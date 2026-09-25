@@ -51,14 +51,13 @@ from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import RetryablePaymentConflictException
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 DEBT_PAIR = "uq_debts_debtor_creditor_equivalent"
 COMPETITOR = Decimal("5.00")
-_FIX = "stage 5 part b (T1909, precondition 1)"
 
 
 @pytest_asyncio.fixture
@@ -200,7 +199,6 @@ async def _api_schedule(stand, monkeypatch, *, tx_id: str):
     return eq, p, request, refusals, competitor_committed_while_parked, outcome
 
 
-@target_xfail(_FIX, "the API payment retries a 23505 on the debt pair instead of ending E010/ABORTED")
 @pytest.mark.asyncio
 async def test_the_api_payment_retries_a_concurrent_insert_of_its_debt_row(stand, monkeypatch) -> None:
     tx_id = str(uuid.uuid4())
@@ -223,7 +221,6 @@ async def test_the_api_payment_retries_a_concurrent_insert_of_its_debt_row(stand
     )
 
 
-@target_xfail(_FIX, "an exhausted debt-pair collision is a retryable 409, never a stored ABORTED")
 @pytest.mark.asyncio
 async def test_an_exhausted_debt_row_collision_is_a_retryable_conflict_and_not_aborted(stand, monkeypatch) -> None:
     monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 1)
@@ -306,7 +303,6 @@ async def _run_transactions(stand, p) -> list[str]:
         )
 
 
-@target_xfail(_FIX, "the money phase replays a 23505 on the debt pair instead of recording the payment E010")
 @pytest.mark.asyncio
 async def test_the_money_phase_replays_a_concurrent_insert_of_a_staged_debt_row(stand, monkeypatch, caplog) -> None:
     eq, p = await _people(stand, "RS", "SR", [("R", "S")])
@@ -335,7 +331,6 @@ async def test_the_money_phase_replays_a_concurrent_insert_of_a_staged_debt_row(
     )
 
 
-@target_xfail(_FIX, "an exhausted money phase is a conflict tick, not a stored E010 payment")
 @pytest.mark.asyncio
 async def test_an_exhausted_money_phase_keeps_the_conflict_contract(stand, monkeypatch) -> None:
     eq, p = await _people(stand, "RE", "SR", [("R", "S")])
@@ -419,7 +414,6 @@ def _record_inject_errors(monkeypatch) -> list[tuple[str | None, str | None]]:
     return seen
 
 
-@target_xfail(_FIX, "the inject retries a 23505 on the debt pair instead of dropping the event as a db error")
 @pytest.mark.asyncio
 async def test_the_inject_retries_a_concurrent_insert_of_its_debt_row(stand, monkeypatch) -> None:
     eq, p = await _people(stand, "RI", "XY", [("X", "Y")])  # X trusts Y: Y may owe X
@@ -448,7 +442,6 @@ async def test_the_inject_retries_a_concurrent_insert_of_its_debt_row(stand, mon
     )
 
 
-@target_xfail(_FIX, "an inject that meets the collision twice stays pending instead of being dropped")
 @pytest.mark.asyncio
 async def test_an_inject_exhausted_by_the_collision_stays_pending(stand, monkeypatch) -> None:
     eq, p = await _people(stand, "RJ", "XYZ", [("X", "Y"), ("X", "Z")])
@@ -499,7 +492,6 @@ async def test_an_inject_exhausted_by_the_collision_stays_pending(stand, monkeyp
 # ── the counter-check: another 23505 is NOT retried (anti-vacuum, AGENTS.md §9) ─────────────────
 
 
-@target_xfail(_FIX, "the classifiers recognise the debt-pair collision")
 def test_only_the_debt_pair_constraint_is_a_retryable_collision() -> None:
     """Built on the real driver's error type: the same SQLSTATE on any other constraint stays terminal."""
 

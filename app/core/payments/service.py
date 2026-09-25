@@ -133,7 +133,9 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
     Retryable: a DBAPI error carrying 40001/40P01, and - 019 stage 3, `FORK-1` - the book's
     `DebtVersionConflict` (a payment flow's debt changed underneath this transaction; the book no
     longer retries it from the same snapshot). Only that subclass: any other `StaleDataError`, and
-    every other ORM error, is not a conflict a fresh attempt is known to cure.
+    every other ORM error, is not a conflict a fresh attempt is known to cure. And - 019 stage 5,
+    `T1909`, precondition 1 - a `23505` on `uq_debts_debtor_creditor_equivalent` and on no other
+    constraint (`is_debt_pair_collision`).
     """
 
     for current in _iter_exception_chain(exc):
@@ -142,6 +144,8 @@ def _classify_payment_db_error(exc: BaseException) -> GeoException:
         if not isinstance(current, DBAPIError):
             continue
         if _payment_db_sqlstate(current) in _RETRYABLE_PAYMENT_SQLSTATES:
+            return RetryablePaymentConflictException()
+        if is_debt_pair_collision(current):
             return RetryablePaymentConflictException()
     return GeoException()
 
@@ -279,6 +283,35 @@ def _is_tx_id_collision(exc: BaseException) -> bool:
         and _payment_db_sqlstate(exc) == "23505"
         and _constraint_name(exc) == TX_ID_UNIQUE_CONSTRAINT
     )
+
+
+#: The one debt uniqueness a concurrent money writer can meet (019 stage 5, `T1909`, precondition 1).
+DEBT_PAIR_UNIQUE_CONSTRAINT = "uq_debts_debtor_creditor_equivalent"
+
+
+def is_debt_pair_collision(exc: BaseException) -> bool:
+    """A `23505` on `uq_debts_debtor_creditor_equivalent` - two writers inserted the same new debt row.
+
+    Without pair locks two transactions can both find no row for a pair and both insert it; the loser's
+    insert meets the winner's committed row. When no read-write cycle is attributable, PostgreSQL reports
+    that as `23505`, not `40001` (`T1908`, `sqlstate=23505 constraint=uq_debts_debtor_creditor_equivalent`).
+    It is transient in the same sense as 40001: nothing of the loser landed, and a fresh snapshot reads
+    the winner's row and updates it. So it is a retryable conflict for the three owners of whole-
+    transaction retries - `pay()`, the money-phase replay, the inject.
+
+    NARROW ON PURPOSE: read from the structured constraint name of the FIRST integrity error on the
+    deliberate chain (`orig`/`__cause__`, never `__context__`), and only this constraint. A `23505` on any
+    other constraint - `transactions_tx_id_key` belongs to the identity resolver, the envelope identities
+    to the book - or without a constraint name stays what it was (spec, Verification plan §4).
+    """
+
+    for current in _iter_exception_chain(exc):
+        if isinstance(current, IntegrityError):
+            return (
+                _payment_db_sqlstate(current) == "23505"
+                and _constraint_name(current) == DEBT_PAIR_UNIQUE_CONSTRAINT
+            )
+    return False
 
 
 @dataclass

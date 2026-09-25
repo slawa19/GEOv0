@@ -16,10 +16,14 @@ WHAT IS MEASURED HERE, without a database - the truth table of the two surviving
 `PaymentService.pay()`'s `_classify_payment_db_error` and the money phase's `money_conflict_name`, plus
 the resolver's own recognizer `_is_tx_id_collision`:
 
-* a `23505` on ANY constraint - the envelope identity, the envelope primary key, a look-alike table, the
-  debt business key - is NOT a retryable conflict by SQLSTATE (spec §2 counter-check: "`23505` на
-  неименованном ограничении остаётся неповторяемым"; spec §4 caps the predicate, it does not oblige a
-  widening);
+* a `23505` on ANY constraint - the envelope identity, the envelope primary key, a look-alike table - is
+  NOT a retryable conflict by SQLSTATE (spec §2 counter-check: "`23505` на неименованном ограничении
+  остаётся неповторяемым"; spec §4 caps the predicate, it does not oblige a widening);
+* THE ONE EXCEPTION, decided 2026-09-25 (019 stage 5, `T1909`, precondition 1 of the fourth
+  consultation): a `23505` that is an `IntegrityError` naming `uq_debts_debtor_creditor_equivalent` -
+  two writers inserted the same new debt row once the pair locks are gone - IS retryable at both owners,
+  by its structured constraint name; the same code on a plain `DBAPIError` or on any other constraint is
+  not (reproducers: `tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py`);
 * the resolver recognizes `transactions_tx_id_key` and nothing else, so the one `23505` the payment
   path does handle cannot be reached through a different constraint;
 * positive controls: `40001` and `40P01` ARE retryable at both owners - the table is not vacuously
@@ -100,7 +104,6 @@ _UNIQUE_VIOLATIONS = [
         "uq_debt_operations_kind_identity",
         id="table_name_extends_the_envelope_table",
     ),
-    pytest.param(DEBT_INSERT, "uq_debts_debtor_creditor_equivalent", id="debt_business_key"),
     pytest.param(TRANSACTION_INSERT, TX_ID_UNIQUE_CONSTRAINT, id="transaction_identity"),
 ]
 
@@ -121,6 +124,24 @@ def test_t1529_no_unique_violation_is_a_retryable_conflict_by_its_sqlstate(state
         assert money_conflict_name(error) is None, (
             f"the money phase would replay a 23505 on {constraint} as a transient conflict"
         )
+
+
+def test_t1909_the_debt_pair_collision_alone_is_retryable_and_only_as_an_integrity_error() -> None:
+    """019 stage 5, `T1909` precondition 1: the one `23505` both owners retry, read by its constraint name.
+
+    MUTATION that must redden it: drop `is_debt_pair_collision` from `_classify_payment_db_error` or
+    from `money_conflict_name`; or key it on the SQLSTATE alone (the `DBAPIError` half then passes).
+    """
+
+    collision = _wrapped(DEBT_INSERT, "23505", "uq_debts_debtor_creditor_equivalent", cls=IntegrityError)
+    assert isinstance(_classify_payment_db_error(collision), RetryablePaymentConflictException)
+    assert money_conflict_name(collision) == "23505"
+    # Not the identity resolver's: the tx_id collision stays a separate path.
+    assert _is_tx_id_collision(collision) is False
+    # The same code and name on a wrapper that is not an integrity error is not the collision.
+    plain = _wrapped(DEBT_INSERT, "23505", "uq_debts_debtor_creditor_equivalent", cls=DBAPIError)
+    assert not isinstance(_classify_payment_db_error(plain), RetryablePaymentConflictException)
+    assert money_conflict_name(plain) is None
 
 
 @pytest.mark.parametrize(("statement", "constraint"), _UNIQUE_VIOLATIONS)
