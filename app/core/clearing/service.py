@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
 from sqlalchemy import bindparam, select, and_, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -151,6 +152,38 @@ class ClearingService:
                 await self._rollback_skipped_execution()
                 raise _ClearingAttemptConflict(exc) from exc
             await self._raise_unexpected_execution(exc)
+
+    async def _end_attempt_on_error(
+        self,
+        exc: Exception,
+        execution_tx_id: str,
+        *,
+        allowed_participant_pids: "AbstractSet[str] | None" = None,
+    ) -> Decimal:
+        """THE ONE CLASSIFIER of a failure inside a clearing attempt (019 stage 5, `T1909` step 3).
+
+        A transaction-level conflict (40001/40P01, `_is_retryable_concurrency_error`) anywhere in the
+        attempt ends it the same way: a committed occurrence of this execution, if the resolver finds
+        one, is the answer; otherwise the attempt is rolled back (by the resolver) and
+        `_ClearingAttemptConflict` carries the ORIGINAL error, with its SQLSTATE, to the retry owner
+        `_run_attempts`. Anything else is the sanitized unexpected failure (`E010`). Until `T1909` only
+        four call sites converted conflicts, and the policy, metadata and net-position reads went
+        straight to `E010` (5a review, P2). An unresolved COMMIT error is a conflict only when PostgreSQL
+        reported one (a rollback it performed), so an unknown commit is never retried here.
+        """
+        if self._is_retryable_concurrency_error(exc):
+            try:
+                replay_amount = await self._reconcile_committed_execution(
+                    execution_tx_id,
+                    allowed_participant_pids=allowed_participant_pids,
+                )
+            except Exception as reconciliation_error:
+                await self._raise_unexpected_execution(reconciliation_error)
+            if replay_amount is not None:
+                return replay_amount
+            raise _ClearingAttemptConflict(exc) from exc
+        await self._raise_unexpected_execution(exc)
+        raise AssertionError("unreachable")  # pragma: no cover - the call above always raises
 
     @staticmethod
     async def _drain_task(task: asyncio.Task) -> asyncio.CancelledError | None:
@@ -1774,20 +1807,9 @@ class ClearingService:
                 execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
         except Exception as exc:
-            if self._is_retryable_concurrency_error(exc):
-                try:
-                    replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id,
-                        allowed_participant_pids=allowed_participant_pids,
-                    )
-                except Exception as reconciliation_error:
-                    await self._raise_unexpected_execution(reconciliation_error)
-                if replay_amount is not None:
-                    return replay_amount
-                # No committed occurrence answers the conflict: the attempt is rolled back (by the
-                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
-                raise _ClearingAttemptConflict(exc) from exc
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
         if replay_amount is not None:
             await self._rollback_skipped_execution()
             return replay_amount
@@ -1801,7 +1823,9 @@ class ClearingService:
             await self._rollback_skipped_execution()
             raise
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         if interlocked_equivalent_id is not None:
             # T1544, the binding read, `FOR SHARE` through the commit (see the method). After the
@@ -1820,20 +1844,9 @@ class ClearingService:
                 .all()
             )
         except Exception as exc:
-            if self._is_retryable_concurrency_error(exc):
-                try:
-                    replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id,
-                        allowed_participant_pids=allowed_participant_pids,
-                    )
-                except Exception as reconciliation_error:
-                    await self._raise_unexpected_execution(reconciliation_error)
-                if replay_amount is not None:
-                    return replay_amount
-                # No committed occurrence answers the conflict: the attempt is rolled back (by the
-                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
-                raise _ClearingAttemptConflict(exc) from exc
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         if len(debts) != len(debt_ids):
             # A concurrent owner may have committed this exact occurrence while
@@ -1844,7 +1857,9 @@ class ClearingService:
                     allowed_participant_pids=allowed_participant_pids,
                 )
             except Exception as exc:
-                await self._raise_unexpected_execution(exc)
+                return await self._end_attempt_on_error(
+                    exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+                )
             if replay_amount is not None:
                 await self._rollback_skipped_execution()
                 return replay_amount
@@ -1905,7 +1920,9 @@ class ClearingService:
         try:
             respects_auto_clearing = await self._cycle_respects_auto_clearing(debts)
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
         if not respects_auto_clearing:
             logger.info("event=clearing.skip_policy cycle_len=%s", len(cycle))
             try:
@@ -1950,7 +1967,9 @@ class ClearingService:
                 )
                 pid_by_id = {p.id: p.pid for p in participants}
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         # 012, second round.  THE PAYLOAD AMOUNT IS A REPRESENTATION, NOT A STORAGE FORMAT, and
         # that was checked before it was changed rather than assumed.  `transactions.payload` is
@@ -2010,7 +2029,9 @@ class ClearingService:
                     pid, debts[0].equivalent_id
                 )
         except Exception as exc:
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
         checkpoint_before = None
         try:
@@ -2018,7 +2039,14 @@ class ClearingService:
                 self.session,
                 equivalent_id=debts[0].equivalent_id,
             )
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, DBAPIError):
+                # A database error has aborted the transaction: swallowing it would lose its SQLSTATE
+                # behind the next statement's 25P02 (`T1909` step 3). Best effort stays best effort only
+                # for a failure that leaves the transaction usable.
+                return await self._end_attempt_on_error(
+                    exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+                )
             logger.warning(
                 "event=clearing.checkpoint_before_failed",
                 exc_info=True,
@@ -2109,7 +2137,9 @@ class ClearingService:
                         self.session,
                         equivalent_id=debts[0].equivalent_id,
                     )
-                except Exception:
+                except Exception as exc:
+                    if isinstance(exc, DBAPIError):
+                        raise  # the transaction is aborted: the handler below classifies it (`T1909`)
                     logger.warning(
                         "event=clearing.checkpoint_after_failed",
                         exc_info=True,
@@ -2215,20 +2245,9 @@ class ClearingService:
             return clear_amount
 
         except Exception as exc:
-            if self._is_retryable_concurrency_error(exc):
-                try:
-                    replay_amount = await self._reconcile_committed_execution(
-                        execution_tx_id,
-                        allowed_participant_pids=allowed_participant_pids,
-                    )
-                except Exception as reconciliation_error:
-                    await self._raise_unexpected_execution(reconciliation_error)
-                if replay_amount is not None:
-                    return replay_amount
-                # No committed occurrence answers the conflict: the attempt is rolled back (by the
-                # resolver) and the retry owner runs the whole execution again (`_run_attempts`).
-                raise _ClearingAttemptConflict(exc) from exc
-            await self._raise_unexpected_execution(exc)
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
 
     async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
         """

@@ -49,7 +49,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
 from tests.integration.p019_interlock_support import _seed_interlock_case
-from tests.p019_support import require_target, target_xfail
+from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -163,7 +163,6 @@ async def _poll(check, timeout: float = 15.0):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("site", SITES)
-@target_xfail("019 stage 5 (T1909 step 3)", "a DB conflict outside the four converted sites ends the clearing as E010")
 async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, stand, monkeypatch) -> None:
     seed = await _seed_interlock_case()
     a_id, b_id, c_id = seed["participant_ids"]
