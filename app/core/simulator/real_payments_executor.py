@@ -471,7 +471,12 @@ class RealPaymentsExecutor:
                                 idempotency_key=idem,
                             )
                             tx_id = str(getattr(staged.result, "tx_id", "") or "")
-                            if tx_id:
+                            # LANDING EVIDENCE is only a row THIS phase wrote (019 stage-3 review,
+                            # P2 #2): a fresh payment or a refusal recorded here. A stored result
+                            # answered by idempotency or by the identity resolver is a row of an
+                            # EARLIER transaction; counting it let a historical row prove that this
+                            # phase's unknown commit landed.
+                            if tx_id and staged.written_here:
                                 staged_tx_ids.add(tx_id)
 
                     res = staged.result

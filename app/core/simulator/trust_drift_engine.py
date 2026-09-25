@@ -20,6 +20,7 @@ from app.core.simulator.models import (
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
+from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import TopologyChangedPayload
@@ -439,6 +440,48 @@ class TrustDriftEngine:
             except Exception:
                 continue
 
+            # Resolve UUIDs (before the floor: the floor reads the CURRENT debt row).
+            creditor_uuid = pid_to_uuid.get(creditor_pid)
+            debtor_uuid = pid_to_uuid.get(debtor_pid)
+            if not creditor_uuid or not debtor_uuid:
+                continue
+
+            if eq_code not in eq_id_cache:
+                eq_row = (
+                    await session.execute(
+                        select(Equivalent.id).where(Equivalent.code == eq_code)
+                    )
+                ).scalar_one_or_none()
+                if eq_row is None:
+                    continue
+                eq_id_cache[eq_code] = eq_row
+
+            eq_id = eq_id_cache.get(eq_code)
+            if not eq_id:
+                continue
+
+            # 019 stage-3 review (P1, class 1): THE FLOOR IS THE DEBT IN THIS TRANSACTION, not the
+            # tick's Python snapshot. The snapshot was read by the money phase's transaction, which has
+            # committed; a payment in flight since then (the API path is one SERIALIZABLE transaction,
+            # 019 stage 3) routed against the old limit and has not written its debt yet. Lowering the
+            # limit from the snapshot alone committed debt above the new limit: nothing tied the two
+            # transactions together, because this one never read the debt row. Reading it here makes
+            # the dependency visible - the same device as the creditor's own PATCH
+            # (`TrustLineService.update`, used amount read in its transaction): SERIALIZABLE sees the
+            # read-write cycle with such a payment and refuses one side (`40001`; the API retries on a
+            # fresh snapshot), and a payment committed before this snapshot raises the floor.
+            current_debt = (
+                await session.execute(
+                    select(Debt.amount).where(
+                        Debt.debtor_id == debtor_uuid,
+                        Debt.creditor_id == creditor_uuid,
+                        Debt.equivalent_id == eq_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if current_debt is not None:
+                debt_amount = max(Decimal(str(debt_amount)), Decimal(str(current_debt)))
+
             # Guardrail: trust drift must never shrink limit below already-used debt,
             # otherwise we can create a TRUST_LIMIT_VIOLATION without any new payment.
             try:
@@ -462,26 +505,6 @@ class TrustDriftEngine:
             ).quantize(_LEDGER_QUANTUM, rounding=ROUND_DOWN)
 
             if new_limit == current_limit:
-                continue
-
-            # Resolve UUIDs
-            creditor_uuid = pid_to_uuid.get(creditor_pid)
-            debtor_uuid = pid_to_uuid.get(debtor_pid)
-            if not creditor_uuid or not debtor_uuid:
-                continue
-
-            if eq_code not in eq_id_cache:
-                eq_row = (
-                    await session.execute(
-                        select(Equivalent.id).where(Equivalent.code == eq_code)
-                    )
-                ).scalar_one_or_none()
-                if eq_row is None:
-                    continue
-                eq_id_cache[eq_code] = eq_row
-
-            eq_id = eq_id_cache.get(eq_code)
-            if not eq_id:
                 continue
 
             await session.execute(

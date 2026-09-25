@@ -557,3 +557,97 @@ async def test_a_staged_definitive_refusal_is_durable_and_replays_the_same_refus
         f"after the tick commit the row was {out.row_after_tick!r}; the replay of the same tx_id "
         f"answered {out.replay!r}",
     )
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_stored_timeout_is_observed_as_a_timeout(api, factory, monkeypatch) -> None:  # noqa: F811
+    """Stage-3 review (Codex, `fae2208`, P2 #6), through the executor and SSE: the T1912 tick leaves
+    seq 1 stored `ABORTED/E007`; the run restarts at the same tick index (`run_lifecycle.py` keeps its
+    identity and rows), the same plan runs again, and seq 1 is answered from its stored row. That
+    answer must be observed as what it is - a payment TIMEOUT (`tx.failed` `PAYMENT_TIMEOUT`, a timeout
+    and an error of the run) - not as a generic `PAYMENT_REJECTED` rejection. Before the fix the stored
+    result came back with no refusal and the executor discarded its error."""
+
+    t = await _two_equivalent_tick(factory, monkeypatch)
+    await _run_the_tick_behind_a_slow_edit(api, factory, t)
+    second = t.calls[1]
+    assert second.get("raised") == "PaymentTransactionUnusable", second
+    assert (await tx_row(factory, str(second["idempotency_key"])) or ("",))[0] == "ABORTED"
+
+    # ── the restart: same tick index, same plan, nothing slow this time ──────────────────────────
+    t.sse.events.clear()
+    before = (t.run.timeouts_total, t.run.errors_total, t.run.rejected_total)
+    try:
+        await asyncio.wait_for(t.runner.tick_real_mode(t.run.run_id), 90.0)
+    finally:
+        _forget_routes(t)
+    replay_first, replay_second = t.calls[2:4]
+    assert replay_first.get("status") == "COMMITTED", replay_first
+    assert replay_second.get("status") == "ABORTED", replay_second  # answered from the stored row
+    assert replay_second["idempotency_key"] == second["idempotency_key"]
+    after = (t.run.timeouts_total, t.run.errors_total, t.run.rejected_total)
+    failed = [(e.get("error") or {}).get("code") for e in t.sse.events if e.get("type") == "tx.failed"]
+    require_target(
+        failed == ["PAYMENT_TIMEOUT"] and (after[0] - before[0], after[2] - before[2]) == (1, 0),
+        f"the replayed E007 was observed as tx.failed {failed!r}; (timeouts, errors, rejected) went "
+        f"{before} -> {after}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_stopping_the_run_while_an_admitted_payment_waits_records_its_cancellation(
+    api, factory, monkeypatch  # noqa: F811
+) -> None:
+    """Stage-3 review (Codex, `fae2208`, P2 #3): the run is stopped - its tick task cancelled, as
+    `run_lifecycle` cancels the heartbeat - while an ADMITTED staged payment waits on a real row lock
+    (the commit guard's `FOR SHARE` behind the operator's slow edit; no timeout this time). The table's
+    row "timeout or cancellation after admission, confirmed rollback -> ABORTED/E007" applies: after the
+    phase is rolled back the cancellation is recorded, and the same `tx_id` answers it. Before the fix
+    the refusal was written into the tick's transaction - rolled back with it - so nothing remained,
+    and the identity could execute later."""
+
+    t = await _two_equivalent_tick(factory, monkeypatch)
+    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 60)
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
+    patch = tick = None
+    try:
+        with with_session_hook(t.gate):
+            patch = asyncio.create_task(
+                api.patch(
+                    f"/api/v1/admin/equivalents/{t.second.code}",
+                    json={"description": "p019 slow operator edit", "reason": "p019 stop"},
+                    headers=ADMIN,
+                )
+            )
+        await asyncio.wait_for(t.gate.reached.wait(), timeout=20)
+        tick = asyncio.create_task(t.runner.tick_real_mode(t.run.run_id))
+        queued = await _row_lock_waiter_exists(factory)
+        tick.cancel()  # the run stops
+        await asyncio.wait([tick], timeout=30)
+        t.gate.release.set()
+        resp = await asyncio.wait_for(patch, timeout=20)
+        assert resp.status_code == 200, resp.text
+    finally:
+        t.gate.release.set()
+        await finish(tick)
+        await finish(patch)
+        _forget_routes(t)
+
+    assert queued, "premise: the second payment never waited on the edit's row lock"
+    assert tick.cancelled() or isinstance(tick.exception(), asyncio.CancelledError), tick
+    first, second = t.calls
+    assert first.get("status") == "COMMITTED", first
+    assert second.get("raised") == "CancelledError", second
+    first_row = await tx_row(factory, str(first["idempotency_key"]))
+    second_row = await tx_row(factory, str(second["idempotency_key"]))
+    replay = await _replay_staged(factory, t.world, second)
+    _forget_routes(t)
+    require_target(
+        first_row is None
+        and second_row is not None
+        and second_row[0] == "ABORTED"
+        and (second_row[1] or {}).get("code") == "E007"
+        and replay[0] == "ABORTED"
+        and await _debt_rows(factory, t.second.id) == [],
+        f"after the stop: seq 0 row {first_row!r}, seq 1 row {second_row!r}, replay {replay!r}",
+    )

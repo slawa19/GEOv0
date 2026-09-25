@@ -294,3 +294,51 @@ async def test_a_commit_that_landed_and_then_raised_a_db_error_answers_committed
         f"{refusal_records!r}"
     )
     _assert_exactly_one_committed_effect(await _one_effect(db_session, request.tx_id), "10.00")
+
+
+@pytest.mark.asyncio
+async def test_a_landed_commit_resolved_after_the_error_applies_its_effects_once(db_session, monkeypatch):
+    """019 stage-3 review (Codex, `fae2208`, P2 #4): the REAL commit lands, then the connection fails
+    under it; the resolution reads the row and answers COMMITTED. That row is THIS attempt's own (its
+    row id), so its post-commit effects - `payment.received`, the route-cache invalidation, the
+    `create/commit` success metrics - are applied, once. A later replay of the same tx_id is a stored
+    result of an older commit and applies nothing. Before the fix the resolution returned the stored
+    result and the effects of the landed payment were lost."""
+
+    from app.utils.event_bus import event_bus
+    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+    sender, receiver, equivalent, sender_priv = await _seed(db_session)
+    request = _signed_request(sender_priv, receiver.pid, equivalent.code)
+    sender_id = sender.id
+    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 15, raising=False)
+
+    service = PaymentService(db_session)
+    original_session_commit = db_session.commit
+    observed: dict[str, object] = {}
+
+    async def _real_commit_then_fail():
+        if "commit_returned" in observed:
+            return await original_session_commit()
+        await original_session_commit()
+        observed["commit_returned"] = True
+        raise OperationalError("SELECT 1", {}, Exception("server closed the connection unexpectedly"))
+
+    published: list[dict] = []
+    monkeypatch.setattr(event_bus, "publish", lambda **kw: published.append(dict(kw)))
+    monkeypatch.setattr(db_session, "commit", _real_commit_then_fail)
+
+    def commit_successes() -> float:
+        return PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success")._value.get()
+
+    before = commit_successes()
+    result = await service.create_payment(sender_id, request)
+    after_landing = commit_successes()
+    replay = await PaymentService(db_session).create_payment(sender_id, request)
+    after_replay = commit_successes()
+
+    assert observed.get("commit_returned") is True, observed
+    assert result.status == "COMMITTED" and replay.status == "COMMITTED", (result, replay)
+    _assert_exactly_one_committed_effect(await _one_effect(db_session, request.tx_id), "10.00")
+    assert [p["event"] for p in published] == ["payment.received"], published
+    assert (after_landing - before, after_replay - after_landing) == (1, 0), (before, after_landing, after_replay)

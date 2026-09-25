@@ -70,8 +70,10 @@ from sqlalchemy.exc import DBAPIError
 
 from app.core.ledger.book import DebtVersionConflict
 from app.core.payments.service import (
+    DefinitiveRefusal,
     PaymentTransactionUnusable,
     _drain_call,
+    collect_admitted_refusals,
     record_definitive_refusal,
 )
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
@@ -348,6 +350,62 @@ async def _roll_back_the_phase(session: Any, logger: logging.Logger, *, run_id: 
         return False
 
 
+async def _record_admitted_refusals(
+    refusals: list[DefinitiveRefusal],
+    *,
+    open_session: Callable[[], Any],
+    logger: logging.Logger,
+    run_id: str,
+) -> None:
+    """Record, each in a short transaction of its own, the admitted refusals the phase's payments
+    handed over (a cancellation; stage-3 review, P2 #3). Only after the phase rollback is established -
+    the caller's duty. A failure is logged and leaves that refusal unrecorded."""
+
+    for refusal in refusals:
+        _stored, failure = await _drain_call(
+            lambda refusal=refusal: record_definitive_refusal(open_session, refusal)
+        )
+        if failure is not None:
+            logger.error(
+                "simulator.real.staged_refusal_record_failed run_id=%s tx_id=%s error_type=%s",
+                str(run_id),
+                refusal.tx_id,
+                type(failure).__name__,
+            )
+        else:
+            logger.warning(
+                "simulator.real.staged_refusal_recorded_after_rollback run_id=%s tx_id=%s code=%s",
+                str(run_id),
+                refusal.tx_id,
+                refusal.error.get("code"),
+            )
+
+
+async def _settle_cancelled_phase(
+    admitted: list[DefinitiveRefusal],
+    *,
+    session: Any,
+    open_session: Callable[[], Any],
+    logger: logging.Logger,
+    run_id: str,
+) -> None:
+    """A cancelled phase whose payments handed over admitted refusals: roll the phase back, establish
+    it, then record them (`ABORTED/E007`, the outcome table's cancellation row). Run to its end even
+    under a repeated cancellation; the caller re-raises the original one."""
+
+    async def settle() -> None:
+        if not await _roll_back_the_phase(session, logger, run_id=run_id):
+            logger.error(
+                "simulator.real.staged_refusal_not_recorded run_id=%s refusals=%d reason=rollback_unconfirmed",
+                str(run_id),
+                len(admitted),
+            )
+            return
+        await _record_admitted_refusals(admitted, open_session=open_session, logger=logger, run_id=run_id)
+
+    await _drain_call(settle)
+
+
 async def _settle_unusable_phase(
     error: PaymentTransactionUnusable,
     *,
@@ -355,6 +413,7 @@ async def _settle_unusable_phase(
     open_session: Callable[[], Any],
     logger: logging.Logger,
     run_id: str,
+    admitted: "list[DefinitiveRefusal] | None" = None,
 ) -> None:
     """The money-phase owner's half of the unusable-transaction branch (019 `T1912`).
 
@@ -381,6 +440,11 @@ async def _settle_unusable_phase(
             getattr(refusal, "tx_id", None),
         )
         return
+    if admitted:
+        # Other payments of the phase cancelled after admission while it failed (P2 #3).
+        await _record_admitted_refusals(
+            list(admitted), open_session=open_session, logger=logger, run_id=run_id
+        )
     if refusal is None:
         return
     stored, failure = await _drain_call(lambda: record_definitive_refusal(open_session, refusal))
@@ -467,10 +531,13 @@ async def run_money_phase_with_bounded_replay(
         error: BaseException | None = None
         landed: bool | None = False
         state = "rolled_back"
+        admitted: list[DefinitiveRefusal] = []
+        commit_attempted = False
 
         try:
             session = await stack.enter_async_context(open_session())
-            phase, should_stop = await run_money_attempt(session)
+            with collect_admitted_refusals() as admitted:
+                phase, should_stop = await run_money_attempt(session)
 
             if should_stop:
                 # A control stop, not a conflict: `run_payments_phase` has already rolled back and
@@ -485,6 +552,7 @@ async def run_money_phase_with_bounded_replay(
                     conflicts=conflicts,
                 )
 
+            commit_attempted = True
             resolution = await _commit_money(session=session, phase=phase, logger=logger)
             state = resolution.state
             error = resolution.error
@@ -545,6 +613,13 @@ async def run_money_phase_with_bounded_replay(
             # Cancellation is a control signal and never a conflict. The buffer is resolved as
             # unknown because a cancelled attempt's transaction outcome genuinely is.
             _resolve_non_replayed(phase, "unknown")
+            if admitted and not commit_attempted:
+                # Payments cancelled after admission (a stopped run) handed their refusals over:
+                # recorded once the phase rollback is established (019 stage-3 review, P2 #3). Never
+                # after a commit attempt - its outcome is unknown, and nothing may be terminalized.
+                await _settle_cancelled_phase(
+                    admitted, session=session, open_session=open_session, logger=logger, run_id=run_id
+                )
             await _close_quietly(stack, logger, run_id=run_id)
             raise
         except BaseException as exc:  # noqa: BLE001 - classified below, always re-raised
@@ -569,7 +644,12 @@ async def run_money_phase_with_bounded_replay(
             # is never replayed: the phase is rolled back whole, and the admitted refusal is recorded
             # on a transaction of its own only once that rollback is established.
             await _settle_unusable_phase(
-                error, session=session, open_session=open_session, logger=logger, run_id=run_id
+                error,
+                session=session,
+                open_session=open_session,
+                logger=logger,
+                run_id=run_id,
+                admitted=admitted,
             )
 
         if landed is None:

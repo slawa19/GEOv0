@@ -191,12 +191,12 @@ def _track_the_attempt_end_and_the_record(monkeypatch, service, *, end_fails=Fal
             monkeypatch.setattr(service.session, "rollback", fail)
         return await original_end()
 
-    async def record(sessions, refusal):
+    async def record(sessions, refusal, **kwargs):
         order.append("record")
         recorded.append((refusal.error["message"], refusal.error["code"], refusal.error["details"]))
         if record_fails is not None:
             raise RuntimeError(record_fails)
-        return await original_record(sessions, refusal)
+        return await original_record(sessions, refusal, **kwargs)
 
     monkeypatch.setattr(service, "_end_failed_attempt", end)
     monkeypatch.setattr(payment_service_module, "record_definitive_refusal", record)
@@ -1186,12 +1186,12 @@ async def test_repeated_cancellation_during_recovery_read_still_aborts(
     record_calls = 0
     original_record = payment_service_module.record_definitive_refusal
 
-    async def blocking_record(sessions, refusal):
+    async def blocking_record(sessions, refusal, **kwargs):
         nonlocal record_calls
         record_calls += 1
         record_started.set()
         await release_record.wait()
-        return await original_record(sessions, refusal)
+        return await original_record(sessions, refusal, **kwargs)
 
     monkeypatch.setattr(service.router, "build_graph", build_graph)
     monkeypatch.setattr(service.router, "find_flow_routes", find_flow_routes)
