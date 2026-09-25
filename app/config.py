@@ -81,6 +81,30 @@ def _require_postgresql_database_url(value: str) -> None:
         )
 
 
+#: The only transaction isolation the application runs PostgreSQL at (2026-09-25, programme 019 P1-A).
+REQUIRED_POSTGRES_ISOLATION_LEVEL = "SERIALIZABLE"
+
+
+def _require_serializable_isolation(value: str) -> str:
+    """Refuse, at settings construction, any `DB_POSTGRES_ISOLATION_LEVEL` other than SERIALIZABLE.
+
+    Returns the canonical spelling. Several money writers read debt without row locks and are correct
+    only because SERIALIZABLE aborts the read-write dependency cycle: trust decay, trust growth against
+    a concurrent raise, and the trust-line reductions (simulator trustline update, creditor PATCH).
+    Below SERIALIZABLE each of those schedules commits a trust limit under the debt it secures.
+    """
+    normalised = " ".join(str(value or "").split()).upper()
+    if normalised != REQUIRED_POSTGRES_ISOLATION_LEVEL:
+        raise RuntimeError(
+            f"DB_POSTGRES_ISOLATION_LEVEL is {value!r}; the application runs PostgreSQL at "
+            f"{REQUIRED_POSTGRES_ISOLATION_LEVEL} only. Trust decay, trust growth and trust-line "
+            "reductions read debt without row locks and rely on SERIALIZABLE to abort a concurrent "
+            "payment; a lower level lets a trust limit fall under the debt it secures. Unset the "
+            "setting or set it to SERIALIZABLE."
+        )
+    return REQUIRED_POSTGRES_ISOLATION_LEVEL
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -104,9 +128,10 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT_SECONDS: int = 30
     DB_POOL_RECYCLE_SECONDS: int = 1800
 
-    # Database transaction isolation
-    # Applied for Postgres connections only.
-    DB_POSTGRES_ISOLATION_LEVEL: str = "SERIALIZABLE"
+    # Database transaction isolation. SERIALIZABLE ONLY (2026-09-25, programme 019 P1-A): any other
+    # value is refused at construction (`_require_serializable_isolation`). The name is kept so that
+    # deployments which set it to SERIALIZABLE keep starting; it is no longer a choice.
+    DB_POSTGRES_ISOLATION_LEVEL: str = REQUIRED_POSTGRES_ISOLATION_LEVEL
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -293,6 +318,9 @@ class Settings(BaseSettings):
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
         self._resolve_environment_alias()
         _require_postgresql_database_url(self.DATABASE_URL)
+        self.DB_POSTGRES_ISOLATION_LEVEL = _require_serializable_isolation(
+            self.DB_POSTGRES_ISOLATION_LEVEL
+        )
         self._guardrail_default_secrets()
         self._guardrail_simulator_session_secret()
         self._guardrail_csrf_allowlist()
