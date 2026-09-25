@@ -72,18 +72,19 @@ Source of truth:
 Ключевые свойства:
 - Guardrail: `CLEARING_ENABLED` может выключать clearing.
 - Есть distributed lock: `dlock:clearing:{equivalent}`.
-- `ClearingService` избегает пар участников, затронутых активными prepared payment flows (см. `_locked_pairs_for_equivalent`).
+- Резервов платежей нет (программа 019, стадия 5, `T1909`: таблица `prepare_locks` удалена миграцией `031`), поэтому
+  клиринг не пропускает циклы «по резерву»; конкурентные платежи разводятся `SERIALIZABLE` и повтором всей транзакции.
 - `execute_clearing_with_amount()` владеет одной попыткой целиком: успешный amount уже durable,
   любой `None` завершает попытку rollback и не оставляет row locks вызывающему.
 - Идентичность occurrence — UUIDv5 от канонического неупорядоченного набора Debt UUID. Повтор того
   же набора после потери подтверждения возвращает сохранённый `Transaction.payload.amount`, не
   применяя эффект повторно; новый набор с новым Debt UUID считается новой occurrence.
-- Clearing входит в общий с payment equivalent-owner domain на одной pinned physical connection.
-  После preflight берётся session-level lock той же identity, acquisition-транзакция откатывается
-  для свежего snapshot, и authoritative Debt/PrepareLock reads выполняются на этой же connection.
-  Денежный UoW завершается до exact unlock; при неподтверждённом unlock connection инвалидируется и
-  физически закрывается. Поэтому committed `PrepareLock` после ожидания виден, новый prepare не
-  пересекает уже принятое clearing conflict decision, а попытка не занимает две pool connections.
+- Clearing берёт **исключительный** режим той же advisory-идентичности эквивалента, которую платёж, staged-фаза
+  и инжект держат **разделяемой** (протокол §7.6.1). После preflight на одной pinned physical connection берётся
+  session-level исключительный лок (он ждёт разделяемых держателей), acquisition-транзакция откатывается для
+  свежего snapshot, и authoritative Debt reads, стоп/hold `FOR SHARE` и все попытки владельца повторов идут на
+  этой же connection. Лок освобождается после разрешения коммита; при неподтверждённом unlock connection
+  инвалидируется и физически закрывается. Попытка не занимает две pool connections.
   `55P03` остаётся bounded timeout, направление долгов и payload не меняется. На PostgreSQL входная
   `AsyncSession` должна быть привязана к `AsyncEngine`; externally bound `AsyncConnection` сервис
   отклоняет до preflight, чтобы не требовать второе соединение из pool.

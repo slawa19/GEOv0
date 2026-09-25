@@ -72,6 +72,29 @@ _CONCURRENCY_SELECTORS = (
     "::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres",
     "tests/integration/test_payment_idempotency_postgres.py"
     "::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres",
+    # 019 stage 5 (`T1909`, 2026-09-25): the ONE equivalent lock in its two modes and the clearing's
+    # retry owner - the concurrency the retained coordination rests on, named one by one for the same
+    # reason as the three above.
+    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
+    "::test_two_shared_holders_of_one_equivalent_are_granted_together",
+    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
+    "::test_two_api_payments_over_different_pairs_of_one_equivalent_overlap_and_both_commit",
+    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
+    "::test_a_shared_holder_holds_off_the_exclusive_session_lock_and_an_exclusive_holder_holds_off_a_shared_one",
+    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
+    "::test_a_clearing_that_waited_for_a_payment_sees_its_commit_in_its_first_attempt",
+    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
+    "::test_no_advisory_lock_of_the_key_outlives_the_clearing",
+    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
+    "::test_an_unconfirmed_unlock_invalidates_the_clearing_connection",
+    "tests/integration/test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py"
+    "::test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner",
+    "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"
+    "::test_the_api_payment_retries_a_concurrent_insert_of_its_debt_row",
+    "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"
+    "::test_the_money_phase_replays_a_concurrent_insert_of_a_staged_debt_row",
+    "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"
+    "::test_the_inject_retries_a_concurrent_insert_of_its_debt_row",
 )
 
 _SCHEDULED_ONLY = re.compile(

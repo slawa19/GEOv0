@@ -553,7 +553,8 @@ CREATE INDEX idx_transactions_state ON transactions(state);
 CREATE INDEX idx_transactions_type ON transactions(type);
 CREATE INDEX idx_transactions_initiator ON transactions(initiator_id);
 
--- Prepare Locks (для 2PC)
+-- Prepare Locks (для 2PC). ИСТОРИЧЕСКОЕ: в реализации Hub таблица удалена миграцией 031
+-- (программа 019, стадия 5, 2026-09-25); REST-платежи резервов не держат (протокол §7.6.1).
 CREATE TABLE prepare_locks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tx_id VARCHAR(64) NOT NULL,
