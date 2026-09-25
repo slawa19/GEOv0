@@ -2209,10 +2209,23 @@ class ClearingService:
                         allowed_participant_pids=allowed_participant_pids,
                     )
                 )
-                reconciliation_cancellation = await self._drain_task(
-                    reconciliation_task
-                )
-                reconciled_amount = reconciliation_task.result()
+                try:
+                    reconciliation_cancellation = await self._drain_task(
+                        reconciliation_task
+                    )
+                    reconciled_amount = reconciliation_task.result()
+                except Exception:
+                    # 020 stage 1: a failed resolution verifies nothing, so the COMMIT's own
+                    # error keeps precedence - an unknown commit ends unretried (`E010`), and
+                    # only a rollback PostgreSQL reported on COMMIT reaches the retry owner.
+                    # The resolver's error must not: its 40001/40P01 is not the commit's.
+                    logger.warning(
+                        "event=clearing.commit_resolution_failed tx_id=%s",
+                        tx_id_str,
+                        exc_info=True,
+                    )
+                    reconciliation_cancellation = None
+                    reconciled_amount = None
                 if (
                     commit_cancellation is None
                     and reconciliation_cancellation is not None

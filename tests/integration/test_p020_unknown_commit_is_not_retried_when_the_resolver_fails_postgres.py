@@ -42,7 +42,7 @@ from sqlalchemy import select, text
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -50,13 +50,6 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 BARRIER_HELD = "p020_s1_resolver_holds"
 BARRIER_WAITED = "p020_s1_resolver_waits"
 _RESOLVER_READ_THAT_DEADLOCKS = 3  # the resolver's last read: its error is the one it surfaces
-
-target_xfail = pytest.mark.xfail(
-    raises=TargetMismatch,
-    strict=True,
-    reason="020 target, fixed by stage 1: an unknown commit keeps precedence when its resolution fails",
-)
-
 
 def _pg_codes(exc: BaseException) -> list[str]:
     return sorted(ClearingService._postgres_error_codes(exc) & {"40001", "40P01"})
@@ -214,7 +207,6 @@ async def _deadlocks() -> int:
 
 
 @pytest.mark.asyncio
-@target_xfail
 async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried() -> None:
     from tests.conftest import TestingSessionLocal
 
