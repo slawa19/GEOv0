@@ -32,7 +32,11 @@ def target_xfail_020(what: str):
     return pytest.mark.xfail(
         raises=TargetMismatch,
         strict=True,
-        reason=f"020 target (owner's amount-first rule), fixed by stage 3 / T2003: {what}",
+        reason=(
+            "020 target UNDELIVERED (owner's amount-first rule, 2026-09-25), superseded by programme 023's "
+            "objective (maximum total eligible debt reduction on a snapshot); 023 decides whether these assertions "
+            f"are replaced or removed and records the change there: {what}"
+        ),
     )
 
 
