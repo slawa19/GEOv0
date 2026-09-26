@@ -210,13 +210,20 @@ def solve_transshipment(
         g = math.gcd(g, cap)
     scaled = [cap // g for cap in caps]
 
-    flow = [0] * m
+    # DATA LAYOUT (optimisation round, 2026-09-26; same algorithm, same arc order, same tie-breaking):
+    # `res[a]` is the residual of arc a, kept up to date on every push (`res[2k] = L_k - M_k`,
+    # `res[2k + 1] = M_k`), so a scan compares one integer instead of recomputing it; `adj[x]` holds
+    # `(a, y, cost)` per outgoing arc of x, in the same order as before (by k, forward before reverse
+    # where both leave x), so Dijkstra relaxes arcs in the same order and picks the same predecessor
+    # on ties - the plan is unchanged, not merely equally optimal.
+    res = [0] * (2 * m)
+    adj: list[list[tuple[int, int, int]]] = [[] for _ in range(n)]
+    for k in range(m):
+        res[2 * k] = scaled[k]
+        adj[tails[k]].append((2 * k, heads[k], 1))
+        adj[heads[k]].append((2 * k + 1, tails[k], -1))
     excess = _supplies(n, tails, heads, scaled)
     pi = [0] * n
-    out_arcs: list[list[int]] = [[] for _ in range(n)]
-    for k in range(m):
-        out_arcs[tails[k]].append(2 * k)
-        out_arcs[heads[k]].append(2 * k + 1)
 
     upper = max(max(scaled), max(abs(x) for x in excess))
     delta = 1 << (upper.bit_length() - 1)
@@ -225,6 +232,7 @@ def solve_transshipment(
     best_stamp = [0] * n
     pred = [-1] * n
     stamp = 0
+    heappush, heappop, heapify = heapq.heappush, heapq.heappop, heapq.heapify
     while delta >= 1:
         # RESTORE nonnegative reduced costs on the Δ-residual graph: saturate every arc with residual >= Δ
         # and reduced cost < 0. Forward arc of k: r = 1 + π_tail - π_head; its reverse has -r.
@@ -232,15 +240,17 @@ def solve_transshipment(
             u, v = tails[k], heads[k]
             r = 1 + pi[u] - pi[v]
             if r < 0:
-                amount = scaled[k] - flow[k]
+                amount = res[2 * k]
                 if amount >= delta:
-                    flow[k] += amount
+                    res[2 * k] = 0
+                    res[2 * k + 1] += amount
                     excess[u] -= amount
                     excess[v] += amount
             elif r > 0:
-                amount = flow[k]
+                amount = res[2 * k + 1]
                 if amount >= delta:
-                    flow[k] -= amount
+                    res[2 * k + 1] = 0
+                    res[2 * k] += amount
                     excess[v] -= amount
                     excess[u] += amount
         sources = {v for v in range(n) if excess[v] >= delta}
@@ -254,11 +264,11 @@ def solve_transshipment(
                 best_stamp[s] = stamp
                 pred[s] = -1
                 heap.append((0, s))
-            heapq.heapify(heap)
+            heapify(heap)
             settled: list[int] = []
             target = -1
             while heap:
-                d_x, x = heapq.heappop(heap)
+                d_x, x = heappop(heap)
                 if settled_stamp[x] == stamp or d_x != dist[x]:
                     continue
                 settled_stamp[x] = stamp
@@ -267,13 +277,8 @@ def solve_transshipment(
                     target = x
                     break
                 base = d_x + pi[x]
-                for a in out_arcs[x]:
-                    k = a >> 1
-                    if a & 1:
-                        res, y, cost = flow[k], tails[k], -1
-                    else:
-                        res, y, cost = scaled[k] - flow[k], heads[k], 1
-                    if res < delta:  # THE SCALING THRESHOLD: only arcs of the Δ-residual graph
+                for a, y, cost in adj[x]:
+                    if res[a] < delta:  # THE SCALING THRESHOLD: only arcs of the Δ-residual graph
                         continue
                     if settled_stamp[y] == stamp:
                         continue
@@ -282,20 +287,17 @@ def solve_transshipment(
                         best_stamp[y] = stamp
                         dist[y] = d_y
                         pred[y] = a
-                        heapq.heappush(heap, (d_y, y))
+                        heappush(heap, (d_y, y))
             if target < 0:
                 break  # no deficit is reachable from any Δ-excess: this phase is done
             # Push Δ along the path, source <- ... <- target.
             y = target
             while pred[y] >= 0:
                 a = pred[y]
+                res[a] -= delta
+                res[a ^ 1] += delta
                 k = a >> 1
-                if a & 1:
-                    flow[k] -= delta
-                    y = heads[k]
-                else:
-                    flow[k] += delta
-                    y = tails[k]
+                y = heads[k] if a & 1 else tails[k]
             excess[y] -= delta
             excess[target] += delta
             if excess[y] < delta:
@@ -306,7 +308,7 @@ def solve_transshipment(
             for x in settled:
                 pi[x] += dist[x] - d_t
         delta >>= 1
-    return [f * g for f in flow], pi
+    return [res[2 * k + 1] * g for k in range(m)], pi
 
 
 # ------------------------------------------------------------------------------------------------ checks

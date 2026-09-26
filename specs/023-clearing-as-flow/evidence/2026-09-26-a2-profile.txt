@@ -1,0 +1,220 @@
+# profile_p023_planner.py, cells (('h4k', 'largeatoms'), ('d8k', 'largeatoms'), ('h4k', 'narrow'))
+
+==================== h4k largeatoms global
+edges=3793 vertices=486 cycles=2945 U.bit_length=67
+stage breakdown (one run each, ms):
+        20.8  load_snapshot (3 statements, incl. session)
+         0.8  sort edges by str(uuid)
+         4.3  _index (validation + indexing)
+      4165.2  solve_transshipment
+         1.9  check_feasible
+        51.1  decompose
+        32.7  check_decomposition
+         1.0  check_certificate
+      4277.8  total
+cProfile, whole plan_for_equivalent, sorted by tottime (top 25):
+           9841649 function calls (9841634 primitive calls) in 8.184 seconds
+     Ordered by: internal time
+     List reduced from 404 to 25 due to restriction <25>
+     ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+          1    6.965    6.965    7.839    7.839 flow_planner.py:196(solve_transshipment)
+    4291188    0.410    0.000    0.410    0.000 {built-in method _heapq.heappush}
+    1739303    0.341    0.000    0.341    0.000 {built-in method _heapq.heappop}
+    2407154    0.105    0.000    0.105    0.000 {method 'append' of 'list' objects}
+          1    0.072    0.072    0.185    0.185 flow_planner.py:379(decompose)
+          1    0.068    0.068    0.103    0.103 flow_planner.py:351(check_decomposition)
+      75291    0.044    0.000    0.060    0.000 flow_planner.py:389(next_edge)
+     323573    0.021    0.000    0.021    0.000 {method 'get' of 'dict' objects}
+     463897    0.019    0.000    0.019    0.000 {built-in method builtins.len}
+      75040    0.017    0.000    0.017    0.000 <string>:2(__eq__)
+       9498    0.015    0.000    0.015    0.000 {built-in method _heapq.heapify}
+       5890    0.014    0.000    0.032    0.000 {built-in method builtins.min}
+      75040    0.011    0.000    0.011    0.000 flow_planner.py:419(<lambda>)
+          5    0.010    0.002    0.037    0.007 flow_planner.py:477(load_snapshot)
+      77985    0.006    0.000    0.006    0.000 flow_planner.py:416(<genexpr>)
+      77985    0.006    0.000    0.006    0.000 flow_planner.py:420(<genexpr>)
+          1    0.005    0.005    0.008    0.008 flow_planner.py:156(_index)
+      82627    0.005    0.000    0.005    0.000 {method 'add' of 'set' objects}
+         17    0.003    0.000    0.003    0.000 {method 'data_received' of 'asyncpg.protocol.protocol.BaseProtocol' objects}
+       3951    0.003    0.000    0.006    0.000 decoder.py:332(decode)
+          1    0.003    0.003    0.004    0.004 flow_planner.py:315(check_feasible)
+       3793    0.002    0.000    0.003    0.000 flow_planner.py:136(atoms_of)
+          1    0.002    0.002    0.003    0.003 flow_planner.py:333(check_certificate)
+       3951    0.002    0.000    0.009    0.000 __init__.py:299(loads)
+         71    0.002    0.000    0.002    0.000 flow_planner.py:247(<setcomp>)
+cProfile, whole plan_for_equivalent, sorted by cumulative (top 25):
+           9841649 function calls (9841634 primitive calls) in 8.184 seconds
+     Ordered by: cumulative time
+     List reduced from 404 to 25 due to restriction <25>
+     ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        6/5    0.001    0.000    8.185    1.637 flow_planner.py:520(plan_for_equivalent)
+          1    0.000    0.000    8.148    8.148 flow_planner.py:439(plan_clearing)
+          1    6.965    6.965    7.839    7.839 flow_planner.py:196(solve_transshipment)
+    4291188    0.410    0.000    0.410    0.000 {built-in method _heapq.heappush}
+    1739303    0.341    0.000    0.341    0.000 {built-in method _heapq.heappop}
+          1    0.072    0.072    0.185    0.185 flow_planner.py:379(decompose)
+    2407154    0.105    0.000    0.105    0.000 {method 'append' of 'list' objects}
+          1    0.068    0.068    0.103    0.103 flow_planner.py:351(check_decomposition)
+      75291    0.044    0.000    0.060    0.000 flow_planner.py:389(next_edge)
+          5    0.010    0.002    0.037    0.007 flow_planner.py:477(load_snapshot)
+       5890    0.014    0.000    0.032    0.000 {built-in method builtins.min}
+     323573    0.021    0.000    0.021    0.000 {method 'get' of 'dict' objects}
+     463897    0.019    0.000    0.019    0.000 {built-in method builtins.len}
+      75040    0.017    0.000    0.017    0.000 <string>:2(__eq__)
+       9498    0.015    0.000    0.015    0.000 {built-in method _heapq.heapify}
+      75040    0.011    0.000    0.011    0.000 flow_planner.py:419(<lambda>)
+       3951    0.002    0.000    0.009    0.000 __init__.py:299(loads)
+          1    0.005    0.005    0.008    0.008 flow_planner.py:156(_index)
+          6    0.000    0.000    0.007    0.001 session.py:430(execute)
+          6    0.000    0.000    0.007    0.001 _concurrency_py3k.py:165(greenlet_spawn)
+        8/2    0.000    0.000    0.007    0.003 {method 'switch' of 'greenlet.greenlet' objects}
+          2    0.000    0.000    0.007    0.003 session.py:2247(execute)
+          2    0.000    0.000    0.006    0.003 session.py:2077(_execute_internal)
+       3951    0.003    0.000    0.006    0.000 decoder.py:332(decode)
+      77985    0.006    0.000    0.006    0.000 flow_planner.py:416(<genexpr>)
+
+==================== d8k largeatoms global
+edges=7453 vertices=286 cycles=7087 U.bit_length=67
+stage breakdown (one run each, ms):
+        56.5  load_snapshot (3 statements, incl. session)
+         1.5  sort edges by str(uuid)
+         8.7  _index (validation + indexing)
+      3649.9  solve_transshipment
+         4.9  check_feasible
+        87.5  decompose
+        54.7  check_decomposition
+         2.0  check_certificate
+      3865.7  total
+cProfile, whole plan_for_equivalent, sorted by tottime (top 25):
+           5203420 function calls (5203405 primitive calls) in 7.383 seconds
+     Ordered by: internal time
+     List reduced from 404 to 25 due to restriction <25>
+     ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+          1    6.503    6.503    6.776    6.776 flow_planner.py:196(solve_transshipment)
+    1380854    0.125    0.000    0.125    0.000 {built-in method _heapq.heappush}
+          1    0.124    0.124    0.316    0.316 flow_planner.py:379(decompose)
+          1    0.118    0.118    0.179    0.179 flow_planner.py:351(check_decomposition)
+     520531    0.104    0.000    0.104    0.000 {built-in method _heapq.heappop}
+     128368    0.074    0.000    0.099    0.000 flow_planner.py:389(next_edge)
+     886028    0.040    0.000    0.040    0.000 {method 'append' of 'list' objects}
+     556861    0.035    0.000    0.035    0.000 {method 'get' of 'dict' objects}
+     796164    0.032    0.000    0.032    0.000 {built-in method builtins.len}
+     127570    0.029    0.000    0.029    0.000 <string>:2(__eq__)
+      14174    0.025    0.000    0.055    0.000 {built-in method builtins.min}
+          5    0.020    0.004    0.073    0.015 flow_planner.py:477(load_snapshot)
+     127570    0.019    0.000    0.019    0.000 flow_planner.py:419(<lambda>)
+     134657    0.011    0.000    0.011    0.000 flow_planner.py:416(<genexpr>)
+          1    0.010    0.010    0.015    0.015 flow_planner.py:156(_index)
+     134657    0.010    0.000    0.010    0.000 flow_planner.py:420(<genexpr>)
+     142477    0.009    0.000    0.009    0.000 {method 'add' of 'set' objects}
+         19    0.007    0.000    0.007    0.000 {method 'data_received' of 'asyncpg.protocol.protocol.BaseProtocol' objects}
+       7761    0.006    0.000    0.013    0.000 decoder.py:332(decode)
+          1    0.006    0.006    0.008    0.008 flow_planner.py:315(check_feasible)
+       5736    0.005    0.000    0.005    0.000 {built-in method _heapq.heapify}
+       7453    0.005    0.000    0.006    0.000 flow_planner.py:136(atoms_of)
+          1    0.004    0.004    0.006    0.006 flow_planner.py:333(check_certificate)
+       7761    0.004    0.000    0.018    0.000 __init__.py:299(loads)
+          1    0.003    0.003    0.003    0.003 flow_planner.py:445(<dictcomp>)
+cProfile, whole plan_for_equivalent, sorted by cumulative (top 25):
+           5203420 function calls (5203405 primitive calls) in 7.383 seconds
+     Ordered by: cumulative time
+     List reduced from 404 to 25 due to restriction <25>
+     ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        6/5    0.002    0.000    7.386    1.477 flow_planner.py:520(plan_for_equivalent)
+          1    0.001    0.001    7.313    7.313 flow_planner.py:439(plan_clearing)
+          1    6.503    6.503    6.776    6.776 flow_planner.py:196(solve_transshipment)
+          1    0.124    0.124    0.316    0.316 flow_planner.py:379(decompose)
+          1    0.118    0.118    0.179    0.179 flow_planner.py:351(check_decomposition)
+    1380854    0.125    0.000    0.125    0.000 {built-in method _heapq.heappush}
+     520531    0.104    0.000    0.104    0.000 {built-in method _heapq.heappop}
+     128368    0.074    0.000    0.099    0.000 flow_planner.py:389(next_edge)
+          5    0.020    0.004    0.073    0.015 flow_planner.py:477(load_snapshot)
+      14174    0.025    0.000    0.055    0.000 {built-in method builtins.min}
+     886028    0.040    0.000    0.040    0.000 {method 'append' of 'list' objects}
+     556861    0.035    0.000    0.035    0.000 {method 'get' of 'dict' objects}
+     796164    0.032    0.000    0.032    0.000 {built-in method builtins.len}
+     127570    0.029    0.000    0.029    0.000 <string>:2(__eq__)
+     127570    0.019    0.000    0.019    0.000 flow_planner.py:419(<lambda>)
+       7761    0.004    0.000    0.018    0.000 __init__.py:299(loads)
+          1    0.010    0.010    0.015    0.015 flow_planner.py:156(_index)
+       7761    0.006    0.000    0.013    0.000 decoder.py:332(decode)
+          6    0.000    0.000    0.012    0.002 session.py:430(execute)
+          6    0.000    0.000    0.012    0.002 _concurrency_py3k.py:165(greenlet_spawn)
+        8/2    0.000    0.000    0.011    0.006 {method 'switch' of 'greenlet.greenlet' objects}
+          2    0.000    0.000    0.011    0.006 session.py:2247(execute)
+          2    0.000    0.000    0.011    0.006 session.py:2077(_execute_internal)
+     134657    0.011    0.000    0.011    0.000 flow_planner.py:416(<genexpr>)
+         27    0.000    0.000    0.011    0.000 base_events.py:1859(_run_once)
+
+==================== h4k narrow global
+edges=3793 vertices=486 cycles=2564 U.bit_length=30
+stage breakdown (one run each, ms):
+        20.4  load_snapshot (3 statements, incl. session)
+         0.6  sort edges by str(uuid)
+         4.3  _index (validation + indexing)
+      1414.6  solve_transshipment
+         2.0  check_feasible
+        45.1  decompose
+        26.7  check_decomposition
+         1.0  check_certificate
+      1514.7  total
+cProfile, whole plan_for_equivalent, sorted by tottime (top 25):
+           4482054 function calls (4482039 primitive calls) in 3.177 seconds
+     Ordered by: internal time
+     List reduced from 404 to 25 due to restriction <25>
+     ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+          1    2.556    2.556    2.873    2.873 flow_planner.py:196(solve_transshipment)
+    1644270    0.147    0.000    0.147    0.000 {built-in method _heapq.heappush}
+     609010    0.120    0.000    0.120    0.000 {built-in method _heapq.heappop}
+          1    0.061    0.061    0.158    0.158 flow_planner.py:379(decompose)
+          1    0.059    0.059    0.090    0.090 flow_planner.py:351(check_decomposition)
+     992274    0.044    0.000    0.044    0.000 {method 'append' of 'list' objects}
+      66146    0.038    0.000    0.051    0.000 flow_planner.py:389(next_edge)
+     287131    0.018    0.000    0.018    0.000 {method 'get' of 'dict' objects}
+     408508    0.016    0.000    0.016    0.000 {built-in method builtins.len}
+      65964    0.015    0.000    0.015    0.000 <string>:2(__eq__)
+       5128    0.012    0.000    0.027    0.000 {built-in method builtins.min}
+          5    0.010    0.002    0.037    0.007 flow_planner.py:477(load_snapshot)
+      65964    0.010    0.000    0.010    0.000 flow_planner.py:419(<lambda>)
+       3653    0.008    0.000    0.008    0.000 {built-in method _heapq.heapify}
+      68528    0.005    0.000    0.005    0.000 flow_planner.py:416(<genexpr>)
+      68528    0.005    0.000    0.005    0.000 flow_planner.py:420(<genexpr>)
+      73551    0.004    0.000    0.004    0.000 {method 'add' of 'set' objects}
+          1    0.004    0.004    0.006    0.006 flow_planner.py:156(_index)
+         17    0.004    0.000    0.004    0.000 {method 'data_received' of 'asyncpg.protocol.protocol.BaseProtocol' objects}
+       3951    0.003    0.000    0.006    0.000 decoder.py:332(decode)
+          1    0.003    0.003    0.004    0.004 flow_planner.py:315(check_feasible)
+          1    0.003    0.003    0.004    0.004 flow_planner.py:333(check_certificate)
+       3793    0.002    0.000    0.003    0.000 flow_planner.py:136(atoms_of)
+       3951    0.002    0.000    0.009    0.000 __init__.py:299(loads)
+         46    0.002    0.000    0.002    0.000 {built-in method _overlapped.GetQueuedCompletionStatus}
+cProfile, whole plan_for_equivalent, sorted by cumulative (top 25):
+           4482054 function calls (4482039 primitive calls) in 3.177 seconds
+     Ordered by: cumulative time
+     List reduced from 404 to 25 due to restriction <25>
+     ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        6/5    0.001    0.000    3.178    0.636 flow_planner.py:520(plan_for_equivalent)
+          1    0.000    0.000    3.141    3.141 flow_planner.py:439(plan_clearing)
+          1    2.556    2.556    2.873    2.873 flow_planner.py:196(solve_transshipment)
+          1    0.061    0.061    0.158    0.158 flow_planner.py:379(decompose)
+    1644270    0.147    0.000    0.147    0.000 {built-in method _heapq.heappush}
+     609010    0.120    0.000    0.120    0.000 {built-in method _heapq.heappop}
+          1    0.059    0.059    0.090    0.090 flow_planner.py:351(check_decomposition)
+      66146    0.038    0.000    0.051    0.000 flow_planner.py:389(next_edge)
+     992274    0.044    0.000    0.044    0.000 {method 'append' of 'list' objects}
+          5    0.010    0.002    0.037    0.007 flow_planner.py:477(load_snapshot)
+       5128    0.012    0.000    0.027    0.000 {built-in method builtins.min}
+     287131    0.018    0.000    0.018    0.000 {method 'get' of 'dict' objects}
+     408508    0.016    0.000    0.016    0.000 {built-in method builtins.len}
+      65964    0.015    0.000    0.015    0.000 <string>:2(__eq__)
+      65964    0.010    0.000    0.010    0.000 flow_planner.py:419(<lambda>)
+       3951    0.002    0.000    0.009    0.000 __init__.py:299(loads)
+       3653    0.008    0.000    0.008    0.000 {built-in method _heapq.heapify}
+          6    0.000    0.000    0.007    0.001 session.py:430(execute)
+          6    0.000    0.000    0.007    0.001 _concurrency_py3k.py:165(greenlet_spawn)
+        8/2    0.000    0.000    0.007    0.003 {method 'switch' of 'greenlet.greenlet' objects}
+          2    0.000    0.000    0.007    0.003 session.py:2247(execute)
+          2    0.000    0.000    0.007    0.003 session.py:2077(_execute_internal)
+          1    0.004    0.004    0.006    0.006 flow_planner.py:156(_index)
+       3951    0.003    0.000    0.006    0.000 decoder.py:332(decode)
+         25    0.000    0.000    0.006    0.000 base_events.py:1859(_run_once)
