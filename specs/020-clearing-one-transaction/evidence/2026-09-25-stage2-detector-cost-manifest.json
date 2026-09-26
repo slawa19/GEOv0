@@ -1,0 +1,213 @@
+{
+  "u2k": {
+    "family": "u2k",
+    "title": "uniform 200/2000",
+    "seed": 20200925,
+    "random_vertices": 200,
+    "random_edges": 2000,
+    "planted_vertices": 89,
+    "planted_edges": 110,
+    "vertices_total": 289,
+    "edges_total": 2110,
+    "eligible_edges": 1942,
+    "excluded_edges": {
+      "closed_line": 76,
+      "consent_refused": 92
+    },
+    "out_degree_random": {
+      "min": 3,
+      "p50": 10,
+      "p95": 16,
+      "max": 19,
+      "mean": 10.0
+    },
+    "in_degree_random": {
+      "min": 3,
+      "p50": 10,
+      "p95": 15,
+      "max": 19,
+      "mean": 10.0
+    },
+    "perimeter_vertices": 188,
+    "planted": [
+      "eligible_ring_10",
+      "eligible_ring_3",
+      "eligible_ring_4",
+      "eligible_ring_5",
+      "eligible_ring_6",
+      "eligible_ring_7",
+      "eligible_ring_8",
+      "eligible_ring_9",
+      "excluded_closed_line",
+      "excluded_in_perimeter_crossing",
+      "excluded_no_consent",
+      "layered_no_short_cycles",
+      "shared_five",
+      "shared_triangle"
+    ],
+    "hubs": [],
+    "graph_sha256": "d69cb2b2be0a24e74b0dc43df657d61c3d7cf7113c5eac9161bee8d649b719cc",
+    "build_s": 2.0
+  },
+  "h4k": {
+    "family": "h4k",
+    "title": "historic 400/4000",
+    "seed": 20200925,
+    "random_vertices": 400,
+    "random_edges": 4000,
+    "planted_vertices": 89,
+    "planted_edges": 110,
+    "vertices_total": 489,
+    "edges_total": 4110,
+    "eligible_edges": 3793,
+    "excluded_edges": {
+      "closed_line": 159,
+      "consent_refused": 158
+    },
+    "out_degree_random": {
+      "min": 3,
+      "p50": 10,
+      "p95": 15,
+      "max": 21,
+      "mean": 10.0
+    },
+    "in_degree_random": {
+      "min": 3,
+      "p50": 10,
+      "p95": 16,
+      "max": 21,
+      "mean": 10.0
+    },
+    "perimeter_vertices": 288,
+    "planted": [
+      "eligible_ring_10",
+      "eligible_ring_3",
+      "eligible_ring_4",
+      "eligible_ring_5",
+      "eligible_ring_6",
+      "eligible_ring_7",
+      "eligible_ring_8",
+      "eligible_ring_9",
+      "excluded_closed_line",
+      "excluded_in_perimeter_crossing",
+      "excluded_no_consent",
+      "layered_no_short_cycles",
+      "shared_five",
+      "shared_triangle"
+    ],
+    "hubs": [],
+    "graph_sha256": "e2ed24ffdaaab8107a014d16607d4576167581ce486aab9cdea750b651f74206",
+    "build_s": 2.6
+  },
+  "s2k": {
+    "family": "s2k",
+    "title": "skewed 200/2000, 10 hubs carry 50% of edges",
+    "seed": 20200925,
+    "random_vertices": 200,
+    "random_edges": 2000,
+    "planted_vertices": 89,
+    "planted_edges": 110,
+    "vertices_total": 289,
+    "edges_total": 2110,
+    "eligible_edges": 1966,
+    "excluded_edges": {
+      "closed_line": 74,
+      "consent_refused": 70
+    },
+    "out_degree_random": {
+      "min": 2,
+      "p50": 8,
+      "p95": 17,
+      "max": 62,
+      "mean": 10.0
+    },
+    "in_degree_random": {
+      "min": 3,
+      "p50": 8,
+      "p95": 18,
+      "max": 50,
+      "mean": 10.0
+    },
+    "perimeter_vertices": 188,
+    "planted": [
+      "eligible_ring_10",
+      "eligible_ring_3",
+      "eligible_ring_4",
+      "eligible_ring_5",
+      "eligible_ring_6",
+      "eligible_ring_7",
+      "eligible_ring_8",
+      "eligible_ring_9",
+      "excluded_closed_line",
+      "excluded_in_perimeter_crossing",
+      "excluded_no_consent",
+      "layered_no_short_cycles",
+      "shared_five",
+      "shared_triangle"
+    ],
+    "hubs": [
+      "s2kv000",
+      "s2kv001",
+      "s2kv002",
+      "s2kv003",
+      "s2kv004",
+      "s2kv005",
+      "s2kv006",
+      "s2kv007",
+      "s2kv008",
+      "s2kv009"
+    ],
+    "graph_sha256": "88b5e3b6897dd3e5ed1ec2545bc7fdce4ce9ecbf53ba8a24446b685359eabdde",
+    "build_s": 2.2
+  },
+  "d8k": {
+    "family": "d8k",
+    "title": "dense stress 200/8000",
+    "seed": 20200925,
+    "random_vertices": 200,
+    "random_edges": 8000,
+    "planted_vertices": 89,
+    "planted_edges": 110,
+    "vertices_total": 289,
+    "edges_total": 8110,
+    "eligible_edges": 7453,
+    "excluded_edges": {
+      "closed_line": 349,
+      "consent_refused": 308
+    },
+    "out_degree_random": {
+      "min": 25,
+      "p50": 40,
+      "p95": 49,
+      "max": 58,
+      "mean": 40.0
+    },
+    "in_degree_random": {
+      "min": 22,
+      "p50": 40,
+      "p95": 49,
+      "max": 53,
+      "mean": 40.0
+    },
+    "perimeter_vertices": 188,
+    "planted": [
+      "eligible_ring_10",
+      "eligible_ring_3",
+      "eligible_ring_4",
+      "eligible_ring_5",
+      "eligible_ring_6",
+      "eligible_ring_7",
+      "eligible_ring_8",
+      "eligible_ring_9",
+      "excluded_closed_line",
+      "excluded_in_perimeter_crossing",
+      "excluded_no_consent",
+      "layered_no_short_cycles",
+      "shared_five",
+      "shared_triangle"
+    ],
+    "hubs": [],
+    "graph_sha256": "a7781cbba0fbb0e547d43e910b9afb2d734cc25df547399c2ed6c2c7b135f1e9",
+    "build_s": 3.5
+  }
+}
