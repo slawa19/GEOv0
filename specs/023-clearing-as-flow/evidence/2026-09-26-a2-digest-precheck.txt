@@ -1,0 +1,27 @@
+# 023 optimisation round: plan digests, UNTIMED pre-check before the acceptance run.
+# The 20 cells' eligible edges rebuilt in memory from the frozen generator (the same ids and the same
+# _policy_flag / status / perimeter filter as the build and the snapshot read), planned with the planner
+# before the change batch (cddabb6) and after it; both compared with the digests recorded by the v1 run
+# 20260926T052821Z (evidence/2026-09-26-a-acceptance-results.json). No timing was taken.
+
+h4k planted global before 28a1e4d60d4cbb9e after 28a1e4d60d4cbb9e recorded ['28a1e4d60d4cbb9e'] IDENTICAL
+h4k planted perimeter before 8f9209856dd28aee after 8f9209856dd28aee recorded ['8f9209856dd28aee'] IDENTICAL
+h4k plateau global before 1df6a48e0b0afd5a after 1df6a48e0b0afd5a recorded ['1df6a48e0b0afd5a'] IDENTICAL
+h4k plateau perimeter before 56f15a2767e5f918 after 56f15a2767e5f918 recorded ['56f15a2767e5f918'] IDENTICAL
+h4k narrow global before a21adb777a988c3e after a21adb777a988c3e recorded ['a21adb777a988c3e'] IDENTICAL
+h4k narrow perimeter before 3a85449733dc2a1b after 3a85449733dc2a1b recorded ['3a85449733dc2a1b'] IDENTICAL
+h4k allequal global before 446118c6ea80a33e after 446118c6ea80a33e recorded ['446118c6ea80a33e'] IDENTICAL
+h4k allequal perimeter before b069b60e96c4b1e0 after b069b60e96c4b1e0 recorded ['b069b60e96c4b1e0'] IDENTICAL
+h4k largeatoms global before 0f032b6f5c67415e after 0f032b6f5c67415e recorded ['0f032b6f5c67415e'] IDENTICAL
+h4k largeatoms perimeter before f7e5ca8d2a5c9760 after f7e5ca8d2a5c9760 recorded ['f7e5ca8d2a5c9760'] IDENTICAL
+d8k planted global before a21c8c889b4aeb53 after a21c8c889b4aeb53 recorded ['a21c8c889b4aeb53'] IDENTICAL
+d8k planted perimeter before 640f25650a30f25e after 640f25650a30f25e recorded ['640f25650a30f25e'] IDENTICAL
+d8k plateau global before 6d17f610ded48afc after 6d17f610ded48afc recorded ['6d17f610ded48afc'] IDENTICAL
+d8k plateau perimeter before 42d698874718356a after 42d698874718356a recorded ['42d698874718356a'] IDENTICAL
+d8k narrow global before 1b8e74674563a7de after 1b8e74674563a7de recorded ['1b8e74674563a7de'] IDENTICAL
+d8k narrow perimeter before 7e05531f11d5d058 after 7e05531f11d5d058 recorded ['7e05531f11d5d058'] IDENTICAL
+d8k allequal global before 98e8ed9e90084164 after 98e8ed9e90084164 recorded ['98e8ed9e90084164'] IDENTICAL
+d8k allequal perimeter before 05bc9eaa401761ff after 05bc9eaa401761ff recorded ['05bc9eaa401761ff'] IDENTICAL
+d8k largeatoms global before 0937232c13fe4f6c after 0937232c13fe4f6c recorded ['0937232c13fe4f6c'] IDENTICAL
+d8k largeatoms perimeter before 8bd044cb1dcd87a0 after 8bd044cb1dcd87a0 recorded ['8bd044cb1dcd87a0'] IDENTICAL
+20/20 identical

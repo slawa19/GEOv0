@@ -1,0 +1,45 @@
+# 023 slice (a), step 1: red evidence of R-023-1..3 and R-023-4a on base b886fa8 + the test commit.
+# Command: $env:PYTEST_ADDOPTS='--runxfail --tb=line -rf'; scripts/verify_local.ps1 -TaskSlug p023a -BackendOnly
+#          -BackendSelector tests/integration/test_p023_reproducers_postgres.py
+# --runxfail is a DEBUG view that only shows the TargetMismatch text the strict marker hides; the canonical
+# run without it: '17 passed, 19 xfailed' (this module + the R-020-1 module + the retention module), exit 0.
+# Every failure below is TargetMismatch (the marker's raises=), none is an AssertionError of a control.
+
+TEST_DATABASE_URL not set: using the derived postgresql+asyncpg://geo:***@127.0.0.1:5432/geov0_test_p023a
+
+== Backend selector safety guard ==
+
+== Test database safety guard ==
+Test database guard passed (backend=postgresql, database='geov0_test_p023a').
+
+== Backend tests (pytest) ==
+FFFFFFFFFFFFF                                                            [100%]
+================================== FAILURES ===================================
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 6: V_edge on the debts 6.00000000, the oracle's optimum 14 (1 occurrence(s))
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: V_edge 6.00000000 (target 8), remaining [('00000000-0000-2302-0000-00000000000a', 'p023r2b', 'p023r2d', Decimal('1.00000000')), ('00000000-0000-2302-0000-00000000000b', 'p023r2d', 'p023r2e', Decimal('1.00000000')), ('00000000-0000-2302-0000-00000000000c', 'p023r2e', 'p023r2f', Decimal('1.00000000')), ('00000000-0000-2302-0000-00000000000d', 'p023r2f', 'p023r2a', Decimal('1.00000000'))] (target [('00000000-0000-2302-0000-000000000002', 'p023r2b', 'p023r2c', Decimal('1')), ('00000000-0000-2302-0000-000000000003', 'p023r2c', 'p023r2a', Decimal('1'))])
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 6: V_edge 0E-8 (0 occurrences), target 7
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 3: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 4: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 5: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 6: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 7: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 8: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 9: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: depth 10: V_edge 0E-8 (0 occurrences), target 11
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: declared 2: executor cleared 5.00000000; remaining [], target [('00000000-0000-2304-0000-000000000000', 'p023r4a', 'p023r4b', Decimal('3')), ('00000000-0000-2304-0000-000000000001', 'p023r4b', 'p023r4c', Decimal('3')), ('00000000-0000-2304-0000-000000000002', 'p023r4c', 'p023r4a', Decimal('3'))]
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: both occurrences are 422d0278-7398-541b-85fb-64a8ae32bc9f: the second would replay as the first
+=========================== short test summary info ===========================
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_1_depth_six_loses_volume_the_flow_finds[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_2_shared_edge_six_versus_eight[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_seven_ring_is_missed_at_depth_six[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[3-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[4-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[5-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[6-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[7-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[8-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[9-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[10-mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_4a_declared_partial_amount_is_not_honoured[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_4a_distinct_occurrences_get_distinct_identities
+13 failed in 14.64s
