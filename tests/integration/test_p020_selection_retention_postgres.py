@@ -1,6 +1,6 @@
 """RETENTION, programme 020 stage 2: detector properties that hold TODAY and must survive the switch.
 
-Green on the current tree, no marker. The stage-3 detector (`T2003`) must keep them green; they are
+Green on the current tree, no marker. A replacement detector (programme 023; 020 stage 3 superseded) must keep them green; they are
 the spec's Verification plan §2 invariants that the current code already satisfies, kept apart from the
 red R-020-1 characterization (`test_p020_selection_amount_first_unique_cycles_postgres.py`) so a red here
 is a regression, never an expected failure.

@@ -1,7 +1,7 @@
 """Guard (programme 020, stage 2): production code does not import the experimental detectors.
 
 `scripts/p020_experimental_detectors.py` holds the stage-2 candidate detectors, measured OUTSIDE the
-production path until the stage-3 switch (`T2003`). This guard checks two things and nothing else:
+production path (020 stage 3 superseded by 023; they stay dated evidence). This guard checks two things and nothing else:
 
 * STATICALLY - no module under `app/` names the experimental module in an `import` / `from ... import`
   (AST walk, so a comment or a string does not count). Anti-vacuum: the same walker, pointed at the

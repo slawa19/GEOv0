@@ -4,7 +4,7 @@ One seeding helper with FIXED identities, so an ordered list of cycle identities
 a test and compared verbatim, and one expected-failure marker in the 019 shape (`tests/p019_support.py`):
 `xfail(raises=TargetMismatch, strict=True)`. A broken stand raises `AssertionError`, which the marker does
 not accept; a tree that already meets the target XPASSes and `strict=True` turns that into a failure, so
-the stage that switches the detector (020 stage 3, `T2003`) must take the marker off.
+the target is undelivered (020 closed narrowed 2026-09-26) and superseded by programme 023, which decides whether these assertions are replaced or removed.
 
 WHAT A "CANONICAL IDENTITY" IS HERE (spec, "Решения" -> selection rule): the sorted tuple of ALL debt UUIDs
 of the cycle, in their canonical lowercase hyphenated spelling. It is the tie key of the owner's rule and
@@ -27,7 +27,7 @@ _PID_NAMESPACE = uuid.UUID("2d0f2e3a-5a0b-4f7e-9d7c-0200000000a0")
 
 
 def target_xfail_020(what: str):
-    """The 020 marker: an expected `TargetMismatch`, strict, removed by the stage-3 switch (`T2003`)."""
+    """The 020 marker: an expected `TargetMismatch`, strict; its fate is decided by programme 023 (020 stage 3 superseded)."""
 
     return pytest.mark.xfail(
         raises=TargetMismatch,

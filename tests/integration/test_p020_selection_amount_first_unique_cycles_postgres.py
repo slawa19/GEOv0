@@ -4,7 +4,7 @@ THE RULE (owner's decision 2026-09-25, spec "Решения"): per detection, at
 UNIQUE eligible cycles ordered by clear amount DESC regardless of length, ties by the FULL canonical identity
 (the sorted tuple of every debt UUID of the cycle); after a success the list is dropped and detection runs
 again at full depth. This module encodes that rule. It is RED on the current tree by design and carries the
-strict 020 marker (`tests/p020_support.py`) until the stage-3 switch (`T2003`) takes it off.
+strict 020 marker (`tests/p020_support.py`) until programme 023 decides their fate (020 stage 3 superseded).
 
 Three parts, as the spec's Verification plan §1 defines them:
 
