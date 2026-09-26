@@ -17,9 +17,21 @@ is a regression, never an expected failure.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
+from sqlalchemy import func, select
 
 from app.core.clearing.service import ClearingService
+from app.db.models.debt import Debt
+from app.db.models.transaction import Transaction
+from tests.conftest import MODE_B
+from tests.integration.test_p020_selection_amount_first_unique_cycles_postgres import (
+    _TRIANGLES,
+    _ladder_edges,
+    _overflow_edges,
+    _remaining,
+)
 from tests.p020_support import Edge, debt_uuid, identity, identity_of, ring, seed_graph
 
 _DEPTHS = [3, 4, 6, 7, 10]
@@ -113,3 +125,53 @@ async def test_retention_same_length_ties_follow_the_full_identity(db_session, m
         identity_of(e.debt_id for e in second),
         identity_of(e.debt_id for e in first),
     ]
+
+
+# ------------------------------------------------------------------ R-020-1's ordinary controls (023 slice (a))
+#
+# Programme 023's decision on R-020-1 (spec 023, Verification plan §3): the ordinary controls of the strict
+# R-020-1 tests are extracted HERE as separate green tests with EXACT assertions, so a regression of today's
+# behaviour is a red test and not a change hidden behind an expected failure. The R-020-1 module and its
+# strict markers are unchanged until slice (d).
+#
+# THE EXPECTED VALUES BELOW ARE TEMPORARY. They are today's ladder (`auto_clear` rungs [4, 6]): triangle
+# first, then the long cycle on what the shared edge has left. Slice (d) moves them to the flow objective
+# (V_edge against the oracle); they do not become a permanent constraint.
+
+@MODE_B
+@pytest.mark.asyncio
+@pytest.mark.parametrize("long_len", [5, 4])
+async def test_retention_ladder_occurrences_and_remainder_are_exact(db_session, long_len) -> None:
+    edges, tri, long_cycle = _ladder_edges(long_len)
+    await seed_graph(db_session, "PZL", edges)
+
+    cleared = await ClearingService(db_session).auto_clear("PZL", max_depth=6)
+    db_session.expire_all()
+    occurrences = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(Transaction)
+            .where(Transaction.type == "CLEARING", Transaction.state == "COMMITTED")
+        )
+    ).scalar_one()
+    remaining = await _remaining(db_session)
+
+    # Today: the triangle clears 10 (its own edges go, the shared edge drops to 90), then the long cycle
+    # clears 90 (the shared edge goes, its own edges drop to 10). Two occurrences - the loop does NOT stop
+    # after the first triangle.
+    assert (cleared, occurrences) == (2, 2), (cleared, occurrences)
+    assert remaining == sorted((e.debtor, e.creditor, Decimal("10")) for e in long_cycle[1:]), remaining
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_depth", [4, 6])
+async def test_retention_overflow_global_result_is_not_empty(db_session, max_depth) -> None:
+    edges, ids_by_triangle = _overflow_edges()
+    await seed_graph(db_session, "PZO", edges)
+    seeded = (await db_session.execute(select(func.count()).select_from(Debt))).scalar_one()
+    assert seeded == 3 * _TRIANGLES
+
+    got = [identity(c) for c in await ClearingService(db_session).find_cycles("PZO", max_depth=max_depth)]
+
+    assert got, f"depth {max_depth}: 101 eligible triangles and an empty global answer"
+    assert set(got) <= {identity_of(ids) for ids in ids_by_triangle.values()}, "a returned cycle is not seeded"
