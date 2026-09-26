@@ -1,0 +1,36 @@
+built geov0_bench_p023a_h4k_planted in 2.7 s
+h4k planted    global    PASS timing=PASS cold=970.583 p50=877.0 p95=907.3 max=970.6 stmts=[2] cycles=2740 longest=77 memory=MEASURED peak=4529227 
+h4k planted    perimeter PASS timing=PASS cold=264.607 p50=131.4 p95=136.6 max=264.6 stmts=[3] cycles=524 longest=60 memory=MEASURED peak=1157960 
+execution h4k {"kind": "execution", "which": "longest", "length": 77, "ms": 291.5, "statements": 417, "cleared": "109.34000000", "planned_amount": "2.11000000"}
+execution h4k {"kind": "execution", "which": "shortest", "length": 3, "ms": 147.5, "statements": 47, "cleared": "297.46000000", "planned_amount": "77.54000000"}
+built geov0_bench_p023a_h4k_plateau in 2.5 s
+h4k plateau    global    PASS timing=PASS cold=1084.298 p50=961.4 p95=994.6 max=1084.3 stmts=[2] cycles=2711 longest=83 memory=MEASURED peak=4514199 
+h4k plateau    perimeter PASS timing=PASS cold=271.979 p50=139.7 p95=154.9 max=272.0 stmts=[3] cycles=544 longest=55 memory=MEASURED peak=1163604 
+built geov0_bench_p023a_h4k_narrow in 2.5 s
+h4k narrow     global    FAIL timing=FAIL cold=1174.716 p50=1077.8 p95=1105.5 max=1174.7 stmts=[2] cycles=2564 longest=87 memory=MEASURED peak=4463373 p95 1105.5 ms > 1000 ms
+h4k narrow     perimeter PASS timing=PASS cold=249.28 p50=114.5 p95=127.5 max=249.3 stmts=[3] cycles=537 longest=45 memory=MEASURED peak=1160708 
+built geov0_bench_p023a_h4k_allequal in 2.5 s
+h4k allequal   global    PASS timing=PASS cold=304.941 p50=168.9 p95=195.3 max=304.9 stmts=[2] cycles=189 longest=54 memory=MEASURED peak=3625861 
+h4k allequal   perimeter PASS timing=PASS cold=164.733 p50=28.7 p95=30.3 max=164.7 stmts=[3] cycles=57 longest=35 memory=MEASURED peak=1005644 
+built geov0_bench_p023a_h4k_largeatoms in 2.5 s
+h4k largeatoms global    FAIL timing=FAIL cold=3068.031 p50=2937.3 p95=2959.6 max=3068.0 stmts=[2] cycles=2945 longest=86 memory=MEASURED peak=4660469 p95 2959.6 ms > 1000 ms
+h4k largeatoms perimeter PASS timing=PASS cold=640.799 p50=512.4 p95=526.5 max=640.8 stmts=[3] cycles=610 longest=48 memory=MEASURED peak=1200304 
+built geov0_bench_p023a_d8k_planted in 3.3 s
+d8k planted    global    PASS timing=PASS cold=1500.619 p50=1385.3 p95=1410.7 max=1500.6 stmts=[2] cycles=6777 longest=55 memory=MEASURED peak=8446007 
+d8k planted    perimeter PASS timing=PASS cold=284.608 p50=159.6 p95=170.3 max=284.6 stmts=[3] cycles=1498 longest=38 memory=MEASURED peak=2139705 
+execution d8k {"kind": "execution", "which": "longest", "length": 55, "ms": 337.9, "statements": 307, "cleared": "79.30000000", "planned_amount": "0.46000000"}
+execution d8k {"kind": "execution", "which": "shortest", "length": 3, "ms": 196.2, "statements": 47, "cleared": "129.88000000", "planned_amount": "129.88000000"}
+built geov0_bench_p023a_d8k_plateau in 3.3 s
+d8k plateau    global    PASS timing=PASS cold=2009.269 p50=1927.4 p95=1948.8 max=2009.3 stmts=[2] cycles=6739 longest=52 memory=MEASURED peak=8422207 
+d8k plateau    perimeter PASS timing=PASS cold=333.575 p50=193.6 p95=204.6 max=333.6 stmts=[3] cycles=1542 longest=41 memory=MEASURED peak=2164715 
+built geov0_bench_p023a_d8k_narrow in 3.4 s
+d8k narrow     global    PASS timing=PASS cold=1431.007 p50=1320.9 p95=1380.6 max=1431.0 stmts=[2] cycles=6628 longest=60 memory=MEASURED peak=8385125 
+d8k narrow     perimeter PASS timing=PASS cold=297.001 p50=174.2 p95=183.5 max=297.0 stmts=[3] cycles=1492 longest=37 memory=MEASURED peak=2132421 
+built geov0_bench_p023a_d8k_allequal in 3.5 s
+d8k allequal   global    PASS timing=PASS cold=443.712 p50=313.3 p95=326.3 max=443.7 stmts=[2] cycles=568 longest=38 memory=MEASURED peak=6619335 
+d8k allequal   perimeter PASS timing=PASS cold=175.529 p50=45.7 p95=55.4 max=175.5 stmts=[3] cycles=177 longest=27 memory=MEASURED peak=1755825 
+built geov0_bench_p023a_d8k_largeatoms in 3.4 s
+d8k largeatoms global    FAIL timing=FAIL cold=2792.386 p50=2676.2 p95=2702.6 max=2792.4 stmts=[2] cycles=7087 longest=55 memory=MEASURED peak=8638981 p95 2702.6 ms > 2000 ms
+d8k largeatoms perimeter PASS timing=PASS cold=671.368 p50=550.6 p95=561.6 max=671.4 stmts=[3] cycles=1646 longest=33 memory=MEASURED peak=2176681 
+VERDICT FAIL: 17 of 20 cells PASSED; timing failures 3; memory not measured 0; failed: ['h4k/narrow/global', 'h4k/largeatoms/global', 'd8k/largeatoms/global']
+results: .local-run\p023a2-bench\20260926T055719Z\results.json
