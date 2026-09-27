@@ -71,7 +71,7 @@ async def test_one_checkpoint_pair_per_touched_equivalent_per_batch(db_session, 
 
     assert (batch.applied_operations, len(batch.touched_equivalent_ids)) == (3, 2)
     assert checkpoints.count == 2 * 2, f"{checkpoints.count} checkpoint computations for 3 operations in 2 equivalents"
-    rows = await trust_line_audit_rows(db_session)
+    rows = await trust_line_audit_rows(db_session, equivalent_codes=[e1, e2])
     assert sorted(r.operation_type for r in rows) == ["TRUST_LINE_CLOSE", "TRUST_LINE_UPDATE", "TRUST_LINE_UPDATE"]
     assert all(is_transaction_scoped(r) for r in rows)
     pairs = {code: {(r.state_checksum_before, r.state_checksum_after) for r in rows if r.equivalent_code == code}
@@ -82,7 +82,7 @@ async def test_one_checkpoint_pair_per_touched_equivalent_per_batch(db_session, 
 
 @pytest.mark.asyncio
 async def test_a_commit_without_finish_is_refused_and_a_rollback_disarms(db_session) -> None:
-    owner, (l1, _l2, _l3), _codes = await _world(db_session)
+    owner, (l1, _l2, _l3), codes = await _world(db_session)
     service = TrustLineService(db_session)
     batch = service.begin_internal_batch()
     await service.execute_update(batch, l1, owner, TrustLineUpdateRequest(limit="99", signature=_UNSIGNED),
@@ -95,7 +95,7 @@ async def test_a_commit_without_finish_is_refused_and_a_rollback_disarms(db_sess
 
     limit = await db_session.scalar(select(TrustLine.limit).where(TrustLine.id == l1))
     assert Decimal(str(limit)) == Decimal("10")
-    assert await trust_line_audit_rows(db_session) == []
+    assert await trust_line_audit_rows(db_session, equivalent_codes=codes) == []
 
 
 @pytest.mark.asyncio

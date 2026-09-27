@@ -60,9 +60,9 @@ class _FailOnSecondDecayRecord(logging.Filter):
         return True
 
 
-async def _audit_count(factory) -> int:  # noqa: F811
+async def _audit_count(factory, eq) -> int:  # noqa: F811
     async with factory() as s:
-        return len(await trust_line_audit_rows(s))
+        return len(await trust_line_audit_rows(s, equivalent_codes=[eq.code]))
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,7 @@ async def test_a_decay_failing_after_its_first_line_leaves_nothing_behind(factor
     assert run.state == "running" and run.errors_total == 0, (run.state, run.last_error)
 
     after = await limits(factory, eq, people)
-    audit = await _audit_count(factory)
+    audit = await _audit_count(factory, eq)
     require_target(
         after[("C", "D")] == (Decimal("100.00"), "active")
         and after[("C", "G")] == (Decimal("100.00"), "active")
@@ -110,7 +110,7 @@ async def test_a_decay_whose_checkpoint_fails_leaves_nothing_behind(factory, mon
     assert run.state == "running" and run.errors_total == 0, (run.state, run.last_error)
 
     after = await limits(factory, eq, people)
-    audit = await _audit_count(factory)
+    audit = await _audit_count(factory, eq)
     require_target(
         checkpoints.count == 2
         and after[("C", "D")] == (Decimal("100.00"), "active")

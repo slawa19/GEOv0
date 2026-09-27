@@ -64,7 +64,7 @@ async def test_a_growth_failing_after_its_mutation_is_rolled_back_by_the_engine(
     await db_session.commit()  # a later commit on the same session
     limit = await db_session.scalar(select(TrustLine.limit).where(TrustLine.id == line_id))
     assert Decimal(str(limit)) == Decimal("100.00"), f"the failed growth's limit became durable: {limit}"
-    assert await trust_line_audit_rows(db_session) == []
+    assert await trust_line_audit_rows(db_session, equivalent_codes=[eq_code]) == []
 
 
 @pytest.mark.asyncio
@@ -95,4 +95,4 @@ async def test_a_failed_http_seeding_is_rolled_back_before_its_503(db_session, m
     left = (await db_session.execute(select(Participant.pid).where(Participant.pid.in_(pids)))).scalars().all()
     eqs = (await db_session.execute(select(Equivalent.id).where(Equivalent.code == eq_code))).scalars().all()
     assert left == [] and eqs == [], f"the failed seeding left participants {left} and equivalents {eqs}"
-    assert await trust_line_audit_rows(db_session) == []
+    assert await trust_line_audit_rows(db_session, equivalent_codes=[eq_code]) == []

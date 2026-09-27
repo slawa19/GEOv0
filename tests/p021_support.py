@@ -60,12 +60,18 @@ class TrustLineCheckpoints:
         return len(self.calls)
 
 
-async def trust_line_audit_rows(session, *, operation_type: str | None = None) -> list:
+async def trust_line_audit_rows(session, *, equivalent_codes, operation_type: str | None = None) -> list:
+    """Trust-line audit rows of THIS test's equivalents only. Required filter: the mode-A tier database is shared
+    across the session and may hold rows other tests committed, so an unfiltered count measures them too."""
+
     from sqlalchemy import select
 
     from app.db.models.audit_log import IntegrityAuditLog
 
-    stmt = select(IntegrityAuditLog).where(IntegrityAuditLog.operation_type.in_(TRUST_LINE_OPERATIONS))
+    stmt = select(IntegrityAuditLog).where(
+        IntegrityAuditLog.operation_type.in_(TRUST_LINE_OPERATIONS),
+        IntegrityAuditLog.equivalent_code.in_(list(equivalent_codes)),
+    )
     if operation_type is not None:
         stmt = stmt.where(IntegrityAuditLog.operation_type == operation_type)
     return list((await session.execute(stmt.order_by(IntegrityAuditLog.created_at))).scalars().all())

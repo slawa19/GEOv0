@@ -1,4 +1,3 @@
-import uuid as _uuid
 from dataclasses import dataclass
 from uuid import UUID
 from decimal import Decimal
@@ -116,6 +115,9 @@ CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
 
 #: The statuses a scenario may give a trust line it imports (`TrustLine.status`).
 INITIAL_STATUSES = frozenset({"active", "frozen", "closed"})
+
+#: Triples per live-line lookup of `import_initial_trustlines` (3 bind parameters each).
+_IMPORT_LOOKUP_CHUNK = 1000
 
 
 class TrustLineWriteBatch:
@@ -716,25 +718,34 @@ class TrustLineService:
         if not lines:
             return []
 
-        triples = {(ln.from_participant.id, ln.to_participant.id, ln.equivalent.id) for ln in lines}
-        live = set(
-            (
-                await self.session.execute(
-                    select(
-                        TrustLine.from_participant_id,
-                        TrustLine.to_participant_id,
-                        TrustLine.equivalent_id,
-                    ).where(
-                        tuple_(
+        # One lookup per chunk of triples, not one per line (the seeder's per-line lookup cost a statement per
+        # scenario line even when nothing was new). Chunked so a large scenario stays under the driver's bind-
+        # parameter ceiling (three parameters per triple).
+        triples = sorted(
+            {(ln.from_participant.id, ln.to_participant.id, ln.equivalent.id) for ln in lines},
+            key=lambda t: tuple(str(x) for x in t),
+        )
+        live: set = set()
+        for start in range(0, len(triples), _IMPORT_LOOKUP_CHUNK):
+            chunk = triples[start:start + _IMPORT_LOOKUP_CHUNK]
+            live.update(
+                (
+                    await self.session.execute(
+                        select(
                             TrustLine.from_participant_id,
                             TrustLine.to_participant_id,
                             TrustLine.equivalent_id,
-                        ).in_(sorted(triples, key=lambda t: tuple(str(x) for x in t))),
-                        TrustLine.status != "closed",
+                        ).where(
+                            tuple_(
+                                TrustLine.from_participant_id,
+                                TrustLine.to_participant_id,
+                                TrustLine.equivalent_id,
+                            ).in_(chunk),
+                            TrustLine.status != "closed",
+                        )
                     )
-                )
-            ).all()
-        )
+                ).all()
+            )
 
         imported: list[TrustLine] = []
         for line in lines:
@@ -743,7 +754,6 @@ class TrustLineService:
                 continue
             await batch._touch(line.equivalent.id, line.equivalent.code)
             trustline = TrustLine(
-                id=_uuid.uuid4(),
                 from_participant_id=line.from_participant.id,
                 to_participant_id=line.to_participant.id,
                 equivalent_id=line.equivalent.id,
@@ -755,10 +765,10 @@ class TrustLineService:
             batch._record(
                 "TRUST_LINE_CREATE",
                 line.equivalent.id,
+                # TRUST_LINE_CREATE's shape ({from, to}, `api/openapi.yaml`) plus the imported status.
                 {
                     "from": line.from_participant.pid,
                     "to": line.to_participant.pid,
-                    "trustline_id": str(trustline.id),
                     "initial_status": line.status,
                 },
             )

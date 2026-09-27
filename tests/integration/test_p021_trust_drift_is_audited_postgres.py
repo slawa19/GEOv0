@@ -190,7 +190,7 @@ async def test_decay_in_a_real_tick_is_audited_per_transaction(factory, monkeypa
     assert after[("C", "E")] == (Decimal("100.00"), "frozen"), after  # drift touches the active line only
 
     async with factory() as s:
-        rows = await trust_line_audit_rows(s, operation_type="TRUST_LINE_UPDATE")
+        rows = await trust_line_audit_rows(s, equivalent_codes=[eq.code], operation_type="TRUST_LINE_UPDATE")
     require_target(
         len(rows) == 2
         and all(is_transaction_scoped(r) for r in rows)
@@ -233,7 +233,7 @@ async def test_growth_after_a_real_tick_clearing_is_audited_per_transaction(fact
     }, after
 
     async with factory() as s:
-        rows = await trust_line_audit_rows(s, operation_type="TRUST_LINE_UPDATE")
+        rows = await trust_line_audit_rows(s, equivalent_codes=[eq.code], operation_type="TRUST_LINE_UPDATE")
     require_target(
         len(rows) == 3 and all(is_transaction_scoped(r) for r in rows) and one_pair(rows) and checkpoints.count == 2,
         f"growth tick: {len(rows)} TRUST_LINE_UPDATE rows, {checkpoints.count} trust-line checkpoints",

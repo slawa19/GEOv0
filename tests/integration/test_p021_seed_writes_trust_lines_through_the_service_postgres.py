@@ -158,12 +158,14 @@ async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session,
 
     await _seed(db_session, w)
     first_seed_checkpoints = checkpoints.count
-    first_rows = await trust_line_audit_rows(db_session, operation_type="TRUST_LINE_CREATE")
+    first_rows = await trust_line_audit_rows(db_session, equivalent_codes=[w["e1"], w["e2"]], operation_type="TRUST_LINE_CREATE")
 
     await _seed(db_session, w)
     second_seed_checkpoints = checkpoints.count - first_seed_checkpoints
-    all_rows = await trust_line_audit_rows(db_session, operation_type="TRUST_LINE_CREATE")
-    second_rows = all_rows[len(first_rows):]
+    all_rows = await trust_line_audit_rows(db_session, equivalent_codes=[w["e1"], w["e2"]], operation_type="TRUST_LINE_CREATE")
+    # By id, not by position: in mode A every row shares one `created_at` (`now()` of the outer transaction).
+    first_ids = {r.id for r in first_rows}
+    second_rows = [r for r in all_rows if r.id not in first_ids]
 
     # ── controls: both seedings ran and applied what the characterization says ─────────────────
     lines = await _lines(db_session, w)
