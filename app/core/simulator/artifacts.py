@@ -108,7 +108,7 @@ class ArtifactsManager:
 
             try:
                 rp = p.resolve()
-                if not str(rp).startswith(str(base)):
+                if not rp.is_relative_to(base):
                     continue
                 mtime = float(rp.stat().st_mtime)
                 if mtime >= cutoff:
@@ -204,7 +204,9 @@ class ArtifactsManager:
         if base is None:
             raise NotFoundException("Artifact not found")
         p = (base / name).resolve()
-        if not str(p).startswith(str(base.resolve())):
+        # Containment over both resolved ends (fix-delta D1): a string prefix admitted a sibling
+        # directory sharing it (`artifacts_x`), reachable through `..` or a `%5C` backslash.
+        if not p.is_relative_to(base.resolve()) or p == base.resolve():
             raise NotFoundException("Artifact not found")
         if not p.exists() or not p.is_file():
             raise NotFoundException("Artifact not found")
