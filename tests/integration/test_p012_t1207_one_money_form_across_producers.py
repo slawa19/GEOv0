@@ -67,6 +67,7 @@ import pytest
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.core.clearing.service import ClearingCommittedAfterCancellation
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
@@ -126,7 +127,7 @@ async def _fixture(session: AsyncSession, *, precision: int, limit: str, used: s
     creditor = Participant(
         pid=f"CR{nonce}",
         display_name="creditor",
-        public_key=f"pk-cr-{nonce}",
+        public_key=simulated_public_key(f"CR{nonce}"),
         type="person",
         status="active",
         profile={},
@@ -134,7 +135,7 @@ async def _fixture(session: AsyncSession, *, precision: int, limit: str, used: s
     debtor = Participant(
         pid=f"DB{nonce}",
         display_name="debtor",
-        public_key=f"pk-db-{nonce}",
+        public_key=simulated_public_key(f"DB{nonce}"),
         type="person",
         status="active",
         profile={},
@@ -209,7 +210,7 @@ async def _legacy_fixture(session: AsyncSession, *, precision: int, limit: str, 
     creditor = Participant(
         pid=f"CR{nonce}",
         display_name="creditor",
-        public_key=f"pk-cr-{nonce}",
+        public_key=simulated_public_key(f"CR{nonce}"),
         type="person",
         status="active",
         profile={},
@@ -217,7 +218,7 @@ async def _legacy_fixture(session: AsyncSession, *, precision: int, limit: str, 
     debtor = Participant(
         pid=f"DB{nonce}",
         display_name="debtor",
-        public_key=f"pk-db-{nonce}",
+        public_key=simulated_public_key(f"DB{nonce}"),
         type="person",
         status="active",
         profile={},
@@ -773,14 +774,14 @@ async def test_the_topology_changed_trustline_limit_is_not_exponential(
     a = Participant(
         pid=f"IA_{nonce}",
         display_name="a",
-        public_key=f"pk_a_{nonce}"[:64],
+        public_key=simulated_public_key(f"IA_{nonce}"),
         type="person",
         status="active",
     )
     b = Participant(
         pid=f"IB_{nonce}",
         display_name="b",
-        public_key=f"pk_b_{nonce}"[:64],
+        public_key=simulated_public_key(f"IB_{nonce}"),
         type="person",
         status="active",
     )

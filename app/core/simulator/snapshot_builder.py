@@ -19,6 +19,7 @@ from app.core.simulator.net_balance_utils import (
 )
 from app.core.simulator import viz_rules
 from app.core.simulator.scenario_equivalent import effective_equivalent
+from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.schemas.simulator import (
     SIMULATOR_API_VERSION,
     SimulatorGraphLink,
@@ -106,7 +107,16 @@ class SnapshotBuilder:
             if eq is None:
                 return None
 
-            p_rows = (await session.execute(select(Participant).where(Participant.pid.in_(pids)))).scalars().all()
+            p_rows = [
+                p
+                for p in (
+                    await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                ).scalars().all()
+                # Programme 024 (fix-delta B1): the pids come from a scenario anyone may upload, so
+                # only rows the simulator created are read; a real participant is treated as absent
+                # and never reaches the `Debt`/`TrustLine` queries below.
+                if p.public_key == simulated_public_key(p.pid)
+            ]
             pid_to_rec = {p.pid: p for p in p_rows}
             pid_to_id = {p.pid: p.id for p in p_rows}
             participant_ids = [p.id for p in p_rows]
