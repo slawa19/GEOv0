@@ -33,7 +33,7 @@ from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
-from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, SimulatorPidTakenError
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription
 from app.core.simulator.sse_broadcast import (
@@ -597,6 +597,29 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                 "interact.ensure_seeded: seeded scenario for run_id=%s scenario_id=%s",
                 run_id,
                 run.scenario_id,
+            )
+        except SimulatorPidTakenError as exc:
+            # Programme 024, F-024-4b: the scenario names a real participant. Not transient, so
+            # not SEEDING_FAILED/503 ("retry"): 409 with the code, the pid and the request id.
+            from app.utils.request_id import request_id_var
+
+            request_id = request_id_var.get()
+            logger.warning(
+                "interact.ensure_seeded: refused code=%s run_id=%s pid=%s request_id=%s",
+                exc.details["code"],
+                run_id,
+                exc.pid,
+                request_id,
+            )
+            return _action_error(
+                status_code=409,
+                code=str(exc.details["code"]),
+                message=exc.message,
+                details={
+                    "run_id": str(run_id),
+                    "pid": exc.pid,
+                    "request_id": request_id,
+                },
             )
         except Exception:
             logger.error(
@@ -2064,6 +2087,7 @@ async def action_participants_list(
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
         403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
+        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
@@ -2158,6 +2182,10 @@ async def action_trustlines_list(
         pids_needed.add(from_pid)
         pids_needed.add(to_pid)
 
+    # Programme 024 (external review P2): only the run's participants are resolved against the
+    # database - the snapshot's nodes, which are the perimeter - so a link whose end lies outside
+    # it never reads a `Debt`, even if a snapshot were to carry one.
+    pids_needed &= set(pid_to_name)
     pid_to_id: dict[str, uuid.UUID] = {}
     if pids_needed:
         rows = (
@@ -2226,6 +2254,7 @@ async def action_trustlines_list(
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
         403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
+        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
@@ -2264,7 +2293,17 @@ async def payment_targets(
         return err
     assert eq is not None
 
-    from_p, err = await _resolve_participant_or_error(session=db, pid=from_pid, field="from_pid")
+    # Programme 024 (external review P2): a read of the run, confined like its money path.
+    # `from_pid` is resolved within the run perimeter, and the router instance is narrowed to it
+    # with the payment service's own mechanism (`allowed_participant_pids` ->
+    # `_confine_router_to_perimeter`), so no target, hop or capacity outside the run - and no
+    # route THROUGH a participant outside it - is computed at all.
+    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+    if not perimeter_available:
+        return _perimeter_unavailable_error(run_id)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
     assert from_p is not None
@@ -2272,6 +2311,7 @@ async def payment_targets(
     # Build the capacity graph (edges included only if capacity > 0).
     router = PaymentRouter(db)
     await router.build_graph(eq.code)
+    PaymentService._confine_router_to_perimeter(router, scoped_pids)
 
     src = str(from_p.pid)
     if src not in (router.graph or {}):

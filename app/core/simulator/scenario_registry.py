@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import re
+import shutil
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +22,18 @@ from app.utils.validation import validate_equivalent_code
 
 
 _VALIDATORS_BY_SCHEMA_PATH: dict[str, Draft202012Validator] = {}
+
+# An uploaded scenario_id becomes a directory name under `<local_state_dir>/scenarios/`
+# (programme 024, F-024-4a). One rule of form: ASCII letters, digits, `-`, `_`, `.`; starts with a
+# letter or digit, does not end with `.` (Windows drops a trailing dot); at most 128 characters.
+# `fixtures/simulator/scenario.schema.json` carries the same pattern for `scenario_id`, but the
+# schema validator is optional, so the code checks the form itself.
+SCENARIO_ID_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$"
+_SCENARIO_ID_RE = re.compile(SCENARIO_ID_PATTERN)
+
+
+def is_safe_scenario_id(value: object) -> bool:
+    return isinstance(value, str) and _SCENARIO_ID_RE.fullmatch(value) is not None
 
 
 def get_scenario_validator(*, schema_path: Path) -> Optional[Draft202012Validator]:
@@ -203,14 +218,29 @@ class ScenarioRegistry:
     def save_uploaded_scenario(self, scenario: dict[str, Any]) -> ScenarioRecord:
         validate_scenario_or_400(raw=scenario, schema_path=self._schema_path)
 
-        scenario_id = str(scenario.get("scenario_id") or "").strip()
-        if not scenario_id:
+        raw_id = scenario.get("scenario_id")
+        if raw_id is None or (isinstance(raw_id, str) and not raw_id.strip()):
             raise BadRequestException("Scenario must contain scenario_id")
+        if not is_safe_scenario_id(raw_id):
+            raise BadRequestException(
+                "scenario_id must be 1-128 ASCII letters, digits, '-', '_' or '.', "
+                "starting with a letter or digit and not ending with '.'",
+                details={"scenario_id": raw_id},
+            )
+        scenario_id: str = raw_id
 
-        base = self._local_state_dir / "scenarios" / scenario_id
+        root = (self._local_state_dir / "scenarios").resolve()
+        base = (root / scenario_id).resolve()
+        if base.parent != root:
+            raise BadRequestException(
+                "scenario_id does not name a directory inside the scenarios store",
+                details={"scenario_id": scenario_id},
+            )
         path = base / "scenario.json"
 
-        if path.exists():
+        with self._lock:
+            registered = scenario_id in self._scenarios
+        if registered or path.exists():
             raise BadRequestException(
                 f"Scenario {scenario_id} already exists",
                 details={"scenario_id": scenario_id},
@@ -221,8 +251,25 @@ class ScenarioRegistry:
             source_path=path,
             created_at=self._utc_now(),
         )
-        base.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
+        # A well-formed id the filesystem still refuses (a Windows device name such as `nul`, a
+        # read-only store) is the uploader's 400, not a 500, and leaves nothing half-created.
+        base_existed = base.exists()
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self._logger.warning(
+                "simulator.uploaded_scenario_write_failed id=%s errno=%s", scenario_id, exc.errno
+            )
+            if base_existed:
+                with contextlib.suppress(OSError):
+                    path.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(base, ignore_errors=True)
+            raise BadRequestException(
+                "scenario_id cannot be stored as a directory on this server",
+                details={"scenario_id": scenario_id},
+            ) from None
         with self._lock:
             self._scenarios[scenario_id] = rec
         return rec
@@ -264,7 +311,20 @@ class ScenarioRegistry:
             try:
                 raw = json.loads(scenario_path.read_text(encoding="utf-8"))
                 rec = scenario_to_record(raw, source_path=scenario_path, created_at=None)
-                self._scenarios[rec.scenario_id] = rec
             except Exception:
                 self._logger.exception("simulator.uploaded_scenario_load_failed path=%s", str(scenario_path))
                 continue
+            # An upload may neither carry an unsafe id nor replace a bundled preset
+            # (programme 024, F-024-4a); a file written before that rule is skipped, not loaded.
+            if not is_safe_scenario_id(rec.scenario_id) or rec.scenario_id != child.name:
+                self._logger.warning(
+                    "simulator.uploaded_scenario_skipped reason=id_mismatch dir=%s", child.name
+                )
+                continue
+            if rec.scenario_id in self._scenarios:
+                self._logger.warning(
+                    "simulator.uploaded_scenario_skipped reason=shadows_registered id=%s",
+                    rec.scenario_id,
+                )
+                continue
+            self._scenarios[rec.scenario_id] = rec

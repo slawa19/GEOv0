@@ -556,7 +556,9 @@ async def test_staging_a_freeze_outside_the_lock_set_raises_before_staging_it(db
             db_session,
             scenario=_freeze_scenario(w),
             event=_freeze_scenario(w)["events"][0],
-            pid_to_participant_id={},
+            # The run's perimeter, as the owner passes it: since programme 024 (F-024-4b) a freeze
+            # target OUTSIDE it must be simulator-created, and this world's keys are not.
+            pid_to_participant_id={w.target_pid: w.target_id, w.other_pid: w.other_id},
             locked_equivalent_ids={w.run_eq_id},
         )
 

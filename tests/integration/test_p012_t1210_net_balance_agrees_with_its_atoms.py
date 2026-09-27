@@ -85,6 +85,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.core.simulator.models import RunRecord
 from app.core.simulator.net_balance_utils import net_decimal_to_atoms, to_money_str
 from app.core.simulator.snapshot_builder import SnapshotBuilder
@@ -179,7 +180,7 @@ async def _fixture(session: AsyncSession, *, precision: int, amount: str):
     creditor = Participant(
         pid=f"CR{nonce}",
         display_name="creditor",
-        public_key=f"pk-cr-{nonce}",
+        public_key=simulated_public_key(f"CR{nonce}"),
         type="person",
         status="active",
         profile={},
@@ -187,7 +188,7 @@ async def _fixture(session: AsyncSession, *, precision: int, amount: str):
     debtor = Participant(
         pid=f"DB{nonce}",
         display_name="debtor",
-        public_key=f"pk-db-{nonce}",
+        public_key=simulated_public_key(f"DB{nonce}"),
         type="person",
         status="active",
         profile={},

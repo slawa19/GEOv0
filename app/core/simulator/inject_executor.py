@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import uuid
 from collections.abc import Iterable, Mapping
@@ -17,6 +16,11 @@ from app.core.simulator.cache_invalidator import (
 from app.core.ledger.book import APPLIED, REFUSED_OPPOSING_DEBT, Book, InjectIncrease
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
+from app.core.simulator.real_scenario_seeder import (
+    SimulatorPidTakenError,
+    require_simulated_participant,
+    simulated_public_key,
+)
 from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.equivalent import Equivalent
@@ -559,11 +563,17 @@ class InjectExecutor:
                     skipped += 1
                     return False
 
-                # Idempotency: skip if participant already exists.
+                # Idempotency: skip if participant already exists. Outside the run's perimeter it
+                # must be one the simulator created; a real participant's pid refuses the run
+                # (programme 024, F-024-4b). Perimeter members were vetted when they entered it.
                 existing_p = (
-                    await session.execute(select(Participant.id).where(Participant.pid == pid))
-                ).scalar_one_or_none()
+                    await session.execute(
+                        select(Participant.id, Participant.public_key).where(Participant.pid == pid)
+                    )
+                ).one_or_none()
                 if existing_p is not None:
+                    if pid not in pids:
+                        require_simulated_participant(pid=pid, public_key=existing_p.public_key)
                     self._logger.info(
                         "simulator.real.inject.add_participant.skip_exists pid=%s",
                         pid,
@@ -578,7 +588,7 @@ class InjectExecutor:
                 status = str(p_data.get("status") or "active").strip().lower()
                 if status not in {"active", "suspended", "left", "deleted"}:
                     status = "active"
-                public_key = hashlib.sha256(pid.encode("utf-8")).hexdigest()
+                public_key = simulated_public_key(pid)
 
                 new_p = Participant(
                     pid=pid,
@@ -638,16 +648,21 @@ class InjectExecutor:
                         if sponsor_id is None:
                             sponsor_row = (
                                 await session.execute(
-                                    select(Participant.id).where(Participant.pid == sponsor_pid)
+                                    select(Participant.id, Participant.public_key).where(
+                                        Participant.pid == sponsor_pid
+                                    )
                                 )
-                            ).scalar_one_or_none()
+                            ).one_or_none()
                             if sponsor_row is None:
                                 self._logger.warning(
                                     "simulator.real.inject.add_participant.sponsor_not_found sponsor=%s",
                                     sponsor_pid,
                                 )
                                 continue
-                            sponsor_id = sponsor_row
+                            require_simulated_participant(
+                                pid=sponsor_pid, public_key=sponsor_row.public_key
+                            )
+                            sponsor_id = sponsor_row.id
                             remember_pid(sponsor_pid, sponsor_id)
 
                         eq_id = await resolve_eq_id(eq_code)
@@ -712,7 +727,7 @@ class InjectExecutor:
 
                 applied += 1
                 return True
-            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError):
+            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError, SimulatorPidTakenError):
                 # Programme 015, phase B step 3: the owner decides - widen the lock set, retry a
                 # serialization failure, or record a database failure. Counting either as a
                 # skipped entry would commit whatever the poisoned transaction still holds.
@@ -764,9 +779,11 @@ class InjectExecutor:
                 if from_id is None:
                     row = (
                         await session.execute(
-                            select(Participant.id).where(Participant.pid == from_pid_val)
+                            select(Participant.id, Participant.public_key).where(
+                                Participant.pid == from_pid_val
+                            )
                         )
-                    ).scalar_one_or_none()
+                    ).one_or_none()
                     if row is None:
                         self._logger.warning(
                             "simulator.real.inject.create_trustline.from_not_found pid=%s",
@@ -774,16 +791,19 @@ class InjectExecutor:
                         )
                         skipped += 1
                         return False
-                    from_id = row
+                    require_simulated_participant(pid=from_pid_val, public_key=row.public_key)
+                    from_id = row.id
                     remember_pid(from_pid_val, from_id)
 
                 to_id = pids.get(to_pid_val)
                 if to_id is None:
                     row = (
                         await session.execute(
-                            select(Participant.id).where(Participant.pid == to_pid_val)
+                            select(Participant.id, Participant.public_key).where(
+                                Participant.pid == to_pid_val
+                            )
                         )
-                    ).scalar_one_or_none()
+                    ).one_or_none()
                     if row is None:
                         self._logger.warning(
                             "simulator.real.inject.create_trustline.to_not_found pid=%s",
@@ -791,7 +811,8 @@ class InjectExecutor:
                         )
                         skipped += 1
                         return False
-                    to_id = row
+                    require_simulated_participant(pid=to_pid_val, public_key=row.public_key)
+                    to_id = row.id
                     remember_pid(to_pid_val, to_id)
 
                 eq_id = await resolve_eq_id(eq_code)
@@ -846,7 +867,7 @@ class InjectExecutor:
                 )
                 applied += 1
                 return True
-            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError):
+            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError, SimulatorPidTakenError):
                 # Programme 015, phase B step 3 - see op_add_participant.
                 raise
             except Exception as exc:
@@ -880,6 +901,9 @@ class InjectExecutor:
                     )
                     skipped += 1
                     return False
+                if freeze_pid not in pids:
+                    # Outside the perimeter only a simulator-created row may be frozen (F-024-4b).
+                    require_simulated_participant(pid=freeze_pid, public_key=p_row.public_key)
 
                 if p_row.status == "suspended":
                     self._logger.info(
@@ -936,7 +960,7 @@ class InjectExecutor:
                 frozen_participant_pids.append(freeze_pid)
                 applied += 1
                 return True
-            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError):
+            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError, SimulatorPidTakenError):
                 # Programme 015, phase B step 3 - see op_add_participant.
                 raise
             except Exception as exc:

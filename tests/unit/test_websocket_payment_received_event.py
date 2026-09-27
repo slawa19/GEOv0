@@ -2,13 +2,16 @@ import asyncio
 import json
 import logging
 import socket
+import uuid
 
 import pytest
+import pytest_asyncio
 import uvicorn
 import websockets
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.db.models.participant import Participant
 from app.main import app
 from app.utils.security import create_access_token
 from app.utils.event_bus import event_bus
@@ -30,9 +33,36 @@ def lifespan_on_the_test_database(monkeypatch):
     monkeypatch.setattr(main_module, "engine", test_engine)
 
 
+@pytest_asyncio.fixture
+async def active_participant_pid(committed_database, monkeypatch):
+    """An ACTIVE participant on a mode-B clone the endpoint reads through `AsyncSessionLocal`.
+
+    Since programme 024 (F-024-4c) `/api/v1/ws` loads the token's participant and admits only an
+    active one, as every HTTP route does; a `sub` that names nobody is closed with 1008.
+    """
+    import app.db.session as app_db_session
+
+    monkeypatch.setattr(app_db_session, "AsyncSessionLocal", committed_database.sessionmaker)
+    pid = f"PID_WS_{uuid.uuid4().hex[:8]}"
+    async with committed_database.sessionmaker() as s:
+        s.add(
+            Participant(
+                pid=pid,
+                display_name=pid,
+                public_key=uuid.uuid4().hex * 2,
+                type="person",
+                status="active",
+                profile={},
+            )
+        )
+        await s.commit()
+    return pid
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("lifespan_on_the_test_database")
-def test_ws_receives_payment_received_event_for_subscribed_pid():
-    pid = "PID_WS_TEST"
+async def test_ws_receives_payment_received_event_for_subscribed_pid(active_participant_pid):
+    pid = active_participant_pid
     token = create_access_token(pid)
 
     with TestClient(app) as client:
@@ -83,8 +113,8 @@ class _LogCollector(logging.Handler):
 
 
 @pytest.mark.asyncio
-async def test_ws_subprotocol_auth_keeps_token_out_of_uvicorn_logs():
-    token = create_access_token("PID_WS_UVICORN_LOG")
+async def test_ws_subprotocol_auth_keeps_token_out_of_uvicorn_logs(active_participant_pid):
+    token = create_access_token(active_participant_pid)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
@@ -115,7 +145,7 @@ async def test_ws_subprotocol_auth_keeps_token_out_of_uvicorn_logs():
             subprotocols=["bearer", token],
         ) as websocket:
             hello = json.loads(await websocket.recv())
-            assert hello["pid"] == "PID_WS_UVICORN_LOG"
+            assert hello["pid"] == active_participant_pid
     finally:
         server.should_exit = True
         await server_task
