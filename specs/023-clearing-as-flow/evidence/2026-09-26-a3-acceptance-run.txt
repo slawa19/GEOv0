@@ -1,0 +1,276 @@
+10:59:37 built geov0_bench_p023a3_t100e300u_planted in 1.8 s
+10:59:39 target t100e300u planted    global       PASS cold=164.111 p50=17.8 p95=19.5 max=164.1 stmts=[2] edges=300 cycles=119 longest=27 memory=MEASURED peak=316702 
+10:59:41 target t100e300u planted    perim_hubs   PASS cold=152.365 p50=8.8 p95=9.3 max=152.4 stmts=[3] edges=156 cycles=34 longest=16 memory=MEASURED peak=181887 
+10:59:42 target t100e300u planted    perim_nohubs PASS cold=146.671 p50=6.2 p95=6.9 max=146.7 stmts=[3] edges=132 cycles=18 longest=15 memory=MEASURED peak=175659 
+10:59:43 target t100e300u planted    empty        PASS cold=135.355 p50=0.7 p95=1.0 max=135.4 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+10:59:45 built geov0_bench_p023a3_t100e300u_plateau in 1.6 s
+10:59:47 target t100e300u plateau    global       PASS cold=157.955 p50=16.4 p95=18.3 max=158.0 stmts=[2] edges=300 cycles=111 longest=29 memory=MEASURED peak=312874 
+10:59:49 target t100e300u plateau    perim_hubs   PASS cold=198.482 p50=7.1 p95=8.7 max=198.5 stmts=[3] edges=156 cycles=39 longest=18 memory=MEASURED peak=182561 
+10:59:51 target t100e300u plateau    perim_nohubs PASS cold=161.383 p50=5.0 p95=5.6 max=161.4 stmts=[3] edges=132 cycles=12 longest=18 memory=MEASURED peak=175343 
+10:59:52 target t100e300u plateau    empty        PASS cold=128.434 p50=0.7 p95=0.8 max=128.4 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+10:59:54 built geov0_bench_p023a3_t100e300u_narrow in 1.6 s
+10:59:56 target t100e300u narrow     global       PASS cold=148.317 p50=13.9 p95=14.6 max=148.3 stmts=[2] edges=300 cycles=110 longest=23 memory=MEASURED peak=313472 
+10:59:57 target t100e300u narrow     perim_hubs   PASS cold=200.068 p50=7.1 p95=8.2 max=200.1 stmts=[3] edges=156 cycles=37 longest=19 memory=MEASURED peak=182007 
+10:59:59 target t100e300u narrow     perim_nohubs PASS cold=147.121 p50=6.0 p95=6.9 max=147.1 stmts=[3] edges=132 cycles=9 longest=18 memory=MEASURED peak=175619 
+11:00:00 target t100e300u narrow     empty        PASS cold=131.282 p50=0.6 p95=0.9 max=131.3 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:02 built geov0_bench_p023a3_t100e300u_allequal in 1.5 s
+11:00:03 target t100e300u allequal   global       PASS cold=142.026 p50=5.9 p95=7.0 max=142.0 stmts=[2] edges=300 cycles=15 longest=24 memory=MEASURED peak=285876 
+11:00:05 target t100e300u allequal   perim_hubs   PASS cold=204.741 p50=3.8 p95=4.6 max=204.7 stmts=[3] edges=156 cycles=8 longest=18 memory=MEASURED peak=183450 
+11:00:06 target t100e300u allequal   perim_nohubs PASS cold=162.128 p50=3.7 p95=5.1 max=162.1 stmts=[3] edges=132 cycles=4 longest=18 memory=MEASURED peak=175255 
+11:00:08 target t100e300u allequal   empty        PASS cold=145.346 p50=0.7 p95=1.0 max=145.3 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:10 built geov0_bench_p023a3_t100e300u_largeatoms in 1.6 s
+11:00:14 target t100e300u largeatoms global       PASS cold=191.019 p50=57.2 p95=64.6 max=191.0 stmts=[2] edges=300 cycles=120 longest=21 memory=MEASURED peak=321120 
+11:00:17 target t100e300u largeatoms perim_hubs   PASS cold=176.623 p50=26.3 p95=32.8 max=176.6 stmts=[3] edges=156 cycles=44 longest=15 memory=MEASURED peak=178475 
+11:00:18 target t100e300u largeatoms perim_nohubs PASS cold=167.611 p50=13.9 p95=15.1 max=167.6 stmts=[3] edges=132 cycles=19 longest=18 memory=MEASURED peak=177399 
+11:00:20 target t100e300u largeatoms empty        PASS cold=129.814 p50=0.6 p95=0.8 max=129.8 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:22 built geov0_bench_p023a3_t100e300u_mixed in 1.6 s
+11:00:25 target t100e300u mixed      global       PASS cold=172.259 p50=32.9 p95=34.7 max=172.3 stmts=[2] edges=300 cycles=76 longest=30 memory=MEASURED peak=305946 
+11:00:27 target t100e300u mixed      perim_hubs   PASS cold=173.211 p50=11.8 p95=13.2 max=173.2 stmts=[3] edges=156 cycles=32 longest=15 memory=MEASURED peak=180773 
+11:00:28 target t100e300u mixed      perim_nohubs PASS cold=168.611 p50=9.5 p95=10.6 max=168.6 stmts=[3] edges=132 cycles=12 longest=17 memory=MEASURED peak=176131 
+11:00:30 target t100e300u mixed      empty        PASS cold=141.648 p50=0.7 p95=0.8 max=141.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:32 built geov0_bench_p023a3_t100e300s_planted in 1.7 s
+11:00:34 target t100e300s planted    global       PASS cold=153.449 p50=16.8 p95=18.9 max=153.4 stmts=[2] edges=300 cycles=131 longest=33 memory=MEASURED peak=318473 
+11:00:36 target t100e300s planted    perim_hubs   PASS cold=166.663 p50=12.1 p95=13.2 max=166.7 stmts=[3] edges=205 cycles=67 longest=18 memory=MEASURED peak=213311 
+11:00:37 target t100e300s planted    perim_nohubs PASS cold=157.881 p50=3.9 p95=5.0 max=157.9 stmts=[3] edges=84 cycles=3 longest=8 memory=MEASURED peak=167399 
+11:00:39 target t100e300s planted    empty        PASS cold=143.219 p50=0.7 p95=0.9 max=143.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:40 built geov0_bench_p023a3_t100e300s_plateau in 1.6 s
+11:00:42 target t100e300s plateau    global       PASS cold=146.89 p50=16.5 p95=17.3 max=146.9 stmts=[2] edges=300 cycles=113 longest=22 memory=MEASURED peak=310219 
+11:00:44 target t100e300s plateau    perim_hubs   PASS cold=206.448 p50=10.4 p95=11.9 max=206.4 stmts=[3] edges=205 cycles=63 longest=16 memory=MEASURED peak=210843 
+11:00:46 target t100e300s plateau    perim_nohubs PASS cold=152.434 p50=3.9 p95=4.2 max=152.4 stmts=[3] edges=84 cycles=2 longest=8 memory=MEASURED peak=167479 
+11:00:47 target t100e300s plateau    empty        PASS cold=145.356 p50=0.7 p95=0.8 max=145.4 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:49 built geov0_bench_p023a3_t100e300s_narrow in 1.5 s
+11:00:51 target t100e300s narrow     global       PASS cold=151.473 p50=13.2 p95=14.3 max=151.5 stmts=[2] edges=300 cycles=117 longest=20 memory=MEASURED peak=310465 
+11:00:52 target t100e300s narrow     perim_hubs   PASS cold=198.867 p50=9.4 p95=9.9 max=198.9 stmts=[3] edges=205 cycles=65 longest=16 memory=MEASURED peak=211129 
+11:00:54 target t100e300s narrow     perim_nohubs PASS cold=142.287 p50=3.5 p95=4.6 max=142.3 stmts=[3] edges=84 cycles=3 longest=8 memory=MEASURED peak=167479 
+11:00:55 target t100e300s narrow     empty        PASS cold=144.633 p50=0.6 p95=0.9 max=144.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:00:57 built geov0_bench_p023a3_t100e300s_allequal in 1.7 s
+11:00:59 target t100e300s allequal   global       PASS cold=155.785 p50=6.1 p95=7.0 max=155.8 stmts=[2] edges=300 cycles=23 longest=21 memory=MEASURED peak=284605 
+11:01:00 target t100e300s allequal   perim_hubs   PASS cold=151.6 p50=4.6 p95=5.2 max=151.6 stmts=[3] edges=205 cycles=17 longest=12 memory=MEASURED peak=198727 
+11:01:02 target t100e300s allequal   perim_nohubs PASS cold=147.805 p50=2.8 p95=3.1 max=147.8 stmts=[3] edges=84 cycles=2 longest=8 memory=MEASURED peak=167479 
+11:01:03 target t100e300s allequal   empty        PASS cold=133.121 p50=0.7 p95=0.8 max=133.1 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:01:05 built geov0_bench_p023a3_t100e300s_largeatoms in 1.7 s
+11:01:09 target t100e300s largeatoms global       PASS cold=221.431 p50=75.1 p95=78.8 max=221.4 stmts=[2] edges=300 cycles=136 longest=23 memory=MEASURED peak=319281 
+11:01:12 target t100e300s largeatoms perim_hubs   PASS cold=187.925 p50=31.7 p95=33.4 max=187.9 stmts=[3] edges=205 cycles=74 longest=17 memory=MEASURED peak=217013 
+11:01:13 target t100e300s largeatoms perim_nohubs PASS cold=155.822 p50=7.7 p95=8.6 max=155.8 stmts=[3] edges=84 cycles=3 longest=8 memory=MEASURED peak=167479 
+11:01:15 target t100e300s largeatoms empty        PASS cold=142.744 p50=0.7 p95=0.8 max=142.7 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:01:17 built geov0_bench_p023a3_t100e300s_mixed in 1.8 s
+11:01:20 target t100e300s mixed      global       PASS cold=192.808 p50=36.7 p95=40.6 max=192.8 stmts=[2] edges=300 cycles=93 longest=25 memory=MEASURED peak=306649 
+11:01:22 target t100e300s mixed      perim_hubs   PASS cold=167.439 p50=22.1 p95=23.1 max=167.4 stmts=[3] edges=205 cycles=41 longest=18 memory=MEASURED peak=206737 
+11:01:24 target t100e300s mixed      perim_nohubs PASS cold=153.494 p50=5.6 p95=6.8 max=153.5 stmts=[3] edges=84 cycles=2 longest=8 memory=MEASURED peak=167479 
+11:01:25 target t100e300s mixed      empty        PASS cold=134.531 p50=0.7 p95=0.8 max=134.5 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:01:27 built geov0_bench_p023a3_t100e500u_planted in 1.7 s
+11:01:30 target t100e500u planted    global       PASS cold=182.198 p50=32.4 p95=34.9 max=182.2 stmts=[2] edges=500 cycles=246 longest=33 memory=MEASURED peak=540602 
+11:01:32 target t100e500u planted    perim_hubs   PASS cold=214.047 p50=16.0 p95=16.9 max=214.0 stmts=[3] edges=283 cycles=102 longest=25 memory=MEASURED peak=284816 
+11:01:34 target t100e500u planted    perim_nohubs PASS cold=152.661 p50=13.9 p95=15.1 max=152.7 stmts=[3] edges=236 cycles=68 longest=27 memory=MEASURED peak=238537 
+11:01:36 target t100e500u planted    empty        PASS cold=139.569 p50=0.6 p95=0.8 max=139.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:01:38 built geov0_bench_p023a3_t100e500u_plateau in 1.8 s
+11:01:40 target t100e500u plateau    global       PASS cold=169.452 p50=31.1 p95=33.3 max=169.5 stmts=[2] edges=500 cycles=224 longest=33 memory=MEASURED peak=528824 
+11:01:42 target t100e500u plateau    perim_hubs   PASS cold=200.163 p50=13.1 p95=13.7 max=200.2 stmts=[3] edges=283 cycles=106 longest=22 memory=MEASURED peak=292324 
+11:01:44 target t100e500u plateau    perim_nohubs PASS cold=156.487 p50=11.2 p95=12.5 max=156.5 stmts=[3] edges=236 cycles=89 longest=22 memory=MEASURED peak=242241 
+11:01:45 target t100e500u plateau    empty        PASS cold=140.195 p50=0.6 p95=0.9 max=140.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:01:47 built geov0_bench_p023a3_t100e500u_narrow in 1.7 s
+11:01:50 target t100e500u narrow     global       PASS cold=176.945 p50=32.0 p95=37.1 max=176.9 stmts=[2] edges=500 cycles=236 longest=27 memory=MEASURED peak=531108 
+11:01:52 target t100e500u narrow     perim_hubs   PASS cold=156.828 p50=13.7 p95=14.4 max=156.8 stmts=[3] edges=283 cycles=102 longest=26 memory=MEASURED peak=284506 
+11:01:53 target t100e500u narrow     perim_nohubs PASS cold=156.393 p50=11.1 p95=11.6 max=156.4 stmts=[3] edges=236 cycles=83 longest=23 memory=MEASURED peak=241033 
+11:01:55 target t100e500u narrow     empty        PASS cold=146.217 p50=0.6 p95=0.8 max=146.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:01:57 built geov0_bench_p023a3_t100e500u_allequal in 1.7 s
+11:01:58 target t100e500u allequal   global       PASS cold=157.163 p50=10.7 p95=11.8 max=157.2 stmts=[2] edges=500 cycles=36 longest=23 memory=MEASURED peak=476482 
+11:02:00 target t100e500u allequal   perim_hubs   PASS cold=167.608 p50=6.5 p95=7.1 max=167.6 stmts=[3] edges=283 cycles=14 longest=17 memory=MEASURED peak=262999 
+11:02:01 target t100e500u allequal   perim_nohubs PASS cold=155.189 p50=5.3 p95=6.2 max=155.2 stmts=[3] edges=236 cycles=17 longest=11 memory=MEASURED peak=222467 
+11:02:03 target t100e500u allequal   empty        PASS cold=136.187 p50=0.5 p95=0.9 max=136.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:02:05 built geov0_bench_p023a3_t100e500u_largeatoms in 1.7 s
+11:02:11 target t100e500u largeatoms global       PASS cold=244.923 p50=106.3 p95=112.5 max=244.9 stmts=[2] edges=500 cycles=264 longest=32 memory=MEASURED peak=553126 
+11:02:15 target t100e500u largeatoms perim_hubs   PASS cold=194.65 p50=49.6 p95=53.3 max=194.7 stmts=[3] edges=283 cycles=121 longest=30 memory=MEASURED peak=303548 
+11:02:18 target t100e500u largeatoms perim_nohubs PASS cold=176.902 p50=35.1 p95=36.2 max=176.9 stmts=[3] edges=236 cycles=90 longest=23 memory=MEASURED peak=248075 
+11:02:20 target t100e500u largeatoms empty        PASS cold=147.996 p50=0.7 p95=0.8 max=148.0 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:02:22 built geov0_bench_p023a3_t100e500u_mixed in 1.7 s
+11:02:27 target t100e500u mixed      global       PASS cold=204.144 p50=69.2 p95=76.4 max=204.1 stmts=[2] edges=500 cycles=141 longest=26 memory=MEASURED peak=510884 
+11:02:29 target t100e500u mixed      perim_hubs   PASS cold=180.909 p50=29.3 p95=30.5 max=180.9 stmts=[3] edges=283 cycles=80 longest=17 memory=MEASURED peak=278636 
+11:02:32 target t100e500u mixed      perim_nohubs PASS cold=169.871 p50=25.4 p95=26.8 max=169.9 stmts=[3] edges=236 cycles=62 longest=24 memory=MEASURED peak=237497 
+11:02:33 target t100e500u mixed      empty        PASS cold=130.244 p50=0.6 p95=0.9 max=130.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:02:35 built geov0_bench_p023a3_t100e500s_planted in 1.6 s
+11:02:38 target t100e500s planted    global       PASS cold=169.629 p50=29.9 p95=32.7 max=169.6 stmts=[2] edges=500 cycles=305 longest=31 memory=MEASURED peak=551752 
+11:02:40 target t100e500s planted    perim_hubs   PASS cold=217.865 p50=18.3 p95=20.5 max=217.9 stmts=[3] edges=326 cycles=155 longest=18 memory=MEASURED peak=335208 
+11:02:42 target t100e500s planted    perim_nohubs PASS cold=148.142 p50=9.9 p95=10.5 max=148.1 stmts=[3] edges=180 cycles=46 longest=25 memory=MEASURED peak=190806 
+11:02:43 target t100e500s planted    empty        PASS cold=127.434 p50=0.6 p95=0.7 max=127.4 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:02:45 built geov0_bench_p023a3_t100e500s_plateau in 1.8 s
+11:02:48 target t100e500s plateau    global       PASS cold=181.507 p50=31.3 p95=36.1 max=181.5 stmts=[2] edges=500 cycles=271 longest=31 memory=MEASURED peak=537360 
+11:02:50 target t100e500s plateau    perim_hubs   PASS cold=169.525 p50=16.2 p95=18.9 max=169.5 stmts=[3] edges=326 cycles=165 longest=24 memory=MEASURED peak=334574 
+11:02:52 target t100e500s plateau    perim_nohubs PASS cold=160.857 p50=10.1 p95=11.3 max=160.9 stmts=[3] edges=180 cycles=59 longest=20 memory=MEASURED peak=192936 
+11:02:53 target t100e500s plateau    empty        PASS cold=136.862 p50=0.5 p95=0.7 max=136.9 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:02:55 built geov0_bench_p023a3_t100e500s_narrow in 1.7 s
+11:02:57 target t100e500s narrow     global       PASS cold=173.233 p50=27.9 p95=29.3 max=173.2 stmts=[2] edges=500 cycles=282 longest=22 memory=MEASURED peak=539472 
+11:02:59 target t100e500s narrow     perim_hubs   PASS cold=173.842 p50=16.1 p95=17.7 max=173.8 stmts=[3] edges=326 cycles=156 longest=23 memory=MEASURED peak=333296 
+11:03:01 target t100e500s narrow     perim_nohubs PASS cold=153.289 p50=9.0 p95=9.9 max=153.3 stmts=[3] edges=180 cycles=58 longest=19 memory=MEASURED peak=191468 
+11:03:03 target t100e500s narrow     empty        PASS cold=136.965 p50=0.7 p95=0.8 max=137.0 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:03:04 built geov0_bench_p023a3_t100e500s_allequal in 1.8 s
+11:03:06 target t100e500s allequal   global       PASS cold=158.024 p50=9.5 p95=12.0 max=158.0 stmts=[2] edges=500 cycles=44 longest=19 memory=MEASURED peak=475512 
+11:03:08 target t100e500s allequal   perim_hubs   PASS cold=154.271 p50=6.4 p95=7.1 max=154.3 stmts=[3] edges=326 cycles=31 longest=16 memory=MEASURED peak=322744 
+11:03:09 target t100e500s allequal   perim_nohubs PASS cold=152.126 p50=4.0 p95=4.9 max=152.1 stmts=[3] edges=180 cycles=9 longest=17 memory=MEASURED peak=183614 
+11:03:11 target t100e500s allequal   empty        PASS cold=146.999 p50=0.6 p95=0.8 max=147.0 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:03:12 built geov0_bench_p023a3_t100e500s_largeatoms in 1.7 s
+11:03:18 target t100e500s largeatoms global       PASS cold=226.881 p50=92.0 p95=100.9 max=226.9 stmts=[2] edges=500 cycles=310 longest=22 memory=MEASURED peak=557968 
+11:03:22 target t100e500s largeatoms perim_hubs   PASS cold=254.227 p50=62.9 p95=65.1 max=254.2 stmts=[3] edges=326 cycles=186 longest=23 memory=MEASURED peak=345804 
+11:03:24 target t100e500s largeatoms perim_nohubs PASS cold=175.561 p50=30.9 p95=32.9 max=175.6 stmts=[3] edges=180 cycles=71 longest=28 memory=MEASURED peak=198850 
+11:03:26 target t100e500s largeatoms empty        PASS cold=135.527 p50=0.6 p95=0.9 max=135.5 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:03:27 built geov0_bench_p023a3_t100e500s_mixed in 1.6 s
+11:03:32 target t100e500s mixed      global       PASS cold=210.902 p50=70.4 p95=84.0 max=210.9 stmts=[2] edges=500 cycles=189 longest=23 memory=MEASURED peak=518832 
+11:03:35 target t100e500s mixed      perim_hubs   PASS cold=214.781 p50=33.9 p95=34.9 max=214.8 stmts=[3] edges=326 cycles=120 longest=23 memory=MEASURED peak=327868 
+11:03:37 target t100e500s mixed      perim_nohubs PASS cold=167.181 p50=17.8 p95=20.5 max=167.2 stmts=[3] edges=180 cycles=42 longest=21 memory=MEASURED peak=189574 
+11:03:39 target t100e500s mixed      empty        PASS cold=143.411 p50=0.6 p95=0.7 max=143.4 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:03:41 built geov0_bench_p023a3_t200e500u_planted in 1.8 s
+11:03:45 target t200e500u planted    global       PASS cold=192.21 p50=48.1 p95=57.8 max=192.2 stmts=[2] edges=500 cycles=166 longest=62 memory=MEASURED peak=557159 
+11:03:48 target t200e500u planted    perim_hubs   PASS cold=181.305 p50=34.7 p95=38.2 max=181.3 stmts=[3] edges=327 cycles=47 longest=38 memory=MEASURED peak=340923 
+11:03:50 target t200e500u planted    perim_nohubs PASS cold=165.26 p50=15.2 p95=16.2 max=165.3 stmts=[3] edges=230 cycles=23 longest=30 memory=MEASURED peak=242050 
+11:03:51 target t200e500u planted    empty        PASS cold=136.478 p50=0.6 p95=0.9 max=136.5 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:03:53 built geov0_bench_p023a3_t200e500u_plateau in 1.8 s
+11:03:57 target t200e500u plateau    global       PASS cold=194.042 p50=48.8 p95=52.7 max=194.0 stmts=[2] edges=500 cycles=140 longest=49 memory=MEASURED peak=545731 
+11:03:59 target t200e500u plateau    perim_hubs   PASS cold=169.131 p50=24.8 p95=31.6 max=169.1 stmts=[3] edges=327 cycles=71 longest=36 memory=MEASURED peak=339125 
+11:04:01 target t200e500u plateau    perim_nohubs PASS cold=161.052 p50=15.5 p95=17.0 max=161.1 stmts=[3] edges=230 cycles=25 longest=27 memory=MEASURED peak=240976 
+11:04:03 target t200e500u plateau    empty        PASS cold=130.158 p50=0.6 p95=0.8 max=130.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:04:04 built geov0_bench_p023a3_t200e500u_narrow in 1.7 s
+11:04:08 target t200e500u narrow     global       PASS cold=201.446 p50=40.6 p95=46.2 max=201.4 stmts=[2] edges=500 cycles=142 longest=42 memory=MEASURED peak=545627 
+11:04:10 target t200e500u narrow     perim_hubs   PASS cold=171.317 p50=21.3 p95=23.1 max=171.3 stmts=[3] edges=327 cycles=61 longest=34 memory=MEASURED peak=338485 
+11:04:12 target t200e500u narrow     perim_nohubs PASS cold=170.249 p50=13.7 p95=15.2 max=170.2 stmts=[3] edges=230 cycles=20 longest=26 memory=MEASURED peak=239626 
+11:04:13 target t200e500u narrow     empty        PASS cold=130.881 p50=0.5 p95=0.7 max=130.9 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:04:15 built geov0_bench_p023a3_t200e500u_allequal in 1.6 s
+11:04:17 target t200e500u allequal   global       PASS cold=152.729 p50=13.3 p95=14.6 max=152.7 stmts=[2] edges=500 cycles=24 longest=31 memory=MEASURED peak=503973 
+11:04:18 target t200e500u allequal   perim_hubs   PASS cold=211.484 p50=10.2 p95=11.4 max=211.5 stmts=[3] edges=327 cycles=12 longest=21 memory=MEASURED peak=333537 
+11:04:20 target t200e500u allequal   perim_nohubs PASS cold=155.843 p50=7.2 p95=8.3 max=155.8 stmts=[3] edges=230 cycles=8 longest=26 memory=MEASURED peak=234414 
+11:04:21 target t200e500u allequal   empty        PASS cold=135.074 p50=0.6 p95=0.8 max=135.1 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:04:23 built geov0_bench_p023a3_t200e500u_largeatoms in 1.6 s
+11:04:33 target t200e500u largeatoms global       PASS cold=302.005 p50=180.6 p95=188.7 max=302.0 stmts=[2] edges=500 cycles=180 longest=45 memory=MEASURED peak=566213 
+11:04:42 target t200e500u largeatoms perim_hubs   PASS cold=261.699 p50=124.1 p95=149.0 max=261.7 stmts=[3] edges=327 cycles=82 longest=36 memory=MEASURED peak=347233 
+11:04:46 target t200e500u largeatoms perim_nohubs PASS cold=189.503 p50=55.0 p95=58.9 max=189.5 stmts=[3] edges=230 cycles=25 longest=26 memory=MEASURED peak=247066 
+11:04:47 target t200e500u largeatoms empty        PASS cold=146.193 p50=0.6 p95=0.8 max=146.2 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:04:49 built geov0_bench_p023a3_t200e500u_mixed in 1.7 s
+11:04:55 target t200e500u mixed      global       PASS cold=225.038 p50=87.7 p95=93.7 max=225.0 stmts=[2] edges=500 cycles=103 longest=37 memory=MEASURED peak=532955 
+11:04:59 target t200e500u mixed      perim_hubs   PASS cold=189.272 p50=53.8 p95=57.3 max=189.3 stmts=[3] edges=327 cycles=46 longest=39 memory=MEASURED peak=341749 
+11:05:01 target t200e500u mixed      perim_nohubs PASS cold=171.848 p50=23.8 p95=24.9 max=171.8 stmts=[3] edges=230 cycles=17 longest=27 memory=MEASURED peak=240948 
+11:05:03 target t200e500u mixed      empty        PASS cold=127.665 p50=0.5 p95=0.9 max=127.7 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:05:04 built geov0_bench_p023a3_t200e500s_planted in 1.8 s
+11:05:08 target t200e500s planted    global       PASS cold=186.408 p50=44.7 p95=48.2 max=186.4 stmts=[2] edges=500 cycles=186 longest=50 memory=MEASURED peak=556685 
+11:05:11 target t200e500s planted    perim_hubs   PASS cold=194.997 p50=32.6 p95=33.7 max=195.0 stmts=[3] edges=343 cycles=95 longest=27 memory=MEASURED peak=372104 
+11:05:13 target t200e500s planted    perim_nohubs PASS cold=149.614 p50=8.5 p95=9.3 max=149.6 stmts=[3] edges=147 cycles=11 longest=8 memory=MEASURED peak=188479 
+11:05:14 target t200e500s planted    empty        PASS cold=129.574 p50=0.6 p95=0.7 max=129.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:05:16 built geov0_bench_p023a3_t200e500s_plateau in 1.7 s
+11:05:19 target t200e500s plateau    global       PASS cold=195.999 p50=46.3 p95=53.5 max=196.0 stmts=[2] edges=500 cycles=175 longest=35 memory=MEASURED peak=540793 
+11:05:22 target t200e500s plateau    perim_hubs   PASS cold=173.587 p50=26.2 p95=29.1 max=173.6 stmts=[3] edges=343 cycles=109 longest=27 memory=MEASURED peak=374100 
+11:05:23 target t200e500s plateau    perim_nohubs PASS cold=155.041 p50=9.1 p95=10.4 max=155.0 stmts=[3] edges=147 cycles=10 longest=8 memory=MEASURED peak=188886 
+11:05:25 target t200e500s plateau    empty        PASS cold=129.597 p50=0.6 p95=0.8 max=129.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:05:26 built geov0_bench_p023a3_t200e500s_narrow in 1.7 s
+11:05:29 target t200e500s narrow     global       PASS cold=179.757 p50=34.5 p95=39.2 max=179.8 stmts=[2] edges=500 cycles=165 longest=36 memory=MEASURED peak=547247 
+11:05:32 target t200e500s narrow     perim_hubs   PASS cold=221.426 p50=23.6 p95=24.8 max=221.4 stmts=[3] edges=343 cycles=89 longest=20 memory=MEASURED peak=368080 
+11:05:33 target t200e500s narrow     perim_nohubs PASS cold=150.988 p50=7.4 p95=8.2 max=151.0 stmts=[3] edges=147 cycles=11 longest=8 memory=MEASURED peak=188310 
+11:05:35 target t200e500s narrow     empty        PASS cold=134.576 p50=0.6 p95=0.8 max=134.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:05:36 built geov0_bench_p023a3_t200e500s_allequal in 1.6 s
+11:05:38 target t200e500s allequal   global       PASS cold=154.97 p50=12.1 p95=14.2 max=155.0 stmts=[2] edges=500 cycles=27 longest=22 memory=MEASURED peak=503467 
+11:05:40 target t200e500s allequal   perim_hubs   PASS cold=195.561 p50=10.1 p95=11.2 max=195.6 stmts=[3] edges=343 cycles=21 longest=20 memory=MEASURED peak=354404 
+11:05:41 target t200e500s allequal   perim_nohubs PASS cold=160.401 p50=5.1 p95=6.2 max=160.4 stmts=[3] edges=147 cycles=7 longest=8 memory=MEASURED peak=188310 
+11:05:43 target t200e500s allequal   empty        PASS cold=131.99 p50=0.5 p95=0.7 max=132.0 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:05:44 built geov0_bench_p023a3_t200e500s_largeatoms in 1.6 s
+11:05:54 target t200e500s largeatoms global       PASS cold=297.51 p50=171.9 p95=198.6 max=297.5 stmts=[2] edges=500 cycles=181 longest=32 memory=MEASURED peak=558745 
+11:06:01 target t200e500s largeatoms perim_hubs   PASS cold=250.3 p50=113.3 p95=119.1 max=250.3 stmts=[3] edges=343 cycles=119 longest=20 memory=MEASURED peak=382612 
+11:06:04 target t200e500s largeatoms perim_nohubs PASS cold=178.914 p50=28.9 p95=30.7 max=178.9 stmts=[3] edges=147 cycles=11 longest=8 memory=MEASURED peak=185552 
+11:06:05 target t200e500s largeatoms empty        PASS cold=128.453 p50=0.6 p95=0.9 max=128.5 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:06:07 built geov0_bench_p023a3_t200e500s_mixed in 1.7 s
+11:06:14 target t200e500s mixed      global       PASS cold=248.952 p50=98.4 p95=100.1 max=249.0 stmts=[2] edges=500 cycles=118 longest=25 memory=MEASURED peak=532271 
+11:06:17 target t200e500s mixed      perim_hubs   PASS cold=180.692 p50=45.1 p95=47.4 max=180.7 stmts=[3] edges=343 cycles=72 longest=21 memory=MEASURED peak=364678 
+11:06:19 target t200e500s mixed      perim_nohubs PASS cold=166.089 p50=14.8 p95=16.4 max=166.1 stmts=[3] edges=147 cycles=8 longest=8 memory=MEASURED peak=187506 
+11:06:21 target t200e500s mixed      empty        PASS cold=138.87 p50=0.6 p95=0.9 max=138.9 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:06:23 built geov0_bench_p023a3_t200e1000u_planted in 1.9 s
+11:06:29 target t200e1000u planted    global       PASS cold=247.037 p50=105.7 p95=123.2 max=247.0 stmts=[2] edges=1000 cycles=544 longest=55 memory=MEASURED peak=1131070 
+11:06:33 target t200e1000u planted    perim_hubs   PASS cold=207.14 p50=63.8 p95=67.8 max=207.1 stmts=[3] edges=602 cycles=211 longest=40 memory=MEASURED peak=631667 
+11:06:37 target t200e1000u planted    perim_nohubs PASS cold=184.018 p50=41.2 p95=45.1 max=184.0 stmts=[3] edges=477 cycles=172 longest=39 memory=MEASURED peak=511598 
+11:06:38 target t200e1000u planted    empty        PASS cold=146.348 p50=0.6 p95=0.8 max=146.3 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:06:40 built geov0_bench_p023a3_t200e1000u_plateau in 2.0 s
+11:06:46 target t200e1000u plateau    global       PASS cold=258.966 p50=106.3 p95=120.0 max=259.0 stmts=[2] edges=1000 cycles=517 longest=54 memory=MEASURED peak=1113852 
+11:06:50 target t200e1000u plateau    perim_hubs   PASS cold=194.675 p50=56.9 p95=61.1 max=194.7 stmts=[3] edges=602 cycles=239 longest=43 memory=MEASURED peak=639789 
+11:06:53 target t200e1000u plateau    perim_nohubs PASS cold=197.432 p50=41.6 p95=45.6 max=197.4 stmts=[3] edges=477 cycles=203 longest=39 memory=MEASURED peak=518944 
+11:06:54 target t200e1000u plateau    empty        PASS cold=135.018 p50=0.6 p95=0.8 max=135.0 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:06:56 built geov0_bench_p023a3_t200e1000u_narrow in 1.8 s
+11:07:02 target t200e1000u narrow     global       PASS cold=243.612 p50=106.1 p95=120.5 max=243.6 stmts=[2] edges=1000 cycles=474 longest=46 memory=MEASURED peak=1096868 
+11:07:05 target t200e1000u narrow     perim_hubs   PASS cold=198.657 p50=47.9 p95=54.9 max=198.7 stmts=[3] edges=602 cycles=203 longest=37 memory=MEASURED peak=629033 
+11:07:08 target t200e1000u narrow     perim_nohubs PASS cold=173.696 p50=33.8 p95=36.1 max=173.7 stmts=[3] edges=477 cycles=180 longest=39 memory=MEASURED peak=516758 
+11:07:09 target t200e1000u narrow     empty        PASS cold=139.92 p50=0.7 p95=0.8 max=139.9 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:07:11 built geov0_bench_p023a3_t200e1000u_allequal in 1.9 s
+11:07:14 target t200e1000u allequal   global       PASS cold=172.599 p50=29.3 p95=32.1 max=172.6 stmts=[2] edges=1000 cycles=48 longest=39 memory=MEASURED peak=964554 
+11:07:16 target t200e1000u allequal   perim_hubs   PASS cold=200.662 p50=19.0 p95=20.7 max=200.7 stmts=[3] edges=602 cycles=25 longest=30 memory=MEASURED peak=574483 
+11:07:17 target t200e1000u allequal   perim_nohubs PASS cold=159.127 p50=14.5 p95=15.6 max=159.1 stmts=[3] edges=477 cycles=24 longest=42 memory=MEASURED peak=464404 
+11:07:19 target t200e1000u allequal   empty        PASS cold=147.003 p50=0.6 p95=0.8 max=147.0 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:07:21 built geov0_bench_p023a3_t200e1000u_largeatoms in 1.9 s
+11:07:42 target t200e1000u largeatoms global       PASS cold=552.794 p50=409.7 p95=428.0 max=552.8 stmts=[2] edges=1000 cycles=565 longest=40 memory=MEASURED peak=1139690 
+11:07:52 target t200e1000u largeatoms perim_hubs   PASS cold=334.911 p50=173.6 p95=187.2 max=334.9 stmts=[3] edges=602 cycles=246 longest=38 memory=MEASURED peak=650527 
+11:08:00 target t200e1000u largeatoms perim_nohubs PASS cold=279.301 p50=126.5 p95=130.6 max=279.3 stmts=[3] edges=477 cycles=220 longest=37 memory=MEASURED peak=535220 
+11:08:02 target t200e1000u largeatoms empty        PASS cold=138.755 p50=0.7 p95=0.8 max=138.8 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:08:04 built geov0_bench_p023a3_t200e1000u_mixed in 1.9 s
+11:08:18 target t200e1000u mixed      global       PASS cold=395.582 p50=260.4 p95=272.0 max=395.6 stmts=[2] edges=1000 cycles=312 longest=46 memory=MEASURED peak=1058446 
+11:08:25 target t200e1000u mixed      perim_hubs   PASS cold=261.067 p50=112.3 p95=121.8 max=261.1 stmts=[3] edges=602 cycles=159 longest=34 memory=MEASURED peak=618049 
+11:08:30 target t200e1000u mixed      perim_nohubs PASS cold=220.042 p50=75.8 p95=79.3 max=220.0 stmts=[3] edges=477 cycles=106 longest=37 memory=MEASURED peak=494716 
+11:08:31 target t200e1000u mixed      empty        PASS cold=139.739 p50=0.6 p95=0.8 max=139.7 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:08:34 built geov0_bench_p023a3_t200e1000s_planted in 1.9 s
+11:08:41 target t200e1000s planted    global       PASS cold=254.858 p50=112.2 p95=126.8 max=254.9 stmts=[2] edges=1000 cycles=535 longest=55 memory=MEASURED peak=1112539 
+11:08:45 target t200e1000s planted    perim_hubs   PASS cold=214.64 p50=66.5 p95=70.6 max=214.6 stmts=[3] edges=670 cycles=297 longest=34 memory=MEASURED peak=703309 
+11:08:48 target t200e1000s planted    perim_nohubs PASS cold=168.994 p50=22.9 p95=24.3 max=169.0 stmts=[3] edges=305 cycles=51 longest=36 memory=MEASURED peak=311809 
+11:08:49 target t200e1000s planted    empty        PASS cold=126.551 p50=0.6 p95=0.8 max=126.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:08:51 built geov0_bench_p023a3_t200e1000s_plateau in 1.9 s
+11:08:57 target t200e1000s plateau    global       PASS cold=259.985 p50=116.3 p95=134.2 max=260.0 stmts=[2] edges=1000 cycles=523 longest=34 memory=MEASURED peak=1090701 
+11:09:00 target t200e1000s plateau    perim_hubs   PASS cold=198.327 p50=61.3 p95=66.1 max=198.3 stmts=[3] edges=670 cycles=329 longest=26 memory=MEASURED peak=703015 
+11:09:03 target t200e1000s plateau    perim_nohubs PASS cold=157.345 p50=19.5 p95=20.9 max=157.3 stmts=[3] edges=305 cycles=54 longest=28 memory=MEASURED peak=310259 
+11:09:04 target t200e1000s plateau    empty        PASS cold=138.858 p50=0.7 p95=1.6 max=138.9 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:09:06 built geov0_bench_p023a3_t200e1000s_narrow in 1.8 s
+11:09:11 target t200e1000s narrow     global       PASS cold=238.491 p50=101.4 p95=119.3 max=238.5 stmts=[2] edges=1000 cycles=507 longest=33 memory=MEASURED peak=1088473 
+11:09:14 target t200e1000s narrow     perim_hubs   PASS cold=236.534 p50=53.8 p95=57.4 max=236.5 stmts=[3] edges=670 cycles=329 longest=30 memory=MEASURED peak=704007 
+11:09:17 target t200e1000s narrow     perim_nohubs PASS cold=161.185 p50=19.2 p95=21.0 max=161.2 stmts=[3] edges=305 cycles=55 longest=34 memory=MEASURED peak=310883 
+11:09:18 target t200e1000s narrow     empty        PASS cold=134.383 p50=0.6 p95=0.7 max=134.4 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:09:20 built geov0_bench_p023a3_t200e1000s_allequal in 2.0 s
+11:09:22 target t200e1000s allequal   global       PASS cold=181.828 p50=28.2 p95=29.1 max=181.8 stmts=[2] edges=1000 cycles=63 longest=23 memory=MEASURED peak=963493 
+11:09:24 target t200e1000s allequal   perim_hubs   PASS cold=166.092 p50=18.5 p95=22.1 max=166.1 stmts=[3] edges=670 cycles=46 longest=21 memory=MEASURED peak=628499 
+11:09:26 target t200e1000s allequal   perim_nohubs PASS cold=146.709 p50=9.1 p95=9.9 max=146.7 stmts=[3] edges=305 cycles=9 longest=27 memory=MEASURED peak=296051 
+11:09:27 target t200e1000s allequal   empty        PASS cold=133.497 p50=0.6 p95=0.8 max=133.5 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:09:29 built geov0_bench_p023a3_t200e1000s_largeatoms in 1.8 s
+11:09:49 target t200e1000s largeatoms global       PASS cold=531.197 p50=369.8 p95=388.0 max=531.2 stmts=[2] edges=1000 cycles=568 longest=34 memory=MEASURED peak=1120145 
+11:09:57 target t200e1000s largeatoms perim_hubs   PASS cold=342.206 p50=205.7 p95=210.0 max=342.2 stmts=[3] edges=670 cycles=377 longest=38 memory=MEASURED peak=728355 
+11:10:02 target t200e1000s largeatoms perim_nohubs PASS cold=201.091 p50=67.7 p95=69.8 max=201.1 stmts=[3] edges=305 cycles=68 longest=36 memory=MEASURED peak=321831 
+11:10:04 target t200e1000s largeatoms empty        PASS cold=136.921 p50=0.6 p95=0.8 max=136.9 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:10:05 built geov0_bench_p023a3_t200e1000s_mixed in 1.8 s
+11:10:20 target t200e1000s mixed      global       PASS cold=412.917 p50=276.7 p95=287.9 max=412.9 stmts=[2] edges=1000 cycles=358 longest=32 memory=MEASURED peak=1048147 
+11:10:30 target t200e1000s mixed      perim_hubs   PASS cold=316.931 p50=164.7 p95=172.3 max=316.9 stmts=[3] edges=670 cycles=216 longest=29 memory=MEASURED peak=680689 
+11:10:33 target t200e1000s mixed      perim_nohubs PASS cold=173.633 p50=30.6 p95=33.8 max=173.6 stmts=[3] edges=305 cycles=42 longest=29 memory=MEASURED peak=308861 
+11:10:34 target t200e1000s mixed      empty        PASS cold=137.623 p50=0.5 p95=0.8 max=137.6 stmts=[1] edges=0 cycles=0 longest=0 memory=MEASURED peak=21663 
+11:10:37 built geov0_bench_p023a3_h4k_planted in 2.6 s
+11:11:21 stress h4k planted    global       PASS cold=999.82 p50=918.6 p95=956.7 max=999.8 stmts=[2] edges=3793 cycles=2740 longest=77 memory=MEASURED peak=4537419 
+11:11:29 stress h4k planted    perimeter    PASS cold=286.22 p50=140.9 p95=151.7 max=286.2 stmts=[3] edges=1035 cycles=524 longest=60 memory=MEASURED peak=1157960 
+11:11:32 execution h4k {"kind": "execution", "which": "longest", "length": 77, "ms": 321.7, "statements": 417, "cleared": "109.34000000", "planned_amount": "2.11000000"}
+11:11:35 execution h4k {"kind": "execution", "which": "shortest", "length": 3, "ms": 164.8, "statements": 47, "cleared": "297.46000000", "planned_amount": "77.54000000"}
+11:11:38 built geov0_bench_p023a3_h4k_plateau in 2.7 s
+11:12:25 stress h4k plateau    global       PASS cold=1105.013 p50=1025.6 p95=1059.7 max=1105.0 stmts=[2] edges=3793 cycles=2711 longest=83 memory=MEASURED peak=4514199 
+11:12:33 stress h4k plateau    perimeter    PASS cold=295.99 p50=146.0 p95=157.2 max=296.0 stmts=[3] edges=1035 cycles=544 longest=55 memory=MEASURED peak=1163604 
+11:12:36 built geov0_bench_p023a3_h4k_narrow in 2.7 s
+11:13:24 stress h4k narrow     global       PASS cold=1246.448 p50=1165.3 p95=1206.5 max=1246.4 stmts=[2] edges=3793 cycles=2564 longest=87 memory=MEASURED peak=4463373 
+11:13:31 stress h4k narrow     perimeter    PASS cold=265.211 p50=119.5 p95=132.6 max=265.2 stmts=[3] edges=1035 cycles=537 longest=45 memory=MEASURED peak=1160708 
+11:13:34 built geov0_bench_p023a3_h4k_allequal in 2.9 s
+11:13:41 stress h4k allequal   global       PASS cold=332.273 p50=191.2 p95=216.6 max=332.3 stmts=[2] edges=3793 cycles=189 longest=54 memory=MEASURED peak=3625837 
+11:13:44 stress h4k allequal   perimeter    PASS cold=175.783 p50=32.4 p95=39.7 max=175.8 stmts=[3] edges=1035 cycles=57 longest=35 memory=MEASURED peak=1005644 
+11:13:47 built geov0_bench_p023a3_h4k_largeatoms in 2.8 s
+11:16:22 stress h4k largeatoms global       PASS cold=3238.411 p50=3228.9 p95=3374.0 max=3547.2 stmts=[2] edges=3793 cycles=2945 longest=86 memory=MEASURED peak=4660445 
+11:16:52 stress h4k largeatoms perimeter    PASS cold=657.445 p50=578.0 p95=656.7 max=721.6 stmts=[3] edges=1035 cycles=610 longest=48 memory=MEASURED peak=1200304 
+11:16:56 built geov0_bench_p023a3_d8k_planted in 3.8 s
+11:17:36 stress d8k planted    global       PASS cold=1360.872 p50=1277.4 p95=1378.5 max=1409.0 stmts=[2] edges=7453 cycles=6777 longest=55 memory=MEASURED peak=8446007 
+11:17:44 stress d8k planted    perimeter    PASS cold=301.032 p50=169.9 p95=184.0 max=301.0 stmts=[3] edges=1916 cycles=1498 longest=38 memory=MEASURED peak=2131513 
+11:17:47 execution d8k {"kind": "execution", "which": "longest", "length": 55, "ms": 352.2, "statements": 307, "cleared": "79.30000000", "planned_amount": "0.46000000"}
+11:17:50 execution d8k {"kind": "execution", "which": "shortest", "length": 3, "ms": 215.5, "statements": 47, "cleared": "129.88000000", "planned_amount": "129.88000000"}
+11:17:54 built geov0_bench_p023a3_d8k_plateau in 3.7 s
+11:19:08 stress d8k plateau    global       PASS cold=2186.457 p50=2040.0 p95=2143.4 max=2186.5 stmts=[2] edges=7453 cycles=6739 longest=52 memory=MEASURED peak=8422207 
+11:19:18 stress d8k plateau    perimeter    PASS cold=355.303 p50=203.4 p95=218.2 max=355.3 stmts=[3] edges=1916 cycles=1542 longest=41 memory=MEASURED peak=2123875 
+11:19:21 built geov0_bench_p023a3_d8k_narrow in 3.7 s
+11:20:04 stress d8k narrow     global       PASS cold=1441.967 p50=1378.9 p95=1438.2 max=1470.3 stmts=[2] edges=7453 cycles=6628 longest=60 memory=MEASURED peak=8385125 
+11:20:11 stress d8k narrow     perimeter    PASS cold=305.391 p50=179.3 p95=205.0 max=305.4 stmts=[3] edges=1916 cycles=1492 longest=37 memory=MEASURED peak=2140613 
+11:20:15 built geov0_bench_p023a3_d8k_allequal in 3.6 s
+11:20:26 stress d8k allequal   global       PASS cold=445.235 p50=321.5 p95=341.5 max=445.2 stmts=[2] edges=7453 cycles=568 longest=38 memory=MEASURED peak=6586567 
+11:20:28 stress d8k allequal   perimeter    PASS cold=172.25 p50=49.2 p95=63.3 max=172.3 stmts=[3] edges=1916 cycles=177 longest=27 memory=MEASURED peak=1796785 
+11:20:32 built geov0_bench_p023a3_d8k_largeatoms in 3.8 s
+11:22:34 stress d8k largeatoms global       PASS cold=2853.629 p50=2777.0 p95=2895.6 max=2949.4 stmts=[2] edges=7453 cycles=7087 longest=55 memory=MEASURED peak=8638981 
+11:22:53 stress d8k largeatoms perimeter    PASS cold=699.482 p50=578.6 p95=606.9 max=699.5 stmts=[3] edges=1916 cycles=1646 longest=33 memory=MEASURED peak=2176681 
+11:22:53 VERDICT PASS: 212 of 212 cells PASSED (target 192/192, stress 20/20); calls over 5000 ms 0; errors/timeouts 0; memory not measured 0; postgres restarted False
+11:22:53 results: D:\Work\Projects\GEOv0\.local-run\worktrees\p023-v3\.local-run\p023a3-bench\20260926T105934Z\results.json
