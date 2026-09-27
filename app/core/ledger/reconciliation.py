@@ -21,6 +21,14 @@ CRITERION (b), per operation that touched or named the equivalent, from what the
                            `clear_amount` must be that minimum; the cycle must be closed; the journal's
                            per-edge delta sum and each edge's first `amount_before` must equal what the
                            recorded pre-amounts imply.
+    CLEARING  (intent v2)  FULL RECOMPUTATION of a plan occurrence (programme 023, decision 5). The expected
+                           change is derived from the frozen DESCRIPTOR: every declared edge drops by its
+                           amount `c` in atoms, `0 < c <= p_e`, nothing else moves, and an edge is deleted
+                           exactly when it reaches zero. The envelope's `tx_id` must be the occurrence id the
+                           descriptor derives; the descriptor, the intent and `transactions.payload` must name
+                           one amount (and the payload the same descriptor); the cycle is one simple directed
+                           cycle of unique debts in one equivalent. It proves only that the occurrence did
+                           what it declared - never that the plan was optimal.
     PAYMENT   (intent v2)  FULL RECOMPUTATION. The flows are replayed in their recorded order over the
                            recorded pre-state of BOTH directions of every flow pair, with the payment rule
                            re-implemented here in integer atoms (never imported from the engine); the
@@ -100,6 +108,7 @@ from app.db.journal_tables import (
 )
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
+from app.db.models.transaction import Transaction
 from app.db.reconciliation_tables import (
     debt_reconciliation_baseline_offsets,
     debt_reconciliation_baselines,
@@ -156,6 +165,7 @@ _LIMITED_LEVELS = frozenset({STRUCTURAL_ONLY, SUBSET})
 #: `(kind, intent_encoding_version)` -> the rule that reads that envelope. Anything else is a finding.
 _READABLE_ENVELOPES = {
     ("CLEARING", 1): FULL_RECOMPUTATION,
+    ("CLEARING", 2): FULL_RECOMPUTATION,
     ("PAYMENT", 2): FULL_RECOMPUTATION,
     ("PAYMENT", 1): STRUCTURAL_ONLY,
     ("INJECT", 1): SUBSET,
@@ -316,6 +326,7 @@ _FAULT_IDENTITY_FIELDS = {
     ),
     "b_payment_v1_structure": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
     "b_inject_subset": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
+    "b_clearing_v2_effect": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
 }
 
 
@@ -434,6 +445,7 @@ async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
     """
 
     ops = debt_operations.c
+    transactions = Transaction.__table__
     named = select(debt_operation_equivalents.c.operation_id).where(
         debt_operation_equivalents.c.equivalent_id == equivalent_id
     )
@@ -450,7 +462,12 @@ async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
                     ops.intent,
                     ops.intent_digest,
                     ops.intent_encoding_version,
-                ).where(or_(ops.id.in_(named), ops.id.in_(touched)))
+                    # What the transaction row says the operation was (CLEARING intent v2 checks it
+                    # against the envelope). NULL for the kinds that own no transaction.
+                    transactions.c.payload.label("tx_payload"),
+                )
+                .select_from(debt_operations.outerjoin(transactions, transactions.c.tx_id == ops.tx_id))
+                .where(or_(ops.id.in_(named), ops.id.in_(touched)))
             )
         ).all()
     )
@@ -604,6 +621,135 @@ def _clearing(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent
     return findings + _compare_recomputation(op, entries, expected, pre if here else {})
 
 
+#: The v2 occurrence namespace, COPIED here rather than imported: the verifier derives the occurrence id from
+#: the descriptor with its own copy of the rule (programme 023, decision 6), so a writer that derived it
+#: wrongly is not checked against itself. `tests/unit/test_p023_b_clearing_intent_v2_rule.py` holds the two
+#: copies to one answer.
+_CLEARING_V2_OCCURRENCE_NAMESPACE = uuid.UUID("5f3c2e7a-0d6b-4a53-9e8f-023b00000002")
+
+
+def _clearing_v2_occurrence_id(plan_id: uuid.UUID, equivalent_id: uuid.UUID, ordinal: int) -> str:
+    return str(uuid.uuid5(_CLEARING_V2_OCCURRENCE_NAMESPACE, f"{plan_id}:{equivalent_id}:{ordinal}"))
+
+
+def _descriptor_atoms(value: Any) -> int | None:
+    """The descriptor's amount: a decimal-digit string of a positive integer, nothing else."""
+
+    if not isinstance(value, str) or not value.isascii() or not value.isdigit():
+        return None
+    atoms = int(value)
+    return atoms if atoms > 0 else None
+
+
+def _clearing_v2(op: Any, intent: dict[str, Any], entries: list[_Entry], equivalent_id: uuid.UUID) -> list:
+    """CLEARING intent v2: a plan occurrence did exactly what its descriptor declared (spec 023, decision 5)."""
+
+    _require_tx_id(op, intent)
+    descriptor = intent.get("occurrence")
+    if not isinstance(descriptor, dict) or descriptor.get("version") != 2:
+        raise _Malformed("clearing_v2_descriptor_shape")
+    plan_id = _intent_uuid(descriptor.get("plan_id"))
+    occurrence_equivalent = _intent_uuid(descriptor.get("equivalent_id"))
+    ordinal = descriptor.get("ordinal")
+    raw_ids = descriptor.get("debt_ids")
+    if (
+        plan_id is None
+        or occurrence_equivalent is None
+        or isinstance(ordinal, bool)
+        or not isinstance(ordinal, int)
+        or ordinal < 0
+        or not isinstance(raw_ids, list)
+        or len(raw_ids) < 3
+    ):
+        raise _Malformed("clearing_v2_descriptor_shape")
+    debt_ids = [_intent_uuid(value) for value in raw_ids]
+    if any(debt_id is None for debt_id in debt_ids):
+        raise _Malformed("clearing_v2_descriptor_shape")
+    if len(set(debt_ids)) != len(debt_ids):
+        raise _Malformed("clearing_v2_debt_ids_repeat")
+    # (1) A positive whole number of atoms, fixed in the descriptor. It is the amount every expected delta
+    # below is derived from - never the intent's `clear_amount`, never the journal.
+    c = _descriptor_atoms(descriptor.get("amount_atoms"))
+    if c is None:
+        raise _Malformed("clearing_v2_amount_is_not_positive_atoms")
+
+    cycle = intent.get("cycle")
+    cycle_equivalent = _intent_uuid(intent.get("equivalent_id"))
+    if not isinstance(cycle, list) or cycle_equivalent is None:
+        raise _Malformed("clearing_v2_intent_shape")
+    order: list[Edge] = []
+    pre: dict[Edge, int] = {}
+    recorded_ids: list[uuid.UUID | None] = []
+    for item in cycle:
+        if not isinstance(item, dict):
+            raise _Malformed("clearing_v2_intent_shape")
+        debtor, creditor = _intent_uuid(item.get("debtor_id")), _intent_uuid(item.get("creditor_id"))
+        amount = _intent_atoms(item.get("amount"))
+        if debtor is None or creditor is None or debtor == creditor or amount is None:
+            raise _Malformed("clearing_v2_intent_shape")
+        if (debtor, creditor) in pre:
+            raise _Malformed("clearing_cycle_repeats_an_edge")
+        order.append((debtor, creditor))
+        pre[(debtor, creditor)] = amount
+        recorded_ids.append(_intent_uuid(item.get("debt_id")))
+
+    findings: list[dict[str, Any]] = []
+
+    def _malformed(reason: str) -> None:
+        findings.append(_finding("b_intent_malformed", op, reason=reason))
+
+    # The identity: the envelope is the occurrence its descriptor names, and nothing else.
+    if op.tx_id != _clearing_v2_occurrence_id(plan_id, occurrence_equivalent, ordinal):
+        _malformed("clearing_v2_tx_id_is_not_the_occurrence_of_the_descriptor")
+    # (2) One equivalent; the recorded cycle is the descriptor's debts in its order; one simple directed cycle.
+    if occurrence_equivalent != cycle_equivalent:
+        _malformed("clearing_v2_equivalent_differs_from_the_descriptor")
+    if recorded_ids != debt_ids:
+        _malformed("clearing_v2_cycle_differs_from_the_descriptor")
+    debtors = [debtor for debtor, _ in order]
+    closed = all(order[k][1] == order[(k + 1) % len(order)][0] for k in range(len(order)))
+    if not closed or len(set(debtors)) != len(debtors):
+        _malformed("clearing_v2_not_one_simple_directed_cycle")
+    # (3) Every locked pre-amount positive and at least `c`.
+    if any(amount <= 0 or c > amount for amount in pre.values()):
+        _malformed("clearing_v2_amount_exceeds_an_edge")
+    # (4) One amount in the descriptor, the intent and the transaction row, and one descriptor in both.
+    if _intent_atoms(intent.get("clear_amount")) != c:
+        _malformed("clearing_v2_intent_amount_differs_from_the_descriptor")
+    payload = getattr(op, "tx_payload", None)
+    if isinstance(payload, (str, bytes)):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            payload = None
+    if not isinstance(payload, dict) or payload.get("occurrence") != descriptor:
+        _malformed("clearing_v2_payload_descriptor_differs")
+    if not isinstance(payload, dict) or _intent_atoms(payload.get("amount")) != c:
+        _malformed("clearing_v2_payload_amount_differs_from_the_descriptor")
+
+    here = cycle_equivalent == equivalent_id
+    # (5) Exactly the declared change, from the frozen descriptor: -c on each declared edge, nothing else;
+    # and (6) the recorded pre-state against where the journal says each edge started.
+    expected = {edge: -c for edge in pre} if here else {}
+    findings += _compare_recomputation(op, entries, expected, pre if here else {})
+    if here:
+        effects: dict[Edge, set[str]] = {}
+        for entry in entries:
+            effects.setdefault((entry.debtor_id, entry.creditor_id), set()).add(entry.effect)
+        for edge in order:
+            deleted = "D" in effects.get(edge, set())
+            if pre[edge] - c == 0 and not deleted:
+                rule = "not_deleted_at_zero"
+            elif pre[edge] - c != 0 and deleted:
+                rule = "deleted_above_zero"
+            else:
+                continue
+            findings.append(
+                _finding("b_clearing_v2_effect", op, rule=rule, debtor_id=str(edge[0]), creditor_id=str(edge[1]))
+            )
+    return findings
+
+
 def _payment_flows(intent: dict[str, Any]) -> list[tuple[uuid.UUID, uuid.UUID, int, uuid.UUID]]:
     locks = intent.get("locks")
     if not isinstance(locks, list) or not locks:
@@ -728,6 +874,7 @@ def _inject_subset(op: Any, intent: dict[str, Any], entries: list[_Entry], _equi
 
 _RULES = {
     ("CLEARING", 1): _clearing,
+    ("CLEARING", 2): _clearing_v2,
     ("PAYMENT", 2): _payment_v2,
     ("PAYMENT", 1): _payment_v1,
     ("INJECT", 1): _inject_subset,

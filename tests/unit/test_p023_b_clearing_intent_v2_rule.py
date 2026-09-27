@@ -37,7 +37,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.ledger import reconciliation as rec
-from tests.p023_support import slice_b_surface, target_xfail_023
+from tests.p023_support import slice_b_surface
 
 EQ = uuid.UUID("00000000-0000-4000-8000-00000000e023")
 PLAN = uuid.UUID("00000000-0000-4000-8000-0000000b1a17")
@@ -118,7 +118,6 @@ def _kinds(findings) -> set[str]:
 # ------------------------------------------------------------------------------------------ the honest case
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: an honest partial occurrence is not recomputed")
 def test_v2_an_honest_partial_occurrence_has_no_finding() -> None:
     stand = _Stand([5 * ATOM, 7 * ATOM, 9 * ATOM], 2 * ATOM)
     assert stand.findings() == []
@@ -127,7 +126,6 @@ def test_v2_an_honest_partial_occurrence_has_no_finding() -> None:
     assert stand.api.rule is not rec._RULES[("CLEARING", 1)]
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: an exact occurrence that deletes one edge")
 def test_v2_an_occurrence_that_exhausts_one_edge_deletes_it_exactly_at_zero() -> None:
     stand = _Stand([2 * ATOM, 7 * ATOM, 9 * ATOM], 2 * ATOM)
     assert [e.effect for e in stand.entries] == ["D", "U", "U"]
@@ -137,7 +135,6 @@ def test_v2_an_occurrence_that_exhausts_one_edge_deletes_it_exactly_at_zero() ->
 # ------------------------------------------------------------------------- (1) the amount and the identity
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: the descriptor amount must be positive whole atoms")
 @pytest.mark.parametrize("amount", ["0", "-5", "1.5", "abc", "", 7])
 def test_v2_a_descriptor_amount_that_is_not_positive_atoms_is_malformed(amount) -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
@@ -145,7 +142,6 @@ def test_v2_a_descriptor_amount_that_is_not_positive_atoms_is_malformed(amount) 
     assert "clearing_v2_amount_is_not_positive_atoms" in _reasons(stand.findings())
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: the envelope tx_id must be the descriptor's occurrence id")
 def test_v2_a_tx_id_that_is_not_the_occurrence_of_its_descriptor_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     # The descriptor says ordinal 1, the envelope (and the intent's tx_id) are ordinal 0's.
@@ -157,14 +153,12 @@ def test_v2_a_tx_id_that_is_not_the_occurrence_of_its_descriptor_is_a_finding() 
 # --------------------------------------------------------------------------------- (2) one simple cycle
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: a cycle that is not closed")
 def test_v2_a_cycle_that_is_not_closed_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.intent["cycle"][2]["creditor_id"] = str(_pid(1))  # P2 -> P1 instead of P2 -> P0
     assert "clearing_v2_not_one_simple_directed_cycle" in _reasons(stand.findings())
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: a closed walk through one vertex twice is not simple")
 def test_v2_a_closed_walk_through_a_vertex_twice_is_a_finding() -> None:
     # Two triangles sharing P0: P0->P1->P2->P0->P3->P4->P0. Closed and balanced, but not ONE simple cycle.
     stand = _Stand([5 * ATOM] * 6, 2 * ATOM)
@@ -178,14 +172,12 @@ def test_v2_a_closed_walk_through_a_vertex_twice_is_a_finding() -> None:
     assert "clearing_v2_not_one_simple_directed_cycle" in _reasons(stand.findings())
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: the recorded cycle must be the descriptor's debts")
 def test_v2_a_cycle_whose_debts_differ_from_the_descriptor_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.intent["cycle"][1]["debt_id"] = str(_debt(99))
     assert "clearing_v2_cycle_differs_from_the_descriptor" in _reasons(stand.findings())
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: repeated debt ids in the descriptor")
 def test_v2_repeated_debt_ids_are_malformed() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     ids = stand.intent["occurrence"]["debt_ids"]
@@ -193,7 +185,6 @@ def test_v2_repeated_debt_ids_are_malformed() -> None:
     assert "clearing_v2_debt_ids_repeat" in _reasons(stand.findings())
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: one equivalent")
 def test_v2_an_equivalent_that_differs_from_the_descriptor_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.intent["equivalent_id"] = str(uuid.UUID(int=0xE0E0))
@@ -203,7 +194,6 @@ def test_v2_an_equivalent_that_differs_from_the_descriptor_is_a_finding() -> Non
 # ------------------------------------------------------------------------------------- (3) c <= p_e
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: over-clearing c > p_e")
 def test_v2_amount_above_an_edge_is_a_finding() -> None:
     """Over-clearing: `c` = 6 on an edge that held 5. Recorded faithfully (the entry says -6), so only (3) can
     say it. MUTATION: accept `c > p_e` in the rule - red."""
@@ -215,7 +205,6 @@ def test_v2_amount_above_an_edge_is_a_finding() -> None:
 # ------------------------------------------------------------------------------ (4) the three amounts
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: intent amount vs descriptor amount")
 def test_v2_an_intent_amount_that_differs_from_the_descriptor_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.intent["clear_amount"] = _text(3 * ATOM)
@@ -225,14 +214,12 @@ def test_v2_an_intent_amount_that_differs_from_the_descriptor_is_a_finding() -> 
     assert "b_delta_mismatch" not in _kinds(found), found
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: payload amount vs descriptor amount")
 def test_v2_a_payload_amount_that_differs_from_the_descriptor_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.payload["amount"] = "2.01"
     assert "clearing_v2_payload_amount_differs_from_the_descriptor" in _reasons(stand.findings())
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: payload descriptor vs intent descriptor")
 @pytest.mark.parametrize("payload", ["other_descriptor", "no_descriptor", "no_payload"])
 def test_v2_a_payload_without_the_same_descriptor_is_a_finding(payload) -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
@@ -248,7 +235,6 @@ def test_v2_a_payload_without_the_same_descriptor_is_a_finding(payload) -> None:
 # ----------------------------------------------------------------------------- (5) the declared change
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: an extra affected edge")
 def test_v2_an_extra_affected_edge_is_a_delta_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.entries.append(rec._Entry(9, _pid(7), _pid(8), "U", 4 * ATOM, -1 * ATOM))
@@ -258,7 +244,6 @@ def test_v2_an_extra_affected_edge_is_a_delta_finding() -> None:
     ], mismatches
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: a delta other than -c")
 def test_v2_a_delta_other_than_minus_c_is_a_delta_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.entries[1] = rec._Entry(1, *stand.edges[1], "U", 5 * ATOM, -2 * ATOM + 1)
@@ -266,7 +251,6 @@ def test_v2_a_delta_other_than_minus_c_is_a_delta_finding() -> None:
     assert [(f["expected_delta"], f["recorded_delta"]) for f in mismatches] == [("-2.00000000", "-1.99999999")]
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: a delete above zero")
 def test_v2_a_delete_above_zero_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     # Coordinated: a `D` of the whole 5 is -5, not -2; the effect rule names it, the delta rule too.
@@ -275,7 +259,6 @@ def test_v2_a_delete_above_zero_is_a_finding() -> None:
     assert ("b_clearing_v2_effect", "deleted_above_zero") in {(f["kind"], f.get("rule")) for f in found}, found
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: zero left standing instead of deleted")
 def test_v2_an_edge_left_at_zero_is_a_finding() -> None:
     stand = _Stand([2 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.entries[0] = rec._Entry(0, *stand.edges[0], "U", 2 * ATOM, -2 * ATOM)
@@ -287,7 +270,6 @@ def test_v2_an_edge_left_at_zero_is_a_finding() -> None:
 # ------------------------------------------------------------------------------------ (6) the pre-state
 
 
-@target_xfail_023("(b)", "no CLEARING intent v2 rule: recorded pre-state vs journal")
 def test_v2_a_prestate_the_journal_does_not_start_from_is_a_finding() -> None:
     stand = _Stand([5 * ATOM, 5 * ATOM, 5 * ATOM], 2 * ATOM)
     stand.intent["cycle"][2]["amount"] = _text(6 * ATOM)
@@ -297,7 +279,6 @@ def test_v2_a_prestate_the_journal_does_not_start_from_is_a_finding() -> None:
 # ------------------------------------------------------------------- writer and verifier agree on the id
 
 
-@target_xfail_023("(b)", "no plan occurrence identity")
 def test_v2_the_occurrence_id_is_plan_equivalent_and_ordinal_and_nothing_else() -> None:
     api = slice_b_surface()
     ids = tuple(_debt(k) for k in range(3))
@@ -321,7 +302,6 @@ def test_v2_the_occurrence_id_is_plan_equivalent_and_ordinal_and_nothing_else() 
     assert stand.findings() == []
 
 
-@target_xfail_023("(b)", "no plan occurrence descriptor")
 @pytest.mark.parametrize(
     "bad",
     [

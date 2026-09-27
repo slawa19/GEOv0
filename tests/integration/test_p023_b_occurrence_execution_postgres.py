@@ -42,7 +42,7 @@ from tests.integration.test_clearing_commit_replay_postgres import (
     _conflicting_clearing_service,
     _seed_conflict_cycle,
 )
-from tests.p023_support import slice_b_surface, target_xfail_023
+from tests.p023_support import slice_b_surface
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: F401 - autouse: every test on a clone
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _edges, _seed_triangle
 from tests.unit.test_p015_step5a_reconciliation import (
@@ -113,7 +113,6 @@ async def _envelopes() -> list[tuple[str, int]]:
 # ------------------------------------------------------------------------------------------------ R-023-4b
 
 
-@target_xfail_023("(b)", "R-023-4b: two equal partial occurrences on the same surviving debts")
 @pytest.mark.asyncio
 async def test_r023_4b_two_plans_commit_two_equal_partials_on_the_same_surviving_debts() -> None:
     api = slice_b_surface()
@@ -140,7 +139,6 @@ async def test_r023_4b_two_plans_commit_two_equal_partials_on_the_same_surviving
     assert outcome.detail()["criterion_b"]["coverage"]["full_recomputation"] == {"CLEARING": 2}
 
 
-@target_xfail_023("(b)", "R-023-4b control: a replay returns the durable amount with no second effect")
 @pytest.mark.asyncio
 async def test_r023_4b_control_a_replay_returns_the_durable_amount_without_a_second_effect() -> None:
     api = slice_b_surface()
@@ -164,7 +162,6 @@ def _fields(occurrence) -> dict:
     )
 
 
-@target_xfail_023("(b)", "R-023-4b control: the same occurrence id with a changed descriptor is refused")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["amount", "debt_order"])
 async def test_r023_4b_control_a_changed_descriptor_for_the_same_occurrence_is_refused(change) -> None:
@@ -189,7 +186,6 @@ async def test_r023_4b_control_a_changed_descriptor_for_the_same_occurrence_is_r
 # ----------------------------------------------------------------------------------------- success paths
 
 
-@target_xfail_023("(b)", "v2: an exact occurrence deletes the exhausted edge and is recomputed PASSED")
 @pytest.mark.asyncio
 async def test_v2_an_exact_occurrence_deletes_at_zero_and_is_recomputed_passed() -> None:
     api = slice_b_surface()
@@ -200,7 +196,6 @@ async def test_v2_an_exact_occurrence_deletes_at_zero_and_is_recomputed_passed()
     assert (await _verify(_factory(), triangle.equivalent.id)).status == PASSED
 
 
-@target_xfail_023("(b)", "v2: the envelope is intent v2 and the payload carries the descriptor; v1 unchanged")
 @pytest.mark.asyncio
 async def test_v2_writes_intent_version_two_and_the_payload_descriptor_while_v1_still_writes_one() -> None:
     api = slice_b_surface()
@@ -218,7 +213,6 @@ async def test_v2_writes_intent_version_two_and_the_payload_descriptor_while_v1_
     assert "occurrence" not in payloads[v1_tx]
 
 
-@target_xfail_023("(b)", "v2: a coordinated corruption of a v2 occurrence is FAILED by criterion (b)")
 @pytest.mark.asyncio
 async def test_v2_a_coordinated_under_clear_of_a_v2_occurrence_is_failed_by_b() -> None:
     """The v2 record corrupted coordinately (entry and debt move together, so criterion (a) is silent): one edge
@@ -232,7 +226,8 @@ async def test_v2_a_coordinated_under_clear_of_a_v2_occurrence_is_failed_by_b() 
         _factory(),
         lambda d: (
             "UPDATE debt_journal_entries SET amount_after = '4.00000000', delta = '-1.00000000' "
-            f"WHERE debtor_id = '{_literal(d, triangle.a.id)}' AND creditor_id = '{_literal(d, triangle.b.id)}'"
+            f"WHERE effect = 'U' AND debtor_id = '{_literal(d, triangle.a.id)}' "
+            f"AND creditor_id = '{_literal(d, triangle.b.id)}'"
         ),
     )
     await _around_the_application(
@@ -246,7 +241,6 @@ async def test_v2_a_coordinated_under_clear_of_a_v2_occurrence_is_failed_by_b() 
 # ------------------------------------------------------------------------------------------- skip paths
 
 
-@target_xfail_023("(b)", "v2: a stale plan is skipped, not partially executed")
 @pytest.mark.asyncio
 async def test_v2_a_stale_plan_whose_edge_fell_below_c_is_skipped_without_effect() -> None:
     api = slice_b_surface()
@@ -258,7 +252,6 @@ async def test_v2_a_stale_plan_whose_edge_fell_below_c_is_skipped_without_effect
     assert await _edges(_factory(), triangle) == {("a", "b"): Decimal("2"), ("b", "c"): Decimal("2"), ("c", "a"): Decimal("2")}
 
 
-@target_xfail_023("(b)", "v2: consent withdrawn is a skip")
 @pytest.mark.asyncio
 async def test_v2_withdrawn_consent_is_a_skip() -> None:
     api = slice_b_surface()
@@ -277,7 +270,6 @@ async def test_v2_withdrawn_consent_is_a_skip() -> None:
 # ---------------------------------------------------------------------------------------- refusal paths
 
 
-@target_xfail_023("(b)", "v2: a descriptor that does not describe the locked rows is refused")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("wrong", ["equivalent", "not_a_directed_cycle"])
 async def test_v2_a_descriptor_that_does_not_match_the_locked_rows_is_refused(wrong) -> None:
@@ -294,7 +286,6 @@ async def test_v2_a_descriptor_that_does_not_match_the_locked_rows_is_refused(wr
     assert await _edges(_factory(), triangle) == {("a", "b"): Decimal("5"), ("b", "c"): Decimal("5"), ("c", "a"): Decimal("5")}
 
 
-@target_xfail_023("(b)", "v2: the operator stop refuses a v2 occurrence")
 @pytest.mark.asyncio
 async def test_v2_the_operator_stop_refuses_the_occurrence() -> None:
     api = slice_b_surface()
@@ -308,7 +299,6 @@ async def test_v2_the_operator_stop_refuses_the_occurrence() -> None:
     assert await _clearings() == []
 
 
-@target_xfail_023("(b)", "v2: the run perimeter holds on a fresh execution and on a replay")
 @pytest.mark.asyncio
 async def test_v2_the_run_perimeter_holds_fresh_and_on_replay() -> None:
     api = slice_b_surface()
@@ -342,7 +332,6 @@ async def _run_owner_v2(service_cls, occurrence):
         await owner_session.close()
 
 
-@target_xfail_023("(b)", "v2: a real 40001 is retried on a fresh snapshot and the declared amount is applied")
 @pytest.mark.asyncio
 async def test_v2_a_real_serialization_conflict_is_retried_and_clears_the_declared_amount() -> None:
     api = slice_b_surface()
@@ -364,7 +353,6 @@ async def test_v2_a_real_serialization_conflict_is_retried_and_clears_the_declar
     assert rows == {debt_ids[0]: Decimal("91.00000000"), debt_ids[1]: Decimal("20.00000000"), debt_ids[2]: Decimal("30.00000000")}
 
 
-@target_xfail_023("(b)", "v2: an exhausted retry budget is the typed retryable refusal with no effect")
 @pytest.mark.asyncio
 async def test_v2_an_exhausted_retry_budget_is_the_typed_retryable_refusal(monkeypatch) -> None:
     from app.config import settings
@@ -389,7 +377,6 @@ async def test_v2_an_exhausted_retry_budget_is_the_typed_retryable_refusal(monke
 # ------------------------------------------------------------------ unknown commit and cancellation, v2
 
 
-@target_xfail_023("(b)", "v2: an unknown commit that landed is resolved to the declared amount, once")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("landed", [True, False])
 async def test_v2_an_unknown_commit_is_resolved_and_never_retried(monkeypatch, landed) -> None:
@@ -423,7 +410,6 @@ async def test_v2_an_unknown_commit_is_resolved_and_never_retried(monkeypatch, l
     assert commits["seen"] == 1
 
 
-@target_xfail_023("(b)", "v2: a commit durable under a pending cancellation is carried out with its id and amount")
 @pytest.mark.asyncio
 async def test_v2_committed_after_cancellation_carries_the_occurrence_id_and_declared_amount(monkeypatch) -> None:
     from app.core.clearing.service import ClearingCommittedAfterCancellation
