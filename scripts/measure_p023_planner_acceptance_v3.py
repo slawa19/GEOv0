@@ -202,7 +202,23 @@ async def _postmaster_start(server_url: str) -> str:
         await conn.close()
 
 
-def main() -> None:
+EXPECTED_CELLS = 212  # 192 target + 20 stress
+
+
+def run_verdict(cells: list[dict]) -> str:
+    """The run-level gate: PASS only with all 212 cells present and every one PASS; cells are never pooled."""
+
+    passed = [c for c in cells if c["verdict"] == "PASS"]
+    return "PASS" if len(cells) == EXPECTED_CELLS and len(passed) == len(cells) else "FAIL"
+
+
+def exit_code(verdict: object) -> int:
+    """The process exit code of a run: 0 only for PASS, so a FAIL or a short run cannot be read as a pass."""
+
+    return 0 if verdict == "PASS" else 1
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--server-url", default=v1.DEFAULT_SERVER_URL)
     parser.add_argument("--out", default=str(REPO_ROOT / ".local-run" / "p023a3-bench"))
@@ -216,7 +232,7 @@ def main() -> None:
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str), encoding="utf-8")
     print(f"manifest: {out_dir / 'manifest.json'}", flush=True)
     if args.manifest_only:
-        return
+        return 0
     log = open(out_dir / "run.log", "w", encoding="utf-8")
 
     def say(line: str) -> None:
@@ -317,7 +333,7 @@ def main() -> None:
         postmaster_after = asyncio.run(_postmaster_start(args.server_url))
         results["machine"]["postmaster_start_after"] = postmaster_after
         results["machine"]["postgres_restarted_during_run"] = postmaster_after != postmaster_before
-        results["verdict"] = "PASS" if len(cells) == 212 and len(passed) == len(cells) else "FAIL"
+        results["verdict"] = run_verdict(cells)
         results["failed_cells"] = [f"{c['tier']}/{c['family']}/{c['variant']}/{c['scope']}: {'; '.join(c['fail_reasons'])}"
                                    for c in cells if c["verdict"] != "PASS"]
         save()
@@ -332,6 +348,7 @@ def main() -> None:
         for f in results["failed_cells"]:
             say(f"FAILED {f}")
         say(f"results: {out_dir / 'results.json'}")
+        return exit_code(results["verdict"])
     finally:
         for name in reversed(created):
             try:
@@ -342,4 +359,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
