@@ -7507,6 +7507,7 @@ components:
         artifact_path:
           type: string
           nullable: true
+          description: The run's artifacts directory relative to the simulator's local state root (`.local-run/simulator/`), POSIX form; never an absolute server path.
         items:
           type: array
           items:

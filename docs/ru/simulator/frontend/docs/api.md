@@ -585,7 +585,8 @@ export type ArtifactIndex = {
   api_version: string
   run_id: string
 
-  // Для dev-режима можно отдать путь, но UI использует это только как "copy".
+  // Каталог артефактов относительно корня состояния симулятора (`.local-run/simulator/`),
+  // в POSIX-форме; абсолютный путь сервера наружу не отдаётся (программа 024, SIM-11).
   artifact_path?: string
 
   items: ArtifactItem[]
@@ -601,7 +602,7 @@ export type ArtifactIndex = {
 {
   "api_version": "simulator-api/1",
   "run_id": "run_2026_01_28_001",
-  "artifact_path": "C:/geo/runs/run_2026_01_28_001",
+  "artifact_path": "runs/run_2026_01_28_001/artifacts",
   "items": [
     { "name": "summary.json", "content_type": "application/json", "size_bytes": 18234, "url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/summary.json" },
     { "name": "events.ndjson", "content_type": "application/x-ndjson", "size_bytes": 934455, "url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/events.ndjson" }
