@@ -152,6 +152,7 @@ class TrustLineWriteBatch:
         self._before: dict[UUID, object] = {}
         self._codes: dict[UUID, str] = {}
         self._operations: list[tuple[str, UUID, dict]] = []
+        self._finishing = False
         self._finished = False
         self._discarded = False
         self._armed = False
@@ -167,7 +168,7 @@ class TrustLineWriteBatch:
     async def _touch(self, equivalent_id: UUID, equivalent_code: str) -> None:
         """Before the first mutation of `equivalent_id` in this batch: its before-checkpoint."""
 
-        if self._finished:
+        if self._finishing:
             raise RuntimeError("TrustLineWriteBatch: already finished; open a new batch for new writes")
         if equivalent_id not in self._before:
             self._before[equivalent_id] = await compute_integrity_checkpoint_for_equivalent(
@@ -201,12 +202,16 @@ class TrustLineWriteBatch:
     async def finish(self) -> None:
         """Flush, compute the after-checkpoint of each touched equivalent once, stage the audit rows, flush."""
 
-        if self._finished:
+        if self._finishing:
             raise RuntimeError("TrustLineWriteBatch: finish() called twice")
         if self._discarded:
             raise RuntimeError("TrustLineWriteBatch: its transaction was rolled back; nothing to finish")
-        self._finished = True
+        # `_finished` only once everything below succeeded: a finish() that fails half-way (a checker that
+        # could not run, an audit row that did not flush) leaves the detector armed, so a commit that skips
+        # the owner's rollback still cannot make the batch durable.
+        self._finishing = True
         if not self._operations:
+            self._finished = True
             return
 
         await self.session.flush()
@@ -240,6 +245,7 @@ class TrustLineWriteBatch:
                     )
                 )
         await self.session.flush()
+        self._finished = True
 
 
 @dataclass(frozen=True)
