@@ -63,7 +63,7 @@ Dev-диагностика (localhost only):
 - `GET /api/v1/simulator/scenarios`
   - Список доступных сценариев (presets).
 - `POST /api/v1/simulator/scenarios`
-  - Загрузка `scenario.json` (создаёт `scenario_id`).
+  - Загрузка `scenario.json` (создаёт `scenario_id`). `scenario_id` берётся как есть, без обрезки пробелов, и обязан соответствовать `^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$` и не совпадать с уже зарегистрированным сценарием (включая пресеты); иначе 400.
 - `GET /api/v1/simulator/scenarios/{scenario_id}` (опционально)
   - Полная информация по сценарию + summary.
 
@@ -585,7 +585,8 @@ export type ArtifactIndex = {
   api_version: string
   run_id: string
 
-  // Для dev-режима можно отдать путь, но UI использует это только как "copy".
+  // Каталог артефактов относительно корня состояния симулятора (`.local-run/simulator/`),
+  // в POSIX-форме; абсолютный путь сервера наружу не отдаётся (программа 024, SIM-11).
   artifact_path?: string
 
   items: ArtifactItem[]
@@ -601,7 +602,7 @@ export type ArtifactIndex = {
 {
   "api_version": "simulator-api/1",
   "run_id": "run_2026_01_28_001",
-  "artifact_path": "C:/geo/runs/run_2026_01_28_001",
+  "artifact_path": "runs/run_2026_01_28_001/artifacts",
   "items": [
     { "name": "summary.json", "content_type": "application/json", "size_bytes": 18234, "url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/summary.json" },
     { "name": "events.ndjson", "content_type": "application/x-ndjson", "size_bytes": 934455, "url": "/api/v1/simulator/runs/run_2026_01_28_001/artifacts/events.ndjson" }

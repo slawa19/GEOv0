@@ -15,6 +15,7 @@ from app.core.simulator.money_replay import (
     run_money_phase_with_bounded_replay,
 )
 from app.core.simulator.post_tick_audit import audit_tick_balance
+from app.core.simulator.real_scenario_seeder import SIMULATOR_PID_TAKEN, SimulatorPidTakenError
 from app.core.simulator.models import RunRecord
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.core.simulator.scenario_equivalent import (
@@ -662,6 +663,17 @@ class RealTickOrchestrator:
                     except Exception:
                         pass
                     raise
+        except SimulatorPidTakenError as e:
+            # Programme 024, F-024-4b: the scenario names a real participant. That is not a
+            # transient failure a later tick could cure, so the run stops now, fail-closed, with
+            # the code and the pid in `last_error` - not after the consecutive-failure limit.
+            rr._logger.warning(
+                "simulator.real.run_refused code=%s run_id=%s pid=%s",
+                SIMULATOR_PID_TAKEN,
+                str(run.run_id),
+                e.pid,
+            )
+            await rr.fail_run(run_id, code=SIMULATOR_PID_TAKEN, message=str(e))
         except Exception as e:
             conflict = money_conflict_name(e)
             rr._logger.warning(

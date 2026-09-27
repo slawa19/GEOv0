@@ -313,3 +313,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify_local.ps1 -TaskSlug p0
   `useSimulatorRealMode.ts:1047+` и evidence-комментарий в `app/core/clearing/service.py:545+`;
   подтверждённые seams на `useSimulatorRealMode.ts:110`, `clearing/service.py:230` и `:2002+`
   остались прежними.
+
+- **2026-09-27** — ревью ядра (программа 024, `specs/024-core-hygiene/review-2026-09-27/impl-duplication.md`, «Статус F-016»): на `4119ace` живы F-016-1, -2, -3, -4, -6, -7; **F-016-5 исчезла** вместе с `recovery.py` и `PREPARED` (остаток — недостижимая ветка `app/core/payments/service.py:881-897`, действие «удалить»); F-016-8 жива частично (mock уходит с 022). Якоря F-016-2/3 и owner surface указывают на удалённые `engine.py`/`recovery.py`; F-016-3 разрослась до пяти извлекателей, `trustlines/service.py:59-67` ходит по `__context__`. Предложение 024: backend-половина (F-016-1…5) поглощается её стадией 4, UI-половина (F-016-6…8) — итерацией по Admin UI. **Статус 016 не менялся**: решает владелец.

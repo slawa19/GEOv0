@@ -108,7 +108,7 @@ class ArtifactsManager:
 
             try:
                 rp = p.resolve()
-                if not str(rp).startswith(str(base)):
+                if not rp.is_relative_to(base):
                     continue
                 mtime = float(rp.stat().st_mtime)
                 if mtime >= cutoff:
@@ -179,12 +179,24 @@ class ArtifactsManager:
         return ArtifactIndex(
             api_version=SIMULATOR_API_VERSION,
             run_id=run_id,
-            artifact_path=str(base),
+            artifact_path=self._public_artifact_path(base),
             items=items,
             bundle_url=(
                 f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip" if (base / "bundle.zip").exists() else None
             ),
         )
+
+    def _public_artifact_path(self, base: Path) -> str | None:
+        """The artifacts directory relative to the simulator's state root, POSIX; never absolute.
+
+        SIM-11 (programme 024): this value goes out over the API to any run owner, and AGENTS.md
+        section 12 forbids handing out absolute local paths. A directory outside the root has no
+        relative name, so the field is omitted (it is nullable) rather than leaking.
+        """
+        try:
+            return base.resolve().relative_to(self._local_state_dir().resolve()).as_posix()
+        except ValueError:
+            return None
 
     def get_artifact_path(self, *, run_id: str, name: str) -> Path:
         run = self._get_run(run_id)
@@ -192,7 +204,9 @@ class ArtifactsManager:
         if base is None:
             raise NotFoundException("Artifact not found")
         p = (base / name).resolve()
-        if not str(p).startswith(str(base.resolve())):
+        # Containment over both resolved ends (fix-delta D1): a string prefix admitted a sibling
+        # directory sharing it (`artifacts_x`), reachable through `..` or a `%5C` backslash.
+        if not p.is_relative_to(base.resolve()) or p == base.resolve():
             raise NotFoundException("Artifact not found")
         if not p.exists() or not p.is_file():
             raise NotFoundException("Artifact not found")

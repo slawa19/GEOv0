@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from app.utils.security import decode_token
+from app.api.deps import get_current_participant
+from app.db import session as db_session
 from app.utils.event_bus import event_bus
+from app.utils.exceptions import ForbiddenException, UnauthorizedException
 
 
 router = APIRouter()
@@ -30,12 +32,16 @@ async def ws_events(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    payload = await decode_token(token, expected_type="access")
-    if not payload or not payload.get("sub"):
+    # The HTTP chain "token -> participant -> active" (programme 024, F-024-4c): a suspended
+    # participant or a `sub` naming nobody is closed before `accept`. A short session of its own,
+    # not `Depends(get_db)`, which would hold a pooled connection for the socket's whole life.
+    try:
+        async with db_session.AsyncSessionLocal() as session:
+            participant = await get_current_participant(db=session, token=token)
+            pid = str(participant.pid)
+    except (UnauthorizedException, ForbiddenException):
         await websocket.close(code=1008)
         return
-
-    pid = str(payload["sub"])
 
     await websocket.accept(subprotocol=_BEARER_SUBPROTOCOL)
     await websocket.send_json({"type": "hello", "pid": pid, "ts": datetime.now(timezone.utc).isoformat()})
