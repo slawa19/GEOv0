@@ -99,7 +99,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
 
-from sqlalchemy import insert, or_, select, update
+from sqlalchemy import and_, insert, or_, select, update
 
 from app.db.journal_tables import (
     debt_journal_entries,
@@ -462,11 +462,21 @@ async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
                     ops.intent,
                     ops.intent_digest,
                     ops.intent_encoding_version,
-                    # What the transaction row says the operation was (CLEARING intent v2 checks it
-                    # against the envelope). NULL for the kinds that own no transaction.
+                    # What the transaction row says the operation was - read for CLEARING intent v2 only,
+                    # which checks it against the envelope; NULL for every other envelope, so the scheduled
+                    # run does not carry every payment's payload.
                     transactions.c.payload.label("tx_payload"),
                 )
-                .select_from(debt_operations.outerjoin(transactions, transactions.c.tx_id == ops.tx_id))
+                .select_from(
+                    debt_operations.outerjoin(
+                        transactions,
+                        and_(
+                            transactions.c.tx_id == ops.tx_id,
+                            ops.kind == "CLEARING",
+                            ops.intent_encoding_version == 2,
+                        ),
+                    )
+                )
                 .where(or_(ops.id.in_(named), ops.id.in_(touched)))
             )
         ).all()
