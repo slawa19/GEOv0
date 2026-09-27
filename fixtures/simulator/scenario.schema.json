@@ -17,7 +17,10 @@
     },
     "scenario_id": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$",
+      "description": "Also a directory name for uploaded scenarios; the backend enforces the same rule (app/core/simulator/scenario_registry.py SCENARIO_ID_PATTERN)."
     },
     "name": {
       "type": "string"

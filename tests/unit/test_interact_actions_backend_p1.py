@@ -956,7 +956,7 @@ async def test_action_payment_real_amount_manual_validation_stays_invalid_amount
 
 @pytest.mark.asyncio
 async def test_payment_targets_multihop_returns_backend_reachable_to_pid_list(
-    client, db_session, interact_actions_enabled
+    client, db_session, interact_actions_enabled, monkeypatch
 ):
     """Phase 2.5: payment-targets must include multi-hop reachable targets.
 
@@ -1021,6 +1021,18 @@ async def test_payment_targets_multihop_returns_backend_reachable_to_pid_list(
     from app.core.payments.router import PaymentRouter
 
     PaymentRouter.invalidate_cache("UAH")
+
+    # Since programme 024 the targets are confined to the run perimeter, transit included, so the
+    # intermediary is a participant of the run here (the fixture's perimeter is alice + bob).
+    _register_run_perimeter(
+        interact_actions_enabled,
+        monkeypatch,
+        [
+            {"id": "alice", "name": "Alice", "type": "person", "status": "active"},
+            {"id": "xavier", "name": "Xavier", "type": "person", "status": "active"},
+            {"id": "bob", "name": "Bob", "type": "person", "status": "active"},
+        ],
+    )
 
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
 

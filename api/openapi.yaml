@@ -3424,6 +3424,12 @@ paths:
           $ref: '#/components/responses/SimulatorActionForbidden'
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':
@@ -3486,6 +3492,12 @@ paths:
           $ref: '#/components/responses/SimulatorActionForbidden'
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':
@@ -3670,7 +3682,7 @@ components:
           schema:
             $ref: '#/components/schemas/SimulatorActionError'
     SimulatorActionConflict:
-      description: Run is terminal, or the action conflicts with current state (flat envelope)
+      description: Run is terminal, the action conflicts with current state, or the run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
       content:
         application/json:
           schema:
@@ -7030,7 +7042,7 @@ components:
       properties:
         scenario:
           type: object
-          description: Scenario JSON payload (validated separately via scenario schema)
+          description: "Scenario JSON payload (validated separately via scenario schema). Its `scenario_id` is used as given, without trimming, and must match `^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$` and not name an already registered scenario; otherwise 400."
           additionalProperties: true
       additionalProperties: false
 
@@ -7507,6 +7519,7 @@ components:
         artifact_path:
           type: string
           nullable: true
+          description: The run's artifacts directory relative to the simulator's local state root (`.local-run/simulator/`), POSIX form; never an absolute server path.
         items:
           type: array
           items:
