@@ -354,3 +354,65 @@ async def test_interact_seeding_of_a_real_participant_is_409_with_code_pid_and_r
     assert run._real_seeded is False
     found = await db_session.scalar(select(Participant.id).where(Participant.pid == newcomer))
     assert found is None
+
+
+def _canon_409_schema_ref(document: dict, path: str) -> str | None:
+    """The schema `$ref` the document declares for `GET <path>` 409, following a response `$ref`."""
+    operation = (document.get("paths") or {}).get(path, {}).get("get") or {}
+    response = (operation.get("responses") or {}).get("409")
+    if response is None:
+        return None
+    if "$ref" in response:
+        name = response["$ref"].rsplit("/", 1)[-1]
+        response = document["components"]["responses"][name]
+    return response["content"]["application/json"]["schema"].get("$ref")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "canon_path"),
+    [
+        ("actions/trustlines-list", "/simulator/runs/{run_id}/actions/trustlines-list"),
+        ("payment-targets", "/simulator/runs/{run_id}/payment-targets"),
+    ],
+)
+async def test_read_actions_that_seed_answer_the_declared_409(
+    client, db_session, monkeypatch, route: str, canon_path: str
+) -> None:
+    """Fix-delta F1: the two read actions reach the seeding refusal too, and must declare it."""
+    from pathlib import Path
+
+    import yaml
+
+    import app.api.v1.simulator as simulator_module
+    from app.main import app as fastapi_app
+
+    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    real = _real_row()
+    db_session.add(real)
+    await db_session.commit()
+    n = _tag()
+    eq_code = f"P24R{n}"
+    scenario = _scenario(eq_code, [real.pid, f"p024_new_{n}"], [(real.pid, f"p024_new_{n}")])
+    run = SimpleNamespace(
+        run_id="p024-read", scenario_id="p024-read", mode="real", state="paused", owner_id="",
+        _scenario_raw=scenario, _real_seeded=False, _real_seeding_lock=None,
+    )
+    monkeypatch.setattr(simulator_module.runtime, "get_run", lambda run_id: run)
+
+    response = await client.get(
+        f"/api/v1/simulator/runs/p024-read/{route}",
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        params={"equivalent": eq_code, "from_pid": real.pid},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == PID_TAKEN
+    canon = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "api" / "openapi.yaml").read_text(encoding="utf-8")
+    )
+    assert _canon_409_schema_ref(canon, canon_path) == "#/components/schemas/SimulatorActionError"
+    generated = fastapi_app.openapi()
+    assert _canon_409_schema_ref(generated, "/api/v1" + canon_path) == (
+        "#/components/schemas/SimulatorActionError"
+    )

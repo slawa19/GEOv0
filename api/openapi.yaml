@@ -3424,6 +3424,12 @@ paths:
           $ref: '#/components/responses/SimulatorActionForbidden'
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':
@@ -3486,6 +3492,12 @@ paths:
           $ref: '#/components/responses/SimulatorActionForbidden'
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
+        '409':
+          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':
@@ -3670,7 +3682,7 @@ components:
           schema:
             $ref: '#/components/schemas/SimulatorActionError'
     SimulatorActionConflict:
-      description: Run is terminal, or the action conflicts with current state (flat envelope)
+      description: Run is terminal, the action conflicts with current state, or the run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
       content:
         application/json:
           schema:
