@@ -2289,7 +2289,17 @@ async def payment_targets(
         return err
     assert eq is not None
 
-    from_p, err = await _resolve_participant_or_error(session=db, pid=from_pid, field="from_pid")
+    # Programme 024 (external review P2): a read of the run, confined like its money path.
+    # `from_pid` is resolved within the run perimeter, and the router instance is narrowed to it
+    # with the payment service's own mechanism (`allowed_participant_pids` ->
+    # `_confine_router_to_perimeter`), so no target, hop or capacity outside the run - and no
+    # route THROUGH a participant outside it - is computed at all.
+    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+    if not perimeter_available:
+        return _perimeter_unavailable_error(run_id)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
     if err is not None:
         return err
     assert from_p is not None
@@ -2297,6 +2307,7 @@ async def payment_targets(
     # Build the capacity graph (edges included only if capacity > 0).
     router = PaymentRouter(db)
     await router.build_graph(eq.code)
+    PaymentService._confine_router_to_perimeter(router, scoped_pids)
 
     src = str(from_p.pid)
     if src not in (router.graph or {}):
