@@ -2182,6 +2182,10 @@ async def action_trustlines_list(
         pids_needed.add(from_pid)
         pids_needed.add(to_pid)
 
+    # Programme 024 (external review P2): only the run's participants are resolved against the
+    # database - the snapshot's nodes, which are the perimeter - so a link whose end lies outside
+    # it never reads a `Debt`, even if a snapshot were to carry one.
+    pids_needed &= set(pid_to_name)
     pid_to_id: dict[str, uuid.UUID] = {}
     if pids_needed:
         rows = (

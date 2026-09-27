@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
@@ -350,6 +351,9 @@ class SnapshotBuilder:
         return await self._enrich_snapshot_from_db(snap, equivalent=equivalent, session=session)
 
 
+_logger = logging.getLogger(__name__)
+
+
 def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> SimulatorGraphSnapshot:
     participants = raw.get("participants") or []
     trustlines = raw.get("trustlines") or []
@@ -382,6 +386,12 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
         )
 
     # Links (only those matching equivalent)
+    # Programme 024 (external review P2): an edge whose end is not one of the scenario's
+    # participants is not part of the run. The schema checks the ends only syntactically and the
+    # seeder already skips such an edge; keeping it here let `trustlines-list` read the debt of two
+    # real participants named only in it. Dropped at the source, for every reader of the links.
+    member_pids = {n.id for n in nodes}
+    orphans = 0
     links: list[SimulatorGraphLink] = []
     for tl in trustlines:
         tl_eq = effective_equivalent(scenario=raw, payload=(tl or {}))
@@ -390,6 +400,9 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
         src = str(tl.get("from") or "")
         dst = str(tl.get("to") or "")
         if not src or not dst:
+            continue
+        if src not in member_pids or dst not in member_pids:
+            orphans += 1
             continue
         limit = tl.get("limit")
         links.append(
@@ -403,6 +416,14 @@ def scenario_to_snapshot(raw: dict[str, Any], *, equivalent: str, utc_now) -> Si
                 viz_width_key="thin",
                 viz_alpha_key="active",
             )
+        )
+
+    if orphans:
+        _logger.warning(
+            "simulator.snapshot.orphan_edges_dropped scenario_id=%s equivalent=%s count=%d",
+            str(raw.get("scenario_id") or ""),
+            eq_norm,
+            orphans,
         )
 
     # links_count
