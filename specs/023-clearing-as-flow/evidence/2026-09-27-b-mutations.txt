@@ -1,0 +1,38 @@
+# 023 slice (b), step 3: mutations of the v2 surface, each run and then restored (git checkout of the file).
+# Tree: claude/023-b at 1687efb (implementation). One exact-text replacement per run.
+# Command per mutation: scripts/verify_local.ps1 -TaskSlug p023b -BackendOnly
+#   -BackendSelector tests/unit/test_p023_b_clearing_intent_v2_rule.py,tests/integration/test_p023_b_occurrence_execution_postgres.py
+#   with PYTEST_ADDOPTS='--tb=line -rf -p no:cacheprovider' (a DEBUG view of the failure lines).
+# Unmutated control on the same selectors: 53 passed, 0 failed.
+
+## m1_accept_c_above_p
+# reconciliation._clearing_v2: requirement (3) disabled ('if False:' instead of the c > p_e check)
+tests/unit/test_p023_b_clearing_intent_v2_rule.py:202: AssertionError: assert 'clearing_v2_amount_exceeds_an_edge' in set()
+FAILED tests/unit/test_p023_b_clearing_intent_v2_rule.py::test_v2_amount_above_an_edge_is_a_finding
+1 failed, 52 passed in 10.50s
+
+## m2_id_without_plan
+# ClearingOccurrence.occurrence_id: uuid5(ns, 'equivalent:ordinal') - the plan UUID dropped
+tests/unit/test_p023_b_clearing_intent_v2_rule.py:123: AssertionError: assert [{'kind': 'b_..._descriptor'}] == []
+tests/unit/test_p023_b_clearing_intent_v2_rule.py:132: AssertionError: assert [{'kind': 'b_..._descriptor'}] == []
+tests/unit/test_p023_b_clearing_intent_v2_rule.py:292: AssertionError: assert '5799686d-fe1c-5447-ae47-ff5fbb5b404f' != '5799686d-fe1c-5447-ae47-ff5fbb5b404f'
+app/core/clearing/service.py:453: app.core.clearing.service.ClearingOccurrenceRefused: Clearing occurrence refused: occurrence_descriptor_mismatch
+tests/integration/test_p023_b_occurrence_execution_postgres.py:196: AssertionError: assert 'FAILED' == 'PASSED'
+tests/integration/test_p023_b_occurrence_execution_postgres.py:238: AssertionError: ({'kind': 'b_intent_malformed', 'operation_id': 'a01beaa8-ef7c-426f-88fd-f92405b5fd50', 'operation_kind': 'CLEARING', ...'debtor_id': '8d86f1b4-ce4b-47ea-9814-d6578811b4c0', 'expected_delta': '-2.00000000', 'kind': 'b_delta_mismatch', ...})
+app/core/clearing/service.py:453: app.core.clearing.service.ClearingOccurrenceRefused: Clearing occurrence refused: occurrence_descriptor_mismatch
+FAILED tests/unit/test_p023_b_clearing_intent_v2_rule.py::test_v2_an_honest_partial_occurrence_has_no_finding
+FAILED tests/unit/test_p023_b_clearing_intent_v2_rule.py::test_v2_an_occurrence_that_exhausts_one_edge_deletes_it_exactly_at_zero
+FAILED tests/unit/test_p023_b_clearing_intent_v2_rule.py::test_v2_the_occurrence_id_is_plan_equivalent_and_ordinal_and_nothing_else
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_r023_4b_two_plans_commit_two_equal_partials_on_the_same_surviving_debts
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_v2_an_exact_occurrence_deletes_at_zero_and_is_recomputed_passed
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_v2_a_coordinated_under_clear_of_a_v2_occurrence_is_failed_by_b
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_v2_a_stale_plan_whose_edge_fell_below_c_is_skipped_without_effect
+7 failed, 46 passed in 10.20s
+
+## m3_replay_without_descriptor
+# _read_committed_execution_amount: the descriptor comparison on replay disabled
+tests/integration/test_p023_b_occurrence_execution_postgres.py:179: Failed: DID NOT RAISE <class 'app.core.clearing.service.ClearingOccurrenceRefused'>
+tests/integration/test_p023_b_occurrence_execution_postgres.py:179: Failed: DID NOT RAISE <class 'app.core.clearing.service.ClearingOccurrenceRefused'>
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_r023_4b_control_a_changed_descriptor_for_the_same_occurrence_is_refused[amount]
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_r023_4b_control_a_changed_descriptor_for_the_same_occurrence_is_refused[debt_order]
+2 failed, 51 passed in 11.69s
