@@ -14,7 +14,42 @@ from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
+from app.utils.exceptions import ConflictException
 from app.utils.validation import is_storable_money, validate_equivalent_code
+
+
+# Programme 024, F-024-4b (SIM-02). A run acts for its participants without signatures (the
+# seeder's trustlines, the tick's and Interact Mode's `create_payment_internal`), so it may take
+# over an EXISTING participant only if the simulator itself would have created that row: its
+# `public_key` is the simulator's pseudo key `sha256(pid)`. Such a row is left over from an earlier
+# run of the same scenario, and adopting it keeps "run the scenario again" working. Any other key
+# belongs to a real participant, and the run is refused instead of acting in its name.
+SIMULATOR_PID_TAKEN = "SIMULATOR_PID_TAKEN"
+
+
+def simulated_public_key(pid: str) -> str:
+    """The pseudo public key the simulator gives a participant it creates. The one owner of the rule."""
+
+    return hashlib.sha256(pid.encode("utf-8")).hexdigest()
+
+
+class SimulatorPidTakenError(ConflictException):
+    """A scenario names a pid that exists and was not created by the simulator."""
+
+    def __init__(self, pid: str) -> None:
+        super().__init__(
+            f"{SIMULATOR_PID_TAKEN}: participant {pid!r} exists and was not created by the "
+            "simulator; a run cannot act for it",
+            details={"code": SIMULATOR_PID_TAKEN, "pid": pid},
+        )
+        self.pid = pid
+
+
+def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
+    """Refuse (fail closed) when an existing participant is not one the simulator created."""
+
+    if public_key != simulated_public_key(pid):
+        raise SimulatorPidTakenError(pid)
 
 
 class RealScenarioSeeder:
@@ -47,6 +82,22 @@ class RealScenarioSeeder:
         return out
 
     async def seed_scenario_into_db(self, *, session: Any, scenario: dict[str, Any]) -> None:
+        # Perimeter first (F-024-4b): refuse before anything of this scenario is staged, so a
+        # refusal leaves no equivalent, participant or trustline behind on any caller's session.
+        scenario_pids = sorted(
+            {str(p.get("id") or "").strip() for p in (scenario.get("participants") or [])} - {""}
+        )
+        if scenario_pids:
+            taken = (
+                await session.execute(
+                    select(Participant.pid, Participant.public_key).where(
+                        Participant.pid.in_(scenario_pids)
+                    )
+                )
+            ).all()
+            for pid, public_key in sorted(taken):
+                require_simulated_participant(pid=pid, public_key=public_key)
+
         # Equivalents
         # Scenarios may omit the top-level 'equivalents' list (schema doesn't require it).
         # Derive equivalent codes from:
@@ -118,7 +169,7 @@ class RealScenarioSeeder:
                     status = "deleted"
                 elif status not in {"active", "suspended", "left", "deleted"}:
                     status = "active"
-                public_key = hashlib.sha256(pid.encode("utf-8")).hexdigest()
+                public_key = simulated_public_key(pid)
                 session.add(
                     Participant(
                         pid=pid,

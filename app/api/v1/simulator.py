@@ -33,7 +33,7 @@ from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
-from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, SimulatorPidTakenError
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription
 from app.core.simulator.sse_broadcast import (
@@ -597,6 +597,29 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                 "interact.ensure_seeded: seeded scenario for run_id=%s scenario_id=%s",
                 run_id,
                 run.scenario_id,
+            )
+        except SimulatorPidTakenError as exc:
+            # Programme 024, F-024-4b: the scenario names a real participant. Not transient, so
+            # not SEEDING_FAILED/503 ("retry"): 409 with the code, the pid and the request id.
+            from app.utils.request_id import request_id_var
+
+            request_id = request_id_var.get()
+            logger.warning(
+                "interact.ensure_seeded: refused code=%s run_id=%s pid=%s request_id=%s",
+                exc.details["code"],
+                run_id,
+                exc.pid,
+                request_id,
+            )
+            return _action_error(
+                status_code=409,
+                code=str(exc.details["code"]),
+                message=exc.message,
+                details={
+                    "run_id": str(run_id),
+                    "pid": exc.pid,
+                    "request_id": request_id,
+                },
             )
         except Exception:
             logger.error(
