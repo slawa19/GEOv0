@@ -590,8 +590,19 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                 )
 
         try:
-            await _real_scenario_seeder.seed_scenario_into_db(session=session, scenario=scenario)
-            await session.commit()
+            try:
+                await _real_scenario_seeder.seed_scenario_into_db(session=session, scenario=scenario)
+                await session.commit()
+            except SimulatorPidTakenError:
+                # The 024 perimeter refuses before the seeder stages anything (`seed_scenario_into_db`
+                # checks every scenario pid first), so there is nothing of the seeding to roll back.
+                raise
+            except Exception:
+                # Programme 021 (T2100 P2-4): this handler owns the seeding transaction, so it rolls back
+                # what the seeding staged BEFORE it translates the failure into a response - the session is
+                # the request's, and nothing staged here may reach a later commit on it.
+                await session.rollback()
+                raise
             run._real_seeded = True
             logger.debug(
                 "interact.ensure_seeded: seeded scenario for run_id=%s scenario_id=%s",

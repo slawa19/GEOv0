@@ -9,11 +9,11 @@ from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.trustline import TrustLine
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
+from app.core.trustlines.service import InitialTrustLine, TrustLineService
 from app.utils.exceptions import ConflictException
 from app.utils.validation import is_storable_money, validate_equivalent_code
 
@@ -220,6 +220,7 @@ class RealScenarioSeeder:
             )
             p_by_pid = {p.pid: p for p in p_rows}
 
+            initial: list[InitialTrustLine] = []
             for tl in trustlines:
                 eq = str(effective_equivalent(scenario, tl) or "").strip().upper()
                 if not eq or eq not in eq_by_code:
@@ -249,22 +250,6 @@ class RealScenarioSeeder:
                 if not is_storable_money(limit):
                     continue
 
-                # Only a LIVE row occupies the triple: since migration 019 a closed
-                # incarnation may coexist with it, so an unfiltered lookup can return
-                # several rows and raise MultipleResultsFound.
-                existing = (
-                    await session.execute(
-                        select(TrustLine).where(
-                            TrustLine.from_participant_id == p_from.id,
-                            TrustLine.to_participant_id == p_to.id,
-                            TrustLine.equivalent_id == eq_by_code[eq].id,
-                            TrustLine.status != "closed",
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing is not None:
-                    continue
-
                 status = str(tl.get("status") or "active").strip().lower()
                 if status not in {"active", "frozen", "closed"}:
                     status = "active"
@@ -273,13 +258,23 @@ class RealScenarioSeeder:
                 if not isinstance(policy, dict):
                     policy = default_policy
 
-                session.add(
-                    TrustLine(
-                        from_participant_id=p_from.id,
-                        to_participant_id=p_to.id,
-                        equivalent_id=eq_by_code[eq].id,
+                initial.append(
+                    InitialTrustLine(
+                        from_participant=p_from,
+                        to_participant=p_to,
+                        equivalent=eq_by_code[eq],
                         limit=limit,
                         status=status,
                         policy=policy,
                     )
                 )
+
+            # Programme 021, stage 1: the lines go through `TrustLineService`'s narrow import of an initial
+            # state - one audit row per imported line, one checkpoint pair per touched equivalent for this
+            # whole seeding transaction. The import skips a line whose triple already has a LIVE row (only a
+            # live row occupies the triple since migration 019), exactly as the per-line lookup here did.
+            # `finish()` flushes and audits; the CALLER commits, and on any failure rolls back.
+            service = TrustLineService(session)
+            batch = service.begin_internal_batch()
+            await service.import_initial_trustlines(batch, initial)
+            await batch.finish()

@@ -651,7 +651,7 @@ async def main_async(args) -> dict:
             template = empty if workload == "seed" else seeded
             samples: list[dict] = []
             for i in range(total):
-                name = checked_bench_name(f"geov0_bench_p021s1_sample")
+                name = checked_bench_name("geov0_bench_p021s1_sample")
                 await create_db(name, template=template)
                 try:
                     checkpoints.reset()

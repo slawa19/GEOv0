@@ -35,7 +35,6 @@ from tests.p021_support import (
     TrustLineCheckpoints,
     is_transaction_scoped,
     require_target,
-    target_xfail_021,
     trust_line_audit_rows,
 )
 
@@ -151,7 +150,6 @@ async def test_repeated_seeding_imports_only_the_closed_line_again(db_session) -
     assert await _lines(db_session, w) == expected
 
 
-@target_xfail_021("T2102", "the seeder writes no audit row and computes no checkpoint (real_scenario_seeder.py:276)")
 @pytest.mark.asyncio
 async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session, monkeypatch) -> None:
     w = _world()

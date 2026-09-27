@@ -1,7 +1,9 @@
+import uuid as _uuid
+from dataclasses import dataclass
 from uuid import UUID
 from decimal import Decimal
-from typing import List, Literal
-from sqlalchemy import func, select, and_, or_
+from typing import List, Literal, Sequence
+from sqlalchemy import event, func, select, and_, or_, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.utils.exceptions import (
@@ -22,6 +24,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import (
+    is_storable_money,
     parse_money_amount,
     validate_equivalent_code,
     validate_trustline_policy,
@@ -105,12 +108,267 @@ def _matches_live_triple(text: str) -> bool:
     )
 
 
+#: Where the internal trust-line path writes the checkpoint scope of an audit row (programme 021, stage 1).
+#: `affected_participants` is the audit row's open metadata object (`api/openapi.yaml`,
+#: `IntegrityAuditLogAffectedParticipants`, `additionalProperties: true`).
+CHECKPOINT_SCOPE_KEY = "checkpoint_scope"
+CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
+
+#: The statuses a scenario may give a trust line it imports (`TrustLine.status`).
+INITIAL_STATUSES = frozenset({"active", "frozen", "closed"})
+
+
+class TrustLineWriteBatch:
+    """The trust-line writes of ONE caller transaction: checkpoints per equivalent, audit rows per operation.
+
+    Programme 021, stage 1 (spec, "Решения" item 9; `T2100`, `CHECKPOINT-GRANULARITY: PER-CALLER-TRANSACTION`).
+    Each touched equivalent gets exactly ONE before/after pair of integrity checkpoints for the whole batch: the
+    before-checkpoint when the first mutation of that equivalent is about to be staged, the after-checkpoint in
+    `finish()`, after every mutation is flushed and before the caller commits. Every applied operation still gets
+    its own `IntegrityAuditLog` row, carrying the pair of its equivalent.
+
+    WHAT THIS GIVES UP, deliberately: attribution of intermediate states. When one batch holds several operations
+    of one equivalent, the rows share the transaction's checksums, and no row says which operation produced which
+    intermediate state. A batch of an internal caller therefore labels its rows
+    (`affected_participants.checkpoint_scope = "caller_transaction"`). A public operation is a batch of one, whose
+    pair is its own; its rows keep their historical shape.
+
+    NOT A TRANSACTION OWNER. It never commits, rolls back or retries. The caller commits after `finish()`, and on
+    any failure - a refusal, a checkpoint the checker could not compute, an audit row that did not flush - the
+    caller rolls its transaction back BEFORE it continues or translates the error (spec, item 7). What the
+    checkpoint FINDS is recorded, not raised: a detected invariant violation lands in the rows'
+    `verification_passed`/`error_details`, exactly as `compute_integrity_checkpoint_for_equivalent` reports it
+    (`app/core/integrity.py:92-119`), while a checker that fails raises through `finish()`.
+
+    A DETECTOR FOR A FORGOTTEN `finish()`. A batch that has applied operations arms a `before_commit` listener on
+    its session: committing such a batch without `finish()` raises instead of making mutations durable without
+    their audit rows. A real rollback of the session disarms it. This detects a mistake of an in-process caller;
+    it is not a barrier against code that wants to bypass it.
+    """
+
+    def __init__(self, session: AsyncSession, *, transaction_scoped: bool) -> None:
+        self.session = session
+        self._transaction_scoped = transaction_scoped
+        self._before: dict[UUID, object] = {}
+        self._codes: dict[UUID, str] = {}
+        self._operations: list[tuple[str, UUID, dict]] = []
+        self._finished = False
+        self._discarded = False
+        self._armed = False
+
+    @property
+    def applied_operations(self) -> int:
+        return len(self._operations)
+
+    @property
+    def touched_equivalent_ids(self) -> list[UUID]:
+        return sorted({eq_id for _op, eq_id, _a in self._operations}, key=str)
+
+    async def _touch(self, equivalent_id: UUID, equivalent_code: str) -> None:
+        """Before the first mutation of `equivalent_id` in this batch: its before-checkpoint."""
+
+        if self._finished:
+            raise RuntimeError("TrustLineWriteBatch: already finished; open a new batch for new writes")
+        if equivalent_id not in self._before:
+            self._before[equivalent_id] = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=equivalent_id,
+            )
+            self._codes[equivalent_id] = equivalent_code
+
+    def _record(self, operation_type: str, equivalent_id: UUID, affected: dict) -> None:
+        if equivalent_id not in self._before:
+            raise RuntimeError("TrustLineWriteBatch: an operation was recorded before its equivalent was touched")
+        self._operations.append((operation_type, equivalent_id, affected))
+        if not self._armed:
+            self._armed = True
+            event.listen(self.session.sync_session, "before_commit", self._refuse_unfinished)
+            event.listen(self.session.sync_session, "after_soft_rollback", self._on_rollback)
+
+    def _refuse_unfinished(self, _session) -> None:
+        if self._operations and not self._finished and not self._discarded:
+            raise RuntimeError(
+                "TrustLineWriteBatch: a commit would make trust-line mutations durable without their "
+                "checkpoints and audit rows; call finish() first"
+            )
+
+    def _on_rollback(self, _session, previous_transaction) -> None:
+        # A rollback of the session's own transaction discards what this batch staged; a savepoint rolled
+        # back inside it does not, so the detector stays armed for that one.
+        if not getattr(previous_transaction, "nested", False):
+            self._discarded = True
+
+    async def finish(self) -> None:
+        """Flush, compute the after-checkpoint of each touched equivalent once, stage the audit rows, flush."""
+
+        if self._finished:
+            raise RuntimeError("TrustLineWriteBatch: finish() called twice")
+        if self._discarded:
+            raise RuntimeError("TrustLineWriteBatch: its transaction was rolled back; nothing to finish")
+        self._finished = True
+        if not self._operations:
+            return
+
+        await self.session.flush()
+        for equivalent_id in self.touched_equivalent_ids:
+            checkpoint_before = self._before[equivalent_id]
+            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
+                self.session,
+                equivalent_id=equivalent_id,
+            )
+            invariants_status = checkpoint_after.invariants_status or {}
+            passed = bool(invariants_status.get("passed", False))
+            before_sum = checkpoint_before.checksum if checkpoint_before else ""
+            after_sum = checkpoint_after.checksum or before_sum
+            for operation_type, eq_id, affected in self._operations:
+                if eq_id != equivalent_id:
+                    continue
+                affected = dict(affected)
+                if self._transaction_scoped:
+                    affected[CHECKPOINT_SCOPE_KEY] = CHECKPOINT_SCOPE_CALLER_TRANSACTION
+                self.session.add(
+                    IntegrityAuditLog(
+                        operation_type=operation_type,
+                        tx_id=None,
+                        equivalent_code=self._codes[equivalent_id],
+                        state_checksum_before=before_sum,
+                        state_checksum_after=after_sum,
+                        affected_participants=affected,
+                        invariants_checked=invariants_status.get("checks") or invariants_status,
+                        verification_passed=passed,
+                        error_details=None if passed else invariants_status,
+                    )
+                )
+        await self.session.flush()
+
+
+@dataclass(frozen=True)
+class InitialTrustLine:
+    """One trust line of a scenario's INITIAL STATE, as the simulator's seeder imports it."""
+
+    from_participant: Participant
+    to_participant: Participant
+    equivalent: Equivalent
+    limit: Decimal
+    status: str
+    policy: dict
+
+
 class TrustLineService:
+    """Trust-line operations: one implementation of validation, mutation and audit.
+
+    TWO ENTRANCES (programme 021, stage 1; spec "Решения" item 4, `T2100` item 2):
+
+    * the PUBLIC operations `create`/`update`/`close` - one operation per transaction, the participant's Ed25519
+      signature ALWAYS required, the service commits and answers;
+    * the INTERNAL execution `execute_create`/`execute_update`/`execute_close` - runs inside the CALLER's
+      transaction on a `TrustLineWriteBatch`, never commits, retries, publishes SSE or applies in-memory
+      effects. Its `require_signature` is keyword-only with no default. Only NAMED trusted in-process callers of
+      the simulator pass `False`; the parameter is an internal calling convention, never part of a request schema
+      and never derived from a request (guarded by
+      `tests/unit/test_p021_unsigned_trust_line_path_is_never_request_controlled.py`).
+
+    What unsigned execution gives up is exactly proof of key possession and binding the request to a signature.
+    Everything else holds on both entrances: owner matching, the money door (`parse_money_amount`), live-line
+    uniqueness, the debt floor of an update, the debt check of a close, status rules, audit and checkpoints.
+
+    `import_initial_trustlines` is a THIRD, narrower operation: the simulator seeder's import of a scenario's
+    initial state, statuses `active`/`frozen`/`closed` included. It is not a participant's operation, carries no
+    signature at all, and no request reaches it.
+    """
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    def begin_internal_batch(self) -> TrustLineWriteBatch:
+        """A batch for a trusted internal caller: its audit rows are labelled transaction-scoped."""
+
+        return TrustLineWriteBatch(self.session, transaction_scoped=True)
+
+    # ------------------------------------------------------------------ public operations (always signed)
+
     async def create(self, from_participant_id: UUID, data: TrustLineCreateRequest) -> TrustLine:
-        if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+        batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
+        trustline = await self.execute_create(batch, from_participant_id, data, require_signature=True)
+        await batch.finish()
+        # `execute_create` found the equivalent BY this code, so it is the row's code.
+        equivalent_code = data.equivalent
+
+        # The uniqueness conflict can surface HERE rather than at the flush above: a
+        # competing transaction that has not committed yet does not block the INSERT, and
+        # PostgreSQL raises only when the winner commits.  Both points must therefore map
+        # to the same declared conflict.
+        # 2026-08-22 / p009_t905 (`F-009-6`).  Everything the response needs is read and
+        # materialised INSIDE the uncommitted transaction, and after the commit this path
+        # performs no mandatory database read.  Before, the readback happened after the
+        # commit, so a failure there reported a mutation that had already happened as
+        # failed -- and the retry it invites is not idempotent.  `RT-009-5` shows the
+        # failure is reachable, not theoretical.  With the readback moved before the
+        # commit, the same failure now happens while the transaction is still open and
+        # honestly undoes the mutation instead of misreporting it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
+
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            await self.session.rollback()
+            if not _is_live_trustline_uniqueness_violation(exc):
+                raise
+            raise ConflictException(
+                "Active trustline already exists",
+                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+            ) from exc
+
+        # In-memory only; `expire_on_commit=False` (`app/db/session.py:78`) keeps the
+        # hydrated attributes valid, so serialising the response touches no connection.
+        PaymentRouter.invalidate_cache(equivalent_code)
+        return response
+
+    async def update(self, trustline_id: UUID, user_id: UUID, data: TrustLineUpdateRequest) -> TrustLine:
+        batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
+        trustline = await self.execute_update(batch, trustline_id, user_id, data, require_signature=True)
+        await batch.finish()
+
+        equivalent_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
+            )
+        ).scalar_one()
+        # See the note in `create`: readback before commit, no mandatory read after it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
+
+        await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent_code)
+        return response
+
+    async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> None:
+        batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
+        trustline = await self.execute_close(batch, trustline_id, user_id, data, require_signature=True)
+        await batch.finish()
+
+        equivalent_code = (
+            await self.session.execute(
+                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
+            )
+        ).scalar_one()
+        await self.session.commit()
+        PaymentRouter.invalidate_cache(equivalent_code)
+
+    # ------------------------------------------------------------------ execution in the caller's transaction
+
+    async def execute_create(
+        self,
+        batch: TrustLineWriteBatch,
+        from_participant_id: UUID,
+        data: TrustLineCreateRequest,
+        *,
+        require_signature: bool,
+    ) -> TrustLine:
+        """Stage a new ACTIVE trust line in the caller's transaction and record it on `batch`."""
+
+        if require_signature and (not isinstance(getattr(data, "signature", None), str) or not data.signature):
             raise InvalidSignatureException("Missing signature")
 
         from_participant = await self.session.get(Participant, from_participant_id)
@@ -132,30 +390,31 @@ class TrustLineService:
         # is the schema's former `ge=0`, now behind the door with the other money rules.
         limit = parse_money_amount(data.limit, field="limit", require_non_negative=True)
 
-        # Signature validation (proof-of-possession + binding of request fields).  `limit` is
-        # the client's string verbatim -- see the door note above.
-        signed_payload: dict = {
-            "to": data.to,
-            "equivalent": data.equivalent,
-            "limit": data.limit,
-        }
-        if data.policy is not None:
-            signed_payload["policy"] = data.policy
+        if require_signature:
+            # Signature validation (proof-of-possession + binding of request fields).  `limit` is
+            # the client's string verbatim -- see the door note above.
+            signed_payload: dict = {
+                "to": data.to,
+                "equivalent": data.equivalent,
+                "limit": data.limit,
+            }
+            if data.policy is not None:
+                signed_payload["policy"] = data.policy
 
-        # `canonical_json` OUTSIDE the try (the `POST /payments` shape, T1210-bis finding B).
-        # It refuses floats by design, and `policy` may legitimately carry one: the canon
-        # declares `max_hop_usage`/`daily_limit` as `oneOf` string|number, so a JSON number
-        # with a fraction arrives here as `float`.  Inside the try that refusal was relabelled
-        # "Invalid signature" - a client whose policy the canon blesses got a 401 it could not
-        # act on, for a request whose signature was never even checked.  Outside, it surfaces
-        # as the honest 400 naming the float.  (That such a policy is UNSIGNABLE at all - the
-        # canon admits a number the canonical form cannot carry - is a recorded contract fork,
-        # not this call site's to settle.)
-        message = canonical_json(signed_payload)
-        try:
-            verify_signature(from_participant.public_key, message, data.signature)
-        except Exception:
-            raise InvalidSignatureException("Invalid signature")
+            # `canonical_json` OUTSIDE the try (the `POST /payments` shape, T1210-bis finding B).
+            # It refuses floats by design, and `policy` may legitimately carry one: the canon
+            # declares `max_hop_usage`/`daily_limit` as `oneOf` string|number, so a JSON number
+            # with a fraction arrives here as `float`.  Inside the try that refusal was relabelled
+            # "Invalid signature" - a client whose policy the canon blesses got a 401 it could not
+            # act on, for a request whose signature was never even checked.  Outside, it surfaces
+            # as the honest 400 naming the float.  (That such a policy is UNSIGNABLE at all - the
+            # canon admits a number the canonical form cannot carry - is a recorded contract fork,
+            # not this call site's to settle.)
+            message = canonical_json(signed_payload)
+            try:
+                verify_signature(from_participant.public_key, message, data.signature)
+            except Exception:
+                raise InvalidSignatureException("Invalid signature")
 
         validate_equivalent_code(data.equivalent)
         if data.policy is not None:
@@ -179,11 +438,6 @@ class TrustLineService:
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
-        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-            self.session,
-            equivalent_id=equivalent.id,
-        )
-
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
         # (docs/ru/02-protocol-spec.md:333) — and, since migration
@@ -205,6 +459,8 @@ class TrustLineService:
         existing_trustline = result.scalar_one_or_none()
         if existing_trustline:
             raise ConflictException("Active trustline already exists")
+
+        await batch._touch(equivalent.id, equivalent.code)
 
         # Create TrustLine
         trustline = TrustLine(
@@ -241,64 +497,24 @@ class TrustLineService:
                 details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
             ) from exc
 
-        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-            self.session,
-            equivalent_id=equivalent.id,
+        batch._record(
+            "TRUST_LINE_CREATE",
+            equivalent.id,
+            {"from": from_participant.pid, "to": to_participant.pid},
         )
-        invariants_status = checkpoint_after.invariants_status or {}
-        passed = bool(invariants_status.get("passed", False))
-        before_sum = checkpoint_before.checksum if checkpoint_before else ""
-        after_sum = checkpoint_after.checksum or before_sum
+        return trustline
 
-        self.session.add(
-            IntegrityAuditLog(
-                operation_type="TRUST_LINE_CREATE",
-                tx_id=None,
-                equivalent_code=equivalent.code,
-                state_checksum_before=before_sum,
-                state_checksum_after=after_sum,
-                affected_participants={
-                    "from": from_participant.pid,
-                    "to": to_participant.pid,
-                },
-                invariants_checked=invariants_status.get("checks") or invariants_status,
-                verification_passed=passed,
-                error_details=None if passed else invariants_status,
-            )
-        )
+    async def execute_update(
+        self,
+        batch: TrustLineWriteBatch,
+        trustline_id: UUID,
+        user_id: UUID,
+        data: TrustLineUpdateRequest,
+        *,
+        require_signature: bool,
+    ) -> TrustLine:
+        """Change a live line's limit and/or policy in the caller's transaction and record it on `batch`."""
 
-        # The uniqueness conflict can surface HERE rather than at the flush above: a
-        # competing transaction that has not committed yet does not block the INSERT, and
-        # PostgreSQL raises only when the winner commits.  Both points must therefore map
-        # to the same declared conflict.
-        # 2026-08-22 / p009_t905 (`F-009-6`).  Everything the response needs is read and
-        # materialised INSIDE the uncommitted transaction, and after the commit this path
-        # performs no mandatory database read.  Before, the readback happened after the
-        # commit, so a failure there reported a mutation that had already happened as
-        # failed -- and the retry it invites is not idempotent.  `RT-009-5` shows the
-        # failure is reachable, not theoretical.  With the readback moved before the
-        # commit, the same failure now happens while the transaction is still open and
-        # honestly undoes the mutation instead of misreporting it.
-        await self.session.refresh(trustline)
-        response = await self._hydrate_trustline(trustline)
-
-        try:
-            await self.session.commit()
-        except IntegrityError as exc:
-            await self.session.rollback()
-            if not _is_live_trustline_uniqueness_violation(exc):
-                raise
-            raise ConflictException(
-                "Active trustline already exists",
-                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
-            ) from exc
-
-        # In-memory only; `expire_on_commit=False` (`app/db/session.py:78`) keeps the
-        # hydrated attributes valid, so serialising the response touches no connection.
-        PaymentRouter.invalidate_cache(equivalent.code)
-        return response
-
-    async def update(self, trustline_id: UUID, user_id: UUID, data: TrustLineUpdateRequest) -> TrustLine:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
@@ -320,12 +536,14 @@ class TrustLineService:
                 details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
             )
 
-        if not isinstance(getattr(data, "signature", None), str) or not data.signature:
-            raise InvalidSignatureException("Missing signature")
+        user = None
+        if require_signature:
+            if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+                raise InvalidSignatureException("Missing signature")
 
-        user = await self.session.get(Participant, user_id)
-        if not user:
-            raise NotFoundException("Sender not found")
+            user = await self.session.get(Participant, user_id)
+            if not user:
+                raise NotFoundException("Sender not found")
 
         # Same storage-capacity door as `create`, before the signature and before the write;
         # `data.limit` is the client's string and the signature covers it verbatim, so the
@@ -336,25 +554,23 @@ class TrustLineService:
                 data.limit, field="limit", require_non_negative=True
             )
 
-        signed_payload: dict = {"id": str(trustline_id)}
-        if data.limit is not None:
-            signed_payload["limit"] = data.limit
-        if data.policy is not None:
-            signed_payload["policy"] = data.policy
+        if require_signature:
+            signed_payload: dict = {"id": str(trustline_id)}
+            if data.limit is not None:
+                signed_payload["limit"] = data.limit
+            if data.policy is not None:
+                signed_payload["policy"] = data.policy
 
-        # Same hoist as `create`: `policy` can carry a canon-blessed float, and its refusal
-        # by `canonical_json` must not be relabelled as a signature failure.
-        message = canonical_json(signed_payload)
-        try:
-            verify_signature(user.public_key, message, data.signature)
-        except Exception:
-            raise InvalidSignatureException("Invalid signature")
+            # Same hoist as `create`: `policy` can carry a canon-blessed float, and its refusal
+            # by `canonical_json` must not be relabelled as a signature failure.
+            message = canonical_json(signed_payload)
+            try:
+                verify_signature(user.public_key, message, data.signature)
+            except Exception:
+                raise InvalidSignatureException("Invalid signature")
 
-        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-            self.session,
-            equivalent_id=trustline.equivalent_id,
-        )
-
+        # Every refusal BEFORE the first mutation and before the batch's checkpoint (same order of
+        # refusals as before 021: the debt floor, then the policy).
         if new_limit is not None:
             used = await self._get_used_amount(trustline)
             if new_limit < used:
@@ -362,82 +578,44 @@ class TrustLineService:
                     "Cannot reduce trustline limit below used amount",
                     details={"used": str(used), "limit": data.limit},
                 )
-            trustline.limit = new_limit
-        
         if data.policy is not None:
             validate_trustline_policy(data.policy)
+
+        equivalent_code = await self._equivalent_code(trustline.equivalent_id)
+        await batch._touch(trustline.equivalent_id, equivalent_code)
+
+        if new_limit is not None:
+            trustline.limit = new_limit
+        if data.policy is not None:
             # Merge or replace policy? Usually merge or replace. Assuming replace for now or merge top level.
             # Schema says optional dict. Let's update existing dict.
             current_policy = dict(trustline.policy) if trustline.policy else {}
             current_policy.update(data.policy)
             trustline.policy = current_policy
 
-        await self.session.flush()
-
-        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-            self.session,
-            equivalent_id=trustline.equivalent_id,
+        from_pid, to_pid = await self._pids(trustline)
+        batch._record(
+            "TRUST_LINE_UPDATE",
+            trustline.equivalent_id,
+            {
+                "from": str(from_pid or trustline.from_participant_id),
+                "to": str(to_pid or trustline.to_participant_id),
+                "trustline_id": str(trustline_id),
+            },
         )
-        invariants_status = checkpoint_after.invariants_status or {}
-        passed = bool(invariants_status.get("passed", False))
-        before_sum = checkpoint_before.checksum if checkpoint_before else ""
-        after_sum = checkpoint_after.checksum or before_sum
+        return trustline
 
-        # Resolve PIDs for readability.
-        from_pid = (
-            await self.session.execute(
-                select(Participant.pid).where(
-                    Participant.id == trustline.from_participant_id
-                )
-            )
-        ).scalar_one_or_none()
-        to_pid = (
-            await self.session.execute(
-                select(Participant.pid).where(
-                    Participant.id == trustline.to_participant_id
-                )
-            )
-        ).scalar_one_or_none()
-        eq_code = (
-            await self.session.execute(
-                select(Equivalent.code).where(
-                    Equivalent.id == trustline.equivalent_id
-                )
-            )
-        ).scalar_one_or_none()
+    async def execute_close(
+        self,
+        batch: TrustLineWriteBatch,
+        trustline_id: UUID,
+        user_id: UUID,
+        data: TrustLineCloseRequest,
+        *,
+        require_signature: bool,
+    ) -> TrustLine:
+        """Close a live line with no debt either way, in the caller's transaction, recorded on `batch`."""
 
-        self.session.add(
-            IntegrityAuditLog(
-                operation_type="TRUST_LINE_UPDATE",
-                tx_id=None,
-                equivalent_code=str(eq_code or trustline.equivalent_id),
-                state_checksum_before=before_sum,
-                state_checksum_after=after_sum,
-                affected_participants={
-                    "from": str(from_pid or trustline.from_participant_id),
-                    "to": str(to_pid or trustline.to_participant_id),
-                    "trustline_id": str(trustline_id),
-                },
-                invariants_checked=invariants_status.get("checks") or invariants_status,
-                verification_passed=passed,
-                error_details=None if passed else invariants_status,
-            )
-        )
-
-        equivalent_code = (
-            await self.session.execute(
-                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
-            )
-        ).scalar_one()
-        # See the note in `create`: readback before commit, no mandatory read after it.
-        await self.session.refresh(trustline)
-        response = await self._hydrate_trustline(trustline)
-
-        await self.session.commit()
-        PaymentRouter.invalidate_cache(equivalent_code)
-        return response
-
-    async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> None:
         stmt = select(TrustLine).where(TrustLine.id == trustline_id)
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
@@ -459,21 +637,22 @@ class TrustLineService:
                 details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
             )
 
-        if not isinstance(getattr(data, "signature", None), str) or not data.signature:
-            raise InvalidSignatureException("Missing signature")
+        if require_signature:
+            if not isinstance(getattr(data, "signature", None), str) or not data.signature:
+                raise InvalidSignatureException("Missing signature")
 
-        user = await self.session.get(Participant, user_id)
-        if not user:
-            raise NotFoundException("Sender not found")
+            user = await self.session.get(Participant, user_id)
+            if not user:
+                raise NotFoundException("Sender not found")
 
-        signed_payload: dict = {"id": str(trustline_id)}
-        # Hoisted like create/update; no float can occur in this payload, kept uniform so the
-        # next field added here does not resurrect the relabelling.
-        message = canonical_json(signed_payload)
-        try:
-            verify_signature(user.public_key, message, data.signature)
-        except Exception:
-            raise InvalidSignatureException("Invalid signature")
+            signed_payload: dict = {"id": str(trustline_id)}
+            # Hoisted like create/update; no float can occur in this payload, kept uniform so the
+            # next field added here does not resurrect the relabelling.
+            message = canonical_json(signed_payload)
+            try:
+                verify_signature(user.public_key, message, data.signature)
+            except Exception:
+                raise InvalidSignatureException("Invalid signature")
 
         # Check debt
         used = await self._get_used_amount(trustline)
@@ -481,24 +660,113 @@ class TrustLineService:
         if used > 0 or reverse_used > 0:
             raise BadRequestException("Cannot close trustline with non-zero debt")
 
-        checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-            self.session,
-            equivalent_id=trustline.equivalent_id,
-        )
+        equivalent_code = await self._equivalent_code(trustline.equivalent_id)
+        await batch._touch(trustline.equivalent_id, equivalent_code)
 
         trustline.status = 'closed'
 
-        await self.session.flush()
-
-        checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-            self.session,
-            equivalent_id=trustline.equivalent_id,
+        from_pid, to_pid = await self._pids(trustline)
+        batch._record(
+            "TRUST_LINE_CLOSE",
+            trustline.equivalent_id,
+            {
+                "from": str(from_pid or trustline.from_participant_id),
+                "to": str(to_pid or trustline.to_participant_id),
+                "trustline_id": str(trustline_id),
+            },
         )
-        invariants_status = checkpoint_after.invariants_status or {}
-        passed = bool(invariants_status.get("passed", False))
-        before_sum = checkpoint_before.checksum if checkpoint_before else ""
-        after_sum = checkpoint_after.checksum or before_sum
+        return trustline
 
+    async def import_initial_trustlines(
+        self,
+        batch: TrustLineWriteBatch,
+        lines: Sequence[InitialTrustLine],
+    ) -> list[TrustLine]:
+        """Import a scenario's INITIAL trust lines, statuses included, into the caller's transaction.
+
+        Programme 021, stage 1 (spec, "Решения" item 6; `T2100` P2-3). The simulator seeder's operation and no
+        one else's: not a participant's TRUST_LINE_CREATE, so no signature is involved and no signed history is
+        written - each row's audit entry says `initial_status` and belongs to the seeding transaction. The
+        semantics are the seeder's own, kept as they were before 021 (characterized by R-021-2):
+
+        * a line whose (from, to, equivalent) already has a LIVE row in the database is skipped. A `closed` row is
+          not live, so importing a `closed` line again adds another closed incarnation;
+        * lines of ONE call are not checked against each other: two live lines of one triple in one scenario
+          still fail at the flush on the live-uniqueness index, and the caller rolls the seeding back;
+        * the status is stored as given (`active`, `frozen` or `closed`), the policy as given.
+
+        The caller has already parsed the scenario and dropped what it cannot use (unknown participant or
+        equivalent, a limit that is not a storable non-negative amount); anything else reaching here is a
+        programming error and raises `ValueError`.
+        """
+
+        for line in lines:
+            if line.status not in INITIAL_STATUSES:
+                raise ValueError(f"initial trust-line status {line.status!r} is not one of {sorted(INITIAL_STATUSES)}")
+            if not isinstance(line.limit, Decimal) or line.limit < 0 or not is_storable_money(line.limit):
+                raise ValueError(f"initial trust-line limit {line.limit!r} is not a storable non-negative amount")
+            if not isinstance(line.policy, dict):
+                raise ValueError("initial trust-line policy must be an object")
+        if not lines:
+            return []
+
+        triples = {(ln.from_participant.id, ln.to_participant.id, ln.equivalent.id) for ln in lines}
+        live = set(
+            (
+                await self.session.execute(
+                    select(
+                        TrustLine.from_participant_id,
+                        TrustLine.to_participant_id,
+                        TrustLine.equivalent_id,
+                    ).where(
+                        tuple_(
+                            TrustLine.from_participant_id,
+                            TrustLine.to_participant_id,
+                            TrustLine.equivalent_id,
+                        ).in_(sorted(triples, key=lambda t: tuple(str(x) for x in t))),
+                        TrustLine.status != "closed",
+                    )
+                )
+            ).all()
+        )
+
+        imported: list[TrustLine] = []
+        for line in lines:
+            triple = (line.from_participant.id, line.to_participant.id, line.equivalent.id)
+            if triple in live:
+                continue
+            await batch._touch(line.equivalent.id, line.equivalent.code)
+            trustline = TrustLine(
+                id=_uuid.uuid4(),
+                from_participant_id=line.from_participant.id,
+                to_participant_id=line.to_participant.id,
+                equivalent_id=line.equivalent.id,
+                limit=line.limit,
+                status=line.status,
+                policy=line.policy,
+            )
+            self.session.add(trustline)
+            batch._record(
+                "TRUST_LINE_CREATE",
+                line.equivalent.id,
+                {
+                    "from": line.from_participant.pid,
+                    "to": line.to_participant.pid,
+                    "trustline_id": str(trustline.id),
+                    "initial_status": line.status,
+                },
+            )
+            imported.append(trustline)
+        return imported
+
+    async def _equivalent_code(self, equivalent_id: UUID) -> str:
+        code = (
+            await self.session.execute(select(Equivalent.code).where(Equivalent.id == equivalent_id))
+        ).scalar_one_or_none()
+        return str(code or equivalent_id)
+
+    async def _pids(self, trustline: TrustLine) -> tuple[str | None, str | None]:
+        # Resolve PIDs for readability.
         from_pid = (
             await self.session.execute(
                 select(Participant.pid).where(
@@ -513,39 +781,7 @@ class TrustLineService:
                 )
             )
         ).scalar_one_or_none()
-        eq_code = (
-            await self.session.execute(
-                select(Equivalent.code).where(
-                    Equivalent.id == trustline.equivalent_id
-                )
-            )
-        ).scalar_one_or_none()
-
-        self.session.add(
-            IntegrityAuditLog(
-                operation_type="TRUST_LINE_CLOSE",
-                tx_id=None,
-                equivalent_code=str(eq_code or trustline.equivalent_id),
-                state_checksum_before=before_sum,
-                state_checksum_after=after_sum,
-                affected_participants={
-                    "from": str(from_pid or trustline.from_participant_id),
-                    "to": str(to_pid or trustline.to_participant_id),
-                    "trustline_id": str(trustline_id),
-                },
-                invariants_checked=invariants_status.get("checks") or invariants_status,
-                verification_passed=passed,
-                error_details=None if passed else invariants_status,
-            )
-        )
-
-        equivalent_code = (
-            await self.session.execute(
-                select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
-            )
-        ).scalar_one()
-        await self.session.commit()
-        PaymentRouter.invalidate_cache(equivalent_code)
+        return from_pid, to_pid
 
     async def get_by_participant(
         self,

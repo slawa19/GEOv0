@@ -6,8 +6,9 @@ Covers:
   - _apply_trust_growth() — limit growth after clearing
   - _apply_trust_decay() — limit decay for overloaded edges
 
-Uses the same mocking approach as test_warmup_and_capacity.py —
-lightweight RealRunner with mocked DB session for async methods.
+A lightweight RealRunner (no SSE, no artifacts). The growth and decay calls run on a real mode-A
+session (`_drift_session`) since programme 021 stage 1 moved their writes onto the trust-line
+service; until then they ran on `AsyncMock` sessions answering statements by position.
 """
 
 from __future__ import annotations
@@ -163,76 +164,64 @@ def _make_run(
     return run
 
 
-class _MockResult:
-    """Minimal async query result proxy."""
-
-    def __init__(self, value: Any = None) -> None:
-        self._value = value
-
-    def scalar_one_or_none(self) -> Any:
-        return self._value
-
-
-def _make_growth_session(
+async def _drift_session(
+    db_session,
     *,
-    eq_id: uuid.UUID = _UID_EQ_UAH,
-    current_limit: float = 1000.0,
-) -> AsyncMock:
-    """Build an async mock session for ``_apply_trust_growth``.
+    alice_bob_limit: float = 1000.0,
+    bob_carol_limit: float = 500.0,
+):
+    """The session a drift call runs on: a REAL one (mode A, rolled back by the fixture).
 
-    Call sequence:
-      1. ``select(Equivalent.id)`` → eq_id
-      2+. For each edge: ``select(TrustLine.limit)`` → current_limit,
-          then optionally ``update(TrustLine)``
+    Programme 021, stage 1: growth and decay write through `TrustLineService`'s internal path, which reads the
+    trust line it changes, the debt it must stay above, and computes integrity checkpoints - a stub answering
+    `execute()` by call position can no longer stand in for the database. Until then this module answered the
+    engine's statements from `AsyncMock` sessions by their order. The assertions below are unchanged; only the
+    stand moved. The world is the one those stubs described: alice, bob, carol with the fixed ids of
+    `_make_run()`, equivalent UAH, the active lines alice -> bob and bob -> carol, no debts.
+
+    Called again on the same session, it only resets the alice -> bob limit (the second call of
+    `test_growth_updates_clearing_history`).
     """
-    call_idx = 0
 
-    async def _execute(stmt):
-        nonlocal call_idx
-        call_idx += 1
-        if call_idx == 1:
-            # Equivalent lookup
-            return _MockResult(eq_id)
-        # Even calls after first: TrustLine limit lookup or update
-        # For selects, return current_limit; for updates, return anything
-        return _MockResult(Decimal(str(current_limit)))
+    from sqlalchemy import select
 
-    session = AsyncMock()
-    session.execute = _execute
-    session.commit = AsyncMock()
-    # 019 stage 5 (`T1907`): drift checks the isolation of its transaction before its first write
-    # (`SHOW transaction_isolation`); the stub answers as the application's engine does.
-    session.scalar = AsyncMock(return_value="serializable")
-    return session
+    from app.db.models.equivalent import Equivalent
+    from app.db.models.participant import Participant
+    from app.db.models.trustline import TrustLine
 
+    existing = await db_session.get(Participant, _UID_ALICE)
+    if existing is None:
+        eq = (await db_session.execute(select(Equivalent).where(Equivalent.code == "UAH"))).scalar_one_or_none()
+        if eq is None:
+            eq = Equivalent(id=_UID_EQ_UAH, code="UAH", precision=2, is_active=True, metadata_={})
+            db_session.add(eq)
+        for uid, pid in ((_UID_ALICE, "alice"), (_UID_BOB, "bob"), (_UID_CAROL, "carol")):
+            db_session.add(
+                Participant(id=uid, pid=pid, display_name=pid, public_key=f"pk_td_{pid}", type="person",
+                            status="active", profile={})
+            )
+        await db_session.flush()
+        db_session.add_all([
+            TrustLine(from_participant_id=_UID_ALICE, to_participant_id=_UID_BOB, equivalent_id=eq.id,
+                      limit=Decimal(str(alice_bob_limit)), status="active", policy={}),
+            TrustLine(from_participant_id=_UID_BOB, to_participant_id=_UID_CAROL, equivalent_id=eq.id,
+                      limit=Decimal(str(bob_carol_limit)), status="active", policy={}),
+        ])
+        await db_session.commit()
+        return db_session
 
-def _make_decay_session(
-    *,
-    eq_id: uuid.UUID = _UID_EQ_UAH,
-) -> AsyncMock:
-    """Build an async mock session for ``_apply_trust_decay``.
-
-    Call sequence:
-      1. ``select(Equivalent.id)`` → eq_id
-      2+. ``update(TrustLine)`` calls
-    """
-    call_idx = 0
-
-    async def _execute(stmt):
-        nonlocal call_idx
-        call_idx += 1
-        if call_idx == 1:
-            # Equivalent lookup
-            return _MockResult(eq_id)
-        return _MockResult(None)
-
-    session = AsyncMock()
-    session.execute = _execute
-    session.commit = AsyncMock()
-    # 019 stage 5 (`T1907`): drift checks the isolation of its transaction before its first write
-    # (`SHOW transaction_isolation`); the stub answers as the application's engine does.
-    session.scalar = AsyncMock(return_value="serializable")
-    return session
+    line = (
+        await db_session.execute(
+            select(TrustLine).where(
+                TrustLine.from_participant_id == _UID_ALICE,
+                TrustLine.to_participant_id == _UID_BOB,
+                TrustLine.status == "active",
+            )
+        )
+    ).scalar_one()
+    line.limit = Decimal(str(alice_bob_limit))
+    await db_session.commit()
+    return db_session
 
 
 # ===================================================================
@@ -344,7 +333,7 @@ class TestInitTrustDrift:
 class TestApplyTrustGrowth:
     """Tests for _apply_trust_growth() — limit growth after clearing."""
 
-    async def test_growth_increases_limit_after_clearing(self) -> None:
+    async def test_growth_increases_limit_after_clearing(self, db_session) -> None:
         """Cleared edge → limit increased by growth_rate."""
         scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
         runner = _make_runner(scenario=scenario)
@@ -354,7 +343,7 @@ class TestApplyTrustGrowth:
         runner._init_trust_drift(run, scenario)
 
         current_limit = 1000.0
-        session = _make_growth_session(current_limit=current_limit)
+        session = await _drift_session(db_session, alice_bob_limit=current_limit)
         observed_limit_at_commit: list[float] = []
 
         async def commit() -> None:
@@ -388,12 +377,12 @@ class TestApplyTrustGrowth:
         assert observed_limit_at_commit == [1000.0]
         assert "UAH" not in PaymentRouter._graph_cache
 
-    async def test_growth_commit_failure_keeps_scenario_and_cache_unchanged(self) -> None:
+    async def test_growth_commit_failure_keeps_scenario_and_cache_unchanged(self, db_session) -> None:
         scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
         runner = _make_runner(scenario=scenario)
         run = _make_run()
         runner._init_trust_drift(run, scenario)
-        session = _make_growth_session(current_limit=1000.0)
+        session = await _drift_session(db_session, alice_bob_limit=1000.0)
         session.commit = AsyncMock(side_effect=RuntimeError("growth commit failed"))
         session.rollback = AsyncMock()
         PaymentRouter._graph_cache["UAH"] = object()
@@ -417,12 +406,12 @@ class TestApplyTrustGrowth:
         assert history.cleared_volume == Decimal("200.00")
         PaymentRouter._graph_cache.pop("UAH", None)
 
-    async def test_growth_cancellation_after_commit_applies_committed_effects(self) -> None:
+    async def test_growth_cancellation_after_commit_applies_committed_effects(self, db_session) -> None:
         scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
         runner = _make_runner(scenario=scenario)
         run = _make_run()
         runner._init_trust_drift(run, scenario)
-        session = _make_growth_session(current_limit=1000.0)
+        session = await _drift_session(db_session, alice_bob_limit=1000.0)
         commit_started = asyncio.Event()
         release_commit = asyncio.Event()
 
@@ -456,7 +445,7 @@ class TestApplyTrustGrowth:
         assert Decimal(str(scenario["trustlines"][0]["limit"])) == Decimal("1050")
         assert "UAH" not in PaymentRouter._graph_cache
 
-    async def test_growth_capped_by_max_growth(self) -> None:
+    async def test_growth_capped_by_max_growth(self, db_session) -> None:
         """When limit already near cap, growth is bounded by original_limit × max_growth."""
         scenario = _make_scenario(trust_drift={
             "enabled": True,
@@ -469,7 +458,7 @@ class TestApplyTrustGrowth:
 
         # Simulate limit already at 1490 (near cap of 1000 * 1.5 = 1500)
         current_limit = 1490.0
-        session = _make_growth_session(current_limit=current_limit)
+        session = await _drift_session(db_session, alice_bob_limit=current_limit)
 
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
         cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 100.0}
@@ -493,14 +482,14 @@ class TestApplyTrustGrowth:
         # point, so the entry is a string now; the number it denotes is unchanged.
         assert Decimal(str(ab_tl["limit"])) == Decimal(cap).quantize(Decimal("1E-8"))
 
-    async def test_growth_updates_clearing_history(self) -> None:
+    async def test_growth_updates_clearing_history(self, db_session) -> None:
         """After growth: clearing_count += 1, last_clearing_tick updated, cleared_volume accumulated."""
         scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
         runner = _make_runner(scenario=scenario)
         run = _make_run()
         runner._init_trust_drift(run, scenario)
 
-        session = _make_growth_session(current_limit=1000.0)
+        session = await _drift_session(db_session, alice_bob_limit=1000.0)
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
         cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 300.0}
         tick = 7
@@ -516,7 +505,7 @@ class TestApplyTrustGrowth:
         assert hist.cleared_volume == 300.0
 
         # Second growth call — history accumulates
-        session2 = _make_growth_session(current_limit=1050.0)
+        session2 = await _drift_session(db_session, alice_bob_limit=1050.0)
         cleared_amounts2: dict[tuple[str, str], float] = {("alice", "bob"): 150.0}
         tick2 = 12
 
@@ -559,7 +548,7 @@ class TestApplyTrustGrowth:
 class TestApplyTrustDecay:
     """Tests for _apply_trust_decay() — limit decay for overloaded edges."""
 
-    async def test_decay_reduces_limit_when_overloaded(self) -> None:
+    async def test_decay_reduces_limit_when_overloaded(self, db_session) -> None:
         """debt/limit ≥ 0.8 → limit decreased by decay_rate."""
         scenario = _make_scenario(trust_drift={
             "enabled": True,
@@ -576,7 +565,7 @@ class TestApplyTrustDecay:
             ("bob", "alice", "UAH"): Decimal("850"),
         }
 
-        session = _make_decay_session()
+        session = await _drift_session(db_session)
         PaymentRouter._graph_cache["UAH"] = object()
 
         res = await runner._apply_trust_decay(
@@ -604,7 +593,7 @@ class TestApplyTrustDecay:
         # point, so the entry is a string now; the number it denotes is unchanged.
         assert Decimal(str(ab_tl["limit"])) == Decimal(str(expected))
 
-    async def test_decay_floored_by_min_limit_ratio(self) -> None:
+    async def test_decay_floored_by_min_limit_ratio(self, db_session) -> None:
         """Repeated decay doesn't drop below original_limit × min_limit_ratio."""
         scenario = _make_scenario(
             trust_drift={
@@ -642,7 +631,7 @@ class TestApplyTrustDecay:
             ("bob", "alice", "UAH"): Decimal("280"),
         }
 
-        session = _make_decay_session()
+        session = await _drift_session(db_session, alice_bob_limit=350.0)
 
         res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
@@ -663,7 +652,7 @@ class TestApplyTrustDecay:
         # point, so the entry is a string now; the number it denotes is unchanged.
         assert Decimal(str(ab_tl["limit"])) == Decimal("300")
 
-    async def test_decay_skips_underloaded_edges(self) -> None:
+    async def test_decay_skips_underloaded_edges(self, db_session) -> None:
         """debt/limit < 0.8 → limit unchanged."""
         scenario = _make_scenario(trust_drift={
             "enabled": True,
@@ -681,7 +670,7 @@ class TestApplyTrustDecay:
             ("bob", "alice", "UAH"): Decimal("500"),
         }
 
-        session = _make_decay_session()
+        session = await _drift_session(db_session)
 
         res = await runner._apply_trust_decay(
             run, session, tick_index=10, debt_snapshot=debt_snapshot,
@@ -696,7 +685,7 @@ class TestApplyTrustDecay:
         )
         assert ab_tl["limit"] == original_limit
 
-    async def test_decay_skips_just_cleared_edges(self) -> None:
+    async def test_decay_skips_just_cleared_edges(self, db_session) -> None:
         """If last_clearing_tick == tick_index → edge skipped (just had growth)."""
         scenario = _make_scenario(trust_drift={
             "enabled": True,
@@ -718,7 +707,7 @@ class TestApplyTrustDecay:
             ("bob", "alice", "UAH"): Decimal("850"),
         }
 
-        session = _make_decay_session()
+        session = await _drift_session(db_session)
 
         # Call with tick_index = 10 (same as last_clearing_tick)
         res = await runner._apply_trust_decay(

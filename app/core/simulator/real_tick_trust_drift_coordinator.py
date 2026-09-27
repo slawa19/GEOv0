@@ -4,7 +4,10 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable
 
-from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
+from app.core.simulator.commit_resolution import (
+    resolve_commit_under_cancellation,
+    resolve_rollback_under_cancellation,
+)
 from app.core.simulator.models import RunRecord
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 
@@ -74,6 +77,17 @@ class RealTickTrustDriftCoordinator:
                 str(run.run_id),
                 int(tick_index or 0),
                 exc_info=True,
+            )
+            # Programme 021, stage 1 (T2100 P2-4): this coordinator OWNS the decay's transaction - it
+            # commits it below - so a failed decay is rolled back HERE, before the tick continues. Without
+            # it, whatever the decay had staged (a changed limit, its audit rows) stayed in this session
+            # and the tail's own commit (`RealTickPersistence.persist_tick_tail`) made it durable.
+            # A rollback that itself fails is not swallowed: the tick must not go on to a commit that could
+            # carry the half-done decay.
+            await resolve_rollback_under_cancellation(
+                rollback=session.rollback,
+                on_rollback=lambda: None,
+                on_unknown=lambda: None,
             )
             return
 

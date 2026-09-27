@@ -43,7 +43,6 @@ from tests.p021_support import (
     TrustLineCheckpoints,
     is_transaction_scoped,
     require_target,
-    target_xfail_021,
     trust_line_audit_rows,
 )
 from tests.simulator_tick_stand import RecordingSse, install_tick_stand, pooled_sessionmaker_over
@@ -172,7 +171,6 @@ DECAY_LINES = [
 DECAY_DEBTS = [("D", "C", "90.00"), ("G", "C", "99.00"), ("E", "C", "90.00")]
 
 
-@target_xfail_021("T2102", "decay rewrites trust_lines.limit with a Core UPDATE (trust_drift_engine.py:531), unaudited")
 @pytest.mark.asyncio
 async def test_decay_in_a_real_tick_is_audited_per_transaction(factory, monkeypatch) -> None:
     eq, people = await world(factory, ["C", "D", "G", "E"], DECAY_LINES, DECAY_DEBTS)
@@ -210,7 +208,6 @@ RING_LINES = [("B", "A", "1000.00", "active"), ("C", "B", "1000.00", "active"), 
 RING_DEBTS = [("A", "B", "10.00"), ("B", "C", "10.00"), ("C", "A", "10.00")]
 
 
-@target_xfail_021("T2102", "growth rewrites trust_lines.limit with a Core UPDATE (trust_drift_engine.py:324), unaudited")
 @pytest.mark.asyncio
 async def test_growth_after_a_real_tick_clearing_is_audited_per_transaction(factory, monkeypatch) -> None:
     eq, people = await world(factory, ["A", "B", "C"], RING_LINES, RING_DEBTS)

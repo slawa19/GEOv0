@@ -240,8 +240,14 @@ class RealTickOrchestrator:
 
                 async with seeding_lock:
                     if not run._real_seeded:
-                        await rr._seed_scenario_into_db(setup_session, scenario)
-                        await setup_session.commit()
+                        try:
+                            await rr._seed_scenario_into_db(setup_session, scenario)
+                            await setup_session.commit()
+                        except Exception:
+                            # Programme 021 (T2100 P2-4): the owner of the seeding transaction rolls it
+                            # back before the failure leaves this block.
+                            await setup_session.rollback()
+                            raise
                         run._real_seeded = True
 
             if run._real_participants is None or run._real_equivalents is None:

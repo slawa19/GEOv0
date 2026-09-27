@@ -40,7 +40,7 @@ from tests.integration.test_p021_trust_drift_is_audited_postgres import (  # noq
     ticks,
     world,
 )
-from tests.p021_support import TrustLineCheckpoints, require_target, target_xfail_021, trust_line_audit_rows
+from tests.p021_support import TrustLineCheckpoints, require_target, trust_line_audit_rows
 from tests.simulator_tick_stand import install_tick_stand
 
 LINES = [("C", "D", "100.00", "active"), ("C", "G", "100.00", "active")]
@@ -65,7 +65,6 @@ async def _audit_count(factory) -> int:  # noqa: F811
         return len(await trust_line_audit_rows(s))
 
 
-@target_xfail_021("T2102", "the decay handler returns without a rollback; the tail's commit keeps the mutation")
 @pytest.mark.asyncio
 async def test_a_decay_failing_after_its_first_line_leaves_nothing_behind(factory, monkeypatch) -> None:  # noqa: F811
     eq, people = await world(factory, ["C", "D", "G"], LINES, DEBTS)
@@ -94,7 +93,6 @@ async def test_a_decay_failing_after_its_first_line_leaves_nothing_behind(factor
     )
 
 
-@target_xfail_021("T2102", "the decay computes no checkpoint, and its handler never rolls back")
 @pytest.mark.asyncio
 async def test_a_decay_whose_checkpoint_fails_leaves_nothing_behind(factory, monkeypatch) -> None:  # noqa: F811
     eq, people = await world(factory, ["C", "D", "G"], LINES, DEBTS)
