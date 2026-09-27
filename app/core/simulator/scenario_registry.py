@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
+import shutil
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -249,8 +251,25 @@ class ScenarioRegistry:
             source_path=path,
             created_at=self._utc_now(),
         )
-        base.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
+        # A well-formed id the filesystem still refuses (a Windows device name such as `nul`, a
+        # read-only store) is the uploader's 400, not a 500, and leaves nothing half-created.
+        base_existed = base.exists()
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            self._logger.warning(
+                "simulator.uploaded_scenario_write_failed id=%s errno=%s", scenario_id, exc.errno
+            )
+            if base_existed:
+                with contextlib.suppress(OSError):
+                    path.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(base, ignore_errors=True)
+            raise BadRequestException(
+                "scenario_id cannot be stored as a directory on this server",
+                details={"scenario_id": scenario_id},
+            ) from None
         with self._lock:
             self._scenarios[scenario_id] = rec
         return rec

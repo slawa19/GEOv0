@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -165,3 +166,34 @@ def test_schema_refuses_a_traversal_id() -> None:
     assert validator is not None
     errors = [e for e in validator.iter_errors(_scenario("../escape")) if list(e.path) == ["scenario_id"]]
     assert errors, "scenario.schema.json must carry the scenario_id pattern"
+
+
+def test_a_filesystem_refusal_is_a_400_and_leaves_no_directory(tmp_path: Path, monkeypatch) -> None:
+    # Fix-delta A2': whatever makes the OS refuse the write, the upload is a 400, not a 500.
+    registry = _registry(tmp_path, schema_path=SCHEMA_PATH)
+
+    def _refuse(self, *args, **kwargs):
+        raise OSError(22, "refused by the filesystem")
+
+    monkeypatch.setattr(Path, "write_text", _refuse)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        registry.save_uploaded_scenario(_scenario("ordinary-id"))
+
+    assert exc_info.value.details.get("scenario_id") == "ordinary-id"
+    assert not (tmp_path / "state" / "scenarios" / "ordinary-id").exists()
+    assert registry._scenarios == {}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows device names exist only on Windows")
+@pytest.mark.parametrize("scenario_id", ["nul"])
+def test_a_windows_device_name_is_a_400(tmp_path: Path, scenario_id: str) -> None:
+    # Measured 2026-09-27 on this Windows 11 host: `con` and `aux.json` are stored as ordinary
+    # directories, `nul` is not (`mkdir` is silent, `write_text` raises FileNotFoundError).
+    registry = _registry(tmp_path, schema_path=SCHEMA_PATH)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        registry.save_uploaded_scenario(_scenario(scenario_id))
+
+    assert exc_info.value.details.get("scenario_id") == scenario_id
+    assert registry._scenarios == {}
