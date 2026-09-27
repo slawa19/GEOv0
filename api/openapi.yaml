@@ -7042,7 +7042,7 @@ components:
       properties:
         scenario:
           type: object
-          description: Scenario JSON payload (validated separately via scenario schema)
+          description: "Scenario JSON payload (validated separately via scenario schema). Its `scenario_id` is used as given, without trimming, and must match `^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$` and not name an already registered scenario; otherwise 400."
           additionalProperties: true
       additionalProperties: false
 

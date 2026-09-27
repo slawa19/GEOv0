@@ -63,7 +63,7 @@ Dev-диагностика (localhost only):
 - `GET /api/v1/simulator/scenarios`
   - Список доступных сценариев (presets).
 - `POST /api/v1/simulator/scenarios`
-  - Загрузка `scenario.json` (создаёт `scenario_id`).
+  - Загрузка `scenario.json` (создаёт `scenario_id`). `scenario_id` берётся как есть, без обрезки пробелов, и обязан соответствовать `^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9_-])?$` и не совпадать с уже зарегистрированным сценарием (включая пресеты); иначе 400.
 - `GET /api/v1/simulator/scenarios/{scenario_id}` (опционально)
   - Полная информация по сценарию + summary.
 
