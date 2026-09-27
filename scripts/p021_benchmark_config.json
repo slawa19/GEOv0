@@ -1,0 +1,67 @@
+{
+  "programme": "021",
+  "task": "T2102",
+  "frozen_on": "2026-09-27",
+  "frozen_before": "any implementation of stage 1 and any timed run",
+  "source": "specs/021-simulator-as-domain-client/spec.md, section 'Решения консультации T2100 (2026-09-27)', item 'Пороги приёмки' - copied verbatim; these are acceptance budgets, not measured results",
+  "rule": "A failed threshold is recorded and stage 1 stops for narrowing or a dated reconsideration. A threshold is never moved after the first timed run, and failed samples are never averaged with passing ones.",
+  "thresholds": {
+    "checkpoint_computations": {
+      "verbatim": "Exactly `2 × touched_equivalents` checkpoint computations per successful nonempty batch, independent of edge count.",
+      "per_touched_equivalent": 2,
+      "applies_to": "every successful batch with at least one applied operation"
+    },
+    "sql_statements": {
+      "verbatim": "At most `16 × applied_operations + 20 × touched_equivalents + 20` client SQL statements for the measured trust-line batch.",
+      "per_applied_operation": 16,
+      "per_touched_equivalent": 20,
+      "constant": 20,
+      "applies_to": "every measured batch, empty ones included (applied_operations = touched_equivalents = 0 gives a budget of 20)",
+      "counted_as": "SQLAlchemy before_cursor_execute events on the batch's engine, from the start of the batch call through its commit"
+    },
+    "seed_p95_seconds": {
+      "verbatim": "Seed benchmark: p95 ≤ **5 seconds** for the specified 100-participant/523-line community on the recorded local PostgreSQL stand.",
+      "max": 5.0,
+      "applies_to": "workload 'seed'"
+    }
+  },
+  "run": {
+    "verbatim": "Прогон: одинаковые нагрузки до и после на свежих изолированных базах, фиксированные входы, ≥ 20 замеров после прогрева; записываются число SQL, число контрольных точек, p50/p95 и исходы откатов; в замер входят пакеты роста и затухания и повторное сидирование.",
+    "warmup_samples": 2,
+    "samples_after_warmup": 20,
+    "fresh_isolated_database_per_sample": true,
+    "database_name_pattern": "^geov0_bench_p021s1[a-z0-9_]*$",
+    "server_url": "postgresql+asyncpg://geo:geo@127.0.0.1:5432/postgres",
+    "percentile": "nearest-rank over the samples after warm-up"
+  },
+  "inputs": {
+    "community": "seeds/communities/greenfield-village-100/community.json",
+    "community_sha256": "3378074e79a8518d0eeecf4a5862aee93d1b9fd817c97e1072934decfcc6a457",
+    "community_expected": {"participants": 100, "trustlines": 523, "equivalents": ["EUR", "HOUR", "UAH"]},
+    "scenario_mapping": "participants -> {id: pid, name, type, status}; trustlines -> {from: pid of ref, to: pid of ref, equivalent, limit, status, policy}; equivalents -> codes; list order kept",
+    "workloads": {
+      "seed": "RealScenarioSeeder.seed_scenario_into_db on a fresh migrated empty database, then commit",
+      "reseed": "the same seeding call on a fresh copy of the seeded database, then commit",
+      "growth": {
+        "call": "TrustDriftEngine.apply_trust_growth (commits itself) on a fresh copy of the seeded database",
+        "equivalent": "UAH",
+        "edges": 50,
+        "selection": "the first 50 active UAH lines in community order",
+        "trust_drift": {"enabled": true, "growth_rate": 0.05, "max_growth": 2.0}
+      },
+      "decay": {
+        "call": "RealTickTrustDriftCoordinator.apply_trust_decay_and_broadcast (commits the decay) on a fresh copy of the seeded database",
+        "equivalents": ["HOUR", "UAH"],
+        "edges_per_equivalent": 25,
+        "selection": "the first 25 active lines of each equivalent in community order",
+        "debt_snapshot_ratio": "0.85",
+        "trust_drift": {"enabled": true, "decay_rate": 0.02, "min_limit_ratio": 0.3, "overload_threshold": 0.8}
+      }
+    },
+    "rollback_probes": {
+      "what": "one run per workload with a non-database failure raised after the first mutation of the transaction; recorded: persisted limit/status of the first mutated line and the number of trust-line audit rows after the owner's handling and a later commit on the same session",
+      "failure_point_before": "a RuntimeError raised by a statement hook right after the first trust-line write statement of the transaction has executed (the current code computes no checkpoint)",
+      "failure_point_after": "a RuntimeError raised by the first after-mutation checkpoint computation of the transaction"
+    }
+  }
+}
