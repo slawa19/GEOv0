@@ -1,0 +1,845 @@
+{
+  "label": "after",
+  "git_head": "fca846691817b23a1b46ee6110e82727a1322d4a",
+  "code_generation": "internal-path",
+  "measured_at": "2026-09-27T18:21:26.371789+00:00",
+  "config": "scripts/p021_benchmark_config.json",
+  "checkpoint_function_bound_in": [
+    "app.core.clearing.service.compute_integrity_checkpoint_for_equivalent",
+    "app.core.integrity.compute_integrity_checkpoint_for_equivalent",
+    "app.core.payments.service.compute_integrity_checkpoint_for_equivalent",
+    "app.core.trustlines.service.compute_integrity_checkpoint_for_equivalent"
+  ],
+  "workloads": {
+    "seed": {
+      "summary": {
+        "samples": 20,
+        "elapsed_p50_s": 0.4151,
+        "elapsed_p95_s": 0.47,
+        "elapsed_max_s": 0.4788,
+        "sql_statements": [
+          34
+        ],
+        "sql_budget": [
+          8448
+        ],
+        "checkpoint_computations": [
+          6
+        ],
+        "checkpoints_expected": [
+          6
+        ],
+        "applied_operations": [
+          523
+        ],
+        "touched_equivalents": [
+          3
+        ],
+        "trust_line_audit_rows_written": [
+          523
+        ],
+        "sql_pass": true,
+        "checkpoints_pass": true,
+        "seed_p95_max_s": 5.0,
+        "seed_p95_pass": true
+      },
+      "rollback_probe": {
+        "failure_point": "checkpoint call 4 (first after-mutation checkpoint)",
+        "raised": true,
+        "later_commit": "failed: RuntimeError",
+        "error": "p021 probe: failure in an after-mutation checkpoint",
+        "failure_fired": true,
+        "mutations_persisted": 0,
+        "audit_rows_persisted": 0,
+        "rolled_back_cleanly": true
+      },
+      "samples": [
+        {
+          "elapsed_s": 0.4087717999937013,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.39174289999937173,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.46995670000615064,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.3951016999926651,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.3789547000051243,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4214868999988539,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4373859000043012,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.3831877000047825,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4452068000100553,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.43729719999828376,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.39435790000425186,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4788235000014538,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.38895059999777004,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.42683160000888165,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.39965269999811426,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.39913039999373723,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4282879999955185,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.40552909999678377,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4280628000124125,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        },
+        {
+          "elapsed_s": 0.4305843000038294,
+          "applied_operations": 523,
+          "touched_equivalents": 3,
+          "sql_statements": 34,
+          "trust_line_audit_rows_written": 523,
+          "checkpoint_computations": 6
+        }
+      ]
+    },
+    "reseed": {
+      "summary": {
+        "samples": 20,
+        "elapsed_p50_s": 0.1118,
+        "elapsed_p95_s": 0.1508,
+        "elapsed_max_s": 0.1543,
+        "sql_statements": [
+          6
+        ],
+        "sql_budget": [
+          20
+        ],
+        "checkpoint_computations": [
+          0
+        ],
+        "checkpoints_expected": [],
+        "applied_operations": [
+          0
+        ],
+        "touched_equivalents": [
+          0
+        ],
+        "trust_line_audit_rows_written": [
+          0
+        ],
+        "sql_pass": true,
+        "checkpoints_pass": null
+      },
+      "rollback_probe": {
+        "failure_point": "checkpoint call 1 (first after-mutation checkpoint)",
+        "raised": false,
+        "later_commit": "committed",
+        "failure_fired": false,
+        "mutations_persisted": 0,
+        "audit_rows_persisted": 0,
+        "rolled_back_cleanly": true
+      },
+      "samples": [
+        {
+          "elapsed_s": 0.11605270000291057,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1116794999979902,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1114030000026105,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1127857999963453,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1543143000017153,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.11151480000989977,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.10695190000114962,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1051788999902783,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.10329189999902155,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.10823940001137089,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.11207590000412893,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.11194950000208337,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.12196400000539143,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1129810999991605,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1182657999888761,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.1507523000036599,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.11801289999857545,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.11136549999355339,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.10240189998876303,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        },
+        {
+          "elapsed_s": 0.10752599999250378,
+          "applied_operations": 0,
+          "touched_equivalents": 0,
+          "sql_statements": 6,
+          "trust_line_audit_rows_written": 0,
+          "checkpoint_computations": 0
+        }
+      ]
+    },
+    "growth": {
+      "summary": {
+        "samples": 20,
+        "elapsed_p50_s": 0.3165,
+        "elapsed_p95_s": 0.3699,
+        "elapsed_max_s": 0.3706,
+        "sql_statements": [
+          312
+        ],
+        "sql_budget": [
+          840
+        ],
+        "checkpoint_computations": [
+          2
+        ],
+        "checkpoints_expected": [
+          2
+        ],
+        "applied_operations": [
+          50
+        ],
+        "touched_equivalents": [
+          1
+        ],
+        "trust_line_audit_rows_written": [
+          50
+        ],
+        "sql_pass": true,
+        "checkpoints_pass": true
+      },
+      "rollback_probe": {
+        "failure_point": "checkpoint call 2 (first after-mutation checkpoint)",
+        "raised": true,
+        "later_commit": "committed",
+        "error": "p021 probe: failure in an after-mutation checkpoint",
+        "failure_fired": true,
+        "mutations_persisted": 0,
+        "audit_rows_persisted": 0,
+        "rolled_back_cleanly": true
+      },
+      "samples": [
+        {
+          "elapsed_s": 0.31439379999937955,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.31321949999255594,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.37057369999820367,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3206287000066368,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.31461339999805205,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3195329000009224,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.31845720000274014,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.31445740000344813,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3163059000071371,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3168716999934986,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3227670000051148,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.36985200000344776,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3134882000013022,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3028802999906475,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3163880999927642,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3153877000004286,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.31651370000327006,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3195082000020193,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.3051129000086803,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        },
+        {
+          "elapsed_s": 0.32065500000317115,
+          "result_updated_count": 50,
+          "applied_operations": 50,
+          "touched_equivalents": 1,
+          "sql_statements": 312,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 2
+        }
+      ]
+    },
+    "decay": {
+      "summary": {
+        "samples": 20,
+        "elapsed_p50_s": 0.3647,
+        "elapsed_p95_s": 0.4066,
+        "elapsed_max_s": 0.4105,
+        "sql_statements": [
+          371
+        ],
+        "sql_budget": [
+          860
+        ],
+        "checkpoint_computations": [
+          4
+        ],
+        "checkpoints_expected": [
+          4
+        ],
+        "applied_operations": [
+          50
+        ],
+        "touched_equivalents": [
+          2
+        ],
+        "trust_line_audit_rows_written": [
+          50
+        ],
+        "sql_pass": true,
+        "checkpoints_pass": true
+      },
+      "rollback_probe": {
+        "failure_point": "checkpoint call 3 (first after-mutation checkpoint)",
+        "raised": false,
+        "later_commit": "committed",
+        "failure_fired": true,
+        "mutations_persisted": 0,
+        "audit_rows_persisted": 0,
+        "rolled_back_cleanly": true
+      },
+      "samples": [
+        {
+          "elapsed_s": 0.36548010000842623,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.35717280000972096,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.36589590000221506,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3624232000001939,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.36472149999463,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.406600599992089,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3572929999936605,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3660466000001179,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3446385999995982,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3612670000002254,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3545989999984158,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3547182000038447,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.4104976000089664,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.36332750000292435,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3637589999998454,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3703572999947937,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.36600380000891164,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.37131269999372307,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3676798000087729,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        },
+        {
+          "elapsed_s": 0.3647650000057183,
+          "applied_operations": 50,
+          "touched_equivalents": 2,
+          "sql_statements": 371,
+          "trust_line_audit_rows_written": 50,
+          "checkpoint_computations": 4
+        }
+      ]
+    }
+  }
+}
