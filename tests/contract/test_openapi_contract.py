@@ -308,8 +308,17 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
 # removed from the application and the canon by the owner's decision of that day. Measured on both
 # trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
+# 2026-09-28 / programme 023 slice (d), decision R3: count HOLDS at 62, digest moves. ONE entry changes content and
+# none enters or leaves: `POST /clearing/auto`, whose 200 body is now the committed-progress `ClearingAutoResponse`
+# on both sides. It was already in the ledger (the canon's `EquivalentCode` pattern on `equivalent`), and its new
+# differences are all of classes this ledger already carries or the canon cannot drop: integer `minimum: 0` against
+# FastAPI's `0.0` (the `8` vs `8.0` class above), `null` inside the nullable `reason` enum (required by
+# `test_p011_nullable_needs_a_sibling_type.py`; pydantic lists only the strings), and the documented `reason` key plus
+# the open tail of `error.details` (pydantic's `dict[str, Any]` states neither). Measured with a per-entry dump of
+# every ledger on `ad992a0` and on this tree: success, error, security and request ledgers identical except that one
+# key; counts 62 / 51 / 66 / 13 on both.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "c1e7e6d357926a705f0c8c381b79b8f465ccdab06ce4fe0044aec67e17f44b05"
+    "e5c6840599b14e2e5ee28fa8e9cd425081eea3fe6b95b02b81f433285bf65efb"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

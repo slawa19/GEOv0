@@ -70,7 +70,6 @@ from tests.p023_support import (
     remaining_debts,
     require_auto_progress,
     require_target,
-    target_xfail_023,
 )
 
 
@@ -119,7 +118,6 @@ def _r1_edges():
     return ring7 + tri[1:], ring7, tri
 
 
-@target_xfail_023("(d)", "R-023-1: the /auto pass (depth 6 before the switch) loses volume the flow finds (6 vs 14)")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_1_depth_six_loses_volume_the_flow_finds(db_session, client, auth_headers) -> None:
@@ -152,7 +150,6 @@ def _r2_edges():
     return tri + five[1:], tri, five
 
 
-@target_xfail_023("(d)", "R-023-2: the shared edge - today 6, the flow 8")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_2_shared_edge_six_versus_eight(db_session, client, auth_headers) -> None:
@@ -183,7 +180,6 @@ def _ring_edges(tag: str, group: int, length: int):
     return ring([f"p023{tag}{k:02d}" for k in range(length)], ["1"] * length, [debt_uuid(group, k) for k in range(length)])
 
 
-@target_xfail_023("(d)", "R-023-3: a 7-ring is missed by the /auto pass (depth 6 before the switch)")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_3_seven_ring_is_missed_at_depth_six(db_session, client, auth_headers) -> None:
@@ -197,7 +193,6 @@ async def test_r023_3_seven_ring_is_missed_at_depth_six(db_session, client, auth
     require_target(v_edge == Decimal(7), f"/auto: V_edge {v_edge} ({cleared} occurrences), target 7")
 
 
-@target_xfail_023("(d)", "R-023-3: an 11-ring is missed by the /auto pass")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_3_eleven_ring_is_missed_at_every_supported_depth(db_session, client, auth_headers) -> None:
@@ -214,7 +209,6 @@ async def test_r023_3_eleven_ring_is_missed_at_every_supported_depth(db_session,
 # ----------------------------------------------------------------------------------------------- R-023-4a
 
 
-@target_xfail_023("(d)", "R-023-4a: the production pass does not commit a partial occurrence c < min")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_4a_declared_partial_amount_is_not_honoured(db_session, client, auth_headers) -> None:
@@ -237,7 +231,6 @@ async def test_r023_4a_declared_partial_amount_is_not_honoured(db_session, clien
     )
 
 
-@target_xfail_023("(d)", "R-023-4a: the production pass does not give an occurrence a plan-scoped identity")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_4a_distinct_occurrences_get_distinct_identities(db_session, client, auth_headers) -> None:

@@ -718,8 +718,9 @@ class SimulatorActionClearingCycle(BaseModel):
 
 
 class SimulatorActionClearingRealRequest(BaseModel):
+    # Programme 023 slice (d), decision 8 / R2: no `max_depth` - clearing execution has no depth. With
+    # `extra="forbid"` a body still carrying it is a schema error (the action family's flat 400 INVALID_REQUEST).
     equivalent: str
-    max_depth: int = Field(default=6, ge=1, le=12)
     client_action_id: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")

@@ -31,7 +31,7 @@ from app.core.simulator.models import RunRecord
 from app.db.models.equivalent import Equivalent
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import debt_uuid, ring, seed_graph
-from tests.p023_support import fresh_read, positive_debt_total, require_target, target_xfail_023
+from tests.p023_support import fresh_read, positive_debt_total, require_target
 
 pytestmark = MODE_B
 
@@ -102,7 +102,6 @@ def _creditor_to_debtor(cycle) -> set[tuple[str, str]]:
     return {(e.creditor, e.debtor) for e in cycle}
 
 
-@target_xfail_023("(d)", "Interact clears through the runner and answers creditor -> debtor PIDs")
 @pytest.mark.asyncio
 async def test_interact_clears_through_the_runner_with_creditor_to_debtor_pids(db_session, client, interact_run, monkeypatch) -> None:
     await seed_graph(db_session, CODE, T1 + T2, precision=2)
@@ -128,7 +127,6 @@ async def test_interact_clears_through_the_runner_with_creditor_to_debtor_pids(d
     assert await fresh_read(db_session, positive_debt_total, CODE) == 0
 
 
-@target_xfail_023("(d)", "R2: the Interact request has no max_depth")
 @pytest.mark.asyncio
 async def test_max_depth_is_not_part_of_the_interact_request(db_session, client, interact_run, monkeypatch) -> None:
     await seed_graph(db_session, CODE, T1 + T2, precision=2)
@@ -143,7 +141,6 @@ async def test_max_depth_is_not_part_of_the_interact_request(db_session, client,
     )
 
 
-@target_xfail_023("(d)", "R3: an interrupted Interact pass is an explicit outcome, not a success")
 @pytest.mark.asyncio
 async def test_an_interrupted_pass_is_an_explicit_conflict_with_progress_and_remainder(db_session, client, interact_run, monkeypatch) -> None:
     await seed_graph(db_session, CODE, T1 + T2, precision=2)
@@ -167,7 +164,6 @@ async def test_an_interrupted_pass_is_an_explicit_conflict_with_progress_and_rem
     assert done["cleared_cycles"] == 1, "the durable progress is published"
 
 
-@target_xfail_023("(d)", "the operator stop after progress keeps 409 CONFLICT with the partial progress, through the runner")
 @pytest.mark.asyncio
 async def test_the_operator_stop_after_progress_keeps_the_conflict_answer(db_session, client, interact_run, monkeypatch) -> None:
     await seed_graph(db_session, CODE, T1 + T2, precision=2)

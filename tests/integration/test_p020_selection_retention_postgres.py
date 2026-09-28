@@ -33,7 +33,7 @@ from tests.integration.test_p020_selection_amount_first_unique_cycles_postgres i
     _remaining,
 )
 from tests.p020_support import Edge, debt_uuid, identity, identity_of, ring, seed_graph
-from tests.p023_support import auto_clear_http, fresh_read, require_target, target_xfail_023
+from tests.p023_support import auto_clear_http, fresh_read, require_target
 
 _DEPTHS = [3, 4, 6, 7, 10]
 
@@ -145,7 +145,6 @@ async def test_retention_same_length_ties_follow_the_full_identity(db_session, m
 # ONE occurrence of the long cycle at 100 (V_edge 100·L against the ladder's 30 + 90·L), the triangle's own edges
 # left at 10. Under the strict 023 marker until the switch.
 
-@target_xfail_023("(d)", "retention of the ladder stand moves to the flow objective")
 @MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("long_len", [5, 4])

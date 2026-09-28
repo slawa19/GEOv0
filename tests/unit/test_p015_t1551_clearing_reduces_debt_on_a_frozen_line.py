@@ -46,7 +46,22 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
-from tests.conftest import MODE_B
+from tests.conftest import MODE_B, sessionmaker_of
+
+
+async def _production_pass(db_session, eq_code: str) -> int:
+    """The production pass (programme 023 slice (d), 2026-09-28: `auto_clear` is gone; the common runner clears).
+
+    Returns the number of committed occurrences, as `auto_clear` returned its count; the session then reads a fresh
+    snapshot.
+    """
+
+    from app.core.clearing.runner import run_clearing_pass
+
+    result = await run_clearing_pass(sessionmaker_of(db_session), eq_code)
+    await db_session.commit()
+    return len(result.committed)
+
 
 _CONSENT = {"auto_clearing": True}
 _REFUSAL = {"auto_clearing": False}
@@ -193,7 +208,7 @@ async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line(db_session,
         for pid in ring.participant_ids
     }
 
-    cleared = await ClearingService(db_session).auto_clear(ring.eq_code, max_depth=3)
+    cleared = await _production_pass(db_session, ring.eq_code)
 
     assert cleared == 1
     positions_after = {
@@ -293,7 +308,7 @@ async def test_a_cycle_through_lines_frozen_by_the_simulator_inject_is_cleared(d
     ).scalars().all()
     assert sorted(incident_statuses) == ["frozen", "frozen"]
 
-    cleared = await ClearingService(db_session).auto_clear(ring.eq_code, max_depth=3)
+    cleared = await _production_pass(db_session, ring.eq_code)
 
     assert cleared == 1
     assert [await _debt_amount(db_session, i) for i in ring.debt_ids] == [None, None, None]

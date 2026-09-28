@@ -323,7 +323,8 @@ def _start_configured_background_tasks(app: FastAPI) -> None:
             name="integrity",
             coroutine_factory=lambda: _integrity_loop(app),
         )
-    # Programme 023: the periodic clearing runner. OFF unless configured (slice (c)); slice (d) activates it.
+    # Programme 023 (decision R1): the periodic clearing runner, started only where the deployment sets
+    # `CLEARING_PERIODIC_ENABLED` - a separate hub; off by default and on simulator stands.
     if getattr(settings, "CLEARING_PERIODIC_ENABLED", False):
         _start_supervised_background_task(
             app,

@@ -905,7 +905,7 @@ async def test_step5c_clearing_real_reports_the_hold_as_its_declared_409(client,
     resp = await client.post(
         "/api/v1/simulator/runs/run-s5c/actions/clearing-real",
         headers=ADMIN,
-        json={"equivalent": "S5CSIM", "max_depth": 6, "client_action_id": "s5c"},
+        json={"equivalent": "S5CSIM", "client_action_id": "s5c"},
     )
 
     assert resp.status_code == 409, resp.text

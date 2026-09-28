@@ -657,9 +657,10 @@ async def test_the_launcher_readiness_survives_a_clearing_the_product_ran(
             # Control: the freshly seeded database is ready.
             assert await dev_database.cmd_ready(url, community=COMMUNITY) == 0
 
-            # The product clears UAH - the same service call `POST /clearing/auto` makes.
-            async with factory() as session:
-                cleared = await ClearingService(session).auto_clear("UAH", max_depth=6)
+            # The product clears UAH - the same runner pass `POST /clearing/auto` makes (programme 023 slice (d)).
+            from app.core.clearing.runner import run_clearing_pass
+
+            cleared = len((await run_clearing_pass(factory, "UAH")).committed)
             assert cleared >= 1, "auto-clearing found nothing to clear; the scenario is vacuous"
 
             # The demonstration state is gone, and the ACCEPTANCE still says so - it is not weakened.

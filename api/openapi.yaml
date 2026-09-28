@@ -2740,24 +2740,28 @@ paths:
   /clearing/auto:
     post:
       tags: [Clearing]
-      summary: Auto-clear cycles for an equivalent
+      summary: Run one awaited clearing pass for an equivalent
+      description: >-
+        Programme 023: one pass of the common clearing runner - a flow plan on a fresh snapshot (maximum total
+        eligible debt reduction), executed cycle by cycle through the money boundary, under the equivalent's
+        clearing lease. The answer reports every COMMITTED occurrence; `complete` only when a plan on a fresh
+        snapshot is empty, otherwise `interrupted` with a reason and the remainder of the last known plan. No
+        HTTP idempotency: a repeated request runs a new pass. `max_depth` is NOT accepted: clearing execution
+        has no depth limit, and the presence of the key in any form (bare, empty, repeated, valid or not) is
+        answered 422 (E009, `details.errors[].loc = [query, max_depth]`) before the pass starts; the parameter
+        remains on the diagnostic GET /clearing/cycles.
       parameters:
         - in: query
           name: equivalent
           required: true
           schema:
             type: string
-        - in: query
-          name: max_depth
-          required: false
-          schema:
-            type: integer
-            minimum: 3
-            maximum: 10
-            default: 6
       responses:
         '200':
-          description: Clearing result
+          description: >-
+            The pass's committed progress. `status: interrupted` is not a full clearing; an error met AFTER at
+            least one committed occurrence (for example the operator stop, `error.code: E008`) is reported here
+            with `reason: error`, the progress being durable.
           content:
             application/json:
               schema:
@@ -2771,7 +2775,14 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >-
+            E008 before any occurrence committed: the equivalent is not active (operator stop or integrity
+            hold; `details.reason`), or its clearing lease is held by another pass. Met after progress, the
+            same stop answers 200 `interrupted` instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /payments/capacity:
     get:
@@ -3329,6 +3340,14 @@ paths:
     post:
       tags: [Simulator]
       summary: Execute a real clearing round inside a run (Interact Mode)
+      description: >-
+        Programme 023: one pass of the common clearing runner inside the run's perimeter. The request has no
+        `max_depth` (clearing execution has no depth; an extra field is 400 INVALID_REQUEST). 200 only when the
+        pass is complete; an interrupted pass (for example the retry budget of one occurrence spent) is 409
+        CLEARING_INTERRUPTED with `details.reason`, the committed progress (`partial_cleared_cycles`,
+        `partial_cleared_amount`) and the remainder of the last known plan (`remaining_cycles`,
+        `remaining_v_edge`, null when not known); the operator stop is 409 CONFLICT, with the partial progress
+        when some occurred. Cycle edges are PIDs in the trust-line direction (`from` = creditor, `to` = debtor).
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
       requestBody:
@@ -3849,11 +3868,6 @@ components:
       properties:
         equivalent:
           type: string
-        max_depth:
-          type: integer
-          minimum: 1
-          maximum: 12
-          default: 6
         client_action_id:
           type: string
           nullable: true
@@ -5505,14 +5519,98 @@ components:
             items:
               $ref: '#/components/schemas/ClearingCycleEdge'
 
+    # Programme 023 slice (d), decision R3 (2026-09-28): every field present, nullable ones as an explicit null.
+    # Money is an exact decimal string (scale 8, no exponent); atoms stay inside the hub.
     ClearingAutoResponse:
       type: object
-      required: [equivalent, cleared_cycles]
+      required: [equivalent, cleared_cycles, status, reason, v_edge, v_cyc, remaining_cycles, remaining_v_edge, committed, error]
       properties:
         equivalent:
           $ref: '#/components/schemas/EquivalentCode'
         cleared_cycles:
           type: integer
+          minimum: 0
+          description: Number of committed occurrences, equal to the length of `committed`.
+        status:
+          type: string
+          enum: [complete, interrupted]
+        reason:
+          type: string
+          nullable: true
+          enum: [cancelled, lease_lost, budget_exhausted, replan_limit, operational_limit, error, null]
+        v_edge:
+          type: string
+          description: Sum over the committed occurrences of cycle length times amount (the debt actually reduced).
+        v_cyc:
+          type: string
+          description: Sum of the committed occurrences' amounts (cycle volume).
+        remaining_cycles:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Unexecuted cycles of the last known plan; null when no plan was known (not measured).
+        remaining_v_edge:
+          type: string
+          nullable: true
+          description: Planned edge volume of those cycles; null when no plan was known.
+        committed:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClearingAutoCommittedOccurrence'
+        error:
+          # The error that stopped the pass AFTER progress (`reason: error`), as the error envelope would render
+          # it; any cause that is not a GeoException is sanitised to E010. Null otherwise.
+          type: object
+          nullable: true
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              # The cause's own details: the documented variant is the refusal reason of the operator stop or
+              # integrity hold (`equivalent_inactive`, ...); other causes forward theirs as is (a deliberately
+              # open tail, as on the error envelope). Null for a sanitised cause.
+              type: object
+              nullable: true
+              properties:
+                reason:
+                  type: string
+              additionalProperties: true
+
+    ClearingAutoCommittedOccurrence:
+      type: object
+      required: [occurrence_id, plan_id, ordinal, amount, edges, after_cancellation]
+      properties:
+        occurrence_id:
+          type: string
+        plan_id:
+          type: string
+        ordinal:
+          type: integer
+          minimum: 0
+        amount:
+          type: string
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClearingAutoCommittedEdge'
+        after_cancellation:
+          type: boolean
+
+    ClearingAutoCommittedEdge:
+      type: object
+      description: One reduced debt, in the direction debtor -> creditor (participant UUIDs).
+      required: [debt_id, debtor_id, creditor_id]
+      properties:
+        debt_id:
+          type: string
+        debtor_id:
+          type: string
+        creditor_id:
+          type: string
+
 
     CapacityResponse:
       type: object

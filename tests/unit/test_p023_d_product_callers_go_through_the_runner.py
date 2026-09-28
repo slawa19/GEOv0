@@ -28,7 +28,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tests.p023_support import require_target, target_xfail_023
+from tests.p023_support import require_target
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP = REPO_ROOT / "app"
@@ -78,7 +78,6 @@ def _function(tree: ast.AST, name: str) -> ast.AST:
     return matches[0]
 
 
-@target_xfail_023("(d)", "the product callers of clearing execution go through the runner")
 def test_each_product_caller_goes_through_its_runner_entry_and_calls_no_executor_itself() -> None:
     problems = []
     for (relative, function), entry in _CALLERS.items():
@@ -91,7 +90,6 @@ def test_each_product_caller_goes_through_its_runner_entry_and_calls_no_executor
     require_target(problems == [], "; ".join(problems))
 
 
-@target_xfail_023("(d)", "only the clearing service calls the shared executor, and auto_clear is gone")
 def test_only_the_service_and_the_runner_reach_the_executors_and_auto_clear_is_gone() -> None:
     from app.core.clearing.service import ClearingService
 

@@ -9,9 +9,7 @@ import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
 
-from tests.p023_support import target_xfail_023  # noqa: E402
 
-_P023_TARGET = target_xfail_023("(d)", "R1: the hub entrypoint passes CLEARING_PERIODIC_ENABLED")
 _SECURITY_FIELDS = {
     "JWT_SECRET",
     "ADMIN_TOKEN",
@@ -256,7 +254,6 @@ def test_active_local_callers_select_dev_configuration_explicitly() -> None:
 # on, and the hub's deployment entrypoint can. The base Compose file passes the variable with the safe default
 # (`false`), so a separate hub sets `CLEARING_PERIODIC_ENABLED=true` in its environment; the dev override (a
 # simulator stand) never turns it on. `ENV` never implies it (a production simulator demo is still `ENV=prod`).
-@_P023_TARGET
 def test_the_hub_entrypoint_passes_the_periodic_clearing_switch_with_a_false_default() -> None:
     from tests.p023_support import require_target
 

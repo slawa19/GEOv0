@@ -42,7 +42,7 @@ from app.core.simulator.real_runner import RealRunner
 from app.core.simulator.runtime_utils import safe_int_env
 from app.db.models.transaction import Transaction
 from tests.p020_support import debt_uuid, participant_uuid, ring, seed_graph
-from tests.p023_support import positive_debt_total, require_target, slow_plan, target_xfail_023
+from tests.p023_support import positive_debt_total, require_target, slow_plan
 from tests.simulator_tick_stand import RecordingSse, install_tick_stand, pooled_sessionmaker_over
 
 CODE = "PQT"
@@ -165,7 +165,6 @@ class _DelegatingPool:
 # ------------------------------------------------------------------------------------------ through the runner
 
 
-@target_xfail_023("(d)", "the tick's clearing goes through the runner and publishes creditor -> debtor PIDs")
 @pytest.mark.asyncio
 async def test_the_tick_clears_through_the_runner_with_creditor_to_debtor_pids(factory, monkeypatch) -> None:
     stand = await _stand(factory, T1 + T2)
@@ -183,7 +182,6 @@ async def test_the_tick_clears_through_the_runner_with_creditor_to_debtor_pids(f
     assert await stand.total() == 0
 
 
-@target_xfail_023("(d)", "SIMULATOR_CLEARING_MAX_DEPTH no longer limits the tick's execution")
 @pytest.mark.asyncio
 async def test_the_simulator_depth_setting_no_longer_limits_execution(factory, monkeypatch) -> None:
     monkeypatch.setenv("SIMULATOR_CLEARING_MAX_DEPTH", "3")
@@ -198,7 +196,6 @@ async def test_the_simulator_depth_setting_no_longer_limits_execution(factory, m
 # ---------------------------------------------------------------------------------- cold spawn, control 1
 
 
-@target_xfail_023("(d)", "cold spawn: the tick's first planning spawns the planner worker, and a later tick clears")
 @pytest.mark.asyncio
 async def test_cold_spawn_the_first_tick_is_recorded_and_a_later_tick_really_clears(factory, monkeypatch) -> None:
     runner = _runner_module()
@@ -234,7 +231,6 @@ async def test_cold_spawn_the_first_tick_is_recorded_and_a_later_tick_really_cle
 # ---------------------------------------------------------------------------------- cold spawn, control 2
 
 
-@target_xfail_023("(d)", "cold spawn: planning past the hard timeout is reported, its late result starts nothing")
 @pytest.mark.asyncio
 async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_starts_nothing(factory, monkeypatch, caplog) -> None:
     runner = _runner_module()
@@ -269,7 +265,6 @@ async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_st
 # ------------------------------------------------------------------------------ cancellation after a commit
 
 
-@target_xfail_023("(d)", "a tick cancelled after a commit keeps its progress in the DB, the accounting and SSE")
 @pytest.mark.asyncio
 async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monkeypatch, caplog) -> None:
     stand = await _stand(factory, T1 + T2)

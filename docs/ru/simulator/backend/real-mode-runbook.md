@@ -206,7 +206,9 @@ Real Mode guardrails:
 - `SIMULATOR_REAL_MAX_IN_FLIGHT` (по умолчанию 1)
 - `SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK` (по умолчанию 5)
 - `SIMULATOR_REAL_MAX_ERRORS_TOTAL` (по умолчанию 200)
-- `SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)
+- ~~`SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)~~ — не читается с 2026-09-28 (программа 023, срез (d)):
+  клиринг тика идёт через общий раннер плана потока, глубины у исполнения нет. Бюджет клиринга тика
+  (`SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS`) — дедлайн раннера: после него новый цикл не начинается.
 
 Clearing policy:
 - фиксированный cadence `SIMULATOR_CLEARING_EVERY_N_TICKS`; другой политики нет. `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` не читаются с 2026-09-28 (адаптивный режим удалён программой 021, стадия 3).

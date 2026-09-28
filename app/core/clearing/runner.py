@@ -1,8 +1,10 @@
-"""Programme 023 slice (c): the ONE clearing runner (spec decisions 3, 4, 7, 9, 10). NOT WIRED to production entrypoints.
+"""Programme 023: the ONE clearing runner (spec decisions 3, 4, 7, 9, 10). Built in slice (c), WIRED in slice (d).
 
-`POST /clearing/auto`, both simulator callers and the periodic loop are switched onto this module in slice (d); in
-slice (c) nothing in production calls it (`tests/unit/test_p023_c_runner_is_not_wired.py`), and the periodic loop in
-`app/main.py` is started only when `CLEARING_PERIODIC_ENABLED` is set, which it is not by default.
+Its product callers since the atomic switch of slice (d): `POST /clearing/auto` (`run_awaited_clearing`), the
+Interact action `clearing-real` and the simulator's tick driver (`run_clearing_pass`, in the run's perimeter), and the
+periodic loop in `app/main.py` (`run_periodic_clearing_pass`), started only when `CLEARING_PERIODIC_ENABLED` is set -
+by a separate hub deployment, never by default (decision R1). No product caller executes clearing around it
+(`tests/unit/test_p023_d_product_callers_go_through_the_runner.py`).
 
 ONE PASS (`run_clearing_pass`), for one equivalent:
 
@@ -20,7 +22,8 @@ ONE PASS (`run_clearing_pass`), for one equivalent:
    lock, retry owner, stop/hold `FOR SHARE`, authoritative consent and perimeter, commit resolver,
    `ClearingCommittedAfterCancellation`). Before EVERY cycle start: the lease (`lease.lost`) and the caller's budget
    (`deadline` on `deadline_clock`); after a loss or past the budget no new cycle starts, and the occurrence in flight is always
-   finished by the boundary, never abandoned.
+   finished by the boundary, never abandoned. The budget is checked BETWEEN occurrences: the first cycle of a pass
+   always starts (a plan slower than the budget would otherwise start nothing, ever).
 4. HANDOFF (decision 10): every durable occurrence is appended to the pass and given to `on_committed` IMMEDIATELY after
    its commit - with no `await` in between, so no later error or cancellation can overtake it - including one committed
    while the caller was being cancelled (`after_cancellation=True`).
@@ -77,16 +80,21 @@ DEFAULT_MAX_REPLANS = 3
 #: Pause before re-planning after a skip - the state moved under the plan; give the concurrent writer a moment.
 DEFAULT_REPLAN_PAUSE_SECONDS = 0.5
 #: The lease of one equivalent's pass. `renew interval + renew timeout + margin < TTL` (10 + 5 + 5 < 30), checked by
-#: `RenewableLease`. The key is the one `/clearing/auto` locks today, so each waits for the other to RELEASE it - but
-#: while legacy `/auto` coexists (until slice (d)), its lock is not renewed and expires after 30 s: a longer `/auto`
-#: run can overlap a runner pass. That is not double application - every occurrence revalidates its rows at the 019
-#: boundary - but it is not mutual exclusion either (review P3-7).
+#: `RenewableLease`. Since slice (d) `/clearing/auto` and the periodic loop take THIS lease on this key, so a manual
+#: and a periodic pass of one equivalent exclude each other where Redis is configured (without Redis nothing
+#: distributed is claimed). Money is protected by the 019 boundary either way.
 LEASE_TIMINGS = {
     "ttl_seconds": 30.0,
     "renew_interval_seconds": 10.0,
     "renew_timeout_seconds": 5.0,
     "safety_margin_seconds": 5.0,
 }
+
+
+def atoms_text(atoms: int) -> str:
+    """Money on the wire: the exact decimal text of `atoms` at scale 8 (`Numeric(20, 8)`) - no float, no exponent."""
+
+    return format(Decimal(int(atoms)).scaleb(-8), "f")
 
 
 def lease_key(equivalent_code: str) -> str:
@@ -334,9 +342,14 @@ async def run_clearing_pass(
     now = deadline_clock or asyncio.get_running_loop().time
     state = _PassState(equivalent_code, distributed_exclusive=lease is not None and lease.distributed)
     replans = 0
+    # Decision 10: the caller's deadline is checked BETWEEN occurrences - never before the first cycle of the pass.
+    # Checked before the snapshot and the first cycle too, a plan slower than the caller's budget (a tick's 250 ms)
+    # started nothing, and a graph whose planning always exceeds the budget never cleared (found 2026-09-28 by
+    # slice (d); `test_a_budget_spent_by_planning_still_lets_the_first_cycle_run`). The lease is checked always.
+    attempted = False
     try:
         while True:
-            stop = _stop_reason(lease, deadline, now)
+            stop = _stop_reason(lease, deadline if attempted else None, now)
             if stop is not None:
                 return _end(state, INTERRUPTED, stop)
             equivalent_id, edges = await _read_snapshot(
@@ -350,9 +363,10 @@ async def run_clearing_pass(
             plan_id = uuid.uuid4()
             skipped = False
             for ordinal, cycle in enumerate(plan.cycles):
-                stop = _stop_reason(lease, deadline, now)
+                stop = _stop_reason(lease, deadline if attempted else None, now)
                 if stop is not None:
                     return _end(state, INTERRUPTED, stop)
+                attempted = True
                 occurrence = ClearingOccurrence(
                     plan_id=plan_id,
                     equivalent_id=equivalent_id,
@@ -421,8 +435,8 @@ async def run_awaited_clearing(
 ) -> ClearingPassResult:
     """The `/clearing/auto`-compatible entry (decision 7): awaited, under the equivalent's renewable lease.
 
-    Refuses when `CLEARING_ENABLED` is off, as the endpoint does. A lease held by another owner is
-    `ConflictException` after `wait_timeout_seconds`. Not used by the endpoint until slice (d).
+    Refuses when `CLEARING_ENABLED` is off. A lease held by another owner is `ConflictException` after
+    `wait_timeout_seconds`. The entry of `POST /clearing/auto` since slice (d).
     """
 
     if not bool(getattr(settings, "CLEARING_ENABLED", True)):

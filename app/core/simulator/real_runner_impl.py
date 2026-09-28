@@ -124,9 +124,8 @@ class RealRunnerImpl:
             "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
             int(self._real_max_errors_total_default),
         )
-        self._clearing_max_depth_limit = _safe_int_env(
-            "SIMULATOR_CLEARING_MAX_DEPTH", 6
-        )
+        # `SIMULATOR_CLEARING_MAX_DEPTH` is no longer read (programme 023 slice (d), R4): clearing execution has no
+        # depth. The runbook records the variable as removed.
         self._clearing_max_fx_edges_limit = _safe_int_env(
             "SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30
         )
@@ -221,7 +220,6 @@ class RealRunnerImpl:
             utc_now=self._utc_now,
             logger=self._logger,
             edge_patch_builder=self._edge_patch_builder,
-            clearing_max_depth_limit=int(self._clearing_max_depth_limit),
             clearing_max_fx_edges_limit=int(self._clearing_max_fx_edges_limit),
             real_clearing_time_budget_ms=int(self._real_clearing_time_budget_ms),
             should_warn_this_tick=lambda run, key: self._should_warn_this_tick(run, key=key),

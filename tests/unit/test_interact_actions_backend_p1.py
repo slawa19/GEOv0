@@ -10,7 +10,6 @@ import pytest
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.clearing.service import ClearingCommittedAfterCancellation
 from app.core.simulator.models import RunRecord
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -1079,6 +1078,18 @@ async def test_payment_targets_no_route_returns_empty_items(
     assert payload == {"items": []}
 
 
+# MIGRATED 2026-09-28, programme 023 slice (d) (spec 023, "Срез (d)"): the Interact clearing action no longer runs its
+# own `find_cycles` / `execute_clearing_with_amount` loop - it calls the common runner once. The doubles of the two
+# service methods the tests below used to install have no call site left; the SAME behaviours are held at the new
+# seam: a double of `run_clearing_pass` that hands off progress through `on_committed` and then fails, is cancelled,
+# or finishes - exactly the shapes of the runner's contract (decision 10). What each test still asserts is unchanged:
+# the sanitised flat error with the partial progress in `details`, the one `clearing.done` publication of durable
+# progress (without patches on cancellation), the cancellation preserved, and the zero-progress failure publishing
+# nothing. `max_depth` left the request (R2), so no body carries it. The end-to-end runner path of this route is
+# `tests/integration/test_p023_d_interact_through_runner_postgres.py`.
+
+
+@MODE_B
 @pytest.mark.asyncio
 async def test_action_clearing_real_happy_zero_cycles(client, db_session, interact_actions_enabled):
     # Arrange
@@ -1091,7 +1102,6 @@ async def test_action_clearing_real_happy_zero_cycles(client, db_session, intera
         headers=headers,
         json={
             "equivalent": "UAH",
-            "max_depth": 6,
             "client_action_id": "c_clear_1",
         },
     )
@@ -1110,31 +1120,17 @@ async def test_action_clearing_real_happy_zero_cycles(client, db_session, intera
 async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     client, db_session, interact_actions_enabled, monkeypatch
 ):
-    # Arrange: create a real debt triangle cycle.
-    alice = Participant(
-        pid="alice",
-        display_name="Alice",
-        public_key="A" * 64,
-        type="person",
-        status="active",
-        profile={},
-    )
-    bob = Participant(
-        pid="bob",
-        display_name="Bob",
-        public_key="B" * 64,
-        type="person",
-        status="active",
-        profile={},
-    )
-    carol = Participant(
-        pid="carol",
-        display_name="Carol",
-        public_key="C" * 64,
-        type="person",
-        status="active",
-        profile={},
-    )
+    """The amount answered is the committed occurrence's, on a triangle whose minimum edge is 5.
+
+    Before 023 (d) this test made the detector lie about per-edge amounts to show the route did not pre-compute
+    them; the route no longer reads detector amounts at all - the runner hands off each occurrence's committed
+    amount - so the lie has nothing to reach. What stays asserted: the answered total and cycle amount are the
+    applied one, 5.
+    """
+
+    alice = Participant(pid="alice", display_name="Alice", public_key="A" * 64, type="person", status="active", profile={})
+    bob = Participant(pid="bob", display_name="Bob", public_key="B" * 64, type="person", status="active", profile={})
+    carol = Participant(pid="carol", display_name="Carol", public_key="C" * 64, type="person", status="active", profile={})
     uah = Equivalent(code="UAH", precision=2, is_active=True)
     db_session.add_all([alice, bob, carol, uah])
     await db_session.commit()
@@ -1142,30 +1138,9 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     # Trustlines required by auto-clearing policy check.
     db_session.add_all(
         [
-            TrustLine(
-                from_participant_id=bob.id,
-                to_participant_id=alice.id,
-                equivalent_id=uah.id,
-                status="active",
-                limit=Decimal("100"),
-                policy={"auto_clearing": True},
-            ),
-            TrustLine(
-                from_participant_id=carol.id,
-                to_participant_id=bob.id,
-                equivalent_id=uah.id,
-                status="active",
-                limit=Decimal("100"),
-                policy={"auto_clearing": True},
-            ),
-            TrustLine(
-                from_participant_id=alice.id,
-                to_participant_id=carol.id,
-                equivalent_id=uah.id,
-                status="active",
-                limit=Decimal("100"),
-                policy={"auto_clearing": True},
-            ),
+            TrustLine(from_participant_id=bob.id, to_participant_id=alice.id, equivalent_id=uah.id, status="active", limit=Decimal("100"), policy={"auto_clearing": True}),
+            TrustLine(from_participant_id=carol.id, to_participant_id=bob.id, equivalent_id=uah.id, status="active", limit=Decimal("100"), policy={"auto_clearing": True}),
+            TrustLine(from_participant_id=alice.id, to_participant_id=carol.id, equivalent_id=uah.id, status="active", limit=Decimal("100"), policy={"auto_clearing": True}),
         ]
     )
     await db_session.commit()
@@ -1174,33 +1149,13 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     async with debt_fixture_setup(db_session, label="setup"):
         db_session.add_all(
             [
-                Debt(
-                    debtor_id=alice.id,
-                    creditor_id=bob.id,
-                    equivalent_id=uah.id,
-                    amount=Decimal("5"),
-                ),
-                Debt(
-                    debtor_id=bob.id,
-                    creditor_id=carol.id,
-                    equivalent_id=uah.id,
-                    amount=Decimal("10"),
-                ),
-                Debt(
-                    debtor_id=carol.id,
-                    creditor_id=alice.id,
-                    equivalent_id=uah.id,
-                    amount=Decimal("7"),
-                ),
+                Debt(debtor_id=alice.id, creditor_id=bob.id, equivalent_id=uah.id, amount=Decimal("5")),
+                Debt(debtor_id=bob.id, creditor_id=carol.id, equivalent_id=uah.id, amount=Decimal("10")),
+                Debt(debtor_id=carol.id, creditor_id=alice.id, equivalent_id=uah.id, amount=Decimal("7")),
             ]
         )
     await db_session.commit()
 
-    # 2026-08-22 / p010: the cycle runs alice -> bob -> carol -> alice, so the run has to
-    # contain carol as well.  The shared fixture registers alice and bob only, and since the
-    # clearing route began honouring the run perimeter (`F-010-3`) a cycle through a
-    # participant the run does not contain is correctly refused.  The old shape - a run
-    # clearing a cycle that leaves it - is exactly what the perimeter exists to stop.
     import app.api.v1.simulator as simulator_module_for_perimeter
 
     _register_run_perimeter(
@@ -1213,45 +1168,12 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
         ],
     )
 
-    # Make find_cycles lie about per-edge amounts to ensure endpoint doesn't pre-calc based on it.
-    import app.core.clearing.service as clearing_service_module
-
-    original_find_cycles = clearing_service_module.ClearingService.find_cycles
-
-    async def _find_cycles_with_stale_amounts(
-        self, equivalent_code: str, max_depth: int = 6, *, allowed_participant_pids=None
-    ):
-        cycles = await original_find_cycles(
-            self,
-            equivalent_code,
-            max_depth=max_depth,
-            allowed_participant_pids=allowed_participant_pids,
-        )
-        for cycle in cycles:
-            for edge in cycle:
-                edge["amount"] = "999"  # wrong pre-calc amount
-        return cycles
-
-    monkeypatch.setattr(
-        clearing_service_module.ClearingService,
-        "find_cycles",
-        _find_cycles_with_stale_amounts,
-    )
-
-    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
-
-    # Act
     r = await client.post(
         "/api/v1/simulator/runs/test-run/actions/clearing-real",
-        headers=headers,
-        json={
-            "equivalent": "UAH",
-            "max_depth": 3,
-            "client_action_id": "c_clear_actual_1",
-        },
+        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+        json={"equivalent": "UAH", "client_action_id": "c_clear_actual_1"},
     )
 
-    # Assert
     assert r.status_code == 200, r.text
     payload = r.json()
     assert payload["ok"] is True
@@ -1259,6 +1181,39 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     assert Decimal(str(payload["total_cleared_amount"])) == Decimal("5")
     assert isinstance(payload.get("cycles"), list)
     assert Decimal(str(payload["cycles"][0]["cleared_amount"])) == Decimal("5")
+
+
+def _alice_bob_occurrence(ids, *, after_cancellation=False):
+    """One committed occurrence on alice -> bob -> alice as the runner hands it off (debtor -> creditor by UUID)."""
+
+    from app.core.clearing.runner import CommittedEdge, CommittedOccurrence
+
+    return CommittedOccurrence(
+        occurrence_id="occ-1",
+        plan_id=uuid.uuid4(),
+        ordinal=0,
+        amount_atoms=250_000_000,  # 2.5
+        edges=(
+            CommittedEdge(uuid.uuid4(), ids["alice"], ids["bob"]),
+            CommittedEdge(uuid.uuid4(), ids["bob"], ids["alice"]),
+        ),
+        after_cancellation=after_cancellation,
+    )
+
+
+def _pass_result(committed, *, status="interrupted", reason="error"):
+    from app.core.clearing.runner import ClearingPassResult, InterruptReason
+
+    return ClearingPassResult(
+        equivalent="UAH",
+        status=status,
+        reason=None if reason is None else InterruptReason(reason),
+        committed=tuple(committed),
+        remaining_cycles=1 if status != "complete" else 0,
+        remaining_v_edge_atoms=100_000_000 if status != "complete" else 0,
+        plans=1,
+        distributed_exclusive=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -1279,76 +1234,32 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     monkeypatch,
     failure_kind,
 ):
-    await _seed_alice_bob_uah(db_session)
+    from app.core.clearing.runner import ClearingPassCancelled, ClearingPassError
 
-    cycles = [
-        [
-            {
-                "debt_id": str(uuid.uuid4()),
-                "debtor": "alice",
-                "creditor": "bob",
-                "amount": "2.5",
-            }
-        ],
-        [
-            {
-                "debt_id": str(uuid.uuid4()),
-                "debtor": "bob",
-                "creditor": "alice",
-                "amount": "1",
-            }
-        ],
-    ]
-    find_calls = 0
-    execute_calls = 0
+    alice, bob, _ = await _seed_alice_bob_uah(db_session)
+    ids = {"alice": alice.id, "bob": bob.id}
+    runner_calls = 0
 
-    async def _find_cycles(
-        self, equivalent_code: str, max_depth: int = 6, *, allowed_participant_pids=None
-    ):
-        nonlocal find_calls
+    async def _run_clearing_pass(session_factory, equivalent_code, *, allowed_participant_pids=None, on_committed=None, **_kw):
+        nonlocal runner_calls
+        runner_calls += 1
         assert equivalent_code == "UAH"
-        assert max_depth == 6
-        # 2026-08-22 / p010: the double asserts the run perimeter arrives, rather than
-        # tolerating the new keyword with **kwargs.  A double that merely swallows the
-        # argument would keep passing if the route stopped scoping.
+        # The run perimeter reaches the runner (a double that swallowed it would pass if the route stopped scoping).
         assert allowed_participant_pids == {"alice", "bob"}, allowed_participant_pids
-        cycle = cycles[min(find_calls, len(cycles) - 1)]
-        find_calls += 1
-        return [cycle]
-
-    async def _execute_clearing(self, cycle, *, allowed_participant_pids=None):
-        nonlocal execute_calls
-        execute_calls += 1
-        assert allowed_participant_pids == {"alice", "bob"}, allowed_participant_pids
-        if failure_kind == "committed_cancel" and execute_calls == 1:
-            raise ClearingCommittedAfterCancellation(
-                tx_id="clearing-committed",
-                cleared_amount=Decimal("2.5"),
-            )
-        if execute_calls == 1:
-            assert cycle is cycles[0]
-            return Decimal("2.5")
-        assert cycle is cycles[1]
+        occurrence = _alice_bob_occurrence(ids, after_cancellation=failure_kind == "committed_cancel")
+        on_committed(occurrence)
         if failure_kind == "geo":
-            raise GeoException(details={"safe_context": "retry_exhausted"}) from RuntimeError(
-                "raw clearing failure secret"
-            )
-        if failure_kind == "cancelled_execute":
-            raise asyncio.CancelledError
-        if failure_kind == "cancelled_finalize":
-            return None
-        raise RuntimeError("raw clearing failure secret")
+            raise ClearingPassError(
+                _pass_result([occurrence]),
+                GeoException(details={"safe_context": "retry_exhausted"}),
+            ) from RuntimeError("raw clearing failure secret")
+        if failure_kind == "unexpected":
+            raise ClearingPassError(_pass_result([occurrence]), RuntimeError("raw clearing failure secret"))
+        if failure_kind in {"cancelled_execute", "committed_cancel"}:
+            raise ClearingPassCancelled(_pass_result([occurrence], reason="cancelled"))
+        return _pass_result([occurrence], status="complete", reason=None)  # cancelled_finalize: a complete pass
 
-    monkeypatch.setattr(
-        interact_actions_enabled.ClearingService,
-        "find_cycles",
-        _find_cycles,
-    )
-    monkeypatch.setattr(
-        interact_actions_enabled.ClearingService,
-        "execute_clearing_with_amount",
-        _execute_clearing,
-    )
+    monkeypatch.setattr(interact_actions_enabled, "run_clearing_pass", _run_clearing_pass)
 
     patch_calls = 0
 
@@ -1359,11 +1270,7 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
             raise asyncio.CancelledError
         return None, None
 
-    monkeypatch.setattr(
-        interact_actions_enabled,
-        "_compute_viz_patches_best_effort",
-        _no_patches,
-    )
+    monkeypatch.setattr(interact_actions_enabled, "_compute_viz_patches_best_effort", _no_patches)
 
     emitted: list[dict] = []
 
@@ -1380,24 +1287,22 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
         with pytest.raises(asyncio.CancelledError):
             await interact_actions_enabled.action_clearing_real(
                 "test-run",
-                SimulatorActionClearingRealRequest(
-                    equivalent="UAH",
-                    max_depth=6,
-                ),
+                SimulatorActionClearingRealRequest(equivalent="UAH"),
                 SimpleNamespace(is_admin=True, owner_id="admin"),
                 db_session,
+                None,  # the session factory: the runner double never opens a session
             )
         response = None
     else:
         response = await client.post(
             "/api/v1/simulator/runs/test-run/actions/clearing-real",
             headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-            json={"equivalent": "UAH", "max_depth": 6},
+            json={"equivalent": "UAH"},
         )
 
     expected_details = {
         "partial_cleared_cycles": 1,
-        "partial_cleared_amount": "2.5",
+        "partial_cleared_amount": "2.50000000",
     }
     if failure_kind == "geo":
         expected_details = {
@@ -1412,12 +1317,14 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
             "details": expected_details,
         }
         assert "raw clearing failure secret" not in response.text
-    assert execute_calls == (1 if failure_kind == "committed_cancel" else 2)
+    assert runner_calls == 1
     assert len(emitted) == 1
     assert emitted[0]["type"] == "clearing.done"
     assert emitted[0]["equivalent"] == "UAH"
     assert emitted[0]["cleared_cycles"] == 1
-    assert emitted[0]["cleared_amount"] == "2.5"
+    assert Decimal(emitted[0]["cleared_amount"]) == Decimal("2.5")
+    # The runner's debtor -> creditor edges reach SSE as trust-line direction creditor -> debtor by PID.
+    assert {(e["from"], e["to"]) for e in emitted[0]["cycle_edges"]} == {("bob", "alice"), ("alice", "bob")}
     assert "raw clearing failure secret" not in str(emitted[0])
     if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         assert emitted[0]["node_patch"] is None
@@ -1436,35 +1343,17 @@ async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
     monkeypatch,
     caplog,
 ):
+    from app.core.clearing.runner import ClearingPassError
+
     await _seed_alice_bob_uah(db_session)
-    cycle = [
-        {
-            "debt_id": str(uuid.uuid4()),
-            "debtor": "alice",
-            "creditor": "bob",
-            "amount": "2.5",
-        }
-    ]
 
-    async def _find_cycles(*_args, **_kwargs):
-        return [cycle]
-
-    async def _execute_clearing(*_args, **_kwargs):
-        raise RuntimeError("raw initial clearing secret")
+    async def _run_clearing_pass(*_args, **_kwargs):
+        raise ClearingPassError(_pass_result([]), RuntimeError("raw initial clearing secret"))
 
     async def _unexpected_done(*_args, **_kwargs):
         raise AssertionError("zero-progress failure must not emit clearing.done")
 
-    monkeypatch.setattr(
-        interact_actions_enabled.ClearingService,
-        "find_cycles",
-        _find_cycles,
-    )
-    monkeypatch.setattr(
-        interact_actions_enabled.ClearingService,
-        "execute_clearing_with_amount",
-        _execute_clearing,
-    )
+    monkeypatch.setattr(interact_actions_enabled, "run_clearing_pass", _run_clearing_pass)
     monkeypatch.setattr(
         interact_actions_enabled,
         "_emit_interact_clearing_done_best_effort",
@@ -1474,7 +1363,7 @@ async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
     response = await client.post(
         "/api/v1/simulator/runs/test-run/actions/clearing-real",
         headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-        json={"equivalent": "UAH", "max_depth": 6},
+        json={"equivalent": "UAH"},
     )
 
     assert response.status_code == 500

@@ -162,7 +162,7 @@ export type SimulatorActionClearingCycle = {
 
 export type SimulatorActionClearingRealRequest = {
   equivalent: string
-  max_depth?: number
+  // Programme 023 slice (d): no `max_depth` - clearing execution has no depth (an extra field is 400).
   client_action_id?: string | null
 }
 

@@ -39,7 +39,7 @@ from app.db.models.transaction import Transaction
 from app.utils.exceptions import BadRequestException, ConflictException
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import Edge, debt_uuid, participant_uuid, ring, seed_graph
-from tests.p023_support import positive_debt_total, remaining_debts, slice_c_surface
+from tests.p023_support import positive_debt_total, remaining_debts, require_target, slice_c_surface
 
 pytestmark = MODE_B
 
@@ -351,6 +351,31 @@ async def test_the_callers_budget_is_checked_between_occurrences(db_session) -> 
     )
     assert result.status == "interrupted" and result.reason == "budget_exhausted", result
     assert len(handed) == 1 and result.remaining_cycles == 1
+    assert len(await _clearings(factory)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_budget_spent_by_planning_still_lets_the_first_cycle_run(db_session) -> None:
+    """Decision 10: the caller's deadline is checked BETWEEN occurrences - it never stops the first cycle of a pass.
+
+    Found 2026-09-28 by slice (d)'s full tier (`test_p015_step5c_hold_through_the_tick_sqlite.py`, tick 1): the tick
+    driver's deadline starts with the pass, and the runner checked it before the snapshot and before the FIRST cycle
+    too, so a plan that took longer than the tick budget (296 ms against 250 ms on that stand) started no cycle at
+    all - and a graph whose planning always exceeds the budget would never clear in the simulator. The deadline
+    here is already past when the pass starts: the first cycle must still run, and the second must not.
+    """
+
+    api = slice_c_surface()
+    await _seed(db_session)
+    factory = sessionmaker_of(db_session)
+    handed: list = []
+
+    result = await api.run_clearing_pass(
+        factory, CODE, on_committed=handed.append, deadline=100.0, deadline_clock=lambda: 200.0
+    )
+    require_target(len(handed) == 1, f"a deadline spent before the first cycle started {len(handed)} cycles: {result}")
+    assert result.status == "interrupted" and result.reason == "budget_exhausted", result
+    assert result.remaining_cycles == 1
     assert len(await _clearings(factory)) == 1
 
 

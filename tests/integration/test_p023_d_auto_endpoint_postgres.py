@@ -40,7 +40,6 @@ from tests.p023_support import (
     positive_debt_total,
     require_auto_progress,
     require_target,
-    target_xfail_023,
 )
 
 pytestmark = MODE_B
@@ -86,7 +85,6 @@ def _triangle_of(entry) -> str:
 # --------------------------------------------------------------------------------------------- success
 
 
-@target_xfail_023("(d)", "R3: /auto answers the exact committed-progress shape")
 @pytest.mark.asyncio
 async def test_a_complete_pass_answers_the_exact_committed_progress_shape(db_session, client, auth_headers) -> None:
     await _seed(db_session)
@@ -130,7 +128,6 @@ async def test_a_complete_pass_answers_the_exact_committed_progress_shape(db_ses
 # ---------------------------------------------------------------------------------------- max_depth (R2)
 
 
-@target_xfail_023("(d)", "R2: /auto refuses max_depth in any form with an explanation, before the runner starts")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query",
@@ -182,7 +179,6 @@ async def _stop_the_equivalent(factory) -> None:
         await session.commit()
 
 
-@target_xfail_023("(d)", "R3: the operator stop after progress answers 200 interrupted with E008")
 @pytest.mark.asyncio
 async def test_the_operator_stop_after_progress_answers_interrupted_with_e008(db_session, client, auth_headers, monkeypatch) -> None:
     await _seed(db_session)
@@ -208,14 +204,23 @@ async def test_the_operator_stop_after_progress_answers_interrupted_with_e008(db
     assert left == TOTAL - Decimal(body["v_edge"]) and left > 0
 
 
-@target_xfail_023("(d)", "R3: an unexpected error after progress answers 200 interrupted with a sanitised error")
+def _internal_failure(kind: str) -> Exception:
+    """An internal failure: a bare exception, or a GeoException with the internal code E010 and a private message
+    (the shape the retired `auto_clear` sanitised - `test_clearing_additional_cases.py`, removed 2026-09-28)."""
+
+    from app.utils.exceptions import GeoException
+
+    return RuntimeError("raw clearing secret") if kind == "raw" else GeoException("raw clearing secret")
+
+
 @pytest.mark.asyncio
-async def test_an_unexpected_error_after_progress_is_reported_sanitised(db_session, client, auth_headers, monkeypatch) -> None:
+@pytest.mark.parametrize("kind", ["raw", "geo_e010"])
+async def test_an_unexpected_error_after_progress_is_reported_sanitised(db_session, client, auth_headers, monkeypatch, kind) -> None:
     await _seed(db_session)
 
     async def before(n: int) -> None:
         if n == 2:
-            raise RuntimeError("raw clearing secret")
+            raise _internal_failure(kind)
 
     calls = _spy_execute(monkeypatch, before)
     response = await auto_clear_http(client, auth_headers, CODE)
@@ -230,7 +235,6 @@ async def test_an_unexpected_error_after_progress_is_reported_sanitised(db_sessi
     assert await fresh_read(db_session, _clearings) == 1
 
 
-@target_xfail_023("(d)", "R3: an unexpected error before any commit keeps the existing error contract")
 @pytest.mark.asyncio
 async def test_an_unexpected_error_before_any_commit_is_the_error_itself(db_session, client, auth_headers, monkeypatch) -> None:
     await _seed(db_session)
@@ -257,7 +261,6 @@ async def test_an_unexpected_error_before_any_commit_is_the_error_itself(db_sess
 # ------------------------------------------------------------------------------------ cancellation
 
 
-@target_xfail_023("(d)", "R3: a cancelled /auto accounts its durable progress, then stays cancelled")
 @pytest.mark.asyncio
 async def test_a_cancelled_request_accounts_its_progress_and_stays_cancelled(db_session, client, auth_headers, monkeypatch, caplog) -> None:
     await _seed(db_session)
@@ -287,3 +290,21 @@ async def test_a_cancelled_request_accounts_its_progress_and_stays_cancelled(db_
     assert await fresh_read(db_session, _clearings) == 1, "the first occurrence is durable"
     records = [r.getMessage() for r in caplog.records if "event=clearing.auto.cancelled" in r.getMessage()]
     assert records and "committed=1" in records[-1], records
+
+
+@pytest.mark.asyncio
+async def test_an_internal_geo_error_before_any_commit_is_the_sanitised_envelope(db_session, client, auth_headers, monkeypatch) -> None:
+    """The E010 GeoException before any commit: the bare internal envelope, its private message only in the log."""
+
+    await _seed(db_session)
+
+    async def before(n: int) -> None:
+        raise _internal_failure("geo_e010")
+
+    _spy_execute(monkeypatch, before)
+    response = await auto_clear_http(client, auth_headers, CODE)
+    assert response.status_code == 500, response.text
+    assert response.json()["error"]["code"] == "E010"
+    assert response.json()["error"]["message"] == "Internal server error"
+    assert "raw clearing secret" not in response.text
+    assert await fresh_read(db_session, _clearings) == 0
