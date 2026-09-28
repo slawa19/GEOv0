@@ -24,7 +24,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineUpdateRequest
-from tests.p021_support import TrustLineCheckpoints, is_transaction_scoped, trust_line_audit_rows
+from tests.p021_support import TrustLineBatchPoints, is_transaction_scoped, trust_line_audit_rows
 
 _UNSIGNED = "__internal__"
 
@@ -56,7 +56,7 @@ async def _world(session):
 @pytest.mark.asyncio
 async def test_one_checkpoint_pair_per_touched_equivalent_per_batch(db_session, monkeypatch) -> None:
     owner, (l1, l2, l3), (e1, e2) = await _world(db_session)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     service = TrustLineService(db_session)
     batch = service.begin_internal_batch()
 
@@ -100,7 +100,7 @@ async def test_a_commit_without_finish_is_refused_and_a_rollback_disarms(db_sess
 @pytest.mark.asyncio
 async def test_control_an_empty_batch_computes_nothing_and_commits(db_session, monkeypatch) -> None:
     await _world(db_session)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     batch = TrustLineService(db_session).begin_internal_batch()
     await batch.finish()
     await db_session.commit()

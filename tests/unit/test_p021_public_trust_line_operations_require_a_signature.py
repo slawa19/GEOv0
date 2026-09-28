@@ -142,4 +142,4 @@ async def test_control_a_correct_signature_is_accepted_and_audited_per_operation
     last = rows[-1]
     assert last.operation_type == "TRUST_LINE_UPDATE"
     assert set(last.affected_participants) == {"from", "to", "trustline_id"}, last.affected_participants
-    assert last.state_checksum_before != last.state_checksum_after
+    assert (last.state_checksum_before, last.state_checksum_after, last.verification_passed) == ("", "", None)  # 024 `T2413.2`: None = the row records the operation, no check ran

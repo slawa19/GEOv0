@@ -7,7 +7,6 @@ from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
 from sqlalchemy import bindparam, select, and_, text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -27,7 +26,6 @@ from app.utils.money import to_money_str
 from app.core.money_boundary import IsolationNotSerializable, MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
-from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.ledger.book import Book, ClearingReduction, operation_for
 from app.db.journal_tables import CLEARING_INTENT_ENCODING_VERSION
 
@@ -2244,26 +2242,6 @@ class ClearingService:
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
 
-        checkpoint_before = None
-        try:
-            checkpoint_before = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=debts[0].equivalent_id,
-            )
-        except Exception as exc:
-            if isinstance(exc, DBAPIError):
-                # A database error has aborted the transaction: swallowing it would lose its SQLSTATE
-                # behind the next statement's 25P02 (`T1909` step 3). Best effort stays best effort only
-                # for a failure that leaves the transaction usable.
-                return await self._end_attempt_on_error(
-                    exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
-                )
-            logger.warning(
-                "event=clearing.checkpoint_before_failed",
-                exc_info=True,
-            )
-            checkpoint_before = None
-
         # 2. Create Transaction (CLEARING)
         # We need an initiator? System or one of participants.
         # Let's pick the first debtor.
@@ -2354,33 +2332,11 @@ class ClearingService:
 
                 await self.session.flush()
 
-                checkpoint_after = None
+                # The operation's audit record (024 `T2413.2`): no full-equivalent check runs in this
+                # transaction, and the row says so - `verification_passed = null`, empty checksums,
+                # `invariants_checked = {}`. What guards the clearing is the neutrality check below and
+                # the `amount < clear_amount` refusal above, which raise.
                 try:
-                    checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                        self.session,
-                        equivalent_id=debts[0].equivalent_id,
-                    )
-                except Exception as exc:
-                    if isinstance(exc, DBAPIError):
-                        raise  # the transaction is aborted: the handler below classifies it (`T1909`)
-                    logger.warning(
-                        "event=clearing.checkpoint_after_failed",
-                        exc_info=True,
-                    )
-                    checkpoint_after = None
-
-                try:
-                    before_sum = checkpoint_before.checksum if checkpoint_before else ""
-                    after_sum = (
-                        checkpoint_after.checksum if checkpoint_after else before_sum
-                    )
-                    invariants_status = (
-                        (checkpoint_after.invariants_status or {})
-                        if checkpoint_after
-                        else {}
-                    )
-                    passed = bool(invariants_status.get("passed", False))
-
                     self.session.add(
                         IntegrityAuditLog(
                             operation_type="CLEARING",
@@ -2388,18 +2344,17 @@ class ClearingService:
                             equivalent_code=str(
                                 equivalent.code if equivalent else debts[0].equivalent_id
                             ),
-                            state_checksum_before=before_sum,
-                            state_checksum_after=after_sum,
+                            state_checksum_before="",
+                            state_checksum_after="",
                             affected_participants={
                                 "participants": [
                                     str(pid_by_id.get(p, p)) for p in participant_ids
                                 ],
                                 "edges": edges_payload,
                             },
-                            invariants_checked=invariants_status.get("checks")
-                            or invariants_status,
-                            verification_passed=passed,
-                            error_details=None if passed else invariants_status,
+                            invariants_checked={},
+                            verification_passed=None,
+                            error_details=None,
                         )
                     )
                 except Exception:

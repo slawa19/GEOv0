@@ -115,15 +115,11 @@ async def test_a_committed_payment_writes_one_audit_row_and_counts_one_commit_an
     )
     row = rows[0]
     assert row.operation_type == "PAYMENT" and row.equivalent_code == world.equivalent.code, row
-    assert row.verification_passed is True, row.error_details
+    assert row.verification_passed is None and row.error_details is None, row  # 024 `T2413.2`: None = the row records the operation, no check ran
     assert row.affected_participants == {
         "participants": sorted([world.sender.pid, world.receiver.pid])
     }, row.affected_participants
-    assert row.state_checksum_before and row.state_checksum_after, row
-    assert row.state_checksum_before != row.state_checksum_after, (
-        "the audit row's checksums are equal although the payment moved money: the 'before' "
-        "checkpoint was not taken before the flows"
-    )
+    assert (row.state_checksum_before, row.state_checksum_after, row.invariants_checked) == ("", "", {}), row
 
     assert _metric("commit", "success") - commit_before == 1
     assert _metric("prepare", "success") - prepare_before == 0, (

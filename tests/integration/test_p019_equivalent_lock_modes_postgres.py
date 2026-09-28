@@ -345,7 +345,7 @@ async def test_two_api_payments_over_different_pairs_of_one_equivalent_overlap_a
         (people["A"].id, people["B"].id): Decimal("10.00000000"),
         (people["C"].id, people["D"].id): Decimal("7.00000000"),
     }, debts
-    assert audits == sorted((tx_id, "PAYMENT", True) for tx_id in tx_ids), audits
+    assert audits == sorted((tx_id, "PAYMENT", None) for tx_id in tx_ids), audits  # 024 `T2413.2`: None = the row records the operation, no check ran
 
 
 # ── (2) shared / exclusive ────────────────────────────────────────────────────────────────────

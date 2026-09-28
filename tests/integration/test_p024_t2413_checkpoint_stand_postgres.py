@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.core.payments.service as payments_module
 from app.config import settings
+from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService, _payment_db_sqlstate
@@ -60,7 +61,10 @@ pytestmark = [pytest.mark.slow]
 
 REPS = 20
 FILLER = 200  # background participants of the same equivalent: 400 trust lines, 200 debts
-_ORIGINAL_CHECKPOINT = payments_module.compute_integrity_checkpoint_for_equivalent
+_ORIGINAL_CHECKPOINT = compute_integrity_checkpoint_for_equivalent
+#: Before `T2413.2` the payment module binds the scan and the stand runs both arms; after it only `as_is`
+#: exists (the same code path, now without the scan) - the "after" of the before/after pair.
+_SCAN_IN_PAYMENT = hasattr(payments_module, "compute_integrity_checkpoint_for_equivalent")
 _turn: contextvars.ContextVar[dict | None] = contextvars.ContextVar("p024_t2413_turn", default=None)
 
 
@@ -209,8 +213,8 @@ async def test_r024_11_checkpoint_cost_and_ssi_conflicts(factory, monkeypatch) -
         return None
 
     monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", held_open)
-    arms = {"as_is": counted_checkpoint, "no_scan": no_scan}
-    report: dict = {"reps": REPS, "filler_participants": FILLER, "commit_retry_attempts": settings.COMMIT_RETRY_ATTEMPTS}
+    arms = {"as_is": counted_checkpoint, "no_scan": no_scan} if _SCAN_IN_PAYMENT else {"as_is": None}
+    report: dict = {"scan_in_payment": _SCAN_IN_PAYMENT, "reps": REPS, "filler_participants": FILLER, "commit_retry_attempts": settings.COMMIT_RETRY_ATTEMPTS}
 
     # (A) one checkpoint alone, in one transaction.
     samples, cost = [], {}
@@ -235,7 +239,8 @@ async def test_r024_11_checkpoint_cost_and_ssi_conflicts(factory, monkeypatch) -
     seq = {arm: {"ms": [], "statements": []} for arm in arms}
     for _ in range(REPS):
         for arm, fn in arms.items():
-            monkeypatch.setattr(payments_module, "compute_integrity_checkpoint_for_equivalent", fn)
+            if fn is not None:
+                monkeypatch.setattr(payments_module, "compute_integrity_checkpoint_for_equivalent", fn)
             probe.reset()
             started = time.perf_counter()
             assert await _pay(factory, world, "S1", "R1") == "COMMITTED"
@@ -255,7 +260,8 @@ async def test_r024_11_checkpoint_cost_and_ssi_conflicts(factory, monkeypatch) -
         for name, (flows, ttl) in schedules.items():
             monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", ttl)
             for arm, fn in arms.items():
-                monkeypatch.setattr(payments_module, "compute_integrity_checkpoint_for_equivalent", fn)
+                if fn is not None:
+                    monkeypatch.setattr(payments_module, "compute_integrity_checkpoint_for_equivalent", fn)
                 PaymentRouter.invalidate_cache(world["code"])
                 if ttl:
                     async with factory() as warm:
@@ -290,7 +296,7 @@ async def test_r024_11_checkpoint_cost_and_ssi_conflicts(factory, monkeypatch) -
         assert table[f"same_pair_known_conflict/{arm}"]["reps_with_40001"] >= 18, ("M3", arm, table)
         for name in schedules:
             assert table[f"{name}/{arm}"]["overlap"] >= 2 * 18, ("M4", name, arm, table)
-            if arm == "as_is":
+            if arm == "as_is" and _SCAN_IN_PAYMENT:
                 assert table[f"{name}/{arm}"]["checkpoints"] >= 2 * 2 * REPS, ("M5", name, table)
-            else:
+            else:  # after `T2413.2` the payment cannot reach the scan at all: R-024-12 holds that
                 assert table[f"{name}/{arm}"]["checkpoints"] == 0, ("M5", name, table)

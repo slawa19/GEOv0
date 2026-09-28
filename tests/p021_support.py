@@ -6,11 +6,12 @@ assertions first, and only the final comparison with the target raises `TargetMi
 not accept, and a tree that already meets the target XPASSes, which `strict=True` turns into a failure - the
 stage that delivers the target has to take the marker off.
 
-`TrustLineCheckpoints` counts the integrity checkpoints the TRUST-LINE SERVICE computes. It wraps the name
-the service module calls at call time and calls straight through, so what is measured is the real
-computation; the counter replaces no domain behaviour. It is scoped to the service's binding on purpose:
-the clearing and payment services compute checkpoints of their own through their own bindings, and a
-tick-wide count would mix them in.
+`TrustLineBatchPoints` counts the per-equivalent points of the trust-line batch: the FIRST touch of an equivalent
+and the staging of its audit rows in `finish()`. Until 024 `T2413.2` the batch computed a full-equivalent
+integrity checkpoint at exactly these two points (before and after), and the 021 tests counted and failed
+those computations; the checkpoints are gone, the points - and what a failure at one must leave behind - are
+not. In the 021 test modules "checkpoint" in a name or message means such a point. It wraps the batch's own
+methods and calls straight through; it replaces no domain behaviour.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import pytest
 from tests.p019_support import TargetMismatch, require_target  # noqa: F401 - re-exported for 021 tests
 
 #: What stage 1 writes into `affected_participants` of every trust-line audit row of an internal batch:
-#: the checksums and check results on the row belong to the caller's whole transaction, not to the row.
+#: the row belongs to the caller's whole transaction (since 024 `T2413.2` it carries no checksums).
 CHECKPOINT_SCOPE_KEY = "checkpoint_scope"
 CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
 
@@ -37,23 +38,32 @@ def target_xfail_021(stage: str, what: str):
     )
 
 
-class TrustLineCheckpoints:
-    """Counts `compute_integrity_checkpoint_for_equivalent` calls made through the trust-line service."""
+class TrustLineBatchPoints:
+    """Counts (and can fail) the trust-line batch's per-equivalent points: first touch, audit staging."""
 
     def __init__(self, monkeypatch) -> None:
-        import app.core.trustlines.service as service_module
+        from app.core.trustlines.service import TrustLineWriteBatch
 
         self.calls: list[object] = []
         self.fail_on_call: int | None = None
-        original = service_module.compute_integrity_checkpoint_for_equivalent
+        touch, stage = TrustLineWriteBatch._touch, TrustLineWriteBatch._stage_audit_rows
 
-        async def counting(session, *, equivalent_id):
+        def point(equivalent_id) -> None:
             self.calls.append(equivalent_id)
             if self.fail_on_call is not None and len(self.calls) == self.fail_on_call:
-                raise RuntimeError(f"p021 forced trust-line checkpoint failure on call {self.fail_on_call}")
-            return await original(session, equivalent_id=equivalent_id)
+                raise RuntimeError(f"p021 forced trust-line batch failure on call {self.fail_on_call}")
 
-        monkeypatch.setattr(service_module, "compute_integrity_checkpoint_for_equivalent", counting)
+        async def counting_touch(batch, equivalent_id, equivalent_code):
+            if equivalent_id not in batch._codes:
+                point(equivalent_id)
+            return await touch(batch, equivalent_id, equivalent_code)
+
+        async def counting_stage(batch, equivalent_id):
+            point(equivalent_id)
+            return await stage(batch, equivalent_id)
+
+        monkeypatch.setattr(TrustLineWriteBatch, "_touch", counting_touch)
+        monkeypatch.setattr(TrustLineWriteBatch, "_stage_audit_rows", counting_stage)
 
     @property
     def count(self) -> int:

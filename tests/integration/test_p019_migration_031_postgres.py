@@ -134,7 +134,12 @@ async def test_031_drops_the_reservations_refuses_an_undrained_database_and_rest
 
     url = committed_database.url
     await committed_database.engine.dispose()
-    assert repository_head() == _AFTER, "this module pins migration 031 as the head it tests"
+    # PINNED TO 031 EXPLICITLY (024 `T2413.2`): 031 is no longer the head (`032` lets an audit row say that
+    # no check ran), so the clone, migrated to the head, steps down to 031 first; every step below names it.
+    assert await _version(url) == [(repository_head(),)]
+    if repository_head() != _AFTER:
+        stepped = _alembic(url, "downgrade", _AFTER)
+        assert stepped.returncode == 0, stepped.stderr
     assert await _version(url) == [(_AFTER,)]
     assert not await _exists(url), "031 is applied but prepare_locks exists"
 

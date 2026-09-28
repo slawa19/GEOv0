@@ -6177,7 +6177,8 @@ components:
           type: string
         state_checksum_before:
           # sha-256 hex, or the empty string: the column is NOT NULL, so "no prior checkpoint"
-          # is spelled "" rather than null.
+          # is spelled "" rather than null. Since 024 `T2413.2` PAYMENT, CLEARING and TRUST_LINE_*
+          # rows compute no checkpoint and write "" on both sides.
           type: string
           pattern: '^([0-9a-f]{64})?$'
         state_checksum_after:
@@ -6188,16 +6189,22 @@ components:
         invariants_checked:
           $ref: '#/components/schemas/IntegrityAuditLogInvariantsChecked'
         verification_passed:
+          # true: the checks ran and passed; false: a check found a violation (SIMULATOR_AUDIT_DRIFT:
+          # always false). null: NO CHECK RAN for this row - PAYMENT, CLEARING and TRUST_LINE_* rows since
+          # 024 `T2413.2` (migration 032), which are the record of the operation, with "" checksums and
+          # `invariants_checked: {}`. Rows written before it keep true/false.
           type: boolean
+          nullable: true
         error_details:
-          # Null exactly when verification_passed is true - with one exception:
+          # Null exactly when verification_passed is true or null - with one exception:
           # SIMULATOR_AUDIT_DRIFT hard-codes verification_passed false and always writes a body.
           #
           # A `oneOf` is safe here where it was not for affected_participants, because the four
           # branches are told apart by their required keys alone; none of them has to forbid
           # additional keys, so an unexpected key on an old row still conforms.
           oneOf:
-            # The five checkpoint writers store the whole `invariants_status` object.
+            # The five checkpoint writers stored the whole `invariants_status` object on a failing row;
+            # since 024 `T2413.2` they write null, and only rows written before it carry this branch.
             - $ref: '#/components/schemas/IntegrityInvariantsStatus'
             - $ref: '#/components/schemas/IntegrityAuditLogVerifyError'
             - $ref: '#/components/schemas/IntegrityAuditLogDriftError'

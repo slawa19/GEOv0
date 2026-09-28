@@ -17,8 +17,8 @@ reaches it and waits (observed in `pg_locks`); the blocker then asks for a cycle
 `FOR UPDATE`. The clearing waited first, so ITS deadlock timer fires first and PostgreSQL aborts the
 clearing's statement with `40P01`; the blocker then gets its row and rolls back, freeing the table. The
 metadata site is reached naturally (`participants` is first read there). The policy site too
-(`trust_lines`). The net-positions and checkpoint sites read only tables the attempt already holds
-(`debts`, `trust_lines`), so there the call site is INSTRUMENTED: its function first reads a test-only
+(`trust_lines`). The net-positions site (and the checkpoint site, until 024 `T2413.2` removed the checkpoint
+from the clearing) reads only tables the attempt already holds (`debts`), so there the call site is INSTRUMENTED: its function first reads a test-only
 table `p019_t1909_barrier` - the statement is the test's, the deadlock and its SQLSTATE are PostgreSQL's
 own (no error is injected). Every site is instrumented only on its first call, so the retry runs clean.
 
@@ -40,7 +40,6 @@ import pytest_asyncio
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.clearing import service as clearing_module
 from app.core.clearing.service import ClearingService
 from app.core.invariants import InvariantChecker
 from app.core.payments.router import PaymentRouter
@@ -55,7 +54,8 @@ from tests.p019_support import require_target
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 BARRIER = "p019_t1909_barrier"
-SITES = ["policy", "metadata", "net_positions", "checkpoint"]
+#: The checkpoint site left with the checkpoint (024 `T2413.2`: the clearing computes none in its transaction).
+SITES = ["policy", "metadata", "net_positions"]
 
 
 @pytest_asyncio.fixture
@@ -74,7 +74,7 @@ async def stand(committed_database):
 
 
 def _instrument(monkeypatch, site: str) -> None:
-    """For the two sites that read only tables the attempt already holds: read the barrier first, once."""
+    """For the site that reads only tables the attempt already holds (net positions): read the barrier first, once."""
 
     done: list[int] = []
 
@@ -91,17 +91,9 @@ def _instrument(monkeypatch, site: str) -> None:
             return await original(self, participant_id, equivalent_id)
 
         monkeypatch.setattr(InvariantChecker, "_calculate_net_position", net_position)
-    elif site == "checkpoint":
-        original_checkpoint = clearing_module.compute_integrity_checkpoint_for_equivalent
-
-        async def checkpoint(session, *, equivalent_id):
-            await barrier_read(session)
-            return await original_checkpoint(session, equivalent_id=equivalent_id)
-
-        monkeypatch.setattr(clearing_module, "compute_integrity_checkpoint_for_equivalent", checkpoint)
 
 
-_TABLE = {"policy": "trust_lines", "metadata": "participants", "net_positions": BARRIER, "checkpoint": BARRIER}
+_TABLE = {"policy": "trust_lines", "metadata": "participants", "net_positions": BARRIER}
 
 
 def _record_retried_codes(monkeypatch) -> list[list[str]]:

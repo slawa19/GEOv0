@@ -53,7 +53,7 @@ from tests.integration.test_p018_mixed_inject_event_is_one_operation_postgres im
     factory,
 )
 from tests.p021_support import (
-    TrustLineCheckpoints,
+    TrustLineBatchPoints,
     is_transaction_scoped,
     require_target,
     trust_line_audit_rows,
@@ -146,7 +146,7 @@ async def test_interact_actions_write_one_audit_row_and_one_checkpoint_pair_each
 ) -> None:
     w = interact
     rows = await _seed_interact(db_session, w)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     per_action: list[int] = []
 
     r1 = await _action(client, w, "trustline-create", limit="100", client_action_id="c1")
@@ -175,7 +175,9 @@ async def test_interact_actions_write_one_audit_row_and_one_checkpoint_pair_each
     audit.sort(key=lambda r: ["TRUST_LINE_CREATE", "TRUST_LINE_UPDATE", "TRUST_LINE_CLOSE"].index(r.operation_type))
     require_target(
         _one_row_per_action(audit, ["TRUST_LINE_CREATE", "TRUST_LINE_UPDATE", "TRUST_LINE_CLOSE"], w)
-        and all(r.state_checksum_before and r.state_checksum_after for r in audit)
+        # 024 `T2413.2`: the rows record the operations; no check ran, so no checksums.
+        and all((r.state_checksum_before, r.state_checksum_after, r.verification_passed) == ("", "", None)
+                for r in audit)
         and per_action == [2, 2, 2],
         f"Interact: audit rows {[(r.operation_type, r.affected_participants) for r in audit]}, "
         f"checkpoints per action {per_action}",
@@ -192,7 +194,7 @@ async def test_interact_create_keeps_its_existing_debt_check(client, db_session,
         db_session.add(Debt(debtor_id=rows.b_id, creditor_id=rows.a_id, equivalent_id=rows.eq_id,
                             amount=Decimal("50")))
     await db_session.commit()
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
 
     below = await _action(client, w, "trustline-create", limit="40")
 
@@ -228,7 +230,7 @@ async def test_a_failed_interact_action_is_rolled_back_by_its_handler(
                                  policy=dict(DEFAULT_POLICY)))
         await db_session.commit()
     body = {"trustline-create": {"limit": "70"}, "trustline-update": {"new_limit": "70"}, "trustline-close": {}}
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     checkpoints.fail_on_call = 2  # one equivalent: call 2 is the after-mutation checkpoint
 
     raised: BaseException | None = None
@@ -246,7 +248,7 @@ async def test_a_failed_interact_action_is_rolled_back_by_its_handler(
 
     require_target(
         checkpoints.count == 2
-        and raised is not None and "forced trust-line checkpoint failure" in str(raised)
+        and raised is not None and "forced trust-line batch failure" in str(raised)
         and state == unchanged
         and audit == [],
         f"{action}: checkpoint failure point reached: {checkpoints.count == 2} ({checkpoints.count} computations); "
@@ -331,7 +333,7 @@ async def test_an_inject_event_writes_one_audit_row_per_line_and_one_checkpoint_
          "initial_trustlines": [{"sponsor": w.a.pid, "equivalent": w.e1.code, "limit": "5"}]},
     ]
     run, scenario, artifacts, runner = _inject_run(w, effects)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
 
     async with factory() as session:
         await runner._apply_due_scenario_events(session, run_id=run.run_id, run=run, scenario=scenario)
@@ -384,7 +386,7 @@ async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkey
         {"op": "create_trustline", "from": w.a.pid, "to": w.b.pid, "equivalent": w.e2.code, "limit": "20"},
     ]
     run, scenario, _artifacts, runner = _inject_run(w, effects)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     # Two equivalents: calls 1-2 are the before-checkpoints of the two lines, calls 3-4 the after-checkpoints.
     checkpoints.fail_on_call = fail_on_call
 
@@ -400,7 +402,7 @@ async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkey
     audit = await _inject_audit(factory, w)
     require_target(
         checkpoints.count == fail_on_call
-        and raised is not None and "forced trust-line checkpoint failure" in str(raised)
+        and raised is not None and "forced trust-line batch failure" in str(raised)
         and lines == []
         and audit == []
         and run._real_fired_scenario_event_indexes == set(),

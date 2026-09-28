@@ -39,6 +39,8 @@ class IntegrityAuditLog(Base):
     state_checksum_after: Mapped[str] = mapped_column(String(64), nullable=False)
     affected_participants: Mapped[dict] = mapped_column(JSON, nullable=False)
     invariants_checked: Mapped[dict] = mapped_column(JSON, nullable=False)
-    verification_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
+    # true: the checks ran and passed; false: a check found a violation (or post-tick drift); null: no check
+    # ran for this row - a money operation's record since 024 `T2413.2` (migration 032).
+    verification_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
     error_details: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

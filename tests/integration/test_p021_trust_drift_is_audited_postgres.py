@@ -40,7 +40,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
 from tests.p021_support import (
-    TrustLineCheckpoints,
+    TrustLineBatchPoints,
     is_transaction_scoped,
     require_target,
     trust_line_audit_rows,
@@ -158,8 +158,8 @@ async def ticks(runner: RealRunnerImpl, run: RunRecord, count: int) -> None:
 
 
 def one_pair(rows) -> bool:
-    pairs = {(r.state_checksum_before, r.state_checksum_after) for r in rows}
-    return len(pairs) == 1 and next(iter(pairs))[0] != next(iter(pairs))[1]
+    # 024 `T2413.2`: no checkpoint in the transaction - the rows of one batch carry the empty pair and say so.
+    return {(r.state_checksum_before, r.state_checksum_after, r.verification_passed) for r in rows} == {("", "", None)}
 
 
 DECAY = {"enabled": True, "decay_rate": 0.02, "min_limit_ratio": 0.3, "overload_threshold": 0.8, "growth_rate": 0.05}
@@ -178,7 +178,7 @@ async def test_decay_in_a_real_tick_is_audited_per_transaction(factory, monkeypa
     run = run_for(list(people.values()), eq.code)
     runner = runner_for(run, scenario, clearing_every=10_000)
     install_tick_stand(monkeypatch, factory)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
 
     await ticks(runner, run, 1)
 
@@ -215,7 +215,7 @@ async def test_growth_after_a_real_tick_clearing_is_audited_per_transaction(fact
     run = run_for(list(people.values()), eq.code)
     runner = runner_for(run, scenario, clearing_every=1)
     install_tick_stand(monkeypatch, factory)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
 
     await ticks(runner, run, 1)
 

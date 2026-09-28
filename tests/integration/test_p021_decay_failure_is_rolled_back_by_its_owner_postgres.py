@@ -40,7 +40,7 @@ from tests.integration.test_p021_trust_drift_is_audited_postgres import (  # noq
     ticks,
     world,
 )
-from tests.p021_support import TrustLineCheckpoints, require_target, trust_line_audit_rows
+from tests.p021_support import TrustLineBatchPoints, require_target, trust_line_audit_rows
 from tests.simulator_tick_stand import install_tick_stand
 
 LINES = [("C", "D", "100.00", "active"), ("C", "G", "100.00", "active")]
@@ -100,7 +100,7 @@ async def test_a_decay_whose_checkpoint_fails_leaves_nothing_behind(factory, mon
     run = run_for(list(people.values()), eq.code)
     runner = runner_for(run, scenario, clearing_every=10_000)
     install_tick_stand(monkeypatch, factory)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     # One equivalent: call 1 is the before-checkpoint, call 2 the after-mutation one.
     checkpoints.fail_on_call = 2
 

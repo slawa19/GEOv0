@@ -8,73 +8,16 @@ import pytest
 from sqlalchemy import func, select
 
 import app.core.trustlines.service as trustline_service_module
-from app.core.invariants import InvariantChecker
 from app.core.trustlines.service import TrustLineService
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from tests.p021_support import TrustLineBatchPoints
 from app.schemas.trustline import (
     TrustLineCloseRequest,
     TrustLineCreateRequest,
     TrustLineUpdateRequest,
 )
-
-
-@pytest.mark.asyncio
-async def test_create_fails_closed_when_actual_invariant_checker_is_unavailable(
-    db_session,
-    monkeypatch,
-) -> None:
-    equivalent = Equivalent(code="CHK", precision=2, is_active=True)
-    sender = Participant(
-        id=uuid.uuid4(),
-        pid="checker-owner",
-        display_name="Checker owner",
-        public_key="test-public-key",
-        type="person",
-        status="active",
-        profile={},
-    )
-    receiver = Participant(
-        id=uuid.uuid4(),
-        pid="checker-peer",
-        display_name="Checker peer",
-        public_key="test-peer-key",
-        type="person",
-        status="active",
-        profile={},
-    )
-    db_session.add_all([equivalent, sender, receiver])
-    await db_session.commit()
-
-    monkeypatch.setattr(trustline_service_module, "verify_signature", lambda *_args: None)
-
-    async def _checker_unavailable(*_args, **_kwargs):
-        raise RuntimeError("invariant checker unavailable")
-
-    # Patches `check_trust_limits`, not `check_zero_sum`. The checkpoint this service computes
-    # for its audit trail used to call zero-sum first, so patching zero-sum was enough to make
-    # the checker unavailable; T1402 withdrew that call, and the probe would have stopped firing
-    # while this test kept passing on nothing. The subject - trustline creation must fail closed
-    # rather than commit without a checkpoint - is unchanged.
-    monkeypatch.setattr(InvariantChecker, "check_trust_limits", _checker_unavailable)
-    commit = AsyncMock()
-    monkeypatch.setattr(db_session, "commit", commit)
-
-    with pytest.raises(RuntimeError, match="invariant checker unavailable"):
-        await TrustLineService(db_session).create(
-            sender.id,
-            TrustLineCreateRequest(
-                to=receiver.pid,
-                equivalent=equivalent.code,
-                limit="10",
-                signature="test-signature",
-            ),
-        )
-
-    commit.assert_not_awaited()
-    await db_session.rollback()
-    assert await db_session.scalar(select(func.count()).select_from(TrustLine)) == 0
 
 
 @pytest.mark.asyncio
@@ -108,27 +51,13 @@ async def test_create_checkpoint_failure_is_not_swallowed_or_committed(
 
     monkeypatch.setattr(trustline_service_module, "verify_signature", lambda *_args: None)
 
-    original_checkpoint = (
-        trustline_service_module.compute_integrity_checkpoint_for_equivalent
-    )
-    checkpoint_calls = 0
-
-    async def _fail_selected_checkpoint(*args, **kwargs):
-        nonlocal checkpoint_calls
-        checkpoint_calls += 1
-        if checkpoint_calls == fail_on_call:
-            raise RuntimeError(f"forced checkpoint failure {fail_on_call}")
-        return await original_checkpoint(*args, **kwargs)
-
-    monkeypatch.setattr(
-        trustline_service_module,
-        "compute_integrity_checkpoint_for_equivalent",
-        _fail_selected_checkpoint,
-    )
+    # Point 1: the batch's first touch of the equivalent; point 2: staging its audit row in finish()
+    # (where the checkpoints were computed until 024 `T2413.2`).
+    TrustLineBatchPoints(monkeypatch).fail_on_call = fail_on_call
     commit = AsyncMock()
     monkeypatch.setattr(db_session, "commit", commit)
 
-    with pytest.raises(RuntimeError, match=f"forced checkpoint failure {fail_on_call}"):
+    with pytest.raises(RuntimeError, match=f"forced trust-line batch failure on call {fail_on_call}"):
         await TrustLineService(db_session).create(
             sender.id,
             TrustLineCreateRequest(
@@ -185,29 +114,15 @@ async def test_update_checkpoint_failure_is_not_swallowed_or_committed(
     trustline_id = trustline.id
 
     monkeypatch.setattr(trustline_service_module, "verify_signature", lambda *_args: None)
-    original_checkpoint = (
-        trustline_service_module.compute_integrity_checkpoint_for_equivalent
-    )
-    checkpoint_calls = 0
-
-    async def _fail_selected_checkpoint(*args, **kwargs):
-        nonlocal checkpoint_calls
-        checkpoint_calls += 1
-        if checkpoint_calls == fail_on_call:
-            raise RuntimeError(f"forced update checkpoint failure {fail_on_call}")
-        return await original_checkpoint(*args, **kwargs)
-
-    monkeypatch.setattr(
-        trustline_service_module,
-        "compute_integrity_checkpoint_for_equivalent",
-        _fail_selected_checkpoint,
-    )
+    # Point 1: the batch's first touch of the equivalent; point 2: staging its audit row in finish()
+    # (where the checkpoints were computed until 024 `T2413.2`).
+    TrustLineBatchPoints(monkeypatch).fail_on_call = fail_on_call
     commit = AsyncMock()
     monkeypatch.setattr(db_session, "commit", commit)
 
     with pytest.raises(
         RuntimeError,
-        match=f"forced update checkpoint failure {fail_on_call}",
+        match=f"forced trust-line batch failure on call {fail_on_call}",
     ):
         await TrustLineService(db_session).update(
             trustline_id,
@@ -263,29 +178,15 @@ async def test_close_checkpoint_failure_is_not_swallowed_or_committed(
     trustline_id = trustline.id
 
     monkeypatch.setattr(trustline_service_module, "verify_signature", lambda *_args: None)
-    original_checkpoint = (
-        trustline_service_module.compute_integrity_checkpoint_for_equivalent
-    )
-    checkpoint_calls = 0
-
-    async def _fail_selected_checkpoint(*args, **kwargs):
-        nonlocal checkpoint_calls
-        checkpoint_calls += 1
-        if checkpoint_calls == fail_on_call:
-            raise RuntimeError(f"forced close checkpoint failure {fail_on_call}")
-        return await original_checkpoint(*args, **kwargs)
-
-    monkeypatch.setattr(
-        trustline_service_module,
-        "compute_integrity_checkpoint_for_equivalent",
-        _fail_selected_checkpoint,
-    )
+    # Point 1: the batch's first touch of the equivalent; point 2: staging its audit row in finish()
+    # (where the checkpoints were computed until 024 `T2413.2`).
+    TrustLineBatchPoints(monkeypatch).fail_on_call = fail_on_call
     commit = AsyncMock()
     monkeypatch.setattr(db_session, "commit", commit)
 
     with pytest.raises(
         RuntimeError,
-        match=f"forced close checkpoint failure {fail_on_call}",
+        match=f"forced trust-line batch failure on call {fail_on_call}",
     ):
         await TrustLineService(db_session).close(
             trustline_id,

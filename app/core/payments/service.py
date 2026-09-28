@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
@@ -1869,24 +1868,6 @@ class PaymentService:
         tx_id = declaration.tx_id
         equivalent_ids = declaration.equivalent_ids()
 
-        # FIX-014: integrity checksums before the flows.
-        checkpoints_before: dict[uuid.UUID, object] = {}
-        for eq_id in sorted(equivalent_ids, key=str):
-            try:
-                checkpoints_before[eq_id] = await compute_integrity_checkpoint_for_equivalent(
-                    session, equivalent_id=eq_id
-                )
-            except DBAPIError:
-                # PostgreSQL aborts the transaction after a database error: the owner of the retries
-                # must see the original SQLSTATE, not a misleading 25P02 later.
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "event=payment.audit_checkpoint_before_failed tx_id=%s error_type=%s",
-                    tx_id,
-                    type(exc).__name__,
-                )
-
         await self._boundary.refuse_inactive_equivalents(equivalent_ids)
 
         prestate = await _read_payment_prestate(session, declaration.flows())
@@ -1952,7 +1933,6 @@ class PaymentService:
                 tx_id,
                 payload=payload,
                 equivalent_ids=list(pairs_by_equivalent),
-                checkpoints_before=checkpoints_before,
             )
 
     async def _write_integrity_audit(
@@ -1961,9 +1941,13 @@ class PaymentService:
         *,
         payload: dict,
         equivalent_ids: "list[uuid.UUID]",
-        checkpoints_before: dict,
     ) -> None:
-        """FIX-014: one `IntegrityAuditLog` row per equivalent, in THIS transaction.
+        """FIX-014: one `IntegrityAuditLog` row per equivalent, in THIS transaction - the operation's record.
+
+        No full-equivalent check runs here (024 `T2413.2`): the row says so with `verification_passed =
+        null`, empty checksums and `invariants_checked = {}`. What guards this payment are the checks above,
+        over its own pairs, which raise; the whole equivalent is checked by the periodic checkpoint, by
+        `POST /integrity/verify` and by the reconciliation.
 
         A database error propagates - swallowed, it would poison the live transaction and hide the
         SQLSTATE from the owner of the retries. Any other failure of one equivalent's audit is logged and
@@ -1984,24 +1968,17 @@ class PaymentService:
                 eq_code = (
                     await self.session.execute(select(Equivalent.code).where(Equivalent.id == eq_id))
                 ).scalar_one_or_none()
-                before_sum = getattr(checkpoints_before.get(eq_id), "checksum", "") or ""
-                cp_after = await compute_integrity_checkpoint_for_equivalent(
-                    self.session, equivalent_id=eq_id
-                )
-                after_sum = getattr(cp_after, "checksum", before_sum) or before_sum
-                invariants_status = getattr(cp_after, "invariants_status", {}) or {}
-                passed = bool(invariants_status.get("passed", False))
                 self.session.add(
                     IntegrityAuditLog(
                         operation_type="PAYMENT",
                         tx_id=tx_id,
                         equivalent_code=str(eq_code or eq_id),
-                        state_checksum_before=before_sum,
-                        state_checksum_after=after_sum,
+                        state_checksum_before="",
+                        state_checksum_after="",
                         affected_participants={"participants": sorted(participant_pids)},
-                        invariants_checked=invariants_status.get("checks") or invariants_status,
-                        verification_passed=passed,
-                        error_details=None if passed else invariants_status,
+                        invariants_checked={},
+                        verification_passed=None,
+                        error_details=None,
                     )
                 )
             except DBAPIError:
