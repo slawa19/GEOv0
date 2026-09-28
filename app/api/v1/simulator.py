@@ -1195,11 +1195,12 @@ async def action_trustline_create(
         await batch.finish()
         await db.refresh(tl)
         await db.commit()
-    except ConflictException as exc:
+    except ConflictException:
         # This handler owns the transaction: roll back BEFORE translating (spec, "Решения" item 7).
+        # The service's only conflict on create is a live line of the triple. The check above already
+        # found none, so whatever the service found - committed after that check, or clashing at its
+        # flush - is a concurrent create.
         await db.rollback()
-        if (exc.details or {}).get("reason") != "CONCURRENT_TRUSTLINE_CREATE":
-            raise
         concurrent_create = True
     except IntegrityError as exc:
         await db.rollback()
