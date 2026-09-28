@@ -171,7 +171,7 @@ def _emit_integrity_metric(result: str) -> None:
         )
 
 
-async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> None:
+async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool:
     """Programme 015 steps 5a and 5b: debt reconciliation, criteria (a) and (b) - detection of change made
     around the application, and of a recorded change that disagrees with its recorded intent.
 
@@ -180,18 +180,32 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> None
     committed, in fresh transactions of its own, and its result is its own row: it never enters a
     checkpoint's `checks`, `passed`, `status` or `alerts`, and never an audit row.
 
-    INDEPENDENT OF THE CHECKPOINT JOB'S STATE on purpose: a reconciliation error is logged and counted
-    as an error here, and neither turns a committed checkpoint run into a failure nor becomes a result.
-    It reads every equivalent, active or not - the T1544 operator stop is a refusal to MOVE money.
+    Returns False on any ERROR - the run itself, an equivalent the verifier could not verify, or a FAILED
+    whose hold reaction raised - and the caller then records the job as failed (024 `T2412.1`, R-024-4;
+    until then the error was only logged and the job read `*_success`). An error still never becomes a
+    result, and never turns the committed checkpoints into something else. A verdict (`FAILED`,
+    `UNVERIFIABLE`) is not an error of the job. It reads every equivalent, active or not - the T1544
+    operator stop is a refusal to MOVE money.
     """
 
     from app.core.ledger.reconciliation import run_scheduled_reconciliation
 
     try:
-        await run_scheduled_reconciliation(session_factory)
+        counts = await run_scheduled_reconciliation(session_factory)
     except Exception:  # noqa: BLE001 - an error is recorded as an error; no result is substituted
         logger.exception("integrity.debt_reconciliation_failed reason=%s", reason)
         _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
+        return False
+    if counts["error"] or counts["hold_errors"]:
+        logger.error(
+            "integrity.debt_reconciliation_errors reason=%s errors=%d hold_errors=%d",
+            reason,
+            counts["error"],
+            counts["hold_errors"],
+        )
+        _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
+        return False
+    return True
 
 
 async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
@@ -220,7 +234,7 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             async with AsyncSessionLocal() as session:
                 await compute_and_store_integrity_checkpoints(session)
             # After the checkpoints have COMMITTED, and under the same distributed lock.
-            await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
+            reconciled = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
     except ConflictException:
         _emit_integrity_metric(f"{reason}_skipped_locked")
         _record_background_job_event(
@@ -239,6 +253,15 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             status="failed",
             event=f"{reason}_error",
             error=error,
+        )
+        return False
+
+    if not reconciled:
+        _record_background_job_event(
+            app,
+            name="integrity",
+            status="failed",
+            event=f"{reason}_debt_reconciliation_error",
         )
         return False
 

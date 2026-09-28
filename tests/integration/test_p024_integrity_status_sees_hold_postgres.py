@@ -95,7 +95,6 @@ def _require_failed_job(app) -> None:
     )
 
 
-@target_xfail_024("T2412.1", "a verifier error is recorded as a failed job")
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
 async def test_r024_4_a_verifier_error_on_one_equivalent_is_not_a_success(monkeypatch) -> None:
@@ -129,7 +128,6 @@ async def test_r024_4_a_verifier_error_on_one_equivalent_is_not_a_success(monkey
     _require_failed_job(app)
 
 
-@target_xfail_024("T2412.1", "a hold-reaction error is recorded as a failed job")
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
 async def test_r024_4_a_failed_reaction_is_not_a_success(monkeypatch) -> None:
@@ -170,3 +168,33 @@ async def test_r024_4_a_failed_reaction_is_not_a_success(monkeypatch) -> None:
     assert await _latest_status(factory, target) == FAILED
 
     _require_failed_job(app)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("tier_on_a_clone")
+async def test_r024_4_a_later_clean_run_recovers_the_job(monkeypatch) -> None:
+    """The degradation is a state of the LAST run, not a latch: the next clean run reads `periodic_success`.
+
+    Counter-check of the two tests above - a host that fails every run would pass them.
+    """
+
+    from tests.conftest import TestingSessionLocal as factory
+
+    target = await _equivalent(factory, "P24RC")
+    original = reconciliation.verify_journal_equals_change
+
+    async def verify(session, equivalent_id):
+        if equivalent_id == target:
+            raise RuntimeError("p024 R-024-4: the verifier fails once")
+        return await original(session, equivalent_id)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(reconciliation, "verify_journal_equals_change", verify)
+        failed = await _run_the_host(monkeypatch, factory)
+    assert _job(failed)["status"] == "failed", failed.state.background_jobs
+
+    app = await _run_the_host(monkeypatch, factory)
+    assert _job(app) == {"status": "running", "event": "periodic_success"}, app.state.background_jobs
+    assert background_health_status(app) == "ok"
+    assert app.completed is True
+    assert await _latest_status(factory, target) is not None
