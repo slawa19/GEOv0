@@ -178,7 +178,6 @@ def main() -> int:
     ap.add_argument("--inject-payment-every-sec", type=int, default=2)
     ap.add_argument("--payment-amount", default="120")
     ap.add_argument("--clearing-every-sec", type=int, default=10)
-    ap.add_argument("--clearing-max-depth", type=int, default=6)
     ap.add_argument("--timeout-sec", type=int, default=30)
     args = ap.parse_args()
 
@@ -333,6 +332,7 @@ def main() -> int:
     payment_fail = 0
     payment_fail_by_code: dict[str, int] = {}
     clearing_calls = 0
+    clearing_errors = 0
     clearing_cycles_reported = 0
 
     i = 0
@@ -374,10 +374,8 @@ def main() -> int:
                     method="POST",
                     path=f"/simulator/runs/{run_id}/actions/clearing-real",
                     headers=headers,
-                    body={
-                        "equivalent": args.equivalent,
-                        "max_depth": int(args.clearing_max_depth),
-                    },
+                    # 023 (d): clearing depth is no longer an execution parameter; the schema forbids it.
+                    body={"equivalent": args.equivalent},
                     timeout_sec=max(args.timeout_sec, 60),
                 )
                 clearing_calls += 1
@@ -386,7 +384,7 @@ def main() -> int:
                 except Exception:
                     pass
             except Exception:
-                clearing_calls += 1
+                clearing_errors += 1
             next_clearing_at = now + max(1, int(args.clearing_every_sec))
 
         time.sleep(0.25)
@@ -441,6 +439,7 @@ def main() -> int:
             "payment_real_fail": payment_fail,
             "payment_real_fail_by_code": payment_fail_by_code,
             "clearing_real_calls": clearing_calls,
+            "clearing_real_errors": clearing_errors,
             "clearing_real_cycles_reported": clearing_cycles_reported,
         },
         "artifact_events_analysis": analyzed,
