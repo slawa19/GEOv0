@@ -30,11 +30,25 @@ typed into the test.
 WHICH SLICE TURNS R-023-4a GREEN - (d), recorded 2026-09-27 with slice (b). Slice (b) is additive: it adds the
 v2 entry (`execute_occurrence`, a declared amount, plan-scoped identity) beside the production executor and
 leaves v1 as it is - decision 5 keeps `clear == min(pre)` for v1 and decision 6 keeps the v1 set-hash
-namespace for historical occurrences. Both tests below exercise exactly that production path
-(`execute_clearing_with_amount`, `_execution_tx_id`), which every caller still uses until the atomic switch of
-slice (d); so they stay red through (b), and the v2 behaviour they ask for is proven by R-023-4b
-(`test_p023_b_occurrence_execution_postgres.py`). Slice (d), which moves the callers to the runner and deletes
-the replaced execution path, removes the markers or transfers these assertions with a record.
+namespace for historical occurrences.
+
+RETARGETED 2026-09-28, slice (d), step 2 (red-first), recorded in the spec's (d) section. Every reproducer now
+calls THE PRODUCTION ENTRY - `POST /api/v1/clearing/auto`, with no depth (decision 8 removes it from execution;
+before the switch the route's default depth 6 applies) - instead of naming today's internals (`auto_clear`,
+`execute_clearing_with_amount`, `_execution_tx_id`). That is what "turns green through the switch" means: the
+same request and the same measurement on the debts; the switch changes what the production path IS. Moved:
+
+* R-023-1/2: `service.auto_clear(code, max_depth=6)` -> `POST /clearing/auto` (the route's default was 6).
+* R-023-3: the 7-ring's control at depth 7 becomes the diagnostic detector at depth 7 (the ring is eligible);
+  the 11-ring's per-depth parametrisation 3..10 collapses into one request - execution has no depth after (d),
+  and before it the route's only depth is its default 6 (the others were a service argument, not an entry).
+* R-023-4a, partial intent: instead of handing the v1 executor a rendered cycle with a lowered amount (a path no
+  product caller has after (d)), the stand is R-023-2's shared edge, whose optimum REQUIRES a partial
+  occurrence: the triangle carries 1 while its locked minimum is 2. Target: the production pass commits an
+  occurrence on the triangle's debts for 1 and its two exclusive edges survive at exactly 2 - 1.
+* R-023-4a, identity: instead of calling the v1 `_execution_tx_id`, the production pass's own committed
+  occurrence is read back: the stored `Transaction.tx_id` is the plan-scoped id (decision 6) of its plan,
+  equivalent and ordinal, and the same debt set in another plan gets another id.
 """
 
 from __future__ import annotations
@@ -49,9 +63,12 @@ from app.db.models.transaction import Transaction
 from tests.conftest import MODE_B
 from tests.p020_support import debt_uuid, identity, identity_of, ring, seed_graph
 from tests.p023_support import (
+    auto_clear_http,
+    fresh_read,
     oracle_max_volume,
     positive_debt_total,
     remaining_debts,
+    require_auto_progress,
     require_target,
     target_xfail_023,
 )
@@ -67,15 +84,16 @@ async def _committed_clearings(session) -> int:
     ).scalar_one()
 
 
-async def _run_auto_clear(session, code: str, depth: int) -> tuple[int, Decimal]:
-    """`auto_clear` at `depth`; returns (count, V_edge measured on the debts). Asserts the run is sound."""
+async def _run_auto_clear(client, headers, session, code: str) -> tuple[int, Decimal]:
+    """`POST /clearing/auto` (the production entry); returns (count, V_edge measured on the debts)."""
 
-    before = await positive_debt_total(session, code)
-    occurrences_before = await _committed_clearings(session)
-    cleared = await ClearingService(session).auto_clear(code, max_depth=depth)
-    session.expire_all()
-    after = await positive_debt_total(session, code)
-    occurrences = await _committed_clearings(session) - occurrences_before
+    before = await fresh_read(session, positive_debt_total, code)
+    occurrences_before = await fresh_read(session, _committed_clearings)
+    response = await auto_clear_http(client, headers, code)
+    assert response.status_code == 200, response.text
+    cleared = response.json()["cleared_cycles"]
+    after = await fresh_read(session, positive_debt_total, code)
+    occurrences = await fresh_read(session, _committed_clearings) - occurrences_before
     # Control: the run completed and its count agrees with the durable occurrences.
     assert cleared == occurrences, (cleared, occurrences)
     return cleared, before - after
@@ -101,25 +119,25 @@ def _r1_edges():
     return ring7 + tri[1:], ring7, tri
 
 
-@target_xfail_023("(d)", "R-023-1: auto_clear(max_depth=6) loses volume the flow finds (6 vs the oracle's 14)")
+@target_xfail_023("(d)", "R-023-1: the /auto pass (depth 6 before the switch) loses volume the flow finds (6 vs 14)")
 @MODE_B
 @pytest.mark.asyncio
-async def test_r023_1_depth_six_loses_volume_the_flow_finds(db_session) -> None:
+async def test_r023_1_depth_six_loses_volume_the_flow_finds(db_session, client, auth_headers) -> None:
     edges, ring7, tri = _r1_edges()
     await seed_graph(db_session, "PQA", edges)
     oracle = _oracle_units(edges)
     # Controls: the oracle's optimum is the ring carrying both units of the shared edge; both cycles are
-    # eligible and visible to the production detector when it may look seven edges deep.
+    # eligible and visible to the diagnostic detector when it may look seven edges deep.
     assert oracle == 14, oracle
     found = {identity(c) for c in await ClearingService(db_session).find_cycles("PQA", max_depth=7)}
     assert found == {identity_of(e.debt_id for e in ring7), identity_of(e.debt_id for e in tri)}, found
 
-    cleared, v_edge = await _run_auto_clear(db_session, "PQA", 6)
+    cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQA")
     assert cleared >= 1, "control: the run executed something"
 
     require_target(
         v_edge == Decimal(oracle),
-        f"depth 6: V_edge on the debts {v_edge}, the oracle's optimum {oracle} ({cleared} occurrence(s))",
+        f"/auto: V_edge on the debts {v_edge}, the oracle's optimum {oracle} ({cleared} occurrence(s))",
     )
 
 
@@ -137,7 +155,7 @@ def _r2_edges():
 @target_xfail_023("(d)", "R-023-2: the shared edge - today 6, the flow 8")
 @MODE_B
 @pytest.mark.asyncio
-async def test_r023_2_shared_edge_six_versus_eight(db_session) -> None:
+async def test_r023_2_shared_edge_six_versus_eight(db_session, client, auth_headers) -> None:
     edges, tri, five = _r2_edges()
     await seed_graph(db_session, "PQB", edges)
     # Controls: the optimum is 8 and both cycles are eligible at depth 6.
@@ -145,9 +163,9 @@ async def test_r023_2_shared_edge_six_versus_eight(db_session) -> None:
     found = {identity(c) for c in await ClearingService(db_session).find_cycles("PQB", max_depth=6)}
     assert found == {identity_of(e.debt_id for e in tri), identity_of(e.debt_id for e in five)}, found
 
-    cleared, v_edge = await _run_auto_clear(db_session, "PQB", 6)
+    cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQB")
     assert cleared >= 1, "control: the run executed something"
-    remaining = await remaining_debts(db_session, "PQB")
+    remaining = await fresh_read(db_session, remaining_debts, "PQB")
 
     expected_remaining = sorted(
         (str(e.debt_id), e.debtor, e.creditor, Decimal("1")) for e in tri[1:]  # B->C and C->A at 1
@@ -165,76 +183,101 @@ def _ring_edges(tag: str, group: int, length: int):
     return ring([f"p023{tag}{k:02d}" for k in range(length)], ["1"] * length, [debt_uuid(group, k) for k in range(length)])
 
 
-@target_xfail_023("(d)", "R-023-3: a 7-ring called at depth 6 is missed")
+@target_xfail_023("(d)", "R-023-3: a 7-ring is missed by the /auto pass (depth 6 before the switch)")
 @MODE_B
 @pytest.mark.asyncio
-async def test_r023_3_seven_ring_is_missed_at_depth_six(db_session) -> None:
-    control_ring = _ring_edges("r3c", 0x2330, 7)
+async def test_r023_3_seven_ring_is_missed_at_depth_six(db_session, client, auth_headers) -> None:
     target_ring = _ring_edges("r3s", 0x2331, 7)
-    await seed_graph(db_session, "PQC", control_ring)
     await seed_graph(db_session, "PQD", target_ring)
+    # Control: the ring is eligible - the diagnostic detector returns it when allowed seven edges.
+    found = [identity(c) for c in await ClearingService(db_session).find_cycles("PQD", max_depth=7)]
+    assert found == [identity_of(e.debt_id for e in target_ring)], found
 
-    # Control on an identical ring in its own equivalent: at depth 7 today's code clears it completely,
-    # so the ring is eligible and executable and the only difference below is the depth.
-    cleared, v_edge = await _run_auto_clear(db_session, "PQC", 7)
-    assert (cleared, v_edge) == (1, Decimal(7)), (cleared, v_edge)
-
-    cleared, v_edge = await _run_auto_clear(db_session, "PQD", 6)
-    require_target(v_edge == Decimal(7), f"depth 6: V_edge {v_edge} ({cleared} occurrences), target 7")
+    cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQD")
+    require_target(v_edge == Decimal(7), f"/auto: V_edge {v_edge} ({cleared} occurrences), target 7")
 
 
-@target_xfail_023("(d)", "R-023-3: an 11-ring is missed at every supported depth")
+@target_xfail_023("(d)", "R-023-3: an 11-ring is missed by the /auto pass")
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("depth", list(range(3, 11)))
-async def test_r023_3_eleven_ring_is_missed_at_every_supported_depth(db_session, depth) -> None:
+async def test_r023_3_eleven_ring_is_missed_at_every_supported_depth(db_session, client, auth_headers) -> None:
     edges = _ring_edges("r3e", 0x2332, 11)
     await seed_graph(db_session, "PQE", edges)
-    # Control: the ring is eligible - the production detector returns it when allowed eleven edges.
+    # Control: the ring is eligible - the diagnostic detector returns it when allowed eleven edges.
     found = [identity(c) for c in await ClearingService(db_session).find_cycles("PQE", max_depth=11)]
     assert found == [identity_of(e.debt_id for e in edges)], found
 
-    cleared, v_edge = await _run_auto_clear(db_session, "PQE", depth)
-    require_target(v_edge == Decimal(11), f"depth {depth}: V_edge {v_edge} ({cleared} occurrences), target 11")
+    cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQE")
+    require_target(v_edge == Decimal(11), f"/auto: V_edge {v_edge} ({cleared} occurrences), target 11")
 
 
 # ----------------------------------------------------------------------------------------------- R-023-4a
 
 
-@target_xfail_023("(d)", "R-023-4a: the production executor ignores a declared amount c < min and clears the minimum")
+@target_xfail_023("(d)", "R-023-4a: the production pass does not commit a partial occurrence c < min")
 @MODE_B
 @pytest.mark.asyncio
-async def test_r023_4a_declared_partial_amount_is_not_honoured(db_session) -> None:
-    edges = ring(["p023r4a", "p023r4b", "p023r4c"], ["5"] * 3, [debt_uuid(0x2304, k) for k in range(3)])
+async def test_r023_4a_declared_partial_amount_is_not_honoured(db_session, client, auth_headers) -> None:
+    edges, tri, five = _r2_edges()
     await seed_graph(db_session, "PQF", edges)
-    service = ClearingService(db_session)
-    [cycle] = await service.find_cycles("PQF", max_depth=6)
-    assert identity(cycle) == identity_of(e.debt_id for e in edges)
-    declared = Decimal("2")
-    # The declared amount goes where the baseline call carries amounts: the rendered cycle.
-    intent = [{**edge, "amount": "2.00"} for edge in cycle]
+    # Controls: the optimum needs the triangle at 1 while its locked minimum is 2 (the shared edge is split).
+    assert _oracle_units(edges) == 8
+    assert min(Decimal(e.amount) for e in tri) == Decimal("2")
 
-    cleared = await service.execute_clearing_with_amount(intent)
-    db_session.expire_all()
-    # Controls: the occurrence executed and committed once.
-    assert cleared is not None, "control: the baseline executed the cycle"
-    assert await _committed_clearings(db_session) == 1
-
-    remaining = await remaining_debts(db_session, "PQF")
-    expected = sorted((str(e.debt_id), e.debtor, e.creditor, Decimal("5") - declared) for e in edges)
+    response = await auto_clear_http(client, auth_headers, "PQF")
+    assert response.status_code == 200, response.text
+    committed = require_auto_progress(response.json())
+    tri_ids = {str(e.debt_id) for e in tri}
+    on_triangle = [o for o in committed if {e["debt_id"] for e in o["edges"]} == tri_ids]
+    remaining = await fresh_read(db_session, remaining_debts, "PQF")
+    expected = sorted((str(e.debt_id), e.debtor, e.creditor, Decimal("1")) for e in tri[1:])
     require_target(
-        remaining == expected,
-        f"declared {declared}: executor cleared {cleared}; remaining {remaining!r}, target {expected!r}",
+        [Decimal(o["amount"]) for o in on_triangle] == [Decimal("1")] and remaining == expected,
+        f"the triangle's occurrence(s) {on_triangle!r}; remaining {remaining!r}, target {expected!r}",
     )
 
 
-@target_xfail_023("(d)", "R-023-4a: two distinct occurrences on one debt set share the production (v1) identity")
-def test_r023_4a_distinct_occurrences_get_distinct_identities() -> None:
-    debt_ids = [debt_uuid(0x2305, k) for k in range(3)]
-    # Two occurrences of ONE debt set: e.g. ordinal 0 of plan A and ordinal 0 of plan B, each declaring a
-    # partial amount on the same surviving rows. The baseline identity takes the debt set and nothing else.
-    first = ClearingService._execution_tx_id(debt_ids)
-    second = ClearingService._execution_tx_id(list(reversed(debt_ids)))
-    # Control: the function is the one the executor uses and it is deterministic.
-    assert first == ClearingService._execution_tx_id(debt_ids)
-    require_target(first != second, f"both occurrences are {first}: the second would replay as the first")
+@target_xfail_023("(d)", "R-023-4a: the production pass does not give an occurrence a plan-scoped identity")
+@MODE_B
+@pytest.mark.asyncio
+async def test_r023_4a_distinct_occurrences_get_distinct_identities(db_session, client, auth_headers) -> None:
+    import uuid
+
+    from app.core.clearing.service import ClearingOccurrence
+    from app.db.models.equivalent import Equivalent
+
+    edges = ring(["p023r4a", "p023r4b", "p023r4c"], ["5"] * 3, [debt_uuid(0x2304, k) for k in range(3)])
+    await seed_graph(db_session, "PQG", edges)
+    response = await auto_clear_http(client, auth_headers, "PQG")
+    assert response.status_code == 200, response.text
+    committed = require_auto_progress(response.json())
+    require_target(len(committed) == 1, f"one occurrence expected, got {committed!r}")
+    [occurrence] = committed
+
+    async def _stored(session):
+        eq_id = (await session.execute(select(Equivalent.id).where(Equivalent.code == "PQG"))).scalar_one()
+        ids = (await session.execute(select(Transaction.tx_id).where(Transaction.type == "CLEARING"))).scalars().all()
+        return eq_id, list(ids)
+
+    equivalent_id, stored = await fresh_read(db_session, _stored)
+    debt_ids = tuple(uuid.UUID(e["debt_id"]) for e in occurrence["edges"])
+
+    def _occurrence(plan_id):
+        return ClearingOccurrence(
+            plan_id=plan_id,
+            equivalent_id=equivalent_id,
+            ordinal=occurrence["ordinal"],
+            debt_ids=debt_ids,
+            amount_atoms=5 * 10**8,
+        )
+
+    this_plan = _occurrence(uuid.UUID(occurrence["plan_id"]))
+    other_plan = _occurrence(uuid.uuid4())
+    # Control: the v1 set-hash gives one id to any two occurrences of this debt set - the case the plan scope
+    # exists for.
+    assert ClearingService._execution_tx_id(list(debt_ids)) == ClearingService._execution_tx_id(list(reversed(debt_ids)))
+    require_target(
+        stored == [occurrence["occurrence_id"]] == [this_plan.occurrence_id]
+        and other_plan.occurrence_id != this_plan.occurrence_id,
+        f"stored {stored}, reported {occurrence['occurrence_id']}, plan-scoped {this_plan.occurrence_id}",
+    )

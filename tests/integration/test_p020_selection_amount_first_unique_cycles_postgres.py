@@ -50,6 +50,7 @@ from tests.p020_support import (
     seed_graph,
     target_xfail_020,
 )
+from tests.p023_support import auto_clear_http, fresh_read, oracle_max_volume, positive_debt_total, target_xfail_023
 
 # ------------------------------------------------------------------------------------------------ overflow
 
@@ -149,7 +150,7 @@ async def _committed_clearings(db_session) -> int:
     ).scalar_one()
 
 
-@target_xfail_020("the ladder executes the short cycle first; amount-first executes the long one")
+@target_xfail_023("(d)", "R-020-1 ladder, rewritten on the flow objective: V_edge equals the oracle's optimum")
 @MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -159,27 +160,38 @@ async def _committed_clearings(db_session) -> int:
         pytest.param(4, id="additional_4cycle_not_a_ladder_discriminator"),
     ],
 )
-async def test_amount_first_executes_the_long_cycle_over_a_shared_edge(db_session, long_len) -> None:
+async def test_amount_first_executes_the_long_cycle_over_a_shared_edge(db_session, client, auth_headers, long_len) -> None:
+    """REWRITTEN 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3, R-020-1): the target is no
+    longer "amount first" but the flow objective - `V_edge` on the debts equals the exhaustive oracle's optimum -
+    through the production entry `POST /clearing/auto`. On this stand the optimum IS the long cycle at 100 (500 for
+    the 5-cycle against the ladder's 30 + 450), so the observable remainder the 020 rule named survives unchanged:
+    the triangle's own edges at 10, one occurrence. The strict 020 marker is replaced by the 023 one until the switch.
+    """
+
     edges, tri, long_cycle = _ladder_edges(long_len)
     await seed_graph(db_session, _LADDER_EQ, edges)
     service = ClearingService(db_session)
 
-    # Control: both cycles are eligible and visible at the requested depth.
+    # Controls: both cycles are eligible and visible to the diagnostic; the oracle's optimum is the long cycle.
     found = {identity(c) for c in await service.find_cycles(_LADDER_EQ, max_depth=6)}
     assert found == {identity_of(e.debt_id for e in tri), identity_of(e.debt_id for e in long_cycle)}, found
+    oracle = oracle_max_volume([(e.debt_id, e.debtor, e.creditor, int(Decimal(e.amount))) for e in edges])[0]
+    assert oracle == 100 * long_len, oracle
 
-    cleared = await service.auto_clear(_LADDER_EQ, max_depth=6)
-    db_session.expire_all()
-    occurrences = await _committed_clearings(db_session)
-    remaining = await _remaining(db_session)
+    before = await fresh_read(db_session, positive_debt_total, _LADDER_EQ)
+    response = await auto_clear_http(client, auth_headers, _LADDER_EQ)
+    assert response.status_code == 200, response.text
+    cleared = response.json()["cleared_cycles"]
+    occurrences = await fresh_read(db_session, _committed_clearings)
+    remaining = await fresh_read(db_session, _remaining)
+    v_edge = before - await fresh_read(db_session, positive_debt_total, _LADDER_EQ)
     # Control: the run completed and its count agrees with the durable occurrences.
     assert cleared == occurrences and cleared >= 1, (cleared, occurrences)
 
     expected_remaining = sorted((e.debtor, e.creditor, Decimal("10")) for e in tri[1:])
     require_target(
-        remaining == expected_remaining and occurrences == 1,
-        f"amount-first must execute the {long_len}-cycle (100) once and leave the triangle's own edges at "
-        f"10; got occurrences={occurrences} remaining={remaining!r}",
+        v_edge == Decimal(oracle) and remaining == expected_remaining and occurrences == 1,
+        f"V_edge {v_edge} against the oracle's {oracle}; occurrences={occurrences} remaining={remaining!r}",
     )
 
 

@@ -33,6 +33,7 @@ from tests.integration.test_p020_selection_amount_first_unique_cycles_postgres i
     _remaining,
 )
 from tests.p020_support import Edge, debt_uuid, identity, identity_of, ring, seed_graph
+from tests.p023_support import auto_clear_http, fresh_read, require_target, target_xfail_023
 
 _DEPTHS = [3, 4, 6, 7, 10]
 
@@ -138,29 +139,40 @@ async def test_retention_same_length_ties_follow_the_full_identity(db_session, m
 # first, then the long cycle on what the shared edge has left. Slice (d) moves them to the flow objective
 # (V_edge against the oracle); they do not become a permanent constraint.
 
+#
+# MOVED TO THE NEW OBJECTIVE 2026-09-28, slice (d) (spec 023, Verification plan §3): the ladder values (two
+# occurrences, the long cycle's own edges left at 10) are replaced by the flow optimum through the production entry:
+# ONE occurrence of the long cycle at 100 (V_edge 100·L against the ladder's 30 + 90·L), the triangle's own edges
+# left at 10. Under the strict 023 marker until the switch.
+
+@target_xfail_023("(d)", "retention of the ladder stand moves to the flow objective")
 @MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("long_len", [5, 4])
-async def test_retention_ladder_occurrences_and_remainder_are_exact(db_session, long_len) -> None:
+async def test_retention_ladder_occurrences_and_remainder_are_exact(db_session, client, auth_headers, long_len) -> None:
     edges, tri, long_cycle = _ladder_edges(long_len)
     await seed_graph(db_session, "PZL", edges)
 
-    cleared = await ClearingService(db_session).auto_clear("PZL", max_depth=6)
-    db_session.expire_all()
-    occurrences = (
-        await db_session.execute(
-            select(func.count())
-            .select_from(Transaction)
-            .where(Transaction.type == "CLEARING", Transaction.state == "COMMITTED")
-        )
-    ).scalar_one()
-    remaining = await _remaining(db_session)
+    response = await auto_clear_http(client, auth_headers, "PZL")
+    assert response.status_code == 200, response.text
+    cleared = response.json()["cleared_cycles"]
 
-    # Today: the triangle clears 10 (its own edges go, the shared edge drops to 90), then the long cycle
-    # clears 90 (the shared edge goes, its own edges drop to 10). Two occurrences - the loop does NOT stop
-    # after the first triangle.
-    assert (cleared, occurrences) == (2, 2), (cleared, occurrences)
-    assert remaining == sorted((e.debtor, e.creditor, Decimal("10")) for e in long_cycle[1:]), remaining
+    async def _occurrences(session) -> int:
+        return (
+            await session.execute(
+                select(func.count())
+                .select_from(Transaction)
+                .where(Transaction.type == "CLEARING", Transaction.state == "COMMITTED")
+            )
+        ).scalar_one()
+
+    occurrences = await fresh_read(db_session, _occurrences)
+    remaining = await fresh_read(db_session, _remaining)
+    assert cleared == occurrences, (cleared, occurrences)
+    require_target(
+        occurrences == 1 and remaining == sorted((e.debtor, e.creditor, Decimal("10")) for e in tri[1:]),
+        f"flow optimum: one occurrence of the {long_len}-cycle at 100; got {occurrences}, remaining {remaining!r}",
+    )
 
 
 @pytest.mark.asyncio
