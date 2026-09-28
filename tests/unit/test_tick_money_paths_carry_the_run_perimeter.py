@@ -33,11 +33,13 @@ import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _EXECUTOR = _ROOT / "app" / "core" / "simulator" / "real_payments_executor.py"
-_CLEARING = _ROOT / "app" / "core" / "simulator" / "real_clearing_engine.py"
+_CLEARING = _ROOT / "app" / "core" / "simulator" / "tick.py"
 
 # Every money entry point the tick uses that accepts a run perimeter. Since programme 023 slice (d) (2026-09-28) the
-# clearing engine calls ONE: the common runner, through its local `run_pass` (`run_clearing_pass` in production); the
-# detector and executor calls it used to make are gone (guarded by `test_p023_d_product_callers_go_through_the_runner.py`).
+# tick's clearing calls ONE: the common runner (`run_clearing_pass`); the detector and executor calls it used to make
+# are gone (guarded by `test_p023_d_product_callers_go_through_the_runner.py`). Since 021 `T2109` the call is in the
+# tick itself (`tick.py::RealTick._run_clearing`), not in the removed driver `real_clearing_engine.py` (whose local
+# `run_pass` alias this set still names, so that a re-introduced alias is counted).
 _GUARDED = {
     "create_payment_internal_staged",
     "find_cycles",
@@ -68,9 +70,10 @@ def _guarded_calls(path: pathlib.Path):
     # guarded call is `execute_clearing_with_amount`.
     # 3 -> 1 on 2026-09-28 (programme 023 slice (d)): the ladder and the engine's executor call are deleted; the one
     # guarded call is the runner's (`run_pass(..., allowed_participant_pids=...)`), which carries the perimeter to
-    # every snapshot and every occurrence.
+    # every snapshot and every occurrence. 021 `T2109` (2026-09-28): the engine is deleted; the one guarded call is
+    # the tick's own `clearing_runner.run_clearing_pass(..., allowed_participant_pids=...)` in `tick.py`.
     [(_EXECUTOR, 1), (_CLEARING, 1)],
-    ids=["payments_executor", "clearing_engine"],
+    ids=["payments_executor", "tick_clearing"],
 )
 def test_every_tick_money_call_passes_the_perimeter(path: pathlib.Path, expected_calls: int) -> None:
     calls = list(_guarded_calls(path))

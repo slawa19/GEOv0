@@ -1961,7 +1961,7 @@ async def action_clearing_real(
     pid_by_id = await _perimeter_pid_by_id(db, scoped_pids)
     # The request session has only READ since the seeding committed; end its transaction before the runner's own
     # sessions write, so no snapshot or lock of this request is held across the pass (the tick does the same
-    # before clearing, `real_tick_clearing_coordinator.py`). Nothing is pending here to commit.
+    # before clearing, `tick.py::RealTick._execute_clearing_with_timeout`). Nothing is pending here to commit.
     await db.commit()
     committed: list = []
     executed: list[SimulatorActionClearingCycle] = []

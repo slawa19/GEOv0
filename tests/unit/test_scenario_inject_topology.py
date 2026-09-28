@@ -24,7 +24,7 @@ from sqlalchemy import select
 
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -58,10 +58,10 @@ def _make_runner(
     *,
     inject_enabled: bool = True,
     artifacts: _DummyArtifacts | None = None,
-) -> tuple[RealRunner, _DummyArtifacts]:
-    """Create a ``RealRunner`` instance with inject flag pre-set."""
+) -> tuple[RealRunnerImpl, _DummyArtifacts]:
+    """Create a ``RealRunnerImpl`` instance with inject flag pre-set."""
     arts = artifacts or _DummyArtifacts()
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: None,  # type: ignore[arg-type]
         get_scenario_raw=lambda _sid: {},

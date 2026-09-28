@@ -4,7 +4,7 @@ The tick adapter is REAL: `RealTick.maybe_run_clearing` (`app/core/simulator/tic
 hard timeout `max(2 s, 4 × budget)` capped by `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealTick._run_clearing`
 -> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The budget is the normal one
 (`SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS`, 250 ms); nothing is raised for the test. Until 021 stage 4 the adapter
-was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunner.tick_real_mode_clearing`.
+was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunnerImpl.tick_real_mode_clearing`.
 
 * THROUGH THE RUNNER - the tick's clearing goes through `execute_occurrence` in the run's perimeter; its
   `clearing.done` carries creditor -> debtor PIDs (decision R3: the runner's progress is debtor -> creditor by
@@ -39,7 +39,7 @@ from sqlalchemy import func, select
 
 from app.core.clearing.service import ClearingService
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.transaction import Transaction
 from tests.p020_support import debt_uuid, participant_uuid, ring, seed_graph
 from tests.p023_support import positive_debt_total, require_target, slow_plan
@@ -70,7 +70,7 @@ class _Stand:
         self.run._real_equivalents = [CODE]
         # The scenario topology in the trust-line direction creditor -> debtor.
         self.run._edges_by_equivalent = {CODE: [(e.creditor, e.debtor) for e in edges]}
-        self.runner = RealRunner(
+        self.runner = RealRunnerImpl(
             lock=threading.RLock(),
             get_run=lambda _run_id: self.run,
             get_scenario_raw=lambda _run_id: {"equivalents": [CODE], "participants": [{"id": p} for p in pids]},

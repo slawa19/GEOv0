@@ -57,7 +57,7 @@ from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_debt_snapshot_loader import RealDebtSnapshotLoader
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.tick import RealTick
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -389,7 +389,7 @@ _INJECTED_TICK_FAILURE = "T1525 stand: a failure right after the payments phase"
 
 
 async def _scenario_real_tick_fails_after_payments(factory, world, monkeypatch) -> _TickOutcome:
-    """The whole real tick of `RealRunner`, failing right after its payments have been staged.
+    """The whole real tick of `RealRunnerImpl`, failing right after its payments have been staged.
 
     Nothing is stubbed on the money path: seeding is skipped because the world is already in the
     database, the planner plans, the coordinator reads the snapshot and runs the real executor.
@@ -420,7 +420,7 @@ async def _scenario_real_tick_fails_after_payments(factory, world, monkeypatch) 
     }
     run = _run_for(world, f"t1525-tick-{uuid.uuid4().hex[:8]}")
     sse = _Sse()
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: run,
         get_scenario_raw=lambda _sid: scenario,

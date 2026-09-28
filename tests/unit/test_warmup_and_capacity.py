@@ -6,7 +6,7 @@ Covers:
   - _load_debt_snapshot_by_pid(): PID-keyed mapping from DB
 
 Uses the same mocking approach as test_simulator_real_amount_model.py —
-lightweight RealRunner with no DB, direct calls to _plan_real_payments().
+lightweight RealRunnerImpl with no DB, direct calls to _plan_real_payments().
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 # ---------------------------------------------------------------------------
@@ -34,9 +34,9 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _runner(*, actions_per_tick_max: int = 50) -> RealRunner:
-    """Create a lightweight RealRunner for unit tests (no DB, no SSE)."""
-    return RealRunner(
+def _runner(*, actions_per_tick_max: int = 50) -> RealRunnerImpl:
+    """Create a lightweight RealRunnerImpl for unit tests (no DB, no SSE)."""
+    return RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: None,  # type: ignore[arg-type]
         get_scenario_raw=lambda _sid: {},

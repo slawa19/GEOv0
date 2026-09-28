@@ -51,7 +51,7 @@ from sqlalchemy.orm import Session
 
 from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -237,8 +237,8 @@ class _Sse:
         pass
 
 
-def _runner(run: RunRecord, scenario: dict[str, Any], artifacts: _Artifacts) -> RealRunner:
-    runner = RealRunner(
+def _runner(run: RunRecord, scenario: dict[str, Any], artifacts: _Artifacts) -> RealRunnerImpl:
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: run,
         get_scenario_raw=lambda _sid: scenario,

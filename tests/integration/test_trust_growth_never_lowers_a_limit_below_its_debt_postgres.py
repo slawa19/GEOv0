@@ -7,10 +7,11 @@ with no lower bound. When the limit had been raised above `original * max_growth
 does not touch the run's `original_limit` - the "growth" LOWERED it, below the committed debt. Serial,
 no race.
 
-THE PATH IS THE TICK'S OWN: `RealClearingEngine.tick_real_mode_clearing` with the real
-`ClearingService` on a mode-B PostgreSQL SERIALIZABLE clone, calling the real
-`TrustDriftEngine.apply_trust_growth` on its clearing session - the wiring of
-`real_runner_impl.py` (`apply_trust_growth=self._trust_drift_engine.apply_trust_growth`).
+THE PATH IS THE TICK'S OWN: the tick's clearing step `tick.py::RealTick._run_clearing` with the real
+clearing runner on a mode-B PostgreSQL SERIALIZABLE clone, calling the real
+`TrustDriftEngine.apply_trust_growth` on its clearing session - the tick reads it from the runner
+(`runner._trust_drift_engine`). Until 021 `T2109` this drove the driver `RealClearingEngine`
+between the tick and the runner.
 
 THE SCHEDULE. R trusts S (edge R->S), original limit 100, so the growth cap is 200. The limit is raised
 to 300 the way `trustline-update` writes it. S pays R 250 through `PaymentService.pay` (debt S->R 250).
@@ -25,7 +26,6 @@ original * max_growth = 200.
 from __future__ import annotations
 
 import logging
-import threading
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -37,7 +37,6 @@ from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_clearing_engine import RealClearingEngine
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -45,6 +44,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
 from tests.debt_setup import debt_fixture_setup
+from tests.simulator_tick_stand import clearing_unit_tick
 from tests.integration.test_p015_p1_money_replay_postgres import factory  # noqa: F401 - fixture
 
 _LOG = logging.getLogger("tests.trust_growth_never_lowers")
@@ -120,7 +120,7 @@ def _run_and_engine(eq, s_, r_, z_) -> tuple[RunRecord, dict, TrustDriftEngine]:
 
 
 @pytest.mark.asyncio
-async def test_growth_after_a_raise_above_the_cap_never_lowers_the_limit_below_the_debt(factory) -> None:  # noqa: F811
+async def test_growth_after_a_raise_above_the_cap_never_lowers_the_limit_below_the_debt(factory, monkeypatch) -> None:  # noqa: F811
     eq, s_, r_, z_ = await _world(factory)
     run, scenario, drift = _run_and_engine(eq, s_, r_, z_)
 
@@ -159,22 +159,12 @@ async def test_growth_after_a_raise_above_the_cap_never_lowers_the_limit_below_t
         )
 
         # 3. The tick clears the cycle S->R->Z->S (10) and grows the touched edges.
-        clearing = RealClearingEngine(
-            lock=threading.RLock(), sse=_Sse(), utc_now=lambda: datetime.now(timezone.utc), logger=_LOG,
-            edge_patch_builder=EdgePatchBuilder(logger=_LOG),
-            clearing_max_depth_limit=6, clearing_max_fx_edges_limit=8, real_clearing_time_budget_ms=10_000,
+        tick = clearing_unit_tick(
+            monkeypatch, sse=_Sse(), session_factory=factory, apply_trust_growth=drift.apply_trust_growth,
+            edge_patch_builder=EdgePatchBuilder(logger=_LOG), max_fx_edges=8, budget_ms=10_000,
         )
-
-        async def _no_patch(**_k):
-            return []
-
-        cleared = await clearing.tick_real_mode_clearing(
-            None, run_id=run.run_id, run=run, equivalents=[eq.code],
-            apply_trust_growth=drift.apply_trust_growth,
-            build_edge_patch_for_equivalent=_no_patch,
-            broadcast_topology_edge_patch=lambda **_k: None,
-            async_session_local=factory,
-        )
+        cleared: dict[str, Decimal] = {}
+        await tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=[eq.code], committed=cleared)
     finally:
         PaymentRouter.invalidate_cache(eq.code)
 

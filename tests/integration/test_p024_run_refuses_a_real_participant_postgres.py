@@ -10,7 +10,7 @@ participant only if the simulator itself would have created it - its `public_key
 fail-closed: the tick fails the run with `SIMULATOR_PID_TAKEN` and the pid; the Interact Mode seeding
 path answers 409 with the code, the pid and the request id.
 
-Stand: the real `RealRunner.tick_real_mode` over a mode-B clone (`committed_database`), as in
+Stand: the real `RealRunnerImpl.tick_real_mode` over a mode-B clone (`committed_database`), as in
 `test_p015_t1544_operator_stop_through_the_tick_sqlite.py`; the HTTP case uses the `client` fixture.
 """
 
@@ -31,7 +31,7 @@ from sqlalchemy import func, or_, select
 from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
@@ -60,8 +60,8 @@ class _Artifacts:
         return None
 
 
-def _runner(run: RunRecord, scenario: dict) -> RealRunner:
-    runner = RealRunner(
+def _runner(run: RunRecord, scenario: dict) -> RealRunnerImpl:
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: run,
         get_scenario_raw=lambda _sid: scenario,
@@ -94,7 +94,7 @@ def _fresh_run(run_id: str, scenario_id: str, scenario: dict) -> RunRecord:
     return run
 
 
-async def _tick(runner: RealRunner, run: RunRecord) -> None:
+async def _tick(runner: RealRunnerImpl, run: RunRecord) -> None:
     run.tick_index += 1
     run.sim_time_ms += 1_000
     await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=60)
@@ -219,7 +219,7 @@ async def test_a_second_run_of_the_same_scenario_adopts_its_simulated_participan
     assert await _trustlines_touching(factory, a) == 1
 
 
-def _seeded_run_with_event(monkeypatch, factory, n: str, effect: dict) -> tuple[RunRecord, RealRunner]:
+def _seeded_run_with_event(monkeypatch, factory, n: str, effect: dict) -> tuple[RunRecord, RealRunnerImpl]:
     """A fresh run of two simulated participants whose first tick seeds them and fires `effect`."""
     eq_code = f"P24I{n}"
     a, b = f"p024_a_{n}", f"p024_b_{n}"

@@ -31,7 +31,7 @@ import ast
 import re
 from pathlib import Path
 
-from tests.p021_support import require_target, target_xfail_021
+from tests.p021_support import require_target
 
 REPO = Path(__file__).resolve().parents[2]
 SCANNED_DIRS = ("app", "tests", "scripts")
@@ -152,7 +152,6 @@ def _runner_call_problems(root: Path = REPO) -> list[str]:
     return problems
 
 
-@target_xfail_021("T2109", "the clearing driver `RealClearingEngine`, the `real_runner.py` shim and the `clearing_pass` wrapper")
 def test_no_driver_no_shim_and_the_tick_calls_the_runner_itself() -> None:
     problems = _scan() + _runner_call_problems()
     require_target(not problems, "the clearing driver or its shim is still here:\n" + "\n".join(problems))

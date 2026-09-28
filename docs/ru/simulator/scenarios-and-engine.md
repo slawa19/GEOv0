@@ -190,7 +190,7 @@ classDiagram
 - Жизненный цикл run: [../../../app/core/simulator/run_lifecycle.py](../../../app/core/simulator/run_lifecycle.py)
 - Реестр сценариев + schema validation: [../../../app/core/simulator/scenario_registry.py](../../../app/core/simulator/scenario_registry.py)
 - Fixtures mode генератор событий: [../../../app/core/simulator/fixtures_runner.py](../../../app/core/simulator/fixtures_runner.py)
-- Real mode runner: [../../../app/core/simulator/real_runner.py](../../../app/core/simulator/real_runner.py)
+- Real mode runner: [../../../app/core/simulator/real_runner_impl.py](../../../app/core/simulator/real_runner_impl.py), тик — [../../../app/core/simulator/tick.py](../../../app/core/simulator/tick.py)
 - SSE broadcast + replay buffer: [../../../app/core/simulator/sse_broadcast.py](../../../app/core/simulator/sse_broadcast.py)
 - Snapshot builder: [../../../app/core/simulator/snapshot_builder.py](../../../app/core/simulator/snapshot_builder.py)
 - Artifacts (events.ndjson и др.): [../../../app/core/simulator/artifacts.py](../../../app/core/simulator/artifacts.py)
@@ -227,7 +227,7 @@ flowchart LR
 - Эмитит «визуальные» события на основе графа trustlines.
 - Каденс клиринга/tx.updated в основном тайм‑based (`_next_*_at_ms`), а не “каждые N тиков”.
 
-**Real mode** (см. [../../../app/core/simulator/real_runner.py](../../../app/core/simulator/real_runner.py)):
+**Real mode** (см. [../../../app/core/simulator/real_runner_impl.py](../../../app/core/simulator/real_runner_impl.py) и [../../../app/core/simulator/tick.py](../../../app/core/simulator/tick.py)):
 - (Один раз на run) сидит сценарий в БД и потом выполняет тик‑цикл.
 - На тике планирует платежи (budget от intensity) и вызывает PaymentService.
 - Может запускать клиринг:
@@ -273,7 +273,7 @@ flowchart LR
 
 ### 2.7 Что сейчас НЕ используется движком (важно для ожиданий)
 
-На текущем этапе (см. [../../../app/core/simulator/real_runner.py](../../../app/core/simulator/real_runner.py)):
+На текущем этапе (см. [../../../app/core/simulator/real_runner_impl.py](../../../app/core/simulator/real_runner_impl.py)):
 - `events[]` присутствуют в schema, но на текущем этапе **ещё не интерпретируются** planner’ом (см. спецификацию).
 - `behaviorProfiles[]` в **real mode** интерпретируются частично: используется подмножество `behaviorProfiles.props` (`tx_rate`, `equivalent_weights`, `recipient_group_weights`, `amount_model[eq]`).
 - Подбор суммы в real mode ограничен сверху: `amount <= min(SIMULATOR_REAL_AMOUNT_CAP, trustline.limit, props.amount_model[eq].max)`.

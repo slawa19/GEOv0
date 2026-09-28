@@ -6,7 +6,7 @@ Covers:
   - _apply_trust_growth() — limit growth after clearing
   - _apply_trust_decay() — limit decay for overloaded edges
 
-A lightweight RealRunner (no SSE, no artifacts). The growth and decay calls run on a real mode-A
+A lightweight RealRunnerImpl (no SSE, no artifacts). The growth and decay calls run on a real mode-A
 session (`_drift_session`) since programme 021 stage 1 moved their writes onto the trust-line
 service; until then they ran on `AsyncMock` sessions answering statements by position.
 """
@@ -26,7 +26,7 @@ import pytest
 
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +116,10 @@ def _make_scenario(
 def _make_runner(
     *,
     scenario: dict[str, Any] | None = None,
-) -> RealRunner:
-    """Create a lightweight RealRunner for unit tests (no DB, no SSE)."""
+) -> RealRunnerImpl:
+    """Create a lightweight RealRunnerImpl for unit tests (no DB, no SSE)."""
     _scenario = scenario or {}
-    return RealRunner(
+    return RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: None,  # type: ignore[arg-type]
         get_scenario_raw=lambda _sid: _scenario,

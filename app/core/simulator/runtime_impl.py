@@ -24,7 +24,7 @@ from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.fixtures_runner import FixturesRunner
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.core.simulator.models import RunRecord, ScenarioRecord, _Subscription
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.run_lifecycle import RunLifecycle
 from app.core.simulator.runtime_utils import (
     ACTIONS_PER_TICK_MAX,
@@ -215,7 +215,7 @@ class _SimulatorRuntimeBase:
             utc_now=_utc_now,
         )
 
-        self._real_runner = RealRunner(
+        self._real_runner = RealRunnerImpl(
             lock=self._lock,
             get_run=self.get_run,
             get_scenario_raw=lambda scenario_id: self.get_scenario(scenario_id).raw,

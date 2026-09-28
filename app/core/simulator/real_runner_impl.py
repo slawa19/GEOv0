@@ -25,7 +25,6 @@ from app.core.simulator.inject_executor import (
     invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
 )
 from app.core.simulator.models import RunRecord, TrustDriftResult
-from app.core.simulator.real_clearing_engine import RealClearingEngine
 from app.core.simulator.real_debt_snapshot_loader import RealDebtSnapshotLoader
 from app.core.simulator.real_payment_action import _RealPaymentAction
 from app.core.simulator.real_payment_planner import RealPaymentPlanner
@@ -161,7 +160,7 @@ class RealRunnerImpl:
             "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250
         )
 
-        # Sub-components: eager init (RealRunner is created once on startup).
+        # Sub-components: eager init (the runner is created once on startup).
         self._edge_patch_builder: EdgePatchBuilder = EdgePatchBuilder(logger=self._logger)
         self._real_debt_snapshot_loader: RealDebtSnapshotLoader = RealDebtSnapshotLoader()
         self._sse_emitter: SseEventEmitter = SseEventEmitter(
@@ -205,17 +204,6 @@ class RealRunnerImpl:
             artifacts=self._artifacts,
             utc_now=self._utc_now,
             logger=self._logger,
-        )
-
-        self._real_clearing_engine: RealClearingEngine = RealClearingEngine(
-            lock=self._lock,
-            sse=self._sse,
-            utc_now=self._utc_now,
-            logger=self._logger,
-            edge_patch_builder=self._edge_patch_builder,
-            clearing_max_fx_edges_limit=int(self._clearing_max_fx_edges_limit),
-            real_clearing_time_budget_ms=int(self._real_clearing_time_budget_ms),
-            should_warn_this_tick=lambda run, key: self._should_warn_this_tick(run, key=key),
         )
 
         self._real_scenario_seeder: RealScenarioSeeder = RealScenarioSeeder()
@@ -896,35 +884,6 @@ class RealRunnerImpl:
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None:
         await self._tick.fail_run(run_id, code=code, message=message)
-
-    async def tick_real_mode_clearing(
-        self,
-        session,  # NOTE: Unused now; clearing uses its own isolated session
-        run_id: str,
-        run: RunRecord,
-        equivalents: list[str],
-        *,
-        async_session_local: Any | None = None,
-        clearing_service_cls: Any | None = None,
-        time_budget_ms_override: int | None = None,
-        max_depth_override: int | None = None,
-    ) -> dict[str, float]:
-        # NO CALLER in `app/` since programme 021 stage 4: the tick calls the driver itself, at one point
-        # (`tick.py::RealTick._run_clearing`). Kept only because `real_runner.py` overrides it through `super()`;
-        # both go with the driver in 021 `T2109`.
-        return await self._real_clearing_engine.tick_real_mode_clearing(
-            session,
-            run_id=run_id,
-            run=run,
-            equivalents=equivalents,
-            apply_trust_growth=self._trust_drift_engine.apply_trust_growth,
-            build_edge_patch_for_equivalent=self._build_edge_patch_for_equivalent,
-            broadcast_topology_edge_patch=self._broadcast_topology_edge_patch,
-            async_session_local=async_session_local,
-            clearing_service_cls=clearing_service_cls,
-            time_budget_ms_override=time_budget_ms_override,
-            max_depth_override=max_depth_override,
-        )
 
     def _plan_real_payments(
         self,

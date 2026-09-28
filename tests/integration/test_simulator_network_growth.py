@@ -4,7 +4,7 @@ Tests validate inject ops (add_participant, create_trustline, freeze_participant
 in a multi-tick, multi-event pipeline context with a real SQLite DB.
 
 Approach: "thick unit test" — real SQLite via ``db_session`` fixture from conftest,
-direct ``RealRunner._apply_due_scenario_events()`` calls with advancing sim_time
+direct ``RealRunnerImpl._apply_due_scenario_events()`` calls with advancing sim_time
 to simulate multi-tick processing.  More integration-like than pure unit tests
 because each test exercises a complete scenario with multiple events at different
 times, verifying cumulative DB + cache state across ticks.
@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
@@ -68,10 +68,10 @@ class _DummySse:
         pass
 
 
-def _make_runner(*, inject_enabled: bool = True) -> tuple[RealRunner, _DummyArtifacts]:
-    """Create a ``RealRunner`` with inject flag pre-set."""
+def _make_runner(*, inject_enabled: bool = True) -> tuple[RealRunnerImpl, _DummyArtifacts]:
+    """Create a ``RealRunnerImpl`` with inject flag pre-set."""
     arts = _DummyArtifacts()
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: None,  # type: ignore[arg-type]
         get_scenario_raw=lambda _sid: {},

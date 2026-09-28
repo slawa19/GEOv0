@@ -99,7 +99,8 @@ def tick_unit_runner(**collaborators: Any):
     built each class with its collaborators as constructor arguments; they now build a `RealTick` over this runner
     and pass the same collaborators as keyword arguments (`_trust_drift_engine=...`, `_artifacts=...`, ...).
     Defaults: a real lock and logger, clearing on every tick with the default 250 ms budget, metrics and
-    bottlenecks on every tick, no artifact writes, storage enabled, every warning let through.
+    bottlenecks on every tick, at most 30 `clearing.done` cycle edges, no artifact writes, storage enabled, every
+    warning let through.
     """
 
     import logging
@@ -113,6 +114,7 @@ def tick_unit_runner(**collaborators: Any):
         _utc_now=lambda: datetime.now(timezone.utc),
         _clearing_every_n_ticks=1,
         _real_clearing_time_budget_ms=250,
+        _clearing_max_fx_edges_limit=30,
         _real_db_metrics_every_n_ticks=1,
         _real_db_bottlenecks_every_n_ticks=1,
         _real_last_tick_write_every_ms=0,
@@ -131,3 +133,51 @@ def unit_tick(**collaborators: Any):
     from app.core.simulator.tick import RealTick
 
     return RealTick(tick_unit_runner(**collaborators))
+
+
+def clearing_unit_tick(
+    monkeypatch,
+    *,
+    sse: Any,
+    session_factory: Any,
+    apply_trust_growth: Any,
+    runner_pass: Any = None,
+    edge_patch_builder: Any = None,
+    build_edge_patch_for_equivalent: Any = None,
+    broadcast_topology_edge_patch: Any = None,
+    max_fx_edges: int = 8,
+    budget_ms: int = 10_000,
+):
+    """A `RealTick` whose clearing step (`RealTick._run_clearing`) runs against the given pieces.
+
+    Programme 021 `T2109` removed the clearing driver (`RealClearingEngine`), whose unit and PostgreSQL tests built
+    the driver with these collaborators as arguments and passed the runner seam as `clearing_pass=`. The tick reads
+    its collaborators from the runner, and the runner entry (`app.core.clearing.runner.run_clearing_pass`) and its
+    session factory (`app.db.session.AsyncSessionLocal`) at CALL time - so `runner_pass`, a double of the runner
+    entry (omitted: the real runner), and `session_factory` are installed there, on `monkeypatch`.
+    Drive it with `await tick._run_clearing(session=None, run_id=..., run=..., equivalents=[...], committed={})`;
+    `committed` receives the committed volume per equivalent, which is what the tick reports.
+    """
+
+    from types import SimpleNamespace
+
+    import app.core.clearing.runner as clearing_runner
+    import app.db.session as app_db_session
+
+    async def _no_edge_patch(**_kwargs) -> list:
+        return []
+
+    monkeypatch.setattr(app_db_session, "AsyncSessionLocal", session_factory)
+    if runner_pass is not None:
+        monkeypatch.setattr(clearing_runner, "run_clearing_pass", runner_pass)
+    if edge_patch_builder is None:
+        edge_patch_builder = SimpleNamespace(build_edge_patch_for_pairs=_no_edge_patch)
+    return unit_tick(
+        _sse=sse,
+        _edge_patch_builder=edge_patch_builder,
+        _trust_drift_engine=SimpleNamespace(apply_trust_growth=apply_trust_growth),
+        _build_edge_patch_for_equivalent=build_edge_patch_for_equivalent or _no_edge_patch,
+        _broadcast_topology_edge_patch=broadcast_topology_edge_patch or (lambda **_kwargs: None),
+        _clearing_max_fx_edges_limit=int(max_fx_edges),
+        _real_clearing_time_budget_ms=int(budget_ms),
+    )

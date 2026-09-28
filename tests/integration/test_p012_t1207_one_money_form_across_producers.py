@@ -71,8 +71,7 @@ from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
 from app.core.simulator.net_balance_utils import to_money_str
-from app.core.simulator.real_clearing_engine import RealClearingEngine
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.snapshot_builder import SnapshotBuilder
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
@@ -81,6 +80,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.simulator_tick_stand import clearing_unit_tick
 
 _LOG = logging.getLogger("test.p012.t1207")
 
@@ -584,7 +584,7 @@ def _cycle_pass(failure_kind: str):
     return _pass
 
 
-async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
+async def _drive_clearing(monkeypatch, *, precision: int, failure_kind: str) -> str:
     sse = _SseCapture()
     run = RunRecord(
         run_id=f"t1207-clearing-{uuid.uuid4().hex[:6]}",
@@ -597,30 +597,22 @@ async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
     run._edges_by_equivalent = {"USD": [("bob", "alice")]}
     run._real_participants = [(_ALICE, "alice"), (_BOB, "bob")]
 
-    engine = RealClearingEngine(
-        lock=threading.RLock(),
-        sse=sse,
-        utc_now=_utc_now,
-        logger=_LOG,
-        edge_patch_builder=_NoopEdgePatchBuilder(),
-        clearing_max_fx_edges_limit=8,
-        real_clearing_time_budget_ms=10_000,
-    )
-
     async def _apply_trust_growth(**_kwargs):
         return SimpleNamespace(updated_count=0)
 
-    call = engine.tick_real_mode_clearing(
-        None,
-        run_id=run.run_id,
-        run=run,
-        equivalents=["USD"],
+    # 021 `T2109`: the tick's own clearing step, not the removed driver `RealClearingEngine`; the runner seam and the
+    # session factory are installed where the tick reads them at call time.
+    tick = clearing_unit_tick(
+        monkeypatch,
+        sse=sse,
+        session_factory=lambda: _ClearingSessionContext(),
+        runner_pass=_cycle_pass(failure_kind),
         apply_trust_growth=_apply_trust_growth,
-        build_edge_patch_for_equivalent=lambda **_k: None,
-        broadcast_topology_edge_patch=lambda **_k: None,
-        async_session_local=lambda: _ClearingSessionContext(),
-        clearing_pass=_cycle_pass(failure_kind),
+        edge_patch_builder=_NoopEdgePatchBuilder(),
+        max_fx_edges=8,
+        budget_ms=10_000,
     )
+    call = tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=["USD"], committed={})
     if failure_kind in {"cancelled_execute", "committed_cancel"}:
         with pytest.raises(asyncio.CancelledError):
             await call
@@ -635,7 +627,7 @@ async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("precision", PRECISIONS)
 async def test_clearing_done_reports_one_scale_whether_or_not_it_was_cancelled(
-    precision: int,
+    precision: int, monkeypatch
 ) -> None:
     """One field, one scale.  `T1203` found two, chosen by whether the clearing was cancelled.
 
@@ -649,10 +641,10 @@ async def test_clearing_done_reports_one_scale_whether_or_not_it_was_cancelled(
     tell that neither was deliberate.
     """
 
-    happy = await _drive_clearing(precision=precision, failure_kind="geo")
-    cancelled = await _drive_clearing(precision=precision, failure_kind="cancelled_execute")
+    happy = await _drive_clearing(monkeypatch, precision=precision, failure_kind="geo")
+    cancelled = await _drive_clearing(monkeypatch, precision=precision, failure_kind="cancelled_execute")
     committed_cancel = await _drive_clearing(
-        precision=precision, failure_kind="committed_cancel"
+        monkeypatch, precision=precision, failure_kind="committed_cancel"
     )
 
     assert happy == cancelled == committed_cancel, (
@@ -820,7 +812,7 @@ async def test_the_topology_changed_trustline_limit_is_not_exponential(
     run._real_viz_by_eq = {}
 
     sse = _RecordingSse()
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: None,  # type: ignore[arg-type]
         get_scenario_raw=lambda _sid: {},

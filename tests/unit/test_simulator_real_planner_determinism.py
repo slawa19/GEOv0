@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 def _utc_now() -> datetime:
@@ -31,7 +31,7 @@ def _scenario_minimal() -> dict:
 def test_real_planner_is_deterministic_and_prefix_stable() -> None:
     scenario = _scenario_minimal()
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: (_ for _ in ()).throw(AssertionError("get_run should not be called")),
         get_scenario_raw=lambda _scenario_id: (_ for _ in ()).throw(AssertionError("get_scenario_raw should not be called")),
@@ -75,7 +75,7 @@ def test_real_planner_is_deterministic_and_prefix_stable() -> None:
 def test_real_planner_seq_is_contiguous_per_tick() -> None:
     scenario = _scenario_minimal()
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: (_ for _ in ()).throw(AssertionError("get_run should not be called")),
         get_scenario_raw=lambda _scenario_id: (_ for _ in ()).throw(AssertionError("get_scenario_raw should not be called")),

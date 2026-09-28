@@ -6,7 +6,7 @@ Covers:
   - Periodicity (4.3): stateless frequency filter based on amount vs p50
 
 Uses the same lightweight mocking as test_warmup_and_capacity.py —
-RealRunner with no DB, direct calls to _plan_real_payments().
+RealRunnerImpl with no DB, direct calls to _plan_real_payments().
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 # ---------------------------------------------------------------------------
@@ -35,9 +35,9 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _runner(*, actions_per_tick_max: int = 50) -> RealRunner:
-    """Create a lightweight RealRunner for unit tests (no DB, no SSE)."""
-    return RealRunner(
+def _runner(*, actions_per_tick_max: int = 50) -> RealRunnerImpl:
+    """Create a lightweight RealRunnerImpl for unit tests (no DB, no SSE)."""
+    return RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: None,  # type: ignore[arg-type]
         get_scenario_raw=lambda _sid: {},

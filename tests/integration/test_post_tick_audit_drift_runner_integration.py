@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.core.simulator.storage as simulator_storage
 import app.db.session as app_db_session
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.tick import RealTick
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -96,7 +96,7 @@ async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
     async with audit_session_factory() as seed:
         eq_code, pids = await _seed_triangle(seed)
 
-    # Patch app session factory so RealRunner uses our isolated DB.
+    # Patch app session factory so RealRunnerImpl uses our isolated DB.
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", audit_session_factory)
 
     # Stub storage writes; not relevant for this test.
@@ -239,7 +239,7 @@ async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
 
     monkeypatch.setattr(RealTick, "persist_tick_tail", _patched_persist_tick_tail)
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: run,
         get_scenario_raw=lambda _run_id: scenario,
