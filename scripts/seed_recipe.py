@@ -80,7 +80,6 @@ from app.core.ledger.reconciliation import (  # noqa: E402
     FULL_RECOMPUTATION,
     PASSED,
     open_verification_snapshot,
-    take_baseline,
     verify_journal_equals_change,
 )
 from app.core.participants.service import ParticipantService  # noqa: E402
@@ -90,9 +89,12 @@ from app.core.payments.service import (  # noqa: E402
     PaymentService,
 )
 from app.core.trustlines.service import TrustLineService  # noqa: E402
-from app.db.journal_tables import debt_operation_equivalents, debt_operations  # noqa: E402
+from app.db.journal_tables import debt_journal_entries, debt_operation_equivalents, debt_operations  # noqa: E402
 from app.db.models import Debt, Equivalent, Participant, TrustLine  # noqa: E402
-from app.db.reconciliation_tables import debt_reconciliation_baseline_offsets  # noqa: E402
+from app.db.reconciliation_tables import (  # noqa: E402
+    debt_reconciliation_baseline_offsets,
+    debt_reconciliation_baselines,
+)
 from app.schemas.admin import (  # noqa: E402
     AdminEquivalentCreateRequest,
     AdminParticipantActionRequest,
@@ -578,31 +580,53 @@ class _Run:
         here (`offsets_recorded` and `entries_read` both zero), and every debt the seed goes on to
         write is then checked by `debts == baseline + sum(journal)` alone, with no offset in the sum
         to reason about (Codex external review of `37fec08..5e687dd`, F10, 2026-09-23).
+
+        SINCE 024 `T2412.2` THE BASELINE IS TAKEN BY `POST /admin/equivalents` ITSELF, in the creating
+        transaction, so this step no longer takes it - taking it again would meet `BaselineAlreadyTaken`.
+        It CHECKS it instead, at the same point and with the same claim: the header exists, and the
+        baseline, the journal and the debts of the equivalent are all still empty - what `take_baseline`
+        would have seen here (`edges_seen` = debt rows, `entries_read` = journal entries).
         """
 
+        entries = debt_journal_entries.c
         for code, equivalent_id in sorted(self.equivalent_ids.items()):
 
             async def body(session, equivalent_id=equivalent_id):
-                taken = await take_baseline(session, equivalent_id)
-                await session.commit()
-                return taken
+                async def count(stmt) -> int:
+                    return int((await session.execute(stmt)).scalar_one())
 
-            # Through the same retry as everything else: `take_baseline` takes the equivalent's
-            # owner lock, so it is a writer like the others. A retry after a SUCCESSFUL commit would
-            # meet `BaselineAlreadyTaken`, which is not transient and becomes a refusal - the right
-            # answer, since nothing re-baselines.
-            taken = await self._attempt(f"take the baseline of {code}", body)
-            if taken.offsets_recorded or taken.entries_read:
+                header = await count(
+                    select(func.count())
+                    .select_from(debt_reconciliation_baselines)
+                    .where(debt_reconciliation_baselines.c.equivalent_id == equivalent_id)
+                )
+                offsets = await count(
+                    select(func.count())
+                    .select_from(debt_reconciliation_baseline_offsets)
+                    .where(debt_reconciliation_baseline_offsets.c.equivalent_id == equivalent_id)
+                )
+                debts = await count(select(func.count()).select_from(Debt).where(Debt.equivalent_id == equivalent_id))
+                journal = await count(
+                    select(func.count()).select_from(debt_journal_entries).where(entries.equivalent_id == equivalent_id)
+                )
+                return header, offsets, debts, journal
+
+            header, offsets, debts, journal = await self._attempt(f"check the baseline of {code}", body)
+            if header != 1:
                 raise SeedRefusal(
-                    f"the baseline of {code} is not empty ({taken.offsets_recorded} offset(s) over "
-                    f"{taken.edges_seen} edge(s), {taken.entries_read} journal entries). It was "
-                    f"supposed to be taken before any money moved; a baseline that adopts debts "
-                    f"makes the reconciliation below prove nothing about them."
+                    f"{code} has no reconciliation baseline; `POST /admin/equivalents` takes it at creation "
+                    f"(024 T2412.2), so the equivalent was not created through it."
+                )
+            if offsets or debts or journal:
+                raise SeedRefusal(
+                    f"the baseline of {code} is not empty ({offsets} offset(s), {debts} debt(s), {journal} "
+                    f"journal entries). It was supposed to be taken before any money moved; a baseline "
+                    f"that adopts debts makes the reconciliation below prove nothing about them."
                 )
             self.report.baselines[code] = {
-                "offsets_recorded": taken.offsets_recorded,
-                "edges_seen": taken.edges_seen,
-                "entries_read": taken.entries_read,
+                "offsets_recorded": offsets,
+                "edges_seen": debts,
+                "entries_read": journal,
             }
 
     # -- the commands -----------------------------------------------------------------------

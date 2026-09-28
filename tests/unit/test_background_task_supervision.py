@@ -237,6 +237,16 @@ async def test_integrity_failure_degrades_and_later_success_recovers(
             return None
 
     monkeypatch.setattr(db_session_module, "AsyncSessionLocal", SessionContext)
+    # The session above is a stand-in, so the reconciliation the job hosts after the checkpoints cannot run
+    # on it. Since 024 `T2412.1` an error there fails the job (it was only logged), so this test - whose
+    # subject is the checkpoints - gives the reconciliation a clean run of its own.
+    import app.core.ledger.reconciliation as reconciliation_module
+
+    monkeypatch.setattr(
+        reconciliation_module,
+        "run_scheduled_reconciliation",
+        AsyncMock(return_value={"error": 0, "hold_errors": 0}),
+    )
     compute = AsyncMock(side_effect=RuntimeError("checkpoint failed"))
     monkeypatch.setattr(
         integrity_module,

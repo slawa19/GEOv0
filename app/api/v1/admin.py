@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
 from pydantic import TypeAdapter, ValidationError, WithJsonSchema
 from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
+from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -69,6 +70,8 @@ from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.money_boundary import MoneyBoundary
+from app.core.ledger.reconciliation import take_baseline
+from app.db.reconciliation_tables import debt_reconciliation_baselines
 from sqlalchemy.exc import IntegrityError
 from app.utils.exceptions import (
     BadRequestException,
@@ -1145,6 +1148,11 @@ async def admin_create_equivalent(
     db.add(eq)
     try:
         await db.flush()
+        # 024 `T2412.2`: the reconciliation baseline, in the creating transaction. A new equivalent has no
+        # debt and no journal entry, so the baseline adopts nothing (zero offsets) and every later change is
+        # checkable; without it criterion (a) stayed UNVERIFIABLE for good. Existing equivalents without a
+        # baseline are NOT backfilled here - that is an operator's decision (spec 024, T2412).
+        await take_baseline(db, eq.id)
         await db.refresh(eq)
         result = EquivalentSchema.model_validate(eq)
         _add_audit_entry(
@@ -1422,7 +1430,16 @@ async def admin_equivalent_usage(
     return AdminEquivalentUsageResponse(code=eq.code, **counts)
 
 
-@router.delete("/equivalents/{code}", response_model=AdminDeleteResponse)
+@router.delete(
+    "/equivalents/{code}",
+    response_model=AdminDeleteResponse,
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Active, in use, or named by rows it must not outlive; nothing deleted",
+        }
+    },
+)
 async def admin_delete_equivalent(
     code: str,
     body: AdminEquivalentDeleteRequest,
@@ -1450,7 +1467,10 @@ async def admin_delete_equivalent(
         raise ConflictException("Deactivate equivalent before delete")
 
     counts = await _equivalent_usage_counts(db, equivalent_id=eq.id)
-    if any(v > 0 for v in counts.values()):
+    # 024 `T2412.3`: integrity checkpoints are reports ABOUT the equivalent (`ON DELETE CASCADE`), not use of
+    # it; counted as use, every equivalent was undeletable after the first integrity run. They stay in the
+    # counts reported, not in the refusal.
+    if counts["trustlines"] > 0 or counts["debts"] > 0:
         raise ConflictException("Equivalent is in use", details=counts)
 
     before = {
@@ -1463,6 +1483,15 @@ async def admin_delete_equivalent(
     }
 
     try:
+        # 024 `T2412.3`: the baseline header goes with the equivalent - it is `RESTRICT`, and since `T2412.2`
+        # every created equivalent has one. Only the HEADER: a baseline that recorded offsets adopted real
+        # debts, its offsets keep `RESTRICT` on it, and this statement then fails into the 409 below. Journal
+        # entries keep refusing the equivalent's own delete the same way.
+        await db.execute(
+            sql_delete(debt_reconciliation_baselines).where(
+                debt_reconciliation_baselines.c.equivalent_id == eq.id
+            )
+        )
         await db.delete(eq)
         _add_audit_entry(
             db,

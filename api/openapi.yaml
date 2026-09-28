@@ -713,6 +713,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminDeleteResponse'
+        '409':
+          # Refused, nothing deleted (024 `T2412.3`): the equivalent is still active; it has trust lines or
+          # debts (`details` carries the usage counts - integrity checkpoints are reported there but no
+          # longer refuse); or the database refused the delete because rows it must not outlive name it -
+          # journal history, or a reconciliation baseline that recorded offsets
+          # (`details.reason: referenced_by_existing_rows`).
+          $ref: '#/components/responses/Conflict'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -4617,10 +4624,10 @@ components:
         tx_id:
           type: string
         state:
-          # The query filters to `_ACTIVE_PAYMENT_TX_STATES` (app/api/v1/admin.py:113-120), so this
-          # is six of the nine transaction states, not all nine. The first version of this schema
-          # left it a bare string - the most constrained field on the read carrying the least
-          # description, in a programme about describing what is returned.
+          # The six non-terminal states the stuck-payment query once filtered to (`_ACTIVE_PAYMENT_TX_STATES`,
+          # removed with programme 019 stage 4). Since migration 030 no PAYMENT row carries any of them, so
+          # the readers answer empty without reading (app/api/v1/admin.py, the "STUCK PAYMENT" note); the enum
+          # stays as the wire shape until П4 decides the incidents surface (024 `T2412.3`, B14 of `T2411`).
           type: string
           enum: [NEW, ROUTED, PREPARE_IN_PROGRESS, PREPARED, PROPOSED, WAITING]
         initiator_pid:

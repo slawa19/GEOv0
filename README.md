@@ -361,8 +361,10 @@ equivalent; without it the stored result is `UNVERIFIABLE`.
 - **Fresh local database — automatic, and taken by the seed itself.** `scripts/run_local.ps1`
   (`start` on an empty database and `reset-db`), `scripts/run_full_stack.ps1` (an empty database and
   `-ResetDb`) and `scripts/verify_admin_phase4_real_contract.ps1` all seed by running a community's
-  recipe, and that recipe takes the baseline on empty debts before its first payment
-  (`scripts/seed_recipe.py`). They then re-check it, and fail if it does not hold. There is no
+  recipe, and that recipe creates its equivalents through `POST /admin/equivalents`, which takes the
+  baseline on empty debts in the creating transaction (since 2026-09-29, 024 `T2412.2`); the recipe
+  checks it is still empty before its first payment (`scripts/seed_recipe.py`). They then re-check
+  it, and fail if it does not hold. There is no
   separate baseline step on these paths, and adding one after seeding would adopt the whole seed and
   certify nothing. After a manual seed by some other route, run
   `python scripts/take_reconciliation_baseline.py --all` yourself before any payments.
@@ -627,7 +629,8 @@ handler, with a key pair generated per participant per run and kept only in memo
 python scripts/seed_db.py --source recipe --community riverside-town-50
 ```
 
-It takes the reconciliation baseline itself, on empty debts before the first payment, so
+Its equivalents get the reconciliation baseline at creation (`POST /admin/equivalents`), on empty
+debts before the first payment, so
 `take_reconciliation_baseline.py` is **not** run afterwards - and it finishes by reconciling what it
 produced, printing one line per acceptance check. The symbolic `ref -> PID` table of the run is
 written to `.local-run/seed-recipe/<community>/participants.json`; the private keys are not written
