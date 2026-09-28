@@ -33,7 +33,7 @@ THE CONTRACT SINCE STAGE 3 (spec, "Путь записи окончательн�
 
 THE SCHEDULES ARE REAL. An operator's `PATCH /admin/equivalents/{code}` of the DESCRIPTION holds its row
 lock through a slow commit (`admin.py` takes the owner lock only for `is_active=false`); the staged
-commit guard's `FOR SHARE` waits on it until `COMMIT_TIMEOUT_SECONDS` (set short) ends it. A committed
+commit guard's `FOR SHARE` waits on it until the payment's commit budget (set short) ends it. A committed
 UPDATE of the trust line's limit by another session between routing and prepare. Neither injects an
 exception; the `T1912` plan is fixed (two payments, two equivalents) so the timeout meets a phase that
 already staged money.
@@ -104,6 +104,7 @@ class _CommitGate:
     def __init__(self) -> None:
         self.reached = asyncio.Event()
         self.release = asyncio.Event()
+        self.committed = asyncio.Event()  # the held commit went through: its row locks are gone
 
     def __call__(self, session) -> None:
         original = session.commit
@@ -112,6 +113,7 @@ class _CommitGate:
             self.reached.set()
             await self.release.wait()
             await original()
+            self.committed.set()
 
         session.commit = gated_commit
 
@@ -195,7 +197,7 @@ async def _replay_staged(session_factory, world, call: dict[str, Any]) -> tuple[
 class _TwoEquivalentTick:
     """One tick, two staged payments: seq 0 in the first equivalent, seq 1 in a second one whose row
     an operator's slow description edit holds. Seq 0 commits inside the tick's transaction; seq 1's
-    commit guard (`FOR SHARE`) waits on the edit's row lock until `COMMIT_TIMEOUT_SECONDS` ends it."""
+    commit guard (`FOR SHARE`) waits on the edit's row lock until its commit budget ends it (`_Subject`)."""
 
     world: Any
     second: Any
@@ -204,6 +206,82 @@ class _TwoEquivalentTick:
     runner: Any
     calls: list[dict[str, Any]]
     gate: Any
+    subject: "_Subject"
+
+
+#: The commit budget of the SUBJECT only - seq 1's money phase, the one that waits on the edit's row
+#: lock. The wait ends by this budget and nothing else, so it is also how long the lock wait lasts.
+#: Every other payment of these tests (seq 0, the winner, the replays) runs on the application's own
+#: `COMMIT_TIMEOUT_SECONDS`.
+#:
+#: WHY IT IS SCOPED (2026-09-28, CI runs `36383388623` attempt 1 and `36390360987`). It used to be set
+#: process-wide to 0.5 s, and under the loaded CI runner it ended payments that were not the subject:
+#: in the first run seq 0 - uncontended, in the first equivalent - timed out at
+#: `check_debt_symmetry` (`service.py:1973`), the tick failed on seq 0 and seq 1 never reached the
+#: lock (the premise was red); in the second the winner of `test_the_owner_yields_...` timed out on
+#: its own commit guard while the released edit was still committing, raised
+#: `PaymentTransactionUnusable` out of the recording hook, and nothing was recorded (`winners == []`).
+_SUBJECT_COMMIT_TIMEOUT_S = 2.0
+
+
+@dataclass
+class _Subject:
+    """Seq 1's money phase, instrumented: its commit budget, and how its commit guard ended.
+
+    THE PREMISE IS READ, NOT POLLED. The guard is the `FOR SHARE` of the second equivalent's row
+    (`MoneyBoundary.refuse_inactive_equivalents(row_lock=True)`, `service.py:1919`). The recorder
+    notes whether the operator's edit held that row uncommitted - its commit reached and not released
+    - when the guard statement was issued AND when it ended, and how it ended. A `FOR SHARE` on a
+    row another open transaction has updated cannot complete while that transaction stays open, so
+    "issued and ended by `CancelledError` with the edit held throughout" means the statement was
+    ended by the commit timeout while it waited on the edit's row lock. A `pg_locks` poll during the
+    tick (`_row_lock_waiter_exists`) could only see that wait while it lasted; this record cannot
+    miss it, and it names THIS payment's statement rather than any waiter in the cluster.
+    """
+
+    second_equivalent_id: Any
+    gate: Any
+    commit_timeout_s: float | None = _SUBJECT_COMMIT_TIMEOUT_S
+    boundary: Any = None
+    guard: dict[str, Any] = field(default_factory=dict)
+
+    def install(self, monkeypatch) -> None:
+        from app.core.money_boundary import MoneyBoundary
+
+        subject = self
+        original_operation = PaymentService._run_payment_operation
+        original_guard = MoneyBoundary.refuse_inactive_equivalents
+
+        async def operation(self_, attempt, **kwargs):
+            # The FIRST money phase in the second equivalent is the tick's seq 1; later ones (the
+            # winner, a replay) are not the subject and keep the budget they were given.
+            if subject.boundary is None and kwargs.get("equivalent_id") == subject.second_equivalent_id:
+                subject.boundary = self_._boundary
+                if subject.commit_timeout_s is not None:
+                    kwargs["commit_timeout_s"] = subject.commit_timeout_s
+            return await original_operation(self_, attempt, **kwargs)
+
+        async def guard(self_, equivalent_ids, *, row_lock):
+            if self_ is not subject.boundary or not row_lock or subject.guard:
+                return await original_guard(self_, equivalent_ids, row_lock=row_lock)
+            held = lambda: subject.gate.reached.is_set() and not subject.gate.release.is_set()  # noqa: E731
+            subject.guard["held_at_issue"] = held()
+            try:
+                result = await original_guard(self_, equivalent_ids, row_lock=row_lock)
+            except BaseException as exc:
+                subject.guard["ended"] = type(exc).__name__
+                raise
+            else:
+                subject.guard["ended"] = "returned"
+                return result
+            finally:
+                subject.guard["held_at_end"] = held()
+
+        monkeypatch.setattr(PaymentService, "_run_payment_operation", operation)
+        monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", guard)
+
+    def waited_on_the_edit_until_the_timeout(self) -> bool:
+        return self.guard == {"held_at_issue": True, "ended": "CancelledError", "held_at_end": True}
 
 
 async def _second_equivalent(factory, world):  # noqa: F811
@@ -261,13 +339,16 @@ async def _two_equivalent_tick(factory, monkeypatch) -> _TwoEquivalentTick:  # n
     _install(monkeypatch, factory)
     staged = _StagedCalls()
     staged.install(monkeypatch)
-    monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.5)
-    return _TwoEquivalentTick(world, second, run, sse, runner, staged.calls, _CommitGate())
+    gate = _CommitGate()
+    subject = _Subject(second.id, gate)
+    subject.install(monkeypatch)
+    return _TwoEquivalentTick(world, second, run, sse, runner, staged.calls, gate, subject)
 
 
 async def _run_the_tick_behind_a_slow_edit(api, factory, t: _TwoEquivalentTick) -> bool:  # noqa: F811
     """Start the operator's slow edit of the SECOND equivalent, run the tick, then release the edit.
-    Returns whether a row-lock waiter was observed while the tick ran (the premise)."""
+    Returns whether seq 1's commit guard waited on the edit's row lock until its commit timeout ended
+    it (the premise, `_Subject`)."""
 
     patch = tick = None
     try:
@@ -281,8 +362,8 @@ async def _run_the_tick_behind_a_slow_edit(api, factory, t: _TwoEquivalentTick) 
             )
         await asyncio.wait_for(t.gate.reached.wait(), timeout=20)
         tick = asyncio.create_task(asyncio.wait_for(t.runner.tick_real_mode(t.run.run_id), 90.0))
-        queued = await _row_lock_waiter_exists(factory)
         await tick
+        queued = t.subject.waited_on_the_edit_until_the_timeout()
         t.gate.release.set()
         resp = await asyncio.wait_for(patch, timeout=20)
         assert resp.status_code == 200, resp.text
@@ -316,7 +397,7 @@ async def test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_
     async with factory() as s:
         level = str((await s.execute(text("SHOW transaction_isolation"))).scalar_one())
     assert level == "serializable", level
-    assert queued, "premise: the second payment never waited on the edit's row lock"
+    assert queued, f"premise: the second payment never waited on the edit's row lock {t.subject.guard}"
     first, second = t.calls
     assert first.get("status") == "COMMITTED" and "raised" not in first, first
     assert "raised" in second, second  # the second one timed out on the lock wait
@@ -386,7 +467,7 @@ async def test_the_owner_records_nothing_when_the_phase_rollback_is_not_establis
     monkeypatch.setattr(PaymentService, "create_payment_internal_staged", the_phase_cannot_be_rolled_back)
     queued = await _run_the_tick_behind_a_slow_edit(api, factory, t)
 
-    assert queued, "premise: the second payment never waited on the edit's row lock"
+    assert queued, f"premise: the second payment never waited on the edit's row lock {t.subject.guard}"
     # The owner tried to end the phase both ways, and both were refused.
     assert "rollback" in broken and "invalidate" in broken, broken
     assert t.run.last_error["code"] == "REAL_MODE_TICK_FAILED", t.run.last_error
@@ -411,27 +492,27 @@ async def test_the_owner_yields_to_a_committed_winner_of_the_same_tx_id(
     winners: list[str] = []
 
     async def a_winner_commits_first(sessions, refusal):
-        t.gate.release.set()  # the slow edit may finish; the winner's commit guard then proceeds
+        # The slow edit finishes, and the winner starts only once it has COMMITTED (a barrier, not a
+        # race): the winner's transaction then begins after the edit, meets no row lock on its commit
+        # guard and no concurrent update of that row, and runs on the application's commit budget
+        # (`_Subject` shortens only seq 1's). Before 2026-09-28 the winner started right after the
+        # release, raced the edit's commit under a process-wide 0.5 s budget, and on a loaded runner
+        # timed out itself (CI run `36390360987`: `winners == []`).
+        t.gate.release.set()
+        await asyncio.wait_for(t.gate.committed.wait(), timeout=20)
         call = t.calls[1]
-        # The winner is its own transaction's owner: a conflict with the edit that is finishing now
-        # (40001 on its commit guard) is retried on a fresh transaction, as any owner does.
-        for _ in range(10):
-            try:
-                async with factory() as session:
-                    async with session.begin_nested():
-                        won = await original_create(
-                            PaymentService(session),
-                            call["sender_id"],
-                            to_pid=call["to_pid"],
-                            equivalent=call["equivalent"],
-                            amount=call["amount"],
-                            allowed_participant_pids=call.get("allowed_participant_pids"),
-                            idempotency_key=call["idempotency_key"],
-                        )
-                    await session.commit()
-                break
-            except RetryablePaymentConflictException:
-                await asyncio.sleep(0.05)
+        async with factory() as session:
+            async with session.begin_nested():
+                won = await original_create(
+                    PaymentService(session),
+                    call["sender_id"],
+                    to_pid=call["to_pid"],
+                    equivalent=call["equivalent"],
+                    amount=call["amount"],
+                    allowed_participant_pids=call.get("allowed_participant_pids"),
+                    idempotency_key=call["idempotency_key"],
+                )
+            await session.commit()
         winners.append(won.result.status)
         return await original_record(sessions, refusal)
 
@@ -439,7 +520,7 @@ async def test_the_owner_yields_to_a_committed_winner_of_the_same_tx_id(
     monkeypatch.setattr(money_replay, "record_definitive_refusal", a_winner_commits_first)
     queued = await _run_the_tick_behind_a_slow_edit(api, factory, t)
 
-    assert queued, "premise: the second payment never waited on the edit's row lock"
+    assert queued, f"premise: the second payment never waited on the edit's row lock {t.subject.guard}"
     assert winners == ["COMMITTED"], winners
     assert t.calls[1].get("raised") == "PaymentTransactionUnusable", t.calls[1]
     assert await tx_row(factory, str(t.calls[1]["idempotency_key"])) == ("COMMITTED", None)
@@ -612,6 +693,7 @@ async def test_stopping_the_run_while_an_admitted_payment_waits_records_its_canc
     and the identity could execute later."""
 
     t = await _two_equivalent_tick(factory, monkeypatch)
+    t.subject.commit_timeout_s = None  # seq 1 too waits on the budget below; the stop ends the wait
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 60)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60)
     patch = tick = None
@@ -638,7 +720,7 @@ async def test_stopping_the_run_while_an_admitted_payment_waits_records_its_canc
         await finish(patch)
         _forget_routes(t)
 
-    assert queued, "premise: the second payment never waited on the edit's row lock"
+    assert queued, f"premise: the second payment never waited on the edit's row lock {t.subject.guard}"
     assert tick.cancelled() or isinstance(tick.exception(), asyncio.CancelledError), tick
     first, second = t.calls
     assert first.get("status") == "COMMITTED", first
