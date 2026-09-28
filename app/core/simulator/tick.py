@@ -135,7 +135,6 @@ class RealTick:
         # Captured once, exactly as the coordinators captured them at the runner's construction.
         self._clearing_every_n_ticks = int(runner._clearing_every_n_ticks)
         self._real_clearing_time_budget_ms = int(runner._real_clearing_time_budget_ms)
-        self._clearing_max_fx_edges_limit = int(runner._clearing_max_fx_edges_limit)
         self._real_db_metrics_every_n_ticks = int(runner._real_db_metrics_every_n_ticks)
         self._real_db_bottlenecks_every_n_ticks = int(runner._real_db_bottlenecks_every_n_ticks)
         self._real_last_tick_write_every_ms = int(runner._real_last_tick_write_every_ms)
@@ -811,7 +810,7 @@ class RealTick:
         """
         with self._runner._lock:
             topology = set(((run._edges_by_equivalent or {}).get(str(eq)) or []))
-        limit = max(1, int(self._clearing_max_fx_edges_limit))
+        limit = max(1, int(self._runner._clearing_max_fx_edges_limit))
         out: list[dict[str, str]] = []
         for creditor, debtor in sorted(touched_edges):
             if topology and (creditor, debtor) not in topology:
