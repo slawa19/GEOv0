@@ -1,0 +1,93 @@
+# 023 slice (a), step 3: mutations of app/core/clearing/flow_planner.py, each red then restored (git checkout).
+# Selector: tests/unit/test_p023_flow_planner.py tests/integration/test_p023_flow_planner_snapshot_postgres.py
+# Command per mutation: $env:PYTEST_ADDOPTS='-rf --tb=line'; scripts/verify_local.ps1 -TaskSlug p023a -BackendOnly -BackendSelector <both>
+# Unmutated (bc0c145 + the tests): 21 passed, exit 0.
+
+========== M1 drop the potentials restore: the whole 'RESTORE nonnegative reduced costs' block of solve_transshipment removed
+TEST_DATABASE_URL not set: using the derived postgresql+asyncpg://geo:***@127.0.0.1:5432/geov0_test_p023a
+
+== Backend selector safety guard ==
+
+== Test database safety guard ==
+Test database guard passed (backend=postgresql, database='geov0_test_p023a').
+
+== Backend tests (pytest) ==
+.F....F.F..FFF....F..                                                    [100%]
+================================== FAILURES ===================================
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt 0b54450b-5ea7-2d44-c5e5-e3f4d047ca6a: residual backward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt 2bb9f118-a86d-0d75-7f88-8353ee5dc1b5: residual backward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt ad52f902-4f21-11cc-ebe5-4b308f2456de: residual backward arc with reduced cost -2 < 0
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt 168be6fc-2dac-9306-66eb-ce1c05cc23c0: residual backward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt 5354cbf2-4eb2-503d-1caa-fe994d1109cf: residual backward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt 7c2bb70b-375d-4456-42ea-42b2f6fb8e44: residual backward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:331: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2351-0000-000000000000: residual backward arc with reduced cost -1 < 0
+=========================== short test summary info ===========================
+FAILED tests/unit/test_p023_flow_planner.py::test_the_planner_matches_the_exhaustive_oracle_on_random_small_graphs
+FAILED tests/unit/test_p023_flow_planner.py::test_decomposition_reconstructs_the_flow_and_is_deterministic
+FAILED tests/unit/test_p023_flow_planner.py::test_every_prefix_of_the_plan_leaves_the_rest_executable
+FAILED tests/unit/test_p023_flow_planner.py::test_certificate_holds_on_every_random_plan
+FAILED tests/unit/test_p023_flow_planner.py::test_large_atoms_scale_the_oracle_exactly
+FAILED tests/unit/test_p023_flow_planner.py::test_large_coprime_atoms_are_planned_and_certified
+FAILED tests/integration/test_p023_flow_planner_snapshot_postgres.py::test_balances_come_from_the_eligible_subgraph_only
+7 failed, 14 passed in 1.92s
+
+
+========== M2 scaling threshold '<' -> '<=': Dijkstra skips arcs with residual <= Δ instead of < Δ
+TEST_DATABASE_URL not set: using the derived postgresql+asyncpg://geo:***@127.0.0.1:5432/geov0_test_p023a
+
+== Backend selector safety guard ==
+
+== Test database safety guard ==
+Test database guard passed (backend=postgresql, database='geov0_test_p023a').
+
+== Backend tests (pytest) ==
+.FF.FFFFFFFFFF....F..                                                    [100%]
+================================== FAILURES ===================================
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 3 vertex(es)
+app\core\clearing\flow_planner.py:346: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2300-0000-00000000000b: residual forward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 2 vertex(es)
+app\core\clearing\flow_planner.py:346: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2300-0000-00000000000b: residual forward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 4 vertex(es)
+app\core\clearing\flow_planner.py:346: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2300-0000-00000000000b: residual forward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 3 vertex(es)
+app\core\clearing\flow_planner.py:346: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2300-0000-00000000000b: residual forward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:346: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2300-0000-00000000000b: residual forward arc with reduced cost -1 < 0
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 4 vertex(es)
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 3 vertex(es)
+app\core\clearing\flow_planner.py:330: app.core.clearing.flow_planner.PlanIntegrityError: the reduction is not a circulation at 2 vertex(es)
+app\core\clearing\flow_planner.py:346: app.core.clearing.flow_planner.PlanIntegrityError: debt 00000000-0000-2350-0000-000000000002: residual forward arc with reduced cost -1 < 0
+=========================== short test summary info ===========================
+FAILED tests/unit/test_p023_flow_planner.py::test_the_planner_matches_the_exhaustive_oracle_on_random_small_graphs
+FAILED tests/unit/test_p023_flow_planner.py::test_shared_edge_gives_eight_not_six
+FAILED tests/unit/test_p023_flow_planner.py::test_an_acyclic_snapshot_and_an_empty_one_plan_nothing
+FAILED tests/unit/test_p023_flow_planner.py::test_feasibility_rejects_an_extra_atom_on_an_edge
+FAILED tests/unit/test_p023_flow_planner.py::test_decomposition_reconstructs_the_flow_and_is_deterministic
+FAILED tests/unit/test_p023_flow_planner.py::test_decomposition_check_rejects_a_tampered_plan
+FAILED tests/unit/test_p023_flow_planner.py::test_every_prefix_of_the_plan_leaves_the_rest_executable
+FAILED tests/unit/test_p023_flow_planner.py::test_certificate_rejects_a_feasible_but_suboptimal_flow
+FAILED tests/unit/test_p023_flow_planner.py::test_certificate_rejects_a_shifted_potential
+FAILED tests/unit/test_p023_flow_planner.py::test_certificate_holds_on_every_random_plan
+FAILED tests/unit/test_p023_flow_planner.py::test_large_atoms_scale_the_oracle_exactly
+FAILED tests/unit/test_p023_flow_planner.py::test_large_coprime_atoms_are_planned_and_certified
+FAILED tests/integration/test_p023_flow_planner_snapshot_postgres.py::test_balances_come_from_the_eligible_subgraph_only
+13 failed, 8 passed in 2.18s
+runner: Backend tests (pytest) failed with exit code 1
+
+
+========== M3 break the certificate: check_certificate's 'M > 0 => r <= 0' condition disabled ('if False:')
+TEST_DATABASE_URL not set: using the derived postgresql+asyncpg://geo:***@127.0.0.1:5432/geov0_test_p023a
+
+== Backend selector safety guard ==
+
+== Test database safety guard ==
+Test database guard passed (backend=postgresql, database='geov0_test_p023a').
+
+== Backend tests (pytest) ==
+.........F...........                                                    [100%]
+================================== FAILURES ===================================
+tests\unit\test_p023_flow_planner.py:197: Failed: DID NOT RAISE <class 'app.core.clearing.flow_planner.PlanIntegrityError'>
+=========================== short test summary info ===========================
+FAILED tests/unit/test_p023_flow_planner.py::test_certificate_rejects_a_feasible_but_suboptimal_flow
+1 failed, 20 passed in 2.92s
+runner: Backend tests (pytest) failed with exit code 1
+

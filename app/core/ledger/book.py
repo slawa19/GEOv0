@@ -243,6 +243,9 @@ class Operation:
     tx_id: str | None = None
     scope_equivalent_ids: frozenset[uuid.UUID] | None = None
     intent_equivalent_ids: frozenset[uuid.UUID] = frozenset()
+    #: The intent encoding version the envelope records. `None` - the kind's default. A declared version
+    #: must be one the kind writes (`intent_encoding_version_for`); 023 slice (b) declares CLEARING v2.
+    intent_encoding_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -650,6 +653,10 @@ def _declaration(op: Operation) -> tuple[Any, str]:
             reason=Refusal.BAD_ARGUMENT,
         )
     try:
+        intent_encoding_version_for(op.kind, op.intent_encoding_version)
+    except ValueError as exc:
+        raise BookError(str(exc), reason=Refusal.BAD_ARGUMENT) from exc
+    try:
         canonical = canonical_json(op.intent)
     except Exception as exc:  # noqa: BLE001 - any canonicalisation failure is the same refusal
         raise BookError(
@@ -964,7 +971,9 @@ class Book:
                         intent_digest=intent_digest,
                         schema_version=SCHEMA_VERSION,
                         money_encoding_version=MONEY_ENCODING_VERSION,
-                        intent_encoding_version=intent_encoding_version_for(op.kind),
+                        intent_encoding_version=intent_encoding_version_for(
+                            op.kind, op.intent_encoding_version
+                        ),
                         opened_at=datetime.now(timezone.utc),
                         state="OPEN",
                     )
@@ -1015,6 +1024,7 @@ def operation_for(
     tx_id: str | None = None,
     scope_equivalent_ids: Iterable[uuid.UUID] | None = None,
     intent_equivalent_ids: Iterable[uuid.UUID] = (),
+    intent_encoding_version: int | None = None,
 ) -> Operation:
     """An `Operation` from the keyword shape callers already spell for `debt_operation`."""
 
@@ -1027,6 +1037,7 @@ def operation_for(
         if scope_equivalent_ids is None
         else frozenset(scope_equivalent_ids),
         intent_equivalent_ids=frozenset(intent_equivalent_ids),
+        intent_encoding_version=intent_encoding_version,
     )
 
 

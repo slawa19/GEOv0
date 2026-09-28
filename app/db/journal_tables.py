@@ -57,6 +57,7 @@ from app.db.types import MONEY_COLUMN_MAX, MoneyNumeric, finite_money_clauses
 
 __all__ = [
     "DEBT_JOURNAL_TABLE_NAMES",
+    "CLEARING_INTENT_ENCODING_VERSION",
     "INTENT_ENCODING_VERSION",
     "MONEY_ENCODING_VERSION",
     "OPERATION_KINDS",
@@ -99,14 +100,36 @@ INTENT_ENCODING_VERSION = 1
 #: payments written before stay as they are and are read structurally (`reconciliation.py`).
 PAYMENT_INTENT_ENCODING_VERSION = 2
 
+#: Programme 023 slice (b) (spec decisions 5-6): a CLEARING plan occurrence records its immutable descriptor
+#: and a DECLARED amount `c <= min`, which the version-1 rule `clear == min(pre)` cannot read. Only an
+#: occurrence written through `ClearingService.execute_occurrence` declares it; every other CLEARING still
+#: writes version 1. The value is the one the CHECK already admits (migration 027), so no migration.
+CLEARING_INTENT_ENCODING_VERSION = 2
+
 #: Every intent encoding version the database admits (migration 027 widened the CHECK to these).
 STORABLE_INTENT_ENCODING_VERSIONS = (INTENT_ENCODING_VERSION, PAYMENT_INTENT_ENCODING_VERSION)
+assert CLEARING_INTENT_ENCODING_VERSION in STORABLE_INTENT_ENCODING_VERSIONS, "the CHECK must admit it"
+
+#: The versions a writer of each kind may DECLARE; the first is what it writes when it declares none.
+_WRITABLE_INTENT_ENCODING_VERSIONS = {
+    "PAYMENT": (PAYMENT_INTENT_ENCODING_VERSION,),
+    "CLEARING": (INTENT_ENCODING_VERSION, CLEARING_INTENT_ENCODING_VERSION),
+}
 
 
-def intent_encoding_version_for(kind: str) -> int:
-    """The intent encoding version an operation of `kind` writes today."""
+def intent_encoding_version_for(kind: str, declared: int | None = None) -> int:
+    """The intent encoding version an operation of `kind` writes: its default, or a declared one it admits.
 
-    return PAYMENT_INTENT_ENCODING_VERSION if kind == "PAYMENT" else INTENT_ENCODING_VERSION
+    A declared version the kind does not write raises `ValueError` - the book turns it into a refusal before
+    anything is inserted, so no envelope can claim a rule that does not read its intent.
+    """
+
+    writable = _WRITABLE_INTENT_ENCODING_VERSIONS.get(kind, (INTENT_ENCODING_VERSION,))
+    if declared is None:
+        return writable[0]
+    if isinstance(declared, bool) or declared not in writable:
+        raise ValueError(f"kind {kind} does not write intent encoding version {declared!r}; it writes {writable}")
+    return declared
 
 _KIND_LIST = ", ".join("'%s'" % kind for kind in OPERATION_KINDS)
 _TX_KIND_LIST = ", ".join("'%s'" % kind for kind in OPERATION_KINDS_WITH_TX)

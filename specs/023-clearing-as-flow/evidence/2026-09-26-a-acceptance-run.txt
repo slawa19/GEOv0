@@ -1,0 +1,36 @@
+built geov0_bench_p023a_h4k_planted in 2.7 s
+h4k planted    global    FAIL cold=1311.596 p50=1201.1 p95=1262.6 max=1311.6 stmts=[2] cycles=2740 longest=77 peak=None TIMEOUT: killed: silent for 10 s; p95 1262.6 ms > 1000 ms
+h4k planted    perimeter PASS cold=309.199 p50=174.7 p95=190.7 max=309.2 stmts=[3] cycles=524 longest=60 peak=1117836 
+execution h4k {"kind": "execution", "which": "longest", "length": 77, "ms": 278.0, "statements": 417, "cleared": "109.34000000", "planned_amount": "2.11000000"}
+execution h4k {"kind": "execution", "which": "shortest", "length": 3, "ms": 161.6, "statements": 47, "cleared": "297.46000000", "planned_amount": "77.54000000"}
+built geov0_bench_p023a_h4k_plateau in 2.6 s
+h4k plateau    global    FAIL cold=1450.615 p50=1319.1 p95=1346.3 max=1456.5 stmts=[2] cycles=2711 longest=83 peak=None TIMEOUT: killed: silent for 10 s; p95 1346.3 ms > 1000 ms
+h4k plateau    perimeter PASS cold=315.419 p50=186.5 p95=208.7 max=315.4 stmts=[3] cycles=544 longest=55 peak=1139141 
+built geov0_bench_p023a_h4k_narrow in 2.5 s
+h4k narrow     global    FAIL cold=1639.226 p50=1523.7 p95=1541.1 max=1639.2 stmts=[2] cycles=2564 longest=87 peak=None TIMEOUT: killed: silent for 10 s; p95 1541.1 ms > 1000 ms
+h4k narrow     perimeter PASS cold=287.282 p50=151.0 p95=167.0 max=287.3 stmts=[3] cycles=537 longest=45 peak=1127936 
+built geov0_bench_p023a_h4k_allequal in 2.5 s
+h4k allequal   global    PASS cold=355.871 p50=228.3 p95=249.4 max=355.9 stmts=[2] cycles=189 longest=54 peak=3389328 
+h4k allequal   perimeter PASS cold=168.057 p50=33.5 p95=35.9 max=168.1 stmts=[3] cycles=57 longest=35 peak=943421 
+built geov0_bench_p023a_h4k_largeatoms in 2.4 s
+h4k largeatoms global    FAIL cold=4307.504 p50=4167.3 p95=4481.2 max=4525.5 stmts=[2] cycles=2945 longest=86 peak=None TIMEOUT: killed: silent for 10 s; p95 4481.2 ms > 1000 ms
+h4k largeatoms perimeter FAIL cold=862.81 p50=717.2 p95=724.6 max=862.8 stmts=[3] cycles=610 longest=48 peak=None TIMEOUT: killed: silent for 10 s
+built geov0_bench_p023a_d8k_planted in 3.4 s
+d8k planted    global    FAIL cold=1825.302 p50=1692.2 p95=1716.7 max=1825.3 stmts=[2] cycles=6777 longest=55 peak=None TIMEOUT: killed: silent for 10 s
+d8k planted    perimeter FAIL cold=361.094 p50=224.4 p95=237.9 max=361.1 stmts=[3] cycles=1498 longest=38 peak=None TIMEOUT: killed: silent for 10 s
+execution d8k {"kind": "execution", "which": "longest", "length": 55, "ms": 286.7, "statements": 307, "cleared": "79.30000000", "planned_amount": "0.46000000"}
+execution d8k {"kind": "execution", "which": "shortest", "length": 3, "ms": 192.9, "statements": 47, "cleared": "129.88000000", "planned_amount": "129.88000000"}
+built geov0_bench_p023a_d8k_plateau in 3.3 s
+d8k plateau    global    FAIL cold=2919.232 p50=2833.3 p95=2910.8 max=2919.2 stmts=[2] cycles=6739 longest=52 peak=None TIMEOUT: killed: silent for 10 s; p95 2910.8 ms > 2000 ms
+d8k plateau    perimeter FAIL cold=426.081 p50=279.6 p95=289.3 max=426.1 stmts=[3] cycles=1542 longest=41 peak=None TIMEOUT: killed: silent for 10 s
+built geov0_bench_p023a_d8k_narrow in 3.4 s
+d8k narrow     global    FAIL cold=2024.823 p50=1895.4 p95=1937.4 max=2026.1 stmts=[2] cycles=6628 longest=60 peak=None TIMEOUT: killed: silent for 10 s
+d8k narrow     perimeter PASS cold=372.044 p50=244.9 p95=257.0 max=372.0 stmts=[3] cycles=1492 longest=37 peak=2196830 
+built geov0_bench_p023a_d8k_allequal in 3.4 s
+d8k allequal   global    FAIL cold=550.67 p50=420.8 p95=432.9 max=550.7 stmts=[2] cycles=568 longest=38 peak=None TIMEOUT: killed: silent for 10 s
+d8k allequal   perimeter PASS cold=180.998 p50=53.2 p95=60.1 max=181.0 stmts=[3] cycles=177 longest=27 peak=1669605 
+built geov0_bench_p023a_d8k_largeatoms in 3.4 s
+d8k largeatoms global    FAIL cold=3992.526 p50=3832.0 p95=3923.6 max=4157.6 stmts=[2] cycles=7087 longest=55 peak=None TIMEOUT: killed: silent for 10 s; p95 3923.6 ms > 2000 ms
+d8k largeatoms perimeter FAIL cold=988.996 p50=853.6 p95=864.4 max=989.0 stmts=[3] cycles=1646 longest=33 peak=None TIMEOUT: killed: silent for 10 s
+VERDICT FAIL: 7/20 cells pass; failed: ['h4k/planted/global', 'h4k/plateau/global', 'h4k/narrow/global', 'h4k/largeatoms/global', 'h4k/largeatoms/perimeter', 'd8k/planted/global', 'd8k/planted/perimeter', 'd8k/plateau/global', 'd8k/plateau/perimeter', 'd8k/narrow/global', 'd8k/allequal/global', 'd8k/largeatoms/global', 'd8k/largeatoms/perimeter']
+results: .local-run\p023a-bench\20260926T052821Z\results.json
