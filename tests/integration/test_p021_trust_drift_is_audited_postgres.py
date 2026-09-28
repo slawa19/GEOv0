@@ -13,7 +13,7 @@ WHAT MUST NOT MOVE, asserted as controls (green before and after): drift changes
 line with the same overload keeps its limit), the decay floor is the debt read in the decay's own transaction
 (a line cannot be decayed below it), growth only raises.
 
-The stand is a real `RealRunner.tick_real_mode` on a mode-B clone (`tests/simulator_tick_stand.py`), because
+The stand is a real `RealRunnerImpl.tick_real_mode` on a mode-B clone (`tests/simulator_tick_stand.py`), because
 both drift writers run inside the tick's own sessions and commits.
 """
 
@@ -33,7 +33,7 @@ from sqlalchemy import select
 
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -66,8 +66,8 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def runner_for(run: RunRecord, scenario: dict, *, clearing_every: int, logger: logging.Logger | None = None) -> RealRunner:
-    return RealRunner(
+def runner_for(run: RunRecord, scenario: dict, *, clearing_every: int, logger: logging.Logger | None = None) -> RealRunnerImpl:
+    return RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: run,
         get_scenario_raw=lambda _sid: scenario,
@@ -150,7 +150,7 @@ async def limits(factory, eq: Equivalent, people: dict) -> dict[tuple[str, str],
     return {(names[r.from_participant_id], names[r.to_participant_id]): (Decimal(str(r.limit)), str(r.status)) for r in rows}
 
 
-async def ticks(runner: RealRunner, run: RunRecord, count: int) -> None:
+async def ticks(runner: RealRunnerImpl, run: RunRecord, count: int) -> None:
     for _ in range(count):
         run.tick_index += 1
         run.sim_time_ms += 1_000

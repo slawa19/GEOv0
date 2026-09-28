@@ -1,11 +1,11 @@
 import logging
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 def test_freeze_participant_does_not_overwrite_non_active_trustline_status_in_scenario() -> None:
-    runner = RealRunner.__new__(RealRunner)
+    runner = RealRunnerImpl.__new__(RealRunnerImpl)
     runner._logger = logging.getLogger(__name__)
 
     run = RunRecord(run_id="r1", scenario_id="s1", mode="real", state="running")

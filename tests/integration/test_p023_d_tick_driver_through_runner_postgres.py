@@ -4,7 +4,7 @@ The tick adapter is REAL: `RealTick.maybe_run_clearing` (`app/core/simulator/tic
 hard timeout `max(2 s, 4 × budget)` capped by `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealTick._run_clearing`
 -> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The budget is the normal one
 (`SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS`, 250 ms); nothing is raised for the test. Until 021 stage 4 the adapter
-was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunner.tick_real_mode_clearing`.
+was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunnerImpl.tick_real_mode_clearing`.
 
 * THROUGH THE RUNNER - the tick's clearing goes through `execute_occurrence` in the run's perimeter; its
   `clearing.done` carries creditor -> debtor PIDs (decision R3: the runner's progress is debtor -> creditor by
@@ -39,7 +39,7 @@ from sqlalchemy import func, select
 
 from app.core.clearing.service import ClearingService
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.transaction import Transaction
 from tests.p020_support import debt_uuid, participant_uuid, ring, seed_graph
 from tests.p023_support import positive_debt_total, require_target, slow_plan
@@ -70,7 +70,7 @@ class _Stand:
         self.run._real_equivalents = [CODE]
         # The scenario topology in the trust-line direction creditor -> debtor.
         self.run._edges_by_equivalent = {CODE: [(e.creditor, e.debtor) for e in edges]}
-        self.runner = RealRunner(
+        self.runner = RealRunnerImpl(
             lock=threading.RLock(),
             get_run=lambda _run_id: self.run,
             get_scenario_raw=lambda _run_id: {"equivalents": [CODE], "participants": [{"id": p} for p in pids]},
@@ -121,7 +121,11 @@ async def _stand(factory, edges) -> _Stand:
     return _Stand(factory, edges)
 
 
-def _spy_execute(monkeypatch, before_call=None) -> list:
+def _spy_execute(monkeypatch, before_call=None, *, execute_delay: float = 0.0) -> list:
+    """Record every occurrence the runner starts. `execute_delay` emulates a slow database: each occurrence takes
+    that long BEFORE the real execution, so a delay above the 250 ms tick budget makes the runner's deadline - checked
+    before every cycle start after the first - end the pass after ONE occurrence (`budget_exhausted`)."""
+
     real = ClearingService.execute_occurrence
     calls: list = []
 
@@ -129,10 +133,66 @@ def _spy_execute(monkeypatch, before_call=None) -> list:
         calls.append((occurrence, kwargs.get("allowed_participant_pids")))
         if before_call is not None:
             await before_call(len(calls))
+        if execute_delay:
+            await asyncio.sleep(execute_delay)
         return await real(self, occurrence, **kwargs)
 
     monkeypatch.setattr(ClearingService, "execute_occurrence", spy)
     return calls
+
+
+#: A fast database, and one slower than the 250 ms tick budget per occurrence (one occurrence per tick). The slow
+#: variant is the anti-vacuum control of the drainage below: it makes the budget end a pass after one occurrence.
+EXECUTE_DELAYS = pytest.mark.parametrize("execute_delay", [0.0, 0.3], ids=["fast-db", "slow-db"])
+#: How many ticks two cycles may take to drain. The contract guarantees one occurrence per tick (the runner's deadline
+#: is not checked before the first cycle start), so two cycles need at most two ticks; the bound leaves room.
+DRAIN_TICKS = 5
+
+
+async def _drain(stand: "_Stand", caplog, *, first_tick: int) -> list[int]:
+    """Tick until the graph is drained, at most `DRAIN_TICKS` ticks; every tick must commit at least one occurrence
+    unless the tick's HARD TIMEOUT cut it first.
+
+    The contract (023 decision 10; `app/core/clearing/runner.py`, the deadline is checked before every cycle start
+    after the first): a tick with a non-empty plan commits at least one occurrence, and may stop on the tick budget
+    after any of them (`budget_exhausted`). The one thing above the budget is the tick's hard timeout
+    (`RealTick._execute_clearing_with_timeout`, 2 s by default): it may cancel a pass before its first commit -
+    observed only under heavy CPU oversubscription. So what a stand may require is progress on every tick that the
+    hard timeout did not cut (that tick must have logged `tick_clearing_hard_timeout`) and drainage within a bound -
+    not a number of cycles in one tick, which depends on how long a commit takes.
+    Returns the committed occurrences per tick.
+    """
+
+    per_tick: list[int] = []
+    for k in range(DRAIN_TICKS):
+        tick_index = first_tick + k
+        stand.run.tick_index = tick_index
+        before = await stand.clearings()
+        caplog.clear()
+        await stand.tick()
+        made = await stand.clearings() - before
+        if made < 1:
+            marker = f"tick_clearing_hard_timeout run_id={stand.run.run_id} tick={tick_index} "
+            cut = any(marker in r.getMessage() for r in caplog.records)
+            assert cut, f"tick {tick_index} committed nothing and was not cut by the hard timeout; per tick: {per_tick}"
+        per_tick.append(made)
+        if await stand.total() == 0:
+            break
+    return per_tick
+
+
+def _budget_does_not_bind(monkeypatch, stand: "_Stand") -> float:
+    """For the stands whose SUBJECT is the hard timeout cutting a held second occurrence: the runner must start that
+    occurrence, whatever the first commit costs. The tick budget - the runner's soft deadline, which may end the
+    pass after the first occurrence - is widened on this stand's tick only, and the hard timeout is held at its
+    default value (2 s) through its own cap, so the timeout under test is the product's. Nothing in `app/` changes.
+    Returns the hard timeout."""
+
+    monkeypatch.setenv("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", "2")
+    stand.runner._tick._real_clearing_time_budget_ms = 60_000
+    hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
+    assert hard_timeout == 2.0, hard_timeout
+    return hard_timeout
 
 
 def _runner_module():
@@ -161,26 +221,47 @@ class _DelegatingPool:
 # ------------------------------------------------------------------------------------------ through the runner
 
 
+@EXECUTE_DELAYS
 @pytest.mark.asyncio
-async def test_the_tick_clears_through_the_runner_with_creditor_to_debtor_pids(factory, monkeypatch) -> None:
+async def test_the_tick_clears_through_the_runner_with_creditor_to_debtor_pids(
+    factory, monkeypatch, caplog, execute_delay
+) -> None:
+    caplog.set_level(logging.INFO)
     stand = await _stand(factory, T1 + T2)
-    calls = _spy_execute(monkeypatch)
-    # A WARM planner process: this test is about the path, not the first spawn (cold spawn is control 1 below). With
-    # a cold one, the spawn alone can outlast the 250 ms tick budget, and the budget - checked between occurrences -
-    # then lets only the first of the two cycles run this tick (measured 2026-09-28: 360 ms, one occurrence).
+    calls = _spy_execute(monkeypatch, execute_delay=execute_delay)
+    # A WARM planner process: this test is about the path, not the first spawn (cold spawn is control 1 below).
     runner = _runner_module()
     await asyncio.wrap_future(runner._default_planner_executor().submit(runner.plan_clearing, []))
 
-    volumes = await stand.tick()
+    # The per-tick volumes, collected through a wrapper around `stand.tick()`.
+    volumes: list[Decimal] = []
+    tick = stand.tick
 
+    async def recording_tick() -> dict:
+        result = await tick()
+        assert isinstance(result[CODE], Decimal)
+        volumes.append(result[CODE])
+        return result
+
+    stand.tick = recording_tick
+    per_tick = await _drain(stand, caplog, first_tick=1)
+
+    # 2026-09-28 (021 `T2109` fix-delta, §15 P2): the old form required both cycles in ONE tick, which the budget
+    # does not promise - one commit then `budget_exhausted` is valid (`reason=budget_exhausted committed=1
+    # elapsed_ms=297` measured). Now: progress every tick, drained within the bound, and the same totals.
     require_target(len(calls) == 2, f"the tick did not go through the runner's occurrences ({len(calls)} calls)")
     pids = {pid for _, pid in stand.run._real_participants}
     assert all(scope == pids for _, scope in calls), "the run perimeter reaches every occurrence"
-    assert volumes[CODE] == Decimal("5") and isinstance(volumes[CODE], Decimal)
-    [done] = stand.done_events()
-    assert done["cleared_cycles"] == 2 and Decimal(done["cleared_amount"]) == Decimal("5")
-    assert {(e["from"], e["to"]) for e in done["cycle_edges"]} == {(e.creditor, e.debtor) for e in T1 + T2}
-    assert await stand.total() == 0
+    assert await stand.total() == 0 and await stand.clearings() == 2 and sum(per_tick) == 2, per_tick
+    if execute_delay:
+        # Control: the slow database ends every pass on the budget - one occurrence per committing tick.
+        assert [n for n in per_tick if n] == [1, 1], f"the slow database must end every pass on the budget ({per_tick})"
+    # One `clearing.done` per committing tick; a tick cut by the hard timeout before a commit publishes nothing.
+    done = stand.done_events()
+    assert [d["cleared_cycles"] for d in done] == [n for n in per_tick if n], (per_tick, done)
+    # Each tick's reported volume is what its `clearing.done` published; together, both cycles' V_cyc.
+    assert [Decimal(d["cleared_amount"]) for d in done] == [v for v in volumes if v] and sum(volumes) == Decimal("5")
+    assert {(e["from"], e["to"]) for d in done for e in d["cycle_edges"]} == {(e.creditor, e.debtor) for e in T1 + T2}
 
 
 @pytest.mark.asyncio
@@ -232,8 +313,11 @@ async def test_cold_spawn_the_first_tick_is_recorded_and_a_later_tick_really_cle
 # ---------------------------------------------------------------------------------- cold spawn, control 2
 
 
+@EXECUTE_DELAYS
 @pytest.mark.asyncio
-async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_starts_nothing(factory, monkeypatch, caplog) -> None:
+async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_starts_nothing(
+    factory, monkeypatch, caplog, execute_delay
+) -> None:
     runner = _runner_module()
     stand = await _stand(factory, T1 + T2)
     hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
@@ -241,7 +325,7 @@ async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_st
     await asyncio.wrap_future(real_pool.submit(runner.plan_clearing, []))  # warm: the delay, not a spawn, is timed
     pool = _DelegatingPool(real_pool)
     monkeypatch.setattr(runner, "_default_planner_executor", lambda: pool)
-    calls = _spy_execute(monkeypatch)
+    calls = _spy_execute(monkeypatch, execute_delay=execute_delay)
     caplog.set_level(logging.INFO)
 
     pool.delay = hard_timeout + 2.0
@@ -257,25 +341,33 @@ async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_st
     assert calls == [], "the late result started an occurrence"
     assert await stand.clearings() == 0 and await stand.total() == Decimal("15")
 
+    # Once the abandoned work is done, the next tick commits (at least one occurrence - the budget may end the pass
+    # after it) and the graph drains within the bound. 021 `T2109` fix-delta: was "both cycles on the next tick".
     pool.delay = None
-    stand.run.tick_index = 2
-    await stand.tick()
-    assert len(calls) == 2 and await stand.total() == 0, "once the abandoned work is done the next tick commits"
+    per_tick = await _drain(stand, caplog, first_tick=2)
+    assert len(calls) == 2 and await stand.total() == 0 and await stand.clearings() == 2, per_tick
+    if execute_delay:
+        # Control: the slow database ends every pass on the budget - one occurrence per committing tick.
+        assert [n for n in per_tick if n] == [1, 1], f"the slow database must end every pass on the budget ({per_tick})"
 
 
 # ------------------------------------------------------------------------------ cancellation after a commit
 
 
+@EXECUTE_DELAYS
 @pytest.mark.asyncio
-async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monkeypatch, caplog) -> None:
+async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monkeypatch, caplog, execute_delay) -> None:
     stand = await _stand(factory, T1 + T2)
-    hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
+    # 021 `T2109` fix-delta: the second occurrence must START for the hard timeout to cut it; with the default budget
+    # a slow first commit ended the pass on the budget instead (1 call). The budget does not bind on this stand; the
+    # hard timeout is the product's 2 s.
+    hard_timeout = _budget_does_not_bind(monkeypatch, stand)
 
     async def before(n: int) -> None:
         if n == 2:
             await asyncio.sleep(hard_timeout + 5.0)
 
-    calls = _spy_execute(monkeypatch, before)
+    calls = _spy_execute(monkeypatch, before, execute_delay=execute_delay)
     caplog.set_level(logging.INFO)
     await stand.tick()
 
@@ -293,8 +385,9 @@ async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monke
 # ------------------------------------------------------------ the committed volume survives the hard timeout
 
 
+@EXECUTE_DELAYS
 @pytest.mark.asyncio
-async def test_a_timeout_after_a_commit_reports_the_committed_volume(factory, monkeypatch) -> None:
+async def test_a_timeout_after_a_commit_reports_the_committed_volume(factory, monkeypatch, execute_delay) -> None:
     """Programme 021 stage 4, `specs/BACKLOG.md` ("Класс 2 из §15-ревью среза (d) программы 023", item 1).
 
     One occurrence commits, the next is held past the tick's hard timeout. The first is durable - in the database
@@ -305,13 +398,13 @@ async def test_a_timeout_after_a_commit_reports_the_committed_volume(factory, mo
     """
 
     stand = await _stand(factory, T1 + T2)
-    hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
+    hard_timeout = _budget_does_not_bind(monkeypatch, stand)  # as in the test above: the second occurrence starts
 
     async def before(n: int) -> None:
         if n == 2:
             await asyncio.sleep(hard_timeout + 5.0)
 
-    calls = _spy_execute(monkeypatch, before)
+    calls = _spy_execute(monkeypatch, before, execute_delay=execute_delay)
     volumes = await stand.tick()
 
     # Controls: the stand reached the second occurrence, the first is durable and published.

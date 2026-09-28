@@ -284,7 +284,9 @@ def test_the_scan_is_not_vacuous() -> None:
         "app/core/clearing/service.py",
         "app/core/payments/service.py",
         "app/core/simulator/real_runner_impl.py",
-        "app/core/simulator/real_clearing_engine.py",
+        # 021 `T2109`: the clearing driver `real_clearing_engine.py` is deleted; its stop/hold refusal moved into the
+        # tick's clearing step.
+        "app/core/simulator/tick.py",
     ):
         assert "MoneyBoundary" in (REPO / consumer).read_text(encoding="utf-8"), consumer
 

@@ -24,7 +24,7 @@
 - Prefilter суммы: `amount <= max_outgoing_limit(sender, eq)` (снижение шума rejected).
 
 Точки реализации:
-- Planner + amount: `app/core/simulator/real_runner.py` (`RealRunner._plan_real_payments`, `RealRunner._real_pick_amount`)
+- Planner + amount: `app/core/simulator/real_payment_planner.py` (`RealPaymentPlanner.plan_payments`, `RealPaymentPlanner.pick_amount`); вызывается из `app/core/simulator/real_runner_impl.py` (`RealRunnerImpl._plan_real_payments`). Шим `real_runner.py` удалён 2026-09-28 (021 `T2109`).
 
 ### 0.2 Реализовано (fixtures + runtime)
 - Добавлен сценарий: `fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json`.

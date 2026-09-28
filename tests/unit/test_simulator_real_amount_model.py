@@ -7,15 +7,15 @@ from decimal import Decimal
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _runner() -> RealRunner:
-    return RealRunner(
+def _runner() -> RealRunnerImpl:
+    return RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: (_ for _ in ()).throw(AssertionError("get_run should not be called")),
         get_scenario_raw=lambda _scenario_id: (_ for _ in ()).throw(AssertionError("get_scenario_raw should not be called")),

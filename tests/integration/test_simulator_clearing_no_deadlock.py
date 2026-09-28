@@ -47,7 +47,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 from tests.debt_setup import debt_fixture_setup
 from tests.simulator_tick_stand import pooled_sessionmaker_over
@@ -231,7 +231,7 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
         def enqueue_event_artifact(self, *a, **kw):
             pass
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _: run,
         get_scenario_raw=lambda _: scenario,

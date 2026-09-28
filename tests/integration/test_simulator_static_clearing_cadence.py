@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -128,7 +128,7 @@ async def _anoop(*a, **kw):
     pass
 
 
-def _make_runner(run: RunRecord, scenario: dict, session_factory, monkeypatch) -> tuple[RealRunner, _DummySse]:
+def _make_runner(run: RunRecord, scenario: dict, session_factory, monkeypatch) -> tuple[RealRunnerImpl, _DummySse]:
     import app.core.simulator.storage as simulator_storage
     import app.db.session as app_db_session
 
@@ -140,7 +140,7 @@ def _make_runner(run: RunRecord, scenario: dict, session_factory, monkeypatch) -
 
     sse = _DummySse()
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _: run,
         get_scenario_raw=lambda _: scenario,

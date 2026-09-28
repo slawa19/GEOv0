@@ -189,7 +189,7 @@ MVP включает:
 - **Real mode:** базовая «частота клиринга» по умолчанию `CLEARING_EVERY_N_TICKS = 25`, но переопределяется через `SIMULATOR_CLEARING_EVERY_N_TICKS`.
 - **Fixtures mode:** клиринг/подсветки носят демонстрационный характер и управляются таймингами внутри fixtures-runner (не “каждые N тиков”).
 
-Политика клиринга — только фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`): один вызов `tick_real_mode_clearing()` по всем equivalents на тике, где `tick_index % N == 0`. Адаптивная политика (`SIMULATOR_CLEARING_POLICY=adaptive`) удалена 2026-09-28 программой 021, стадия 3 (решение — `docs/ru/09-decisions-and-defaults.md`, раздел «Клиринг (policy)»).
+Политика клиринга — только фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`): на тике, где `tick_index % N == 0`, `RealTick.maybe_run_clearing()` (`app/core/simulator/tick.py`) запускает клиринг по всем equivalents под жёстким таймаутом; `RealTick._run_clearing()` делает на каждый equivalent один проход общего раннера клиринга `run_clearing_pass` (023(d)) в периметре рана с бюджетом тика как дедлайном. Драйвер `RealClearingEngine` / `tick_real_mode_clearing()` удалён 2026-09-28 (021 `T2109`). Адаптивная политика (`SIMULATOR_CLEARING_POLICY=adaptive`) удалена 2026-09-28 программой 021, стадия 3 (решение — `docs/ru/09-decisions-and-defaults.md`, раздел «Клиринг (policy)»).
 
 Важно:
 - строгий контракт payload’ов событий — в `api/openapi.yaml` и `simulator-domain-model.md`.

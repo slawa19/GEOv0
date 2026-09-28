@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner, _RealPaymentAction
+from app.core.simulator.real_payment_action import _RealPaymentAction
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.schemas.payment import PaymentResult
 from app.utils.exceptions import BadRequestException
@@ -112,7 +113,7 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
     sse = _DummySse()
     session = _DummySession()
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: run,
         get_scenario_raw=lambda _scenario_id: {
@@ -152,11 +153,11 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
 
     monkeypatch.setattr(runner, "_plan_real_payments", _plan_two, raising=True)
 
-    # Patch DB session factory used inside tick_real_mode.
-    import app.core.simulator.real_runner as real_runner_mod
+    # Patch DB session factory used inside tick_real_mode (the tick reads it at call time).
+    import app.db.session as db_session
 
     monkeypatch.setattr(
-        real_runner_mod.db_session,
+        db_session,
         "AsyncSessionLocal",
         lambda: _DummySessionCtx(session),
         raising=True,

@@ -68,7 +68,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -240,8 +240,8 @@ def _scenario(world: _World) -> dict[str, Any]:
 
 def _runner(
     run: RunRecord, scenario: dict[str, Any], sse: _Sse, *, actions_per_tick_max: int = 1
-) -> RealRunner:
-    return RealRunner(
+) -> RealRunnerImpl:
+    return RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: run,
         get_scenario_raw=lambda _sid: scenario,
@@ -271,7 +271,7 @@ def _install(monkeypatch, session_factory) -> None:
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", session_factory)
 
 
-def _record_plans(monkeypatch, runner: RealRunner) -> list[list[Any]]:
+def _record_plans(monkeypatch, runner: RealRunnerImpl) -> list[list[Any]]:
     plans: list[list[Any]] = []
     original = runner._plan_real_payments
 
@@ -286,7 +286,7 @@ def _record_plans(monkeypatch, runner: RealRunner) -> list[list[Any]]:
 
 def _competitor_after_snapshot(
     monkeypatch,
-    runner: RealRunner,
+    runner: RealRunnerImpl,
     session_factory,
     world: _World,
     *,
@@ -356,7 +356,7 @@ def _run_record_with_outsiders(world: _World, run_id: str) -> RunRecord:
 
 def _write_skew_competitor(
     monkeypatch,
-    runner: RealRunner,
+    runner: RealRunnerImpl,
     session_factory,
     world: _World,
     *,

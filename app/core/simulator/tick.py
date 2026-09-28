@@ -13,7 +13,8 @@ THE TICK, IN ORDER, WITH ITS DURABILITY BOUNDARIES (spec 021, "Решения" i
    snapshot, planning and staged payments on a fresh session, committed at its own boundary and replayed as a whole
    on a transient conflict. Called here and nowhere else.
 3. Clearing - on the static cadence only, with the tick's hard timeout; the tail's transaction is committed first
-   so clearing (its own sessions, through the current driver `RealClearingEngine`) does not queue behind it.
+   so clearing (its own sessions, one pass of the common runner `run_clearing_pass` per equivalent - 023 (d); the
+   driver `RealClearingEngine` in between was removed by 021 `T2109`) does not queue behind it.
 4. Trust decay - its OWN commit, before its edge patch is published; a failed decay is rolled back HERE by the
    owner of its transaction (`T2100` P2-4), so nothing of it reaches a later commit.
 5. Metrics and bottlenecks - their own, later commit; a failure there does not undo the decay.
@@ -35,7 +36,9 @@ zero to the `clearing_volume` metric while the database and `clearing.done` kept
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
+import uuid
 import weakref
 from dataclasses import dataclass
 from decimal import Decimal
@@ -47,6 +50,7 @@ import app.core.clearing.runner as clearing_runner
 import app.core.simulator.storage as simulator_storage
 import app.db.session as db_session
 from app.config import settings
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import PaymentService
 from app.core.simulator.commit_resolution import (
     resolve_commit_under_cancellation,
@@ -57,17 +61,23 @@ from app.core.simulator.money_replay import (
     money_conflict_name,
     run_money_phase_with_bounded_replay,
 )
+from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.real_payments_executor import DeferredRealPaymentEffects, RealPaymentsResult
 from app.core.simulator.real_scenario_seeder import SIMULATOR_PID_TAKEN, SimulatorPidTakenError
+from app.core.simulator.run_perimeter import run_perimeter_pids
 from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
+from app.core.simulator.sse_broadcast import SseEventEmitter
+from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.utils.exceptions import ConflictException, GeoException
 
 if TYPE_CHECKING:
     from app.core.simulator.real_runner_impl import RealRunnerImpl
@@ -652,7 +662,7 @@ class RealTick:
                 ),
             )
 
-    # ── clearing: static cadence, hard timeout, one call to the driver ────────────────────────────────
+    # ── clearing: static cadence, hard timeout, one call to the common runner ─────────────────────────
 
     def clearing_hard_timeout_sec(self) -> float:
         """The hard timeout of the tick's clearing: `max(2 s, 4 × budget)`, capped by
@@ -765,6 +775,53 @@ class RealTick:
             payments_result=payments_result,
         )
 
+    def _should_warn(self, run: RunRecord, key: str) -> bool:
+        try:
+            return bool(self._runner._should_warn_this_tick(run, key=key))
+        except Exception:
+            return True
+
+    def _cleared_amount_str(self, run: RunRecord, eq: str, amount: Decimal) -> str:
+        """The single rendering of `clearing.done.cleared_amount` (012 / `T1207`).
+
+        One field, one scale, whichever way the clearing ended: the precision is the equivalent's, from the
+        `VizPatchHelper` cached on the run (no DB round trip), and 2 - the codebase's default for a missing
+        `Equivalent.precision` - before the first helper exists, on every path alike. The field used to be produced
+        three times with two scales, chosen by whether the clearing had been cancelled.
+        """
+        precision = 2
+        try:
+            with self._runner._lock:
+                helper = (run._real_viz_by_eq or {}).get(str(eq))
+            if helper is not None:
+                precision = int(getattr(helper, "precision", 2) or 2)
+        except Exception:
+            precision = 2
+        return to_money_str(amount, precision)
+
+    def _done_cycle_edges(
+        self, run: RunRecord, eq: str, touched_edges: set[tuple[str, str]]
+    ) -> list[dict[str, str]] | None:
+        """`clearing.done.cycle_edges`: the touched edges, creditor -> debtor, as the scenario topology has them.
+
+        `touched_edges` are (creditor_pid, debtor_pid) - the trust-line direction of the snapshot links and the edge
+        patches. An edge the run's topology cache holds only reversed is flipped, one it does not hold at all is left
+        out; without a cache every edge is kept. At most `SIMULATOR_CLEARING_MAX_EDGES_FOR_FX` (at least one).
+        """
+        with self._runner._lock:
+            topology = set(((run._edges_by_equivalent or {}).get(str(eq)) or []))
+        limit = max(1, int(self._runner._clearing_max_fx_edges_limit))
+        out: list[dict[str, str]] = []
+        for creditor, debtor in sorted(touched_edges):
+            if topology and (creditor, debtor) not in topology:
+                if (debtor, creditor) not in topology:
+                    continue
+                creditor, debtor = debtor, creditor
+            out.append({"from": creditor, "to": debtor})
+            if len(out) >= limit:
+                break
+        return out or None
+
     async def _run_clearing(
         self,
         *,
@@ -774,36 +831,344 @@ class RealTick:
         equivalents: list[str],
         committed: dict[str, Decimal],
     ) -> None:
-        """THE ONE CALL from the tick to the clearing driver (`RealClearingEngine`, until 021 `T2109`).
+        """THE ONE CALL from the tick to the common clearing runner (023 (d); 021 `T2109` removed the driver).
 
-        `committed` receives every occurrence the clearing runner hands over as committed (`on_committed`, 023
-        decision 10), before the driver's own accounting sees it - synchronously, with no await in between, so a
-        cancellation cannot fall between the commit and this record.
+        One pass of `run_clearing_pass` per equivalent, in the run's perimeter, its deadline the tick's clearing
+        budget (checked by the runner before every cycle start; the hard timeout is the caller's,
+        `_execute_clearing_with_timeout`). Clearing uses sessions of its own (`app.db.session.AsyncSessionLocal`,
+        read at call time), never the tick's: a PostgreSQL error would leave that transaction aborted.
+
+        THE PROGRESS (023 decision 10). The runner hands every durable occurrence to `on_committed` right after its
+        commit, with no await in between - including one committed while the pass was being cancelled. The callback
+        records it first in `committed` (the tick's volume, `V_cyc`, the sum of committed occurrences) and then in
+        this equivalent's accounting: cycles, touched participants, and the touched edges converted from the runner's
+        debtor -> creditor by UUID to the tick's creditor -> debtor by PID, through the run's own participant list.
+
+        THE ENDINGS, per equivalent:
+        * nothing committed - no event; a failure of the pass is classified below;
+        * progress - trust growth on the touched edges (its own failure only logged), node and edge patches, one
+          `clearing.done`; a failure of the pass after progress is raised only then;
+        * cancellation - progress not yet published is published without patches and without growth, and the
+          cancellation propagates;
+        * the operator's stop or an integrity hold (`MoneyBoundary.MONEY_STOP_REASONS`) - the equivalent is skipped,
+          not a run error; any other failure - a run error (`CLEARING_ERROR`, sanitised), then the next equivalent.
         """
         rr = self._runner
+        budget_ms = max(1, int(self._real_clearing_time_budget_ms))
+        emitter = SseEventEmitter(sse=rr._sse, utc_now=rr._utc_now, logger=rr._logger)
+        session_local = db_session.AsyncSessionLocal
+        with rr._lock:
+            pid_by_id = {participant_id: str(pid) for (participant_id, pid) in (run._real_participants or [])}
 
-        async def _recording_pass(session_factory, equivalent_code, *, on_committed=None, **kwargs):
-            def _record(occurrence) -> None:
-                key = str(equivalent_code)
-                committed[key] = committed.get(key, Decimal("0")) + occurrence.amount
-                if on_committed is not None:
-                    on_committed(occurrence)
+        for eq in equivalents:
+            eq = str(eq)
+            plan_id = f"plan_{secrets.token_hex(6)}"
+            cleared_cycles = 0
+            cleared_amount = Decimal("0")
+            touched_nodes: set[str] = set()
+            touched_edges: set[tuple[str, str]] = set()
+            cleared_amount_per_edge: dict[tuple[str, str], float] = {}
+            done_emitted = False
 
-            return await clearing_runner.run_clearing_pass(
-                session_factory, equivalent_code, on_committed=_record, **kwargs
+            def _on_committed(occurrence, eq: str = eq) -> None:
+                nonlocal cleared_cycles, cleared_amount
+                committed[eq] = committed.get(eq, Decimal("0")) + occurrence.amount
+                cleared_cycles += 1
+                cleared_amount += occurrence.amount
+                for edge in occurrence.edges:
+                    debtor_pid = pid_by_id.get(edge.debtor_id)
+                    creditor_pid = pid_by_id.get(edge.creditor_id)
+                    if debtor_pid:
+                        touched_nodes.add(debtor_pid)
+                    if creditor_pid:
+                        touched_nodes.add(creditor_pid)
+                    if creditor_pid and debtor_pid:
+                        edge_key = (creditor_pid, debtor_pid)
+                        touched_edges.add(edge_key)
+                        cleared_amount_per_edge[edge_key] = cleared_amount_per_edge.get(edge_key, 0.0) + float(
+                            occurrence.amount
+                        )
+
+            try:
+                eq_t0 = time.monotonic()
+                rr._logger.warning(
+                    "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s", str(run.run_id), int(run.tick_index), eq
+                )
+                with rr._lock:
+                    run.current_phase = "clearing"
+
+                execution_error: Exception | None = None
+                try:
+                    result = await clearing_runner.run_clearing_pass(
+                        session_local,
+                        eq,
+                        allowed_participant_pids=run_perimeter_pids(run),
+                        on_committed=_on_committed,
+                        deadline=asyncio.get_running_loop().time() + budget_ms / 1000.0,
+                    )
+                except clearing_runner.ClearingPassCancelled as cancelled:
+                    # A cancellation during planning does NOT stop the planner worker; the result says so
+                    # (`planner_abandoned`) and its late plan starts nothing.
+                    rr._logger.warning(
+                        "simulator.real.clearing_pass_cancelled run_id=%s tick=%s eq=%s committed=%s "
+                        "planner_abandoned=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        eq,
+                        len(cancelled.result.committed),
+                        bool(cancelled.result.planner_abandoned),
+                    )
+                    raise
+                except clearing_runner.ClearingPassError as failed:
+                    if cleared_cycles <= 0:
+                        raise failed.cause
+                    # Progress is durable: publish it below, then let the cause take its classification.
+                    execution_error = failed.cause
+                else:
+                    rr._logger.warning(
+                        "simulator.real.clearing_pass_done run_id=%s tick=%s eq=%s status=%s reason=%s "
+                        "committed=%s remaining_cycles=%s elapsed_ms=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        eq,
+                        result.status,
+                        None if result.reason is None else result.reason.value,
+                        len(result.committed),
+                        result.remaining_cycles,
+                        int((time.monotonic() - eq_t0) * 1000.0),
+                    )
+
+                if cleared_cycles <= 0:
+                    with rr._lock:
+                        run.current_phase = None
+                    continue
+
+                async with session_local() as clearing_session:
+                    if touched_edges:
+                        await self._grow_trust_after_clearing(
+                            run_id, run, eq, clearing_session, touched_edges, cleared_amount_per_edge
+                        )
+                    node_patch, edge_patch = await self._clearing_patches(
+                        run, eq, clearing_session, touched_nodes, touched_edges, cleared_cycles
+                    )
+                    with rr._lock:
+                        run.last_event_type = "clearing.done"
+                        run.current_phase = None
+                    emitter.emit_clearing_done(
+                        run_id=run_id,
+                        run=run,
+                        equivalent=eq,
+                        plan_id=plan_id,
+                        cleared_cycles=cleared_cycles,
+                        # `to_money_str` is total and cannot raise: no `str(Decimal)` fallback (`1E-8` on the wire).
+                        cleared_amount=self._cleared_amount_str(run, eq, cleared_amount) if cleared_amount > 0 else None,
+                        cycle_edges=self._done_cycle_edges(run, eq, touched_edges) if touched_edges else None,
+                        node_patch=node_patch,
+                        edge_patch=edge_patch,
+                    )
+                    done_emitted = True
+                    rr._logger.warning(
+                        "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        eq,
+                        int((time.monotonic() - eq_t0) * 1000.0),
+                        int(cleared_cycles),
+                    )
+                    if execution_error is not None:
+                        raise execution_error
+            except asyncio.CancelledError:
+                if cleared_cycles > 0 and not done_emitted:
+                    with rr._lock:
+                        run.last_event_type = "clearing.done"
+                        run.current_phase = None
+                    try:
+                        emitter.emit_clearing_done(
+                            run_id=run_id,
+                            run=run,
+                            equivalent=eq,
+                            plan_id=plan_id,
+                            cleared_cycles=cleared_cycles,
+                            cleared_amount=self._cleared_amount_str(run, eq, cleared_amount),
+                            cycle_edges=self._done_cycle_edges(run, eq, touched_edges),
+                            node_patch=None,
+                            edge_patch=None,
+                        )
+                    except Exception:
+                        rr._logger.warning(
+                            "simulator.real.clearing_cancel_partial_emit_failed run_id=%s tick=%s eq=%s",
+                            str(run.run_id),
+                            int(run.tick_index),
+                            eq,
+                            exc_info=True,
+                        )
+                raise
+            except Exception as exc:
+                refusal_reason = (exc.details or {}).get("reason") if isinstance(exc, ConflictException) else None
+                if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
+                    # T1544: the operator's stop refuses clearing in THIS equivalent; it is not a failure of the run.
+                    # Same rule as a refused payment: skip the equivalent without touching `errors_total`,
+                    # `_error_timestamps` or `last_error`, which would otherwise be spent on every clearing tick
+                    # until the run-level error limit. Step 5c: an integrity hold is skipped identically.
+                    rr._logger.info(
+                        "simulator.real.clearing_refused_%s run_id=%s tick=%s eq=%s exc=%s",
+                        refusal_reason,
+                        str(run.run_id),
+                        int(run.tick_index),
+                        eq,
+                        type(exc).__name__,
+                    )
+                    with rr._lock:
+                        run.current_phase = None
+                    continue
+                if self._should_warn(run, f"clearing_failed:{eq}"):
+                    rr._logger.warning(
+                        "simulator.real.clearing_failed run_id=%s tick=%s eq=%s",
+                        str(run.run_id),
+                        int(run.tick_index),
+                        eq,
+                        exc_info=True,
+                    )
+                with rr._lock:
+                    run.errors_total += 1
+                    run._error_timestamps.append(time.time())
+                    cutoff = time.time() - 60.0
+                    while run._error_timestamps and run._error_timestamps[0] < cutoff:
+                        run._error_timestamps.popleft()
+                    run.last_error = {
+                        "code": "CLEARING_ERROR",
+                        "message": GeoException().message,
+                        "at": rr._utc_now().isoformat(),
+                    }
+                    run.current_phase = None
+                continue
+
+    async def _grow_trust_after_clearing(
+        self,
+        run_id: str,
+        run: RunRecord,
+        eq: str,
+        clearing_session: Any,
+        touched_edges: set[tuple[str, str]],
+        cleared_amount_per_edge: dict[tuple[str, str], float],
+    ) -> None:
+        """Trust growth on the edges clearing touched, on the clearing's session; a failure is logged, not raised."""
+        rr = self._runner
+        try:
+            growth = await rr._trust_drift_engine.apply_trust_growth(
+                run=run,
+                clearing_session=clearing_session,
+                touched_edges=touched_edges,
+                eq_code=eq,
+                tick_index=int(run.tick_index or 0),
+                cleared_amount_per_edge=cleared_amount_per_edge,
+            )
+            if int(getattr(growth, "updated_count", 0) or 0) > 0:
+                try:
+                    edge_patch = await rr._build_edge_patch_for_equivalent(
+                        session=clearing_session,
+                        run=run,
+                        equivalent_code=eq,
+                        only_edges=None,
+                        include_width_keys=True,
+                    )
+                    rr._broadcast_topology_edge_patch(
+                        run_id=run_id, run=run, equivalent=eq, edge_patch=edge_patch, reason="trust_drift_growth"
+                    )
+                except Exception:
+                    rr._logger.warning("simulator.real.trust_drift.growth_edge_patch_failed", exc_info=True)
+        except Exception:
+            rr._logger.warning(
+                "simulator.real.trust_drift.growth_failed run_id=%s tick=%s eq=%s",
+                str(run.run_id),
+                int(run.tick_index or 0),
+                eq,
+                exc_info=True,
             )
 
-        await rr._real_clearing_engine.tick_real_mode_clearing(
-            session,
-            run_id=run_id,
-            run=run,
-            equivalents=equivalents,
-            apply_trust_growth=rr._trust_drift_engine.apply_trust_growth,
-            build_edge_patch_for_equivalent=rr._build_edge_patch_for_equivalent,
-            broadcast_topology_edge_patch=rr._broadcast_topology_edge_patch,
-            async_session_local=db_session.AsyncSessionLocal,
-            clearing_pass=_recording_pass,
+    async def _clearing_patches(
+        self,
+        run: RunRecord,
+        eq: str,
+        clearing_session: Any,
+        touched_nodes: set[str],
+        touched_edges: set[tuple[str, str]],
+        cleared_cycles: int,
+    ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
+        """The node and edge patches of `clearing.done` for what clearing touched; `(None, None)` on any failure."""
+        rr = self._runner
+        node_patch: list[dict[str, Any]] | None = None
+        edge_patch: list[dict[str, Any]] | None = None
+        rr._logger.warning(
+            "simulator.real.clearing_patch_start run_id=%s tick=%s eq=%s touched_nodes=%s touched_edges=%s "
+            "cleared_cycles=%s",
+            str(run.run_id),
+            int(run.tick_index),
+            eq,
+            int(len(touched_nodes)),
+            int(len(touched_edges)),
+            int(cleared_cycles),
         )
+        patch_t0 = time.monotonic()
+        try:
+            with rr._lock:
+                helper = run._real_viz_by_eq.get(eq)
+            if helper is None:
+                helper = await VizPatchHelper.create(
+                    clearing_session,
+                    equivalent_code=eq,
+                    refresh_every_ticks=int(getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10),
+                )
+                with rr._lock:
+                    run._real_viz_by_eq[eq] = helper
+
+            participant_ids: list[uuid.UUID] = [pid for (pid, _) in (run._real_participants or [])]
+            await helper.maybe_refresh_quantiles(
+                clearing_session, tick_index=int(run.tick_index), participant_ids=participant_ids
+            )
+
+            pids = sorted({str(x).strip() for x in touched_nodes if str(x).strip()})
+            if pids:
+                res = await clearing_session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                pid_to_participant = {p.pid: p for p in res.scalars().all()}
+                node_patch = await helper.compute_node_patches(
+                    clearing_session, pid_to_participant=pid_to_participant, pids=pids
+                ) or None
+                edge_patch = await rr._edge_patch_builder.build_edge_patch_for_pairs(
+                    session=clearing_session,
+                    helper=helper,
+                    edges_pairs=sorted(touched_edges),
+                    pid_to_participant=pid_to_participant,
+                ) or None
+        except Exception:
+            if self._should_warn(run, f"clearing_done_patch_failed:{eq}"):
+                rr._logger.debug(
+                    "simulator.real.clearing_done_patch_failed run_id=%s tick=%s eq=%s",
+                    str(run.run_id),
+                    int(run.tick_index),
+                    eq,
+                    exc_info=True,
+                )
+            node_patch = None
+            edge_patch = None
+
+        patch_ms = int((time.monotonic() - patch_t0) * 1000.0)
+        if patch_ms > 500:
+            rr._logger.warning(
+                "simulator.real.clearing_patch_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
+                str(run.run_id),
+                int(run.tick_index),
+                eq,
+                patch_ms,
+            )
+        rr._logger.warning(
+            "simulator.real.clearing_patch_done run_id=%s tick=%s eq=%s elapsed_ms=%s",
+            str(run.run_id),
+            int(run.tick_index),
+            eq,
+            patch_ms,
+        )
+        return node_patch, edge_patch
 
     async def _execute_clearing_with_timeout(
         self,

@@ -8,8 +8,8 @@ What it checks, statically (AST - a comment or a docstring does not count):
 
 * the three product callers each name their runner entry - `POST /clearing/auto` (`app/api/v1/clearing.py::
   auto_clear`) `run_awaited_clearing`; the Interact action (`app/api/v1/simulator.py::action_clearing_real`) and
-  the tick driver (`app/core/simulator/real_clearing_engine.py::RealClearingEngine.tick_real_mode_clearing`)
-  `run_clearing_pass` - and none of them calls an executor or a detector itself (`execute_clearing_with_amount`,
+  the tick (`app/core/simulator/tick.py::RealTick._run_clearing`; until 021 `T2109` the driver
+  `real_clearing_engine.py::RealClearingEngine.tick_real_mode_clearing`) `run_clearing_pass` - and none of them calls an executor or a detector itself (`execute_clearing_with_amount`,
   `execute_clearing`, `execute_occurrence`, `find_cycles`, `auto_clear`);
 * under `app/`, only `app/core/clearing/service.py` calls the shared executor `execute_clearing_with_amount` /
   `execute_clearing`, only `service.py` and `runner.py` call `execute_occurrence`, and nothing calls
@@ -36,7 +36,7 @@ _EXECUTORS = frozenset({"execute_clearing_with_amount", "execute_clearing", "exe
 _CALLERS = {
     ("app/api/v1/clearing.py", "auto_clear"): "run_awaited_clearing",
     ("app/api/v1/simulator.py", "action_clearing_real"): "run_clearing_pass",
-    ("app/core/simulator/real_clearing_engine.py", "tick_real_mode_clearing"): "run_clearing_pass",
+    ("app/core/simulator/tick.py", "_run_clearing"): "run_clearing_pass",
 }
 
 

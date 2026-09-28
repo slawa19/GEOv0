@@ -3,7 +3,7 @@ import threading
 from datetime import datetime, timezone
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 def _utc_now() -> datetime:
@@ -47,7 +47,7 @@ async def test_real_flush_pending_storage_writes_once(monkeypatch) -> None:
     }
     run._real_last_tick_storage_flushed_tick = -1
 
-    runner = RealRunner(
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _run_id: run,
         get_scenario_raw=lambda _scenario_id: {},
@@ -73,16 +73,13 @@ async def test_real_flush_pending_storage_writes_once(monkeypatch) -> None:
         calls.append(("bottlenecks", kwargs))
 
     # Patch DB session factory and storage writers to avoid real DB.
-    import app.core.simulator.real_runner as real_runner_mod
+    import app.core.simulator.storage as simulator_storage
+    import app.db.session as db_session
 
+    monkeypatch.setattr(db_session, "AsyncSessionLocal", lambda: _DummySessionCtx())
+    monkeypatch.setattr(simulator_storage, "write_tick_metrics", _write_tick_metrics)
     monkeypatch.setattr(
-        real_runner_mod.db_session, "AsyncSessionLocal", lambda: _DummySessionCtx()
-    )
-    monkeypatch.setattr(
-        real_runner_mod.simulator_storage, "write_tick_metrics", _write_tick_metrics
-    )
-    monkeypatch.setattr(
-        real_runner_mod.simulator_storage,
+        simulator_storage,
         "write_tick_bottlenecks",
         _write_tick_bottlenecks,
     )

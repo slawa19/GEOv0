@@ -9,7 +9,7 @@ must not stop a simulation that serves others.
 
 THE RULE is the one the payments phase already applies to a refused payment
 (`real_payments_executor.py`: a 4xx `GeoException` is REJECTED, its savepoint rolled back, counted,
-and the tick continues). This module drives `RealRunner.tick_real_mode` itself - not the phase
+and the tick continues). This module drives `RealRunnerImpl.tick_real_mode` itself - not the phase
 functions - for more ticks than the consecutive-failure limit, and each test asserts that the refusal
 really happened, so a path that never ran cannot pass.
 
@@ -45,7 +45,7 @@ from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner import RealRunner
+from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -80,8 +80,8 @@ class _Artifacts:
         self.payloads.append(payload)
 
 
-def _runner(run, scenario, *, actions: int, clearing_every: int, artifacts: _Artifacts) -> RealRunner:
-    runner = RealRunner(
+def _runner(run, scenario, *, actions: int, clearing_every: int, artifacts: _Artifacts) -> RealRunnerImpl:
+    runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _rid: run,
         get_scenario_raw=lambda _sid: scenario,
@@ -160,7 +160,7 @@ async def _debts(factory, eq: Equivalent) -> list[Decimal]:
     return sorted(Decimal(str(a)) for a in rows)
 
 
-async def _ticks(runner: RealRunner, run: RunRecord, count: int) -> None:
+async def _ticks(runner: RealRunnerImpl, run: RunRecord, count: int) -> None:
     for _ in range(count):
         run.tick_index += 1
         run.sim_time_ms += 1_000

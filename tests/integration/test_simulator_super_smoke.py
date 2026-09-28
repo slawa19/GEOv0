@@ -614,8 +614,12 @@ async def test_super_smoke_part1_fixtures_http_visual_contract(
 @pytest.mark.asyncio
 async def test_super_smoke_part2_real_logic_deterministic(
     db_session,
+    monkeypatch,
 ) -> None:
-    """Part 2: deterministic real-mode logic smoke (nested tx + RealClearingEngine).
+    """Part 2: deterministic real-mode logic smoke (nested tx + the tick's clearing step).
+
+    021 `T2109`: the clearing is the tick's own step (`tick.py::RealTick._run_clearing`), which calls the common
+    runner itself; until then this drove the removed driver `RealClearingEngine`.
 
     Does not depend on HTTP layer.
     """
@@ -626,7 +630,6 @@ async def test_super_smoke_part2_real_logic_deterministic(
         try:
             from decimal import Decimal
             import hashlib
-            import threading
 
             from sqlalchemy import select
             from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -634,7 +637,7 @@ async def test_super_smoke_part2_real_logic_deterministic(
             from app.core.payments.service import PaymentService
             from app.core.simulator.edge_patch_builder import EdgePatchBuilder
             from app.core.simulator.models import RunRecord, TrustDriftResult
-            from app.core.simulator.real_clearing_engine import RealClearingEngine
+            from tests.simulator_tick_stand import clearing_unit_tick
             from app.db.models.debt import Debt
             from app.db.models.equivalent import Equivalent
             from app.db.models.participant import Participant
@@ -807,17 +810,6 @@ async def test_super_smoke_part2_real_logic_deterministic(
             run._edges_by_equivalent = {"UAH": [(p1.pid, p2.pid) for (p1, p2) in tl_pairs]}
 
             sse = _CaptureSse()
-            clearing = RealClearingEngine(
-                lock=threading.Lock(),
-                sse=sse,  # type: ignore[arg-type]
-                utc_now=lambda: datetime.now(timezone.utc),
-                logger=__import__("logging").getLogger("tests.super_smoke"),
-                edge_patch_builder=EdgePatchBuilder(logger=__import__("logging").getLogger("tests.super_smoke")),
-                clearing_max_depth_limit=6,
-                clearing_max_fx_edges_limit=50,
-                real_clearing_time_budget_ms=2_000,
-            )
-
             async def _no_trust_growth(*args, **kwargs) -> TrustDriftResult:
                 return TrustDriftResult(updated_count=0)
 
@@ -837,15 +829,19 @@ async def test_super_smoke_part2_real_logic_deterministic(
                 join_transaction_mode="create_savepoint",
             )
 
-            await clearing.tick_real_mode_clearing(
-                db_session,
-                run_id=run.run_id,
-                run=run,
-                equivalents=["UAH"],
+            clearing = clearing_unit_tick(
+                monkeypatch,
+                sse=sse,
+                session_factory=async_session_local,
                 apply_trust_growth=_no_trust_growth,
+                edge_patch_builder=EdgePatchBuilder(logger=__import__("logging").getLogger("tests.super_smoke")),
                 build_edge_patch_for_equivalent=_no_edge_patch,
                 broadcast_topology_edge_patch=_no_topology_patch,
-                async_session_local=async_session_local,
+                max_fx_edges=50,
+                budget_ms=2_000,
+            )
+            await clearing._run_clearing(
+                session=db_session, run_id=run.run_id, run=run, equivalents=["UAH"], committed={}
             )
 
             net_after = await _net_positions()

@@ -1,11 +1,16 @@
-"""The tick clearing engine publishes durable progress before a failure or a cancellation propagates.
+"""The tick's clearing step publishes durable progress before a failure or a cancellation propagates.
 
-MIGRATED 2026-09-28, programme 023 slice (d) (spec 023, "Срез (d)"): the engine no longer detects cycles and calls
-the v1 executor itself - it runs ONE pass of the common runner per equivalent (`clearing_pass`, the runner entry
-`run_clearing_pass` in production). The service doubles this module used (`find_cycles` then
-`execute_clearing_with_amount`, flipping on the first call after the first execution) have no call site left; the
-same five shapes are held at the runner seam, as the runner's contract produces them (decision 10): the first
-occurrence handed off through `on_committed`, then
+MOVED 2026-09-28, programme 021 `T2109` (was `tests/unit/test_real_clearing_engine_partial_failure.py`): the clearing
+driver `RealClearingEngine` is gone and the tick calls the common runner itself (`tick.py::RealTick._run_clearing`,
+one `run_clearing_pass` per equivalent). The stand is the same - a double of the runner entry, a session factory
+that reads nothing, a viz helper at precision 2 - installed where the tick reads them at call time
+(`tests/simulator_tick_stand.py::clearing_unit_tick`) instead of passed to the driver as `clearing_pass=` and
+`async_session_local=`. Every assertion is kept; the driver's return value (`{"USD": 5.0}`) is now the tick's
+committed volume (`committed`), which is what the tick reports as `clearing_volume`.
+
+History (023 slice (d), 2026-09-28): the service doubles this module used (`find_cycles` then
+`execute_clearing_with_amount`) were replaced by the runner seam; the same five shapes are held there, as the
+runner's contract produces them (decision 10): the first occurrence handed off through `on_committed`, then
 
 * `geo` - the pass stops on a GeoException (`ClearingPassError`): the progress is finalised (trust growth, one
   `clearing.done`), then the error takes its classification (a run error, sanitised);
@@ -15,18 +20,13 @@ occurrence handed off through `on_committed`, then
 * `cancelled_finalize` - the pass completes and the cancellation lands in trust growth;
 * `committed_cancel` - the occurrence became durable while the caller was being cancelled (`after_cancellation`).
 
-The assertions on accounting, the published amount, the direction of `cycle_edges` and the run-error bookkeeping
-are unchanged. The engine against the REAL runner and PostgreSQL:
-`tests/integration/test_p023_d_tick_driver_through_runner_postgres.py`.
+The tick against the REAL runner and PostgreSQL: `tests/integration/test_p023_d_tick_driver_through_runner_postgres.py`.
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
-import threading
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -41,8 +41,8 @@ from app.core.clearing.runner import (
     InterruptReason,
 )
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_clearing_engine import RealClearingEngine
 from app.utils.exceptions import GeoException
+from tests.simulator_tick_stand import clearing_unit_tick
 
 ALICE = uuid.uuid5(uuid.NAMESPACE_DNS, "alice.p023d")
 BOB = uuid.uuid5(uuid.NAMESPACE_DNS, "bob.p023d")
@@ -59,6 +59,12 @@ class _ScalarResult:
 class _Session:
     async def execute(self, _statement) -> _ScalarResult:
         return _ScalarResult()
+
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None
 
 
 class _SessionContext:
@@ -131,15 +137,17 @@ def _run(run_id: str, tick: int) -> RunRecord:
     return run
 
 
-def _engine(sse) -> RealClearingEngine:
-    return RealClearingEngine(
-        lock=threading.RLock(),
+def _tick(monkeypatch, sse, runner_pass, apply_trust_growth, **collaborators):
+    return clearing_unit_tick(
+        monkeypatch,
         sse=sse,
-        utc_now=lambda: datetime(2026, 8, 8, tzinfo=timezone.utc),
-        logger=logging.getLogger(__name__),
+        session_factory=lambda: _SessionContext(),
+        runner_pass=runner_pass,
+        apply_trust_growth=apply_trust_growth,
         edge_patch_builder=_EdgePatchBuilder(),
-        clearing_max_fx_edges_limit=8,
-        real_clearing_time_budget_ms=10_000,
+        max_fx_edges=8,
+        budget_ms=10_000,
+        **collaborators,
     )
 
 
@@ -155,11 +163,10 @@ def _engine(sse) -> RealClearingEngine:
     ],
 )
 async def test_partial_clearing_is_finalized_before_failure_propagates(
-    failure_kind: str,
+    failure_kind: str, monkeypatch
 ) -> None:
     sse = _SseCapture()
     run = _run("partial-clearing-run", 7)
-    engine = _engine(sse)
     runner_calls = 0
 
     async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
@@ -192,23 +199,23 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     def _unexpected_broadcast(**_kwargs) -> None:
         raise AssertionError("trust-growth broadcast must not run")
 
-    call = engine.tick_real_mode_clearing(
-        None,
-        run_id=run.run_id,
-        run=run,
-        equivalents=["USD"],
-        apply_trust_growth=_apply_trust_growth,
+    tick = _tick(
+        monkeypatch,
+        sse,
+        _clearing_pass,
+        _apply_trust_growth,
         build_edge_patch_for_equivalent=_unexpected_edge_patch,
         broadcast_topology_edge_patch=_unexpected_broadcast,
-        async_session_local=lambda: _SessionContext(),
-        clearing_pass=_clearing_pass,
     )
+    committed: dict[str, Decimal] = {}
+    call = tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=["USD"], committed=committed)
     if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         with pytest.raises(asyncio.CancelledError):
             await call
     else:
-        cleared = await call
-        assert cleared == {"USD": 5.0}
+        await call
+    # The committed occurrence is the tick's volume on every ending, the cancelled ones included.
+    assert committed == {"USD": Decimal("5.00")}
 
     assert runner_calls == 1
     expected_growth_calls = 0 if failure_kind in {
@@ -235,7 +242,7 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     assert done_events[0]["cycle_edges"] == [{"from": "bob", "to": "alice"}]
 
 
-# --- p007_t715: the cleared volume leaves this engine as exact Decimal -------
+# --- p007_t715: the cleared volume leaves the tick's clearing step as exact Decimal -------
 
 
 # 19 significant digits: binary64 cannot hold it, so a single `float(...)` on the
@@ -250,7 +257,7 @@ def test_exact_amount_probe_is_beyond_float() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
+async def test_cleared_volume_is_returned_as_exact_decimal(monkeypatch) -> None:
     """`float(cleared_amount_dec)` used to narrow the clearing volume here.
 
     The volume feeds the `clearing_volume` metric series, which the domain model
@@ -277,16 +284,23 @@ async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
     def _broadcast(**_kwargs) -> None:
         return None
 
-    cleared = await _engine(_SseCapture()).tick_real_mode_clearing(
-        None,
+    tick = _tick(
+        monkeypatch,
+        _SseCapture(),
+        _clearing_pass,
+        _apply_trust_growth,
+        build_edge_patch_for_equivalent=_edge_patch,
+        broadcast_topology_edge_patch=_broadcast,
+    )
+    # The whole clearing step of the tick (cadence, the commit before clearing, the hard timeout): the volume it
+    # returns is what the `clearing_volume` metric receives.
+    cleared = await tick.maybe_run_clearing(
+        session=_Session(),
         run_id=run.run_id,
         run=run,
         equivalents=["USD", "EUR"],
-        apply_trust_growth=_apply_trust_growth,
-        build_edge_patch_for_equivalent=_edge_patch,
-        broadcast_topology_edge_patch=_broadcast,
-        async_session_local=lambda: _SessionContext(),
-        clearing_pass=_clearing_pass,
+        planned_len=0,
+        tick_t0=0.0,
     )
 
     assert cleared["USD"] == _TOO_PRECISE_FOR_FLOAT
@@ -295,3 +309,87 @@ async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
     # a float seed would re-narrow it before the metric writer ever sees it.
     assert isinstance(cleared["EUR"], Decimal)
     assert cleared["EUR"] == Decimal("0")
+
+
+# --- `clearing.done.cycle_edges`: creditor -> debtor by PID, from the runner's debtor -> creditor by UUID ---------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("topology", "expected"),
+    [
+        # No topology cache: the converted edge is published as is - the only case where the conversion alone decides
+        # the direction (with a cache, an edge held reversed is flipped to the cache's direction).
+        (None, [{"from": "bob", "to": "alice"}]),
+        ([("bob", "alice")], [{"from": "bob", "to": "alice"}]),
+        # The cache holds only the reverse: the topology's direction wins (the snapshot links are drawn from it).
+        ([("alice", "bob")], [{"from": "alice", "to": "bob"}]),
+        # An edge the cache does not hold at all is not published.
+        ([("carol", "alice")], None),
+    ],
+    ids=["no-topology", "topology-agrees", "topology-reversed", "not-in-topology"],
+)
+async def test_cycle_edges_are_creditor_to_debtor_pids(monkeypatch, topology, expected) -> None:
+    sse = _SseCapture()
+    run = _run("edge-direction-run", 5)
+    run._edges_by_equivalent = {} if topology is None else {"USD": topology}
+
+    async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
+        occurrence = _occurrence(Decimal("1.00"))  # alice owes bob: debtor alice, creditor bob
+        on_committed(occurrence)
+        return _result([occurrence], status="complete", reason=None)
+
+    growth: list[dict] = []
+
+    async def _apply_trust_growth(**kwargs):
+        growth.append(kwargs)
+        return SimpleNamespace(updated_count=0)
+
+    tick = _tick(monkeypatch, sse, _clearing_pass, _apply_trust_growth)
+    await tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=["USD"], committed={})
+
+    [done] = [event for event in sse.events if event["type"] == "clearing.done"]
+    assert done["cycle_edges"] == expected
+    # Trust growth sees the trust-line direction (creditor, debtor) whatever the topology cache says.
+    [call] = growth
+    assert call["touched_edges"] == {("bob", "alice")}
+    assert call["cleared_amount_per_edge"] == {("bob", "alice"): 1.0}
+
+
+# --- the runner's caller deadline is the tick's clearing budget, per equivalent --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_each_pass_gets_the_tick_budget_as_its_deadline(monkeypatch) -> None:
+    """023 decision 10: the budget is the runner's caller deadline, checked before every cycle start.
+
+    Budget 300 ms: each equivalent's pass is handed `now + 0.3 s` of the event loop's clock, measured when the pass
+    starts - not one deadline for the whole tick, not the hard timeout, and not missing (the runner has no budget of
+    its own). The run perimeter reaches every pass.
+    """
+
+    run = _run("deadline-run", 2)
+    seen: list[tuple[str, float, object]] = []
+
+    async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
+        seen.append((equivalent, deadline - asyncio.get_running_loop().time(), allowed_participant_pids))
+        await asyncio.sleep(0.05)  # the second equivalent starts later, so a shared deadline would show
+        return _result([], status="complete", reason=None)
+
+    async def _apply_trust_growth(**_kwargs):
+        raise AssertionError("nothing was committed: no trust growth")
+
+    tick = clearing_unit_tick(
+        monkeypatch,
+        sse=_SseCapture(),
+        session_factory=lambda: _SessionContext(),
+        runner_pass=_clearing_pass,
+        apply_trust_growth=_apply_trust_growth,
+        budget_ms=300,
+    )
+    await tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=["USD", "EUR"], committed={})
+
+    assert [eq for eq, _, _ in seen] == ["USD", "EUR"]
+    for _, remaining, scope in seen:
+        assert 0.25 < remaining <= 0.3, remaining
+        assert scope == {"alice", "bob"}
