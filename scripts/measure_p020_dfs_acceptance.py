@@ -4,7 +4,8 @@ HISTORICAL, NOT RUNNABLE ON THE CURRENT TREE (note added 2026-09-28, programme 0
 otherwise unchanged, as specs 020 and 023 promise for the 020 runners). It calls symbols that no longer exist:
 `ClearingService.auto_clear` (removed by 023 slice (d)) and the simulator clearing driver `RealClearingEngine` with
 its `tests/unit/test_real_clearing_engine_partial_failure.py` helpers (removed / moved by 021 `T2109`). To run it,
-check out the historical revision `968189a`.
+check out `7e5d938` (the revision the recorded run used); any revision before the 023 slice (d) merge `2df5703`
+works, e.g. `ad992a0`. `968189a` does NOT: `ClearingService._auto_clear_find` is already gone there.
 
 WHY (Codex §15 review of stage 2, 2026-09-25, P2-1 and P2-3). The first measurement
 (`scripts/measure_p020_detector_cost.py`) planted high-value structures, so on part of its cells the
