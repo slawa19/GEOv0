@@ -1,0 +1,1260 @@
+[
+ {
+  "file": "tests/integration/test_audit_drift_delta_check_sse_integration.py",
+  "lines": 155,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": "U-F-7",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "executor path; PaymentService.create_payment_internal_staged replaced by a raiser (service seam, not a private function)"
+ },
+ {
+  "file": "tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py",
+  "lines": 422,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "dead dialect skip :73-79 (tier PG-only since 017); monkeypatch raising=False on 3 existing settings keys :226-228 would hide a removed key; comment :219-220 names PaymentEngine"
+ },
+ {
+  "file": "tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py",
+  "lines": 313,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "file name: PaymentEngine.prepare_routes removed by 019 stage 4 (own footer :307-313)",
+  "tests": [],
+  "note": "rename to test_concurrent_payments_shared_bottleneck_postgres.py; dead dialect skip :36-43"
+ },
+ {
+  "file": "tests/integration/test_daily_limit_not_enforced.py",
+  "lines": 146,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "protocol docs/ru/02-protocol-spec.md:191 (daily_limit informational); _register_and_login copy -> shared factory"
+ },
+ {
+  "file": "tests/integration/test_health_and_equivalents.py",
+  "lines": 188,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": "U-F-1",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_health_endpoints",
+    "verdict": "MERGE",
+    "universal": "U-F-1",
+    "stronger": null
+   },
+   {
+    "name": "test_public_db_health_hides_exception_details",
+    "verdict": "MERGE",
+    "universal": "U-F-1",
+    "stronger": null
+   },
+   {
+    "name": "test_db_health_diagnostic_requires_admin",
+    "verdict": "MERGE",
+    "universal": "U-F-1",
+    "stronger": null
+   },
+   {
+    "name": "test_versioned_health_uses_resolved_settings_environment",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "moves into the U-F-1 module as its own test; GEO_ENV env var is read nowhere in app/ (phantom input)"
+   },
+   {
+    "name": "test_equivalents_list",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "move to equivalents tests; _register_and_login duplicates conftest auth_headers"
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_http_rate_limit.py",
+  "lines": 91,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-5",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_http_rate_limit_falls_back_to_memory_and_resets_next_window",
+    "verdict": "MERGE",
+    "universal": "U-F-5",
+    "stronger": null
+   },
+   {
+    "name": "test_http_rate_limit_uses_redis_counter_and_expiry",
+    "verdict": "MERGE",
+    "universal": "U-F-5",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p1_clearing_run_perimeter_postgres.py",
+  "lines": 199,
+  "verdict": "DELETE-DUP",
+  "basket": "A",
+  "universal": null,
+  "stronger": "tests/unit/test_p1_clearing_run_perimeter.py (MODE_B tests take the same engine-bound interlock path on a SERIALIZABLE clone)",
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_interlock_path_refuses_a_cycle_outside_the_perimeter",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p1_clearing_run_perimeter.py::test_execution_layer_refuses_a_cycle_outside_the_perimeter[mode_b]"
+   },
+   {
+    "name": "test_interlock_path_still_clears_for_the_owning_run",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p1_clearing_run_perimeter.py::test_a_committed_replay_is_not_returned_to_a_foreign_scope[mode_b]",
+    "note": "carry `after == []` (service level) into that test before deleting; route-level after==[] already in ::test_the_owning_run_still_clears_its_own_cycle[mode_b]"
+   },
+   {
+    "name": "test_the_expanding_bind_works_on_postgresql",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p1_clearing_run_perimeter.py::test_the_sql_producer_itself_is_scoped"
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p1_commit_then_refresh_postgres.py",
+  "lines": 241,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": "U-F-6",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "dead skip :56-60; docstring cites conftest:222-235; own engine on the TIER database with manual cleanup instead of committed_database clone"
+ },
+ {
+  "file": "tests/integration/test_p1_failed_rollback_state_postgres.py",
+  "lines": 153,
+  "verdict": "DELETE-REMOVED",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "PaymentEngine retry loop app/core/payments/engine.py:537-541 (file deleted, programme 019 stage 4). VERIFY FIRST: ClearingService._run_attempts (service.py:1470-1520) drops ORM state with expunge_all and _raise_unexpected_execution (:100-111) raises after its swallowed rollback, so no remaining site replays on the same session",
+  "tests": [
+   {
+    "name": "test_a_failed_rollback_still_leaves_no_stale_value_behind",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_the_session_is_usable_again_after_a_failed_rollback",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p1_reconcile_after_failed_rollback_postgres.py",
+  "lines": 167,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": "U-F-6",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "subject still exists: ClearingService._reconcile_committed_execution service.py:415-449 swallows the rollback; line refs :249/:256/:288/:1332 stale; dead skip :63-67"
+ },
+ {
+  "file": "tests/integration/test_p1_tick_session_ownership_postgres.py",
+  "lines": 104,
+  "verdict": "FIX-DOC",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "dead dialect skip :37-43; skip on simulator_storage.db_enabled() :45-46 reads getattr(settings,'SIMULATOR_DB_ENABLED',False) (storage.py:27, default diverges from Settings True, F-024-7) -> must be an assert, else a silent skip"
+ },
+ {
+  "file": "tests/integration/test_p1_trustline_reopen_postgres.py",
+  "lines": 309,
+  "verdict": "FIX-DOC",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "reopen = A; xfail(strict) concurrent create = B, BACKLOG T1549 finding 1; dead dialect skips :90-96 and :195-201; writes the tier DB via TestingSessionLocal with manual cleanup"
+ },
+ {
+  "file": "tests/integration/test_post_tick_audit_drift_runner_integration.py",
+  "lines": 278,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": "U-F-7",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "receives the tick_index / invariants_checked assertions of test_audit_drift_integrity_log.py"
+ },
+ {
+  "file": "tests/integration/test_static_clearing_hard_timeout_no_leak.py",
+  "lines": 83,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "no DB, fake session: belongs in tests/unit/"
+ },
+ {
+  "file": "tests/integration/test_trust_growth_never_lowers_a_limit_below_its_debt_postgres.py",
+  "lines": 199,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "imports fixture `factory` from another test module (test_p015_p1_money_replay_postgres) -> move to conftest/support"
+ },
+ {
+  "file": "tests/integration/test_validation_error_envelope.py",
+  "lines": 16,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-9",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_validation_error_envelope_returns_e009",
+    "verdict": "MERGE",
+    "universal": "U-F-9",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_apply_flow_retry_on_stale.py",
+  "lines": 128,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "in-place retry of _apply_flow removed by 019 stage 3 (own docstring :36-41)",
+  "tests": [],
+  "note": "rename: behaviour is raise DebtVersionConflict, not retry"
+ },
+ {
+  "file": "tests/unit/test_audit_drift_integrity_log.py",
+  "lines": 66,
+  "verdict": "MERGE",
+  "basket": "F",
+  "universal": "U-F-7",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_audit_drift_integrity_audit_log_round_trip",
+    "verdict": "MERGE",
+    "universal": "U-F-7",
+    "stronger": null,
+    "note": "round-trips the test's own ORM row; move 2 shape asserts into the runner test that writes the row through the app, then delete"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_audit_drift_sse_event.py",
+  "lines": 47,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-8",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_audit_drift_event_serializes_with_required_fields",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   },
+   {
+    "name": "test_audit_drift_event_rejects_invalid_severity",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_background_task_supervision.py",
+  "lines": 299,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_root_and_versioned_health_report_background_degradation",
+    "verdict": "MERGE",
+    "universal": "U-F-1",
+    "stronger": null
+   },
+   {
+    "name": "test_task_factory_failure_marks_job_degraded",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_task_creation_failure_marks_job_degraded",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_unexpected_task_exception_is_observable",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_shutdown_cancellation_is_not_reported_as_failure",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_lifespan_stops_supervised_tasks_before_closing_resources",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_clean_stop_is_not_reported_as_unexpected_exit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_integrity_failure_degrades_and_later_success_recovers",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_canonical_json.py",
+  "lines": 43,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-4",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_canonical_json_is_deterministic_and_compact",
+    "verdict": "MERGE",
+    "universal": "U-F-4",
+    "stronger": null
+   },
+   {
+    "name": "test_canonical_json_normalizes_decimal_string_form",
+    "verdict": "MERGE",
+    "universal": "U-F-4",
+    "stronger": null
+   },
+   {
+    "name": "test_canonical_json_rejects_float_anywhere_in_payload",
+    "verdict": "MERGE",
+    "universal": "U-F-4",
+    "stronger": null
+   },
+   {
+    "name": "test_canonical_json_rejects_decimal_exponent_notation",
+    "verdict": "MERGE",
+    "universal": "U-F-4",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_check_alembic_heads.py",
+  "lines": 35,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "unit test of scripts/check_alembic_heads.py (monkeypatched Config); the script itself runs in required-backend"
+ },
+ {
+  "file": "tests/unit/test_crypto_pid.py",
+  "lines": 23,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-F-4",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_pid_generation_matches_spec_sha256_base58",
+    "verdict": "MERGE",
+    "universal": "U-F-4",
+    "stronger": null
+   },
+   {
+    "name": "test_pid_generation_is_deterministic",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_crypto_pid.py::test_pid_generation_matches_spec_sha256_base58",
+    "note": "exact equality to base58(sha256(key)) implies determinism"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_deployment_config.py",
+  "lines": 248,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "compose/Dockerfile/.env/docs text; test_active_local_callers_select_dev_configuration_explicitly reads frozen EN/PL docs -> owner decides deletion (AGENTS.md section 11)"
+ },
+ {
+  "file": "tests/unit/test_edge_patch_builder.py",
+  "lines": 150,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "edge_patch wire shape (protected SSE contract, AGENTS.md section 8)"
+ },
+ {
+  "file": "tests/unit/test_edges_by_equivalent_status_filter.py",
+  "lines": 16,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "same rule as test_freeze_participant (missing status = active): co-locate in one module"
+ },
+ {
+  "file": "tests/unit/test_event_bus_backpressure.py",
+  "lines": 107,
+  "verdict": "KEEP",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": []
+ },
+ {
+  "file": "tests/unit/test_flow_and_periodicity.py",
+  "lines": 638,
+  "verdict": "MIXED",
+  "basket": "F",
+  "universal": "U-F-10",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_flow_directs_household_to_retail",
+    "verdict": "MERGE",
+    "universal": "U-F-10",
+    "stronger": null
+   },
+   {
+    "name": "test_flow_fallback_without_chains",
+    "verdict": "MERGE",
+    "universal": "U-F-10",
+    "stronger": null
+   },
+   {
+    "name": "test_flow_affinity_zero_ignores_chains",
+    "verdict": "MERGE",
+    "universal": "U-F-10",
+    "stronger": null
+   },
+   {
+    "name": "test_flow_disabled_setting_skips_all",
+    "verdict": "MERGE",
+    "universal": "U-F-10",
+    "stronger": null
+   },
+   {
+    "name": "test_realistic_v2_fixture_flow_chains_match_group_ids",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "fixture-content guard over fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json; belongs to the generator scripts/generate_simulator_seed_scenarios.py"
+   },
+   {
+    "name": "test_periodicity_large_payments_less_frequent",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_periodicity_factor_one_no_change",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_periodicity_small_payments_more_frequent",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_reciprocity_increases_limit_with_reverse_debt",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_reciprocity_no_reverse_debt_no_bonus",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "note": "vacuous if no A->B action is planned (loop over empty list); add assert a_to_b"
+   },
+   {
+    "name": "test_reciprocity_disabled_no_bonus",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "note": "same vacuity"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_freeze_participant_in_memory_status_overwrite.py",
+  "lines": 43,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "RealRunner.__new__ + private _invalidate_caches_after_inject; public entry is the inject freeze action (fate depends on 021)"
+ },
+ {
+  "file": "tests/unit/test_invariants.py",
+  "lines": 532,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_edge_model_attributes_a_debt_directionally",
+    "verdict": "MERGE",
+    "universal": "U-F-3",
+    "stronger": null
+   },
+   {
+    "name": "test_trust_limit_violation_detected",
+    "verdict": "MERGE",
+    "universal": "U-F-3",
+    "stronger": null
+   },
+   {
+    "name": "test_clearing_neutrality_passes_for_cycle_clearing",
+    "verdict": "MERGE",
+    "universal": "U-F-3",
+    "stronger": null
+   },
+   {
+    "name": "test_clearing_neutrality_violation_detected",
+    "verdict": "MERGE",
+    "universal": "U-F-3",
+    "stronger": null
+   },
+   {
+    "name": "test_integrity_checkpoint_status_critical_for_trust_limits",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_integrity_checkpoints.py::test_integrity_checkpoint_marks_trust_limit_violation_as_critical"
+   },
+   {
+    "name": "test_integrity_checkpoint_status_warning_for_debt_symmetry",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_integrity_checkpoints.py::test_integrity_checkpoint_marks_debt_symmetry_violation_as_warning"
+   },
+   {
+    "name": "test_payment_commit_writes_integrity_audit_log_on_success",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_clearing_writes_integrity_audit_log_on_success",
+    "verdict": "MERGE",
+    "universal": "U-F-2",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_measure_swallowed_exceptions_instrument.py",
+  "lines": 92,
+  "verdict": "MOVE-OUT",
+  "basket": "D",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": "instrument of programme 010; T1004 closed 2026-08-22 (specs/010-money-core-fail-closed/spec.md:372)",
+  "tests": [],
+  "note": "loads a script from specs/, not app; test_the_docstring_and_the_code_agree pins docstring text"
+ },
+ {
+  "file": "tests/unit/test_metrics_unmatched_routes_path_label.py",
+  "lines": 36,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-9",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_unmatched_route_uses_fixed_path_label",
+    "verdict": "MERGE",
+    "universal": "U-F-9",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_net_balance_utils.py",
+  "lines": 24,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "collapse into one parametrized table (5 rows) in place"
+ },
+ {
+  "file": "tests/unit/test_no_mandatory_readback_after_commit.py",
+  "lines": 79,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_no_refresh_after_commit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_the_site_list_matches_the_spec",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "asserts the length of a list literal defined in the same file (:38-47); no observation of app"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p1_clearing_run_perimeter.py",
+  "lines": 460,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "HTTP+DB in tests/unit (misfiled, section 11); docstring line refs stale; receives service-level after==[] from the PG twin"
+ },
+ {
+  "file": "tests/unit/test_p1_payment_run_perimeter.py",
+  "lines": 528,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "HTTP+DB in tests/unit; test_a_replay_whose_route_cannot_be_read_is_refused forges a payload by UPDATE (deliberate legacy shape, stated in docstring)"
+ },
+ {
+  "file": "tests/unit/test_p1_tick_storage_flush_marker.py",
+  "lines": 175,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": []
+ },
+ {
+  "file": "tests/unit/test_post_tick_audit.py",
+  "lines": 125,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": "U-F-7",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": []
+ },
+ {
+  "file": "tests/unit/test_pytest_selector_guard.py",
+  "lines": 63,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": []
+ },
+ {
+  "file": "tests/unit/test_quality_workflow_schedule.py",
+  "lines": 251,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "job-command half of test_the_required_backend_job_owns_the_postgres_service_and_the_alembic_head_check duplicates tests/unit/test_postgres_test_taxonomy.py::test_postgres_ci_job_uses_production_migration_entrypoint (exact lines); only the verify_local.ps1 backend-half assertion is unique"
+ },
+ {
+  "file": "tests/unit/test_rate_limit_memory_bound.py",
+  "lines": 74,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-5",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_unique_hosts_cannot_grow_in_memory_rate_limit_state_without_bound",
+    "verdict": "MERGE",
+    "universal": "U-F-5",
+    "stronger": null
+   },
+   {
+    "name": "test_recently_active_host_survives_unique_host_eviction",
+    "verdict": "MERGE",
+    "universal": "U-F-5",
+    "stronger": null
+   },
+   {
+    "name": "test_bounded_state_still_enforces_limit_for_real_host",
+    "verdict": "MERGE",
+    "universal": "U-F-5",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_request_id_middleware_validation.py",
+  "lines": 63,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-F-9",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_request_id_invalid_header_is_ignored_and_regenerated",
+    "verdict": "MERGE",
+    "universal": "U-F-9",
+    "stronger": null
+   },
+   {
+    "name": "test_request_id_valid_header_is_reflected_unchanged",
+    "verdict": "MERGE",
+    "universal": "U-F-9",
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_settings_guardrails.py",
+  "lines": 533,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": "U-F-12",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_settings_guardrail_prod_rejects_default_jwt_secret",
+    "verdict": "MERGE",
+    "universal": "U-F-12",
+    "stronger": null
+   },
+   {
+    "name": "test_settings_guardrail_prod_rejects_default_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-F-12",
+    "stronger": null,
+    "note": "its value dev-admin-token-change-me == DEFAULT_ADMIN_TOKEN is already a row of test_non_dev_rejects_every_current_empty_or_placeholder_security_value (ENV staging)"
+   },
+   {
+    "name": "test_settings_guardrail_dev_allows_default_secrets",
+    "verdict": "MERGE",
+    "universal": "U-F-12",
+    "stronger": null
+   },
+   {
+    "name": "test_settings_guardrail_test_allows_default_secrets",
+    "verdict": "MERGE",
+    "universal": "U-F-12",
+    "stronger": null
+   },
+   {
+    "name": "test_database_url_is_required_and_has_no_default",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_every_database_url_but_postgresql_asyncpg_is_refused",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_an_unparseable_database_url_is_refused_without_echoing_it",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_a_postgresql_asyncpg_url_is_accepted_verbatim",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_every_postgres_isolation_level_but_serializable_is_refused",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_an_isolation_level_from_the_environment_is_refused_too",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_serializable_is_accepted_and_normalised",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_settings_normalizes_supported_environment_aliases",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_settings_rejects_unknown_or_empty_environment",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_settings_requires_explicit_environment",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_misspelled_constructor_environment_cannot_enable_dev_defaults",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_lowercase_process_environment_is_ignored_but_fails_closed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_legacy_environment_key_is_honored_and_guarded",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_conflicting_environment_keys_fail_startup",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_unrelated_ambient_legacy_environment_does_not_override_canonical_env",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_unsupported_explicit_legacy_environment_does_not_override_canonical_env",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_unsupported_legacy_environment_without_canonical_env_is_precise",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_supported_ambient_legacy_environment_still_conflicts_with_canonical_env",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_rejects_every_current_empty_or_placeholder_security_value",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_accepts_configured_security_values",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_rejects_secrets_shorter_than_32_characters",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_rejects_anchored_long_placeholders",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_placeholder_words_inside_strong_secret_are_not_false_positive",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_rejects_non_origin_csrf_allowlist_entries",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_settings_reports_the_precise_invalid_csrf_allowlist_entry_without_broadening",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_empty_csrf_allowlist_remains_a_missing_configuration_error",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_accepts_comma_separated_exact_http_origins",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_settings_canonicalizes_browser_origin_serialization",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_rejects_obviously_repeated_secrets",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_non_dev_accepts_nonrepeating_secret_at_32_character_boundary",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_static_diagnostics_policy.py",
+  "lines": 27,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": []
+ },
+ {
+  "file": "tests/unit/test_test_database_guard.py",
+  "lines": 143,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "test_rejects_every_sqlite_database is 4x2=8 items of one rule; fold into one 'unsupported backend' table with the mysql row"
+ },
+ {
+  "file": "tests/unit/test_the_test_engine_enforces_foreign_keys.py",
+  "lines": 84,
+  "verdict": "FIX-DOC",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "SQLite PRAGMA subject gone (017); what remains is a schema FK property, the only FK check in the tier (schema parity compares CHECK/UNIQUE only); rename to test_schema_refuses_dangling_references.py"
+ },
+ {
+  "file": "tests/unit/test_the_tier_refuses_a_database_that_is_not_postgres.py",
+  "lines": 192,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": "U-F-11",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "subprocess pytest + PowerShell runner; test_every_slug_the_runner_admits_derives_a_name_the_guard_owns_or_refuses is a guard-unit test -> test_test_database_guard.py"
+ },
+ {
+  "file": "tests/unit/test_tick_money_paths_carry_the_run_perimeter.py",
+  "lines": 112,
+  "verdict": "KEEP",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "AST guard; form exists (executor 1 call, clearing engine 3 calls at 5748c516)"
+ },
+ {
+  "file": "tests/unit/test_topology_changed_no_empty_payload.py",
+  "lines": 311,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": "U-F-8",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_no_event_when_edge_patches_missing",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   },
+   {
+    "name": "test_no_event_when_edge_patches_empty_dict",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   },
+   {
+    "name": "test_no_event_when_edge_patches_empty_list_for_eq",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   },
+   {
+    "name": "test_event_emitted_with_nonempty_edge_patch",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   },
+   {
+    "name": "test_mixed_equivalents_only_nonempty_emitted",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null
+   },
+   {
+    "name": "test_edge_patch_present_in_model_dump",
+    "verdict": "MERGE",
+    "universal": "U-F-8",
+    "stronger": null,
+    "note": "fold source=='A' assert into test_event_by_alias_true"
+   },
+   {
+    "name": "test_empty_lists_serialized",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_event_by_alias_true",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_empty_payload_triggers_refresh",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "asserts only the test-local helper _frontend_would_refresh"
+   },
+   {
+    "name": "test_payload_with_edge_patch_does_not_trigger_refresh",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "same"
+   },
+   {
+    "name": "test_payload_with_added_nodes_does_not_trigger_refresh",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "same"
+   },
+   {
+    "name": "test_trust_drift_decay_event_does_not_trigger_refresh",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_topology_changed_no_empty_payload.py::TestTopologyChangedPayloadSerialization::test_event_by_alias_true",
+    "note": "helper replicates a frontend rule that has since changed (simulator-ui/v2/src/composables/realEventPipeline.ts:216-233, hasStructuralChanges); frontend behaviour owned by realEventPipeline.test.ts"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_warmup_and_capacity.py",
+  "lines": 477,
+  "verdict": "MIXED",
+  "basket": "F",
+  "universal": "U-F-10",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_warmup_ramp_reduces_actions_at_tick_zero",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_warmup_ramp_linear_progression",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_warmup_ramp_full_intensity_after_warmup",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_warmup_no_config_means_no_ramp",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_warmup_floor_clamp",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_capacity_reduces_amount_with_existing_debt",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "note": "vacuous if planned is empty; add assert planned"
+   },
+   {
+    "name": "test_capacity_empty_snapshot_uses_static_limit",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "note": "same"
+   },
+   {
+    "name": "test_capacity_zero_available_skips_candidate",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_capacity_three_level_reduction",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_load_debt_snapshot_maps_pids_correctly",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "mock session keyed on call order + deprecated get_event_loop().run_until_complete; public input: seed Debt rows on db_session and call the loader"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_zero_debt_policy.py",
+  "lines": 109,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-F-2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_clearing_deletes_zero_debts",
+    "verdict": "MERGE",
+    "universal": "U-F-2",
+    "stronger": null
+   }
+  ]
+ }
+]

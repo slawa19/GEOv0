@@ -1,0 +1,1161 @@
+{
+ "summary": {
+  "collected_tests_by_verdict": {
+   "KEEP": 1152,
+   "MERGE": 1052,
+   "REWRITE": 71,
+   "DELETE-DUP": 95,
+   "DELETE-EMPTY": 29,
+   "FIX-DOC": 43,
+   "MOVE-OUT": 784,
+   "DELETE-REMOVED": 80,
+   "KEEP(unlisted-in-MIXED)": 5
+  },
+  "seconds_by_verdict": {
+   "KEEP": 652.5,
+   "MERGE": 468.0,
+   "REWRITE": 37.3,
+   "DELETE-DUP": 77.5,
+   "DELETE-EMPTY": 5.0,
+   "FIX-DOC": 28.4,
+   "MOVE-OUT": 190.2,
+   "DELETE-REMOVED": 20.0,
+   "KEEP(unlisted-in-MIXED)": 0.0
+  },
+  "zero_app_coverage_by_verdict": {
+   "KEEP": 209,
+   "REWRITE": 30,
+   "MERGE": 152,
+   "DELETE-DUP": 17,
+   "DELETE-EMPTY": 27,
+   "FIX-DOC": 3,
+   "MOVE-OUT": 728,
+   "KEEP(unlisted-in-MIXED)": 3,
+   "DELETE-REMOVED": 16
+  },
+  "deleted_tests": 204,
+  "lines_lost_if_all_DELETE_applied": 219,
+  "lines_lost_by_app_file": {
+   "core/simulator/adaptive_clearing_policy.py": 105,
+   "core/simulator/real_tick_clearing_coordinator.py": 91,
+   "core/simulator/real_clearing_engine.py": 16,
+   "core/simulator/storage.py": 4,
+   "core/payments/service.py": 2,
+   "core/simulator/real_payments_executor.py": 1
+  },
+  "deleted_tests_touching_lost_lines": [
+   {
+    "test": "tests/integration/test_simulator_adaptive_clearing_integration.py::test_adaptive_coordinator_processes_equivalents_in_sorted_order",
+    "lost_lines_touched": 109,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_adaptive_exception_is_treated_as_zero_yield_and_triggers_cooldown",
+    "lost_lines_touched": 109,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_adaptive_tick_budget_caps_multi_equivalent_clearing",
+    "lost_lines_touched": 106,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_adaptive_max_eq_per_tick_caps_multi_equivalent_clearing",
+    "lost_lines_touched": 104,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_adaptive_records_zero_signals_each_tick_so_warmup_finishes",
+    "lost_lines_touched": 102,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_simulator_adaptive_clearing_integration.py::test_adaptive_policy_triggers_clearing_on_high_rejection_rate",
+    "lost_lines_touched": 101,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_simulator_metrics_numeric_value_postgres.py::test_adaptive_clearing_volume_reaches_the_column_exactly",
+    "lost_lines_touched": 88,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_adaptive_keeps_the_volume_exact_and_hands_the_policy_a_float",
+    "lost_lines_touched": 88,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestBackoffGrowth::test_backoff_resets_on_positive_yield",
+    "lost_lines_touched": 59,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestReactionTime::test_deactivation_after_recovery",
+    "lost_lines_touched": 58,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestBackoffGrowth::test_backoff_doubles_on_zero_yield",
+    "lost_lines_touched": 57,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBackoff::test_backoff_grows_on_zero_volume",
+    "lost_lines_touched": 54,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_simulator_adaptive_clearing_integration.py::test_adaptive_coordinator_respects_cooldown",
+    "lost_lines_touched": 50,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestNoJitter::test_cooldown_limits_consecutive_clearings",
+    "lost_lines_touched": 50,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestActivation::test_activates_respecting_cooldown",
+    "lost_lines_touched": 50,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestHysteresis::test_deactivates_below_low",
+    "lost_lines_touched": 47,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestHysteresis::test_stays_active_between_low_and_high",
+    "lost_lines_touched": 47,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestReactionTime::test_activation_within_window_after_spike",
+    "lost_lines_touched": 40,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestPerEqIndependence::test_separate_eq_states",
+    "lost_lines_touched": 40,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestBudgetClamping::test_budget_within_bounds_at_all_pressure_levels",
+    "lost_lines_touched": 39,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestActivation::test_activates_when_no_capacity_rate_above_high",
+    "lost_lines_touched": 35,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBudgetScaling::test_budget_respects_global_ceiling",
+    "lost_lines_touched": 35,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBudgetScaling::test_max_pressure_gives_max_budget",
+    "lost_lines_touched": 35,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBudgetScaling::test_pressure_at_high_gives_max_budget",
+    "lost_lines_touched": 35,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBudgetScaling::test_pressure_at_low_gives_min_budget_when_active",
+    "lost_lines_touched": 35,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBudgetScaling::test_pressure_at_one_gives_max_budget_when_active",
+    "lost_lines_touched": 35,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestBudgetClamping::test_global_ceiling_limits_budget",
+    "lost_lines_touched": 34,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestBudgetScaling::test_higher_pressure_means_higher_budget",
+    "lost_lines_touched": 34,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestWarmupFallbackEffectiveness::test_cold_start_with_fallback_fires_clearing",
+    "lost_lines_touched": 27,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestWarmupFallback::test_warmup_fallback_fires_at_cadence",
+    "lost_lines_touched": 24,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestWarmupFallback::test_warmup_fallback_respects_cooldown",
+    "lost_lines_touched": 19,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_real_clearing_throttle.py::test_tick_real_mode_clearing_yields_to_event_loop",
+    "lost_lines_touched": 16,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBackoff::test_backoff_resets_on_positive_volume",
+    "lost_lines_touched": 13,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBackoff::test_backoff_capped_at_max",
+    "lost_lines_touched": 11,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestBackoff::test_backoff_formula_exact_intervals_with_cap",
+    "lost_lines_touched": 11,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestActivation::test_does_not_activate_below_high",
+    "lost_lines_touched": 10,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestColdStart::test_zero_attempted_payments",
+    "lost_lines_touched": 10,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestWarmupFallback::test_warmup_fallback_transitions_to_adaptive",
+    "lost_lines_touched": 10,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestNoJitter::test_no_oscillation_in_hysteresis_band",
+    "lost_lines_touched": 9,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_simulator_adaptive_clearing_integration.py::test_guardrail_inflight_blocks_clearing",
+    "lost_lines_touched": 8,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_simulator_adaptive_clearing_integration.py::test_guardrail_queue_depth_blocks_clearing",
+    "lost_lines_touched": 8,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestConfigValidation::test_low_gte_high_warns",
+    "lost_lines_touched": 6,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestWarmupFallback::test_warmup_fallback_skips_non_cadence_tick",
+    "lost_lines_touched": 5,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_sse_replay.py::test_subscribe_replays_events_after_last_event_id",
+    "lost_lines_touched": 4,
+    "verdict": "DELETE-DUP"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestConfigValidation::test_budget_min_gt_max_warns",
+    "lost_lines_touched": 3,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestConfigValidation::test_window_ticks_zero_warns",
+    "lost_lines_touched": 3,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestColdStart::test_window_rolling_eviction",
+    "lost_lines_touched": 2,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestMissingData::test_record_tick_signals_treats_none_and_negative_as_zero",
+    "lost_lines_touched": 2,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_p019_pay_retries_a_debt_version_conflict_postgres.py::test_pay_retries_a_debt_version_conflict_on_a_fresh_attempt_and_counts_one_commit",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py::test_the_error_budget_assertion_can_see_a_failed_tick",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-DUP"
+   },
+   {
+    "test": "tests/unit/test_payment_timeouts.py::test_payment_commit_timeout_returns_committed_when_tx_already_committed",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-DUP"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestWarmupBehaviour::test_empty_window_does_not_activate",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestWarmupBehaviour::test_partial_window_activates_on_extreme_signal",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestWarmupBehaviour::test_partial_window_needs_strong_signal",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py::TestWarmupFallbackEffectiveness::test_cold_start_without_fallback_no_clearing",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestColdStart::test_empty_window_no_clearing",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   },
+   {
+    "test": "tests/unit/test_simulator_adaptive_clearing_policy.py::TestWarmupFallback::test_warmup_disabled_when_cadence_zero",
+    "lost_lines_touched": 1,
+    "verdict": "DELETE-REMOVED"
+   }
+  ],
+  "moved_out_tests": 784,
+  "extra_lines_lost_from_backend_tier_by_MOVE_OUT": 27,
+  "move_out_lost_by_app_file": {
+   "core/simulator/viz_rules.py": 19,
+   "core/ledger/reconciliation.py": 5,
+   "core/clearing/service.py": 3
+  },
+  "delete_dup_checked": 79,
+  "delete_dup_stronger_not_found": 20,
+  "delete_dup_subset_ok": 39,
+  "delete_dup_not_subset": 20,
+  "merge_tests": 1052,
+  "merge_tests_with_unique_lines": 96,
+  "merge_unique_lines_total": 576,
+  "keep_with_zero_app_coverage_top_files": {
+   "tests/unit/test_p017_no_second_dialect.py": 42,
+   "tests/unit/test_p018_only_book_writes_debts.py": 31,
+   "tests/unit/test_p012_t1211_money_path_never_types_a_float.py": 29,
+   "tests/unit/test_p012_t1211_money_rendering_conformance.py": 23,
+   "tests/contract/test_p011_responses_conform_to_the_canon.py": 17,
+   "tests/unit/test_no_mandatory_readback_after_commit.py": 8,
+   "tests/contract/test_openapi_contract.py": 7,
+   "tests/contract/test_p011_nullable_needs_a_sibling_type.py": 5,
+   "tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py": 5,
+   "tests/contract/test_p011_documentation_models_do_not_filter.py": 4,
+   "tests/contract/test_p011_success_responses_describe_their_content.py": 3,
+   "tests/integration/test_p014_t1402_zero_sum_is_not_published_as_a_check.py": 3,
+   "tests/unit/test_backend_marker_policy.py": 3,
+   "tests/unit/test_p019_lock_primitives_live_in_money_boundary.py": 3,
+   "tests/contract/test_p011_callable_surface_matches_canon.py": 2,
+   "tests/contract/test_p011_reachable_statuses_are_declared.py": 2,
+   "tests/contract/test_p011_root_routes_bypass_the_policy_gate.py": 2,
+   "tests/integration/test_p015_t1534_the_migrated_schema_flag_is_true_postgres.py": 2,
+   "tests/integration/test_p015_t1549_test_engine_runs_at_the_application_isolation_postgres.py": 2,
+   "tests/unit/test_p020_experimental_detectors_are_not_imported_by_production.py": 2,
+   "tests/unit/test_simulator_storage_schema_contract.py": 2,
+   "tests/unit/test_tick_money_paths_carry_the_run_perimeter.py": 2,
+   "tests/unit/test_topology_changed_no_empty_payload.py": 2,
+   "tests/integration/test_p011_admin_money_is_a_decimal_string_on_the_wire.py": 1,
+   "tests/integration/test_p011_money_is_a_decimal_string_on_the_wire.py": 1
+  },
+  "unknown_verdict_tests": 0
+ },
+ "delete_dup": [
+  {
+   "test": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c18_p_entries_come_from_the_retry_and_carry_the_concurrent_value",
+   "stronger": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attempts_entries",
+   "stronger_found": 1,
+   "own_lines": 203,
+   "stronger_lines": 203,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c19_p_nan_is_excluded_by_the_magnitude_clause_and_not_by_positivity",
+   "stronger": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule[an entry whose delta is not a number]",
+   "stronger_found": 8,
+   "own_lines": 0,
+   "stronger_lines": 10,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py::test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_today",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves",
+   "stronger_found": 0,
+   "own_lines": 1056,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py::test_c6_p_control_the_same_payment_without_the_wrapper_satisfies_criterion_b",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full",
+   "stronger_found": 1,
+   "own_lines": 1056,
+   "stronger_lines": 1353,
+   "not_in_stronger": 2,
+   "not_in_stronger_by_file": {
+    "utils/validation.py": 2
+   }
+  },
+  {
+   "test": "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py::test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_verified",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind",
+   "stronger_found": 1,
+   "own_lines": 754,
+   "stronger_lines": 947,
+   "not_in_stronger": 4,
+   "not_in_stronger_by_file": {
+    "utils/money.py": 4
+   }
+  },
+  {
+   "test": "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py::test_c6_p_control_the_same_cycle_without_the_listener_satisfies_criterion_b",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed",
+   "stronger_found": 1,
+   "own_lines": 754,
+   "stronger_lines": 956,
+   "not_in_stronger": 4,
+   "not_in_stronger_by_file": {
+    "utils/money.py": 4
+   }
+  },
+  {
+   "test": "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py::test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_today",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves",
+   "stronger_found": 0,
+   "own_lines": 1056,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py::test_c6_control_the_same_payment_without_the_wrapper_satisfies_criterion_b",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full",
+   "stronger_found": 1,
+   "own_lines": 1056,
+   "stronger_lines": 1353,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py::test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_verified",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind",
+   "stronger_found": 1,
+   "own_lines": 751,
+   "stronger_lines": 947,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py::test_c6_control_the_same_cycle_without_the_listener_satisfies_criterion_b",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed",
+   "stronger_found": 1,
+   "own_lines": 751,
+   "stronger_lines": 956,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p015_p1_money_replay_postgres.py::test_the_stand_is_serializable",
+   "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_real_serialization_failure_replays_the_money_phase_and_commits_once (asserts sqlstates == ['40001'], which cannot arise below SERIALIZABLE)",
+   "stronger_found": 0,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_step5a_reconciliation_postgres.py::test_step5a_p_passed_failed_unverifiable_and_the_scheduled_row",
+   "stronger": "tests/unit/test_p015_step5a_reconciliation.py::test_step5a_a_one_atom_change_around_the_application_is_failed + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_an_application_payment_that_moves_debts_and_journal_is_passed + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_without_a_baseline_the_result_is_unverifiable_never_passed + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_an_unchanged_verdict_keeps_one_row_and_advances_last_checked_at (TRANSFER one assertion into the without_a_baseline test: two scheduled runs store exactly one UNVERIFIABLE row)",
+   "stronger_found": 0,
+   "own_lines": 1541,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_step5a_reconciliation_postgres.py::test_step5a_p_a_fixture_write_after_the_baseline_is_refused",
+   "stronger": "tests/unit/test_p015_step5a_reconciliation.py::test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused[TEST_FIXTURE]",
+   "stronger_found": 2,
+   "own_lines": 282,
+   "stronger_lines": 337,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_p015_step5a_reconciliation.py::test_step5a_a_payment_committed_between_the_verifiers_reads_is_still_passed",
+   "stronger": "tests/integration/test_p015_step5a_reconciliation_postgres.py::test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still_passed (same stand and _assert_interleave; the PG form runs the stand at READ COMMITTED, so it also proves the verifier's own snapshot)",
+   "stronger_found": 0,
+   "own_lines": 1281,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_step5b_criterion_b_postgres.py::test_step5b_p_the_criterion_b_controls_hold_on_asyncpg",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::<the same-named test, per parametrised row> (this test calls the unit function object itself; since 017 both run on PostgreSQL/asyncpg, so every item is executed twice)",
+   "stronger_found": 0,
+   "own_lines": 1826,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_step5b_criterion_b_postgres.py::test_step5b_p_a_b_finding_is_stored_in_the_same_row_on_asyncpg",
+   "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_never_in_a_checkpoint (calls it directly)",
+   "stronger_found": 0,
+   "own_lines": 1451,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_step5c_hold_races_postgres.py::test_step5c_p_the_evidence_of_a_hold_cannot_be_deleted_while_held",
+   "stronger": "tests/unit/test_p015_step5c_reaction_and_hold.py::test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held (superset: hold set by the real reaction, latest-row id also asserted)",
+   "stronger_found": 0,
+   "own_lines": 203,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_route_refuses_when_its_usage_count_misses_a_debt",
+   "stronger": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c17_p_deleting_an_equivalent_whose_only_debt_was_cleared_is_refused_with_409 (the same IntegrityError->409 branch of admin_delete_equivalent, reached with honest zero usage counts instead of a patched private _equivalent_usage_counts) + tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_database_refuses_to_delete_an_equivalent_that_carries_debt",
+   "stronger_found": 0,
+   "own_lines": 301,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_t1525_control_postgres.py::test_postgres_a_rolled_back_tick_leaves_no_payment_from_the_executor",
+   "stronger": "tests/integration/test_p015_t1525_control_postgres.py::test_postgres_a_real_tick_failing_after_payments_leaves_no_payment (same _assert_rolled_back_tick_left_no_payment plus last_error; the narrow form drives RealPaymentsExecutor and the resolver directly)",
+   "stronger_found": 0,
+   "own_lines": 1678,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py::test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number",
+   "stronger": "tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py::test_a_an_orm_write_of_nan_must_not_reach_the_money_column (identical NaN write; test_a asserts the stored amounts are exactly ['5.00000000'], which fixes the sum)",
+   "stronger_found": 0,
+   "own_lines": 204,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_t1530_delta_arithmetic_postgres.py::test_t1530_the_migration_and_the_metadata_spell_the_same_predicate",
+   "stronger": "tests/integration/test_p015_t1530_delta_arithmetic_postgres.py::test_t1530_p_the_constraint_exists_and_bites_on_both_construction_paths (stored definitions compared on both databases; the tier cannot start without PostgreSQL, so 'needs no server' buys nothing)",
+   "stronger_found": 0,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line_postgres.py::test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres",
+   "stronger": "tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py::test_the_triangle_query_returns_a_cycle_through_a_frozen_line[frozen] + tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py::test_clearing_reduces_the_over_limit_debt_on_a_frozen_line[frozen] (MODE_B: real commits on PostgreSQL through the same auto_clear; same amounts 30/30/150, same residual 20)",
+   "stronger_found": 0,
+   "own_lines": 1023,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_no_module_carries_the_marker_any_more",
+   "stronger": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_pytest_no_longer_registers_the_marker + pytest.ini --strict-markers (an unregistered marker is a collection error)",
+   "stronger_found": 0,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_the_canonical_runner_subtracts_the_marker_from_no_tier",
+   "stronger": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_pytest_no_longer_registers_the_marker (a runner exclusion of a marker nothing can carry excludes nothing; the runner's `not slow` default is the subject of the runner-policy guards)",
+   "stronger_found": 0,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_b4_entries_and_money.py::test_c15_a_process_that_imports_only_the_models_still_cannot_write_a_debt",
+   "stronger": "tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py::test_t1801_a_raw_driver_write_with_no_operation_is_refused_and_the_row_is_unchanged (the refusal is the database trigger's GE001 on every connection; the listener-era premise 'protection must arrive with the models' has no referent)",
+   "stronger_found": 0,
+   "own_lines": 758,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_t1522_payment_delta_drift_must_be_exact.py::test_the_barrier_compares_against_zero_and_not_against_a_quantum",
+   "stronger": "tests/unit/test_p015_t1522_payment_delta_drift_must_be_exact.py::test_one_quantum_of_drift_is_detected (a constant pin: by its own docstring any tolerance below one quantum admits nothing that can occur, so it guards no observable behaviour)",
+   "stronger_found": 0,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_t1524_equivalent_deletion_keeps_obligations.py::test_the_database_refuses_to_delete_an_equivalent_that_carries_debt",
+   "stronger": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_database_refuses_to_delete_an_equivalent_that_carries_debt (same name, same assertions; the gate runs mode A on the MIGRATED schema - scripts/verify_local.ps1:152-153 and .github/workflows/quality.yml:85 set GEO_TEST_USE_MIGRATED_SCHEMA=1 - so this 'SQLite/model half' tests neither SQLite nor the model)",
+   "stronger_found": 0,
+   "own_lines": 194,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_t1524_equivalent_deletion_keeps_obligations.py::test_the_route_refuses_when_its_usage_count_misses_a_debt",
+   "stronger": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_route_refuses_when_its_usage_count_misses_a_debt (same name, same assertions; the gate runs mode A on the MIGRATED schema - scripts/verify_local.ps1:152-153 and .github/workflows/quality.yml:85 set GEO_TEST_USE_MIGRATED_SCHEMA=1 - so this 'SQLite/model half' tests neither SQLite nor the model)",
+   "stronger_found": 0,
+   "own_lines": 301,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/unit/test_p015_t1524_equivalent_deletion_keeps_obligations.py::test_an_unused_equivalent_still_deletes",
+   "stronger": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_an_unused_equivalent_still_deletes (same name, same assertions; the gate runs mode A on the MIGRATED schema - scripts/verify_local.ps1:152-153 and .github/workflows/quality.yml:85 set GEO_TEST_USE_MIGRATED_SCHEMA=1 - so this 'SQLite/model half' tests neither SQLite nor the model)",
+   "stronger_found": 0,
+   "own_lines": 113,
+   "stronger_lines": 0,
+   "not_in_stronger": null,
+   "not_in_stronger_by_file": null
+  },
+  {
+   "test": "tests/integration/test_p017_t1702_mode_b_fixture_postgres.py::test_mode_a_commit_is_not_visible_to_another_connection",
+   "stronger": "tests/integration/test_p017_mode_a_isolation_survives_an_application_commit_postgres.py::test_an_application_commit_inside_mode_a_stays_inside_the_test",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 10,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p018_b_book_transaction_contract_postgres.py::test_a_failure_inside_leaves_nothing_and_the_sibling_operation_commits",
+   "stronger": "tests/integration/test_p018_b_step4_counterexamples_postgres.py::test_c11_a_failure_inside_one_operation_leaves_nothing_and_its_sibling_commits[a business rejection in the body]",
+   "stronger_found": 5,
+   "own_lines": 227,
+   "stronger_lines": 227,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p019_api_payment_commits_once_postgres.py::test_a_successful_api_payment_commits_once",
+   "stronger": "tests/integration/test_p019_no_durable_intermediate_state_postgres.py::test_no_intermediate_state_is_visible_before_the_money_commit",
+   "stronger_found": 1,
+   "own_lines": 1479,
+   "stronger_lines": 1512,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_amount_first_executes_the_long_cycle_over_a_shared_edge",
+   "stronger": "tests/integration/test_p023_reproducers_postgres.py::test_r023_2_shared_edge_six_versus_eight",
+   "stronger_found": 1,
+   "own_lines": 1061,
+   "stronger_lines": 1038,
+   "not_in_stronger": 23,
+   "not_in_stronger_by_file": {
+    "core/clearing/service.py": 22,
+    "core/ledger/book.py": 1
+   }
+  },
+  {
+   "test": "tests/unit/test_p017_default_tier_can_see_the_lock.py::test_the_owner_lock_is_executed_and_held_on_the_default_tier",
+   "stronger": "tests/integration/test_p019_equivalent_lock_modes_postgres.py::test_two_shared_holders_of_one_equivalent_are_granted_together",
+   "stronger_found": 1,
+   "own_lines": 31,
+   "stronger_lines": 31,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_p017_default_tier_can_see_the_lock.py::test_an_empty_equivalent_set_takes_no_lock",
+   "stronger": "tests/integration/test_p019_equivalent_lock_modes_postgres.py::test_two_shared_holders_of_one_equivalent_are_granted_together",
+   "stronger_found": 1,
+   "own_lines": 13,
+   "stronger_lines": 31,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/contract/test_p011_declared_status_reachability.py::test_no_route_declares_503_only_in_the_canon",
+   "stronger": "tests/contract/test_openapi_contract.py::test_openapi_success_error_responses_and_security_are_ratcheted",
+   "stronger_found": 1,
+   "own_lines": 2,
+   "stronger_lines": 2,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/contract/test_p011_declared_status_reachability.py::test_each_route_of_the_class_declares_it_in_the_application_schema",
+   "stronger": "tests/contract/test_openapi_contract.py::test_openapi_success_error_responses_and_security_are_ratcheted",
+   "stronger_found": 1,
+   "own_lines": 2,
+   "stronger_lines": 2,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/contract/test_p011_rate_limit_status_is_declared.py::test_every_rate_limited_operation_declares_429",
+   "stronger": "tests/contract/test_p011_reachable_statuses_are_declared.py::test_no_new_undeclared_reachable_status_in_the_canon",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 32,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/contract/test_p011_root_routes_bypass_the_policy_gate.py::test_root_routes_do_not_go_through_the_rate_limit_dependency",
+   "stronger": "tests/contract/test_p011_root_routes_bypass_the_policy_gate.py::test_adding_root_paths_to_the_exempt_list_would_change_nothing",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p011_events_poll_is_always_empty.py::test_the_cursor_makes_no_difference_because_nothing_reads_it",
+   "stronger": "tests/integration/test_p011_events_poll_is_always_empty.py::test_the_poll_answers_an_empty_array_whatever_it_is_asked[with-cursor]",
+   "stronger_found": 4,
+   "own_lines": 46,
+   "stronger_lines": 46,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p012_rt2_precision_1_amount_is_erased_on_the_wire_postgres.py::test_rt_012_2_an_amount_accepted_and_stored_is_reported_as_zero_on_the_wire",
+   "stronger": "tests/integration/test_p012_t1207_one_money_form_across_producers.py::test_the_edge_patch_and_the_snapshot_report_the_same_trustline[10.00000000-0.05-1]",
+   "stronger_found": 15,
+   "own_lines": 1536,
+   "stronger_lines": 553,
+   "not_in_stronger": 1237,
+   "not_in_stronger_by_file": {
+    "core/payments/service.py": 444,
+    "core/payments/router.py": 143,
+    "core/trustlines/service.py": 103,
+    "core/money_boundary.py": 82,
+    "core/invariants.py": 67
+   }
+  },
+  {
+   "test": "tests/integration/test_p012_rt2_precision_1_amount_is_erased_on_the_wire_postgres.py::test_rt_012_2_counter_check_the_same_amount_at_precision_2_is_reported_faithfully",
+   "stronger": "tests/integration/test_p012_t1207_one_money_form_across_producers.py::test_the_edge_patch_and_the_snapshot_report_the_same_trustline[10.00000000-0.05-2]",
+   "stronger_found": 15,
+   "own_lines": 1532,
+   "stronger_lines": 553,
+   "not_in_stronger": 1237,
+   "not_in_stronger_by_file": {
+    "core/payments/service.py": 444,
+    "core/payments/router.py": 143,
+    "core/trustlines/service.py": 103,
+    "core/money_boundary.py": 82,
+    "core/invariants.py": 67
+   }
+  },
+  {
+   "test": "tests/integration/test_p012_rt2_precision_1_amount_is_erased_on_the_wire_postgres.py::test_rt_012_2_the_other_producer_in_the_same_file_puts_exponential_money_on_the_wire",
+   "stronger": "tests/integration/test_p012_t1207_one_money_form_across_producers.py::test_no_producer_reading_the_ledger_emits_exponential_money",
+   "stronger_found": 1,
+   "own_lines": 757,
+   "stronger_lines": 698,
+   "not_in_stronger": 459,
+   "not_in_stronger_by_file": {
+    "core/trustlines/service.py": 103,
+    "core/invariants.py": 55,
+    "core/auth/service.py": 51,
+    "core/integrity.py": 49,
+    "utils/validation.py": 39
+   }
+  },
+  {
+   "test": "tests/integration/test_p012_t1202_money_modules_read_precision_postgres.py::test_the_sql_detector_and_the_dfs_fallback_agree_on_what_a_real_debt_is",
+   "stronger": "tests/integration/test_p012_money_form_and_detector_reach_postgres.py::test_one_debt_has_one_string_whichever_detector_answered",
+   "stronger_found": 1,
+   "own_lines": 504,
+   "stronger_lines": 504,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p012_t1211_negative_zero_cannot_come_back_from_the_ledger_postgres.py::test_the_renderer_disagreement_this_pins_is_still_real",
+   "stronger": "tests/unit/test_p012_t1211_money_rendering_conformance.py::test_negative_zero_is_the_one_place_the_three_copies_disagree",
+   "stronger_found": 1,
+   "own_lines": 12,
+   "stronger_lines": 12,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p012_t1211_shared_edge_order_postgres.py::test_within_a_length_the_largest_executable_cycle_comes_first_pg",
+   "stronger": "tests/unit/test_p012_t1210_detector_union_default_tier.py::test_within_a_length_the_largest_executable_cycle_comes_first",
+   "stronger_found": 1,
+   "own_lines": 496,
+   "stronger_lines": 496,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py::test_the_error_budget_assertion_can_see_a_failed_tick",
+   "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_tail_failure_after_the_money_commit_never_replays_money",
+   "stronger_found": 1,
+   "own_lines": 3814,
+   "stronger_lines": 2477,
+   "not_in_stronger": 1354,
+   "not_in_stronger_by_file": {
+    "core/clearing/service.py": 564,
+    "core/simulator/real_clearing_engine.py": 263,
+    "core/payments/service.py": 147,
+    "core/simulator/real_payments_executor.py": 89,
+    "core/simulator/real_tick_clearing_coordinator.py": 74
+   }
+  },
+  {
+   "test": "tests/integration/test_simulator_metrics_numeric_value_postgres.py::test_probe_value_is_beyond_float",
+   "stronger": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_the_probe_value_really_is_beyond_float",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_simulator_super_smoke.py::test_super_smoke_part3_real_mode_http_startup",
+   "stronger": "tests/integration/test_simulator_sse_real_smoke.py::test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 3635,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_interact_actions_backend_p1.py::test_action_participants_list_returns_array",
+   "stronger": "tests/unit/test_interact_actions_backend_p1.py::test_action_participants_list_is_run_scoped_snapshot_only",
+   "stronger_found": 1,
+   "own_lines": 86,
+   "stronger_lines": 86,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_interact_actions_backend_p1.py::test_action_trustlines_list_returns_array",
+   "stronger": "tests/unit/test_interact_actions_backend_p1.py::test_action_trustlines_list_is_run_scoped_and_filters_by_participant_pid",
+   "stronger_found": 1,
+   "own_lines": 105,
+   "stronger_lines": 368,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_real_clearing_engine_partial_failure.py::test_exact_amount_probe_is_beyond_float",
+   "stronger": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_the_probe_value_really_is_beyond_float",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_static_clearing_applies_payment_effects_after_commit",
+   "stronger": "tests/unit/test_real_payments_ordered_journal.py::test_commit_publishes_mixed_outcomes_in_seq_order_and_isolates_errors",
+   "stronger_found": 1,
+   "own_lines": 106,
+   "stronger_lines": 474,
+   "not_in_stronger": 106,
+   "not_in_stronger_by_file": {
+    "core/simulator/real_tick_clearing_coordinator.py": 83,
+    "core/simulator/commit_resolution.py": 23
+   }
+  },
+  {
+   "test": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py::test_volume_probe_is_beyond_float",
+   "stronger": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_the_probe_value_really_is_beyond_float",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_real_tick_orchestrator_rollback_resolution.py::test_a_replay_that_succeeds_commits_and_publishes_exactly_once",
+   "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_real_serialization_failure_replays_the_money_phase_and_commits_once",
+   "stronger_found": 1,
+   "own_lines": 363,
+   "stronger_lines": 2859,
+   "not_in_stronger": 85,
+   "not_in_stronger_by_file": {
+    "core/simulator/real_payments_executor.py": 36,
+    "core/simulator/real_tick_orchestrator.py": 34,
+    "core/simulator/commit_resolution.py": 10,
+    "core/simulator/money_replay.py": 3,
+    "core/simulator/real_tick_payments_coordinator.py": 2
+   }
+  },
+  {
+   "test": "tests/unit/test_real_tick_orchestrator_rollback_resolution.py::test_a_tail_failure_after_the_money_commit_cannot_unpublish_or_replay_money",
+   "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_tail_failure_after_the_money_commit_never_replays_money",
+   "stronger_found": 1,
+   "own_lines": 319,
+   "stronger_lines": 2477,
+   "not_in_stronger": 42,
+   "not_in_stronger_by_file": {
+    "core/simulator/real_payments_executor.py": 38,
+    "core/simulator/real_tick_payments_coordinator.py": 4
+   }
+  },
+  {
+   "test": "tests/unit/test_real_tick_orchestrator_rollback_resolution.py::test_a_transient_conflict_is_replayed_and_never_spends_the_error_budget",
+   "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_permanent_contention_exhausts_the_budget_without_spending_the_error_budget",
+   "stronger_found": 1,
+   "own_lines": 203,
+   "stronger_lines": 1757,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_scenario_inject_topology.py::test_add_participant_creates_db_rows",
+   "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_add_participant_appears_in_snapshot",
+   "stronger_found": 1,
+   "own_lines": 898,
+   "stronger_lines": 902,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_scenario_inject_topology.py::test_create_trustline_creates_db_row",
+   "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_create_trustline_visible_in_routing",
+   "stronger_found": 1,
+   "own_lines": 841,
+   "stronger_lines": 845,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_scenario_inject_topology.py::test_create_trustline_updates_caches",
+   "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_create_trustline_visible_in_routing",
+   "stronger_found": 1,
+   "own_lines": 841,
+   "stronger_lines": 845,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_scenario_inject_topology.py::test_freeze_freezes_incident_trustlines",
+   "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_freeze_removes_from_active_routing",
+   "stronger_found": 1,
+   "own_lines": 791,
+   "stronger_lines": 957,
+   "not_in_stronger": 2,
+   "not_in_stronger_by_file": {
+    "core/simulator/scenario_equivalent.py": 1,
+    "core/simulator/inject_executor.py": 1
+   }
+  },
+  {
+   "test": "tests/unit/test_scenario_inject_topology.py::test_freeze_sets_participant_suspended",
+   "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_freeze_removes_from_active_routing",
+   "stronger_found": 1,
+   "own_lines": 737,
+   "stronger_lines": 957,
+   "not_in_stronger": 1,
+   "not_in_stronger_by_file": {
+    "core/simulator/inject_executor.py": 1
+   }
+  },
+  {
+   "test": "tests/unit/test_simulator_actions_feature_flag.py::test_simulator_actions_are_documented_regardless_of_the_feature_flag",
+   "stronger": "tests/contract/test_p011_callable_surface_matches_canon.py::test_the_eight_interact_mode_operations_are_declared",
+   "stronger_found": 1,
+   "own_lines": 386,
+   "stronger_lines": 0,
+   "not_in_stronger": 386,
+   "not_in_stronger_by_file": {
+    "api/v1/simulator.py": 381,
+    "schemas/simulator.py": 5
+   }
+  },
+  {
+   "test": "tests/unit/test_simulator_cookie_session.py::test_cookie_name_constant",
+   "stronger": "tests/unit/test_simulator_cookie_session.py::test_ensure_session_sets_cookie_and_returns_owner",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 462,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_simulator_cookie_session.py::test_cookie_version_constant",
+   "stronger": "tests/unit/test_simulator_cookie_session.py::test_create_session",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 9,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_simulator_cookie_session.py::test_session_owner_id_format",
+   "stronger": "tests/unit/test_simulator_cookie_session.py::test_validate_session_valid",
+   "stronger_found": 1,
+   "own_lines": 9,
+   "stronger_lines": 22,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_money_series_reach_the_wire_without_losing_precision",
+   "stronger": "tests/integration/test_simulator_metrics_numeric_value_postgres.py::test_money_metric_survives_the_whole_chain_exactly",
+   "stronger_found": 1,
+   "own_lines": 67,
+   "stronger_lines": 163,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_simulator_sse_replay.py::test_subscribe_replays_events_after_last_event_id",
+   "stronger": "tests/unit/test_simulator_sse_replay_atomic.py::test_atomic_subscribe_queues_complete_replay_before_live_tail",
+   "stronger_found": 1,
+   "own_lines": 579,
+   "stronger_lines": 135,
+   "not_in_stronger": 482,
+   "not_in_stronger_by_file": {
+    "core/simulator/artifacts.py": 108,
+    "core/simulator/run_lifecycle.py": 91,
+    "core/simulator/runtime_impl.py": 90,
+    "core/simulator/storage.py": 86,
+    "core/simulator/runtime_utils.py": 48
+   }
+  },
+  {
+   "test": "tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py::test_decay_config_initialized",
+   "stronger": "tests/unit/test_trust_drift.py::TestInitTrustDrift::test_init_stores_original_limit",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 220,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py::test_edge_clearing_history_populated",
+   "stronger": "tests/unit/test_trust_drift.py::TestInitTrustDrift::test_init_stores_original_limit",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 220,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_payment_timeouts.py::test_payment_prepare_timeout_aborts_transaction",
+   "stronger": "tests/integration/test_p019_refusal_classes_characterization_postgres.py::test_the_api_path_refusal_table",
+   "stronger_found": 1,
+   "own_lines": 441,
+   "stronger_lines": 1831,
+   "not_in_stronger": 15,
+   "not_in_stronger_by_file": {
+    "core/payments/service.py": 13,
+    "utils/validation.py": 2
+   }
+  },
+  {
+   "test": "tests/unit/test_payment_timeouts.py::test_payment_commit_timeout_returns_committed_when_tx_already_committed",
+   "stronger": "tests/unit/test_p015_t1523_the_commit_landed_then_the_caller_failed.py::test_a_commit_that_landed_and_then_timed_out_answers_committed_once",
+   "stronger_found": 1,
+   "own_lines": 491,
+   "stronger_lines": 1220,
+   "not_in_stronger": 122,
+   "not_in_stronger_by_file": {
+    "core/payments/service.py": 109,
+    "utils/exceptions.py": 11,
+    "utils/validation.py": 2
+   }
+  },
+  {
+   "test": "tests/integration/test_p1_clearing_run_perimeter_postgres.py::test_interlock_path_refuses_a_cycle_outside_the_perimeter",
+   "stronger": "tests/unit/test_p1_clearing_run_perimeter.py::test_execution_layer_refuses_a_cycle_outside_the_perimeter[mode_b]",
+   "stronger_found": 1,
+   "own_lines": 724,
+   "stronger_lines": 724,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/integration/test_p1_clearing_run_perimeter_postgres.py::test_interlock_path_still_clears_for_the_owning_run",
+   "stronger": "tests/unit/test_p1_clearing_run_perimeter.py::test_a_committed_replay_is_not_returned_to_a_foreign_scope[mode_b]",
+   "stronger_found": 1,
+   "own_lines": 1030,
+   "stronger_lines": 1072,
+   "not_in_stronger": 19,
+   "not_in_stronger_by_file": {
+    "core/clearing/service.py": 19
+   }
+  },
+  {
+   "test": "tests/integration/test_p1_clearing_run_perimeter_postgres.py::test_the_expanding_bind_works_on_postgresql",
+   "stronger": "tests/unit/test_p1_clearing_run_perimeter.py::test_the_sql_producer_itself_is_scoped",
+   "stronger_found": 1,
+   "own_lines": 273,
+   "stronger_lines": 273,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_crypto_pid.py::test_pid_generation_is_deterministic",
+   "stronger": "tests/unit/test_crypto_pid.py::test_pid_generation_matches_spec_sha256_base58",
+   "stronger_found": 1,
+   "own_lines": 10,
+   "stronger_lines": 10,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  },
+  {
+   "test": "tests/unit/test_invariants.py::test_integrity_checkpoint_status_critical_for_trust_limits",
+   "stronger": "tests/unit/test_integrity_checkpoints.py::test_integrity_checkpoint_marks_trust_limit_violation_as_critical",
+   "stronger_found": 1,
+   "own_lines": 336,
+   "stronger_lines": 330,
+   "not_in_stronger": 6,
+   "not_in_stronger_by_file": {
+    "db/models/trustline.py": 6
+   }
+  },
+  {
+   "test": "tests/unit/test_invariants.py::test_integrity_checkpoint_status_warning_for_debt_symmetry",
+   "stronger": "tests/unit/test_integrity_checkpoints.py::test_integrity_checkpoint_marks_debt_symmetry_violation_as_warning",
+   "stronger_found": 1,
+   "own_lines": 339,
+   "stronger_lines": 333,
+   "not_in_stronger": 6,
+   "not_in_stronger_by_file": {
+    "db/models/trustline.py": 6
+   }
+  },
+  {
+   "test": "tests/unit/test_topology_changed_no_empty_payload.py::test_trust_drift_decay_event_does_not_trigger_refresh",
+   "stronger": "tests/unit/test_topology_changed_no_empty_payload.py::TestTopologyChangedPayloadSerialization::test_event_by_alias_true",
+   "stronger_found": 1,
+   "own_lines": 0,
+   "stronger_lines": 0,
+   "not_in_stronger": 0,
+   "not_in_stronger_by_file": {}
+  }
+ ]
+}

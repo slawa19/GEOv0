@@ -1,0 +1,2651 @@
+[
+ {
+  "file": "tests/integration/test_p015_b4_entries_and_money_postgres.py",
+  "lines": 2792,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": [
+   "U-A-p015-1",
+   "U-A-p015-2",
+   "U-A-p015-3",
+   "U-B-p015-10"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_c4_p_the_life_of_one_edge_at_full_money_size_is_exact_integer_atoms",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-1",
+    "stronger": null,
+    "lines": 89,
+    "items": 1
+   },
+   {
+    "name": "test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attempts_entries",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-2",
+    "stronger": null,
+    "lines": 145,
+    "items": 1
+   },
+   {
+    "name": "test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winning_entries",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 141,
+    "items": 1
+   },
+   {
+    "name": "test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winning_entries",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-10",
+    "stronger": null,
+    "lines": 188,
+    "items": 1
+   },
+   {
+    "name": "test_c12_p_a_value_outside_the_money_domain_is_refused_before_any_debt_sql",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 116,
+    "items": 4
+   },
+   {
+    "name": "test_c12_p_control_this_dialect_stores_the_whole_domain_exactly",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 41,
+    "items": 4
+   },
+   {
+    "name": "test_c13_p_two_concurrent_openers_of_one_identity_and_the_database_refuses_one",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 100,
+    "items": 1
+   },
+   {
+    "name": "test_c14_the_payment_envelope_is_written_before_its_first_debt_write",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 116,
+    "items": 1
+   },
+   {
+    "name": "test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cleared",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 116,
+    "items": 1
+   },
+   {
+    "name": "test_c17_p_deleting_an_equivalent_whose_only_debt_was_cleared_is_refused_with_409",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 83,
+    "items": 1
+   },
+   {
+    "name": "test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_its_history",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 235,
+    "items": 2
+   },
+   {
+    "name": "test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_the_foreign_key",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 77,
+    "items": 1
+   },
+   {
+    "name": "test_c18_p_entries_come_from_the_retry_and_carry_the_concurrent_value",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attempts_entries",
+    "lines": 99,
+    "items": 1
+   },
+   {
+    "name": "test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 68,
+    "items": 8
+   },
+   {
+    "name": "test_c19_p_the_boundary_with_step_6_moved_on_this_tier_and_here_is_where_it_is_now",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 98,
+    "items": 1
+   },
+   {
+    "name": "test_c19_p_nan_is_excluded_by_the_magnitude_clause_and_not_by_positivity",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c19_p_a_shape_invalid_forged_row_is_refused_by_the_named_rule[an entry whose delta is not a number]",
+    "lines": 43,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py",
+  "lines": 1132,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_c5_p_the_journal_of_an_honest_payment_is_exact_at_full_money_size",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 86,
+    "items": 1
+   },
+   {
+    "name": "test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_today",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves",
+    "lines": 143,
+    "items": 1
+   },
+   {
+    "name": "test_c6_p_control_the_same_payment_without_the_wrapper_satisfies_criterion_b",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full",
+    "lines": 77,
+    "items": 1
+   },
+   {
+    "name": "test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_verified",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind",
+    "lines": 162,
+    "items": 1
+   },
+   {
+    "name": "test_c6_p_control_the_same_cycle_without_the_listener_satisfies_criterion_b",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed",
+    "lines": 91,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py",
+  "lines": 1450,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": [
+   "U-A-p015-18",
+   "U-A-p015-4"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": "its helpers (_seed_triangle, _edges, _prepare_payment, _routed_over, _collapse_the_route, _under_clear_by_one_atom, _audit, _tx_state, ATOM) are imported by 6 test modules and 2 out-of-tier probes: move them to a support module first",
+  "tests": [
+   {
+    "name": "test_c5_the_journal_of_an_honest_payment_equals_the_change_and_the_intent",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-18",
+    "stronger": "transfer the assertions 'three entries, strictly increasing ordinal; first entry is b->a U 7->2' into tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full",
+    "lines": 100,
+    "items": 1
+   },
+   {
+    "name": "test_c13_a_replayed_payment_commit_leaves_exactly_one_envelope",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 70,
+    "items": 1
+   },
+   {
+    "name": "test_c13_a_replayed_clearing_leaves_exactly_one_envelope",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 75,
+    "items": 1
+   },
+   {
+    "name": "test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_today",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves",
+    "lines": 168,
+    "items": 1
+   },
+   {
+    "name": "test_c6_control_the_same_payment_without_the_wrapper_satisfies_criterion_b",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full",
+    "lines": 88,
+    "items": 1
+   },
+   {
+    "name": "test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_verified",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind",
+    "lines": 172,
+    "items": 1
+   },
+   {
+    "name": "test_c6_control_the_same_cycle_without_the_listener_satisfies_criterion_b",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed",
+    "lines": 99,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py",
+  "lines": 255,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-A-p015-16",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_an_inject_opposite_to_an_existing_debt_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-16",
+    "stronger": null,
+    "lines": 15,
+    "items": 1
+   },
+   {
+    "name": "test_an_opposing_effect_of_the_same_event_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-16",
+    "stronger": null,
+    "lines": 20,
+    "items": 1
+   },
+   {
+    "name": "test_counter_check_an_inject_in_the_same_direction_still_increases_the_debt",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-16",
+    "stronger": null,
+    "lines": 17,
+    "items": 1
+   },
+   {
+    "name": "test_counter_check_an_inject_on_a_pair_without_debt_still_creates_it",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-16",
+    "stronger": null,
+    "lines": 14,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_inject_holds_the_owner_lock_postgres.py",
+  "lines": 403,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_due_events_phase_writes_each_injected_debt_under_its_owner_lock",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 25,
+    "items": 1
+   },
+   {
+    "name": "test_a_real_tick_keeps_the_owner_lock_boundary_from_inject_to_payments",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 56,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_inject_retries_a_serialization_failure_postgres.py",
+  "lines": 186,
+  "verdict": "MERGE",
+  "basket": "B",
+  "universal": "U-B-p015-10",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_work",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-10",
+    "stronger": null,
+    "lines": 133,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_p1_money_replay_postgres.py",
+  "lines": 812,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": "U-B-p015-11",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_stand_is_serializable",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_real_serialization_failure_replays_the_money_phase_and_commits_once (asserts sqlstates == ['40001'], which cannot arise below SERIALIZABLE)",
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_a_real_serialization_failure_replays_the_money_phase_and_commits_once",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-11",
+    "stronger": null,
+    "lines": 85,
+    "items": 1
+   },
+   {
+    "name": "test_a_genuine_40001_is_raised_by_the_staged_write_on_this_backend",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-11",
+    "stronger": null,
+    "lines": 82,
+    "items": 2
+   },
+   {
+    "name": "test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 45,
+    "items": 1
+   },
+   {
+    "name": "test_permanent_contention_exhausts_the_budget_without_spending_the_error_budget",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   },
+   {
+    "name": "test_a_tail_failure_after_the_money_commit_never_replays_money",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 44,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_step5a_reconciliation_postgres.py",
+  "lines": 428,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": "U-A-p015-6",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5a_p_both_construction_paths_build_the_same_tables_and_both_bite",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 60,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_p_passed_failed_unverifiable_and_the_scheduled_row",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5a_reconciliation.py::test_step5a_a_one_atom_change_around_the_application_is_failed + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_an_application_payment_that_moves_debts_and_journal_is_passed + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_without_a_baseline_the_result_is_unverifiable_never_passed + tests/unit/test_p015_step5a_reconciliation.py::test_step5a_an_unchanged_verdict_keeps_one_row_and_advances_last_checked_at (TRANSFER one assertion into the without_a_baseline test: two scheduled runs store exactly one UNVERIFIABLE row)",
+    "lines": 42,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_p_a_fixture_write_after_the_baseline_is_refused",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5a_reconciliation.py::test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused[TEST_FIXTURE]",
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still_passed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_alongside_it",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 64,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_step5a_reconciliation.py",
+  "lines": 1020,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5a_a_one_atom_change_around_the_application_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 44,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_an_application_payment_that_moves_debts_and_journal_is_passed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_without_a_baseline_the_result_is_unverifiable_never_passed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_journal_row_contradicting_its_own_arithmetic_is_failed_and_dominates",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_missing_delta_on_an_edge_the_application_removed_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 30,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_duplicated_delta_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_payment_committed_between_the_verifiers_reads_is_still_passed",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_step5a_reconciliation_postgres.py::test_step5a_p_a_payment_committed_between_the_verifiers_reads_is_still_passed (same stand and _assert_interleave; the PG form runs the stand at READ COMMITTED, so it also proves the verifier's own snapshot)",
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_an_unchanged_verdict_keeps_one_row_and_advances_last_checked_at",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_failed_then_passed_transition_inserts_and_keeps_the_failed_evidence",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_payment_on_an_already_failed_edge_keeps_the_fault_identity",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 54,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_different_findings_under_the_same_status_insert",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_the_baseline_adopts_a_debt_the_journal_cannot_explain_and_later_change_is_checked",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_an_equivalent_has_exactly_one_baseline",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 57,
+    "items": 2
+   },
+   {
+    "name": "test_step5a_the_scheduled_result_is_its_own_row_and_never_enters_a_checkpoint_or_audit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 63,
+    "items": 1
+   },
+   {
+    "name": "test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_step5b_criterion_b_postgres.py",
+  "lines": 587,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": [
+   "U-A-p015-12",
+   "U-A-p015-6"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5b_p_both_construction_paths_widen_only_the_intent_version_and_it_bites",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 38,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_for_share",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-12",
+    "stronger": null,
+    "lines": 48,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_make_the_record_disagree",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_the_record_disagree",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 42,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_the_prestate_window",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 68,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_p_the_criterion_b_controls_hold_on_asyncpg",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::<the same-named test, per parametrised row> (this test calls the unit function object itself; since 017 both run on PostgreSQL/asyncpg, so every item is executed twice)",
+    "lines": 11,
+    "items": 15
+   },
+   {
+    "name": "test_step5b_p_a_b_finding_is_stored_in_the_same_row_on_asyncpg",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5b_criterion_b.py::test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_never_in_a_checkpoint (calls it directly)",
+    "lines": 5,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_p_an_unwidened_version_check_refuses_the_payment_and_the_service_aborts_it",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 88,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_step5b_criterion_b.py",
+  "lines": 1056,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-12",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 50,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_a_corrupted_payment_record_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 50,
+    "items": 3
+   },
+   {
+    "name": "test_step5b_net_neutral_cycle_inflation_on_a_payment_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_a_v1_payment_is_structural_only_and_never_a_full_recomputation",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_a_v1_payment_with_an_edge_outside_its_flow_pairs_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 36,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_a_corrupted_clearing_record_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 102,
+    "items": 5
+   },
+   {
+    "name": "test_step5b_an_honest_inject_is_checked_as_its_subset_and_passed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_an_inject_outside_its_subset_is_failed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 74,
+    "items": 4
+   },
+   {
+    "name": "test_step5b_the_version_split_and_the_check_on_the_metadata_path",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 67,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_never_in_a_checkpoint",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 57,
+    "items": 1
+   },
+   {
+    "name": "test_step5b_the_prestate_is_one_read_after_the_operator_stop_and_before_the_envelope",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-12",
+    "stronger": null,
+    "lines": 66,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_step5c_hold_races_postgres.py",
+  "lines": 819,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": [
+   "U-A-p015-6",
+   "U-B-p015-8"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5c_p_a_reaction_arriving_between_the_binding_and_the_money_phase_holds_first_and_the_payment_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 88,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_waits_and_holds_after",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 83,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_the_reaction_confirms_in_its_own_snapshot_taken_after_the_verdict",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 65,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_its_fresh_snapshot",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 76,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_hold",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 76,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_the_admin_clear_waits_for_a_holder_of_the_row",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 64,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_the_evidence_of_a_hold_cannot_be_deleted_while_held",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_step5c_reaction_and_hold.py::test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held (superset: hold set by the real reaction, latest-row id also asserted)",
+    "lines": 23,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_p_both_construction_paths_build_the_same_hold_column_and_the_downgrade_refuses_a_hold",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": "catalogue half only; the migration-028 downgrade-refusal half stays as a test of its own",
+    "lines": 76,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_step5c_hold_through_the_tick_sqlite.py",
+  "lines": 197,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-A-p015-7b",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5c_a_held_inject_is_consumed_and_does_not_fail_the_run",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7b",
+    "stronger": null,
+    "lines": 50,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_held_tick_clearing_does_not_spend_the_error_budget",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7b",
+    "stronger": null,
+    "lines": 44,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_held_staged_payment_is_rejected_and_the_tick_continues",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7b",
+    "stronger": null,
+    "lines": 50,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1544_operator_stop_through_the_tick_sqlite.py",
+  "lines": 336,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-A-p015-7b",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_refused_inject_is_consumed_and_does_not_fail_the_run",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7b",
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   },
+   {
+    "name": "test_a_refused_tick_clearing_does_not_spend_the_error_budget",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7b",
+    "stronger": null,
+    "lines": 51,
+    "items": 1
+   },
+   {
+    "name": "test_a_refused_staged_payment_is_rejected_and_the_tick_continues",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7b",
+    "stronger": null,
+    "lines": 48,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1523_in_progress_and_insert_race_postgres.py",
+  "lines": 350,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 121,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1523_replay_after_a_hold_or_an_abort.py",
+  "lines": 341,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-A-p015-4",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_committed_payment_still_replays_its_result_under_an_integrity_hold",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 74,
+    "items": 1
+   },
+   {
+    "name": "test_a_tx_id_whose_payment_aborted_replays_the_stored_aborted_result",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 88,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1523_restart_after_commit_postgres.py",
+  "lines": 292,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_payment_committed_by_a_process_that_died_is_replayed_by_another_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 145,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py",
+  "lines": 155,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-3",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_database_refuses_to_delete_an_equivalent_that_carries_debt",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 25,
+    "items": 1
+   },
+   {
+    "name": "test_the_route_refuses_when_its_usage_count_misses_a_debt",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_b4_entries_and_money_postgres.py::test_c17_p_deleting_an_equivalent_whose_only_debt_was_cleared_is_refused_with_409 (the same IntegrityError->409 branch of admin_delete_equivalent, reached with honest zero usage counts instead of a patched private _equivalent_usage_counts) + tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_database_refuses_to_delete_an_equivalent_that_carries_debt",
+    "lines": 25,
+    "items": 1
+   },
+   {
+    "name": "test_an_unused_equivalent_still_deletes",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 11,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1525_classification_reads_deliberate_wrapping_only_postgres.py",
+  "lines": 299,
+  "verdict": "MERGE",
+  "basket": "B",
+  "universal": "U-A-p015-5",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_terminal_error_inside_a_40001_handler_is_not_retryable",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 38,
+    "items": 1
+   },
+   {
+    "name": "test_a_genuine_40001_is_still_retryable_on_both_classifiers",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_a_genuine_55p03_is_still_found_by_the_narrowed_walk",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1525_control_postgres.py",
+  "lines": 587,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_postgres_an_aborted_service_payment_leaves_debts_unchanged",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_postgres_a_rolled_back_tick_leaves_no_payment_from_the_executor",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_t1525_control_postgres.py::test_postgres_a_real_tick_failing_after_payments_leaves_no_payment (same _assert_rolled_back_tick_left_no_payment plus last_error; the narrow form drives RealPaymentsExecutor and the resolver directly)",
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_postgres_a_real_tick_failing_after_payments_leaves_no_payment",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 12,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py",
+  "lines": 445,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-17",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_an_orm_write_of_nan_must_not_reach_the_money_column",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 62,
+    "items": 1
+   },
+   {
+    "name": "test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py::test_a_an_orm_write_of_nan_must_not_reach_the_money_column (identical NaN write; test_a asserts the stored amounts are exactly ['5.00000000'], which fixes the sum)",
+    "lines": 48,
+    "items": 1
+   },
+   {
+    "name": "test_c_the_database_itself_refuses_nan_when_python_is_bypassed",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-17",
+    "stronger": null,
+    "lines": 79,
+    "items": 1
+   },
+   {
+    "name": "test_d_the_same_hole_in_the_other_money_column_is_closed_too",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-17",
+    "stronger": null,
+    "lines": 74,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1530_delta_arithmetic_postgres.py",
+  "lines": 269,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": "U-A-p015-6",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_t1530_p_the_constraint_exists_and_bites_on_both_construction_paths",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 85,
+    "items": 1
+   },
+   {
+    "name": "test_t1530_the_migration_and_the_metadata_spell_the_same_predicate",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_t1530_delta_arithmetic_postgres.py::test_t1530_p_the_constraint_exists_and_bites_on_both_construction_paths (stored definitions compared on both databases; the tier cannot start without PostgreSQL, so 'needs no server' buys nothing)",
+    "lines": 25,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1533_participant_deletion_keeps_obligations_postgres.py",
+  "lines": 277,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": [
+   "U-A-p015-3",
+   "U-A-p015-6"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_database_refuses_to_delete_a_debtor_who_still_owes",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_the_database_refuses_to_delete_a_creditor_who_is_still_owed",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   },
+   {
+    "name": "test_the_refusal_is_the_debts_own_constraint_and_not_the_journals_history",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 32,
+    "items": 1
+   },
+   {
+    "name": "test_a_participant_who_owes_nothing_still_deletes",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_the_migrated_schema_declares_restrict_on_both_participant_columns",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 28,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1534_the_migrated_schema_flag_is_true_postgres.py",
+  "lines": 147,
+  "verdict": "KEEP",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_t1534_the_gate_schema_is_stamped_at_the_repository_head",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   },
+   {
+    "name": "test_t1534_the_gate_schema_was_built_by_the_migrations_not_by_create_all",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1544_operator_stop_races_postgres.py",
+  "lines": 935,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": "U-B-p015-8",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_stop_arriving_between_the_binding_and_the_money_phase_answers_first_and_the_payment_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 102,
+    "items": 1
+   },
+   {
+    "name": "test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_flag",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 88,
+    "items": 1
+   },
+   {
+    "name": "test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snapshot",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 94,
+    "items": 1
+   },
+   {
+    "name": "test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_replay_refuses",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 80,
+    "items": 1
+   },
+   {
+    "name": "test_a_commit_guard_conflict_on_every_attempt_exhausts_the_budget_without_money",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   },
+   {
+    "name": "test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_that_payment",
+    "verdict": "MERGE",
+    "universal": "U-B-p015-8",
+    "stronger": null,
+    "lines": 90,
+    "items": 1
+   },
+   {
+    "name": "test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_nothing",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 101,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1544_operator_stop_refuses_money.py",
+  "lines": 463,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": [
+   "U-A-p015-4",
+   "U-A-p015-7a"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_payment_in_a_deactivated_equivalent_is_refused_before_any_transaction_exists",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7a",
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_an_accepted_payment_still_replays_its_result_after_the_stop",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_a_payment_prepared_before_the_stop_is_refused_at_commit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 64,
+    "items": 1
+   },
+   {
+    "name": "test_clearing_in_a_deactivated_equivalent_is_refused_and_keeps_the_debts",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7a",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_clearing_real_reports_the_stop_as_its_declared_409",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7a",
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1545_max_flow_to_self.py",
+  "lines": 53,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_max_flow_to_own_pid_is_refused_like_a_payment_to_yourself",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1549_test_engine_runs_at_the_application_isolation_postgres.py",
+  "lines": 69,
+  "verdict": "KEEP",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": "test 2 asserts the dead SQLite branch `_test_engine_isolation_kwargs('sqlite') == {}` (tests/conftest.py:139): drop that line together with the branch",
+  "tests": [
+   {
+    "name": "test_the_shared_test_engine_connects_at_the_application_isolation",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_the_test_engine_isolation_is_read_from_the_setting_not_a_literal",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 8,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line_postgres.py",
+  "lines": 133,
+  "verdict": "DELETE-DUP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py::test_the_triangle_query_returns_a_cycle_through_a_frozen_line[frozen] + tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py::test_clearing_reduces_the_over_limit_debt_on_a_frozen_line[frozen] (MODE_B: real commits on PostgreSQL through the same auto_clear; same amounts 30/30/150, same residual 20)",
+    "lines": 97,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py",
+  "lines": 153,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_no_module_carries_the_marker_any_more",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_pytest_no_longer_registers_the_marker + pytest.ini --strict-markers (an unregistered marker is a collection error)",
+    "lines": 34,
+    "items": 1
+   },
+   {
+    "name": "test_pytest_no_longer_registers_the_marker",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   },
+   {
+    "name": "test_the_canonical_runner_subtracts_the_marker_from_no_tier",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_pytest_no_longer_registers_the_marker (a runner exclusion of a marker nothing can carry excludes nothing; the runner's `not slow` default is the subject of the runner-policy guards)",
+    "lines": 29,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_b4_entries_and_money.py",
+  "lines": 752,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": [
+   "U-A-p015-1",
+   "U-A-p015-2",
+   "U-A-p015-3"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_c4_one_edge_through_insert_update_update_delete_is_four_linked_entries",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-1",
+    "stronger": null,
+    "lines": 73,
+    "items": 1
+   },
+   {
+    "name": "test_c4_an_amount_change_and_a_delete_in_one_flush_are_one_effect",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-1",
+    "stronger": null,
+    "lines": 56,
+    "items": 1
+   },
+   {
+    "name": "test_c4_an_edge_created_and_removed_again_still_counts_two_effects",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-1",
+    "stronger": null,
+    "lines": 42,
+    "items": 1
+   },
+   {
+    "name": "test_c4_a_deleted_edge_that_comes_back_is_an_insert_and_not_an_update",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-1",
+    "stronger": null,
+    "lines": 57,
+    "items": 1
+   },
+   {
+    "name": "test_c13_a_second_operation_with_a_spent_identity_is_refused",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 54,
+    "items": 2
+   },
+   {
+    "name": "test_c15_a_process_that_imports_only_the_models_still_cannot_write_a_debt",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py::test_t1801_a_raw_driver_write_with_no_operation_is_refused_and_the_row_is_unchanged (the refusal is the database trigger's GE001 on every connection; the listener-era premise 'protection must arrive with the models' has no referent)",
+    "lines": 60,
+    "items": 1
+   },
+   {
+    "name": "test_c17_a_row_the_journal_history_names_cannot_be_deleted",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 81,
+    "items": 2
+   },
+   {
+    "name": "test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stale_one",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-2",
+    "stronger": null,
+    "lines": 104,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py",
+  "lines": 195,
+  "verdict": "KEEP",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_every_fixture_block_in_the_tree_contains_only_fixture_setup",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_the_tree_really_uses_the_context_this_guard_is_about",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_c21_the_fixture_block_guard_rejects_application_calls",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 37,
+    "items": 3
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_inject_transaction_ownership.py",
+  "lines": 996,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_staging_leaves_the_transaction_to_its_caller_rollback",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_staging_leaves_the_transaction_to_its_caller_commit_control",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_the_owner_refuses_a_session_with_unflushed_changes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 24,
+    "items": 1
+   },
+   {
+    "name": "test_the_owner_returns_with_no_transaction_open",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_a_transient_failure_is_retried_and_applied_exactly_once",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 37,
+    "items": 4
+   },
+   {
+    "name": "test_a_second_transient_failure_propagates_and_leaves_the_event_pending",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 32,
+    "items": 2
+   },
+   {
+    "name": "test_a_non_transient_staging_error_is_recorded_not_retried",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   },
+   {
+    "name": "test_staging_a_freeze_outside_the_lock_set_raises_before_staging_it",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 24,
+    "items": 1
+   },
+   {
+    "name": "test_the_owner_locks_a_freezes_incident_equivalents_before_staging",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 20,
+    "items": 1
+   },
+   {
+    "name": "test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_its_read",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   },
+   {
+    "name": "test_a_freeze_of_two_participants_in_two_outside_equivalents_completes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 81,
+    "items": 1
+   },
+   {
+    "name": "test_a_second_lock_set_expansion_leaves_the_event_pending",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 25,
+    "items": 1
+   },
+   {
+    "name": "test_a_flush_error_is_a_known_rollback_not_an_unknown_outcome",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_a_non_transient_commit_error_keeps_the_event_fired_and_is_not_retried",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_during_the_commit_keeps_the_event_fired",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_while_staging_rolls_back_and_leaves_the_event_pending",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 20,
+    "items": 1
+   },
+   {
+    "name": "test_a_publish_failure_after_commit_keeps_the_committed_inject",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 30,
+    "items": 2
+   },
+   {
+    "name": "test_staging_does_not_touch_the_shared_pid_map",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_a_rolled_back_add_participant_is_not_seen_by_the_retry_but_a_committed_one_is",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 32,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_p1_money_conflict_predicate.py",
+  "lines": 230,
+  "verdict": "MERGE",
+  "basket": "D",
+  "universal": "U-A-p015-5",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_real_serialization_failure_is_a_money_conflict",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 10,
+    "items": 1
+   },
+   {
+    "name": "test_a_real_integrity_error_on_the_same_backend_is_not_a_money_conflict",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   },
+   {
+    "name": "test_the_typed_payment_conflict_is_a_money_conflict",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 6,
+    "items": 1
+   },
+   {
+    "name": "test_the_postgresql_transient_sqlstates_are_money_conflicts",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 28,
+    "items": 2
+   },
+   {
+    "name": "test_a_non_transient_sqlstate_is_not_a_money_conflict",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   },
+   {
+    "name": "test_everything_else_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 36,
+    "items": 8
+   },
+   {
+    "name": "test_the_retryable_conflict_is_matched_by_type_and_not_by_its_base",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_an_unrelated_exception_carrying_a_stray_sqlstate_attribute_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 9,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_p1_money_phase_replay.py",
+  "lines": 634,
+  "verdict": "FIX-DOC",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_conflict_before_the_commit_replays_and_publishes_exactly_once",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   },
+   {
+    "name": "test_a_discarded_attempt_publishes_nothing_and_moves_no_business_counter",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   },
+   {
+    "name": "test_a_discarded_attempt_leaves_no_counter_or_cache_behind",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 50,
+    "items": 1
+   },
+   {
+    "name": "test_a_programmatic_failure_is_never_replayed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_the_budget_is_finite_and_its_exhaustion_is_not_an_error",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_one_attempt_disables_the_replay_entirely",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_a_conflict_at_the_commit_replays_only_because_the_rollback_succeeded",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 30,
+    "items": 1
+   },
+   {
+    "name": "test_an_unknown_outcome_that_landed_publishes_once_and_never_replays",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 36,
+    "items": 1
+   },
+   {
+    "name": "test_an_unresolvable_unknown_outcome_forbids_the_replay_and_is_not_a_conflict",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   },
+   {
+    "name": "test_a_control_stop_is_returned_and_never_replayed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_is_not_a_conflict_and_resolves_the_attempt_as_unknown",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 30,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_step5c_reaction_and_hold.py",
+  "lines": 1018,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": [
+   "U-A-p015-3",
+   "U-A-p015-7a"
+  ],
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_step5c_one_atom_around_the_application_holds_the_equivalent_through_the_scheduled_host",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_hold_whose_commit_fails_persists_nothing_and_emits_no_log_and_no_metric",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 44,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_one_equivalent_failing_to_hold_does_not_roll_back_anothers",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_the_re_run_is_the_confirmation_a_fault_gone_by_the_reaction_is_not_held",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_repeated_failed_is_idempotent",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_no_hold_on_unverifiable",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_no_hold_on_a_verifier_error_either_before_or_inside_the_reaction",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_no_hold_on_an_inherited_critical_checkpoint",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 33,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-3",
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_held_equivalent_refuses_a_new_payment_before_any_transaction_exists",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7a",
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_inactive_and_held_is_refused_as_inactive",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 32,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_before_the_envelope",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 125,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_a_held_equivalent_refuses_clearing_and_another_equivalent_still_clears",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7a",
+    "stronger": null,
+    "lines": 33,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_clearing_real_reports_the_hold_as_its_declared_409",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-7a",
+    "stronger": null,
+    "lines": 67,
+    "items": 1
+   },
+   {
+    "name": "test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_and_audited",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 81,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1514_simulator_must_not_requantise_stored_money.py",
+  "lines": 404,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_injecting_into_a_core_created_debt_preserves_its_stored_precision",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 32,
+    "items": 1
+   },
+   {
+    "name": "test_the_injected_amount_itself_is_still_normalised",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_the_trust_limit_still_bounds_the_result",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_trust_growth_preserves_the_stored_limit_precision",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 36,
+    "items": 1
+   },
+   {
+    "name": "test_trust_growth_still_respects_the_max_growth_ceiling",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_the_scenario_limit_is_not_laundered_through_float",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1522_payment_delta_drift_must_be_exact.py",
+  "lines": 172,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-13",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_one_quantum_of_drift_is_detected",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-13",
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   },
+   {
+    "name": "test_an_exact_match_stays_silent",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-13",
+    "stronger": null,
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_a_drift_the_barrier_already_caught_is_still_caught",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-13",
+    "stronger": null,
+    "lines": 25,
+    "items": 1
+   },
+   {
+    "name": "test_the_barrier_compares_against_zero_and_not_against_a_quantum",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_t1522_payment_delta_drift_must_be_exact.py::test_one_quantum_of_drift_is_detected (a constant pin: by its own docstring any tolerance below one quantum admits nothing that can occur, so it guards no observable behaviour)",
+    "lines": 18,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1523_the_commit_landed_then_the_caller_failed.py",
+  "lines": 344,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-15",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_commit_that_landed_and_then_timed_out_answers_committed_once",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-15",
+    "stronger": null,
+    "lines": 55,
+    "items": 1
+   },
+   {
+    "name": "test_a_commit_that_landed_and_then_raised_a_db_error_answers_committed_once",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-15",
+    "stronger": null,
+    "lines": 50,
+    "items": 1
+   },
+   {
+    "name": "test_a_landed_commit_resolved_after_the_error_applies_its_effects_once",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1524_equivalent_deletion_keeps_obligations.py",
+  "lines": 112,
+  "verdict": "DELETE-DUP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_database_refuses_to_delete_an_equivalent_that_carries_debt",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_database_refuses_to_delete_an_equivalent_that_carries_debt (same name, same assertions; the gate runs mode A on the MIGRATED schema - scripts/verify_local.ps1:152-153 and .github/workflows/quality.yml:85 set GEO_TEST_USE_MIGRATED_SCHEMA=1 - so this 'SQLite/model half' tests neither SQLite nor the model)",
+    "lines": 14,
+    "items": 1
+   },
+   {
+    "name": "test_the_route_refuses_when_its_usage_count_misses_a_debt",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_the_route_refuses_when_its_usage_count_misses_a_debt (same name, same assertions; the gate runs mode A on the MIGRATED schema - scripts/verify_local.ps1:152-153 and .github/workflows/quality.yml:85 set GEO_TEST_USE_MIGRATED_SCHEMA=1 - so this 'SQLite/model half' tests neither SQLite nor the model)",
+    "lines": 24,
+    "items": 1
+   },
+   {
+    "name": "test_an_unused_equivalent_still_deletes",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py::test_an_unused_equivalent_still_deletes (same name, same assertions; the gate runs mode A on the MIGRATED schema - scripts/verify_local.ps1:152-153 and .github/workflows/quality.yml:85 set GEO_TEST_USE_MIGRATED_SCHEMA=1 - so this 'SQLite/model half' tests neither SQLite nor the model)",
+    "lines": 11,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1529_the_envelope_identity_is_a_retryable_race.py",
+  "lines": 163,
+  "verdict": "MIXED",
+  "basket": "D",
+  "universal": "U-A-p015-5",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_t1529_the_identity_set_is_the_envelope_identity_the_schema_declares",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_t1529_no_unique_violation_is_a_retryable_conflict_by_its_sqlstate",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 16,
+    "items": 5
+   },
+   {
+    "name": "test_t1909_the_debt_pair_collision_alone_is_retryable_and_only_as_an_integrity_error",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_t1529_only_the_transaction_identity_reaches_the_identity_resolver",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 9,
+    "items": 5
+   },
+   {
+    "name": "test_t1529_the_positive_controls_are_retryable_at_both_owners",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-5",
+    "stronger": null,
+    "lines": 6,
+    "items": 2
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1533_participant_deletion_keeps_obligations.py",
+  "lines": 240,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-A-p015-6",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_database_refuses_to_delete_a_debtor_who_still_owes",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 11,
+    "items": 1
+   },
+   {
+    "name": "test_the_database_refuses_to_delete_a_creditor_who_is_still_owed",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 10,
+    "items": 1
+   },
+   {
+    "name": "test_no_journal_history_names_these_participants",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 30,
+    "items": 1
+   },
+   {
+    "name": "test_a_participant_who_owes_nothing_still_deletes",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-6",
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1543_frozen_line_is_not_limit_zero.py",
+  "lines": 334,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-14",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_debt_within_the_limit_of_a_frozen_line_is_not_a_violation",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-14",
+    "stronger": null,
+    "lines": 7,
+    "items": 1
+   },
+   {
+    "name": "test_a_frozen_line_within_its_limit_leaves_the_checkpoint_healthy",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_a_payment_beside_a_frozen_line_is_recorded_as_verified",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   },
+   {
+    "name": "test_a_partial_repayment_of_debt_on_a_frozen_line_commits",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   },
+   {
+    "name": "test_a_frozen_line_over_its_limit_is_still_a_violation_against_that_limit",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-14",
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   },
+   {
+    "name": "test_a_debt_without_a_live_line_is_a_violation_against_zero",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-14",
+    "stronger": null,
+    "lines": 17,
+    "items": 1
+   },
+   {
+    "name": "test_an_active_line_is_compared_with_its_stored_limit",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-14",
+    "stronger": null,
+    "lines": 18,
+    "items": 2
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1544_inject_refuses_a_deactivated_equivalent.py",
+  "lines": 149,
+  "verdict": "FIX-DOC",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_an_inject_into_a_deactivated_equivalent_is_consumed_without_debt_or_envelope",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1548_a_replay_without_a_stored_fingerprint_is_refused.py",
+  "lines": 434,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-A-p015-4",
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": true,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_a_replay_of_a_row_without_a_usable_fingerprint_is_refused",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 45,
+    "items": 6
+   },
+   {
+    "name": "test_the_refusal_does_not_depend_on_the_stored_state",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_the_refusal_is_decided_before_the_perimeter",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_the_stored_result_is_still_readable_after_the_refusal",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   },
+   {
+    "name": "test_the_insert_race_row_is_refused_by_the_same_policy",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 66,
+    "items": 1
+   },
+   {
+    "name": "test_a_fingerprinted_replay_of_the_same_request_is_still_an_idempotent_hit",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   },
+   {
+    "name": "test_a_fingerprinted_replay_of_a_different_request_is_still_the_old_conflict",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 20,
+    "items": 1
+   },
+   {
+    "name": "test_a_row_of_another_type_or_another_sender_keeps_its_own_answer",
+    "verdict": "MERGE",
+    "universal": "U-A-p015-4",
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py",
+  "lines": 299,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "fix_doc": false,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_the_triangle_query_returns_a_cycle_through_a_frozen_line",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 8,
+    "items": 2
+   },
+   {
+    "name": "test_the_quadrangle_query_returns_a_cycle_through_a_frozen_line",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 7,
+    "items": 1
+   },
+   {
+    "name": "test_clearing_reduces_the_over_limit_debt_on_a_frozen_line",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 39,
+    "items": 2
+   },
+   {
+    "name": "test_a_frozen_line_without_consent_is_still_not_cleared",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_a_cycle_through_lines_frozen_by_the_simulator_inject_is_cleared",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 58,
+    "items": 1
+   }
+  ]
+ }
+]

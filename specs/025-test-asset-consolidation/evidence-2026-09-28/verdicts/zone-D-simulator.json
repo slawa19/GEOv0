@@ -1,0 +1,3458 @@
+[
+ {
+  "file": "tests/integration/test_scenarios.py",
+  "lines": 727,
+  "verdict": "KEEP",
+  "basket": "A",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "protocol end-to-end (register/auth, trust-line CRUD, direct/multihop/multipath payment, clearing) - not simulator; register_and_login + signed line create repeated ~10x -> factory; float() comparisons of money at :253, :560",
+  "tests": [
+   {
+    "name": "test_clearing",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_direct_payment",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_multihop_payment",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_multipath_payment",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_register_and_auth",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_trustlines_crud",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py",
+  "lines": 519,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "slow A/B benchmark; own seed ring duplicates other stands",
+  "tests": [
+   {
+    "name": "test_adaptive_does_not_degrade_vs_static",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_the_error_budget_assertion_can_see_a_failed_tick",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_tail_failure_after_the_money_commit_never_replays_money",
+    "note": "anti-vacuum control of the benchmark metric; benchmark dies in T2104; behaviour (programmatic tail failure swallowed and counted: last_error REAL_MODE_TICK_FAILED, errors_total==1) asserted by the stronger PG test. 021 Verification plan p.3 lists it for transfer - correct 021"
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_adaptive_clearing_integration.py",
+  "lines": 648,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "5 of 6 are pure coordinator unit tests living in integration/",
+  "tests": [
+   {
+    "name": "test_adaptive_coordinator_processes_equivalents_in_sorted_order",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_adaptive_coordinator_respects_cooldown",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_adaptive_policy_triggers_clearing_on_high_rejection_rate",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_guardrail_inflight_blocks_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_guardrail_queue_depth_blocks_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_static_policy_unchanged_with_adaptive_code_present",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "021-named survivor: static cadence (clearing only on tick % N == 0) -> tick.py (stage 4) via tick_real_mode on mode B; rename"
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_artifacts_events_ndjson.py",
+  "lines": 105,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "waits up to 5 s for a heartbeat event via runtime.subscribe (test-only API per SIM-17); shares run/stop/stream arrange with 8 files",
+  "tests": [
+   {
+    "name": "test_simulator_artifacts_include_events_ndjson",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_clearing_no_deadlock.py",
+  "lines": 305,
+  "verdict": "REWRITE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "t1706 inventory said delete; kept by 017 S2a. Since P1 the parent session holds nothing at clearing, so the stand manufactures the lock by monkeypatching RealTickClearingCoordinator.maybe_run_clearing (:271-279). Rule 'tail commit before clearing' -> tick.py (stage 4) / 023 runner (T2109); seed triangle duplicates adaptive_integration verbatim",
+  "tests": [
+   {
+    "name": "test_the_tick_commits_its_parent_session_before_clearing",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_metrics_migration_018_postgres.py",
+  "lines": 440,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "executes an APPLIED migration (018, immutable per AGENTS 3) on a throwaway schema; one-time authoring evidence of T715. Move to a migration-history tier run only when migrations/ change, or record and delete; dead branch pytest.skip on non-PG URL (:170-171) after 017",
+  "tests": [
+   {
+    "name": "test_migration_018_aborts_instead_of_losing_digits",
+    "items": 1,
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_migration_018_archives_and_retypes_under_hostile_float_digits",
+    "items": 1,
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_migration_018_fails_fast_on_a_busy_table",
+    "items": 1,
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_migration_018_holds_access_exclusive_across_the_copy_window",
+    "items": 1,
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_metrics_numeric_value_postgres.py",
+  "lines": 368,
+  "verdict": "MIXED",
+  "basket": "A",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_adaptive_clearing_volume_reaches_the_column_exactly",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21. Static-form transfer demanded by 021 is the union of ::test_money_metric_survives_the_whole_chain_exactly (writer->wire), test_simulator_metrics_bottlenecks_real_mode.py::test_clearing_volume_leaves_the_producer_as_exact_decimal (producer) and the Decimal result of the clearing runner (023)"
+   },
+   {
+    "name": "test_metric_value_column_is_numeric_20_8",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "basket E: real information_schema"
+   },
+   {
+    "name": "test_money_metric_survives_the_whole_chain_exactly",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "writer->column->reader->wire exact Decimal; NULL vs measured zero"
+   },
+   {
+    "name": "test_overflow_rolls_back_only_the_metrics_write",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-10",
+    "stronger": null,
+    "note": "row numeric_overflow"
+   },
+   {
+    "name": "test_probe_value_is_beyond_float",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_the_probe_value_really_is_beyond_float",
+    "note": "4th copy of the same anti-vacuum probe"
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_network_growth.py",
+  "lines": 826,
+  "verdict": "REWRITE",
+  "basket": "A",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "multi-tick inject timing (event fires only at its time) - unique; stronger than 5 inject_topology tests; imports RealRunner shim (T2109) and calls private _apply_due_scenario_events -> re-point to the due-events phase of tick.py; FIX-DOC: docstring 'real SQLite' (:3-6), name 'appears_in_snapshot' though no snapshot is read",
+  "tests": [
+   {
+    "name": "test_inject_add_participant_appears_in_snapshot",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_inject_create_trustline_visible_in_routing",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_inject_freeze_removes_from_active_routing",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_real_snapshot_db_enrichment.py",
+  "lines": 199,
+  "verdict": "FIX-DOC",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "mode B; comments describe deleted mechanisms (aiosqlite, busy_timeout :107-118, 'journal's write guard' C2 :120-127 - journal deleted by 018); 15x0.2 s real polling (:77-84) -> await seeding via SSE observer; asserts net_sign only (SIM-10 net_balance gap)",
+  "tests": [
+   {
+    "name": "test_real_mode_graph_snapshot_enriches_used_and_net_sign",
+    "items": 1,
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_scenario_upload_validation.py",
+  "lines": 187,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "already parametrized; ScenarioRegistry construction duplicated -> fixture; SIM-01 (scenario_id path traversal / preset override) not covered",
+  "tests": [
+   {
+    "name": "test_scenario_upload_bounds_noncanonical_equivalent_errors",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_scenario_upload_rejects_noncanonical_equivalent_before_storage",
+    "items": 5,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py",
+  "lines": 76,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "HTTP clearing-once -> SSE clearing.done shape",
+  "tests": [
+   {
+    "name": "test_simulator_fixtures_mode_emits_clearing_done_with_plan_id",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_sse_real_smoke.py",
+  "lines": 142,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "mode B; stronger twin of super_smoke part3; receives the two part3-only asserts",
+  "tests": [
+   {
+    "name": "test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_sse_replay_410.py",
+  "lines": 48,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "paths x cursors already looped (8 combos)",
+  "tests": [
+   {
+    "name": "test_simulator_sse_returns_410_for_every_unrecoverable_last_event_id_on_both_endpoints",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_sse_smoke.py",
+  "lines": 72,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "fixtures-mode run_status + tx.updated over HTTP; heartbeat wait <=5 s",
+  "tests": [
+   {
+    "name": "test_simulator_run_events_sse_has_run_status_and_tx_updated",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_sse_trust_drift_decay_topology_patch.py",
+  "lines": 127,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "mode B, real run; the only test of the production decay -> topology.changed(edge_patch) path; up to 2x15 s wait",
+  "tests": [
+   {
+    "name": "test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topology_changed",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_sse_tx_failed_timeout.py",
+  "lines": 148,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "only wire test of PAYMENT_TIMEOUT tx.failed + REAL_MODE_TOO_MANY_TIMEOUTS; monkeypatches runtime._real_runner._real_max_timeouts_per_tick_limit and .fail_run (private runner state) - re-point at stage 4; PaymentService staged seam is a legitimate fault injection",
+  "tests": [
+   {
+    "name": "test_simulator_run_events_sse_real_mode_emits_tx_failed_on_timeout",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_simulator_super_smoke.py",
+  "lines": 1004,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "slow; red on main (2 failed / 1 passed): both failures are stale stands, see report",
+  "tests": [
+   {
+    "name": "test_super_smoke_part1_fixtures_http_visual_contract",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "basket C milestone: tx-once/clearing-once edges subset of snapshot links, run_status shape"
+   },
+   {
+    "name": "test_super_smoke_part2_real_logic_deterministic",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "stale stand: mode-A connection-bound sessionmaker (:831-838) is refused by PG clearing by design (app/core/clearing/service.py:1576-1583 external_connection_bind_unsupported); drives RealClearingEngine (T2109). Move to MODE_B/committed_database and the public tick; keep the real-mode clearing.done node/edge patch shape"
+   },
+   {
+    "name": "test_super_smoke_part3_real_mode_http_startup",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_sse_real_smoke.py::test_simulator_run_events_sse_real_mode_has_run_status_and_tx_updated",
+    "note": "same real run over client + SSE shape; the stronger twin runs in MODE_B, this one in mode A (root cause of its 40001). Transfer: 'no INTERNAL_ERROR in tx.failed' and 'run.state != error'"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_fixtures_runner_clearing_done_amount.py",
+  "lines": 63,
+  "verdict": "MERGE",
+  "basket": "F",
+  "survives_021": "yes",
+  "universal": "U-D-16",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "base row (pending plan -> done, exact 10.00, state cleared)",
+  "tests": [
+   {
+    "name": "test_fixtures_runner_clearing_done_includes_cleared_amount",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-16",
+    "stronger": null,
+    "note": "pending-done row"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_interact_actions_backend_p1.py",
+  "lines": 1838,
+  "verdict": "MIXED",
+  "basket": "A",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "25 functions / 33 items, ~9 rules; block action_* rewritten by 021 stage 2/4 with codes and bodies unchanged -> HTTP asserts survive, patches of module internals do not",
+  "tests": [
+   {
+    "name": "test_action_clearing_real_emits_durable_partial_done_before_sanitized_failure",
+    "items": 5,
+    "verdict": "MERGE",
+    "universal": "U-D-3",
+    "stronger": null,
+    "note": "driver=interact rows"
+   },
+   {
+    "name": "test_action_clearing_real_happy_zero_cycles",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "basket C"
+   },
+   {
+    "name": "test_action_clearing_real_initial_failure_uses_flat_sanitized_error",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-3",
+    "stronger": null,
+    "note": "row 'initial failure: no done, details None'"
+   },
+   {
+    "name": "test_action_clearing_real_total_cleared_amount_is_actual_not_precalc",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "mode B; actual, not precalculated, amount"
+   },
+   {
+    "name": "test_action_participants_list_is_run_scoped_snapshot_only",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "drop the build_graph_snapshot fake: the fixture already registers a real perimeter (:59-77)"
+   },
+   {
+    "name": "test_action_participants_list_returns_array",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_interact_actions_backend_p1.py::test_action_participants_list_is_run_scoped_snapshot_only",
+    "note": "weaker: superset >= vs exact [alice,bob]"
+   },
+   {
+    "name": "test_action_payment_real_amount_manual_validation_stays_invalid_amount",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_action_payment_real_emits_tx_updated_with_edge_patch",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "payment and SseEventEmitter both faked; observe the real tx.updated via runtime subscription after a real payment"
+   },
+   {
+    "name": "test_action_payment_real_happy_mocked",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "create_payment_internal mocked; real success path exists in tests/unit/test_p1_payment_run_perimeter.py::test_a_run_that_contains_the_hop_still_pays_through_it; keep only the response-shape asserts on a real payment"
+   },
+   {
+    "name": "test_action_payment_real_insufficient_capacity_when_topology_path_exists",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "seeds a zero-limit line and then mocks anyway; unmock and measure the real code"
+   },
+   {
+    "name": "test_action_payment_real_no_route_mocked",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "unmock: no line -> real NO_ROUTE"
+   },
+   {
+    "name": "test_action_payment_real_retryable_conflict_is_not_rejected",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "typed-exception mapping row (seam stays)"
+   },
+   {
+    "name": "test_action_trustline_close_happy_and_has_debt",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "409 TRUSTLINE_HAS_DEBT row; happy half -> U-D-2"
+   },
+   {
+    "name": "test_action_trustline_close_seeds_when_run_paused",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "lazy seeding of a paused run (HTTP seeder)"
+   },
+   {
+    "name": "test_action_trustline_create_after_close_is_a_declared_outcome",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-2",
+    "stronger": null,
+    "note": "recreate-after-close row: new id != old"
+   },
+   {
+    "name": "test_action_trustline_create_happy_and_conflict",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "409 TRUSTLINE_EXISTS row; happy half -> U-D-2"
+   },
+   {
+    "name": "test_action_trustline_create_schema_validation_is_invalid_request",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_action_trustline_create_self_loop_is_invalid_request",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_action_trustline_update_happy_and_used_exceeds_new_limit",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "409 USED_EXCEEDS_NEW_LIMIT row; happy half -> U-D-2"
+   },
+   {
+    "name": "test_action_trustlines_list_is_run_scoped_and_filters_by_participant_pid",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "links come from a faked snapshot; seed scenario trustlines so SnapshotBuilder produces them"
+   },
+   {
+    "name": "test_action_trustlines_list_returns_array",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_interact_actions_backend_p1.py::test_action_trustlines_list_is_run_scoped_and_filters_by_participant_pid",
+    "note": "weaker: only 'items is a list'"
+   },
+   {
+    "name": "test_build_clearing_done_cycle_edges_payload_merges_cycles_stable_and_dedup",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "basket C pure helper; moves with the 023(d) clearing loop"
+   },
+   {
+    "name": "test_every_mutating_action_is_run_scoped_not_just_create",
+    "items": 3,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "update/close/payment perimeter rows"
+   },
+   {
+    "name": "test_mutating_action_is_run_scoped_like_its_read_sibling",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "create row of the perimeter; read-side 'mallory not listed' -> participants_list test"
+   },
+   {
+    "name": "test_payment_targets_multihop_returns_backend_reachable_to_pid_list",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-17",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_payment_targets_no_route_returns_empty_items",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-17",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_trustline_create_used_read_error_returns_503_and_error_envelope",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-1",
+    "stronger": null,
+    "note": "fault row via _trustline_used_amount monkeypatch - dies when 021 moves the read into TrustLineService; re-point the seam"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_clearing_engine_partial_failure.py",
+  "lines": 323,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "real_clearing_engine.py and real_runner.py shim, removed by 021 T2109 after 023(d)",
+  "note": "",
+  "tests": [
+   {
+    "name": "test_cleared_volume_is_returned_as_exact_decimal",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "contract (cleared volume leaves the clearing driver as Decimal, zero as Decimal) -> 023(d) runner result at T2109"
+   },
+   {
+    "name": "test_exact_amount_probe_is_beyond_float",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_the_probe_value_really_is_beyond_float",
+    "note": "probe copy"
+   },
+   {
+    "name": "test_partial_clearing_is_finalized_before_failure_propagates",
+    "items": 5,
+    "verdict": "MERGE",
+    "universal": "U-D-3",
+    "stronger": null,
+    "note": "driver=tick rows; move to the 023(d) shared runner"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_payments_ordered_journal.py",
+  "lines": 613,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "PaymentService.create_payment_internal_staged monkeypatched: subject is the executor's publication/ordering, payment faked",
+  "tests": [
+   {
+    "name": "test_commit_publishes_mixed_outcomes_in_seq_order_and_isolates_errors",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "nothing published before commit, seq order, effect error isolated"
+   },
+   {
+    "name": "test_executor_preacquires_complete_sorted_equivalent_owner_set",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "owner-lock order kept by T2100 p.7"
+   },
+   {
+    "name": "test_idempotent_committed_replay_observation_follows_outer_outcome",
+    "items": 2,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_retryable_staged_conflict_propagates_without_rejection_observation",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_stop_requested_double_cancellation_bounds_rollback_wait",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "coordinator (stage 4); same rule as U-D-13"
+   },
+   {
+    "name": "test_stop_requested_rollback_failure_resolves_unknown_once_and_propagates",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "coordinator (stage 4)"
+   },
+   {
+    "name": "test_timeout_stops_tick_but_harvests_and_rolls_back_successful_sibling",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "RealTickPaymentsCoordinator (stage 4) -> tick.py"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_runner_tick_nested_partial_failures.py",
+  "lines": 263,
+  "verdict": "REWRITE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "RealRunner + faked PaymentService + AsyncSessionLocal; asserts savepoint per action, 2 commits, one failed action does not abort the tick -> tick_real_mode on mode B with one unpayable planned action",
+  "tests": [
+   {
+    "name": "test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action_error",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_tick_clearing_coordinator_adaptive.py",
+  "lines": 500,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "",
+  "tests": [
+   {
+    "name": "test_adaptive_exception_is_treated_as_zero_yield_and_triggers_cooldown",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_adaptive_keeps_the_volume_exact_and_hands_the_policy_a_float",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21; static form = engine result passed through unchanged, covered by the clearing-driver Decimal test"
+   },
+   {
+    "name": "test_adaptive_max_eq_per_tick_caps_multi_equivalent_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_adaptive_records_zero_signals_each_tick_so_warmup_finishes",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_adaptive_tick_budget_caps_multi_equivalent_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "test_every_early_return_hands_back_decimal_zeros",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "021-named survivor: seeds 1 (disabled) and 3 (failed clearing) -> tick.py; seed 2 is adaptive and goes"
+   },
+   {
+    "name": "test_static_clearing_applies_payment_effects_after_commit",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_real_payments_ordered_journal.py::test_commit_publishes_mixed_outcomes_in_seq_order_and_isolates_errors",
+    "note": "021-named survivor, but after P1 the effects resolve at the money commit and this second apply is a documented no-op (real_tick_clearing_coordinator.py:486-490 comment); the stub asserts applied==1 with no ordering, so 'after commit' is not observed. Stronger: publication only after commit (unit) + PG test_p015_p1_money_replay_postgres.py::test_a_real_serialization_failure_replays_the_money_phase_and_commits_once"
+   },
+   {
+    "name": "test_volume_probe_is_beyond_float",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py::test_the_probe_value_really_is_beyond_float",
+    "note": "021-named survivor; identical assertion to the kept probe"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_tick_commit_cancellation.py",
+  "lines": 522,
+  "verdict": "MERGE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": "U-D-13",
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "28 items = one function resolve_commit_under_cancellation (commit_resolution.py:102) x 3 wrappers",
+  "tests": [
+   {
+    "name": "test_cancelled_commit_resolves_unknown_for_every_cleanup_outcome",
+    "items": 9,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_clearing_cancellation_waits_for_commit_and_resolves_commit",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_commit_failure_resolves_terminal_rollback_outcome_and_propagates_original",
+    "items": 9,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_persistence_cancellation_waits_for_commit_and_resolves_commit",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_repeated_cancellation_bounds_rollback_wait_and_marks_unknown",
+    "items": 3,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_repeated_cancellation_bounds_wait_and_marks_commit_unknown",
+    "items": 3,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_trust_drift_cancellation_waits_for_commit_and_resolves_commit",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_trust_drift_commit_failure_does_not_apply_staged_effects",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_tick_orchestrator_pending_clearing.py",
+  "lines": 48,
+  "verdict": "REWRITE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "grace-cancel of a pending clearing task -> tick.py; real 0.5 s wait (hard timeout 1 s / 2)",
+  "tests": [
+   {
+    "name": "test_await_pending_clearing_cancels_after_grace",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_tick_orchestrator_rollback_resolution.py",
+  "lines": 608,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "fake _RealRunnerPort",
+  "tests": [
+   {
+    "name": "test_a_committed_money_phase_resets_the_no_progress_counter",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "-> tick.py"
+   },
+   {
+    "name": "test_a_programmatic_failure_still_stops_the_run",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "counter-check -> tick.py"
+   },
+   {
+    "name": "test_a_replay_that_succeeds_commits_and_publishes_exactly_once",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_real_serialization_failure_replays_the_money_phase_and_commits_once",
+    "note": "superset asserted by name and docstring only - read before deleting"
+   },
+   {
+    "name": "test_a_tail_failure_after_the_money_commit_cannot_unpublish_or_replay_money",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_a_tail_failure_after_the_money_commit_never_replays_money",
+    "note": "transfer: phase.apply_rollback_observations() is False after the tail rollback"
+   },
+   {
+    "name": "test_a_transient_conflict_is_replayed_and_never_spends_the_error_budget",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p015_p1_money_replay_postgres.py::test_permanent_contention_exhausts_the_budget_without_spending_the_error_budget",
+    "note": "transfer: 'RETRYABLE_PAYMENT_CONFLICT' in last_error.message"
+   },
+   {
+    "name": "test_double_cancellation_bounds_the_tail_rollback_and_resolves_once",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-13",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_permanent_contention_stops_the_run_by_no_progress_and_not_by_a_sqlstate",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "-> tick.py"
+   },
+   {
+    "name": "test_rollback_failure_in_the_tail_resolves_nothing_of_the_committed_money",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "-> tick.py; log line rollback_failed"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_real_tick_persistence_post_commit.py",
+  "lines": 136,
+  "verdict": "REWRITE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "021 names ::test_outer_commit_failure_does_not_apply_payment_effects for rewrite on tick.py keeping both asserts; the callback-failure test goes with it",
+  "tests": [
+   {
+    "name": "test_outer_commit_failure_does_not_apply_payment_effects",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_post_commit_callback_failure_does_not_rollback_durable_commit",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_scenario_inject_topology.py",
+  "lines": 1458,
+  "verdict": "MIXED",
+  "basket": "A",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "imports RealRunner shim (T2109), calls private _apply_due_scenario_events; docstring 'real SQLite' and malformed-test text 'debt journal was armed' (journal deleted by 018) -> FIX-DOC",
+  "tests": [
+   {
+    "name": "test_add_participant_creates_db_rows",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_add_participant_appears_in_snapshot",
+    "note": ""
+   },
+   {
+    "name": "test_add_participant_idempotent_skip",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_add_participant_updates_caches",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_trustline_creates_db_row",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_create_trustline_visible_in_routing",
+    "note": ""
+   },
+   {
+    "name": "test_create_trustline_idempotent_skip",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_trustline_unknown_equivalent_skips",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_trustline_updates_caches",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_create_trustline_visible_in_routing",
+    "note": "transfer scenario trustline 'to' assert"
+   },
+   {
+    "name": "test_freeze_freezes_incident_trustlines",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_freeze_removes_from_active_routing",
+    "note": ""
+   },
+   {
+    "name": "test_freeze_idempotent",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_freeze_invalidation_is_narrow_per_incident_equivalents",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_freeze_sets_participant_suspended",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_network_growth.py::test_inject_freeze_removes_from_active_routing",
+    "note": ""
+   },
+   {
+    "name": "test_freeze_with_freeze_trustlines_false",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_inject_debt_creates_debt_row_from_to",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_inject_debt_invalidates_graph_cache_and_viz",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_inject_debt_updates_existing_debt_row",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_inject_skipped_when_env_disabled",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_malformed_inject_effect_skipped",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-4",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_actions_feature_flag.py",
+  "lines": 75,
+  "verdict": "MIXED",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_simulator_actions_are_documented_regardless_of_the_feature_flag",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/contract/test_p011_callable_surface_matches_canon.py::test_the_eight_interact_mode_operations_are_declared",
+    "note": "guards include_in_schema=_actions_enabled(), removed 2026-08-23 (011/T1101; no include_in_schema left in app/api/v1/simulator.py); importlib.reload of the router module mid-suite"
+   },
+   {
+    "name": "test_simulator_actions_endpoints_disabled_returns_403_actions_disabled",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_actions_serialization.py",
+  "lines": 29,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "from/to alias on the wire",
+  "tests": [
+   {
+    "name": "test_clearing_real_response_serializes_edge_ref_with_from_alias",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_actor_and_csrf.py",
+  "lines": 373,
+  "verdict": "MIXED",
+  "basket": "G",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_csrf_check_allows_all_when_empty_allowlist",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_allows_all_when_none_allowlist",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_blocks_invalid_origin",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_blocks_missing_origin_even_empty_allowlist",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_passes_second_origin_in_allowlist",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_passes_with_valid_origin",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_preserves_nondefault_origin_port",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_requires_origin_for_anon_delete",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_requires_origin_for_anon_post",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_requires_origin_for_anon_put",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_skips_get_method",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_skips_head_method",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_skips_non_anon",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_skips_options_method",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_skips_participant",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_check_uses_browser_canonical_origin_serialization",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_error_is_forbidden_exception_with_e006",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_missing_origin_is_forbidden_exception",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-11",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_owner_header_invalid_after_trim_raises_e009",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_owner_header_trimmed",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_simulator_actor_admin",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "asserts a dataclass returns its constructor args"
+   },
+   {
+    "name": "test_simulator_actor_admin_with_owner_override",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "same; the override itself is tested by test_owner_header_trimmed"
+   },
+   {
+    "name": "test_simulator_actor_anon",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "same"
+   },
+   {
+    "name": "test_simulator_actor_participant",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "same"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py",
+  "lines": 431,
+  "verdict": "DELETE-REMOVED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21",
+  "note": "021 names it for deletion",
+  "tests": [
+   {
+    "name": "TestBackoffGrowth::test_backoff_doubles_on_zero_yield",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBackoffGrowth::test_backoff_resets_on_positive_yield",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetClamping::test_budget_within_bounds_at_all_pressure_levels",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetClamping::test_global_ceiling_limits_budget",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetScaling::test_higher_pressure_means_higher_budget",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestNoJitter::test_cooldown_limits_consecutive_clearings",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestNoJitter::test_no_oscillation_in_hysteresis_band",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestReactionTime::test_activation_within_window_after_spike",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestReactionTime::test_deactivation_after_recovery",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupBehaviour::test_empty_window_does_not_activate",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupBehaviour::test_partial_window_activates_on_extreme_signal",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupBehaviour::test_partial_window_needs_strong_signal",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallbackEffectiveness::test_cold_start_with_fallback_fires_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallbackEffectiveness::test_cold_start_without_fallback_no_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_adaptive_clearing_policy.py",
+  "lines": 541,
+  "verdict": "DELETE-REMOVED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21",
+  "note": "021 names it for deletion; TestGuardrailConfig checks only dataclass field storage",
+  "tests": [
+   {
+    "name": "TestActivation::test_activates_respecting_cooldown",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestActivation::test_activates_when_no_capacity_rate_above_high",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestActivation::test_does_not_activate_below_high",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBackoff::test_backoff_capped_at_max",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBackoff::test_backoff_formula_exact_intervals_with_cap",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBackoff::test_backoff_grows_on_zero_volume",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBackoff::test_backoff_resets_on_positive_volume",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetScaling::test_budget_respects_global_ceiling",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetScaling::test_max_pressure_gives_max_budget",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetScaling::test_pressure_at_high_gives_max_budget",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetScaling::test_pressure_at_low_gives_min_budget_when_active",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestBudgetScaling::test_pressure_at_one_gives_max_budget_when_active",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestColdStart::test_empty_window_no_clearing",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestColdStart::test_window_rolling_eviction",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestColdStart::test_zero_attempted_payments",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestConfigValidation::test_budget_min_gt_max_warns",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestConfigValidation::test_low_gte_high_warns",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestConfigValidation::test_valid_config_no_warnings",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestConfigValidation::test_window_ticks_zero_warns",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestGuardrailConfig::test_default_guardrails_disabled",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestGuardrailConfig::test_guardrails_configurable",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestHysteresis::test_deactivates_below_low",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestHysteresis::test_stays_active_between_low_and_high",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestMissingData::test_record_tick_signals_treats_none_and_negative_as_zero",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestPerEqIndependence::test_separate_eq_states",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallback::test_warmup_disabled_when_cadence_zero",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallback::test_warmup_fallback_fires_at_cadence",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallback::test_warmup_fallback_respects_cooldown",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallback::test_warmup_fallback_skips_non_cadence_tick",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   },
+   {
+    "name": "TestWarmupFallback::test_warmup_fallback_transitions_to_adaptive",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "adaptive clearing mode (adaptive_clearing_policy.py + adaptive branch of real_tick_clearing_coordinator.py:176-453), removed by 021 stage 3 T2104; decision ADAPTIVE-POLICY: REMOVE 2026-09-21"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_cookie_session.py",
+  "lines": 368,
+  "verdict": "MIXED",
+  "basket": "G",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "HTTP fixture docstring 'SQLite startup probes' (:296-301) - probes deleted by 017 T1703 -> FIX-DOC",
+  "tests": [
+   {
+    "name": "test_cookie_name_constant",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_cookie_session.py::test_ensure_session_sets_cookie_and_returns_owner",
+    "note": "literal == literal; wire form asserted by the Set-Cookie test"
+   },
+   {
+    "name": "test_cookie_version_constant",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_cookie_session.py::test_create_session",
+    "note": "cookie starts with 'v1.'"
+   },
+   {
+    "name": "test_create_session",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_session_unique_sids",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_csrf_guardrail_fails_fast_empty_allowlist_in_prod",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_ensure_session_replaces_invalid_cookie",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_ensure_session_reuses_existing_valid_cookie",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_ensure_session_sets_cookie_and_returns_owner",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_guardrail_allows_default_in_dev",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_guardrail_fails_fast_in_production",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_session_clock_skew_not_extends_ttl",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_session_expired_exactly_at_ttl_boundary",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_session_expired_one_second_past_ttl",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_session_owner_id_format",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_cookie_session.py::test_validate_session_valid",
+    "note": "same owner_id == anon:<sid> assert"
+   },
+   {
+    "name": "test_validate_session_bad_format",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_expired",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_future_clock_skew",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_tampered_sid",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_tampered_signature",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_too_far_future",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_valid",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_wrong_secret",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_validate_session_wrong_version",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-12",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_fixtures_clearing_plan_done_pair.py",
+  "lines": 67,
+  "verdict": "MERGE",
+  "basket": "F",
+  "survives_021": "yes",
+  "universal": "U-D-16",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "runtime heartbeat + real polling up to 6 s (:40-45); scheduled-plan row -> drive FixturesRunner.tick_fixtures_events; comment about SQLite 'database is locked' (:12-13) stale",
+  "tests": [
+   {
+    "name": "test_fixtures_mode_emits_clearing_done_with_plan_id",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-16",
+    "stronger": null,
+    "note": "scheduled trigger row"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py",
+  "lines": 1177,
+  "verdict": "MIXED",
+  "basket": "C",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "reader (metrics_bottlenecks.py) survives; producer (real_tick_metrics.py) dies at stage 4; docstring/tests say 'sqlite' (:5, :739, :1067, :1117) -> FIX-DOC",
+  "tests": [
+   {
+    "name": "test_clearing_volume_leaves_the_producer_as_exact_decimal",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "stage 4"
+   },
+   {
+    "name": "test_failed_total_debt_snapshot_is_not_reported_as_measurement",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "stage 4"
+   },
+   {
+    "name": "test_fixtures_mode_bottlenecks_still_synthesise_from_trustlines",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_fixtures_mode_metrics_still_synthesise_numeric_series",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_measured_route_length_is_recorded",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "stage 4"
+   },
+   {
+    "name": "test_measured_total_debt_is_recorded",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "RealTickMetrics (stage 4) -> tick.py metrics tail"
+   },
+   {
+    "name": "test_metric_point_value_renders_one_canonical_decimal_string",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_metric_series_keys_agree_across_canon_pydantic_and_reader",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_missing_measurement_stays_null_end_to_end",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_money_series_reach_the_wire_without_losing_precision",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_simulator_metrics_numeric_value_postgres.py::test_money_metric_survives_the_whole_chain_exactly",
+    "note": "same probe through a real column; transfer the 1E-8 row"
+   },
+   {
+    "name": "test_real_and_synthetic_producers_emit_the_same_form",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_bottlenecks_apply_min_score_and_limit",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_bottlenecks_db_failure_raises_instead_of_synthesising",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-9",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_bottlenecks_empty_table_returns_empty_not_synthetic",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_bottlenecks_second_query_failure_raises",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-9",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_bottlenecks_serve_persisted_rows",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_bottlenecks_without_storage_raises",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-9",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_failure_traceback_is_rate_limited",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_metrics_db_failure_raises_instead_of_synthesising",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-9",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_metrics_distinguish_missing_measurement_from_measured_zero",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_metrics_serves_persisted_points_with_carry_forward",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_metrics_session_open_failure_raises",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-9",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_metrics_without_storage_raises",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-9",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_mode_serves_persisted_network_cardinalities",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_synthetic_bottlenecks_get_writes_nothing_end_to_end",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_synthetic_mode_counts_cardinalities_instead_of_inventing_them",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_the_probe_value_really_is_beyond_float",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_throttled_tick_does_not_stamp_stale_total_debt",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "stage 4"
+   },
+   {
+    "name": "test_total_debt_snapshot_leaves_the_producer_as_exact_decimal",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "stage 4"
+   },
+   {
+    "name": "test_writer_and_reader_agree_on_the_key_set_end_to_end",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_owner_isolation.py",
+  "lines": 609,
+  "verdict": "MIXED",
+  "basket": "G",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "mapping tests pin _active_run_id_by_owner, which SIM-05 proposes to remove; count_active_runs is test-only (SIM-17); restart test pins the mapping but not the heartbeat (SIM-03 gap); commented-out TODO tests at :592-609",
+  "tests": [
+   {
+    "name": "test_check_run_access_empty_owner_allows_admin",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_check_run_access_empty_owner_denies_non_admin",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_clear_active_run_id",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_clear_active_run_id_mismatched_run",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_count_active_runs",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_run_clears_missing_stale_owner_mapping",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_run_global_limit_conflict_kind",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_run_owner_active_exists_conflict",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_create_run_owner_limit_checked_before_global",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_get_active_run_id_different_owner_returns_none",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_get_active_run_id_empty_owner",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_get_active_run_id_empty_owner_no_runs",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_get_all_active_runs",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_list_runs_empty",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-14",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_list_runs_filter_by_owner_id",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-14",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_list_runs_filter_by_state",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-14",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_list_runs_filter_by_state_and_owner",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-14",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_list_runs_no_filter",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-14",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_restart_conflict_with_another_active_run",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_restart_restores_active_run_id",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_run_record_admin_owner",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "dataclass stores constructor args"
+   },
+   {
+    "name": "test_run_record_default_owner_fields",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "dataclass defaults"
+   },
+   {
+    "name": "test_run_record_owner_fields",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "dataclass stores constructor args"
+   },
+   {
+    "name": "test_run_record_participant_owner",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "startswith('pid:') of the value it passed"
+   },
+   {
+    "name": "test_set_and_get_active_run_id",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_two_owners_two_runs",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_real_amount_model.py",
+  "lines": 121,
+  "verdict": "MERGE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": "U-D-15",
+  "stronger": null,
+  "removed_contract": "real_clearing_engine.py and real_runner.py shim, removed by 021 T2109 after 023(d)",
+  "note": "RealRunner shim; planner lives in real_payment_planner.py (survives). Cap row is vacuous: env cap 500 > model max 200 (:76, :92)",
+  "tests": [
+   {
+    "name": "test_real_amount_cap_is_opt_in",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-15",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_amount_model_is_respected_with_env_cap",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-15",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_real_clearing_throttle.py",
+  "lines": 118,
+  "verdict": "DELETE-REMOVED",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "real_clearing_engine.py and real_runner.py shim, removed by 021 T2109 after 023(d)",
+  "note": "patches ClearingService, db_session and asyncio.sleep; transfer 'long clearing yields to the loop' requirement to the 023(d) runner",
+  "tests": [
+   {
+    "name": "test_tick_real_mode_clearing_yields_to_event_loop",
+    "items": 1,
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "note": "real_clearing_engine.py and real_runner.py shim, removed by 021 T2109 after 023(d); transfer the event-loop-yield requirement to 023(d)"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_real_events_stress.py",
+  "lines": 77,
+  "verdict": "MERGE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": "U-D-15",
+  "stronger": null,
+  "removed_contract": "real_clearing_engine.py and real_runner.py shim, removed by 021 T2109 after 023(d)",
+  "note": "",
+  "tests": [
+   {
+    "name": "test_stress_multipliers_by_scope",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-15",
+    "stronger": null,
+    "note": "stress rows onto RealPaymentPlanner.compute_stress_multipliers"
+   },
+   {
+    "name": "test_stress_outside_window_is_ignored",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-15",
+    "stronger": null,
+    "note": "stress rows onto RealPaymentPlanner.compute_stress_multipliers"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_real_flush_pending_storage.py",
+  "lines": 99,
+  "verdict": "REWRITE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "six real_tick_* modules and _RealRunnerPort, removed by 021 stage 4 T2105",
+  "note": "flush dedup per tick with patched AsyncSessionLocal/storage writers -> tick.py; compare with tests/unit/test_p1_tick_storage_flush_marker.py (outside zone) before rewriting",
+  "tests": [
+   {
+    "name": "test_real_flush_pending_storage_writes_once",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_real_planner_determinism.py",
+  "lines": 107,
+  "verdict": "MERGE",
+  "basket": "F",
+  "survives_021": "no",
+  "universal": "U-D-15",
+  "stronger": null,
+  "removed_contract": "real_clearing_engine.py and real_runner.py shim, removed by 021 T2109 after 023(d)",
+  "note": "",
+  "tests": [
+   {
+    "name": "test_real_planner_is_deterministic_and_prefix_stable",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-15",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_real_planner_seq_is_contiguous_per_tick",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-15",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_rejection_codes.py",
+  "lines": 33,
+  "verdict": "KEEP",
+  "basket": "F",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "already a table; rows EQUIVALENT/PARTICIPANT/TX_NOT_FOUND pin meaning taken from message text (SIM-18, AGENTS 9); imported via the runtime shim",
+  "tests": [
+   {
+    "name": "test_map_rejection_code",
+    "items": 18,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_run_status_response_schema.py",
+  "lines": 41,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_run_status_serializes_stop_metadata_and_authoritative_counters",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_scenario_allowlist_and_archives.py",
+  "lines": 21,
+  "verdict": "KEEP",
+  "basket": "G",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_archived_fixture_scenarios_are_not_loaded",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_list_scenarios_default_allowlist_contains_only_canonical_presets",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_sse_replay.py",
+  "lines": 39,
+  "verdict": "DELETE-DUP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": "tests/unit/test_simulator_sse_replay_atomic.py::test_atomic_subscribe_queues_complete_replay_before_live_tail",
+  "removed_contract": null,
+  "note": "uses test-only runtime.subscribe/_sse.next_event_id/broadcast (SIM-17)",
+  "tests": [
+   {
+    "name": "test_subscribe_replays_events_after_last_event_id",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_simulator_sse_replay_atomic.py::test_atomic_subscribe_queues_complete_replay_before_live_tail",
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_sse_replay_atomic.py",
+  "lines": 420,
+  "verdict": "KEEP",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "protected replay contract; two tests monkeypatch simulator_api.runtime to drive the private _run_events_stream",
+  "tests": [
+   {
+    "name": "test_atomic_publish_serializes_id_buffer_and_subscriber_order_across_producers",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_atomic_subscribe_queues_complete_replay_before_live_tail",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_bootstrap_tail_overflow_closes_subscription_and_replay_recovers_gap",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_live_priority_event_follows_full_pending_replay_bootstrap",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_stream_emits_single_bootstrap_tail_in_producer_order",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_subscribe_rejects_invalid_future_and_oversized_cursors",
+    "items": 5,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_subscribe_rejects_pruned_replay_but_accepts_cursor_before_oldest",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_subscribe_rejects_replay_that_cannot_fit_without_exposing_subscriber",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_terminal_stream_flushes_replay_before_status_and_closes",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py",
+  "lines": 516,
+  "verdict": "MIXED",
+  "basket": "C",
+  "survives_021": "no",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "8 of 14 tests exercise a replica defined in the test file (:330-364), not production SseEventEmitter.emit_topology_edge_patch (sse_broadcast.py:447); fixture trust_drift_decay_regression.json is read only here and violates the scenario schema (008 B-A2b-002)",
+  "tests": [
+   {
+    "name": "TestBroadcastTopologyEdgePatchContract::test_emits_with_valid_edge_patch",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18 on the real emitter"
+   },
+   {
+    "name": "TestBroadcastTopologyEdgePatchContract::test_frontend_normalizer_would_accept_event",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18 on the real emitter"
+   },
+   {
+    "name": "TestBroadcastTopologyEdgePatchContract::test_skips_empty_edge_patch",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18 on the real emitter"
+   },
+   {
+    "name": "TestBroadcastTopologyEdgePatchContract::test_skips_none_edge_patch",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18 on the real emitter"
+   },
+   {
+    "name": "TestDecayScenarioFixture::test_scenario_amount_model_exceeds_overload_threshold",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "guards test data whose only consumer is this module"
+   },
+   {
+    "name": "TestDecayScenarioFixture::test_scenario_file_exists",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "guards test data whose only consumer is this module"
+   },
+   {
+    "name": "TestDecayScenarioFixture::test_scenario_has_participants_and_trustlines",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "guards test data whose only consumer is this module"
+   },
+   {
+    "name": "TestDecayScenarioFixture::test_scenario_has_trust_drift_enabled",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "note": "guards test data whose only consumer is this module"
+   },
+   {
+    "name": "TestFullDecayPipelineNeverEmitsEmptyTopologyChanged::test_decay_with_empty_patch_emits_nothing",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18"
+   },
+   {
+    "name": "TestFullDecayPipelineNeverEmitsEmptyTopologyChanged::test_decay_with_patches_emits_correct_event",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18"
+   },
+   {
+    "name": "TestFullDecayPipelineNeverEmitsEmptyTopologyChanged::test_multiple_equivalents_only_nonempty_emitted",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18"
+   },
+   {
+    "name": "TestFullDecayPipelineNeverEmitsEmptyTopologyChanged::test_no_decay_updates_means_no_broadcast",
+    "items": 1,
+    "verdict": "DELETE-EMPTY",
+    "universal": "U-D-18",
+    "stronger": null,
+    "note": "tests the test's own replica; replaced by U-D-18"
+   },
+   {
+    "name": "TestTrustDriftDecayProducesResult::test_decay_config_initialized",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_trust_drift.py::TestInitTrustDrift::test_init_stores_original_limit",
+    "note": "init only; no decay runs despite the class name"
+   },
+   {
+    "name": "TestTrustDriftDecayProducesResult::test_edge_clearing_history_populated",
+    "items": 1,
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_trust_drift.py::TestInitTrustDrift::test_init_stores_original_limit",
+    "note": "init only; no decay runs despite the class name"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_storage_schema_contract.py",
+  "lines": 27,
+  "verdict": "KEEP",
+  "basket": "E",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "reads the model, not the migrated DB",
+  "tests": [
+   {
+    "name": "test_simulator_run_has_owner_state_created_index",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_simulator_run_owner_column_matches_postgres_migration_contract",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_tx_failed_event_schema.py",
+  "lines": 24,
+  "verdict": "MERGE",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": "U-D-6",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_simulator_event_accepts_tx_failed",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-6",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_tx_updated_amount_flyout_contract.py",
+  "lines": 71,
+  "verdict": "MERGE",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": "U-D-6",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "pytest.raises(Exception) too broad -> ValidationError",
+  "tests": [
+   {
+    "name": "test_tx_updated_amount_flyout_accepts_edges",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-6",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_tx_updated_amount_flyout_accepts_from_to",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-6",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_tx_updated_amount_flyout_requires_amount",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-6",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_tx_updated_amount_flyout_requires_endpoints",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-6",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_simulator_write_tick_metrics_upsert.py",
+  "lines": 225,
+  "verdict": "MIXED",
+  "basket": "G",
+  "survives_021": "yes",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_failed_delegated_commit_leaves_the_session_usable",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_failed_metrics_write_does_not_roll_back_the_caller",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-10",
+    "stronger": null,
+    "note": "row check_violation"
+   },
+   {
+    "name": "test_write_tick_metrics_bulk_upsert_updates_without_duplicates",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": "float inputs for money keys"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_sse_queue_full_policy.py",
+  "lines": 182,
+  "verdict": "MERGE",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": "U-D-7",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_sse_queue_full_amount_flyout_terminates_instead_of_skipping_lower_event",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-7",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_sse_queue_full_run_status_terminates_instead_of_skipping_lower_event",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-7",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_sse_queue_overflow_closes_stream_before_any_higher_id_is_delivered",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-7",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_sse_rate_limit.py",
+  "lines": 60,
+  "verdict": "MERGE",
+  "basket": "C",
+  "survives_021": "yes",
+  "universal": "U-D-8",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "uses SseBroadcast.subscribe (test-only per SIM-17; production uses subscribe_with_status)",
+  "tests": [
+   {
+    "name": "test_sse_subscribe_rate_limit_per_run",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-8",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "test_sse_subscribe_rate_limit_total",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-8",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_trust_drift.py",
+  "lines": 734,
+  "verdict": "MIXED",
+  "basket": "F",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "RealRunner shim + AsyncMock session that returns the same Decimal for every execute (:190-198): the DB write is never observed, only the scenario dict; 021 stage 1 moves drift writes into TrustLineService -> the mock call sequence breaks",
+  "tests": [
+   {
+    "name": "TestApplyTrustDecay::test_decay_floored_by_min_limit_ratio",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustDecay::test_decay_reduces_limit_when_overloaded",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustDecay::test_decay_skips_just_cleared_edges",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustDecay::test_decay_skips_underloaded_edges",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustGrowth::test_growth_cancellation_after_commit_applies_committed_effects",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "cancellation after commit -> U-D-13 semantics on the drift boundary"
+   },
+   {
+    "name": "TestApplyTrustGrowth::test_growth_capped_by_max_growth",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustGrowth::test_growth_commit_failure_keeps_scenario_and_cache_unchanged",
+    "items": 1,
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "note": "commit-failure rollback -> db_session + R-021-4 style owner rollback"
+   },
+   {
+    "name": "TestApplyTrustGrowth::test_growth_increases_limit_after_clearing",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustGrowth::test_growth_skipped_when_disabled",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestApplyTrustGrowth::test_growth_updates_clearing_history",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestInitTrustDrift::test_init_creates_history_for_all_trustlines",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestInitTrustDrift::test_init_stores_original_limit",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestTrustDriftConfig::test_config_from_scenario_disabled",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestTrustDriftConfig::test_config_from_scenario_enabled",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   },
+   {
+    "name": "TestTrustDriftConfig::test_config_from_scenario_partial",
+    "items": 1,
+    "verdict": "MERGE",
+    "universal": "U-D-5",
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_trust_drift_decay_does_not_break_trust_limits.py",
+  "lines": 159,
+  "verdict": "KEEP",
+  "basket": "A",
+  "survives_021": "partly",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "decay floor == used debt exactly + InvariantChecker.check_trust_limits; 021-named survivor; TrustDriftEngine API changes in stage 1",
+  "tests": [
+   {
+    "name": "test_trust_drift_decay_never_shrinks_below_used_debt",
+    "items": 1,
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "note": ""
+   }
+  ]
+ }
+]

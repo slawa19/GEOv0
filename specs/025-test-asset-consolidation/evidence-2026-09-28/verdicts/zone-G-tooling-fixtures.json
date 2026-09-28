@@ -1,0 +1,1154 @@
+[
+ {
+  "file": "tests/__init__.py",
+  "lines": 0,
+  "verdict": "KEEP",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "package marker; needed by `from tests.x import`"
+ },
+ {
+  "file": "tests/integration/__init__.py",
+  "lines": 0,
+  "verdict": "KEEP",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "package marker; needed by `from tests.x import`"
+ },
+ {
+  "file": "tests/unit/__init__.py",
+  "lines": 0,
+  "verdict": "KEEP",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "package marker; needed by `from tests.x import`"
+ },
+ {
+  "file": "tests/conftest.py",
+  "lines": 772,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": "U-G-F2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "core fixtures KEEP; FIX-DOC :532-539 (engine.py _run_uow_with_retry/_apply_flow, deleted 3932737b), :148-161/:325-326/:423-428 dead non-PostgreSQL branches, :104 RECOVERY_ENABLED (recovery.py deleted 3932737b); DELETE the GEO_TEST_FIXTURE_MODE instrument :368-377 (017 stage-2 catalogue done, 3139ffd5); MERGE auth_headers (:659-716) into auth_user (:719-772); add factory / api_client / module_database per U-G-F2",
+  "helpers": [
+   {
+    "name": "db_session",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "client",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "committed_database",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "committed_session",
+    "verdict": "MERGE",
+    "note": "2 users; = committed_database.sessionmaker()"
+   },
+   {
+    "name": "MODE_B",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "sessionmaker_of",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "init_db",
+    "verdict": "FIX-DOC"
+   },
+   {
+    "name": "_FIXTURE_MODE/GEO_TEST_FIXTURE_MODE",
+    "verdict": "DELETE-REMOVED",
+    "removed_contract": "017 stage-2 catalogue measurement (3139ffd5), recorded in specs/017-postgres-only-engine/stage2-catalogue.md"
+   },
+   {
+    "name": "test_user_keys",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "auth_headers",
+    "verdict": "MERGE",
+    "note": "return auth_user['headers']"
+   },
+   {
+    "name": "auth_user",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "_test_engine_isolation_kwargs",
+    "verdict": "FIX-DOC"
+   }
+  ]
+ },
+ {
+  "file": "tests/debt_setup.py",
+  "lines": 398,
+  "verdict": "FIX-DOC",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "debt_fixture_setup (87 files), writer_operation (7), fixture_block_violations (5) KEEP; docstrings :6-29, :62-64, :137-148, :279-282 describe app/core/ledger/journal.py listeners, _apply_flow, PaymentEngine (deleted 2b8b0228 / 3932737b); _uuid_literals is str(UUID) with 1 user - inline"
+ },
+ {
+  "file": "tests/integration/p012_pg_http.py",
+  "lines": 67,
+  "verdict": "MERGE",
+  "basket": "G",
+  "universal": "U-G-F2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "pg_client (4 files) = conftest api_client over committed_database; docstring describes the after_transaction_end listener and PaymentEngine._apply_flow (listener removed 017 stage 2a, engine.py 3932737b)"
+ },
+ {
+  "file": "tests/integration/p019_interlock_support.py",
+  "lines": 163,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": "U-G-F1",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "_seed_interlock_case -> factories.make_world (cycle A->B 100, B->C 30, C->A 40 + reverse line); _use_serializable KEEP; _no_advisory_lock_is_held MERGE with p019_locks_off.advisory_locks_held into one lock-observer module",
+  "helpers": [
+   {
+    "name": "_seed_interlock_case",
+    "verdict": "MERGE",
+    "universal": "U-G-F1"
+   },
+   {
+    "name": "_use_serializable",
+    "verdict": "KEEP"
+   },
+   {
+    "name": "_no_advisory_lock_is_held",
+    "verdict": "MERGE",
+    "note": "with tests/p019_locks_off.py::advisory_locks_held"
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/p019_stand.py",
+  "lines": 408,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": "U-G-F2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "api fixture -> conftest api_client (also replaces pg_client); build_api_world -> factories (HTTP half); observers tx_row/debts/envelopes/observe_after_marker, CommitRecorder, EngineCommitBarrier (FIX-DOC: name says Engine, target is PaymentService._apply_payment), finish, set_integrity_hold, backend_waits_on_advisory KEEP; stop re-exporting `factory` from a test module"
+ },
+ {
+  "file": "tests/integration/t1523_restart_child.py",
+  "lines": 112,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "child process of the restart-after-commit cell; the PaymentEngine mention in its docstring is marked as history"
+ },
+ {
+  "file": "tests/ledger_corruption.py",
+  "lines": 158,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "named corruption helper of 018 (FORK-4); 10 users"
+ },
+ {
+  "file": "tests/migrated_schema.py",
+  "lines": 719,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "provisioning KEEP; migrated_clone (:706-719) has 0 users -> delete",
+  "helpers": [
+   {
+    "name": "migrated_clone",
+    "verdict": "DELETE-EMPTY",
+    "note": "0 callers (git grep -w migrated_clone -- tests scripts)"
+   }
+  ]
+ },
+ {
+  "file": "tests/p015_b4_support.py",
+  "lines": 236,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-G-F1",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "World/seed_world -> factories.make_world; operation/stored_* KEEP; EXACT_DOMAIN_LIMIT is the SQLite exact domain (FIX-DOC or drop)"
+ },
+ {
+  "file": "tests/p018_support.py",
+  "lines": 221,
+  "verdict": "MIXED",
+  "basket": "B",
+  "universal": "U-G-F2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "module_clone -> conftest module_database (9 copy-paste migrated_url fixtures); seed_world -> factories; SQLSTATE consts, refused, rolled_back_session, readers KEEP"
+ },
+ {
+  "file": "tests/p018_t1809_operation_cost_probe.py",
+  "lines": 415,
+  "verdict": "DELETE-REMOVED",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "018 T1809 measurement closed [x] 2026-09-24 (018 closed, PR #45 467d5c2; numbers in the 018 Changelog); not collected by any gate; restore with git show 5748c516:tests/p018_t1809_operation_cost_probe.py",
+  "tests": [
+   {
+    "name": "test_t1809_operation_cost",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": "018 T1809, closed 2026-09-24"
+   }
+  ]
+ },
+ {
+  "file": "tests/p019_locks_off.py",
+  "lines": 103,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "NOT T1908-only: advisory_locks_held/blocked_by are used by 3 non-slow gate modules (test_clearing_skip_releases_locks_postgres.py:197, test_p015_t1544_operator_stop_races_postgres.py:182, test_p019_clearing_holds_the_stop_for_share_postgres.py:45); merge the observers with the p019_interlock_support / p019_stand lock observers"
+ },
+ {
+  "file": "tests/p019_support.py",
+  "lines": 67,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "target_xfail has 0 users (every 019 marker was removed by stage 5, 7eb3b859) -> delete; TargetMismatch/require_target (17 files + 020/023 markers) and allow_below_serializable_for_a_diagnostic (5) KEEP",
+  "helpers": [
+   {
+    "name": "target_xfail",
+    "verdict": "DELETE-EMPTY",
+    "note": "0 users"
+   }
+  ]
+ },
+ {
+  "file": "tests/p019_t1903_statement_sequence_probe.py",
+  "lines": 500,
+  "verdict": "DELETE-REMOVED",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "019 T1903 equivalence check (stage 2, 696ca42..5907064) and T1909 re-marking (7eb3b85; numbers in 019 spec :500); not collected by any gate; the retained lock shape is held by test_p019_equivalent_lock_modes_postgres.py (required nodes) and test_p019_lock_primitives_live_in_money_boundary.py",
+  "tests": [
+   {
+    "name": "test_t1903_statement_sequence",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": "019 T1903/T1909"
+   }
+  ]
+ },
+ {
+  "file": "tests/p019_t1904_owner_lock_contention_probe.py",
+  "lines": 356,
+  "verdict": "DELETE-REMOVED",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": "019 T1904 contention experiment (a243971); the fork was decided KEEP-EQUIVALENT-LOCK (019 spec :431, T1909 7eb3b85); 0 importers",
+  "tests": [
+   {
+    "name": "test_t1904_owner_lock_contention",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": "019 T1904 / KEEP-EQUIVALENT-LOCK"
+   }
+  ]
+ },
+ {
+  "file": "tests/p020_support.py",
+  "lines": 155,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": "U-G-F1",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "target_xfail_020 is removed at 023 slice (d) (023 spec :127); seed_graph -> factories.make_world(ids='uuid5') with deterministic ids; identity helpers KEEP"
+ },
+ {
+  "file": "tests/p023_support.py",
+  "lines": 130,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "the oracle is acceptance evidence of the active 023; target_xfail_023 is removed by slices (b)/(d)"
+ },
+ {
+  "file": "tests/simulator_tick_stand.py",
+  "lines": 91,
+  "verdict": "MIXED",
+  "basket": "F",
+  "universal": "U-G-F2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "RecordingSse, install_tick_stand KEEP; pooled_sessionmaker_over -> committed_database.pooled_sessionmaker() (the same settings the 11 local `factory` fixtures spell by hand)"
+ },
+ {
+  "file": "tests/stage2_catalogue_recorder.py",
+  "lines": 151,
+  "verdict": "MOVE-OUT",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "measurement plugin loaded only with -p; pytest.ini:65 points operators to it for Windows timeouts -> move to scripts/pytest_plugins/ and update the pytest.ini comment"
+ },
+ {
+  "file": "tests/test_participants_me_and_auth_payloads.py",
+  "lines": 91,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_auth_login_returns_expires_in_and_participant",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   },
+   {
+    "name": "test_participants_me_get_and_patch",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   }
+  ],
+  "note": "unique asserts on the login payload (expires_in, participant) and on /participants/me stats keys; relocate to tests/integration/; arrange through factories.register_and_login"
+ },
+ {
+  "file": "tests/tier_on_a_clone.py",
+  "lines": 77,
+  "verdict": "MERGE",
+  "basket": "G",
+  "universal": "U-G-F2",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [],
+  "note": "exists only to redirect TestingSessionLocal lookups of 27 (+10 opt-in) modules; retires when they take `factory` (committed_database) directly"
+ },
+ {
+  "file": "tests/unit/test_alembic_postgres_only.py",
+  "lines": 52,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_sqlite_alembic_fails_before_executing_revisions",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   }
+  ],
+  "note": "the migration entry refuses non-PostgreSQL, online and --sql"
+ },
+ {
+  "file": "tests/unit/test_backend_marker_policy.py",
+  "lines": 2940,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": "U-G-3",
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_backend_e2e_is_not_a_registered_or_filtered_empty_tier",
+    "verdict": "MERGE",
+    "universal": "U-G-1",
+    "stronger": null,
+    "note": "e2e marker removed 663bd2fc (2026-08-11); applying it again already fails collection under --strict-markers"
+   },
+   {
+    "name": "test_backend_scenario_is_not_a_registered_empty_tier",
+    "verdict": "MERGE",
+    "universal": "U-G-1",
+    "stronger": null,
+    "note": "the docs half (pytest.mark.scenario absent from docs) is dropped: document wording"
+   },
+   {
+    "name": "test_stable_contributor_guide_uses_canonical_backend_tiers",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "asserts on the wording of specs/001 tasks.md and of the frozen EN guide are dropped (AGENTS §11; docs/README translation freeze); 'no bare pytest in the ru guide' goes to U-G-3"
+   },
+   {
+    "name": "test_active_operational_docs_do_not_bypass_the_canonical_pytest_runner",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null
+   },
+   {
+    "name": "test_contributor_guides_keep_python_tools_on_the_prepared_venv",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "venv-order row optional in U-G-3"
+   },
+   {
+    "name": "test_direct_pytest_guard_recognizes_supported_launcher_shapes",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_direct_pytest_guard_stops_at_python_execution_target",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_direct_pytest_guard_unwraps_nested_execution_context",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_python_tool_guard_recognizes_all_supported_launcher_shapes",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_python_tool_guard_stops_at_python_execution_target",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_python_execution_target_distinguishes_case_sensitive_options",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_prepared_venv_tool_accepts_equivalent_module_launchers",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_quoted_venv_executable_requires_call_operator",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_control_flow_guard_does_not_treat_hashtable_keys_as_execution",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_unsupported_scriptblock_definition",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_all_local_scriptblock_definitions",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_multiline_hashtable_in_owned_block",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_one_line_hashtable_in_owned_block",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_invoked_scriptblock",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_expression_guard_preserves_cmdlet_switches",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_control_guard_preserves_multi_type_catch_shape",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_unsupported_control_bodies",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_contributor_venv_guard_rejects_missing_executable_setup_roles",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_canonical_verifier_guard_requires_repository_script_path",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_shell_guard_rejects_non_executable_documented_commands",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_document_command_parser_covers_markdown_command_roles",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_powershell_parser_preserves_quoted_markers_and_post_comment_suffix",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_powershell_line_comments_cannot_hide_following_pytest_commands",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_powershell_parser_preserves_here_string_terminator_suffix",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_invalid_or_mismatched_database_names",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_fails_closed_after_control_flow",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_invalid_expression",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_rejects_control_statement_without_block",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   },
+   {
+    "name": "test_postgres_doc_guard_accepts_a_minimal_correct_example",
+    "verdict": "MOVE-OUT",
+    "universal": "U-G-3",
+    "stronger": null,
+    "note": "tests the hand-written PowerShell parser (:47-1590) itself; leaves with the parser (option A deletes both)"
+   }
+  ],
+  "note": "1 590 lines of a hand-written PowerShell-in-Markdown parser + 29 parser self-tests (~1 250 lines incl. parametrize data); 5 tests read real files"
+ },
+ {
+  "file": "tests/unit/test_postgres_test_taxonomy.py",
+  "lines": 246,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_no_module_takes_itself_out_of_the_postgres_tier",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": "`postgres` marker removed 2026-09-23 (017 stage 2c T1702, 0a10096b); re-application already fails collection under --strict-markers (pytest.ini:43); the dialect-skip half checks unreachable skips"
+   },
+   {
+    "name": "test_the_marker_scan_still_sees_a_marker",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": "counter-check of the deleted scan above"
+   },
+   {
+    "name": "test_postgres_ci_job_runs_the_whole_tier_without_file_allowlist",
+    "verdict": "MERGE",
+    "universal": "U-G-2",
+    "stronger": null,
+    "note": "-BackendSelector is already in tests/unit/test_p017_required_gate_runs_on_postgres.py::test_the_required_backend_gate_declares_postgres_and_its_url; carry 'no raw pytest', 'one verify_local call', '-TaskSlug ci-required-backend', '-BackendOnly'"
+   },
+   {
+    "name": "test_postgres_ci_job_uses_production_migration_entrypoint",
+    "verdict": "MERGE",
+    "universal": "U-G-2",
+    "stronger": "tests/unit/test_quality_workflow_schedule.py::test_the_required_backend_job_owns_the_postgres_service_and_the_alembic_head_check",
+    "note": "check_alembic_heads + docker-entrypoint true are already there; carry only 'no direct alembic upgrade in the job'"
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_run_full_stack_database_url_redaction.py",
+  "lines": 3022,
+  "verdict": "MOVE-OUT",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_database_display_value_excludes_userinfo_and_query_secrets",
+    "verdict": "MERGE",
+    "universal": "U-G-4",
+    "stronger": null
+   },
+   {
+    "name": "test_database_display_accepts_at_sign_inside_discarded_query",
+    "verdict": "MERGE",
+    "universal": "U-G-4",
+    "stronger": null
+   },
+   {
+    "name": "test_database_display_rejects_ambiguous_numeric_credential_prefixes",
+    "verdict": "MERGE",
+    "universal": "U-G-4",
+    "stronger": null
+   },
+   {
+    "name": "test_database_display_value_handles_a_url_without_authority_without_native_arguments",
+    "verdict": "MERGE",
+    "universal": "U-G-4",
+    "stronger": null
+   },
+   {
+    "name": "test_database_display_rejects_ambiguous_raw_reserved_credentials_without_leak",
+    "verdict": "MERGE",
+    "universal": "U-G-4",
+    "stronger": null
+   },
+   {
+    "name": "test_database_display_rejects_malformed_urls_with_generic_error",
+    "verdict": "MERGE",
+    "universal": "U-G-4",
+    "stronger": null
+   },
+   {
+    "name": "test_unproven_service_ownership_never_stops_a_process",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_matching_pid_file_and_listener_stops_only_owned_process",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_wrong_repository_identity_is_never_accepted_as_owned",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_pid_reuse_without_listener_cleans_only_stale_metadata",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_unreadable_process_identity_is_a_conflict_and_retains_metadata",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_exact_live_non_listener_has_an_actionable_conflict_reason",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_status_reason_distinguishes_unreadable_identity_with_listener",
+    "verdict": "MERGE",
+    "universal": "U-G-5",
+    "stronger": null
+   },
+   {
+    "name": "test_startup_never_adopts_a_listener_other_than_launched_process",
+    "verdict": "MERGE",
+    "universal": "U-G-6",
+    "stronger": null
+   },
+   {
+    "name": "test_startup_timeout_cleans_up_exact_launched_process",
+    "verdict": "MERGE",
+    "universal": "U-G-6",
+    "stronger": null
+   },
+   {
+    "name": "test_startup_child_that_already_exited_is_not_a_cleanup_failure",
+    "verdict": "MERGE",
+    "universal": "U-G-6",
+    "stronger": null
+   },
+   {
+    "name": "test_startup_cleanup_failure_preserves_primary_and_cleanup_evidence",
+    "verdict": "MERGE",
+    "universal": "U-G-6",
+    "stronger": null
+   },
+   {
+    "name": "test_successful_startup_persists_ownership_without_cleanup",
+    "verdict": "MERGE",
+    "universal": "U-G-6",
+    "stronger": null
+   },
+   {
+    "name": "test_run_local_adopts_a_descendant_listener_and_stop_kills_both",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_full_stack_adopts_a_descendant_listener_and_stop_kills_both",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_run_local_refuses_a_listener_that_is_not_the_launched_descendant",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_full_stack_refuses_a_listener_that_is_not_the_launched_descendant",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_run_local_treats_a_live_launched_full_stack_process_as_active",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_run_real_treats_a_live_launched_full_stack_process_as_active",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_run_local_start_metadata_supports_a_separate_exact_stop",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_run_real_start_metadata_supports_a_separate_exact_stop",
+    "verdict": "MERGE",
+    "universal": "U-G-7",
+    "stronger": null
+   },
+   {
+    "name": "test_env_overrides_never_print_values_or_invalid_raw_entries",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_fail_on_conflict_checks_all_services_before_any_stop",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_stop_failure_propagates_and_retains_all_ownership_files",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_multi_service_late_conflict_is_detected_before_any_stop",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_versioned_ownership_metadata_round_trip",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_native_stop_failure_is_not_swallowed",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_unreadable_identity_after_native_stop_is_not_reported_as_stopped",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_local_refuses_active_or_unreadable_full_stack_ownership",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_local_only_cleans_disproved_stale_full_stack_ownership",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_full_stack_refuses_a_run_local_listener_without_full_stack_metadata",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_repository_lifecycle_lock_rejects_interleaving_and_is_crash_released",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_local_legacy_pid_evidence_causes_zero_stops",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_real_listener_without_metadata_causes_zero_stops",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_full_stack_startup_rollback_is_reverse_order_and_exact_only",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_launcher_port_release_wait_observes_until_listener_disappears",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_launcher_startup_cleanup_preserves_primary_failure",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_local_reads_version_1_ownership_and_refuses_a_malformed_version_2",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_a_failed_listener_cleanup_still_stops_the_launched_process",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_real_compose_stop_failure_propagates",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_local_startup_rollback_is_reverse_exact_and_keeps_both_failures",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_run_real_rollback_limits_compose_delta_and_keeps_primary_evidence",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "launcher behaviour through real PowerShell; tooling tier"
+   },
+   {
+    "name": "test_env_override_write_host_has_no_raw_value_expression",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_full_stack_summary_uses_only_the_safe_database_display_value",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_database_and_ownership_preflight_precede_first_main_stop",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_status_displays_the_exact_conflict_reason",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_launcher_uses_direct_pass_thru_processes_for_all_listeners",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_launcher_ownership_namespaces_are_disjoint_and_actions_are_guarded",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_all_mutating_launchers_share_lock_and_cover_destructive_actions",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_full_stack_main_wires_late_failure_to_reverse_rollback",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_run_local_status_branch_is_filesystem_read_only",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_run_local_rejects_reload_before_any_lifecycle_mutation",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_replacement_paths_wait_for_owned_ports_to_be_released",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_runtime_metadata_and_transactional_start_wiring",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_pinned_diagnostics_are_still_the_text_the_launchers_emit",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_no_launcher_output_assertion_skips_console_normalization",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "source-text wiring guard (string-index order) of a PowerShell launcher; tooling tier, candidate to drop under AGENTS §11 'thin wiring'"
+   },
+   {
+    "name": "test_console_text_survives_every_host_wrap_position",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "tests the file's own console-text normalisation; leaves with the file"
+   },
+   {
+    "name": "test_the_wrap_sweep_is_not_vacuous",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "tests the file's own console-text normalisation; leaves with the file"
+   },
+   {
+    "name": "test_normalization_does_not_rescue_a_changed_diagnostic",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "tests the file's own console-text normalisation; leaves with the file"
+   },
+   {
+    "name": "test_collapsing_whitespace_joins_across_line_boundaries",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "tests the file's own console-text normalisation; leaves with the file"
+   },
+   {
+    "name": "test_the_guard_detects_an_unnormalized_assertion",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "note": "tests the file's own console-text normalisation; leaves with the file"
+   }
+  ],
+  "note": "dev-launcher behaviour (scripts/run_full_stack.ps1, run_local.ps1, run_real_simulator.ps1), not backend; 47 tests spawn PowerShell (x2 on Windows: pwsh + powershell.exe); move to tests/tooling/, run by required-ui (windows) or a job of its own; inside it merge U-G-4..7"
+ },
+ {
+  "file": "tests/unit/test_run_lifecycle_per_run_scenario_isolation.py",
+  "lines": 83,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "tests": [
+   {
+    "name": "test_create_run_deep_copies_scenario_raw_per_run",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null
+   }
+  ]
+ }
+]

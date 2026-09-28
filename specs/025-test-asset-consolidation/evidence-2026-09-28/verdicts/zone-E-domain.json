@@ -1,0 +1,2778 @@
+[
+ {
+  "file": "tests/integration/test_admin_endpoints.py",
+  "lines": 20,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-E-8",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_requires_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_config_ok_with_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 6,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_admin_equivalent_input_validation.py",
+  "lines": 95,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_equivalent_mutations_reject_values_outside_openapi_bounds",
+    "verdict": "MERGE",
+    "universal": "U-E-12",
+    "stronger": null,
+    "lines": 48,
+    "items": 4
+   },
+   {
+    "name": "test_admin_equivalent_mutation_responses_attach_utc_to_sqlite_timestamps",
+    "verdict": "MERGE",
+    "universal": "U-E-17",
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_admin_feature_flags_multipath.py",
+  "lines": 206,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-4",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_feature_flag_multipath_enabled_gates_multi_route_payment",
+    "verdict": "MERGE",
+    "universal": "U-E-4",
+    "stronger": null,
+    "lines": 99,
+    "items": 1
+   },
+   {
+    "name": "test_feature_flag_full_multipath_gates_max_flow_metadata",
+    "verdict": "MERGE",
+    "universal": "U-E-4",
+    "stronger": null,
+    "lines": 68,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_admin_freeze_participant.py",
+  "lines": 64,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_freeze_blocks_participant_and_unfreeze_restores_access",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 54,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_admin_mutation_audit_atomicity.py",
+  "lines": 279,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_participant_status_and_equivalent_mutations_commit_with_audit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 72,
+    "items": 1
+   },
+   {
+    "name": "test_admin_mutation_uses_canonical_request_id_for_mandatory_audit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 39,
+    "items": 1
+   },
+   {
+    "name": "test_admin_participant_status_rolls_back_when_audit_flush_fails",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_admin_equivalent_mutation_rolls_back_when_audit_flush_fails",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 54,
+    "items": 3
+   },
+   {
+    "name": "test_admin_delete_active_equivalent_is_rejected_without_audit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 24,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_admin_routing_max_paths.py",
+  "lines": 142,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-4",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_routing_max_paths_limits_multipath_payment",
+    "verdict": "MERGE",
+    "universal": "U-E-4",
+    "stronger": null,
+    "lines": 108,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_auth_refresh.py",
+  "lines": 117,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_auth_refresh_rotates_and_reuse_is_rejected",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 18,
+    "items": 1
+   },
+   {
+    "name": "test_auth_refresh_rejects_access_token",
+    "verdict": "MERGE",
+    "universal": "U-E-19",
+    "stronger": null,
+    "lines": 8,
+    "items": 1
+   },
+   {
+    "name": "test_access_token_expiry_returns_401_and_refresh_recovers",
+    "verdict": "MERGE",
+    "universal": "U-E-19",
+    "stronger": null,
+    "lines": 33,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_auth_token_type_enforced.py",
+  "lines": 67,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-19",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_refresh_token_rejected_for_protected_endpoints",
+    "verdict": "MERGE",
+    "universal": "U-E-19",
+    "stronger": null,
+    "lines": 59,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_clearing_commit_replay_postgres.py",
+  "lines": 851,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "4 unreachable dialect skips; two inline copies of the 100/30/40 cycle seed that _seed_conflict_cycle already owns",
+  "tests": [
+   {
+    "name": "test_concurrent_same_cycle_serializable_resolves_one_durable_occurrence_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 230,
+    "items": 1
+   },
+   {
+    "name": "test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_snapshot_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 52,
+    "items": 1
+   },
+   {
+    "name": "test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryable_refusal_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 54,
+    "items": 1
+   },
+   {
+    "name": "test_post_commit_boundary_reconciles_and_new_cycle_still_executes_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 284,
+    "items": 4
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_clearing_max_depth_controls_long_cycles.py",
+  "lines": 113,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_clearing_max_depth_blocks_and_allows_length_5_cycle",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 102,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_clearing_payment_prepare_interlock_postgres.py",
+  "lines": 895,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "rename -> test_clearing_equivalent_lock_schedules_postgres.py: nothing of PREPARE/prepare is exercised; drop _require_postgres (dead skip)",
+  "tests": [
+   {
+    "name": "test_no_advisory_lock_check_ignores_other_databases_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_clearing_exclusive_lock_blocks_a_reverse_payment_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 229,
+    "items": 1
+   },
+   {
+    "name": "test_clearing_interlock_completes_with_single_connection_pool_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_postgres_clearing_rejects_external_connection_bind_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 36,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_after_interlock_checkout_returns_connection_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 70,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_during_interlocked_work_rolls_back_before_unlock_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 97,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_during_preflight_select_rolls_back_caller_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_during_interlock_release_preserves_durable_amount_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 81,
+    "items": 1
+   },
+   {
+    "name": "test_interlock_timeout_rolls_back_work_and_releases_owner_postgres",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 113,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_clearing_skip_releases_locks_postgres.py",
+  "lines": 418,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "2 dead dialect skips",
+  "tests": [
+   {
+    "name": "test_skip_ends_service_owned_transaction_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 134,
+    "items": 4
+   },
+   {
+    "name": "test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 255,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_equivalent_writer_and_legacy_reads.py",
+  "lines": 216,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_real_scenario_seeder_rejects_noncanonical_equivalent_before_write",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 3
+   },
+   {
+    "name": "test_orm_writer_accepts_canonical_equivalent_precision_boundaries",
+    "verdict": "MERGE",
+    "universal": "U-E-12",
+    "stronger": null,
+    "lines": 7,
+    "items": 2
+   },
+   {
+    "name": "test_orm_writer_rejects_noncanonical_equivalent_code",
+    "verdict": "MERGE",
+    "universal": "U-E-12",
+    "stronger": null,
+    "lines": 3,
+    "items": 1
+   },
+   {
+    "name": "test_orm_writer_rejects_noncanonical_equivalent_precision",
+    "verdict": "MERGE",
+    "universal": "U-E-12",
+    "stronger": null,
+    "lines": 10,
+    "items": 1
+   },
+   {
+    "name": "test_admin_can_repair_legacy_precision_when_code_is_canonical",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 44,
+    "items": 2
+   },
+   {
+    "name": "test_admin_patch_rejects_nonrepairing_legacy_precision_before_mutation",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 63,
+    "items": 2
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_integrity_endpoints.py",
+  "lines": 216,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_integrity_status_and_verify_and_audit_log",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_integrity_checksum_returns_404_until_checkpoint_exists",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   },
+   {
+    "name": "test_integrity_wire_models_preserve_aware_timestamp_offset",
+    "verdict": "MERGE",
+    "universal": "U-E-17",
+    "stronger": null,
+    "lines": 38,
+    "items": 3
+   },
+   {
+    "name": "test_integrity_status_and_verify_serialize_sqlite_checkpoint_as_utc",
+    "verdict": "MERGE",
+    "universal": "U-E-17",
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_integrity_verify_checkpoint_failure_is_not_swallowed_or_committed",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_participants_search.py",
+  "lines": 109,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_participants_search_by_q_type_and_limit",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_participants_search_pagination_is_consistent",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_participants_type_default.py",
+  "lines": 36,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_participant_type_defaults_to_person_when_omitted",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 28,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_participants_uniqueness.py",
+  "lines": 56,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_register_participant_duplicate_public_key_returns_conflict",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payment_audit_serialization_failure_postgres.py",
+  "lines": 137,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_audit_serialization_failure_is_retried_by_pay_before_the_transaction_is_poisoned",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 73,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payment_idempotency_postgres.py",
+  "lines": 297,
+  "verdict": "MERGE",
+  "basket": "B",
+  "universal": "U-E-1",
+  "stronger": "tests/integration/test_p015_t1523_in_progress_and_insert_race_postgres.py::test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_postgres",
+  "removed_contract": null,
+  "note": "the same schedule as the t1523 cell-3 test; before deleting, move its two extra asserts (one verified PAYMENT audit row; exactly one payment.received publication) into that test",
+  "tests": [
+   {
+    "name": "test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": "tests/integration/test_p015_t1523_in_progress_and_insert_race_postgres.py::test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_postgres",
+    "lines": 247,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payment_inverse_multisegment_postgres.py",
+  "lines": 301,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "dead _require_postgres",
+  "tests": [
+   {
+    "name": "test_inverse_multisegment_commits_serialize_and_preserve_invariants_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 168,
+    "items": 2
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payment_prepare_capacity_policy.py",
+  "lines": 155,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "file name names the removed prepare phase -> test_payment_segment_capacity.py; the formula pinned at :403 (+reverse debt) is the one F-024-3 disputes against protocol 6.3.1",
+  "tests": [
+   {
+    "name": "test_segment_capacity_is_the_limit_less_the_debt_plus_the_reverse_debt",
+    "verdict": "MERGE",
+    "universal": "U-E-10",
+    "stronger": null,
+    "lines": 14,
+    "items": 1
+   },
+   {
+    "name": "test_a_single_route_refusal_reports_the_capacity_and_the_need",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_multipath_counts_its_own_earlier_routes_over_one_segment",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payment_prepare_error_taxonomy.py",
+  "lines": 1586,
+  "verdict": "MIXED",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "every test replaces router.build_graph/find_flow_routes and _bind_payment/_apply_payment; phase ids 'prepare'/'commit' and details {'state': 'PREPARED'} name the removed engine",
+  "tests": [
+   {
+    "name": "test_retryable_database_failure_uses_e008_at_service_boundary",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 47,
+    "items": 2
+   },
+   {
+    "name": "test_insert_serialization_failure_is_typed_before_any_tx_is_persisted",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 40,
+    "items": 2
+   },
+   {
+    "name": "test_http_insert_serialization_failure_returns_declared_conflict",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_staged_insert_serialization_failure_propagates_without_local_rollback",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_prepare_preserves_typed_client_error_in_http_and_transaction",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 94,
+    "items": 3
+   },
+   {
+    "name": "test_operational_prepare_error_is_sanitized_everywhere",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 91,
+    "items": 2
+   },
+   {
+    "name": "test_typed_server_prepare_error_is_sanitized",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   },
+   {
+    "name": "test_public_prepare_failure_rolls_back_session_before_abort",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   },
+   {
+    "name": "test_direct_prepare_reraises_same_typed_error_after_durable_abort",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_prepare_rollback_failure_does_not_abort_poisoned_session",
+    "verdict": "MERGE",
+    "universal": "U-E-2",
+    "stronger": null,
+    "lines": 39,
+    "items": 1
+   },
+   {
+    "name": "test_prepare_abort_failure_replaces_original_client_error_with_safe_500",
+    "verdict": "MERGE",
+    "universal": "U-E-2",
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_operational_commit_error_is_sanitized_in_response_and_transaction",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 66,
+    "items": 1
+   },
+   {
+    "name": "test_typed_commit_error_is_reraised_only_after_durable_abort",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 47,
+    "items": 1
+   },
+   {
+    "name": "test_commit_cleanup_failure_is_safe_and_ordered",
+    "verdict": "MERGE",
+    "universal": "U-E-2",
+    "stronger": null,
+    "lines": 84,
+    "items": 4
+   },
+   {
+    "name": "test_prepare_cancellation_preserves_cancel_and_durably_aborts",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_cancellation_at_other_payment_phases_has_terminal_state",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 59,
+    "items": 2
+   },
+   {
+    "name": "test_staged_prepare_cancellation_aborts_before_outer_rollback",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 56,
+    "items": 1
+   },
+   {
+    "name": "test_repeated_cancellation_during_recovery_read_still_aborts",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 68,
+    "items": 2
+   },
+   {
+    "name": "test_timeout_rollback_failure_is_safe_without_read_or_abort",
+    "verdict": "MERGE",
+    "universal": "U-E-2",
+    "stronger": null,
+    "lines": 38,
+    "items": 1
+   },
+   {
+    "name": "test_timeout_recovery_read_failure_is_safe_without_abort",
+    "verdict": "MERGE",
+    "universal": "U-E-2",
+    "stronger": null,
+    "lines": 81,
+    "items": 1
+   },
+   {
+    "name": "test_an_unresolved_commit_with_no_row_found_is_not_terminalized",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 54,
+    "items": 1
+   },
+   {
+    "name": "test_timeout_abort_failure_is_safe_after_recovery_read",
+    "verdict": "MERGE",
+    "universal": "U-E-2",
+    "stronger": null,
+    "lines": 48,
+    "items": 1
+   },
+   {
+    "name": "test_staged_timeout_abort_failure_has_symmetric_safe_log",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 64,
+    "items": 1
+   },
+   {
+    "name": "test_staged_generic_prepare_failure_is_safe_without_session_commit_or_rollback",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 72,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payment_staged_multicall_postgres.py",
+  "lines": 423,
+  "verdict": "KEEP",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "dead _require_postgres",
+  "tests": [
+   {
+    "name": "test_a_staged_batch_writes_one_payment_audit_row_per_committed_payment_and_keeps_the_limits_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 105,
+    "items": 1
+   },
+   {
+    "name": "test_staged_shared_sets_do_not_wait_for_each_other_and_hold_off_a_clearing_exclusive_lock_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 108,
+    "items": 1
+   },
+   {
+    "name": "test_staged_owner_restores_outer_transaction_lock_timeout_postgres",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payments_amount_validation.py",
+  "lines": 96,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-E-5",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_create_payment_rejects_invalid_amount",
+    "verdict": "MERGE",
+    "universal": "U-E-5",
+    "stronger": null,
+    "lines": 68,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payments_constraints_avoid.py",
+  "lines": 110,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-4",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_payment_routing_constraints_avoid_filters_intermediate_pid",
+    "verdict": "MERGE",
+    "universal": "U-E-4",
+    "stronger": null,
+    "lines": 92,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payments_idempotency.py",
+  "lines": 311,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-1",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_payments_tx_id_returns_same_result",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 68,
+    "items": 1
+   },
+   {
+    "name": "test_payments_tx_id_reuse_with_different_payload_conflicts",
+    "verdict": "MERGE",
+    "universal": "U-E-1",
+    "stronger": null,
+    "lines": 80,
+    "items": 1
+   },
+   {
+    "name": "test_payments_missing_tx_id_is_bad_request",
+    "verdict": "MERGE",
+    "universal": "U-E-5",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payments_insufficient_capacity.py",
+  "lines": 76,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-4",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_payment_insufficient_capacity_returns_400_e002",
+    "verdict": "MERGE",
+    "universal": "U-E-4",
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payments_list_filters.py",
+  "lines": 241,
+  "verdict": "REWRITE",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "two real asyncio.sleep(1.1) (:129, :155): second-resolution timestamps are gone with SQLite; mode B already gives each request its own now()",
+  "tests": [
+   {
+    "name": "test_list_payments_filters",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "lines": 205,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_payments_multipath.py",
+  "lines": 141,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-4",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_payment_multipath_split_two_routes",
+    "verdict": "MERGE",
+    "universal": "U-E-4",
+    "stronger": null,
+    "lines": 126,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_trustline_cache_invalidation.py",
+  "lines": 201,
+  "verdict": "MIXED",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_public_trustline_success_evicts_only_equivalent_caches_after_commit",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 3
+   },
+   {
+    "name": "test_public_trustline_commit_failure_retains_caches_after_rollback",
+    "verdict": "MERGE",
+    "universal": "U-E-14",
+    "stronger": null,
+    "lines": 44,
+    "items": 3
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_trustline_negative_constraints.py",
+  "lines": 163,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-6",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_trustline_update_rejects_limit_below_used",
+    "verdict": "MERGE",
+    "universal": "U-E-6",
+    "stronger": null,
+    "lines": 69,
+    "items": 1
+   },
+   {
+    "name": "test_trustline_close_rejects_non_zero_debt",
+    "verdict": "MERGE",
+    "universal": "U-E-6",
+    "stronger": null,
+    "lines": 64,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_trustlines_get_by_id.py",
+  "lines": 61,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_get_trustline_by_id",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 49,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_trustlines_list_filters_pagination.py",
+  "lines": 164,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "private copies of register/sign helpers (:13-78)",
+  "tests": [
+   {
+    "name": "test_trustlines_list_status_filter_and_pagination",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 84,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_abort_tx.py",
+  "lines": 315,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_abort_tx_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_404",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 5,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_refuses_a_non_terminal_transaction_of_another_type",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_repeats_aborted_transaction_idempotently",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_keeps_the_stored_refusal_of_an_aborted_payment",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_rejects_committed_transaction_without_audit",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_rolls_back_when_audit_flush_fails",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   },
+   {
+    "name": "test_admin_abort_tx_rolls_back_when_outer_commit_fails",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 57,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_audit_log_list.py",
+  "lines": 103,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_audit_log_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_audit_log_pagination_and_q_search",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 87,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_clearing_cycles.py",
+  "lines": 105,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_clearing_cycles_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_clearing_cycles_returns_equivalents_and_cycles",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 84,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_config_patch_atomicity.py",
+  "lines": 583,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_config_patch_rejects_entire_batch_when_later_key_is_not_mutable",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_config_patch_rejects_string_for_boolean_without_mutation",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_config_patch_accepts_native_boolean_and_integer_values",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 25,
+    "items": 1
+   },
+   {
+    "name": "test_config_patch_keeps_old_values_visible_until_audit_is_durable",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_config_patch_audit_failure_never_publishes_values",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_config_patch_persists_exact_audit_before_and_after",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   },
+   {
+    "name": "test_config_patch_cancellation_waits_for_durable_audit_and_publish",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   },
+   {
+    "name": "test_repeated_config_patch_cancellation_cancels_audit_before_unlock",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 47,
+    "items": 1
+   },
+   {
+    "name": "test_feature_flags_patch_keeps_both_readers_old_until_audit_is_durable",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 66,
+    "items": 1
+   },
+   {
+    "name": "test_feature_flags_patch_audit_failure_never_publishes_values",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   },
+   {
+    "name": "test_feature_flags_patch_cancellation_waits_for_audit_and_publish",
+    "verdict": "MERGE",
+    "universal": "U-E-9",
+    "stronger": null,
+    "lines": 39,
+    "items": 1
+   },
+   {
+    "name": "test_cancelled_config_audit_releases_feature_flags_required_writer",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 58,
+    "items": 3
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_graph_ego.py",
+  "lines": 116,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_graph_ego_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_graph_ego_depth_1_and_2",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 95,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_graph_snapshot.py",
+  "lines": 142,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_graph_snapshot_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_graph_snapshot_hydrates_trustlines_and_debts",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 66,
+    "items": 1
+   },
+   {
+    "name": "test_admin_graph_snapshot_equivalent_enables_net_viz",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_incidents_list.py",
+  "lines": 77,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "app/api/v1/admin.py:1050 returns a constant: the seeded rows of the first test are never read",
+  "tests": [
+   {
+    "name": "test_admin_incidents_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_incidents_is_empty_whatever_old_rows_exist",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_admin_incidents_pagination_is_echoed_on_the_empty_list",
+    "verdict": "MERGE",
+    "universal": "U-E-7",
+    "stronger": null,
+    "lines": 8,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_liquidity_summary.py",
+  "lines": 192,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_liquidity_summary_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_liquidity_summary_smoke",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 104,
+    "items": 1
+   },
+   {
+    "name": "test_admin_liquidity_summary_keeps_high_precision_threshold",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 63,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_participant_metrics.py",
+  "lines": 238,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_participant_metrics_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 5,
+    "items": 1
+   },
+   {
+    "name": "test_admin_participant_metrics_balance_and_counterparties_and_capacity_and_rank",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 133,
+    "items": 1
+   },
+   {
+    "name": "test_admin_participant_metrics_activity_counts",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 78,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_participants_list.py",
+  "lines": 80,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_participants_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_participants_list_pagination_and_filters",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 66,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_participants_stats.py",
+  "lines": 37,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_participants_stats_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_participants_stats_counts",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_token_comparison.py",
+  "lines": 68,
+  "verdict": "KEEP",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_token_match_uses_compare_digest",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 16,
+    "items": 1
+   },
+   {
+    "name": "test_every_admin_dependency_path_uses_shared_token_matcher",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 33,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_trustlines_bottlenecks.py",
+  "lines": 128,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_trustlines_bottlenecks_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_trustlines_bottlenecks_filters_and_sorts",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 107,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_trustlines_list.py",
+  "lines": 141,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_trustlines_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_trustlines_list_filters_and_pagination",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 120,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_admin_whoami_and_extras.py",
+  "lines": 160,
+  "verdict": "MIXED",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_admin_whoami_requires_admin_token",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 4,
+    "items": 1
+   },
+   {
+    "name": "test_admin_whoami_returns_role_admin",
+    "verdict": "MERGE",
+    "universal": "U-E-8",
+    "stronger": null,
+    "lines": 6,
+    "items": 1
+   },
+   {
+    "name": "test_admin_dev_auth_allows_missing_token_for_allowlisted_ip",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 15,
+    "items": 1
+   },
+   {
+    "name": "test_admin_equivalents_include_inactive",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_admin_feature_flags_partial_patch",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_admin_graph_snapshot_include_extras_smoke",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 68,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_balance_service_summary.py",
+  "lines": 60,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-10",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "assigns settings.BALANCE_SUMMARY_CACHE_TTL_SECONDS = 0 without monkeypatch (:178): leaks into every later test of the session",
+  "tests": [
+   {
+    "name": "test_balance_summary_capacity_semantics",
+    "verdict": "MERGE",
+    "universal": "U-E-10",
+    "stronger": null,
+    "lines": 46,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_clearing_additional_cases.py",
+  "lines": 948,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_all_cycles_blocked_by_policy_returns_empty",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 47,
+    "items": 1
+   },
+   {
+    "name": "test_partially_blocked_returns_allowed_cycle",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   },
+   {
+    "name": "test_cycles_scoped_to_equivalent",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 53,
+    "items": 1
+   },
+   {
+    "name": "test_no_trustline_means_no_consent",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 20,
+    "items": 1
+   },
+   {
+    "name": "test_frozen_trustline_with_consent_does_not_block_clearing",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 49,
+    "items": 1
+   },
+   {
+    "name": "test_sql_and_dfs_produce_same_cycles",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 52,
+    "items": 1
+   },
+   {
+    "name": "test_self_loop_not_allowed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 24,
+    "items": 1
+   },
+   {
+    "name": "test_auto_clear_clears_multiple_independent_cycles",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 63,
+    "items": 1
+   },
+   {
+    "name": "test_auto_clear_surfaces_sanitized_failure_after_partial_progress",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 52,
+    "items": 4
+   },
+   {
+    "name": "test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanitized_error",
+    "verdict": "MERGE",
+    "universal": "U-E-18",
+    "stronger": null,
+    "lines": 95,
+    "items": 1
+   },
+   {
+    "name": "test_execute_clearing_policy_lookup_failure_rolls_back_without_effects",
+    "verdict": "MERGE",
+    "universal": "U-E-18",
+    "stronger": null,
+    "lines": 69,
+    "items": 1
+   },
+   {
+    "name": "test_execute_clearing_policy_skip_remains_non_exceptional",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 45,
+    "items": 1
+   },
+   {
+    "name": "test_execute_clearing_nonpositive_defensive_skip_rolls_back",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 36,
+    "items": 1
+   },
+   {
+    "name": "test_execute_clearing_commit_failure_rolls_back_without_visible_effects",
+    "verdict": "MERGE",
+    "universal": "U-E-18",
+    "stronger": null,
+    "lines": 52,
+    "items": 1
+   },
+   {
+    "name": "test_execute_clearing_rollback_failure_keeps_original_error_sanitized",
+    "verdict": "MERGE",
+    "universal": "U-E-18",
+    "stronger": null,
+    "lines": 61,
+    "items": 1
+   },
+   {
+    "name": "test_execute_clearing_checkpoint_failure_is_explicitly_best_effort",
+    "verdict": "MERGE",
+    "universal": "U-E-18",
+    "stronger": null,
+    "lines": 41,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_clearing_auto_clearing_policy.py",
+  "lines": 102,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-11",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_cycle_rejected_when_any_edge_auto_clearing_false",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   },
+   {
+    "name": "test_cycle_allowed_when_all_edges_auto_clearing_true_or_default",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_clearing_plan_edges_extraction.py",
+  "lines": 64,
+  "verdict": "DELETE-EMPTY",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "tests extract_cycle_edges_for_ui defined in the test file itself (:6-24); no import of app; grep -c in app/ = 0; the second test builds plan_steps inline and asserts on its own literal",
+  "tests": [
+   {
+    "name": "test_extract_edges_from_clearing_cycle",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "lines": 15,
+    "items": 1
+   },
+   {
+    "name": "test_clearing_plan_steps_include_highlight_edges",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "lines": 21,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_clearing_scope_reaches_every_replay_path.py",
+  "lines": 82,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_every_replay_resolver_call_passes_the_perimeter",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 17,
+    "items": 1
+   },
+   {
+    "name": "test_the_resolver_refuses_rather_than_ignores_an_unverifiable_payload",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "lines": 7,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_clearing_sql_cycle_detection.py",
+  "lines": 208,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-11",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_find_cycles_uses_sql_triangles",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_find_cycles_uses_sql_quadrangles",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 40,
+    "items": 1
+   },
+   {
+    "name": "test_find_cycles_filters_auto_clearing_policy_and_falls_back_to_quadrangles",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 80,
+    "items": 1
+   },
+   {
+    "name": "test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d",
+    "verdict": "MERGE",
+    "universal": "U-E-11",
+    "stronger": null,
+    "lines": 30,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_debt_optimistic_lock.py",
+  "lines": 121,
+  "verdict": "FIX-DOC",
+  "basket": "B",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "docstring :8 names PaymentEngine._is_retryable_db_error (removed by 019 stage 4)",
+  "tests": [
+   {
+    "name": "test_a_stale_writer_cannot_overwrite_the_committed_debt_amount",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 85,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_debt_symmetry.py",
+  "lines": 89,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_debt_symmetry_violation_detected",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 24,
+    "items": 1
+   },
+   {
+    "name": "test_apply_flow_nets_mutual_debts",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 47,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_equivalent_code_validation.py",
+  "lines": 54,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_validate_equivalent_code_accepts_valid_codes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 13,
+    "items": 6
+   },
+   {
+    "name": "test_validate_equivalent_code_rejects_invalid_codes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 15,
+    "items": 7
+   },
+   {
+    "name": "test_validate_equivalent_precision_accepts_integer_bounds",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 3,
+    "items": 2
+   },
+   {
+    "name": "test_validate_equivalent_precision_rejects_noncanonical_values",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 4,
+    "items": 7
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_equivalent_metadata_validation.py",
+  "lines": 31,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "pytest.raises(Exception) at :30 accepts any error -> BadRequestException",
+  "tests": [
+   {
+    "name": "test_equivalent_metadata_allows_none",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 2,
+    "items": 1
+   },
+   {
+    "name": "test_equivalent_metadata_valid_fiat_with_iso_code",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 2,
+    "items": 1
+   },
+   {
+    "name": "test_equivalent_metadata_valid_time_without_iso_code",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 2,
+    "items": 1
+   },
+   {
+    "name": "test_equivalent_metadata_invalid",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 14,
+    "items": 6
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_integrity_checkpoints.py",
+  "lines": 222,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-13",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_integrity_checkpoint_propagates_unavailable_invariant_checker",
+    "verdict": "MERGE",
+    "universal": "U-E-13",
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   },
+   {
+    "name": "test_checkpoint_batch_fails_and_rolls_back_when_checker_is_unavailable",
+    "verdict": "MERGE",
+    "universal": "U-E-13",
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_integrity_checkpoint_records_invariant_checks_when_healthy",
+    "verdict": "MERGE",
+    "universal": "U-E-13",
+    "stronger": null,
+    "lines": 72,
+    "items": 1
+   },
+   {
+    "name": "test_integrity_checkpoint_marks_trust_limit_violation_as_critical",
+    "verdict": "MERGE",
+    "universal": "U-E-13",
+    "stronger": null,
+    "lines": 31,
+    "items": 1
+   },
+   {
+    "name": "test_integrity_checkpoint_marks_debt_symmetry_violation_as_warning",
+    "verdict": "MERGE",
+    "universal": "U-E-13",
+    "stronger": null,
+    "lines": 45,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_participant_race_stays_a_declared_conflict.py",
+  "lines": 102,
+  "verdict": "KEEP",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_registration_race_is_reported_as_a_conflict_not_a_server_error",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 34,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_cleanup_cancellation.py",
+  "lines": 62,
+  "verdict": "KEEP",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "two tests differ only by the number of cancellations (1 vs 2): parametrize; the helper is one of the F-024-11 copies",
+  "tests": [
+   {
+    "name": "test_payment_cleanup_is_drained_after_caller_cancellation",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 24,
+    "items": 1
+   },
+   {
+    "name": "test_repeated_cancellation_does_not_preempt_terminal_cleanup",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_db_error_classifier.py",
+  "lines": 67,
+  "verdict": "KEEP",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_retryable_database_conflicts_use_existing_sanitized_contract",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 17,
+    "items": 6
+   },
+   {
+    "name": "test_retryable_sqlstate_is_found_through_exception_cause_chain",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_nonretryable_database_errors_remain_internal",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 10,
+    "items": 3
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_delta_check.py",
+  "lines": 75,
+  "verdict": "FIX-DOC",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "test name says payment_engine; the subject is MoneyBoundary.check_payment_delta",
+  "tests": [
+   {
+    "name": "test_payment_engine_delta_check_raises_on_drift",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 60,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_engine_advisory_locks_execute.py",
+  "lines": 238,
+  "verdict": "FIX-DOC",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "rename -> test_money_boundary_lock_statements.py; content is the live MoneyBoundary primitives",
+  "tests": [
+   {
+    "name": "test_shared_equivalent_locks_are_deduplicated_sorted_and_in_the_one_namespace",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   },
+   {
+    "name": "test_the_staged_entry_takes_the_shared_set_and_restores_the_callers_lock_timeout",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   },
+   {
+    "name": "test_the_exclusive_session_lock_and_its_release_use_the_same_identity",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   },
+   {
+    "name": "test_advisory_lock_timeout_uses_one_decreasing_commit_budget",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_advisory_lock_budget_matches_service_zero_default",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 9,
+    "items": 1
+   },
+   {
+    "name": "test_the_binding_phase_takes_the_shared_equivalent_lock_before_the_first_row_read",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 27,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_router_invalidate_cache.py",
+  "lines": 24,
+  "verdict": "KEEP",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_payment_router_invalidate_cache_clears_specific_key",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 19,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_staged_post_commit.py",
+  "lines": 263,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_staged_payment_rollback_has_no_rows_or_effects",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 37,
+    "items": 1
+   },
+   {
+    "name": "test_staged_payment_effects_apply_once_after_outer_commit",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 88,
+    "items": 1
+   },
+   {
+    "name": "test_committed_payment_result_does_not_read_expired_participants",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "lines": 29,
+    "items": 1
+   },
+   {
+    "name": "test_staged_payment_cancellation_rolls_back_without_effects",
+    "verdict": "MERGE",
+    "universal": "U-E-3",
+    "stronger": null,
+    "lines": 36,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_payment_timeouts.py",
+  "lines": 208,
+  "verdict": "DELETE-DUP",
+  "basket": "D",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_payment_prepare_timeout_aborts_transaction",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p019_refusal_classes_characterization_postgres.py::test_the_api_path_refusal_table",
+    "lines": 89,
+    "items": 1
+   },
+   {
+    "name": "test_payment_commit_timeout_returns_committed_when_tx_already_committed",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p015_t1523_the_commit_landed_then_the_caller_failed.py::test_a_commit_that_landed_and_then_timed_out_answers_committed_once",
+    "lines": 98,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_routing_constraints_timeout_ms.py",
+  "lines": 44,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-15",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_find_flow_routes_timeout_ms_is_enforced",
+    "verdict": "MERGE",
+    "universal": "U-E-15",
+    "stronger": null,
+    "lines": 35,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_routing_reserved_and_policy.py",
+  "lines": 264,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "file name names removed reservations; build_graph test seeds debts=[] so it cannot see the reverse-debt formula at all",
+  "tests": [
+   {
+    "name": "test_build_graph_capacity_is_the_limit_and_respects_policy",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 60,
+    "items": 1
+   },
+   {
+    "name": "test_find_flow_routes_blocks_intermediate_when_policy_false",
+    "verdict": "MERGE",
+    "universal": "U-E-15",
+    "stronger": null,
+    "lines": 23,
+    "items": 1
+   },
+   {
+    "name": "test_find_flow_routes_blocks_blocked_participants_as_intermediate_node",
+    "verdict": "MERGE",
+    "universal": "U-E-15",
+    "stronger": null,
+    "lines": 20,
+    "items": 1
+   },
+   {
+    "name": "test_find_flow_routes_allows_blocked_participants_as_destination",
+    "verdict": "MERGE",
+    "universal": "U-E-15",
+    "stronger": null,
+    "lines": 22,
+    "items": 1
+   },
+   {
+    "name": "test_calculate_max_flow_to_self_is_refused_instead_of_looping_forever",
+    "verdict": "MERGE",
+    "universal": "U-E-15",
+    "stronger": null,
+    "lines": 26,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_trustline_audit_fail_closed.py",
+  "lines": 300,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-14",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_create_fails_closed_when_actual_invariant_checker_is_unavailable",
+    "verdict": "MERGE",
+    "universal": "U-E-14",
+    "stronger": null,
+    "lines": 55,
+    "items": 1
+   },
+   {
+    "name": "test_create_checkpoint_failure_is_not_swallowed_or_committed",
+    "verdict": "MERGE",
+    "universal": "U-E-14",
+    "stronger": null,
+    "lines": 65,
+    "items": 2
+   },
+   {
+    "name": "test_update_checkpoint_failure_is_not_swallowed_or_committed",
+    "verdict": "MERGE",
+    "universal": "U-E-14",
+    "stronger": null,
+    "lines": 76,
+    "items": 2
+   },
+   {
+    "name": "test_close_checkpoint_failure_is_not_swallowed_or_committed",
+    "verdict": "MERGE",
+    "universal": "U-E-14",
+    "stronger": null,
+    "lines": 76,
+    "items": 2
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_trustline_conflict_identity.py",
+  "lines": 189,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-16",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "_INSERT_SQL :26-29 is a SQLite statement (? placeholders); t1706 'transfer' not executed",
+  "tests": [
+   {
+    "name": "test_classifier_reads_the_driver_error_and_not_the_statement",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 21,
+    "items": 7
+   },
+   {
+    "name": "test_classifier_prefers_the_constraint_name_when_the_driver_provides_it",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 6,
+    "items": 1
+   },
+   {
+    "name": "test_classifier_is_false_without_a_driver_error",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 2,
+    "items": 1
+   },
+   {
+    "name": "test_constraint_name_is_found_through_a_nested_cause_chain",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 9,
+    "items": 1
+   },
+   {
+    "name": "test_postgres_unique_violation_without_a_constraint_name_uses_sqlstate_and_table",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 9,
+    "items": 1
+   },
+   {
+    "name": "test_postgres_unique_violation_on_two_of_the_three_columns_is_not_ours",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 12,
+    "items": 1
+   },
+   {
+    "name": "test_asyncpg_wrapper_does_not_hide_the_facts_on_the_chained_error",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 13,
+    "items": 1
+   },
+   {
+    "name": "test_asyncpg_wrapper_still_rejects_a_clash_on_another_table",
+    "verdict": "MERGE",
+    "universal": "U-E-16",
+    "stronger": null,
+    "lines": 13,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_trustline_signatures.py",
+  "lines": 60,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": "U-E-6",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_trustline_create_rejects_invalid_signature",
+    "verdict": "MERGE",
+    "universal": "U-E-6",
+    "stronger": null,
+    "lines": 44,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_trustline_timestamps.py",
+  "lines": 49,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-E-17",
+  "stronger": null,
+  "removed_contract": null,
+  "note": null,
+  "tests": [
+   {
+    "name": "test_trustline_wire_timestamp_treats_naive_database_value_as_utc",
+    "verdict": "MERGE",
+    "universal": "U-E-17",
+    "stronger": null,
+    "lines": 21,
+    "items": 2
+   },
+   {
+    "name": "test_trustline_wire_timestamp_preserves_explicit_offset",
+    "verdict": "MERGE",
+    "universal": "U-E-17",
+    "stronger": null,
+    "lines": 17,
+    "items": 1
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_websocket_payment_received_event.py",
+  "lines": 157,
+  "verdict": "FIX-DOC",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "fixture docstring :22 'SQLite startup probes' - app/main.py has none",
+  "tests": [
+   {
+    "name": "test_ws_receives_payment_received_event_for_subscribed_pid",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 30,
+    "items": 1
+   },
+   {
+    "name": "test_ws_rejects_legacy_query_string_token",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 10,
+    "items": 1
+   },
+   {
+    "name": "test_ws_subprotocol_auth_keeps_token_out_of_uvicorn_logs",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "lines": 43,
+    "items": 1
+   }
+  ]
+ }
+]
