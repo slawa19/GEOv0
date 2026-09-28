@@ -366,8 +366,18 @@ async def test_an_inject_event_writes_one_audit_row_per_line_and_one_checkpoint_
 
 
 @pytest.mark.usefixtures("tier_on_a_clone")
+@pytest.mark.parametrize(
+    "fail_on_call",
+    [
+        # The before-checkpoint of the SECOND line (inside its effect handler, after the first line was
+        # staged): the failure has to get past the handler's "skipped" to reach the owner.
+        pytest.param(2, id="second_line_before_checkpoint"),
+        # The first after-checkpoint (end of staging), after both lines were written and flushed.
+        pytest.param(3, id="after_checkpoint"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkeypatch) -> None:
+async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkeypatch, fail_on_call) -> None:
     w = await _seed_inject(factory)
     effects = [
         {"op": "create_trustline", "from": w.a.pid, "to": w.b.pid, "equivalent": w.e1.code, "limit": "10"},
@@ -375,9 +385,8 @@ async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkey
     ]
     run, scenario, _artifacts, runner = _inject_run(w, effects)
     checkpoints = TrustLineCheckpoints(monkeypatch)
-    # Two equivalents: calls 1-2 are the before-checkpoints of the two lines, call 3 is the first
-    # after-checkpoint - after both lines were written and flushed.
-    checkpoints.fail_on_call = 3
+    # Two equivalents: calls 1-2 are the before-checkpoints of the two lines, calls 3-4 the after-checkpoints.
+    checkpoints.fail_on_call = fail_on_call
 
     raised: BaseException | None = None
     async with factory() as session:
@@ -390,12 +399,13 @@ async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkey
     lines = await _inject_lines(factory, w)
     audit = await _inject_audit(factory, w)
     require_target(
-        checkpoints.count == 3
+        checkpoints.count == fail_on_call
         and raised is not None and "forced trust-line checkpoint failure" in str(raised)
         and lines == []
         and audit == []
         and run._real_fired_scenario_event_indexes == set(),
-        f"inject: checkpoint failure point reached: {checkpoints.count == 3} ({checkpoints.count} computations); "
+        f"inject: checkpoint failure point reached: {checkpoints.count == fail_on_call} "
+        f"({checkpoints.count} computations); "
         f"raised {raised!r}; lines after {lines}; {len(audit)} audit rows; "
         f"fired {sorted(run._real_fired_scenario_event_indexes)}",
     )
