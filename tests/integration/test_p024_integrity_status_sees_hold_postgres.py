@@ -374,3 +374,111 @@ async def test_r024_3_a_passed_result_without_a_hold_raises_nothing(client, db_s
     payload = await _status(client)
     assert payload["equivalents"]["P24HF"]["status"] == "healthy", payload["equivalents"]["P24HF"]
     assert _alerts_of(payload, "P24HF") == [], payload["alerts"]
+
+
+# ==============================================================================================
+# §15 fix-delta P2-1: a locked skip must not erase a recorded failure (one application state)
+# ==============================================================================================
+
+
+class _Stand:
+    """ONE application state across runs, the integrity job's collaborators replaced by switches.
+
+    Unlike the tests above this is not a DB stand: the subject is the job state machine across three runs
+    - fail, skip (another worker holds the Redis lock), clean - and every run must see the state the
+    previous one left. `lock_held` makes `redis_distributed_lock` refuse as a held lock does.
+    """
+
+    def __init__(self, monkeypatch) -> None:
+        import app.core.integrity as integrity_module
+        import app.db.session as app_db_session
+        import app.utils.distributed_lock as lock_module
+        from app.utils.exceptions import ConflictException
+
+        self.app = SimpleNamespace(state=SimpleNamespace(redis=None, background_jobs={}))
+        self.lock_held = False
+        self.checkpoint_error = False
+        self.reconciliation_errors = 0
+        self.skips = 0
+
+        class _Session:
+            async def __aenter__(self):
+                return object()
+
+            async def __aexit__(self, *exc):
+                return None
+
+        stand = self
+
+        class _Lock:
+            async def __aenter__(self):
+                if stand.lock_held:
+                    stand.skips += 1
+                    raise ConflictException("p024 stand: another worker holds the integrity lock")
+
+            async def __aexit__(self, *exc):
+                return None
+
+        async def compute(_session):
+            if stand.checkpoint_error:
+                raise RuntimeError("p024 stand: checkpoints fail")
+
+        async def reconcile(_factory, **_kw):
+            return {"error": stand.reconciliation_errors, "hold_errors": 0}
+
+        monkeypatch.setattr(app_db_session, "AsyncSessionLocal", _Session)
+        monkeypatch.setattr(lock_module, "redis_distributed_lock", lambda *a, **k: _Lock())
+        monkeypatch.setattr(integrity_module, "compute_and_store_integrity_checkpoints", compute)
+        monkeypatch.setattr(reconciliation, "run_scheduled_reconciliation", reconcile)
+
+    async def run(self) -> dict:
+        import app.main as main_module
+
+        await main_module._run_integrity_checkpoints_once(self.app, reason="periodic")
+        return dict(self.app.state.background_jobs["integrity"])
+
+
+async def _fail_skip_clean(stand: _Stand, first_failure: str) -> None:
+    failed = await stand.run()
+    assert failed["status"] == "failed" and failed["event"] == first_failure, failed
+
+    stand.lock_held = True
+    stand.checkpoint_error = False
+    stand.reconciliation_errors = 0
+    skipped = await stand.run()
+    assert stand.skips == 1, "stand: the run was not skipped on the lock"
+    kept = skipped == failed and background_health_status(stand.app) == "degraded"
+
+    stand.lock_held = False
+    clean = await stand.run()
+    assert clean == {"status": "running", "event": "periodic_success"}, clean
+    assert background_health_status(stand.app) == "ok"
+
+    require_target(
+        kept,
+        f"a locked skip erased the failure {failed} without a clean run: after the skip the job read "
+        f"{skipped}",
+    )
+
+
+@target_xfail_024("T2412.1 fix-delta (§15 P2-1)", "a locked skip keeps the reconciliation failure")
+@pytest.mark.asyncio
+async def test_p2_1_a_locked_skip_keeps_a_reconciliation_failure(monkeypatch) -> None:
+    """Reconciliation error -> skipped run -> still `failed`/degraded; only the clean run recovers.
+
+    MUTATION: drop the retention in the skip branch of `app/main.py` - red.
+    """
+
+    stand = _Stand(monkeypatch)
+    stand.reconciliation_errors = 1
+    await _fail_skip_clean(stand, "periodic_debt_reconciliation_error")
+
+
+@target_xfail_024("T2412.1 fix-delta (§15 P2-1)", "a locked skip keeps the checkpoint failure")
+@pytest.mark.asyncio
+async def test_p2_1_a_locked_skip_keeps_a_checkpoint_failure(monkeypatch) -> None:
+    """The checkpoint half of the same job has the same overwrite (pre-existing): same line, same fix."""
+
+    stand = _Stand(monkeypatch)
+    stand.checkpoint_error = True
+    await _fail_skip_clean(stand, "periodic_error")
