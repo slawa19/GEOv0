@@ -26,6 +26,15 @@ typed into the test.
   debt-id SET (`service.py:283-285`), so two distinct occurrences on one set of debts get one id. Two
   partial commits are NOT claimed reproduced here - the baseline has no such path (spec, R-023-4a); that
   regression is R-023-4b, slice (b).
+
+WHICH SLICE TURNS R-023-4a GREEN - (d), recorded 2026-09-27 with slice (b). Slice (b) is additive: it adds the
+v2 entry (`execute_occurrence`, a declared amount, plan-scoped identity) beside the production executor and
+leaves v1 as it is - decision 5 keeps `clear == min(pre)` for v1 and decision 6 keeps the v1 set-hash
+namespace for historical occurrences. Both tests below exercise exactly that production path
+(`execute_clearing_with_amount`, `_execution_tx_id`), which every caller still uses until the atomic switch of
+slice (d); so they stay red through (b), and the v2 behaviour they ask for is proven by R-023-4b
+(`test_p023_b_occurrence_execution_postgres.py`). Slice (d), which moves the callers to the runner and deletes
+the replaced execution path, removes the markers or transfers these assertions with a record.
 """
 
 from __future__ import annotations
@@ -192,7 +201,7 @@ async def test_r023_3_eleven_ring_is_missed_at_every_supported_depth(db_session,
 # ----------------------------------------------------------------------------------------------- R-023-4a
 
 
-@target_xfail_023("(b)", "R-023-4a: a declared amount c < min is not honoured; the minimum is cleared")
+@target_xfail_023("(d)", "R-023-4a: the production executor ignores a declared amount c < min and clears the minimum")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r023_4a_declared_partial_amount_is_not_honoured(db_session) -> None:
@@ -219,7 +228,7 @@ async def test_r023_4a_declared_partial_amount_is_not_honoured(db_session) -> No
     )
 
 
-@target_xfail_023("(b)", "R-023-4a: two distinct occurrences on one debt set share the baseline identity")
+@target_xfail_023("(d)", "R-023-4a: two distinct occurrences on one debt set share the production (v1) identity")
 def test_r023_4a_distinct_occurrences_get_distinct_identities() -> None:
     debt_ids = [debt_uuid(0x2305, k) for k in range(3)]
     # Two occurrences of ONE debt set: e.g. ordinal 0 of plan A and ordinal 0 of plan B, each declaring a

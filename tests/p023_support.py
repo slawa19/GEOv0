@@ -22,6 +22,47 @@ import pytest
 from tests.p019_support import TargetMismatch, require_target  # noqa: F401 - re-exported for 023 tests
 
 
+def slice_b_surface():
+    """The slice (b) surface (spec decisions 5-6), or `TargetMismatch` naming what the tree lacks.
+
+    The v2 tests read the new executor, descriptor and criterion (b) rule through here, so on a tree
+    without slice (b) they end on the target - "no declared-amount occurrence path, no CLEARING intent v2
+    rule" (the baseline executor takes neither an amount nor a plan, `service.py:1766`; a v2 envelope is
+    `b_version_unsupported`) - and not on an `ImportError` the strict marker would not accept.
+    """
+
+    from types import SimpleNamespace
+
+    from app.core.clearing import service
+    from app.core.ledger import reconciliation
+    from app.db import journal_tables
+
+    missing = [
+        name
+        for owner, name in (
+            (service, "ClearingOccurrence"),
+            (service, "ClearingOccurrenceRefused"),
+            (service.ClearingService, "execute_occurrence"),
+            (journal_tables, "CLEARING_INTENT_ENCODING_VERSION"),
+        )
+        if not hasattr(owner, name)
+    ]
+    rule = getattr(reconciliation, "_RULES", {}).get(("CLEARING", 2))
+    if rule is None:
+        missing.append("criterion (b) rule for (CLEARING, intent v2)")
+    if missing:
+        raise TargetMismatch(
+            "slice (b) is not delivered: no declared-amount plan occurrence and no CLEARING intent v2 rule "
+            f"on this tree ({', '.join(missing)} absent)"
+        )
+    return SimpleNamespace(
+        ClearingOccurrence=service.ClearingOccurrence,
+        ClearingOccurrenceRefused=service.ClearingOccurrenceRefused,
+        version=journal_tables.CLEARING_INTENT_ENCODING_VERSION,
+        rule=rule,
+    )
+
+
 def target_xfail_023(slice_: str, what: str):
     """The 023 marker: an expected `TargetMismatch`, strict, naming the slice whose switch removes it."""
 
