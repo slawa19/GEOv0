@@ -29,9 +29,8 @@ import asyncio
 import pytest
 
 from app.utils.exceptions import ConflictException
-from tests.p023_support import slice_c_surface, target_xfail_023
+from tests.p023_support import slice_c_surface
 
-pytestmark = target_xfail_023("(c)", "no renewable owner-token lease")
 
 KEY = "dlock:clearing:P023C"
 

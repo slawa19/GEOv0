@@ -28,9 +28,9 @@ from app.db.models.simulator_storage import SimulatorRun
 from app.db.models.transaction import Transaction
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import debt_uuid, ring, seed_graph
-from tests.p023_support import remaining_debts, slice_c_surface, target_xfail_023
+from tests.p023_support import remaining_debts, slice_c_surface
 
-pytestmark = [target_xfail_023("(c)", "no periodic runner with the simulator isolation rule"), MODE_B]
+pytestmark = MODE_B
 
 CODE = "PQI"
 HUB = ring(["p023ia", "p023ib", "p023ic"], ["4", "4", "4"], [debt_uuid(0x2305, k) for k in range(3)])

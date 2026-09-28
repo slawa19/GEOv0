@@ -22,6 +22,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFINING_MODULE = REPO_ROOT / "app" / "core" / "clearing" / "service.py"
+#: Slice (c), 2026-09-28: the common runner is the one module that reaches the executor; that it is itself reached
+#: by no production entrypoint is `tests/unit/test_p023_c_runner_is_not_wired.py`.
+_RUNNER_MODULE = REPO_ROOT / "app" / "core" / "clearing" / "runner.py"
 _SYMBOLS = frozenset({"execute_occurrence", "ClearingOccurrence"})
 
 
@@ -42,7 +45,7 @@ def test_no_production_module_reaches_the_v2_occurrence_executor() -> None:
     offenders = {
         str(path.relative_to(REPO_ROOT)): sorted(used)
         for path in sorted((REPO_ROOT / "app").rglob("*.py"))
-        if path != _DEFINING_MODULE and (used := _names_used(path))
+        if path not in (_DEFINING_MODULE, _RUNNER_MODULE) and (used := _names_used(path))
     }
     assert offenders == {}, f"slice (b) is additive; these modules already reach the v2 executor: {offenders}"
 
@@ -50,6 +53,8 @@ def test_no_production_module_reaches_the_v2_occurrence_executor() -> None:
 def test_the_walker_sees_the_forms_it_looks_for() -> None:
     probe = REPO_ROOT / "tests" / "integration" / "test_p023_b_occurrence_execution_postgres.py"
     assert _names_used(probe) == set(_SYMBOLS), _names_used(probe)
+    # The runner's exemption is not vacuous: it is the module that does reach the executor.
+    assert _names_used(_RUNNER_MODULE) == set(_SYMBOLS), _names_used(_RUNNER_MODULE)
     synthetic = REPO_ROOT / "tests" / "unit" / "test_p023_b_occurrence_is_not_wired.py"
     # This module names the symbols only in strings and a frozenset literal: the walker must not count them.
     assert _names_used(synthetic) == set(), _names_used(synthetic)

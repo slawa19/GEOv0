@@ -266,6 +266,44 @@ async def _integrity_loop(app: FastAPI) -> None:
             await _run_integrity_checkpoints_once(app, reason="periodic")
 
 
+async def _run_periodic_clearing_once(app: FastAPI) -> None:
+    """Programme 023 (decisions 7, 9): one periodic clearing pass. A refusal or an error is recorded, never silent."""
+
+    from app.core.clearing.runner import ClearingPeriodicRefused, run_periodic_clearing_pass
+    from app.db.session import AsyncSessionLocal
+
+    try:
+        results = await run_periodic_clearing_pass(AsyncSessionLocal, getattr(app.state, "redis", None))
+    except ClearingPeriodicRefused as refusal:
+        logger.error("clearing.periodic_refused reason=%s", refusal.reason)
+        _record_background_job_event(
+            app, name="clearing", status="failed", event=f"refused_{refusal.reason}", error=refusal
+        )
+        return
+    except Exception as error:
+        logger.exception("clearing.periodic_failed")
+        _record_background_job_event(app, name="clearing", status="failed", event="error", error=error)
+        return
+    interrupted = sorted(code for code, result in results.items() if result.status != "complete")
+    _record_background_job_event(
+        app,
+        name="clearing",
+        status="running",
+        event="pass_interrupted" if interrupted else "pass_complete",
+    )
+
+
+async def _clearing_loop(app: FastAPI) -> None:
+    interval = max(1, int(getattr(settings, "CLEARING_PERIODIC_INTERVAL_SECONDS", 300) or 300))
+    while not app.state._bg_stop_event.is_set():
+        await _run_periodic_clearing_once(app)
+        try:
+            await asyncio.wait_for(app.state._bg_stop_event.wait(), timeout=interval)
+            break
+        except asyncio.TimeoutError:
+            continue
+
+
 def _start_configured_background_tasks(app: FastAPI) -> None:
     # No payment recovery loop since programme 019, stage 4: the hub executes a payment as one
     # transaction and persists no intermediate state for it to finish (migration 030). The
@@ -275,6 +313,13 @@ def _start_configured_background_tasks(app: FastAPI) -> None:
             app,
             name="integrity",
             coroutine_factory=lambda: _integrity_loop(app),
+        )
+    # Programme 023: the periodic clearing runner. OFF unless configured (slice (c)); slice (d) activates it.
+    if getattr(settings, "CLEARING_PERIODIC_ENABLED", False):
+        _start_supervised_background_task(
+            app,
+            name="clearing",
+            coroutine_factory=lambda: _clearing_loop(app),
         )
 
 

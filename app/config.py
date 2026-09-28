@@ -247,6 +247,12 @@ class Settings(BaseSettings):
     FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: bool = False
     CLEARING_ENABLED: bool = True
 
+    # Periodic clearing (programme 023, decision 7; `app/core/clearing/runner.py`). OFF by default: slice (c) adds
+    # the loop, slice (d) switches it on. Supported only on a hub database without simulator data (decision 9,
+    # form (b)): the runner refuses on a database holding a real-mode simulator run.
+    CLEARING_PERIODIC_ENABLED: bool = False
+    CLEARING_PERIODIC_INTERVAL_SECONDS: int = 300
+
     # Integrity checkpoints
     INTEGRITY_CHECKPOINT_ENABLED: bool = True
     INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: int = 300

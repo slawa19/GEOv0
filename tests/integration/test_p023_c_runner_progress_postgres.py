@@ -39,9 +39,9 @@ from app.db.models.transaction import Transaction
 from app.utils.exceptions import BadRequestException, ConflictException
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import Edge, debt_uuid, participant_uuid, ring, seed_graph
-from tests.p023_support import positive_debt_total, remaining_debts, slice_c_surface, target_xfail_023
+from tests.p023_support import positive_debt_total, remaining_debts, slice_c_surface
 
-pytestmark = [target_xfail_023("(c)", "no common runner and no committed-progress handoff"), MODE_B]
+pytestmark = MODE_B
 
 ATOM = 10**8
 CODE = "PQC"
