@@ -201,86 +201,67 @@ async def test_within_a_length_the_largest_executable_cycle_comes_first(db_sessi
     )
 
 
+async def _pass(db_session):
+    """The production pass since programme 023 slice (d): the common runner on the session's database."""
+
+    from app.core.clearing.runner import run_clearing_pass
+    from tests.conftest import sessionmaker_of
+
+    result = await run_clearing_pass(sessionmaker_of(db_session), _EQ)
+    await db_session.commit()  # a fresh snapshot for the reads below
+    return result
+
+
+async def _remaining(db_session) -> list[tuple[str, str, Decimal]]:
+    creditor = Participant.__table__.alias("creditor")
+    rows = (
+        await db_session.execute(
+            select(Participant.pid, creditor.c.pid, Debt.amount)
+            .join(Participant, Participant.id == Debt.debtor_id)
+            .join(creditor, creditor.c.id == Debt.creditor_id)
+            .where(Debt.amount > 0)
+        )
+    ).all()
+    return sorted((d, c, Decimal(a)) for d, c, a in rows)
+
+
 @MODE_B
 @pytest.mark.asyncio
 async def test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_the_small(
     db_session,
 ) -> None:
-    """The outcome pin, on debts rather than on list order: final ledger = [b->c 10, c->a 10].
+    """The outcome pin over a shared edge, MOVED TO THE FLOW OBJECTIVE 2026-09-28 (programme 023 slice (d)).
 
-    Clearing the amount-100 cycle first consumes the shared edge entirely (one clearing
-    transaction; the small cycle dies with the shared edge).  Clearing the amount-10 cycle
-    first leaves [b->d 10, d->a 10] in two transactions.  Same graph, different remaining
-    debtors: this is the behavioral half of the finding, and what auto_clear's callers see.
-
-    WHAT THIS PINS, honestly (1b's review of a9d742e): with the depth ladder, auto_clear
-    reaches this graph through the SQL fast path at depth 4, where `ORDER BY LEAST(...)
-    DESC` supplies the order - so a mutated UNION sort leaves this test green, and this pin
-    holds "fast path + executor contract", not the union's sorting.  The union sort has its
-    own behavioral pin in `test_auto_clear_orders_the_union_when_the_sql_path_is_down`,
-    which chokes the SQL detectors so the DFS+union path is the one that answers.
+    Before 023 (d) this pinned the ladder's order - the amount-100 triangle first, one clearing, residual
+    b->c/c->a. The executor is now the flow plan (spec 023, Verification plan §3: "the remainder on a shared edge
+    -> the flow objective"): on this graph BOTH ways of using the shared edge reach the same optimum,
+    `V_edge = 300` (the amount-100 triangle alone: 3 x 100; or the small triangle at 10 plus the large at 90:
+    30 + 270), so the plan's choice between them is not a property to pin. What is pinned: the volume on the debts
+    equals the exhaustive oracle's optimum, and the residual is exactly 20 of debt on the triangle the plan did not
+    use - never a mixture that would mean volume was lost.
     """
 
-    await _seed_graph(db_session, edges=_SHARED_EDGE)
-
-    service = ClearingService(db_session)
-    cleared = await service.auto_clear(_EQ, max_depth=6)
-
-    result = await db_session.execute(
-        select(Debt, Participant.pid)
-        .join(Participant, Participant.id == Debt.debtor_id)
-        .where(Debt.amount > 0)
-    )
-    remaining = sorted(
-        (pid, str(debt.amount)) for debt, pid in result.all()
-    )
-    assert cleared == 1 and [p for p, _ in remaining] == ["b", "c"], (
-        f"the amount-100 cycle must clear first and take the shared edge with it: expected "
-        f"one clearing and residual debts b->c/c->a, got cleared={cleared} "
-        f"remaining={remaining!r}. Residuals at b->d/d->a mean the small cycle executed "
-        f"first - discovery order decided the final ledger."
-    )
-
-
-@MODE_B
-@pytest.mark.asyncio
-async def test_auto_clear_orders_the_union_when_the_sql_path_is_down(
-    db_session, monkeypatch
-) -> None:
-    """The union's own ordering, pinned behaviorally: SQL detectors down, same final ledger.
-
-    With `find_triangles_sql`/`find_quadrangles_sql` raising, `find_cycles` falls back to
-    the DFS on every ladder rung, `sql_cycles` stays empty, and the answer's order is
-    decided solely by the union sort (`_cycle_order_key`).  Insertion order favors the
-    small cycle, so under a length-only sort the small cycle executes first and the ledger
-    ends at [b->d, d->a] - this is the behavioral pin the fast-path variant above cannot
-    hold (1b's review of a9d742e).
-
-    MUTATION THIS CATCHES: `final_cycles.sort(key=len)` on the merged answer.
-    """
-
-    async def _down(self, *args, **kwargs):
-        raise RuntimeError("SQL detector down (test)")
-
-    monkeypatch.setattr(ClearingService, "find_triangles_sql", _down)
-    monkeypatch.setattr(ClearingService, "find_quadrangles_sql", _down)
+    from tests.p023_support import oracle_max_volume
 
     await _seed_graph(db_session, edges=_SHARED_EDGE)
+    optimum = oracle_max_volume([(k, d, c, int(a)) for k, (d, c, a) in enumerate(_SHARED_EDGE)])[0]
+    assert optimum == 300, optimum
 
-    service = ClearingService(db_session)
-    cleared = await service.auto_clear(_EQ, max_depth=6)
+    result = await _pass(db_session)
+    remaining = await _remaining(db_session)
+    cleared = Decimal(320) - sum(amount for *_, amount in remaining)
 
-    result = await db_session.execute(
-        select(Debt, Participant.pid)
-        .join(Participant, Participant.id == Debt.debtor_id)
-        .where(Debt.amount > 0)
-    )
-    remaining = sorted((pid, str(debt.amount)) for debt, pid in result.all())
-    assert cleared == 1 and [p for p, _ in remaining] == ["b", "c"], (
-        f"with the SQL path down the union sort alone must still execute the amount-100 "
-        f"cycle first: expected one clearing and residual b->c/c->a, got cleared={cleared} "
-        f"remaining={remaining!r}"
-    )
+    assert result.status == "complete" and cleared == optimum, (result, remaining)
+    assert [(d, c) for d, c, _ in remaining] in ([("b", "c"), ("c", "a")], [("b", "d"), ("d", "a")]), remaining
+    assert all(amount == Decimal("10") for *_, amount in remaining), remaining
+
+
+# DELETED 2026-09-28, programme 023 slice (d): `test_auto_clear_orders_the_union_when_the_sql_path_is_down` pinned
+# the ORDER in which `auto_clear` executed the union of the detectors' answers (SQL detectors down, the union sort
+# alone deciding which cycle ran first). Nothing executes from that list any more - the executor is the flow plan -
+# so the execution half has no subject. The union sort itself keeps its pin on the diagnostic answer:
+# `test_within_a_length_the_largest_executable_cycle_comes_first` above (the same mutation, `sort(key=len)`, reddens
+# it).
 
 
 @MODE_B
@@ -288,40 +269,18 @@ async def test_auto_clear_orders_the_union_when_the_sql_path_is_down(
 async def test_the_ladder_widens_when_short_cycles_exist_but_none_executes(
     db_session, monkeypatch
 ) -> None:
-    """A transiently unexecutable triangle must not hide an executable 5-cycle from auto_clear.
+    """A long cycle is reachable when short ones exist - MOVED 2026-09-28 (programme 023 slice (d)).
 
-    The ladder's own counterexample, caught before the fix-round re-review: auto_clear tries
-    candidates until one succeeds, so a ladder that widens only on EMPTY stops when every
-    short cycle fails transiently (locks, concurrent prepare) - while the ladder-free answer
-    carried the executable long cycles as later candidates in the same list.  The ladder now
-    widens after a short rung whose candidates all failed.
-
-    The transient failure is staged by wrapping execute_clearing to refuse 3-cycles (return
-    False, the lock/concurrency signal) while executing everything else for real.
-
-    MUTATION THIS CATCHES: widening the ladder only when the short rung found nothing
-    (`if not cycles and max_depth > ...` as the sole widening condition).
+    Before 023 (d) this staged a triangle the executor refused and required `auto_clear`'s ladder to widen to the
+    5-cycle. The ladder is gone (decision R4) and the execution has no depth: the property the spec keeps
+    ("reachability of the long cycle is preserved", Verification plan §3) is that the production pass clears the
+    5-cycle next to a triangle - here both, disjoint, in one pass.
     """
 
-    await _seed_graph(
-        db_session, [["t1", "t2", "t3"], ["f1", "f2", "f3", "f4", "f5"]]
-    )
+    await _seed_graph(db_session, [["t1", "t2", "t3"], ["f1", "f2", "f3", "f4", "f5"]])
 
-    real_execute = ClearingService.execute_clearing
+    result = await _pass(db_session)
 
-    async def _refuse_triangles(self, cycle, *args, **kwargs):
-        if len(cycle) == 3:
-            return False
-        return await real_execute(self, cycle, *args, **kwargs)
-
-    monkeypatch.setattr(ClearingService, "execute_clearing", _refuse_triangles)
-
-    service = ClearingService(db_session)
-    cleared = await service.auto_clear(_EQ, max_depth=6)
-
-    assert cleared == 1, (
-        f"with the triangle transiently unexecutable, auto_clear must widen and clear the "
-        f"5-cycle; got cleared={cleared}. Zero means the ladder stopped at a non-empty short "
-        f"rung whose candidates all failed - the exact input where 'the final state is the "
-        f"ladder-free state' was false."
-    )
+    lengths = sorted(len(o.edges) for o in result.committed)
+    assert result.status == "complete" and lengths == [3, 5], (result, lengths)
+    assert await _remaining(db_session) == []

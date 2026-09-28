@@ -35,18 +35,26 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _EXECUTOR = _ROOT / "app" / "core" / "simulator" / "real_payments_executor.py"
 _CLEARING = _ROOT / "app" / "core" / "simulator" / "real_clearing_engine.py"
 
-# Every money entry point the tick uses that accepts a run perimeter.
+# Every money entry point the tick uses that accepts a run perimeter. Since programme 023 slice (d) (2026-09-28) the
+# clearing engine calls ONE: the common runner, through its local `run_pass` (`run_clearing_pass` in production); the
+# detector and executor calls it used to make are gone (guarded by `test_p023_d_product_callers_go_through_the_runner.py`).
 _GUARDED = {
     "create_payment_internal_staged",
     "find_cycles",
     "execute_clearing_with_amount",
+    "run_pass",
+    "run_clearing_pass",
 }
+
+
+def _called_name(func) -> str | None:
+    return getattr(func, "attr", None) or getattr(func, "id", None)
 
 
 def _guarded_calls(path: pathlib.Path):
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) in _GUARDED:
+        if isinstance(node, ast.Call) and _called_name(node.func) in _GUARDED:
             yield node
 
 
@@ -58,7 +66,10 @@ def _guarded_calls(path: pathlib.Path):
     # full-depth call - the one that made the preflight ladder decorative - is gone in
     # favor of consuming the preflight and refreshing through the helper, and the third
     # guarded call is `execute_clearing_with_amount`.
-    [(_EXECUTOR, 1), (_CLEARING, 3)],
+    # 3 -> 1 on 2026-09-28 (programme 023 slice (d)): the ladder and the engine's executor call are deleted; the one
+    # guarded call is the runner's (`run_pass(..., allowed_participant_pids=...)`), which carries the perimeter to
+    # every snapshot and every occurrence.
+    [(_EXECUTOR, 1), (_CLEARING, 1)],
     ids=["payments_executor", "clearing_engine"],
 )
 def test_every_tick_money_call_passes_the_perimeter(path: pathlib.Path, expected_calls: int) -> None:

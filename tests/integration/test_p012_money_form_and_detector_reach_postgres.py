@@ -126,7 +126,10 @@ def _route_default(endpoint, name: str) -> int:
 
 
 API_DEFAULT_MAX_DEPTH = _route_default(clearing_route.list_cycles, "max_depth")
-API_AUTO_DEFAULT_MAX_DEPTH = _route_default(clearing_route.auto_clear, "max_depth")
+# MOVED 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3; decision 8): this module read the
+# default depth of `POST /clearing/auto` here and required it to equal the diagnostic's. Execution has no depth any
+# more - the route refuses the parameter - so there is no second default to agree with; the agreement assertion
+# below now requires its ABSENCE from the route's signature, and the reach tests keep the diagnostic's default.
 
 _OPEN_POLICY = {
     "auto_clearing": True,
@@ -482,8 +485,10 @@ def test_the_api_default_depth_is_past_what_the_sql_detectors_can_reach() -> Non
         f"longer exceeds the SQL detectors' reach of {_SQL_DETECTOR_MAX_CYCLE_LENGTH} edges. "
         "The reach tests below now prove nothing; re-read them before trusting them."
     )
-    assert API_AUTO_DEFAULT_MAX_DEPTH == API_DEFAULT_MAX_DEPTH, (
-        "the two clearing routes must not disagree about how deep clearing looks"
+    # 023 (d): the executing route has no depth to disagree about; a `max_depth` parameter there would be the
+    # accepted-and-ignored (or MTCS-limiting) state decision 8 forbids.
+    assert "max_depth" not in inspect.signature(clearing_route.auto_clear).parameters, (
+        "POST /clearing/auto must not declare an execution depth (programme 023, decision 8)"
     )
 
 

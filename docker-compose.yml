@@ -48,6 +48,9 @@ services:
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
       SIMULATOR_SESSION_SECRET: "${SIMULATOR_SESSION_SECRET:-}"
       SIMULATOR_CSRF_ORIGIN_ALLOWLIST: "${SIMULATOR_CSRF_ORIGIN_ALLOWLIST:-}"
+      # Periodic clearing (programme 023, R1): a SEPARATE hub deployment sets CLEARING_PERIODIC_ENABLED=true.
+      # Off by default; never on a database shared with the simulator (the runner refuses there).
+      CLEARING_PERIODIC_ENABLED: "${CLEARING_PERIODIC_ENABLED:-false}"
       LOG_LEVEL: INFO
     depends_on:
       db:

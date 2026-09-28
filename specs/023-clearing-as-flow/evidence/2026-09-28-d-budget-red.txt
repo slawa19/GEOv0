@@ -1,0 +1,5 @@
+Programme 023 slice (d): the runner's budget check, red before the narrow fix (base: the switch working tree, runner.py before the 'attempted' guard).
+Found by the full tier: tests/integration/test_p015_step5c_hold_through_the_tick_sqlite.py tick 1 - 'clearing.runner.pass_end ... status=interrupted reason=budget_exhausted committed=0 plans=1 remaining=1' after 296 ms of planning against the 250 ms tick budget.
+Command: scripts/verify_local.ps1 -TaskSlug p023d -BackendOnly -BackendSelector tests/integration/test_p023_c_runner_progress_postgres.py::test_a_budget_spent_by_planning_still_lets_the_first_cycle_run
+E   tests.p019_support.TargetMismatch: a deadline spent before the first cycle started 0 cycles: ClearingPassResult(equivalent='PQC', status='interrupted', reason=<InterruptReason.BUDGET_EXHAUSTED: 'budget_exhausted'>, committed=(), remaining_cycles=None, remaining_v_edge_atoms=None, plans=0, distributed_exclusive=False, planner_abandoned=False)
+1 failed in 3.38s

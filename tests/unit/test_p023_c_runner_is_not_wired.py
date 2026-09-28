@@ -1,4 +1,7 @@
-"""Guard (programme 023, slice (c)): no production entrypoint uses the common clearing runner yet.
+"""Guard (programme 023, slice (c), narrowed in slice (d)): the periodic loop is off by default and a refusal is loud.
+
+HISTORY: until slice (d) this module also asserted that no production entrypoint used the runner; the atomic switch
+inverted that check into `test_p023_d_product_callers_go_through_the_runner.py` (recorded below and in the spec).
 
 Slice (c) is ADDITIVE and INACTIVE on production entrypoints (spec "Стадии", row (c); decision 7): the runner, the
 periodic loop and the renewable lease exist and are tested directly, but `POST /clearing/auto` and both simulator
@@ -59,27 +62,11 @@ def _parse(path: Path) -> ast.AST:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_no_production_module_but_the_periodic_loop_reaches_the_runner() -> None:
-    offenders = {
-        str(path.relative_to(REPO_ROOT)): sorted(used)
-        for path in sorted((REPO_ROOT / "app").rglob("*.py"))
-        if path not in (_RUNNER, _MAIN) and (used := _uses(_parse(path)))
-    }
-    assert offenders == {}, f"slice (c) is inactive; these modules already reach the runner: {offenders}"
-
-    main = _parse(_MAIN)
-    reaching = sorted(
-        node.name
-        for node in ast.walk(main)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and _uses(node)
-        and not any(
-            isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)) and inner is not node and _uses(inner)
-            for inner in ast.walk(node)
-        )
-    )
-    assert reaching == ["_run_periodic_clearing_once"], reaching
-    assert _uses(main) == {_MODULE, "run_periodic_clearing_pass"}, _uses(main)
+# REMOVED 2026-09-28, slice (d): `test_no_production_module_but_the_periodic_loop_reaches_the_runner` asserted that
+# nothing but the periodic loop reached the runner - the (c) state the atomic switch ends. Its assertion is INVERTED,
+# not dropped, in `tests/unit/test_p023_d_product_callers_go_through_the_runner.py` (each product caller must go
+# through its runner entry and call no executor itself). The default-off checks below stay: decision R1 keeps the
+# loop off by default.
 
 
 def test_the_walker_sees_the_forms_it_looks_for() -> None:

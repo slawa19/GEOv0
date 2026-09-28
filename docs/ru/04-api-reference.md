@@ -704,13 +704,39 @@ POST /clearing/auto?equivalent=UAH
 Authorization: Bearer {access_token}
 ```
 
-**Response:**
+Один ожидаемый проход общего раннера клиринга (программа 023): план потока на свежем снимке, исполнение
+цикл за циклом. `max_depth` **не принимается**: присутствие ключа в любой форме — `422` (E009) до начала
+прохода; параметр остаётся у диагностики `GET /clearing/cycles`. Нормативная схема — `api/openapi.yaml`.
+
+**Response (пример, полный проход):**
 ```json
 {
   "equivalent": "UAH",
-  "cleared_cycles": 2
+  "cleared_cycles": 1,
+  "status": "complete",
+  "reason": null,
+  "v_edge": "6.00000000",
+  "v_cyc": "2.00000000",
+  "remaining_cycles": 0,
+  "remaining_v_edge": "0.00000000",
+  "committed": [
+    {
+      "occurrence_id": "…",
+      "plan_id": "…",
+      "ordinal": 0,
+      "amount": "2.00000000",
+      "edges": [{"debt_id": "…", "debtor_id": "…", "creditor_id": "…"}],
+      "after_cancellation": false
+    }
+  ],
+  "error": null
 }
 ```
+
+`status: interrupted` — не полное погашение: причина в `reason` (`lease_lost`, `budget_exhausted`,
+`replan_limit`, `operational_limit`, `error`), остаток — хвост последнего известного плана (`null`, если
+плана не было). Ошибка после хотя бы одного закоммиченного вхождения (например, стоп оператора) —
+`200` с `reason: error` и `error.code`; до первого коммита — прежний ответ (`409/E008` на стопе).
 
 ---
 

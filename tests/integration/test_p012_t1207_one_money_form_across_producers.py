@@ -68,7 +68,6 @@ from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.simulator.real_scenario_seeder import simulated_public_key
-from app.core.clearing.service import ClearingCommittedAfterCancellation
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.models import RunRecord
 from app.core.simulator.net_balance_utils import to_money_str
@@ -542,29 +541,47 @@ def _viz_helper(precision: int):
 CLEARED = Decimal("5.0625")
 
 
-class _CycleService:
-    """Clears `CLEARED` once, then fails or cancels depending on `failure_kind`."""
+_ALICE = uuid.uuid5(uuid.NAMESPACE_DNS, "alice.t1207")
+_BOB = uuid.uuid5(uuid.NAMESPACE_DNS, "bob.t1207")
 
-    failure_kind = "geo"
 
-    def __init__(self, _session) -> None:
-        self.calls = 0
-        self.cycle = [{"debtor": "alice", "creditor": "bob", "amount": "11.00"}]
+def _cycle_pass(failure_kind: str):
+    """The runner seam of the engine (programme 023 slice (d)): clears `CLEARED` once, then fails or cancels.
 
-    async def find_cycles(self, _equivalent, *, max_depth, allowed_participant_pids=None):
-        return [self.cycle]
+    MIGRATED 2026-09-28: this was a `ClearingService` double (`find_cycles` + `execute_clearing_with_amount`); the
+    engine now runs ONE pass of the common runner, so the same three endings are produced as the runner produces
+    them - an error after progress (`ClearingPassError`), a cancellation after progress, and an occurrence durable
+    while the caller was cancelled (`after_cancellation`). What is asserted about `clearing.done` is unchanged.
+    """
 
-    async def execute_clearing_with_amount(self, _cycle, *, allowed_participant_pids=None):
-        self.calls += 1
-        if self.calls == 1:
-            if self.failure_kind == "committed_cancel":
-                raise ClearingCommittedAfterCancellation(
-                    tx_id="clearing-committed", cleared_amount=CLEARED
-                )
-            return CLEARED
-        if self.failure_kind == "cancelled_execute":
-            raise asyncio.CancelledError
-        raise RuntimeError("stop after one cycle")
+    from app.core.clearing.runner import (
+        ClearingPassCancelled,
+        ClearingPassError,
+        ClearingPassResult,
+        CommittedEdge,
+        CommittedOccurrence,
+        InterruptReason,
+    )
+
+    async def _pass(_session_factory, _equivalent, *, allowed_participant_pids, on_committed, deadline):
+        occurrence = CommittedOccurrence(
+            occurrence_id=str(uuid.uuid4()),
+            plan_id=uuid.uuid4(),
+            ordinal=0,
+            amount_atoms=int(CLEARED.scaleb(8)),
+            edges=(CommittedEdge(uuid.uuid4(), _ALICE, _BOB),),
+            after_cancellation=failure_kind == "committed_cancel",
+        )
+        on_committed(occurrence)
+
+        def result(reason):
+            return ClearingPassResult("USD", "interrupted", reason, (occurrence,), 1, 100, 1, False)
+
+        if failure_kind in {"cancelled_execute", "committed_cancel"}:
+            raise ClearingPassCancelled(result(InterruptReason.CANCELLED))
+        raise ClearingPassError(result(InterruptReason.ERROR), RuntimeError("stop after one cycle"))
+
+    return _pass
 
 
 async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
@@ -578,6 +595,7 @@ async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
     run.tick_index = 3
     run._real_viz_by_eq["USD"] = _viz_helper(precision)
     run._edges_by_equivalent = {"USD": [("bob", "alice")]}
+    run._real_participants = [(_ALICE, "alice"), (_BOB, "bob")]
 
     engine = RealClearingEngine(
         lock=threading.RLock(),
@@ -585,11 +603,9 @@ async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
         utc_now=_utc_now,
         logger=_LOG,
         edge_patch_builder=_NoopEdgePatchBuilder(),
-        clearing_max_depth_limit=6,
         clearing_max_fx_edges_limit=8,
         real_clearing_time_budget_ms=10_000,
     )
-    _CycleService.failure_kind = failure_kind
 
     async def _apply_trust_growth(**_kwargs):
         return SimpleNamespace(updated_count=0)
@@ -603,7 +619,7 @@ async def _drive_clearing(*, precision: int, failure_kind: str) -> str:
         build_edge_patch_for_equivalent=lambda **_k: None,
         broadcast_topology_edge_patch=lambda **_k: None,
         async_session_local=lambda: _ClearingSessionContext(),
-        clearing_service_cls=_CycleService,
+        clearing_pass=_cycle_pass(failure_kind),
     )
     if failure_kind in {"cancelled_execute", "committed_cancel"}:
         with pytest.raises(asyncio.CancelledError):

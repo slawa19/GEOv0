@@ -18,7 +18,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
-from tests.conftest import MODE_B
+from tests.conftest import MODE_B, sessionmaker_of
 
 
 def _mk_eq(code_prefix: str) -> Equivalent:
@@ -465,9 +465,12 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
 
     await db_session.commit()
 
-    service = ClearingService(db_session)
-    cleared = await service.auto_clear(eq.code, max_depth=3)
-    assert cleared == 2
+    # MIGRATED 2026-09-28 (programme 023 slice (d)): `auto_clear` is gone; the production pass is the common runner.
+    from app.core.clearing.runner import run_clearing_pass
+
+    result = await run_clearing_pass(sessionmaker_of(db_session), eq.code)
+    assert result.status == "complete" and len(result.committed) == 2
+    await db_session.commit()  # a fresh snapshot for the read below
 
     remaining = (
         (
@@ -481,58 +484,13 @@ async def test_auto_clear_clears_multiple_independent_cycles(db_session):
     assert remaining == []
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure_site",
-    ["execute", "execute_raw", "find", "find_raw"],
-)
-async def test_auto_clear_surfaces_sanitized_failure_after_partial_progress(
-    db_session,
-    monkeypatch,
-    caplog,
-    failure_site,
-):
-    service = ClearingService(db_session)
-    cycle = [{"debt_id": str(uuid.uuid4())}]
-    execute_calls = 0
-    find_calls = 0
-
-    async def _find_cycles(*_args, **_kwargs):
-        nonlocal find_calls
-        find_calls += 1
-        if failure_site in {"find", "find_raw"} and find_calls == 2:
-            if failure_site == "find_raw":
-                raise RuntimeError("private raw discovery detail")
-            raise GeoException("private discovery detail")
-        return [cycle]
-
-    async def _execute_clearing(_cycle):
-        nonlocal execute_calls
-        execute_calls += 1
-        if execute_calls == 1 or failure_site in {"find", "find_raw"}:
-            return True
-        if failure_site == "execute_raw":
-            raise RuntimeError("private raw lock detail")
-        raise GeoException("private database detail")
-
-    monkeypatch.setattr(service, "find_cycles", _find_cycles)
-    monkeypatch.setattr(service, "execute_clearing", _execute_clearing)
-
-    with pytest.raises(GeoException) as exc_info:
-        await service.auto_clear("USD")
-
-    assert execute_calls == (1 if failure_site in {"find", "find_raw"} else 2)
-    assert exc_info.value.code == "E010"
-    assert exc_info.value.status_code == 500
-    assert exc_info.value.details == {"cleared_cycles": 1, "partial": True}
-    assert "private database detail" not in str(exc_info.value.to_dict())
-    assert "private discovery detail" not in str(exc_info.value.to_dict())
-    assert "private raw lock detail" not in str(exc_info.value.to_dict())
-    assert "private raw discovery detail" not in str(exc_info.value.to_dict())
-    if failure_site in {"execute", "execute_raw"}:
-        assert "event=clearing.auto_clear_execute_failed" in caplog.text
-    if failure_site in {"find", "find_raw"}:
-        assert "event=clearing.auto_clear_find_failed" in caplog.text
+# DELETED 2026-09-28, programme 023 slice (d): `test_auto_clear_surfaces_sanitized_failure_after_partial_progress`
+# pinned the error envelope of `ClearingService.auto_clear` after partial progress (E010, details
+# `{cleared_cycles, partial}`, the private text sanitised). `auto_clear` is deleted (decision R4); the contract moved to
+# `POST /clearing/auto`, where decision R3 reports progress then a SANITISED error (`200 interrupted`, error E010 with no
+# private text) - held by `tests/integration/test_p023_d_auto_endpoint_postgres.py::
+# test_an_unexpected_error_after_progress_is_reported_sanitised` (a raw exception and an E010 GeoException) and
+# `test_an_internal_geo_error_before_any_commit_is_the_sanitised_envelope`.
 
 
 @MODE_B

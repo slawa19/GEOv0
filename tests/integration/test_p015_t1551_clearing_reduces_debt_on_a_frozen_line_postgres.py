@@ -106,9 +106,12 @@ async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres() 
         for cycle in triangles
     }, "the PostgreSQL triangle query must admit the frozen line"
 
-    async with TestingSessionLocal() as worker:
-        cleared = await ClearingService(worker).auto_clear(code, max_depth=3)
-    assert cleared == 1
+    # 2026-09-28, programme 023 slice (d): `auto_clear` is gone; the production pass is the common runner.
+    from app.core.clearing.runner import run_clearing_pass
+
+    result = await run_clearing_pass(TestingSessionLocal, code)
+    cleared = len(result.committed)
+    assert cleared == 1 and result.status == "complete", result
 
     async with TestingSessionLocal() as verify:
         checker = InvariantChecker(verify)

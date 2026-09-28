@@ -1,4 +1,10 @@
-"""R-020-1 (programme 020, stage 2): candidate selection follows the owner's amount-first rule.
+"""R-020-1 (programme 020, stage 2) - SETTLED BY PROGRAMME 023 SLICE (d), 2026-09-28 (spec 023, Verification plan §3).
+
+023's disposition, as the spec fixes it: the strict 020 markers are removed; the LADDER test is rewritten against
+the flow objective (V_edge on the debts equals the exhaustive oracle's optimum, through `POST /clearing/auto`) and
+carries no marker; the OVERFLOW and FULL-TIE-KEY tests are deleted with a record where they stood - their target
+(the top 100 by amount, ordered by the full identity) belonged to the "large amount first" rule the owner replaced
+on 2026-09-26. The historical description of the 020 rule follows, unchanged.
 
 THE RULE (owner's decision 2026-09-25, spec "Решения"): per detection, at the caller's FULL depth, up to 100
 UNIQUE eligible cycles ordered by clear amount DESC regardless of length, ties by the FULL canonical identity
@@ -48,8 +54,8 @@ from tests.p020_support import (
     require_target,
     ring,
     seed_graph,
-    target_xfail_020,
 )
+from tests.p023_support import auto_clear_http, fresh_read, oracle_max_volume, positive_debt_total
 
 # ------------------------------------------------------------------------------------------------ overflow
 
@@ -69,40 +75,13 @@ def _overflow_edges():
     return edges, ids_by_triangle
 
 
-@target_xfail_020("the top 100 unique cycles by amount, not 100 rotations / 50 raw DFS cycles")
-@pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", [4, 6])
-async def test_overflow_returns_the_100_largest_unique_cycles_in_order(db_session, max_depth) -> None:
-    edges, ids_by_triangle = _overflow_edges()
-    await seed_graph(db_session, _OVERFLOW_EQ, edges)
-
-    # Control: the stand holds 101 triangles, 303 positive debts.
-    seeded = (await db_session.execute(select(func.count()).select_from(Debt))).scalar_one()
-    assert seeded == 3 * _TRIANGLES, f"stand: expected {3 * _TRIANGLES} debts, got {seeded}"
-
-    service = ClearingService(db_session)
-    # Control (anti-vacuum): the one triangle the target drops - the smallest - IS eligible; it is the
-    # limit that must drop it, not the policy. Its perimeter isolates it.
-    smallest = await service.find_cycles(
-        _OVERFLOW_EQ, max_depth=max_depth, allowed_participant_pids={f"p020a000{v}" for v in "xyz"}
-    )
-    assert [identity(c) for c in smallest] == [identity_of(ids_by_triangle[0])], smallest
-
-    cycles = await service.find_cycles(_OVERFLOW_EQ, max_depth=max_depth)
-    got = [identity(c) for c in cycles]
-    seeded_identities = {identity_of(ids) for ids in ids_by_triangle.values()}
-    # Control: whatever came back is made of seeded triangles only (no phantom cycles).
-    assert set(got) <= seeded_identities, "a returned cycle is not a seeded triangle"
-
-    expected = [identity_of(ids_by_triangle[i]) for i in range(_TRIANGLES - 1, 0, -1)]
-    first_diff = next(
-        (k for k, (a, b) in enumerate(zip(got, expected)) if a != b), min(len(got), len(expected))
-    )
-    require_target(
-        got == expected,
-        f"depth {max_depth}: expected the 100 largest of 101 triangles, amount DESC; got {len(got)} "
-        f"cycles ({len(set(got))} unique), first difference at position {first_diff}",
-    )
+# DELETED 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3, R-020-1): the strict test
+# `test_overflow_returns_the_100_largest_unique_cycles_in_order` asked `find_cycles` for the top 100 unique cycles
+# by amount - the target of the 020 rule "large amount first", replaced by the owner on 2026-09-26 with the flow
+# objective. Nothing executes from that list any more (execution is the flow plan), so the target has no owner.
+# What survives of its ordinary controls: `test_retention_overflow_global_result_is_not_empty` (retention module) -
+# the diagnostic answer on 101 eligible triangles is non-empty and made of seeded triangles only. The stand
+# (`_overflow_edges`, `_TRIANGLES`) stays: the retention module imports it.
 
 
 # ------------------------------------------------------------------------------ ladder, observed on debts
@@ -149,7 +128,6 @@ async def _committed_clearings(db_session) -> int:
     ).scalar_one()
 
 
-@target_xfail_020("the ladder executes the short cycle first; amount-first executes the long one")
 @MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -159,90 +137,43 @@ async def _committed_clearings(db_session) -> int:
         pytest.param(4, id="additional_4cycle_not_a_ladder_discriminator"),
     ],
 )
-async def test_amount_first_executes_the_long_cycle_over_a_shared_edge(db_session, long_len) -> None:
+async def test_amount_first_executes_the_long_cycle_over_a_shared_edge(db_session, client, auth_headers, long_len) -> None:
+    """REWRITTEN 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3, R-020-1): the target is no
+    longer "amount first" but the flow objective - `V_edge` on the debts equals the exhaustive oracle's optimum -
+    through the production entry `POST /clearing/auto`. On this stand the optimum IS the long cycle at 100 (500 for
+    the 5-cycle against the ladder's 30 + 450), so the observable remainder the 020 rule named survives unchanged:
+    the triangle's own edges at 10, one occurrence. The strict 020 marker is replaced by the 023 one until the switch.
+    """
+
     edges, tri, long_cycle = _ladder_edges(long_len)
     await seed_graph(db_session, _LADDER_EQ, edges)
     service = ClearingService(db_session)
 
-    # Control: both cycles are eligible and visible at the requested depth.
+    # Controls: both cycles are eligible and visible to the diagnostic; the oracle's optimum is the long cycle.
     found = {identity(c) for c in await service.find_cycles(_LADDER_EQ, max_depth=6)}
     assert found == {identity_of(e.debt_id for e in tri), identity_of(e.debt_id for e in long_cycle)}, found
+    oracle = oracle_max_volume([(e.debt_id, e.debtor, e.creditor, int(Decimal(e.amount))) for e in edges])[0]
+    assert oracle == 100 * long_len, oracle
 
-    cleared = await service.auto_clear(_LADDER_EQ, max_depth=6)
-    db_session.expire_all()
-    occurrences = await _committed_clearings(db_session)
-    remaining = await _remaining(db_session)
+    before = await fresh_read(db_session, positive_debt_total, _LADDER_EQ)
+    response = await auto_clear_http(client, auth_headers, _LADDER_EQ)
+    assert response.status_code == 200, response.text
+    cleared = response.json()["cleared_cycles"]
+    occurrences = await fresh_read(db_session, _committed_clearings)
+    remaining = await fresh_read(db_session, _remaining)
+    v_edge = before - await fresh_read(db_session, positive_debt_total, _LADDER_EQ)
     # Control: the run completed and its count agrees with the durable occurrences.
     assert cleared == occurrences and cleared >= 1, (cleared, occurrences)
 
     expected_remaining = sorted((e.debtor, e.creditor, Decimal("10")) for e in tri[1:])
     require_target(
-        remaining == expected_remaining and occurrences == 1,
-        f"amount-first must execute the {long_len}-cycle (100) once and leave the triangle's own edges at "
-        f"10; got occurrences={occurrences} remaining={remaining!r}",
+        v_edge == Decimal(oracle) and remaining == expected_remaining and occurrences == 1,
+        f"V_edge {v_edge} against the oracle's {oracle}; occurrences={occurrences} remaining={remaining!r}",
     )
 
 
-# ------------------------------------------------------------------------------------------ full tie key
-
-_TIE_EQ = "PZC"
-
-
-def _tie_edges():
-    """Three components, each two equal-amount cycles through ONE shared edge = the minimum debt id.
-
-    * group 30 - two TRIANGLES; the full key puts the second-seeded triangle first;
-    * group 20 - triangle + quadrangle; the full key puts the TRIANGLE first;
-    * group 10 - triangle + quadrangle; the full key puts the QUADRANGLE first.
-
-    Group amounts differ, so the expected list is [group 30, group 20, group 10], each pair in full-key
-    order. A key of "minimum id only" ties every pair; a length-first key gets group 10 wrong; a key that
-    puts quadrangles first gets group 20 wrong; discovery order gets group 30 wrong.
-    """
-
-    def component(tag: str, amount: str, g: int, first_len: int, first_ids: list[int], second_len: int, second_ids: list[int]):
-        shared = debt_uuid(g, 1)
-        a, b = f"p020c{tag}a", f"p020c{tag}b"
-        first_pids = [a, b] + [f"p020c{tag}f{k}" for k in range(first_len - 2)]
-        second_pids = [a, b] + [f"p020c{tag}s{k}" for k in range(second_len - 2)]
-        first = ring(first_pids, [amount] * first_len, [shared] + [debt_uuid(g, n) for n in first_ids])
-        second = ring(second_pids, [amount] * second_len, [shared] + [debt_uuid(g, n) for n in second_ids])
-        return first + second[1:], first, second
-
-    # ids inside a group: the shared edge is 1 (the minimum); the second element of each full key decides.
-    g30, t30a, t30b = component("30", "30", 0xC3, 3, [50, 51], 3, [20, 21])  # t30b (20..) first
-    g20, t20, q20 = component("20", "20", 0xC2, 3, [20, 21], 4, [50, 51, 52])  # triangle first
-    g10, t10, q10 = component("10", "10", 0xC1, 3, [50, 51], 4, [20, 21, 22])  # quadrangle first
-    expected = [
-        identity_of(e.debt_id for e in t30b),
-        identity_of(e.debt_id for e in t30a),
-        identity_of(e.debt_id for e in t20),
-        identity_of(e.debt_id for e in q20),
-        identity_of(e.debt_id for e in q10),
-        identity_of(e.debt_id for e in t10),
-    ]
-    return g30 + g20 + g10, expected
-
-
-@target_xfail_020("equal amounts are ordered by the full identity, not by length first")
-@pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", [4, 6])
-async def test_equal_amounts_are_ordered_by_the_full_canonical_identity(db_session, max_depth) -> None:
-    edges, expected = _tie_edges()
-    await seed_graph(db_session, _TIE_EQ, edges)
-
-    # Control: every pair really shares its minimum debt id and ties on amount.
-    for k in range(0, len(expected), 2):
-        assert expected[k][0] == expected[k + 1][0], "stand: the pair must share its minimum debt id"
-        assert expected[k][1:] != expected[k + 1][1:]
-
-    cycles = await ClearingService(db_session).find_cycles(_TIE_EQ, max_depth=max_depth)
-    got = [identity(c) for c in cycles]
-    # Control: exactly the six planted cycles came back (order aside).
-    assert sorted(got) == sorted(expected), got
-
-    require_target(
-        got == expected,
-        f"depth {max_depth}: equal-amount cycles must follow the full canonical identity; "
-        f"positions differing: {[k for k, (a, b) in enumerate(zip(got, expected)) if a != b]}",
-    )
+# DELETED 2026-09-28, programme 023 slice (d) (R-020-1): `test_equal_amounts_are_ordered_by_the_full_canonical_
+# identity` asked the diagnostic list to order equal-amount cycles by the full identity regardless of length - an
+# ordering rule of the replaced "large amount first" selection; the flow plan does not select by order. Its
+# retained property - same-length ties follow the full identity at depths 4 and 6 - is kept, green, by
+# `test_retention_same_length_ties_follow_the_full_identity` in the retention module.

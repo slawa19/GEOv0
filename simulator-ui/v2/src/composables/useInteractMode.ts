@@ -643,7 +643,7 @@ export function useInteractMode(opts: {
       // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
       fsm.enterClearingPreview()
 
-      const res = await opts.actions.runClearing(opts.equivalent.value, undefined, { signal })
+      const res = await opts.actions.runClearing(opts.equivalent.value, { signal })
       if (!isCurrent()) return
       fsm.setLastClearing(res)
 

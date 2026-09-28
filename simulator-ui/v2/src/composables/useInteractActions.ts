@@ -143,7 +143,6 @@ export function useInteractActions(opts: {
   ) => Promise<SimulatorActionTrustlineCloseResponse>
   runClearing: (
     eq: string,
-    maxDepth?: number,
     opts?: { clientActionId?: string; signal?: AbortSignal },
   ) => Promise<SimulatorActionClearingRealResponse>
   fetchParticipants: () => Promise<ParticipantInfo[]>
@@ -253,11 +252,10 @@ export function useInteractActions(opts: {
         }, o?.signal ? { signal: o.signal } : undefined),
       ),
 
-    runClearing: (eq, maxDepth, o) =>
+    runClearing: (eq, o) =>
       wrapAction(() =>
         actionClearingReal(opts.httpConfig.value, requireRunId(), {
           equivalent: eq,
-          ...(maxDepth != null ? { max_depth: maxDepth } : {}),
           client_action_id: o?.clientActionId ?? genClientActionId(),
         }, o?.signal ? { signal: o.signal } : undefined),
       ),

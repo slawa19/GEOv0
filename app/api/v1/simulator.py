@@ -26,9 +26,11 @@ from app.core.trustlines.service import (
 from app.api import deps
 from app.config import settings
 from app.core.simulator.runtime import runtime
-from app.core.clearing.service import (
-    ClearingCommittedAfterCancellation,
-    ClearingService,
+from app.core.clearing.runner import (
+    ClearingPassCancelled,
+    ClearingPassError,
+    atoms_text,
+    run_clearing_pass,
 )
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
@@ -1917,6 +1919,7 @@ async def action_clearing_real(
     req: SimulatorActionClearingRealRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
+    session_factory=Depends(deps.get_payment_session_factory),
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
@@ -1950,13 +1953,32 @@ async def action_clearing_real(
         # behind a successful-looking empty result.
         return _perimeter_unavailable_error(run_id)
 
-    service = ClearingService(db)
-
+    # Programme 023, slice (d): ONE pass of the common runner in the run's perimeter (decisions 7, 10; R3). The route
+    # no longer detects and executes cycles itself. The runner hands every durable occurrence to `_account` right
+    # after its commit, with no await in between; it is recorded here as is and shaped for the wire afterwards.
+    # UUIDs -> PIDs through the perimeter's own participants, resolved BEFORE the pass so that no lookup (no await)
+    # stands between a commit and its record.
+    pid_by_id = await _perimeter_pid_by_id(db, scoped_pids)
+    # The request session has only READ since the seeding committed; end its transaction before the runner's own
+    # sessions write, so no snapshot or lock of this request is held across the pass (the tick does the same
+    # before clearing, `real_tick_clearing_coordinator.py`). Nothing is pending here to commit.
+    await db.commit()
+    committed: list = []
     executed: list[SimulatorActionClearingCycle] = []
     total = Decimal("0")
     cleared_count = 0
 
+    def _account(occurrence) -> None:
+        nonlocal total, cleared_count
+        committed.append(occurrence)
+        total += occurrence.amount
+        cleared_count += 1
+
+    def _shape() -> None:
+        executed[:] = [_interact_cycle_of(occurrence, pid_by_id) for occurrence in committed]
+
     async def _emit_known_progress() -> None:
+        _shape()
         try:
             await _emit_interact_clearing_done_best_effort(
                 run_id=run_id,
@@ -1981,61 +2003,22 @@ async def action_clearing_real(
             )
             raise
 
+    def _progress_details() -> dict[str, Any]:
+        return {
+            "partial_cleared_cycles": int(cleared_count),
+            "partial_cleared_amount": _fmt_decimal_for_api(total),
+        }
+
     try:
-        # Auto-clear loop: best-effort match ClearingService.auto_clear(), but keep per-cycle details.
-        for _ in range(0, 100):
-            cycles = await service.find_cycles(
-                eq_code,
-                max_depth=int(req.max_depth),
-                allowed_participant_pids=scoped_pids,
-            )
-            if not cycles:
-                break
-
-            executed_this_round = False
-            for cycle in cycles:
-                commit_cancellation = None
-                try:
-                    clear_amt = await service.execute_clearing_with_amount(
-                        cycle, allowed_participant_pids=scoped_pids
-                    )
-                except ClearingCommittedAfterCancellation as exc:
-                    clear_amt = exc.cleared_amount
-                    commit_cancellation = exc
-                if clear_amt is None:
-                    continue
-
-                # The clearing transaction is already durable when the service
-                # returns an amount. Record it before response/SSE shaping so a
-                # later formatting failure cannot hide committed progress.
-                total += clear_amt
-                cleared_count += 1
-                executed_this_round = True
-
-                edges: list[SimulatorActionEdgeRef] = []
-                for edge in cycle or []:
-                    debtor = str(edge.get("debtor") or "").strip()
-                    creditor = str(edge.get("creditor") or "").strip()
-                    if debtor and creditor and debtor != creditor:
-                        # Trustline direction is creditor -> debtor (see project guardrails).
-                        edges.append(
-                            SimulatorActionEdgeRef(from_=creditor, to=debtor)
-                        )
-
-                executed.append(
-                    SimulatorActionClearingCycle(
-                        cleared_amount=_fmt_decimal_for_api(clear_amt),
-                        edges=edges,
-                    )
-                )
-                if commit_cancellation is not None:
-                    raise commit_cancellation
-                break
-
-            if not executed_this_round:
-                break
-    except asyncio.CancelledError:
+        result = await run_clearing_pass(
+            session_factory,
+            eq_code,
+            allowed_participant_pids=scoped_pids,
+            on_committed=_account,
+        )
+    except ClearingPassCancelled:
         if cleared_count > 0:
+            _shape()
             _emit_interact_clearing_done_without_patches_best_effort(
                 run_id=run_id,
                 run=run,
@@ -2045,22 +2028,20 @@ async def action_clearing_real(
                 total=total,
             )
         raise
-    except Exception as exc:
-        logger.exception(
+    except ClearingPassError as failed:
+        exc = failed.cause
+        logger.error(
             "event=simulator.interact.clearing_failed run_id=%s "
-            "equivalent=%s cleared_cycles=%s",
+            "equivalent=%s cleared_cycles=%s error=%s",
             run_id,
             eq_code,
             cleared_count,
+            type(exc).__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
         details = dict(exc.details or {}) if isinstance(exc, GeoException) else {}
         if cleared_count > 0:
-            details.update(
-                {
-                    "partial_cleared_cycles": int(cleared_count),
-                    "partial_cleared_amount": _fmt_decimal_for_api(total),
-                }
-            )
+            details.update(_progress_details())
             await _emit_known_progress()
         if (
             isinstance(exc, ConflictException)
@@ -2085,6 +2066,23 @@ async def action_clearing_real(
 
     await _emit_known_progress()
 
+    if result.status != "complete":
+        # R3: an interrupted pass is not a success. Its durable progress is published above and reported here with
+        # the reason and the remainder of the last known plan (None: no plan was known - not measured, not zero).
+        return _action_error(
+            status_code=409,
+            code="CLEARING_INTERRUPTED",
+            message="Clearing pass interrupted before the plan was exhausted",
+            details={
+                "reason": None if result.reason is None else result.reason.value,
+                **_progress_details(),
+                "remaining_cycles": result.remaining_cycles,
+                "remaining_v_edge": (
+                    None if result.remaining_v_edge_atoms is None else atoms_text(result.remaining_v_edge_atoms)
+                ),
+            },
+        )
+
     return SimulatorActionClearingRealResponse(
         equivalent=eq_code,
         cleared_cycles=int(cleared_count),
@@ -2092,6 +2090,33 @@ async def action_clearing_real(
         cycles=executed,
         client_action_id=req.client_action_id,
     )
+
+
+async def _perimeter_pid_by_id(db, scoped_pids) -> dict:
+    """Participant id -> PID for the run's perimeter (one read, before the pass)."""
+
+    if not scoped_pids:
+        return {}
+    rows = (
+        await db.execute(select(Participant.id, Participant.pid).where(Participant.pid.in_(sorted(scoped_pids))))
+    ).all()
+    return {participant_id: str(pid) for participant_id, pid in rows}
+
+
+def _interact_cycle_of(occurrence, pid_by_id: dict) -> SimulatorActionClearingCycle:
+    """One committed occurrence on the wire: its amount and its edges in the trust-line direction creditor -> debtor.
+
+    The runner's progress edge is debtor -> creditor by participant UUID (decision R3); the Interact wire and
+    `clearing.done.cycle_edges` carry `from` = creditor, `to` = debtor by PID.
+    """
+
+    edges: list[SimulatorActionEdgeRef] = []
+    for edge in occurrence.edges:
+        creditor = pid_by_id.get(edge.creditor_id)
+        debtor = pid_by_id.get(edge.debtor_id)
+        if creditor and debtor and creditor != debtor:
+            edges.append(SimulatorActionEdgeRef(from_=creditor, to=debtor))
+    return SimulatorActionClearingCycle(cleared_amount=_fmt_decimal_for_api(occurrence.amount), edges=edges)
 
 
 @router.get(

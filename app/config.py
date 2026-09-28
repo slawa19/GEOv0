@@ -247,9 +247,10 @@ class Settings(BaseSettings):
     FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: bool = False
     CLEARING_ENABLED: bool = True
 
-    # Periodic clearing (programme 023, decision 7; `app/core/clearing/runner.py`). OFF by default: slice (c) adds
-    # the loop, slice (d) switches it on. Supported only on a hub database without simulator data (decision 9,
-    # form (b)): the runner refuses on a database holding a real-mode simulator run.
+    # Periodic clearing (programme 023, decisions 7, 9, R1; `app/core/clearing/runner.py`). OFF by default - general,
+    # dev/test and simulator stands. A SEPARATE hub deployment turns it on explicitly (`docker-compose.yml` passes
+    # `CLEARING_PERIODIC_ENABLED`, default false); it is never inferred from `ENV`. Supported only on a hub database
+    # without simulator data (decision 9, form (b)): the runner refuses on a database holding a real-mode run.
     CLEARING_PERIODIC_ENABLED: bool = False
     CLEARING_PERIODIC_INTERVAL_SECONDS: int = 300
 

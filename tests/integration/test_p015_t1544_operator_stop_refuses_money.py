@@ -451,7 +451,7 @@ async def test_clearing_real_reports_the_stop_as_its_declared_409(
     resp = await client.post(
         "/api/v1/simulator/runs/run-t1544/actions/clearing-real",
         headers=ADMIN,
-        json={"equivalent": _SIM_EQ, "max_depth": 6, "client_action_id": "t1544"},
+        json={"equivalent": _SIM_EQ, "client_action_id": "t1544"},
     )
 
     assert resp.status_code == 409, resp.text

@@ -134,6 +134,9 @@ async def _debt_amounts(db_session, eq_id) -> list[Decimal]:
     return sorted(Decimal(str(a)) for a in rows)
 
 
+# MODE B since 2026-09-28 (programme 023 slice (d)): the route clears through the common runner, which opens
+# sessions of its own - in mode A the seed is uncommitted and invisible to them (as for `POST /payments`).
+@MODE_B
 @pytest.mark.asyncio
 async def test_clearing_real_does_not_touch_another_runs_participants(
     client, db_session, run_a_only
@@ -148,7 +151,7 @@ async def test_clearing_real_does_not_touch_another_runs_participants(
     resp = await client.post(
         "/api/v1/simulator/runs/run-a/actions/clearing-real",
         headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-        json={"equivalent": _EQ, "max_depth": 6, "client_action_id": "rt_010_4"},
+        json={"equivalent": _EQ, "client_action_id": "rt_010_4"},
     )
 
     assert resp.status_code == 200, resp.text
@@ -216,7 +219,7 @@ async def test_the_owning_run_still_clears_its_own_cycle(client, db_session, run
     resp = await client.post(
         "/api/v1/simulator/runs/run-b/actions/clearing-real",
         headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-        json={"equivalent": _EQ, "max_depth": 6, "client_action_id": "rt_010_4_positive"},
+        json={"equivalent": _EQ, "client_action_id": "rt_010_4_positive"},
     )
 
     assert resp.status_code == 200, resp.text
@@ -392,7 +395,7 @@ async def test_an_unavailable_perimeter_is_not_reported_as_an_empty_result(
     resp = await client.post(
         "/api/v1/simulator/runs/run-a/actions/clearing-real",
         headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-        json={"equivalent": _EQ, "max_depth": 6, "client_action_id": "rt_010_4_unavailable"},
+        json={"equivalent": _EQ, "client_action_id": "rt_010_4_unavailable"},
     )
 
     assert resp.status_code != 200, (

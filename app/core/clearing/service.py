@@ -21,7 +21,6 @@ from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
-from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
@@ -712,6 +711,10 @@ class ClearingService:
         equal-amount ties deterministic across tiers and detectors, instead of leaving them
         to discovery or `ORDER BY` residue.  Used on the merged answer AND on the fast-path
         early return, so a caller sees one ordering rule regardless of which path answered.
+
+        HISTORICAL since programme 023 slice (d), 2026-09-28: `auto_clear` is gone and no executor consumes this
+        order - execution goes through the flow plan (`app/core/clearing/runner.py`). `find_cycles` is the
+        diagnostic of `GET /clearing/cycles` and `/admin/clearing/cycles` only; the order is its answer's.
         """
 
         def _executable_amount() -> Decimal:
@@ -1579,6 +1582,8 @@ class ClearingService:
         if sql_cycles:
             final_cycles = self._deduplicate_cycles(final_cycles + sql_cycles)
 
+        # (The executor named below is gone since programme 023 slice (d); the order now shapes the diagnostic answer
+        # only - see `_cycle_order_key`.)
         # Shorter cycles first for auto_clear(); WITHIN a length, largest clearable amount
         # first (T1211, external review).  The SQL detectors deliberately ORDER BY
         # `LEAST(...) DESC` - the executable amount of a cycle is its smallest edge - and
@@ -2504,122 +2509,3 @@ class ClearingService:
             return await self._end_attempt_on_error(
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
-
-    async def auto_clear(self, equivalent_code: str, *, max_depth: int = 6) -> int:
-        """
-        Run clearing loop.
-        Returns number of cleared cycles.
-        """
-        count = 0
-        # Depth ladder (T1211, external review).  The union in `find_cycles` is right for a
-        # READ answer, but past the SQL reach it loads the whole graph and runs the DFS on
-        # every call - and this loop calls it once per cleared cycle.  An executor does not
-        # need the complete answer, it needs one executable cycle, shortest first - so ask
-        # the SQL-complete depth first (early return, no graph load) and widen to the
-        # caller's depth only when the short rung yields nothing EXECUTABLE.
-        #
-        # "Nothing executable", not "nothing found" - the distinction is the ladder's own
-        # counterexample, caught before the fix-round re-review: this loop tries candidates
-        # until one succeeds, so when every short cycle fails transiently (locks, concurrent
-        # prepare) a ladder that widens only on EMPTY would stop here, while the ladder-free
-        # answer had the executable 5-6-cycles as later candidates in the same list.  Hence
-        # the widening also runs after a short rung whose candidates all failed; a failed
-        # short cycle may be attempted once more on the wide rung, which is harmless (it
-        # skips again, or a released lock lets it through).
-        rungs = [min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH)]
-        if max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
-            rungs.append(max_depth)
-        while True:
-            executed = False
-            for rung in rungs:
-                cycles = await self._auto_clear_find(equivalent_code, rung, count)
-                if not cycles:
-                    continue
-                executed = await self._auto_clear_try_candidates(cycles, equivalent_code, count)
-                if executed:
-                    count += 1
-                    break
-
-            if not executed:
-                break
-
-            if count > 100:  # Safety break
-                break
-
-        return count
-
-    async def _auto_clear_find(
-        self, equivalent_code: str, max_depth: int, count: int
-    ) -> List[List[Dict]]:
-        """One rung of `auto_clear`'s ladder, with its original error envelope."""
-
-        try:
-            return await self.find_cycles(equivalent_code, max_depth=max_depth)
-        except GeoException as exc:
-            if exc.code != ErrorCode.E010.value:
-                raise
-            logger.exception(
-                "event=clearing.auto_clear_find_failed equivalent=%s "
-                "cleared_cycles=%s",
-                equivalent_code,
-                count,
-            )
-            raise GeoException(
-                details={
-                    "cleared_cycles": count,
-                    "partial": count > 0,
-                }
-            ) from exc
-        except Exception as exc:
-            logger.exception(
-                "event=clearing.auto_clear_find_failed equivalent=%s "
-                "cleared_cycles=%s",
-                equivalent_code,
-                count,
-            )
-            raise GeoException(
-                details={
-                    "cleared_cycles": count,
-                    "partial": count > 0,
-                }
-            ) from exc
-
-    async def _auto_clear_try_candidates(
-        self, cycles: List[List[Dict]], equivalent_code: str, count: int
-    ) -> bool:
-        """Try cycles until one succeeds; False when all candidates fail (locks/concurrency)."""
-
-        for cycle in cycles:
-            try:
-                success = await self.execute_clearing(cycle)
-            except GeoException as exc:
-                if exc.code != ErrorCode.E010.value:
-                    raise
-                logger.exception(
-                    "event=clearing.auto_clear_execute_failed equivalent=%s "
-                    "cleared_cycles=%s",
-                    equivalent_code,
-                    count,
-                )
-                raise GeoException(
-                    details={
-                        "cleared_cycles": count,
-                        "partial": count > 0,
-                    }
-                ) from exc
-            except Exception as exc:
-                logger.exception(
-                    "event=clearing.auto_clear_execute_failed equivalent=%s "
-                    "cleared_cycles=%s",
-                    equivalent_code,
-                    count,
-                )
-                raise GeoException(
-                    details={
-                        "cleared_cycles": count,
-                        "partial": count > 0,
-                    }
-                ) from exc
-            if success:
-                return True
-        return False

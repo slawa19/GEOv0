@@ -1,18 +1,51 @@
+"""The tick clearing engine publishes durable progress before a failure or a cancellation propagates.
+
+MIGRATED 2026-09-28, programme 023 slice (d) (spec 023, "Срез (d)"): the engine no longer detects cycles and calls
+the v1 executor itself - it runs ONE pass of the common runner per equivalent (`clearing_pass`, the runner entry
+`run_clearing_pass` in production). The service doubles this module used (`find_cycles` then
+`execute_clearing_with_amount`, flipping on the first call after the first execution) have no call site left; the
+same five shapes are held at the runner seam, as the runner's contract produces them (decision 10): the first
+occurrence handed off through `on_committed`, then
+
+* `geo` - the pass stops on a GeoException (`ClearingPassError`): the progress is finalised (trust growth, one
+  `clearing.done`), then the error takes its classification (a run error, sanitised);
+* `cancelled_find` / `cancelled_execute` - the pass is cancelled (`ClearingPassCancelled`): progress is published
+  without patches, no trust growth, the cancellation is preserved, no run error. In the runner both are one
+  shape - cancellation between or during occurrences - and are kept as two ids for the history of this file;
+* `cancelled_finalize` - the pass completes and the cancellation lands in trust growth;
+* `committed_cancel` - the occurrence became durable while the caller was being cancelled (`after_cancellation`).
+
+The assertions on accounting, the published amount, the direction of `cycle_edges` and the run-error bookkeeping
+are unchanged. The engine against the REAL runner and PostgreSQL:
+`tests/integration/test_p023_d_tick_driver_through_runner_postgres.py`.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import threading
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
-from app.core.clearing.service import ClearingCommittedAfterCancellation
+from app.core.clearing.runner import (
+    ClearingPassCancelled,
+    ClearingPassError,
+    ClearingPassResult,
+    CommittedEdge,
+    CommittedOccurrence,
+    InterruptReason,
+)
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_clearing_engine import RealClearingEngine
 from app.utils.exceptions import GeoException
+
+ALICE = uuid.uuid5(uuid.NAMESPACE_DNS, "alice.p023d")
+BOB = uuid.uuid5(uuid.NAMESPACE_DNS, "bob.p023d")
 
 
 class _ScalarResult:
@@ -63,68 +96,51 @@ class _EdgePatchBuilder:
         return []
 
 
-class _SuccessThenE010Service:
-    instance: "_SuccessThenE010Service | None" = None
-    failure_kind = "geo"
+def _occurrence(amount: Decimal, *, after_cancellation: bool = False) -> CommittedOccurrence:
+    """alice owes bob: the runner's progress edge, debtor -> creditor by participant UUID."""
 
-    def __init__(self, _session) -> None:
-        self.execute_calls = 0
-        self.find_calls = 0
-        self.cycle = [
-            {
-                "debtor": "alice",
-                "creditor": "bob",
-                # Deliberately stale candidate: the service result is authoritative.
-                "amount": "11.00",
-            }
-        ]
-        type(self).instance = self
+    return CommittedOccurrence(
+        occurrence_id=str(uuid.uuid4()),
+        plan_id=uuid.uuid4(),
+        ordinal=0,
+        amount_atoms=int(amount.scaleb(8)),
+        edges=(CommittedEdge(uuid.uuid4(), ALICE, BOB),),
+        after_cancellation=after_cancellation,
+    )
 
-    async def find_cycles(
-        self, _equivalent: str, *, max_depth: int, allowed_participant_pids=None
-    ) -> list:
-        # 2026-08-22 / p010: this double deliberately does NOT assert the perimeter.  Its
-        # run has no `_real_participants`, so the value is None whether the tick passes it
-        # or not, and an assertion here would be true in both cases - the vacuous shape this
-        # program keeps finding elsewhere.  The wiring is covered by
-        # `tests/unit/test_tick_money_paths_carry_the_run_perimeter.py`, and a double whose
-        # run DOES have participants asserts it in
-        # `tests/unit/test_real_runner_tick_nested_partial_failures.py`.
-        assert max_depth >= 1
-        self.find_calls += 1
-        # Threshold moved 2 -> 1 with the T1211 engine-ladder fix: the execution loop's
-        # first iteration now CONSUMES the preflight answer instead of re-finding, so the
-        # second `find_cycles` call is the first post-execution refresh (it used to be the
-        # third).  The five scenarios' semantics are unchanged - each still flips on the
-        # first find AFTER the first execution.
-        if self.failure_kind == "cancelled_find" and self.find_calls > 1:
-            raise asyncio.CancelledError
-        if self.failure_kind == "cancelled_finalize" and self.find_calls > 1:
-            return []
-        return [self.cycle]
 
-    async def _execute(self):
-        self.execute_calls += 1
-        if self.failure_kind == "committed_cancel" and self.execute_calls == 1:
-            raise ClearingCommittedAfterCancellation(
-                tx_id="clearing-committed",
-                cleared_amount=Decimal("5.00"),
-            )
-        if self.execute_calls == 1:
-            return Decimal("5.00")
-        if self.failure_kind == "cancelled_execute":
-            raise asyncio.CancelledError
-        failure = GeoException("private clearing failure detail")
-        assert failure.code == "E010"
-        raise failure
+def _result(committed, *, status: str, reason) -> ClearingPassResult:
+    return ClearingPassResult(
+        equivalent="USD",
+        status=status,
+        reason=reason,
+        committed=tuple(committed),
+        remaining_cycles=0 if status == "complete" else 1,
+        remaining_v_edge_atoms=0 if status == "complete" else 100,
+        plans=1,
+        distributed_exclusive=False,
+    )
 
-    async def execute_clearing(self, _cycle) -> bool:
-        return (await self._execute()) is not None
 
-    async def execute_clearing_with_amount(
-        self, _cycle, *, allowed_participant_pids=None
-    ) -> Decimal | None:
-        return await self._execute()
+def _run(run_id: str, tick: int) -> RunRecord:
+    run = RunRecord(run_id=run_id, scenario_id="scenario", mode="real", state="running")
+    run.tick_index = tick
+    run._real_viz_by_eq["USD"] = _VizHelper()
+    run._edges_by_equivalent = {"USD": [("bob", "alice")]}
+    run._real_participants = [(ALICE, "alice"), (BOB, "bob")]
+    return run
+
+
+def _engine(sse) -> RealClearingEngine:
+    return RealClearingEngine(
+        lock=threading.RLock(),
+        sse=sse,
+        utc_now=lambda: datetime(2026, 8, 8, tzinfo=timezone.utc),
+        logger=logging.getLogger(__name__),
+        edge_patch_builder=_EdgePatchBuilder(),
+        clearing_max_fx_edges_limit=8,
+        real_clearing_time_budget_ms=10_000,
+    )
 
 
 @pytest.mark.asyncio
@@ -142,27 +158,23 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     failure_kind: str,
 ) -> None:
     sse = _SseCapture()
-    run = RunRecord(
-        run_id="partial-clearing-run",
-        scenario_id="scenario",
-        mode="real",
-        state="running",
-    )
-    run.tick_index = 7
-    run._real_viz_by_eq["USD"] = _VizHelper()
-    run._edges_by_equivalent = {"USD": [("bob", "alice")]}
+    run = _run("partial-clearing-run", 7)
+    engine = _engine(sse)
+    runner_calls = 0
 
-    engine = RealClearingEngine(
-        lock=threading.RLock(),
-        sse=sse,
-        utc_now=lambda: datetime(2026, 8, 8, tzinfo=timezone.utc),
-        logger=logging.getLogger(__name__),
-        edge_patch_builder=_EdgePatchBuilder(),
-        clearing_max_depth_limit=6,
-        clearing_max_fx_edges_limit=8,
-        real_clearing_time_budget_ms=10_000,
-    )
-    _SuccessThenE010Service.failure_kind = failure_kind
+    async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
+        nonlocal runner_calls
+        runner_calls += 1
+        assert equivalent == "USD" and deadline is not None
+        first = _occurrence(Decimal("5.00"), after_cancellation=failure_kind == "committed_cancel")
+        on_committed(first)
+        if failure_kind == "geo":
+            failure = GeoException("private clearing failure detail")
+            assert failure.code == "E010"
+            raise ClearingPassError(_result([first], status="interrupted", reason=InterruptReason.ERROR), failure)
+        if failure_kind in {"cancelled_find", "cancelled_execute", "committed_cancel"}:
+            raise ClearingPassCancelled(_result([first], status="interrupted", reason=InterruptReason.CANCELLED))
+        return _result([first], status="complete", reason=None)
 
     trust_growth_calls = 0
 
@@ -189,7 +201,7 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
         build_edge_patch_for_equivalent=_unexpected_edge_patch,
         broadcast_topology_edge_patch=_unexpected_broadcast,
         async_session_local=lambda: _SessionContext(),
-        clearing_service_cls=_SuccessThenE010Service,
+        clearing_pass=_clearing_pass,
     )
     if failure_kind.startswith("cancelled") or failure_kind == "committed_cancel":
         with pytest.raises(asyncio.CancelledError):
@@ -198,13 +210,7 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
         cleared = await call
         assert cleared == {"USD": 5.0}
 
-    assert _SuccessThenE010Service.instance is not None
-    expected_execute_calls = 1 if failure_kind in {
-        "cancelled_find",
-        "cancelled_finalize",
-        "committed_cancel",
-    } else 2
-    assert _SuccessThenE010Service.instance.execute_calls == expected_execute_calls
+    assert runner_calls == 1
     expected_growth_calls = 0 if failure_kind in {
         "cancelled_find",
         "cancelled_execute",
@@ -237,27 +243,6 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
 _TOO_PRECISE_FOR_FLOAT = Decimal("12345678901.12345678")
 
 
-class _ExactAmountService:
-    """Clears one cycle for an amount no float can represent, then stops."""
-
-    def __init__(self, _session) -> None:
-        self.calls = 0
-
-    async def find_cycles(
-        self, equivalent: str, *, max_depth: int, allowed_participant_pids=None
-    ) -> list:
-        # Only USD has a cycle; EUR clears nothing this tick.
-        if self.calls or str(equivalent) != "USD":
-            return []
-        return [[{"debtor": "alice", "creditor": "bob", "amount": "1.00"}]]
-
-    async def execute_clearing_with_amount(
-        self, _cycle, *, allowed_participant_pids=None
-    ) -> Decimal | None:
-        self.calls += 1
-        return _TOO_PRECISE_FOR_FLOAT
-
-
 def test_exact_amount_probe_is_beyond_float() -> None:
     """Anti-vacuum: the probe must actually be unrepresentable as a float."""
 
@@ -273,26 +258,15 @@ async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
     T715 / finding B-D1-002).
     """
 
-    run = RunRecord(
-        run_id="exact-clearing-run",
-        scenario_id="scenario",
-        mode="real",
-        state="running",
-    )
-    run.tick_index = 3
-    run._real_viz_by_eq["USD"] = _VizHelper()
-    run._edges_by_equivalent = {"USD": [("bob", "alice")]}
+    run = _run("exact-clearing-run", 3)
 
-    engine = RealClearingEngine(
-        lock=threading.RLock(),
-        sse=_SseCapture(),
-        utc_now=lambda: datetime(2026, 8, 20, tzinfo=timezone.utc),
-        logger=logging.getLogger(__name__),
-        edge_patch_builder=_EdgePatchBuilder(),
-        clearing_max_depth_limit=6,
-        clearing_max_fx_edges_limit=8,
-        real_clearing_time_budget_ms=10_000,
-    )
+    async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
+        # Only USD has a cycle; EUR clears nothing this tick.
+        if equivalent != "USD":
+            return _result([], status="complete", reason=None)
+        occurrence = _occurrence(_TOO_PRECISE_FOR_FLOAT)
+        on_committed(occurrence)
+        return _result([occurrence], status="complete", reason=None)
 
     async def _apply_trust_growth(**_kwargs):
         return SimpleNamespace(updated_count=0)
@@ -303,7 +277,7 @@ async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
     def _broadcast(**_kwargs) -> None:
         return None
 
-    cleared = await engine.tick_real_mode_clearing(
+    cleared = await _engine(_SseCapture()).tick_real_mode_clearing(
         None,
         run_id=run.run_id,
         run=run,
@@ -312,7 +286,7 @@ async def test_cleared_volume_is_returned_as_exact_decimal() -> None:
         build_edge_patch_for_equivalent=_edge_patch,
         broadcast_topology_edge_patch=_broadcast,
         async_session_local=lambda: _SessionContext(),
-        clearing_service_cls=_ExactAmountService,
+        clearing_pass=_clearing_pass,
     )
 
     assert cleared["USD"] == _TOO_PRECISE_FOR_FLOAT

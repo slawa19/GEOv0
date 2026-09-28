@@ -73,7 +73,10 @@ trustline-update и `PATCH` кредитора — читают долг без 
 - routing/balance: `ROUTING_*`, `MAX_FLOW_MAX_HOPS`,
   `BALANCE_SUMMARY_CACHE_TTL_SECONDS`;
 - service controls: `RATE_LIMIT_*`, `METRICS_ENABLED`, `CLEARING_ENABLED`,
-  `FEATURE_FLAGS_*`, `INTEGRITY_CHECKPOINT_*`;
+  `FEATURE_FLAGS_*`, `INTEGRITY_CHECKPOINT_*`, `CLEARING_PERIODIC_ENABLED`,
+  `CLEARING_PERIODIC_INTERVAL_SECONDS`. Периодический клиринг (программа 023) по умолчанию выключен;
+  его включает развёртывание **отдельного хаба** (`CLEARING_PERIODIC_ENABLED=true`, base Compose передаёт
+  переменную с умолчанием `false`), из `ENV` он не выводится;
 - simulator: `SIMULATOR_DB_ENABLED`, `SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS`,
   `SIMULATOR_SESSION_*`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`,
   `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`;

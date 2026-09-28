@@ -86,23 +86,31 @@ async def test_clearing_max_depth_blocks_and_allows_length_5_cycle(client: Async
     assert resp.status_code == 200, resp.text
     assert resp.json().get("cycles") == []
 
-    # With max_depth=4, auto_clear should not clear the cycle.
+    # MOVED 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3; decision 8): the depth no longer
+    # controls EXECUTION. The depth assertions stay on the diagnostic `/cycles` (above: 4 does not see the 5-cycle;
+    # below: 5 does), and `/auto` - which refuses `max_depth` with 422 - clears the 5-cycle with no depth at all.
+    resp = await client.get(
+        "/api/v1/clearing/cycles",
+        params={"equivalent": "USD", "max_depth": 5},
+        headers=user["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json().get("cycles")) == 1
+
     resp = await client.post(
         "/api/v1/clearing/auto",
         params={"equivalent": "USD", "max_depth": 4},
         headers=user["headers"],
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["cleared_cycles"] == 0
+    assert resp.status_code == 422, resp.text
 
-    # With max_depth=5, auto_clear should clear the cycle.
     resp = await client.post(
         "/api/v1/clearing/auto",
-        params={"equivalent": "USD", "max_depth": 5},
+        params={"equivalent": "USD"},
         headers=user["headers"],
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["cleared_cycles"] >= 1
+    assert resp.json()["cleared_cycles"] == 1 and resp.json()["status"] == "complete"
 
     resp = await client.get(
         "/api/v1/clearing/cycles",

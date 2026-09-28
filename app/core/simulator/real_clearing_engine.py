@@ -5,7 +5,6 @@ import logging
 import secrets
 import time
 import uuid
-import hashlib
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
@@ -13,11 +12,7 @@ from sqlalchemy import select
 
 import app.db.session as db_session
 from app.config import settings
-from app.core.clearing.service import (
-    _SQL_DETECTOR_MAX_CYCLE_LENGTH,
-    ClearingCommittedAfterCancellation,
-    ClearingService,
-)
+from app.core.clearing.runner import ClearingPassCancelled, ClearingPassError, run_clearing_pass
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.net_balance_utils import to_money_str
 from app.core.simulator.run_perimeter import run_perimeter_pids
@@ -38,17 +33,18 @@ class RealClearingEngine:
         utc_now,
         logger: logging.Logger,
         edge_patch_builder: EdgePatchBuilder,
-        clearing_max_depth_limit: int,
         clearing_max_fx_edges_limit: int,
         real_clearing_time_budget_ms: int,
         should_warn_this_tick: Callable[[RunRecord, str], bool] | None = None,
+        clearing_max_depth_limit: int | None = None,
     ) -> None:
+        # `clearing_max_depth_limit` is INACTIVE since programme 023 slice (d): execution has no depth. Accepted and
+        # ignored until 021 `T2109` removes the driver.
         self._lock = lock
         self._sse = sse
         self._utc_now = utc_now
         self._logger = logger
         self._edge_patch_builder = edge_patch_builder
-        self._clearing_max_depth_limit = int(clearing_max_depth_limit)
         self._clearing_max_fx_edges_limit = int(clearing_max_fx_edges_limit)
         self._real_clearing_time_budget_ms = int(real_clearing_time_budget_ms)
 
@@ -108,6 +104,7 @@ class RealClearingEngine:
         clearing_service_cls: Any | None = None,
         time_budget_ms_override: int | None = None,
         max_depth_override: int | None = None,
+        clearing_pass: Callable[..., Awaitable[Any]] | None = None,
     ) -> dict[str, Decimal]:
         """Execute clearing for all equivalents using an isolated session.
 
@@ -116,19 +113,19 @@ class RealClearingEngine:
         a transaction as "aborted" after any error, and subsequent queries fail
         with InFailedSQLTransactionError.
 
-        Optional overrides (for adaptive clearing policy):
+        Programme 023 slice (d): one pass of the common clearing runner per equivalent, in the run's perimeter.
+
         - time_budget_ms_override: if set, used instead of self._real_clearing_time_budget_ms
-          (clamped to the constructor ceiling as guardrail).
-        - max_depth_override: if set, used instead of self._clearing_max_depth_limit
-          (clamped to the constructor ceiling as guardrail).
+          (clamped to the constructor ceiling as guardrail); it is the runner's caller deadline.
+        - max_depth_override, clearing_service_cls: INACTIVE since 023 (d) - execution has no depth and the
+          runner owns its service; kept only until 021 `T2109` removes the driver's signature.
+        - clearing_pass: the runner entry (`run_clearing_pass`); a seam for tests.
         """
 
-        max_depth = min(
-            int(max_depth_override)
-            if max_depth_override is not None
-            else int(self._clearing_max_depth_limit),
-            int(self._clearing_max_depth_limit),
-        )
+        # Programme 023, slice (d): the tick clears through the common runner (decisions 7, 10; R3, R4). No
+        # execution depth: `max_depth_override` and the constructor's `clearing_max_depth_limit` are inactive, kept
+        # only until their owners remove them (the driver and `real_runner.py` - 021 `T2109`; the coordinator and
+        # its port - 021 stage 4). The budget is the runner's caller deadline, checked before every cycle start.
         effective_time_budget_ms = min(
             int(time_budget_ms_override)
             if time_budget_ms_override is not None
@@ -136,9 +133,7 @@ class RealClearingEngine:
             int(self._real_clearing_time_budget_ms),
         )
 
-        # Safety: never allow non-positive budgets/depth.
-        # If time_budget_ms <= 0, the loop would skip the budget check entirely.
-        max_depth = max(1, int(max_depth))
+        # Safety: never allow a non-positive budget.
         effective_time_budget_ms = max(1, int(effective_time_budget_ms))
         max_fx_edges = int(self._clearing_max_fx_edges_limit)
         # 2026-08-20 / p007_t715: cleared volume is money and stays Decimal all
@@ -151,316 +146,103 @@ class RealClearingEngine:
         emitter = SseEventEmitter(sse=self._sse, utc_now=self._utc_now, logger=self._logger)
 
         session_local = async_session_local or db_session.AsyncSessionLocal
-        service_cls = clearing_service_cls or ClearingService
+        run_pass = clearing_pass or run_clearing_pass
+        # Participant UUID -> PID of the run, read from the run's own list (no DB lookup, no await): the runner's
+        # progress is by UUID, debtor -> creditor; the tick's accounting and SSE are by PID, creditor -> debtor.
+        with self._lock:
+            pid_by_id = {participant_id: str(pid) for (participant_id, pid) in (run._real_participants or [])}
 
         for eq in equivalents:
-            plan_id = ""
+            plan_id = f"plan_{secrets.token_hex(6)}"
             cleared_cycles = 0
             cleared_amount_dec = Decimal("0")
             touched_nodes: set[str] = set()
             touched_edges: set[tuple[str, str]] = set()
             cleared_amount_per_edge: dict[tuple[str, str], float] = {}
             partial_done_emitted = False
+
+            def _account(occurrence) -> None:
+                """Decision 10: called by the runner right after a commit, with no await in between."""
+
+                nonlocal cleared_cycles, cleared_amount_dec
+                cleared_cycles += 1
+                cleared_amount_dec += occurrence.amount
+                for edge in occurrence.edges:
+                    debtor_pid = pid_by_id.get(edge.debtor_id)
+                    creditor_pid = pid_by_id.get(edge.creditor_id)
+                    if debtor_pid:
+                        touched_nodes.add(debtor_pid)
+                    if creditor_pid:
+                        touched_nodes.add(creditor_pid)
+                    if creditor_pid and debtor_pid:
+                        # Trust-line direction (creditor, debtor): the snapshot links and edge patches use it.
+                        edge_key = (creditor_pid, debtor_pid)
+                        touched_edges.add(edge_key)
+                        cleared_amount_per_edge[edge_key] = cleared_amount_per_edge.get(edge_key, 0.0) + float(
+                            occurrence.amount
+                        )
+
             try:
-                async with session_local() as clearing_session:
-                    service = service_cls(clearing_session)
+                eq_t0 = time.monotonic()
+                self._logger.warning(
+                    "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s",
+                    str(run.run_id),
+                    int(run.tick_index),
+                    str(eq),
+                )
+                with self._lock:
+                    run.current_phase = "clearing"
 
-                    eq_t0 = time.monotonic()
+                execution_error: Exception | None = None
+                deadline = asyncio.get_running_loop().time() + effective_time_budget_ms / 1000.0
+                try:
+                    result = await run_pass(
+                        session_local,
+                        str(eq),
+                        allowed_participant_pids=run_perimeter_pids(run),
+                        on_committed=_account,
+                        deadline=deadline,
+                    )
+                except ClearingPassCancelled as cancelled:
+                    # Reported, then preserved: a cancellation during planning does NOT stop the planner worker,
+                    # and the result says so (`planner_abandoned`); its late plan starts nothing.
                     self._logger.warning(
-                        "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s",
+                        "simulator.real.clearing_pass_cancelled run_id=%s tick=%s eq=%s committed=%s "
+                        "planner_abandoned=%s",
                         str(run.run_id),
                         int(run.tick_index),
                         str(eq),
+                        len(cancelled.result.committed),
+                        bool(cancelled.result.planner_abandoned),
                     )
-
+                    raise
+                except ClearingPassError as failed:
+                    if cleared_cycles <= 0:
+                        raise failed.cause
+                    # Progress is durable: publish it below, then let the cause take its classification.
+                    execution_error = failed.cause
+                else:
                     self._logger.warning(
-                        "simulator.real.clearing_find_cycles_start run_id=%s tick=%s eq=%s max_depth=%s",
+                        "simulator.real.clearing_pass_done run_id=%s tick=%s eq=%s status=%s reason=%s "
+                        "committed=%s remaining_cycles=%s elapsed_ms=%s",
                         str(run.run_id),
                         int(run.tick_index),
                         str(eq),
-                        int(max_depth),
+                        result.status,
+                        None if result.reason is None else result.reason.value,
+                        len(result.committed),
+                        result.remaining_cycles,
+                        int((time.monotonic() - eq_t0) * 1000.0),
                     )
-                    _fc_t0 = time.monotonic()
 
-                    # Depth ladder (T1211): an executor needs one executable cycle
-                    # shortest-first, not the complete union - ask the SQL-complete depth
-                    # first (early return, no graph load), widen to the caller's depth only
-                    # when the short rung is EMPTY.
-                    #
-                    # WHY empty-only HERE while `auto_clear` also widens on all-candidates-
-                    # failed: every failure-without-exception path of the execution -
-                    # exactly five since 019 stage 5 removed the locked-pair skip with
-                    # `prepare_locks` - `_execute_clearing_with_amount` returns None for an empty
-                    # cycle, invalid debt ids, Debt rows gone, amount <= 0, and the auto_clearing
-                    # policy - is either unreachable from detector output or filtered from the NEXT
-                    # `find_cycles` answer by the same predicate (policy: the find-side filter calls
-                    # the execution's own `_cycle_respects_auto_clearing`).  So a PERSISTENT
-                    # cause empties the short rung by the next tick and the wide rung fires;
-                    # a TRANSIENT one costs at most this tick, and the next tick retries by
-                    # design (per-tick time budget is why this ladder exists).  `auto_clear`
-                    # has no next tick - its one call must widen in-place.  THIS REASONING
-                    # LEANS ON THOSE FIVE PATHS: adding a sixth None-return to the
-                    # execution breaks it, and whoever adds one must revisit this ladder.
-                    #
-                    # One ladder for the preflight AND the execution loop below: the first
-                    # loop iteration consumes this preflight answer (already prioritized),
-                    # later iterations re-find through the same ladder.  The first edition
-                    # laddered only this preflight while the loop re-found at full depth
-                    # every iteration - the preflight answer never survived to execution
-                    # (T1211 fix-round, both slices, measured find_depths=[4, 6, 6]).
-                    async def _ladder_find() -> list:
-                        found = await service.find_cycles(
-                            eq,
-                            max_depth=min(max_depth, _SQL_DETECTOR_MAX_CYCLE_LENGTH),
-                            allowed_participant_pids=run_perimeter_pids(run),
-                        )
-                        if not found and max_depth > _SQL_DETECTOR_MAX_CYCLE_LENGTH:
-                            found = await service.find_cycles(
-                                eq,
-                                max_depth=max_depth,
-                                allowed_participant_pids=run_perimeter_pids(run),
-                            )
-                        return found
-
-                    cycles = await _ladder_find()
-                    _fc_ms = int((time.monotonic() - _fc_t0) * 1000.0)
-                    if _fc_ms > 500:
-                        self._logger.warning(
-                            "simulator.real.clearing_find_cycles_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
-                            str(run.run_id),
-                            int(run.tick_index),
-                            str(eq),
-                            int(_fc_ms),
-                        )
-                    self._logger.warning(
-                        "simulator.real.clearing_find_cycles_done run_id=%s tick=%s eq=%s cycles_n=%s elapsed_ms=%s",
-                        str(run.run_id),
-                        int(run.tick_index),
-                        str(eq),
-                        int(len(cycles or [])),
-                        int(_fc_ms),
-                    )
-                    if not cycles:
-                        continue
-
-                    def _prioritize_cycle_for_tick(cycles_in: list[Any]) -> list[Any]:
-                        if len(cycles_in) <= 1:
-                            return cycles_in
-                        seed = f"{run.run_id}:{run.tick_index}:{eq}".encode("utf-8")
-                        digest = hashlib.sha256(seed).digest()
-                        idx = int.from_bytes(digest[:4], byteorder="big", signed=False) % len(
-                            cycles_in
-                        )
-                        if idx <= 0:
-                            return cycles_in
-                        # Put the chosen cycle first (so visualization and execution are aligned).
-                        chosen = cycles_in[idx]
-                        return [chosen, *cycles_in[:idx], *cycles_in[idx + 1 :]]
-
-                    # IMPORTANT: keep visualization aligned with what we attempt to clear first.
-                    cycles = _prioritize_cycle_for_tick(list(cycles))
-
-                    plan_id = f"plan_{secrets.token_hex(6)}"
-
+                if cleared_cycles <= 0:
                     with self._lock:
-                        run.current_phase = "clearing"
+                        run.current_phase = None
+                    continue
 
-                    clearing_started = time.monotonic()
-                    progress_last_log = 0.0
-                    execution_error: Exception | None = None
-                    consumed_preflight = False
+                cleared_amount_by_eq[str(eq)] = cleared_amount_dec
 
-                    while True:
-                        now = time.monotonic()
-                        if progress_last_log <= 0.0:
-                            progress_last_log = now
-                        elif (now - progress_last_log) >= 5.0:
-                            self._logger.warning(
-                                "simulator.real.clearing_progress run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                str(eq),
-                                int((now - clearing_started) * 1000.0),
-                                int(cleared_cycles),
-                            )
-                            progress_last_log = now
-
-                        if cleared_cycles and (cleared_cycles % 5 == 0):
-                            await asyncio.sleep(0)
-
-                        budget_ms = int(effective_time_budget_ms)
-                        elapsed_ms = (time.monotonic() - clearing_started) * 1000.0
-                        if elapsed_ms >= float(budget_ms):
-                            if self._should_warn_this_tick(
-                                run, f"clearing_time_budget_exceeded:{eq}"
-                            ):
-                                self._logger.warning(
-                                    "simulator.real.clearing_time_budget_exceeded run_id=%s tick=%s eq=%s budget_ms=%s elapsed_ms=%s",
-                                    str(run.run_id),
-                                    int(run.tick_index),
-                                    str(eq),
-                                    int(budget_ms),
-                                    int(elapsed_ms),
-                                )
-                            break
-
-                        self._logger.debug(
-                            "simulator.real.clearing_find_cycles_loop_start run_id=%s tick=%s eq=%s cleared_cycles=%s",
-                            str(run.run_id),
-                            int(run.tick_index),
-                            str(eq),
-                            int(cleared_cycles),
-                        )
-                        if consumed_preflight:
-                            _loop_fc_t0 = time.monotonic()
-                            try:
-                                cycles = await _ladder_find()
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as exc:
-                                if cleared_cycles <= 0:
-                                    raise
-                                execution_error = exc
-                                break
-                            _loop_fc_ms = int((time.monotonic() - _loop_fc_t0) * 1000.0)
-                            if _loop_fc_ms > 500:
-                                self._logger.warning(
-                                    "simulator.real.clearing_find_cycles_loop_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
-                                    str(run.run_id),
-                                    int(run.tick_index),
-                                    str(eq),
-                                    int(_loop_fc_ms),
-                                )
-                            if not cycles:
-                                break
-
-                            # Keep execution order aligned with visualization policy.
-                            cycles = _prioritize_cycle_for_tick(list(cycles))
-                        else:
-                            # First iteration executes the preflight answer - the same
-                            # (already prioritized) list the visualization plan was built
-                            # from; re-finding here discarded the preflight ladder entirely,
-                            # and re-prioritizing would rotate the list a second time,
-                            # misaligning execution with the published plan.
-                            consumed_preflight = True
-
-                        executed = False
-                        for cycle in cycles:
-                            try:
-                                amts: list[Decimal] = []
-                                for edge in cycle:
-                                    if isinstance(edge, dict):
-                                        amts.append(Decimal(str(edge.get("amount"))))
-                                    else:
-                                        amts.append(Decimal(str(getattr(edge, "amount"))))
-                                candidate_amount = (
-                                    min(amts) if amts else Decimal("0")
-                                )
-                            except Exception:
-                                if self._should_warn_this_tick(
-                                    run, f"clearing_clear_amount_parse_failed:{eq}"
-                                ):
-                                    self._logger.debug(
-                                        "simulator.real.clearing_clear_amount_parse_failed run_id=%s tick=%s eq=%s",
-                                        str(run.run_id),
-                                        int(run.tick_index),
-                                        str(eq),
-                                        exc_info=True,
-                                    )
-                                candidate_amount = Decimal("0")
-
-                            self._logger.warning(
-                                "simulator.real.clearing_execute_start run_id=%s tick=%s eq=%s candidate_amount=%s cycle_len=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                str(eq),
-                                str(candidate_amount),
-                                int(len(cycle or [])),
-                            )
-                            _exec_t0 = time.monotonic()
-                            commit_cancellation = None
-                            try:
-                                actual_amount = (
-                                    await service.execute_clearing_with_amount(
-                                        cycle,
-                                        allowed_participant_pids=run_perimeter_pids(run),
-                                    )
-                                )
-                            except ClearingCommittedAfterCancellation as exc:
-                                actual_amount = exc.cleared_amount
-                                commit_cancellation = exc
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as exc:
-                                if cleared_cycles <= 0:
-                                    raise
-                                execution_error = exc
-                                break
-                            _exec_ms = int((time.monotonic() - _exec_t0) * 1000.0)
-                            self._logger.warning(
-                                "simulator.real.clearing_execute_done run_id=%s tick=%s eq=%s success=%s elapsed_ms=%s",
-                                str(run.run_id),
-                                int(run.tick_index),
-                                str(eq),
-                                actual_amount is not None,
-                                int(_exec_ms),
-                            )
-                            if _exec_ms > 500:
-                                self._logger.warning(
-                                    "simulator.real.clearing_execute_slow run_id=%s tick=%s eq=%s elapsed_ms=%s",
-                                    str(run.run_id),
-                                    int(run.tick_index),
-                                    str(eq),
-                                    int(_exec_ms),
-                                )
-
-                            if actual_amount is not None:
-                                actual_amount = Decimal(str(actual_amount))
-                                if actual_amount <= 0:
-                                    raise GeoException()
-                                cleared_cycles += 1
-                                cleared_amount_dec += actual_amount
-
-                                try:
-                                    for edge in cycle:
-                                        if not isinstance(edge, dict):
-                                            continue
-                                        debtor_pid = str(edge.get("debtor") or "").strip()
-                                        creditor_pid = str(edge.get("creditor") or "").strip()
-                                        if debtor_pid:
-                                            touched_nodes.add(debtor_pid)
-                                        if creditor_pid:
-                                            touched_nodes.add(creditor_pid)
-                                        if creditor_pid and debtor_pid:
-                                            touched_edges.add((creditor_pid, debtor_pid))
-                                            edge_key = (creditor_pid, debtor_pid)
-                                            cleared_amount_per_edge[edge_key] = (
-                                                cleared_amount_per_edge.get(edge_key, 0.0)
-                                                + float(actual_amount)
-                                            )
-                                except Exception:
-                                    if self._should_warn_this_tick(
-                                        run, f"clearing_touched_parse_failed:{eq}"
-                                    ):
-                                        self._logger.debug(
-                                            "simulator.real.clearing_touched_parse_failed run_id=%s tick=%s eq=%s",
-                                            str(run.run_id),
-                                            int(run.tick_index),
-                                            str(eq),
-                                            exc_info=True,
-                                        )
-                                executed = True
-                                if commit_cancellation is not None:
-                                    raise commit_cancellation
-                                break
-
-                        if not executed:
-                            break
-                        if cleared_cycles > 100:
-                            break
-
-                    cleared_amount_by_eq[str(eq)] = cleared_amount_dec
-
+                async with session_local() as clearing_session:
                     if touched_edges:
                         try:
                             growth_res = await apply_trust_growth(

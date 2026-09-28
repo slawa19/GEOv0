@@ -1,0 +1,83 @@
+Programme 023 slice (d), step 2 (red-first), on the base tree a0bd303+spec 232f241 (no production change).
+Command (debug variant of the canonical runner): PYTEST_ADDOPTS='--runxfail -p no:cacheprovider -rf' scripts/verify_local.ps1 -TaskSlug p023d -BackendOnly -BackendSelector <the 8 modules below>
+Canonical run without --runxfail (same 8 modules plus test_p023_d_periodic_profiles_postgres.py, exit 0): 29 passed, 1 skipped, 37 xfailed.
+
+37 failed, 25 passed, 1 skipped in 36.52s
+
+== failures ==
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_1_depth_six_loses_volume_the_flow_finds[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_2_shared_edge_six_versus_eight[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_seven_ring_is_missed_at_depth_six[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_3_eleven_ring_is_missed_at_every_supported_depth[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_4a_declared_partial_amount_is_not_honoured[mode_b]
+FAILED tests/integration/test_p023_reproducers_postgres.py::test_r023_4a_distinct_occurrences_get_distinct_identities[mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_a_complete_pass_answers_the_exact_committed_progress_shape[mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_max_depth_in_any_form_is_refused_before_the_runner[bare-mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_max_depth_in_any_form_is_refused_before_the_runner[empty-mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_max_depth_in_any_form_is_refused_before_the_runner[valid-mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_max_depth_in_any_form_is_refused_before_the_runner[repeated-mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_max_depth_in_any_form_is_refused_before_the_runner[not_an_int-mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_max_depth_in_any_form_is_refused_before_the_runner[out_of_range-mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_the_operator_stop_after_progress_answers_interrupted_with_e008[mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_an_unexpected_error_after_progress_is_reported_sanitised[mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_an_unexpected_error_before_any_commit_is_the_error_itself[mode_b]
+FAILED tests/integration/test_p023_d_auto_endpoint_postgres.py::test_a_cancelled_request_accounts_its_progress_and_stays_cancelled[mode_b]
+FAILED tests/integration/test_p023_d_interact_through_runner_postgres.py::test_interact_clears_through_the_runner_with_creditor_to_debtor_pids[mode_b]
+FAILED tests/integration/test_p023_d_interact_through_runner_postgres.py::test_max_depth_is_not_part_of_the_interact_request[mode_b]
+FAILED tests/integration/test_p023_d_interact_through_runner_postgres.py::test_an_interrupted_pass_is_an_explicit_conflict_with_progress_and_remainder[mode_b]
+FAILED tests/integration/test_p023_d_interact_through_runner_postgres.py::test_the_operator_stop_after_progress_keeps_the_conflict_answer[mode_b]
+FAILED tests/integration/test_p023_d_tick_driver_through_runner_postgres.py::test_the_tick_clears_through_the_runner_with_creditor_to_debtor_pids
+FAILED tests/integration/test_p023_d_tick_driver_through_runner_postgres.py::test_the_simulator_depth_setting_no_longer_limits_execution
+FAILED tests/integration/test_p023_d_tick_driver_through_runner_postgres.py::test_cold_spawn_the_first_tick_is_recorded_and_a_later_tick_really_clears
+FAILED tests/integration/test_p023_d_tick_driver_through_runner_postgres.py::test_planning_past_the_hard_timeout_is_reported_and_its_late_result_starts_nothing
+FAILED tests/integration/test_p023_d_tick_driver_through_runner_postgres.py::test_a_tick_cancelled_after_a_commit_keeps_its_progress
+FAILED tests/unit/test_p023_d_product_callers_go_through_the_runner.py::test_each_product_caller_goes_through_its_runner_entry_and_calls_no_executor_itself
+FAILED tests/unit/test_p023_d_product_callers_go_through_the_runner.py::test_only_the_service_and_the_runner_reach_the_executors_and_auto_clear_is_gone
+FAILED tests/unit/test_deployment_config.py::test_the_hub_entrypoint_passes_the_periodic_clearing_switch_with_a_false_default
+FAILED tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_overflow_returns_the_100_largest_unique_cycles_in_order[4]
+FAILED tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_overflow_returns_the_100_largest_unique_cycles_in_order[6]
+FAILED tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_amount_first_executes_the_long_cycle_over_a_shared_edge[reproducer_5cycle-mode_b]
+FAILED tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_amount_first_executes_the_long_cycle_over_a_shared_edge[additional_4cycle_not_a_ladder_discriminator-mode_b]
+FAILED tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_equal_amounts_are_ordered_by_the_full_canonical_identity[4]
+FAILED tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py::test_equal_amounts_are_ordered_by_the_full_canonical_identity[6]
+FAILED tests/integration/test_p020_selection_retention_postgres.py::test_retention_ladder_occurrences_and_remainder_are_exact[5-mode_b]
+FAILED tests/integration/test_p020_selection_retention_postgres.py::test_retention_ladder_occurrences_and_remainder_are_exact[4-mode_b]
+
+== the exception of every failure (all TargetMismatch) ==
+E   tests.p019_support.TargetMismatch: /auto: V_edge on the debts 6.00000000, the oracle's optimum 14 (1 occurrence(s))
+E   tests.p019_support.TargetMismatch: V_edge 6.00000000 (target 8), remaining [('00000000-0000-2302-0000-00000000000a', 'p023r2b', 'p023r2d', Decimal('1.00000000')), ('00000000-0000-2302-0000-00000000000b', 'p023r2d', 'p023r2e', Decimal('1.00000000')), ('00000000-0000-2302-0000-00000000000c', 'p023r2e', 'p023r2f', Decimal('1.00000000')), ('00000000-0000-2302-0000-00000000000d', 'p023r2f', 'p023r2
+E   tests.p019_support.TargetMismatch: /auto: V_edge 0E-8 (0 occurrences), target 7
+E   tests.p019_support.TargetMismatch: /auto: V_edge 0E-8 (0 occurrences), target 11
+E   tests.p019_support.TargetMismatch: /clearing/auto does not report committed progress: fields ['committed', 'error', 'reason', 'remaining_cycles', 'remaining_v_edge', 'status', 'v_cyc', 'v_edge'] absent ({'equivalent': 'PQF', 'cleared_cycles': 1})
+E   tests.p019_support.TargetMismatch: /clearing/auto does not report committed progress: fields ['committed', 'error', 'reason', 'remaining_cycles', 'remaining_v_edge', 'status', 'v_cyc', 'v_edge'] absent ({'equivalent': 'PQG', 'cleared_cycles': 1})
+E   tests.p019_support.TargetMismatch: /clearing/auto does not report committed progress: fields ['committed', 'error', 'reason', 'remaining_cycles', 'remaining_v_edge', 'status', 'v_cyc', 'v_edge'] absent ({'equivalent': 'PQU', 'cleared_cycles': 2})
+E   tests.p019_support.TargetMismatch: '&max_depth': 422 {'error': {'code': 'E009', 'message': 'Validation error', 'details': {'errors': [{'type': 'int_parsing', 'loc': ['query', 'max_depth'], 'msg': 'Input should be a valid integer, unable to parse string as an integer', 'input': '', 'url': 'https://errors.pydantic.dev/2.5/v/int_parsing'}]}}}
+E   tests.p019_support.TargetMismatch: '&max_depth=': 422 {'error': {'code': 'E009', 'message': 'Validation error', 'details': {'errors': [{'type': 'int_parsing', 'loc': ['query', 'max_depth'], 'msg': 'Input should be a valid integer, unable to parse string as an integer', 'input': '', 'url': 'https://errors.pydantic.dev/2.5/v/int_parsing'}]}}}
+E   tests.p019_support.TargetMismatch: '&max_depth=6': 200 {'equivalent': 'PQU', 'cleared_cycles': 2}
+E   tests.p019_support.TargetMismatch: '&max_depth=6&max_depth=7': 200 {'equivalent': 'PQU', 'cleared_cycles': 2}
+E   tests.p019_support.TargetMismatch: '&max_depth=abc': 422 {'error': {'code': 'E009', 'message': 'Validation error', 'details': {'errors': [{'type': 'int_parsing', 'loc': ['query', 'max_depth'], 'msg': 'Input should be a valid integer, unable to parse string as an integer', 'input': 'abc', 'url': 'https://errors.pydantic.dev/2.5/v/int_parsing'}]}}}
+E   tests.p019_support.TargetMismatch: '&max_depth=99': 422 {'error': {'code': 'E009', 'message': 'Validation error', 'details': {'errors': [{'type': 'less_than_equal', 'loc': ['query', 'max_depth'], 'msg': 'Input should be less than or equal to 10', 'input': '99', 'ctx': {'le': 10}, 'url': 'https://errors.pydantic.dev/2.5/v/less_than_equal'}]}}}
+E   tests.p019_support.TargetMismatch: 200 {'equivalent': 'PQU', 'cleared_cycles': 2}
+E   tests.p019_support.TargetMismatch: 200 {'equivalent': 'PQU', 'cleared_cycles': 2}
+E   tests.p019_support.TargetMismatch: expected the unhandled error (a sanitised 500 in production); got 200
+E   tests.p019_support.TargetMismatch: the second occurrence was reached: False; cancelled: False
+E   tests.p019_support.TargetMismatch: the route did not go through the runner's occurrences (0 calls)
+E   tests.p019_support.TargetMismatch: 200 {"ok":true,"equivalent":"PQV","cleared_cycles":2,"total_cleared_amount":"5.00000000","cycles":[{"cleared_amount":"3.00000000","edges":[{"from":"p023ve","to":"p023vd"},{"from":"p023vf","to":"p023ve"},{"from":"p023vd","to":"p023vf"}]},{"cleared_amount":"2.00000000","edges":[{"from":"p023vb","to":"p023va"},{"from":"p023vc","to":"p023vb"},{"from":"p023va","to
+E   tests.p019_support.TargetMismatch: 200 {'ok': True, 'equivalent': 'PQV', 'cleared_cycles': 2, 'total_cleared_amount': '5.00000000', 'cycles': [{'cleared_amount': '3.00000000', 'edges': [{'from': 'p023ve', 'to': 'p023vd'}, {'from': 'p023vf', 'to': 'p023ve'}, {'from': 'p023vd', 'to': 'p023vf'}]}, {'cleared_amount': '2.00000000', 'edges': [{'from': 'p023vb', 'to': 'p023va'}, {'from': 'p023vc', 't
+E   tests.p019_support.TargetMismatch: the stop was not met through the runner (0 calls; 200 {'ok': True, 'equivalent': 'PQV', 'cleared_cycles': 2, 'total_cleared_amount': '5.00000000', 'cycles': [{'cleared_amount': '3.00000000', 'edges': [{'from': 'p023ve', 'to': 'p023vd'}, {'from': 'p023vf', 'to': 'p023ve'}, {'from': 'p023vd', 'to': 'p023vf'}]}, {'cleared_amount': '2.00000000', 'edges': [{'from'
+E   tests.p019_support.TargetMismatch: the tick did not go through the runner's occurrences (0 calls)
+E   tests.p019_support.TargetMismatch: a 4-ring under SIMULATOR_CLEARING_MAX_DEPTH=3: 4.00000000 left
+E   tests.p019_support.TargetMismatch: the tick never used the runner's planner pool
+E   tests.p019_support.TargetMismatch: the tick never handed a plan to the runner's planner pool
+E   tests.p019_support.TargetMismatch: the tick did not reach a second runner occurrence (0 calls)
+E   tests.p019_support.TargetMismatch: app/api/v1/clearing.py::auto_clear does not use run_awaited_clearing; app/api/v1/clearing.py::auto_clear calls ['auto_clear'] itself; app/api/v1/simulator.py::action_clearing_real does not use run_clearing_pass; app/api/v1/simulator.py::action_clearing_real calls ['execute_clearing_with_amount', 'find_cycles'] itself; app/core/simulator/real_clearing_engine.p
+E   tests.p019_support.TargetMismatch: executor calls outside their owners: {'app/api/v1/clearing.py': ['auto_clear'], 'app/api/v1/simulator.py': ['execute_clearing_with_amount', 'find_cycles'], 'app/core/simulator/real_clearing_engine.py': ['execute_clearing_with_amount', 'find_cycles']}; ClearingService.auto_clear present: True
+E   tests.p019_support.TargetMismatch: docker-compose.yml passes CLEARING_PERIODIC_ENABLED=None
+E   tests.p019_support.TargetMismatch: depth 4: expected the 100 largest of 101 triangles, amount DESC; got 34 cycles (34 unique), first difference at position 34
+E   tests.p019_support.TargetMismatch: depth 6: expected the 100 largest of 101 triangles, amount DESC; got 51 cycles (51 unique), first difference at position 34
+E   tests.p019_support.TargetMismatch: V_edge 480.00000000 against the oracle's 500; occurrences=2 remaining=[('p020bb', 'p020bl0', Decimal('10.00000000')), ('p020bl0', 'p020bl1', Decimal('10.00000000')), ('p020bl1', 'p020bl2', Decimal('10.00000000')), ('p020bl2', 'p020ba', Decimal('10.00000000'))]
+E   tests.p019_support.TargetMismatch: V_edge 390.00000000 against the oracle's 400; occurrences=2 remaining=[('p020bb', 'p020bl0', Decimal('10.00000000')), ('p020bl0', 'p020bl1', Decimal('10.00000000')), ('p020bl1', 'p020ba', Decimal('10.00000000'))]
+E   tests.p019_support.TargetMismatch: depth 4: equal-amount cycles must follow the full canonical identity; positions differing: [3, 4, 5]
+E   tests.p019_support.TargetMismatch: depth 6: equal-amount cycles must follow the full canonical identity; positions differing: [3, 4, 5]
+E   tests.p019_support.TargetMismatch: flow optimum: one occurrence of the 5-cycle at 100; got 2, remaining [('p020bb', 'p020bl0', Decimal('10.00000000')), ('p020bl0', 'p020bl1', Decimal('10.00000000')), ('p020bl1', 'p020bl2', Decimal('10.00000000')), ('p020bl2', 'p020ba', Decimal('10.00000000'))]
+E   tests.p019_support.TargetMismatch: flow optimum: one occurrence of the 4-cycle at 100; got 2, remaining [('p020bb', 'p020bl0', Decimal('10.00000000')), ('p020bl0', 'p020bl1', Decimal('10.00000000')), ('p020bl1', 'p020ba', Decimal('10.00000000'))]

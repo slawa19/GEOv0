@@ -221,3 +221,65 @@ async def remaining_debts(session, equivalent_code: str) -> list[tuple[str, str,
         )
     ).all()
     return sorted((str(i), d, c, Decimal(a)) for i, d, c, a in rows)
+
+
+# ------------------------------------------------------------------------------------------- slice (d)
+
+
+#: The fields of `ClearingAutoResponse` fixed by spec decision R3 (2026-09-28): every one present, nullable ones
+#: as an explicit `null`.
+AUTO_RESPONSE_FIELDS = frozenset(
+    {
+        "equivalent",
+        "cleared_cycles",
+        "status",
+        "reason",
+        "v_edge",
+        "v_cyc",
+        "remaining_cycles",
+        "remaining_v_edge",
+        "committed",
+        "error",
+    }
+)
+
+
+async def auto_clear_http(client, headers, code: str, query: str = ""):
+    """`POST /api/v1/clearing/auto` - the production entry of the manual pass. No depth: slice (d) removed it."""
+
+    return await client.post(f"/api/v1/clearing/auto?equivalent={code}{query}", headers=headers)
+
+
+def require_auto_progress(body) -> list:
+    """The `committed` list of an `/auto` answer, or `TargetMismatch` when the answer does not report progress."""
+
+    missing = sorted(AUTO_RESPONSE_FIELDS - set(body)) if isinstance(body, dict) else sorted(AUTO_RESPONSE_FIELDS)
+    require_target(not missing, f"/clearing/auto does not report committed progress: fields {missing} absent ({body!r})")
+    return body["committed"]
+
+
+async def fresh_read(session, fn, *args):
+    """Run `fn(session_of_the_same_database, *args)` on a NEW session: a snapshot after the request's commits."""
+
+    from tests.conftest import sessionmaker_of
+
+    async with sessionmaker_of(session)() as fresh:
+        try:
+            return await fn(fresh, *args)
+        finally:
+            await fresh.rollback()
+
+
+def slow_plan(delay_seconds: float, edges):
+    """Planner-process entry for the cold-spawn acceptance (spec (d), P2-2): sleep, then the real planner.
+
+    Module-level so the `spawn` worker can import it by name; the planner itself is the unchanged
+    `flow_planner.plan_clearing`.
+    """
+
+    import time
+
+    from app.core.clearing.flow_planner import plan_clearing
+
+    time.sleep(delay_seconds)
+    return plan_clearing(edges)
