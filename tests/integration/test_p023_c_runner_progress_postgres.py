@@ -347,7 +347,7 @@ async def test_the_callers_budget_is_checked_between_occurrences(db_session) -> 
         now["t"] = 200.0
 
     result = await api.run_clearing_pass(
-        factory, CODE, on_committed=spend_the_budget, deadline=100.0, clock=lambda: now["t"]
+        factory, CODE, on_committed=spend_the_budget, deadline=100.0, deadline_clock=lambda: now["t"]
     )
     assert result.status == "interrupted" and result.reason == "budget_exhausted", result
     assert len(handed) == 1 and result.remaining_cycles == 1

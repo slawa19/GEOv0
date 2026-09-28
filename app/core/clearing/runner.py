@@ -19,7 +19,7 @@ ONE PASS (`run_clearing_pass`), for one equivalent:
    order, `c` in atoms) through `ClearingService.execute_occurrence` - the 019 boundary unchanged (exclusive equivalent
    lock, retry owner, stop/hold `FOR SHARE`, authoritative consent and perimeter, commit resolver,
    `ClearingCommittedAfterCancellation`). Before EVERY cycle start: the lease (`lease.lost`) and the caller's budget
-   (`deadline` on `clock`); after a loss or past the budget no new cycle starts, and the occurrence in flight is always
+   (`deadline` on `deadline_clock`); after a loss or past the budget no new cycle starts, and the occurrence in flight is always
    finished by the boundary, never abandoned.
 4. HANDOFF (decision 10): every durable occurrence is appended to the pass and given to `on_committed` IMMEDIATELY after
    its commit - with no `await` in between, so no later error or cancellation can overtake it - including one committed
@@ -270,10 +270,10 @@ async def _plan_off_the_loop(edges, executor: Optional[Executor], state: _PassSt
         raise
 
 
-def _stop_reason(lease: Optional[RenewableLease], deadline: Optional[float], now: Callable[[], float]):
+def _stop_reason(lease: Optional[RenewableLease], deadline: Optional[float], deadline_clock: Callable[[], float]):
     if lease is not None and lease.lost:
         return InterruptReason.LEASE_LOST
-    if deadline is not None and now() >= deadline:
+    if deadline is not None and deadline_clock() >= deadline:
         return InterruptReason.BUDGET_EXHAUSTED
     return None
 
@@ -309,7 +309,7 @@ async def run_clearing_pass(
     on_committed: Optional[Callable[[CommittedOccurrence], None]] = None,
     lease: Optional[RenewableLease] = None,
     deadline: Optional[float] = None,
-    clock: Optional[Callable[[], float]] = None,
+    deadline_clock: Optional[Callable[[], float]] = None,
     max_replans: int = DEFAULT_MAX_REPLANS,
     replan_pause_seconds: float = DEFAULT_REPLAN_PAUSE_SECONDS,
     executor: Optional[Executor] = None,
@@ -318,10 +318,10 @@ async def run_clearing_pass(
     """One pass for one equivalent (module docstring). `session_factory` gives engine-bound `AsyncSession`s.
 
     `on_committed` is SYNCHRONOUS on purpose: it runs between the commit and the next `await`, so nothing can
-    interrupt a handoff half-done. `deadline` is on `clock` (default: the event loop's clock).
+    interrupt a handoff half-done. `deadline` is on `deadline_clock` (default: the event loop's clock).
     """
 
-    now = clock or asyncio.get_running_loop().time
+    now = deadline_clock or asyncio.get_running_loop().time
     state = _PassState(equivalent_code, distributed_exclusive=lease is not None and lease.distributed)
     replans = 0
     try:
