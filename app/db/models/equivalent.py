@@ -24,15 +24,15 @@ class Equivalent(Base):
     # keeps it visible. Never exposed on a read response.
     #
     # ON DELETE RESTRICT (step 5c review, 2026-09-14): the evidence row of a hold cannot be deleted while
-    # the hold points at it, on either dialect. A delete of it - accidental or maintenance - would
+    # the hold points at it. A delete of it - accidental or maintenance - would
     # otherwise release containment with no later PASSED, no reason and no audit. The only ways a hold
     # ends are the admin clear and deleting the equivalent row itself (whose CASCADE removes its results
-    # and is accepted by both dialects, measured). Tests do not delete result rows in teardown: since
+    # and is accepted, measured). Tests do not delete result rows in teardown: since
     # 018 stage B they dispose of their data by dropping a cloned database; a test that must remove a
     # hold's evidence nulls the hold first (`tests/integration/test_p015_step5c_hold_races_postgres.py`).
     # `use_alter`: the result table already references `equivalents`, so the pair is a cycle; it orders
-    # PostgreSQL's `create_all`/`drop_all`, but NOT SQLite's `drop_all` over rows, which still fails with
-    # `FOREIGN KEY constraint failed` (measured; `PRAGMA defer_foreign_keys` does not help a RESTRICT).
+    # PostgreSQL's `create_all`/`drop_all`. (HISTORY, until 017: it did NOT order SQLite's `drop_all` over
+    # rows, which failed with `FOREIGN KEY constraint failed`; `PRAGMA defer_foreign_keys` did not help.)
     integrity_hold_result_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey(

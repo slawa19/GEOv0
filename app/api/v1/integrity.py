@@ -78,7 +78,7 @@ async def get_integrity_status(
         last_verified = checkpoint.created_at if checkpoint else None
 
         # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
-        # `check_zero_sum` telescopes to zero for any set of `Debt` rows, so it could not fail on
+        # `check_zero_sum` (removed, 024 `T2411`) telescoped to zero for any `Debt` rows, so could not fail on
         # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
         # response keeps naming every protocol invariant, and `unverified` below keeps the gap
         # visible in the summary rather than implied by a missing key.
@@ -182,7 +182,7 @@ async def verify_integrity(
         invariants: dict[str, InvariantOutcome] = {}
 
         # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
-        # `check_zero_sum` telescopes to zero for any set of `Debt` rows, so it could not fail on
+        # `check_zero_sum` (removed, 024 `T2411`) telescoped to zero for any `Debt` rows, so could not fail on
         # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
         # response keeps naming every protocol invariant, and `unverified` below keeps the gap
         # visible in the summary rather than implied by a missing key.

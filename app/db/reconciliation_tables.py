@@ -136,7 +136,7 @@ debt_reconciliation_baseline_offsets = Table(
 #: every distinct FAILED, UNVERIFIABLE and later PASSED is kept, and growth is bounded by state changes.
 #:
 #: `is_latest` MARKS the row a repeat is compared against, and at most one row per equivalent may carry
-#: it (partial unique index, both dialects). It exists so that "the latest row" is a stored fact rather
+#: it (partial unique index). It exists so that "the latest row" is a stored fact rather
 #: than an order of timestamps - a clock step would otherwise make an older row look newest.
 debt_reconciliation_results = Table(
     "debt_reconciliation_results",

@@ -83,9 +83,11 @@ from app.db.models.transaction import Transaction
 from app.utils.exceptions import RetryablePaymentConflictException
 
 #: PostgreSQL reports these for a transaction IT has already rolled back, which is what makes the
-#: attempt known not to have landed. 40001 serialization_failure, 40P01 deadlock_detected - the
-#: same pair `PaymentEngine._is_retryable_db_error` and the inject loop already use. Kept as one
-#: frozenset so the three retry sites cannot drift apart silently.
+#: attempt known not to have landed. 40001 serialization_failure, 40P01 deadlock_detected. The
+#: payment retry owner (`app/core/payments/service.py`) and the inject loop
+#: (`real_runner_impl.py`, which adds `55P03`) declare their own sets; nothing keeps them in step
+#: yet - one extractor with per-owner retry policies is 024 `T2415.1`. (Until 019 this named
+#: `PaymentEngine._is_retryable_db_error`, which is gone.)
 _TRANSIENT_SQLSTATES = frozenset({"40001", "40P01"})
 
 

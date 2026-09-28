@@ -40,7 +40,7 @@ thing before the wire, for the writers that never passed a door.
 
 WHAT IT REFUSES WIDENED ON 2026-09-24 (018 / FORK-1, slice B0a). Until then `MoneyNumeric` refused
 only non-finite values, and the scale-8 and magnitude refusal before debt SQL lived in exactly one
-place: the debt journal's listener (`journal.py::_check_storable`), which stage B of 018 removes.
+place: the debt journal's listener (`journal.py::_check_storable`), which stage B of 018 removed.
 PostgreSQL cannot take that refusal over - a `NUMERIC(20, 8)` column coerces `0.123456789` to
 `0.12345679` before any CHECK or trigger sees it. So the bind now applies THE storability predicate
 (`app/utils/validation.py::money_storability_violation`) with the column's own declared capacity:

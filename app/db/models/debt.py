@@ -28,9 +28,9 @@ class Debt(Base):
     # obligation disappear. Migration 020 makes the same change on existing databases.
     equivalent_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('equivalents.id', ondelete='RESTRICT'), nullable=False, index=True)
     # `MoneyNumeric`, not `Numeric` - T1526. The DDL is unchanged (`NUMERIC(20, 8)`); what the
-    # type adds is a refusal to BIND a non-finite value. It is the only guard that can refuse a
-    # `NaN` on SQLite, where the driver turns one into `NULL` and `NOT NULL` - a constraint about a
-    # different rule - is what fires today. The database-level half is the CHECK below.
+    # type adds is a refusal to BIND a non-finite value, before the statement is sent. HISTORY
+    # (SQLite left with programme 017): on SQLite it was the only guard that could refuse a `NaN`,
+    # which the driver turned into `NULL`. The database-level half is the CHECK below.
     amount: Mapped[Decimal] = mapped_column(MoneyNumeric(20, 8), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -47,11 +47,11 @@ class Debt(Base):
         # T1526. THREE CLAUSES, THREE JOBS, and none of them may be dropped as a simplification:
         #   `amount > 0`                        SIGN - a debt of zero is not a debt.
         #   `amount <= 999999999999.99999999`   MAGNITUDE - the column's own maximum. Refuses
-        #                                       nothing NUMERIC(20, 8) accepts on PostgreSQL; on
-        #                                       SQLite, where the type is not enforced, it is the
-        #                                       only magnitude bound and it is what refuses a
-        #                                       positive Infinity (measured - `> 0` alone stores
-        #                                       one as REAL inf there).
+        #                                       nothing NUMERIC(20, 8) accepts on PostgreSQL. HISTORY:
+        #                                       on SQLite (until 017), where the type is not
+        #                                       enforced, it was the only magnitude bound and what
+        #                                       refused a positive Infinity (measured - `> 0` alone
+        #                                       stored one as REAL inf there).
         #   `amount <> 'NaN'`                   NOT A NUMBER, stated explicitly. The magnitude
         #                                       bound already rejects NaN on PostgreSQL, but only
         #                                       as a side effect of being an upper bound, and a

@@ -18,9 +18,9 @@ class InvariantResult(BaseModel):
 class InvariantWithdrawn(BaseModel):
     """An invariant that is NOT evaluated, said so that no reader can mistake it for a verdict.
 
-    T1402 of programme 014. `check_zero_sum` sums the same `Debt` rows grouped by creditor and
-    grouped by debtor and returns the difference, so it telescopes to zero for any row set: it
-    cannot fail on data corruption, and publishing `passed: true` for it was a claim the code
+    T1402 of programme 014. `check_zero_sum` (removed by 024 `T2411`) summed the same `Debt` rows
+    grouped by creditor and grouped by debtor and returned the difference, so it telescoped to zero
+    for any row set: it could not fail on data corruption, and publishing `passed: true` for it was a claim the code
     could not support. Measured on PostgreSQL 2026-09-11 - one debt inflated by one storage
     quantum, and a three-edge cycle inflated uniformly, both leave it PASSED.
 

@@ -18,10 +18,10 @@ They still live on `Base.metadata`, because mode A of the test fixtures builds i
 `Base.metadata.create_all` and a table outside the metadata would simply not exist there.
 
 MONEY COLUMNS ARE `MoneyNumeric`, NOT `Numeric` (T1526, measured 2026-09-12). The CHECK constraints
-below exclude `NaN` through the MAGNITUDE clause - `abs('NaN') <= 1e12` is false on PostgreSQL -
-and that reasoning does not reach SQLite at all: a bound `NaN` arrives there as SQL `NULL`, so it
-never meets the CHECK and would be refused, if at all, by a `NOT NULL` that names a different
-problem. `MoneyNumeric` refuses the bind on every dialect, before the statement is sent. See
+below exclude `NaN` through the MAGNITUDE clause - `abs('NaN') <= 1e12` is false on PostgreSQL.
+HISTORY (SQLite left with programme 017): that reasoning did not reach SQLite at all - a bound `NaN`
+arrived there as SQL `NULL`, never met the CHECK, and was refused, if at all, by a `NOT NULL` that
+names a different problem. `MoneyNumeric` refuses the bind before the statement is sent. See
 `app/db/types.py`.
 
 NO CHECKSUM CHAIN. `head_hash`, `prev_hash`, `hash` and `algorithm_version` are deliberately absent:
@@ -365,6 +365,7 @@ debt_operation_equivalents = Table(
     # A row that is neither is a row nobody can explain.
     CheckConstraint("effect_count > 0 OR in_intent", name="chk_debt_operation_equivalents_why"),
     # And an effect outside the declared scope is not something to record: it is something the
-    # flush hook must already have refused.
+    # book must already have refused (`Refusal.OUT_OF_SCOPE`, `app/core/ledger/book.py`; the ORM
+    # flush hook that refused it until 018 stage B is gone).
     CheckConstraint("in_scope OR effect_count = 0", name="chk_debt_operation_equivalents_scope"),
 )

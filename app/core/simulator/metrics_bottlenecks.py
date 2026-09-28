@@ -174,7 +174,7 @@ class MetricsBottlenecks:
             ("bottlenecks_score", "%"),
             # Network cardinalities. The writer persists them as plain counts
             # (`storage.write_tick_metrics`, fed by
-            # `real_tick_metrics.populate_per_eq_metric_values`: number of active
+            # `RealTick.populate_per_eq_metric_values` in `tick.py`: number of active
             # scenario participants and number of edges in the equivalent), so
             # the unit is "count", not "amount".
             ("active_participants", "count"),
@@ -269,7 +269,7 @@ class MetricsBottlenecks:
         edges_n = len(((run._edges_by_equivalent or {}).get(equivalent) or []))
 
         # Cardinalities are counted from the same sources the real-mode producer
-        # uses (`real_tick_metrics.populate_per_eq_metric_values`): the scenario
+        # uses (`RealTick.populate_per_eq_metric_values` in `tick.py`): the scenario
         # participant list and the runtime edge cache. They are counted, not
         # invented, even on this synthetic path.
         scenario_raw = getattr(run, "_scenario_raw", None) or scenario.raw or {}

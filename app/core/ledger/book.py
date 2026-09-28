@@ -113,11 +113,11 @@ logger = logging.getLogger(__name__)
 
 #: The unique constraints that spell an operation envelope's IDENTITY - the declaration "this
 #: operation has already been opened", and nothing else about it (T1529). Written out rather than
-#: read off `debt_operations.constraints`, because a retry predicate that widens itself whenever
-#: somebody adds a unique constraint to that table is a policy change nobody decided;
+#: read off `debt_operations.constraints`;
 #: `tests/unit/test_p015_t1529_the_envelope_identity_is_a_retryable_race.py` reddens if the set and
-#: the schema ever disagree. Moved here from `app/core/payments/engine.py` by 018 stage A: the
-#: envelope is the book's.
+#: the schema ever disagree. Moved here from `app/core/payments/engine.py` by 018 stage A. The retry
+#: predicate it fed lived in that engine and left with it (019): no production code reads the set
+#: today, only that test.
 DEBT_OPERATION_IDENTITY_CONSTRAINTS = frozenset(
     {"uq_debt_operations_kind_identity", "uq_debt_operations_tx_id"}
 )

@@ -165,7 +165,7 @@ async def _drain_payment_cleanup(
             if caller_cancellation is None:
                 caller_cancellation = exc
             # Repeated caller cancellation must not interrupt the session-owned
-            # terminalization sequence and leave a durable NEW/PREPARED row.
+            # terminalization sequence and leave it half-done.
         except Exception:
             # The task is terminal; classify its exact result below.
             pass
@@ -1271,8 +1271,8 @@ class PaymentService:
         # and AFTER the idempotency decision, so a replay of an already-accepted tx_id still answers
         # with its stored result. It is not the binding check - that one is at commit, under the
         # shared equivalent lock and `FOR SHARE` (`MoneyBoundary.refuse_inactive_equivalents`) - and it
-        # deliberately does not lock: forbidding a new PREPARED state after the PATCH returns would
-        # be a stronger rule than this task's.
+        # deliberately does not lock: forbidding an admitted payment to proceed after the PATCH returns
+        # would be a stronger rule than this task's.
         if not equivalent.is_active:
             try:
                 from app.utils.metrics import PAYMENT_EVENTS_TOTAL

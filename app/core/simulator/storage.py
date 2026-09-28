@@ -405,9 +405,9 @@ async def write_tick_metrics(
                 # passed `commit=False`, kept ownership of the transaction and
                 # never asked us to end it - so rolling it back was deciding for
                 # them. Here `commit=True` means the caller delegated the commit
-                # to us (`real_tick_persistence.py` opens a session, hands it
-                # over without `commit=`, and then reuses it for
-                # `write_tick_bottlenecks`). Failing the delegated commit and
+                # to us (`RealTick.flush_pending_storage` in `tick.py` opens a
+                # session, hands it over without `commit=`, and then reuses it
+                # for `write_tick_bottlenecks`). Failing the delegated commit and
                 # leaving the session in pending-rollback would make the caller's
                 # *next* statement die of `PendingRollbackError`, an error with
                 # no connection to the real cause. Returning the session to a
@@ -520,7 +520,7 @@ async def write_tick_bottlenecks(
         else:
             # 2026-08-21 / p009_t902: the session belongs to the CALLER - the real-mode
             # tick passes its own session with commit=False
-            # (`real_tick_persistence.py:122-133`).  The previous code called
+            # (`RealTick.persist_tick_tail` in `tick.py`).  The previous code called
             # `await session.rollback()` here, which discarded everything the tick had
             # staged; the outer `except` then swallowed the failure, and the owner went on
             # to commit and fire `on_commit`, reporting success for work that no longer

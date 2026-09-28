@@ -78,10 +78,11 @@ async def compute_integrity_checkpoint_for_equivalent(
 
     # zero-sum: WITHDRAWN by T1402 of programme 014, not evaluated.
     #
-    # `check_zero_sum` sums the same `Debt` rows twice - grouped by creditor and grouped by
-    # debtor - and returns the difference, so it telescopes to zero for any row set. It cannot
-    # fail on data corruption, and the `passed: True` written here was a claim about integrity
-    # that the call could not support. It is no longer called, and no longer contributes to
+    # `check_zero_sum` (removed 2026-09-28, 024 `T2411`) summed the same `Debt` rows twice -
+    # grouped by creditor and grouped by debtor - and returned the difference, so it telescoped
+    # to zero for any row set. It could not fail on data corruption, and the `passed: True`
+    # written here was a claim about integrity that the call could not support. It is not
+    # evaluated, and does not contribute to
     # `overall_status`, to `alerts` or to `passed`: an unverified check must not be able to make
     # the summary healthier, and must not be able to make it worse either.
     #

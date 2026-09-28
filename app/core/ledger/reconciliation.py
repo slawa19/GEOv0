@@ -10,10 +10,11 @@ or a baseline offset:
 
     current debt(edge) - sum of every recorded journal delta(edge) == baseline offset(edge)
 
-plus, per journal row, `amount_after - amount_before == delta`. On PostgreSQL the row arithmetic is
-already a CHECK constraint (`chk_debt_journal_entries_delta_arithmetic`, migration 024); on SQLite it is
-not, because SQLite binds `Numeric` through float. The row check is done here on both dialects because
-one code path is cheaper to keep right than two; on PostgreSQL it can only fire if the constraint is gone.
+plus, per journal row, `amount_after - amount_before == delta`. The row arithmetic is already a CHECK
+constraint (`chk_debt_journal_entries_delta_arithmetic`, migration 024), so the check here can only fire
+if the constraint is gone - which is a change around the application, the thing criterion (a) exists
+to detect. (HISTORY: it was written for SQLite, which bound `Numeric` through float and had no such
+CHECK; SQLite left with programme 017.)
 
 CRITERION (b), per operation that touched or named the equivalent, from what the ENVELOPE recorded:
 
@@ -49,8 +50,9 @@ and for every examined kind: the envelope's version is one a rule above reads. T
 is NOT recomputed: every ledger-relevant change of an intent is refuted by its kind's rule. Findings of (b) are immutable journal and intent facts, so they are stable fault
 identities; they enter the same outcome and the same fingerprint as (a).
 
-ALL ARITHMETIC IS IN INTEGER ATOMS (1e-8) IN PYTHON, never an SQL `SUM`: on SQLite an aggregate over a
-`NUMERIC` column is a float sum, and a float sum is not money evidence.
+ALL ARITHMETIC IS IN INTEGER ATOMS (1e-8) IN PYTHON, never an SQL `SUM`: one exact rule in one place,
+whatever the database does with an aggregate (on SQLite, until 017, an aggregate over a `NUMERIC` column
+was a float sum, and a float sum is not money evidence).
 
 THE THREAT MODEL IS NARROW, AND THE WHOLE OF IT IS STATED. `docs/ru/02-protocol-spec.md` §11.2.1 names
 the comparison of `debts` with the history that produced them as the real detector, and §11.6 asks for
