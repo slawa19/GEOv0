@@ -42,6 +42,7 @@ from app.core.simulator.real_runner import RealRunner
 from app.core.simulator.runtime_utils import safe_int_env
 from app.db.models.transaction import Transaction
 from tests.p020_support import debt_uuid, participant_uuid, ring, seed_graph
+from tests.p021_support import target_xfail_021
 from tests.p023_support import positive_debt_total, require_target, slow_plan
 from tests.simulator_tick_stand import RecordingSse, install_tick_stand, pooled_sessionmaker_over
 
@@ -292,3 +293,47 @@ async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monke
     assert done["cleared_cycles"] == 1 and Decimal(done["cleared_amount"]) == (Decimal("15") - left) / 3
     messages = [r.getMessage() for r in caplog.records]
     assert any("clearing_pass_cancelled" in m and "committed=1" in m for m in messages), messages[-20:]
+
+
+# ------------------------------------------------------------ the committed volume survives the hard timeout
+
+
+@target_xfail_021(
+    "T2105 (stage 4)",
+    "the tick's clearing volume is taken from the successful return, so a timeout after a commit reports zero",
+)
+@pytest.mark.asyncio
+async def test_a_timeout_after_a_commit_reports_the_committed_volume(factory, monkeypatch) -> None:
+    """Programme 021 stage 4, `specs/BACKLOG.md` ("Класс 2 из §15-ревью среза (d) программы 023", item 1).
+
+    One occurrence commits, the next is held past the tick's hard timeout. The first is durable - in the database
+    and in `clearing.done` - so the volume the tick reports for this equivalent (what feeds the `clearing_volume`
+    metric) must be that occurrence's `V_cyc`, not zero. On `2df5703` the coordinator initialises the volume to
+    zero and assigns the real one only when the clearing task RETURNS; the timeout cancels the task, and the
+    committed volume is lost to the metric while SSE and the database keep it.
+    """
+
+    stand = await _stand(factory, T1 + T2)
+    hard_timeout = stand.runner._real_tick_clearing_coordinator.compute_static_clearing_hard_timeout_sec(safe_int_env=safe_int_env)
+
+    async def before(n: int) -> None:
+        if n == 2:
+            await asyncio.sleep(hard_timeout + 5.0)
+
+    calls = _spy_execute(monkeypatch, before)
+    volumes = await stand.tick()
+
+    # Controls: the stand reached the second occurrence, the first is durable and published.
+    assert len(calls) == 2, f"the tick did not reach a second runner occurrence ({len(calls)} calls)"
+    assert await stand.clearings() == 1, "the first occurrence is durable"
+    left = await stand.total()
+    committed_v_cyc = (Decimal("15") - left) / 3
+    assert committed_v_cyc in (Decimal("2"), Decimal("3")), left
+    [done] = stand.done_events()
+    assert Decimal(done["cleared_amount"]) == committed_v_cyc
+    assert set(volumes) == {CODE} and isinstance(volumes[CODE], Decimal)
+
+    require_target(
+        volumes[CODE] == committed_v_cyc,
+        f"the tick reports clearing volume {volumes[CODE]} for {CODE}; committed and published: {committed_v_cyc}",
+    )
