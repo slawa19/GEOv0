@@ -461,7 +461,6 @@ async def _fail_skip_clean(stand: _Stand, first_failure: str) -> None:
     )
 
 
-@target_xfail_024("T2412.1 fix-delta (§15 P2-1)", "a locked skip keeps the reconciliation failure")
 @pytest.mark.asyncio
 async def test_p2_1_a_locked_skip_keeps_a_reconciliation_failure(monkeypatch) -> None:
     """Reconciliation error -> skipped run -> still `failed`/degraded; only the clean run recovers.
@@ -474,7 +473,6 @@ async def test_p2_1_a_locked_skip_keeps_a_reconciliation_failure(monkeypatch) ->
     await _fail_skip_clean(stand, "periodic_debt_reconciliation_error")
 
 
-@target_xfail_024("T2412.1 fix-delta (§15 P2-1)", "a locked skip keeps the checkpoint failure")
 @pytest.mark.asyncio
 async def test_p2_1_a_locked_skip_keeps_a_checkpoint_failure(monkeypatch) -> None:
     """The checkpoint half of the same job has the same overwrite (pre-existing): same line, same fix."""

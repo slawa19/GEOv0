@@ -237,6 +237,10 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             reconciled = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
     except ConflictException:
         _emit_integrity_metric(f"{reason}_skipped_locked")
+        # A skipped run proves nothing: a recorded failure (checkpoints or reconciliation) is kept, with its
+        # event, until a run of this job completes cleanly (024 `T2412.1`, §15 fix-delta P2-1).
+        if _background_job_states(app).get("integrity", {}).get("status") == "failed":
+            return True
         _record_background_job_event(
             app,
             name="integrity",
