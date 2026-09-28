@@ -308,3 +308,52 @@ async def test_an_internal_geo_error_before_any_commit_is_the_sanitised_envelope
     assert response.json()["error"]["message"] == "Internal server error"
     assert "raw clearing secret" not in response.text
     assert await fresh_read(db_session, _clearings) == 0
+
+
+# ----------------------------------------------------------------------------- ordinary interruptions, lease
+
+
+@pytest.mark.asyncio
+async def test_a_pass_that_keeps_meeting_a_stale_plan_answers_interrupted_replan_limit(db_session, client, auth_headers, monkeypatch) -> None:
+    """R3: an ordinary interruption is `200 interrupted` with its reason, never a success and never an error.
+
+    Every occurrence is skipped as the boundary skips a stale one (`None`), so the runner re-plans up to its bound.
+    """
+
+    await _seed(db_session)
+
+    async def skip(self, occurrence, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ClearingService, "execute_occurrence", skip)
+    response = await auto_clear_http(client, auth_headers, CODE)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "interrupted" and body["reason"] == "replan_limit", body
+    assert body["cleared_cycles"] == 0 and body["committed"] == [] and body["error"] is None
+    assert Decimal(body["v_edge"]) == 0 and body["remaining_cycles"] == 2
+    assert await fresh_read(db_session, positive_debt_total, CODE) == TOTAL
+
+
+@pytest.mark.asyncio
+async def test_a_lease_held_by_another_pass_is_409_and_nothing_runs(db_session, client, auth_headers, monkeypatch) -> None:
+    """The equivalent's clearing lease held by another owner (Redis configured): 409/E008 after the wait, no pass."""
+
+    from app.api import deps
+    from app.main import app
+    from tests.unit.test_p023_c_renewable_lease import _Clock, _FakeRedis
+
+    await _seed(db_session)
+    redis = _FakeRedis(_Clock())
+    redis.steal(f"dlock:clearing:{CODE}")
+    app.dependency_overrides[deps.get_redis_client] = lambda: redis
+    calls = _spy_execute(monkeypatch, lambda n: asyncio.sleep(0))
+    try:
+        response = await auto_clear_http(client, auth_headers, CODE)
+    finally:
+        app.dependency_overrides.pop(deps.get_redis_client, None)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "E008"
+    assert calls == [] and await fresh_read(db_session, positive_debt_total, CODE) == TOTAL
