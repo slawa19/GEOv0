@@ -173,7 +173,7 @@ MVP-контракт событий **точно равен** union `SimulatorEv
 
 - `active_participants` — число участников сценария со статусом `active` на момент бакета.
   - Единицы: `count`.
-  - Считается по in-memory сценарию (`real_tick_metrics.populate_per_eq_metric_values`);
+  - Считается по in-memory сценарию (`RealTick.populate_per_eq_metric_values`, `app/core/simulator/tick.py`);
     значение одинаково для всех эквивалентов одного прогона.
 
 - `active_trustlines` — число рёбер (trustlines) в выбранном эквиваленте на момент бакета.

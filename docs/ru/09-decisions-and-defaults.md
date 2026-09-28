@@ -233,7 +233,7 @@ ordering contract и ошибочно отбрасывал бы данные п�
 | **L3: Invariant** | In-transaction Check | Внутри транзакции платежа (до 2026-09-25 — `PaymentEngine.commit`; с 019, стадии 4 — денежная фаза `PaymentService._apply_payment`, внутри savepoint'а операции) проверяется дельта балансов до и после операций. При несовпадении (из-за триггеров или side-effects) транзакция откатывается (`IntegrityViolation`). |
 
 Управление фоновыми задачами клиринга:
-- `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator`.
+- `asyncio.shield` запрещён для длинных операций в `RealTickOrchestrator` (с 2026-09-28, 021 стадия 4 — `RealTick`, `app/core/simulator/tick.py`).
 - Задачи клиринга, не уложившиеся в time budget, отменяются (`task.cancel()`) и ожидаются, чтобы гарантировать освобождение ресурсов БД до начала следующей фазы платежей.
 
 **Решение 2026-08-11 для payment serialization:** lock identity денежного сегмента —

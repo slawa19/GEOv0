@@ -70,7 +70,7 @@
 - `tests/unit/test_simulator_tx_failed_event_schema.py`
 - `tests/unit/test_simulator_rejection_codes.py`
 - `tests/unit/test_simulator_fixtures_clearing_plan_done_pair.py`
-- `tests/unit/test_real_tick_clearing_coordinator_static.py` — static clearing coordinator: payment effects after the commit, cleared volume stays Decimal on every return
+- `tests/unit/test_tick_static_clearing.py` — static clearing of the tick (`tick.py`): payment effects after the commit, cleared volume stays Decimal on every return
 
 ### 3.2 Contract (контракты схем/типов)
 Цель: ловить дрейф контрактов без запуска сервисов.
