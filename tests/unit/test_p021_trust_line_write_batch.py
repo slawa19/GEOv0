@@ -74,10 +74,9 @@ async def test_one_checkpoint_pair_per_touched_equivalent_per_batch(db_session, 
     rows = await trust_line_audit_rows(db_session, equivalent_codes=[e1, e2])
     assert sorted(r.operation_type for r in rows) == ["TRUST_LINE_CLOSE", "TRUST_LINE_UPDATE", "TRUST_LINE_UPDATE"]
     assert all(is_transaction_scoped(r) for r in rows)
-    pairs = {code: {(r.state_checksum_before, r.state_checksum_after) for r in rows if r.equivalent_code == code}
-             for code in (e1, e2)}
-    assert all(len(p) == 1 for p in pairs.values()), pairs
-    assert all(before != after for (before, after), in pairs.values()), pairs
+    # 024 `T2413.2`: no full-equivalent scan inside the caller's transaction; each row says no check ran.
+    assert {(r.verification_passed, r.state_checksum_before, r.state_checksum_after, r.error_details)
+            for r in rows} == {(None, "", "", None)}, rows
 
 
 @pytest.mark.asyncio
