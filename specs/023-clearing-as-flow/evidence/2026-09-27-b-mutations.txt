@@ -36,3 +36,14 @@ tests/integration/test_p023_b_occurrence_execution_postgres.py:179: Failed: DID 
 FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_r023_4b_control_a_changed_descriptor_for_the_same_occurrence_is_refused[amount]
 FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_r023_4b_control_a_changed_descriptor_for_the_same_occurrence_is_refused[debt_order]
 2 failed, 51 passed in 11.69s
+
+## m4_payload_join_excludes_v2 (on f174a2e; selector tests/integration/test_p023_b_occurrence_execution_postgres.py)
+# reconciliation._operations: the transactions.payload join admits intent version 1 instead of 2
+# Unmutated control on this selector: 18 passed.
+tests/integration/test_p023_b_occurrence_execution_postgres.py:138: AssertionError: ReconciliationOutcome(equivalent_id=UUID('8ff6eb2d-66fb-445b-831a-4ba07724f2bd'), findings=({'kind': 'b_intent_malform...d=3, entries_read=9, criterion_b_coverage=(('full_recomputation', 'CLEARING', 2), ('not_examine
+tests/integration/test_p023_b_occurrence_execution_postgres.py:196: AssertionError: assert 'FAILED' == 'PASSED'
+tests/integration/test_p023_b_occurrence_execution_postgres.py:238: AssertionError: ({'kind': 'b_intent_malformed', 'operation_id': '6cca7b51-bf2a-49cc-abc8-c23bd271bf49', 'operation_kind': 'CLEARING', ...'debtor_id': 'f519b3f2-5a6b-4123-8e18-b1a171ffd8fc', 'expected_delta': '-2.00000000', 'kind': '
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_r023_4b_two_plans_commit_two_equal_partials_on_the_same_surviving_debts
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_v2_an_exact_occurrence_deletes_at_zero_and_is_recomputed_passed
+FAILED tests/integration/test_p023_b_occurrence_execution_postgres.py::test_v2_a_coordinated_under_clear_of_a_v2_occurrence_is_failed_by_b
+3 failed, 15 passed in 12.27s
