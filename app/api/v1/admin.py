@@ -69,6 +69,7 @@ from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.money_boundary import MoneyBoundary
+from app.core.ledger.reconciliation import take_baseline
 from sqlalchemy.exc import IntegrityError
 from app.utils.exceptions import (
     BadRequestException,
@@ -1145,6 +1146,11 @@ async def admin_create_equivalent(
     db.add(eq)
     try:
         await db.flush()
+        # 024 `T2412.2`: the reconciliation baseline, in the creating transaction. A new equivalent has no
+        # debt and no journal entry, so the baseline adopts nothing (zero offsets) and every later change is
+        # checkable; without it criterion (a) stayed UNVERIFIABLE for good. Existing equivalents without a
+        # baseline are NOT backfilled here - that is an operator's decision (spec 024, T2412).
+        await take_baseline(db, eq.id)
         await db.refresh(eq)
         result = EquivalentSchema.model_validate(eq)
         _add_audit_entry(

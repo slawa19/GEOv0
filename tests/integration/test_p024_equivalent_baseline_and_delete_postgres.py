@@ -89,7 +89,6 @@ async def _scheduled_integrity_run(monkeypatch, factory) -> None:
     await main_module._run_integrity_checkpoints_once(app, reason="periodic")
 
 
-@target_xfail_024("T2412.2", "the created equivalent carries a baseline and reconciles PASSED")
 @MODE_B
 @pytest.mark.asyncio
 async def test_t2412_2_a_created_equivalent_has_a_baseline_and_is_verifiable(client, db_session) -> None:
