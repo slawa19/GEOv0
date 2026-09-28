@@ -1,0 +1,4109 @@
+{
+ "tests/integration/test_p017_t1711_seed_recipe_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 96.837,
+  "share_of_tier_time": 0.06548,
+  "app_lines": 2378,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_responses_conform_to_the_canon.py": {
+  "tests": 40,
+  "outcomes": {
+   "passed": 40
+  },
+  "duration_s": 63.98,
+  "share_of_tier_time": 0.04326,
+  "app_lines": 973,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 33,
+  "twin_group": null
+ },
+ "tests/unit/test_run_full_stack_database_url_redaction.py": {
+  "tests": 216,
+  "outcomes": {
+   "passed": 216
+  },
+  "duration_s": 62.89,
+  "share_of_tier_time": 0.04253,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 216,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_step5b_criterion_b.py": {
+  "tests": 23,
+  "outcomes": {
+   "passed": 23
+  },
+  "duration_s": 49.224,
+  "share_of_tier_time": 0.03328,
+  "app_lines": 2723,
+  "unique_app_lines": 10,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_step5b_criterion_b"
+ },
+ "tests/unit/test_p015_inject_transaction_ownership.py": {
+  "tests": 24,
+  "outcomes": {
+   "passed": 24
+  },
+  "duration_s": 42.905,
+  "share_of_tier_time": 0.02901,
+  "app_lines": 1367,
+  "unique_app_lines": 67,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_interact_actions_backend_p1.py": {
+  "tests": 33,
+  "outcomes": {
+   "passed": 33
+  },
+  "duration_s": 42.668,
+  "share_of_tier_time": 0.02885,
+  "app_lines": 2763,
+  "unique_app_lines": 422,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_step5a_reconciliation.py": {
+  "tests": 17,
+  "outcomes": {
+   "passed": 17
+  },
+  "duration_s": 35.53,
+  "share_of_tier_time": 0.02402,
+  "app_lines": 1593,
+  "unique_app_lines": 21,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_step5a_reconciliation"
+ },
+ "tests/unit/test_p015_step5c_reaction_and_hold.py": {
+  "tests": 15,
+  "outcomes": {
+   "passed": 15
+  },
+  "duration_s": 32.682,
+  "share_of_tier_time": 0.0221,
+  "app_lines": 2689,
+  "unique_app_lines": 14,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_clearing_additional_cases.py": {
+  "tests": 19,
+  "outcomes": {
+   "passed": 19
+  },
+  "duration_s": 27.835,
+  "share_of_tier_time": 0.01882,
+  "app_lines": 1201,
+  "unique_app_lines": 52,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payment_prepare_error_taxonomy.py": {
+  "tests": 34,
+  "outcomes": {
+   "passed": 34
+  },
+  "duration_s": 26.253,
+  "share_of_tier_time": 0.01775,
+  "app_lines": 1086,
+  "unique_app_lines": 26,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_step5b_criterion_b_postgres.py": {
+  "tests": 22,
+  "outcomes": {
+   "passed": 22
+  },
+  "duration_s": 25.334,
+  "share_of_tier_time": 0.01713,
+  "app_lines": 2279,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_step5b_criterion_b"
+ },
+ "tests/contract/test_openapi_contract.py": {
+  "tests": 24,
+  "outcomes": {
+   "passed": 24
+  },
+  "duration_s": 22.997,
+  "share_of_tier_time": 0.01555,
+  "app_lines": 276,
+  "unique_app_lines": 138,
+  "tests_with_zero_app_lines": 7,
+  "twin_group": null
+ },
+ "tests/unit/test_scenario_inject_topology.py": {
+  "tests": 17,
+  "outcomes": {
+   "passed": 17
+  },
+  "duration_s": 20.993,
+  "share_of_tier_time": 0.0142,
+  "app_lines": 1379,
+  "unique_app_lines": 41,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p1_clearing_run_perimeter.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 18.16,
+  "share_of_tier_time": 0.01228,
+  "app_lines": 1730,
+  "unique_app_lines": 28,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p1_clearing_run_perimeter"
+ },
+ "tests/unit/test_p015_t1548_a_replay_without_a_stored_fingerprint_is_refused.py": {
+  "tests": 13,
+  "outcomes": {
+   "passed": 13
+  },
+  "duration_s": 17.407,
+  "share_of_tier_time": 0.01177,
+  "app_lines": 1297,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p011_admin_money_is_a_decimal_string_on_the_wire.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 16.127,
+  "share_of_tier_time": 0.0109,
+  "app_lines": 751,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_p1_payment_run_perimeter.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 16.015,
+  "share_of_tier_time": 0.01083,
+  "app_lines": 1907,
+  "unique_app_lines": 48,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_step4_counterexamples_postgres.py": {
+  "tests": 53,
+  "outcomes": {
+   "passed": 53
+  },
+  "duration_s": 15.878,
+  "share_of_tier_time": 0.01074,
+  "app_lines": 244,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p017_t1702_mode_b_fixture_postgres.py": {
+  "tests": 10,
+  "outcomes": {
+   "passed": 10
+  },
+  "duration_s": 15.345,
+  "share_of_tier_time": 0.01038,
+  "app_lines": 1474,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 7,
+  "twin_group": null
+ },
+ "tests/unit/test_p019_lock_primitives_live_in_money_boundary.py": {
+  "tests": 35,
+  "outcomes": {
+   "passed": 35
+  },
+  "duration_s": 15.156,
+  "share_of_tier_time": 0.01025,
+  "app_lines": 19,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 34,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_b4_wrong_writer_is_recorded_faithfully.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 14.612,
+  "share_of_tier_time": 0.00988,
+  "app_lines": 1647,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_b4_wrong_writer_is_recorded_faithfully"
+ },
+ "tests/integration/test_p020_selection_retention_postgres.py": {
+  "tests": 17,
+  "outcomes": {
+   "passed": 17
+  },
+  "duration_s": 14.186,
+  "share_of_tier_time": 0.00959,
+  "app_lines": 1083,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p012_t1210_detector_union_default_tier.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 13.91,
+  "share_of_tier_time": 0.00941,
+  "app_lines": 1066,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p023_reproducers_postgres.py": {
+  "tests": 13,
+  "outcomes": {
+   "xfailed": 13
+  },
+  "duration_s": 13.858,
+  "share_of_tier_time": 0.00937,
+  "app_lines": 1038,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_b4_entries_and_money_postgres.py": {
+  "tests": 30,
+  "outcomes": {
+   "passed": 30
+  },
+  "duration_s": 13.594,
+  "share_of_tier_time": 0.00919,
+  "app_lines": 2578,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": "test_p015_b4_entries_and_money"
+ },
+ "tests/integration/test_p015_step5c_hold_races_postgres.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 12.93,
+  "share_of_tier_time": 0.00874,
+  "app_lines": 2217,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_money_form_and_detector_reach_postgres.py": {
+  "tests": 25,
+  "outcomes": {
+   "passed": 25
+  },
+  "duration_s": 12.5,
+  "share_of_tier_time": 0.00845,
+  "app_lines": 1077,
+  "unique_app_lines": 12,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/integration/test_p020_experimental_detectors_postgres.py": {
+  "tests": 26,
+  "outcomes": {
+   "passed": 26
+  },
+  "duration_s": 12.478,
+  "share_of_tier_time": 0.00844,
+  "app_lines": 771,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_reachable_statuses_are_declared.py": {
+  "tests": 11,
+  "outcomes": {
+   "passed": 11
+  },
+  "duration_s": 11.957,
+  "share_of_tier_time": 0.00809,
+  "app_lines": 113,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1543_frozen_line_is_not_limit_zero.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 11.398,
+  "share_of_tier_time": 0.00771,
+  "app_lines": 1137,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_invariants.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 11.311,
+  "share_of_tier_time": 0.00765,
+  "app_lines": 1553,
+  "unique_app_lines": 9,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 11.264,
+  "share_of_tier_time": 0.00762,
+  "app_lines": 1696,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_t1551_clearing_reduces_debt_on_a_frozen_line"
+ },
+ "tests/integration/test_p019_owner_before_row_races_postgres.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 10.973,
+  "share_of_tier_time": 0.00742,
+  "app_lines": 1944,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_abort_tx.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 10.661,
+  "share_of_tier_time": 0.00721,
+  "app_lines": 105,
+  "unique_app_lines": 31,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_scenarios.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 10.3,
+  "share_of_tier_time": 0.00696,
+  "app_lines": 2344,
+  "unique_app_lines": 31,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1207_one_money_form_across_producers.py": {
+  "tests": 78,
+  "outcomes": {
+   "passed": 78
+  },
+  "duration_s": 10.269,
+  "share_of_tier_time": 0.00694,
+  "app_lines": 1726,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p011_money_is_a_decimal_string_on_the_wire.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 10.265,
+  "share_of_tier_time": 0.00694,
+  "app_lines": 216,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1201_money_door_at_the_entrances.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 10.006,
+  "share_of_tier_time": 0.00677,
+  "app_lines": 1589,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1544_operator_stop_refuses_money.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 9.599,
+  "share_of_tier_time": 0.00649,
+  "app_lines": 2659,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_the_tier_refuses_a_database_that_is_not_postgres.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 9.242,
+  "share_of_tier_time": 0.00625,
+  "app_lines": 499,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 5,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_migration_030_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 9.239,
+  "share_of_tier_time": 0.00625,
+  "app_lines": 71,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_migration_029_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 9.146,
+  "share_of_tier_time": 0.00618,
+  "app_lines": 208,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 8.902,
+  "share_of_tier_time": 0.00602,
+  "app_lines": 1395,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_migration_031_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 8.805,
+  "share_of_tier_time": 0.00595,
+  "app_lines": 255,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_step5a_reconciliation_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 8.747,
+  "share_of_tier_time": 0.00591,
+  "app_lines": 1609,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_step5a_reconciliation"
+ },
+ "tests/integration/test_trustline_cache_invalidation.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 8.248,
+  "share_of_tier_time": 0.00558,
+  "app_lines": 442,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p020_unknown_commit_is_not_retried_when_the_resolver_fails_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 8.208,
+  "share_of_tier_time": 0.00555,
+  "app_lines": 871,
+  "unique_app_lines": 14,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p023_v3_acceptance_protocol.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 8.096,
+  "share_of_tier_time": 0.00547,
+  "app_lines": 228,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 9,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1514_simulator_must_not_requantise_stored_money.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 7.911,
+  "share_of_tier_time": 0.00535,
+  "app_lines": 1153,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p017_t1701_schema_provisioning_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 7.833,
+  "share_of_tier_time": 0.0053,
+  "app_lines": 61,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 5,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_whoami_and_extras.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 7.707,
+  "share_of_tier_time": 0.00521,
+  "app_lines": 333,
+  "unique_app_lines": 25,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 7.525,
+  "share_of_tier_time": 0.00509,
+  "app_lines": 820,
+  "unique_app_lines": 10,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_clearing_payment_prepare_interlock_postgres.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 7.263,
+  "share_of_tier_time": 0.00491,
+  "app_lines": 1703,
+  "unique_app_lines": 23,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1523_the_commit_landed_then_the_caller_failed.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 7.144,
+  "share_of_tier_time": 0.00483,
+  "app_lines": 1247,
+  "unique_app_lines": 6,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p018_only_book_writes_debts.py": {
+  "tests": 31,
+  "outcomes": {
+   "passed": 31
+  },
+  "duration_s": 7.116,
+  "share_of_tier_time": 0.00481,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 31,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_run_refuses_a_real_participant_postgres.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 7.024,
+  "share_of_tier_time": 0.00475,
+  "app_lines": 1612,
+  "unique_app_lines": 57,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_staged_refusal_is_durable_postgres.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 7.015,
+  "share_of_tier_time": 0.00474,
+  "app_lines": 3439,
+  "unique_app_lines": 94,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_clearing_commit_replay_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 6.881,
+  "share_of_tier_time": 0.00465,
+  "app_lines": 881,
+  "unique_app_lines": 23,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_integrity_checkpoints.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 6.59,
+  "share_of_tier_time": 0.00446,
+  "app_lines": 363,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py": {
+  "tests": 6,
+  "outcomes": {
+   "xfailed": 6
+  },
+  "duration_s": 6.563,
+  "share_of_tier_time": 0.00444,
+  "app_lines": 1081,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_money_writers_refuse_non_serializable_postgres.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 6.495,
+  "share_of_tier_time": 0.00439,
+  "app_lines": 1977,
+  "unique_app_lines": 11,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p013_t1302_graph_snapshot_include_completeness.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 6.484,
+  "share_of_tier_time": 0.00438,
+  "app_lines": 224,
+  "unique_app_lines": 16,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_backend_marker_policy.py": {
+  "tests": 214,
+  "outcomes": {
+   "passed": 214
+  },
+  "duration_s": 6.397,
+  "share_of_tier_time": 0.00433,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 214,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1202_money_modules_read_precision_postgres.py": {
+  "tests": 16,
+  "outcomes": {
+   "passed": 16
+  },
+  "duration_s": 6.151,
+  "share_of_tier_time": 0.00416,
+  "app_lines": 651,
+  "unique_app_lines": 9,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p014_t1406_no_mutable_database_in_the_working_tree.py": {
+  "tests": 10,
+  "outcomes": {
+   "passed": 10
+  },
+  "duration_s": 6.081,
+  "share_of_tier_time": 0.00411,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 10,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_metrics_migration_018_postgres.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 5.991,
+  "share_of_tier_time": 0.00405,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_equivalent_lock_modes_postgres.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 5.766,
+  "share_of_tier_time": 0.0039,
+  "app_lines": 1680,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1544_operator_stop_races_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 5.639,
+  "share_of_tier_time": 0.00381,
+  "app_lines": 3395,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_config_patch_atomicity.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 5.585,
+  "share_of_tier_time": 0.00378,
+  "app_lines": 205,
+  "unique_app_lines": 27,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_clearing_sql_cycle_detection.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 5.525,
+  "share_of_tier_time": 0.00374,
+  "app_lines": 531,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_staged_post_commit.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 5.503,
+  "share_of_tier_time": 0.00372,
+  "app_lines": 1199,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p023_flow_planner.py": {
+  "tests": 16,
+  "outcomes": {
+   "passed": 16
+  },
+  "duration_s": 5.466,
+  "share_of_tier_time": 0.0037,
+  "app_lines": 225,
+  "unique_app_lines": 11,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_no_second_dialect.py": {
+  "tests": 42,
+  "outcomes": {
+   "passed": 42
+  },
+  "duration_s": 5.305,
+  "share_of_tier_time": 0.00359,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 42,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 5.193,
+  "share_of_tier_time": 0.00351,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 5,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_nullable_needs_a_sibling_type.py": {
+  "tests": 25,
+  "outcomes": {
+   "passed": 25
+  },
+  "duration_s": 5.109,
+  "share_of_tier_time": 0.00345,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 25,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_success_responses_describe_their_content.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 5.106,
+  "share_of_tier_time": 0.00345,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 7,
+  "twin_group": null
+ },
+ "tests/integration/test_trustline_negative_constraints.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 4.956,
+  "share_of_tier_time": 0.00335,
+  "app_lines": 1496,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_admin_feature_flags_multipath.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 4.897,
+  "share_of_tier_time": 0.00331,
+  "app_lines": 1617,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_sse_trust_drift_decay_topology_patch.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 4.833,
+  "share_of_tier_time": 0.00327,
+  "app_lines": 3986,
+  "unique_app_lines": 18,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_simulator_sse_trust_drift_decay_topology_patch"
+ },
+ "tests/integration/test_p015_p1_money_replay_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 4.803,
+  "share_of_tier_time": 0.00325,
+  "app_lines": 2967,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/integration/test_payments_list_filters.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 4.766,
+  "share_of_tier_time": 0.00322,
+  "app_lines": 1500,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_sse_real_smoke.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 4.384,
+  "share_of_tier_time": 0.00296,
+  "app_lines": 3635,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 4.33,
+  "share_of_tier_time": 0.00293,
+  "app_lines": 3566,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1210_net_balance_agrees_with_its_atoms.py": {
+  "tests": 48,
+  "outcomes": {
+   "passed": 48
+  },
+  "duration_s": 4.324,
+  "share_of_tier_time": 0.00292,
+  "app_lines": 485,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1530_delta_arithmetic_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 4.275,
+  "share_of_tier_time": 0.00289,
+  "app_lines": 61,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_graph_snapshot.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 4.179,
+  "share_of_tier_time": 0.00283,
+  "app_lines": 485,
+  "unique_app_lines": 121,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_b4_entries_and_money.py": {
+  "tests": 10,
+  "outcomes": {
+   "passed": 10
+  },
+  "duration_s": 4.175,
+  "share_of_tier_time": 0.00282,
+  "app_lines": 223,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_b4_entries_and_money"
+ },
+ "tests/unit/test_admin_participant_metrics.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 4.16,
+  "share_of_tier_time": 0.00281,
+  "app_lines": 658,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_liquidity_summary.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 4.08,
+  "share_of_tier_time": 0.00276,
+  "app_lines": 409,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1524_equivalent_deletion_keeps_obligations.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.986,
+  "share_of_tier_time": 0.0027,
+  "app_lines": 316,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_t1524_equivalent_deletion_keeps_obligations"
+ },
+ "tests/integration/test_payments_idempotency.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.951,
+  "share_of_tier_time": 0.00267,
+  "app_lines": 1526,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_incidents_list.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.942,
+  "share_of_tier_time": 0.00267,
+  "app_lines": 51,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_real_snapshot_db_enrichment.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 3.934,
+  "share_of_tier_time": 0.00266,
+  "app_lines": 1814,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1523_replay_after_a_hold_or_an_abort.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 3.915,
+  "share_of_tier_time": 0.00265,
+  "app_lines": 1669,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_sse_tx_failed_timeout.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 3.903,
+  "share_of_tier_time": 0.00264,
+  "app_lines": 1989,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1522_payment_delta_drift_must_be_exact.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 3.898,
+  "share_of_tier_time": 0.00264,
+  "app_lines": 291,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_p020_experimental_detectors_are_not_imported_by_production.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.876,
+  "share_of_tier_time": 0.00262,
+  "app_lines": 499,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_refusal_classes_characterization_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 3.831,
+  "share_of_tier_time": 0.00259,
+  "app_lines": 3140,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p014_t1402_zero_sum_is_not_published_as_a_check.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 3.816,
+  "share_of_tier_time": 0.00258,
+  "app_lines": 647,
+  "unique_app_lines": 22,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_scenario_upload_validation.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 3.77,
+  "share_of_tier_time": 0.00255,
+  "app_lines": 144,
+  "unique_app_lines": 22,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1523_restart_after_commit_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 3.726,
+  "share_of_tier_time": 0.00252,
+  "app_lines": 333,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_rt2_precision_1_amount_is_erased_on_the_wire_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.707,
+  "share_of_tier_time": 0.00251,
+  "app_lines": 1629,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_a_serialization_failure_leaves_no_envelope.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 3.605,
+  "share_of_tier_time": 0.00244,
+  "app_lines": 303,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_rate_limit_status_is_declared.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 3.478,
+  "share_of_tier_time": 0.00235,
+  "app_lines": 88,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/unit/test_p019_no_intermediate_payment_state_is_written.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 3.309,
+  "share_of_tier_time": 0.00224,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_callable_surface_matches_canon.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.256,
+  "share_of_tier_time": 0.0022,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1201_magnitude_bound_is_load_bearing_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 3.225,
+  "share_of_tier_time": 0.00218,
+  "app_lines": 376,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_retryable_conflict_is_not_stored_aborted_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 3.193,
+  "share_of_tier_time": 0.00216,
+  "app_lines": 1642,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_fixtures_clearing_plan_done_pair.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 3.083,
+  "share_of_tier_time": 0.00208,
+  "app_lines": 633,
+  "unique_app_lines": 42,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/test_participants_me_and_auth_payloads.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.964,
+  "share_of_tier_time": 0.002,
+  "app_lines": 327,
+  "unique_app_lines": 19,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_participants_stats.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.962,
+  "share_of_tier_time": 0.002,
+  "app_lines": 73,
+  "unique_app_lines": 23,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_clearing_cycles.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.931,
+  "share_of_tier_time": 0.00198,
+  "app_lines": 579,
+  "unique_app_lines": 32,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_book_transaction_contract_postgres.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 2.902,
+  "share_of_tier_time": 0.00196,
+  "app_lines": 328,
+  "unique_app_lines": 17,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payment_inverse_multisegment_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.843,
+  "share_of_tier_time": 0.00192,
+  "app_lines": 1260,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_staged_tx_id_race_is_a_declared_conflict_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 2.817,
+  "share_of_tier_time": 0.0019,
+  "app_lines": 1207,
+  "unique_app_lines": 18,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payment_staged_multicall_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 2.817,
+  "share_of_tier_time": 0.0019,
+  "app_lines": 1092,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_clearing_skip_releases_locks_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 2.799,
+  "share_of_tier_time": 0.00189,
+  "app_lines": 1393,
+  "unique_app_lines": 29,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_graph_ego.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.794,
+  "share_of_tier_time": 0.00189,
+  "app_lines": 532,
+  "unique_app_lines": 262,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_admin_routing_max_paths.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 2.781,
+  "share_of_tier_time": 0.00188,
+  "app_lines": 1575,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_audit_log_list.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.731,
+  "share_of_tier_time": 0.00185,
+  "app_lines": 75,
+  "unique_app_lines": 12,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_b4_counterexample_marker_is_not_a_hiding_place.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 2.703,
+  "share_of_tier_time": 0.00183,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_trustlines_list.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.702,
+  "share_of_tier_time": 0.00183,
+  "app_lines": 348,
+  "unique_app_lines": 37,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_debt_symmetry.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.702,
+  "share_of_tier_time": 0.00183,
+  "app_lines": 314,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_timeouts.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.641,
+  "share_of_tier_time": 0.00179,
+  "app_lines": 499,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_trustlines_bottlenecks.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.637,
+  "share_of_tier_time": 0.00178,
+  "app_lines": 337,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_participants_list.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.624,
+  "share_of_tier_time": 0.00177,
+  "app_lines": 89,
+  "unique_app_lines": 39,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_b4_wrong_writer_is_recorded_faithfully_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 2.595,
+  "share_of_tier_time": 0.00175,
+  "app_lines": 1497,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_b4_wrong_writer_is_recorded_faithfully"
+ },
+ "tests/integration/test_payments_constraints_avoid.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 2.575,
+  "share_of_tier_time": 0.00174,
+  "app_lines": 1433,
+  "unique_app_lines": 6,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_default_tier_can_see_the_lock.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.543,
+  "share_of_tier_time": 0.00172,
+  "app_lines": 31,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b0a_money_the_column_cannot_hold.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 2.521,
+  "share_of_tier_time": 0.0017,
+  "app_lines": 296,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_metrics_numeric_value_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 2.398,
+  "share_of_tier_time": 0.00162,
+  "app_lines": 431,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/integration/test_payments_multipath.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 2.328,
+  "share_of_tier_time": 0.00157,
+  "app_lines": 1427,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p020_rank_bound_diagnostic.py": {
+  "tests": 49,
+  "outcomes": {
+   "passed": 49
+  },
+  "duration_s": 2.325,
+  "share_of_tier_time": 0.00157,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 49,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_actions_feature_flag.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.246,
+  "share_of_tier_time": 0.00152,
+  "app_lines": 61,
+  "unique_app_lines": 6,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_schema_parity_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 2.187,
+  "share_of_tier_time": 0.00148,
+  "app_lines": 221,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1525_control_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 2.18,
+  "share_of_tier_time": 0.00147,
+  "app_lines": 2657,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_step5c_hold_through_the_tick_sqlite.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 2.169,
+  "share_of_tier_time": 0.00147,
+  "app_lines": 2401,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_pay_retries_a_debt_version_conflict_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 2.117,
+  "share_of_tier_time": 0.00143,
+  "app_lines": 1304,
+  "unique_app_lines": 8,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_refusal_recording_is_bounded_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 2.037,
+  "share_of_tier_time": 0.00138,
+  "app_lines": 1220,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_metrics_bottlenecks_real_mode.py": {
+  "tests": 30,
+  "outcomes": {
+   "passed": 30
+  },
+  "duration_s": 2.028,
+  "share_of_tier_time": 0.00137,
+  "app_lines": 484,
+  "unique_app_lines": 212,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_alembic_postgres_only.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 2.027,
+  "share_of_tier_time": 0.00137,
+  "app_lines": 24,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_book_keeps_each_kind_to_its_semantics.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 1.935,
+  "share_of_tier_time": 0.00131,
+  "app_lines": 274,
+  "unique_app_lines": 8,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_clearing_holds_the_stop_for_share_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 1.916,
+  "share_of_tier_time": 0.0013,
+  "app_lines": 824,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_postgres_test_taxonomy.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.912,
+  "share_of_tier_time": 0.00129,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/unit/test_apply_flow_retry_on_stale.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.853,
+  "share_of_tier_time": 0.00125,
+  "app_lines": 278,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p023_flow_planner_snapshot_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 1.834,
+  "share_of_tier_time": 0.00124,
+  "app_lines": 454,
+  "unique_app_lines": 31,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1544_operator_stop_through_the_tick_sqlite.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.823,
+  "share_of_tier_time": 0.00123,
+  "app_lines": 2398,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_trustlines_list_filters_pagination.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.801,
+  "share_of_tier_time": 0.00122,
+  "app_lines": 608,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payments_amount_validation.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.8,
+  "share_of_tier_time": 0.00122,
+  "app_lines": 653,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_clearing_max_depth_controls_long_cycles.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.796,
+  "share_of_tier_time": 0.00121,
+  "app_lines": 1201,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_network_growth.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.752,
+  "share_of_tier_time": 0.00118,
+  "app_lines": 1062,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1211_negative_zero_cannot_come_back_from_the_ledger_postgres.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 1.727,
+  "share_of_tier_time": 0.00117,
+  "app_lines": 12,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 5,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_declared_status_reachability.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.704,
+  "share_of_tier_time": 0.00115,
+  "app_lines": 2,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_websocket_checks_the_participant_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 1.683,
+  "share_of_tier_time": 0.00114,
+  "app_lines": 76,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_debt_optimistic_lock.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.683,
+  "share_of_tier_time": 0.00114,
+  "app_lines": 200,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payment_prepare_capacity_policy.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.674,
+  "share_of_tier_time": 0.00113,
+  "app_lines": 313,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.663,
+  "share_of_tier_time": 0.00112,
+  "app_lines": 1187,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_journal_guards_postgres.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 1.659,
+  "share_of_tier_time": 0.00112,
+  "app_lines": 233,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_scenario_upload_refuses_unsafe_id.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.65,
+  "share_of_tier_time": 0.00112,
+  "app_lines": 225,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p017_pay_retry_after_a_real_40001_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 1.633,
+  "share_of_tier_time": 0.0011,
+  "app_lines": 1231,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1533_participant_deletion_keeps_obligations_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 1.609,
+  "share_of_tier_time": 0.00109,
+  "app_lines": 10,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": "test_p015_t1533_participant_deletion_keeps_obligations"
+ },
+ "tests/integration/test_p015_t1526_nan_amount_reaches_the_money_column_postgres.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.591,
+  "share_of_tier_time": 0.00108,
+  "app_lines": 204,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1533_participant_deletion_keeps_obligations.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.508,
+  "share_of_tier_time": 0.00102,
+  "app_lines": 10,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_t1533_participant_deletion_keeps_obligations"
+ },
+ "tests/integration/test_p1_clearing_run_perimeter_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.45,
+  "share_of_tier_time": 0.00098,
+  "app_lines": 1064,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p1_clearing_run_perimeter"
+ },
+ "tests/unit/test_trustline_audit_fail_closed.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 1.448,
+  "share_of_tier_time": 0.00098,
+  "app_lines": 313,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_trustlines_get_by_id.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.44,
+  "share_of_tier_time": 0.00097,
+  "app_lines": 378,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_s1_demo_fixture_generator_needs_no_database.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.426,
+  "share_of_tier_time": 0.00096,
+  "app_lines": 70,
+  "unique_app_lines": 19,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_the_record_is_the_stored_row_postgres.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 1.422,
+  "share_of_tier_time": 0.00096,
+  "app_lines": 229,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1525_classification_reads_deliberate_wrapping_only_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.411,
+  "share_of_tier_time": 0.00095,
+  "app_lines": 268,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payments_insufficient_capacity.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.385,
+  "share_of_tier_time": 0.00094,
+  "app_lines": 900,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_validation_error_envelope.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.383,
+  "share_of_tier_time": 0.00094,
+  "app_lines": 38,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_edge_patch_builder.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.356,
+  "share_of_tier_time": 0.00092,
+  "app_lines": 457,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_a_write_without_context_is_refused_by_the_database.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 1.347,
+  "share_of_tier_time": 0.00091,
+  "app_lines": 221,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_adaptive_clearing_effectiveness_ab.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.329,
+  "share_of_tier_time": 0.0009,
+  "app_lines": 3814,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1544_inject_refuses_a_deactivated_equivalent.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.327,
+  "share_of_tier_time": 0.0009,
+  "app_lines": 1052,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_adaptive_clearing_integration.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 1.325,
+  "share_of_tier_time": 0.0009,
+  "app_lines": 4178,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_post_tick_audit.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.292,
+  "share_of_tier_time": 0.00087,
+  "app_lines": 325,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_delta_check.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.29,
+  "share_of_tier_time": 0.00087,
+  "app_lines": 290,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_audit_drift_integrity_log.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.279,
+  "share_of_tier_time": 0.00086,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_balance_service_summary.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.268,
+  "share_of_tier_time": 0.00086,
+  "app_lines": 303,
+  "unique_app_lines": 7,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_metrics_unmatched_routes_path_label.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.251,
+  "share_of_tier_time": 0.00085,
+  "app_lines": 27,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1524_equivalent_deletion_keeps_obligations_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.225,
+  "share_of_tier_time": 0.00083,
+  "app_lines": 316,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_t1524_equivalent_deletion_keeps_obligations"
+ },
+ "tests/integration/test_daily_limit_not_enforced.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.224,
+  "share_of_tier_time": 0.00083,
+  "app_lines": 1450,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1523_in_progress_and_insert_race_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.219,
+  "share_of_tier_time": 0.00082,
+  "app_lines": 1245,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_sse_smoke.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.203,
+  "share_of_tier_time": 0.00081,
+  "app_lines": 849,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1711_seed_recipe_refuses.py": {
+  "tests": 45,
+  "outcomes": {
+   "passed": 45
+  },
+  "duration_s": 1.183,
+  "share_of_tier_time": 0.0008,
+  "app_lines": 37,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 35,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_trust_decay_respects_concurrent_debt_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 1.174,
+  "share_of_tier_time": 0.00079,
+  "app_lines": 1417,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_b_corruption_helper_postgres.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 1.16,
+  "share_of_tier_time": 0.00078,
+  "app_lines": 364,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/integration/test_p1_trustline_reopen_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "xfailed": 1,
+   "passed": 1
+  },
+  "duration_s": 1.156,
+  "share_of_tier_time": 0.00078,
+  "app_lines": 377,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_payment_idempotency_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.151,
+  "share_of_tier_time": 0.00078,
+  "app_lines": 1240,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_clearing_no_deadlock.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.11,
+  "share_of_tier_time": 0.00075,
+  "app_lines": 3814,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_sse_replay_410.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.102,
+  "share_of_tier_time": 0.00075,
+  "app_lines": 533,
+  "unique_app_lines": 14,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_websocket_payment_received_event.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.075,
+  "share_of_tier_time": 0.00073,
+  "app_lines": 479,
+  "unique_app_lines": 23,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1212_declared_precision_exceeds_storage_scale_postgres.py": {
+  "tests": 13,
+  "outcomes": {
+   "passed": 13
+  },
+  "duration_s": 1.068,
+  "share_of_tier_time": 0.00072,
+  "app_lines": 178,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 10,
+  "twin_group": null
+ },
+ "tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.051,
+  "share_of_tier_time": 0.00071,
+  "app_lines": 1642,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p020_consent_parity_postgres.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 1.051,
+  "share_of_tier_time": 0.00071,
+  "app_lines": 206,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1713_community_recipes.py": {
+  "tests": 67,
+  "outcomes": {
+   "passed": 67
+  },
+  "duration_s": 1.046,
+  "share_of_tier_time": 0.00071,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 67,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1712_community_descriptions.py": {
+  "tests": 48,
+  "outcomes": {
+   "passed": 48
+  },
+  "duration_s": 1.033,
+  "share_of_tier_time": 0.0007,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 48,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 1.032,
+  "share_of_tier_time": 0.0007,
+  "app_lines": 879,
+  "unique_app_lines": 71,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_participants_search.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 1.03,
+  "share_of_tier_time": 0.0007,
+  "app_lines": 241,
+  "unique_app_lines": 15,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_direct_execution_effects_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 1.001,
+  "share_of_tier_time": 0.00068,
+  "app_lines": 1256,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_snapshot_does_not_read_real_participants.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.983,
+  "share_of_tier_time": 0.00066,
+  "app_lines": 750,
+  "unique_app_lines": 52,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p011_json_artifacts_are_downloaded_and_validated.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.967,
+  "share_of_tier_time": 0.00065,
+  "app_lines": 808,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_inject_holds_the_owner_lock_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.964,
+  "share_of_tier_time": 0.00065,
+  "app_lines": 1576,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_api_payment_commits_once_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.922,
+  "share_of_tier_time": 0.00062,
+  "app_lines": 1479,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_payment_targets_stay_in_the_run.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.862,
+  "share_of_tier_time": 0.00058,
+  "app_lines": 451,
+  "unique_app_lines": 6,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_trust_growth_never_lowers_a_limit_below_its_debt_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.861,
+  "share_of_tier_time": 0.00058,
+  "app_lines": 2500,
+  "unique_app_lines": 16,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_no_durable_intermediate_state_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.833,
+  "share_of_tier_time": 0.00056,
+  "app_lines": 1512,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_a_live_payment_is_not_reported_aborted_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.821,
+  "share_of_tier_time": 0.00056,
+  "app_lines": 1526,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_concurrent_prepare_routes_bottleneck_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.803,
+  "share_of_tier_time": 0.00054,
+  "app_lines": 1343,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_simulator_artifacts_events_ndjson.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.794,
+  "share_of_tier_time": 0.00054,
+  "app_lines": 900,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_p1_money_conflict_predicate.py": {
+  "tests": 16,
+  "outcomes": {
+   "passed": 16
+  },
+  "duration_s": 0.773,
+  "share_of_tier_time": 0.00052,
+  "app_lines": 51,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.759,
+  "share_of_tier_time": 0.00051,
+  "app_lines": 1023,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": "test_p015_t1551_clearing_reduces_debt_on_a_frozen_line"
+ },
+ "tests/unit/test_flow_and_periodicity.py": {
+  "tests": 11,
+  "outcomes": {
+   "passed": 11
+  },
+  "duration_s": 0.72,
+  "share_of_tier_time": 0.00049,
+  "app_lines": 500,
+  "unique_app_lines": 23,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/integration/test_post_tick_audit_drift_runner_integration.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.717,
+  "share_of_tier_time": 0.00048,
+  "app_lines": 2746,
+  "unique_app_lines": 45,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p012_t1201_money_door_bounds.py": {
+  "tests": 201,
+  "outcomes": {
+   "passed": 201
+  },
+  "duration_s": 0.71,
+  "share_of_tier_time": 0.00048,
+  "app_lines": 96,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1701_the_alembic_version_bootstrap_has_one_owner.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 0.707,
+  "share_of_tier_time": 0.00048,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 12,
+  "twin_group": null
+ },
+ "tests/integration/test_payment_audit_serialization_failure_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.699,
+  "share_of_tier_time": 0.00047,
+  "app_lines": 1185,
+  "unique_app_lines": 8,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_integrity_endpoints.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 0.685,
+  "share_of_tier_time": 0.00046,
+  "app_lines": 691,
+  "unique_app_lines": 51,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_artifact_index_has_no_server_path.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.667,
+  "share_of_tier_time": 0.00045,
+  "app_lines": 790,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p019_money_phase_landing_evidence_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.641,
+  "share_of_tier_time": 0.00043,
+  "app_lines": 2605,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_quality_workflow_schedule.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 0.638,
+  "share_of_tier_time": 0.00043,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 7,
+  "twin_group": null
+ },
+ "tests/integration/test_admin_mutation_audit_atomicity.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 0.601,
+  "share_of_tier_time": 0.00041,
+  "app_lines": 234,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1534_the_migrated_schema_flag_is_true_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.582,
+  "share_of_tier_time": 0.00039,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_write_tick_metrics_upsert.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.577,
+  "share_of_tier_time": 0.00039,
+  "app_lines": 109,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_settings_guardrails.py": {
+  "tests": 93,
+  "outcomes": {
+   "passed": 92,
+   "skipped": 1
+  },
+  "duration_s": 0.566,
+  "share_of_tier_time": 0.00038,
+  "app_lines": 133,
+  "unique_app_lines": 36,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p017_mode_a_isolation_survives_an_application_commit_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.556,
+  "share_of_tier_time": 0.00038,
+  "app_lines": 10,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_inject_retries_a_serialization_failure_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.542,
+  "share_of_tier_time": 0.00037,
+  "app_lines": 1037,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_zero_debt_policy.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.539,
+  "share_of_tier_time": 0.00036,
+  "app_lines": 904,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p012_t1211_shared_edge_order_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.519,
+  "share_of_tier_time": 0.00035,
+  "app_lines": 496,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_tick_orchestrator_pending_clearing.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.518,
+  "share_of_tier_time": 0.00035,
+  "app_lines": 52,
+  "unique_app_lines": 27,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_equivalent_writer_and_legacy_reads.py": {
+  "tests": 11,
+  "outcomes": {
+   "passed": 11
+  },
+  "duration_s": 0.514,
+  "share_of_tier_time": 0.00035,
+  "app_lines": 162,
+  "unique_app_lines": 9,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p024_orphan_scenario_edges_are_not_part_of_the_run.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.497,
+  "share_of_tier_time": 0.00034,
+  "app_lines": 682,
+  "unique_app_lines": 8,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_auth_refresh.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.493,
+  "share_of_tier_time": 0.00033,
+  "app_lines": 371,
+  "unique_app_lines": 47,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p024_scenario_id_is_a_safe_path_segment.py": {
+  "tests": 38,
+  "outcomes": {
+   "passed": 38
+  },
+  "duration_s": 0.445,
+  "share_of_tier_time": 0.0003,
+  "app_lines": 147,
+  "unique_app_lines": 33,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p018_mixed_inject_event_is_one_operation_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.442,
+  "share_of_tier_time": 0.0003,
+  "app_lines": 1434,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_participants_type_default.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.44,
+  "share_of_tier_time": 0.0003,
+  "app_lines": 92,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_participants_uniqueness.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.428,
+  "share_of_tier_time": 0.00029,
+  "app_lines": 111,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_cookie_session.py": {
+  "tests": 23,
+  "outcomes": {
+   "passed": 23
+  },
+  "duration_s": 0.428,
+  "share_of_tier_time": 0.00029,
+  "app_lines": 546,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/integration/test_health_and_equivalents.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.413,
+  "share_of_tier_time": 0.00028,
+  "app_lines": 356,
+  "unique_app_lines": 58,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p1_tick_session_ownership_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.405,
+  "share_of_tier_time": 0.00027,
+  "app_lines": 53,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1549_test_engine_runs_at_the_application_isolation_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.375,
+  "share_of_tier_time": 0.00025,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_the_test_engine_enforces_foreign_keys.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.359,
+  "share_of_tier_time": 0.00024,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/integration/test_p015_t1545_max_flow_to_self.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.356,
+  "share_of_tier_time": 0.00024,
+  "app_lines": 299,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p1_failed_rollback_state_postgres.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.333,
+  "share_of_tier_time": 0.00023,
+  "app_lines": 10,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_admin_equivalent_input_validation.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.311,
+  "share_of_tier_time": 0.00021,
+  "app_lines": 146,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_required_gate_runs_on_postgres.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.309,
+  "share_of_tier_time": 0.00021,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 5,
+  "twin_group": null
+ },
+ "tests/integration/test_p1_commit_then_refresh_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.279,
+  "share_of_tier_time": 0.00019,
+  "app_lines": 316,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_p011_events_poll_is_always_empty.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.277,
+  "share_of_tier_time": 0.00019,
+  "app_lines": 46,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_warmup_and_capacity.py": {
+  "tests": 10,
+  "outcomes": {
+   "passed": 10
+  },
+  "duration_s": 0.255,
+  "share_of_tier_time": 0.00017,
+  "app_lines": 501,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_trust_drift_decay_does_not_break_trust_limits.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.227,
+  "share_of_tier_time": 0.00015,
+  "app_lines": 335,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_admin_freeze_participant.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.205,
+  "share_of_tier_time": 0.00014,
+  "app_lines": 384,
+  "unique_app_lines": 7,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_trustline_signatures.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.201,
+  "share_of_tier_time": 0.00014,
+  "app_lines": 110,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p012_t1211_money_rendering_conformance.py": {
+  "tests": 73,
+  "outcomes": {
+   "passed": 73
+  },
+  "duration_s": 0.192,
+  "share_of_tier_time": 0.00013,
+  "app_lines": 16,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 23,
+  "twin_group": null
+ },
+ "tests/integration/test_p1_reconcile_after_failed_rollback_postgres.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.166,
+  "share_of_tier_time": 0.00011,
+  "app_lines": 10,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_tick_commit_cancellation.py": {
+  "tests": 28,
+  "outcomes": {
+   "passed": 28
+  },
+  "duration_s": 0.162,
+  "share_of_tier_time": 0.00011,
+  "app_lines": 184,
+  "unique_app_lines": 23,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1710_launcher_database_boundary.py": {
+  "tests": 53,
+  "outcomes": {
+   "passed": 53
+  },
+  "duration_s": 0.157,
+  "share_of_tier_time": 0.00011,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 53,
+  "twin_group": null
+ },
+ "tests/unit/test_deployment_config.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 8,
+   "skipped": 1
+  },
+  "duration_s": 0.153,
+  "share_of_tier_time": 0.0001,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 8,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_adaptive_clearing_policy.py": {
+  "tests": 30,
+  "outcomes": {
+   "passed": 30
+  },
+  "duration_s": 0.143,
+  "share_of_tier_time": 0.0001,
+  "app_lines": 143,
+  "unique_app_lines": 7,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_trust_drift.py": {
+  "tests": 15,
+  "outcomes": {
+   "passed": 15
+  },
+  "duration_s": 0.142,
+  "share_of_tier_time": 0.0001,
+  "app_lines": 483,
+  "unique_app_lines": 16,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_owner_isolation.py": {
+  "tests": 26,
+  "outcomes": {
+   "passed": 26
+  },
+  "duration_s": 0.125,
+  "share_of_tier_time": 8e-05,
+  "app_lines": 205,
+  "unique_app_lines": 89,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/integration/test_http_rate_limit.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.12,
+  "share_of_tier_time": 8e-05,
+  "app_lines": 82,
+  "unique_app_lines": 14,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_auth_token_type_enforced.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.119,
+  "share_of_tier_time": 8e-05,
+  "app_lines": 266,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_background_task_supervision.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 0.119,
+  "share_of_tier_time": 8e-05,
+  "app_lines": 225,
+  "unique_app_lines": 92,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_admin_endpoints.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.107,
+  "share_of_tier_time": 7e-05,
+  "app_lines": 55,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_actor_and_csrf.py": {
+  "tests": 24,
+  "outcomes": {
+   "passed": 24
+  },
+  "duration_s": 0.091,
+  "share_of_tier_time": 6e-05,
+  "app_lines": 134,
+  "unique_app_lines": 7,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/unit/test_static_diagnostics_policy.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.091,
+  "share_of_tier_time": 6e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_sse_replay.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.079,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 579,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_test_database_guard.py": {
+  "tests": 17,
+  "outcomes": {
+   "passed": 17
+  },
+  "duration_s": 0.079,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 17,
+  "twin_group": null
+ },
+ "tests/unit/test_real_tick_orchestrator_rollback_resolution.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 0.076,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 440,
+  "unique_app_lines": 22,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_audit_drift_delta_check_sse_integration.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.075,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 435,
+  "unique_app_lines": 10,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_sse_replay_atomic.py": {
+  "tests": 13,
+  "outcomes": {
+   "passed": 13
+  },
+  "duration_s": 0.075,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 225,
+  "unique_app_lines": 24,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_rate_limit_memory_bound.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.073,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 40,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_p1_money_phase_replay.py": {
+  "tests": 11,
+  "outcomes": {
+   "passed": 11
+  },
+  "duration_s": 0.069,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 283,
+  "unique_app_lines": 14,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p012_t1210_daily_limit_policy_door.py": {
+  "tests": 22,
+  "outcomes": {
+   "passed": 22
+  },
+  "duration_s": 0.068,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 71,
+  "unique_app_lines": 7,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_payments_ordered_journal.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 0.068,
+  "share_of_tier_time": 5e-05,
+  "app_lines": 636,
+  "unique_app_lines": 6,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_equivalent_code_validation.py": {
+  "tests": 22,
+  "outcomes": {
+   "passed": 22
+  },
+  "duration_s": 0.061,
+  "share_of_tier_time": 4e-05,
+  "app_lines": 20,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p012_t1211_money_path_never_types_a_float.py": {
+  "tests": 29,
+  "outcomes": {
+   "passed": 29
+  },
+  "duration_s": 0.06,
+  "share_of_tier_time": 4e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 29,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_adaptive_clearing_effectiveness_synthetic.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 0.06,
+  "share_of_tier_time": 4e-05,
+  "app_lines": 132,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_tick_clearing_coordinator_adaptive.py": {
+  "tests": 8,
+  "outcomes": {
+   "passed": 8
+  },
+  "duration_s": 0.059,
+  "share_of_tier_time": 4e-05,
+  "app_lines": 379,
+  "unique_app_lines": 26,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_rejection_codes.py": {
+  "tests": 18,
+  "outcomes": {
+   "passed": 18
+  },
+  "duration_s": 0.057,
+  "share_of_tier_time": 4e-05,
+  "app_lines": 38,
+  "unique_app_lines": 19,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_clearing_engine_partial_failure.py": {
+  "tests": 7,
+  "outcomes": {
+   "passed": 7
+  },
+  "duration_s": 0.053,
+  "share_of_tier_time": 4e-05,
+  "app_lines": 406,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_pytest_selector_guard.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 0.05,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 9,
+  "twin_group": null
+ },
+ "tests/unit/test_trustline_conflict_identity.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 0.05,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 29,
+  "unique_app_lines": 29,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_no_mandatory_readback_after_commit.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 0.047,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 9,
+  "twin_group": null
+ },
+ "tests/unit/test_p015_t1529_the_envelope_identity_is_a_retryable_race.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 0.047,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 69,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py": {
+  "tests": 14,
+  "outcomes": {
+   "passed": 14
+  },
+  "duration_s": 0.043,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 14,
+  "twin_group": "test_simulator_sse_trust_drift_decay_topology_patch"
+ },
+ "tests/unit/test_tick_money_paths_carry_the_run_perimeter.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.043,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 4,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_p019_debt_version_conflict_is_narrow.py": {
+  "tests": 13,
+  "outcomes": {
+   "passed": 13
+  },
+  "duration_s": 0.04,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 62,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_topology_changed_no_empty_payload.py": {
+  "tests": 12,
+  "outcomes": {
+   "passed": 12
+  },
+  "duration_s": 0.039,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 51,
+  "unique_app_lines": 24,
+  "tests_with_zero_app_lines": 7,
+  "twin_group": null
+ },
+ "tests/unit/test_clearing_scope_reaches_every_replay_path.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.037,
+  "share_of_tier_time": 3e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_tx_updated_amount_flyout_contract.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 0.036,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 16,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/integration/test_static_clearing_hard_timeout_no_leak.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.034,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 109,
+  "unique_app_lines": 15,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1701_cleanup_failure_is_not_swallowed.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 0.033,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 9,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_db_error_classifier.py": {
+  "tests": 10,
+  "outcomes": {
+   "passed": 10
+  },
+  "duration_s": 0.033,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 50,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1701_provisioning_refuses_rather_than_skips.py": {
+  "tests": 10,
+  "outcomes": {
+   "passed": 10
+  },
+  "duration_s": 0.032,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 10,
+  "twin_group": null
+ },
+ "tests/unit/test_p024_artifact_download_stays_in_its_directory.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.031,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 29,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_engine_advisory_locks_execute.py": {
+  "tests": 6,
+  "outcomes": {
+   "passed": 6
+  },
+  "duration_s": 0.03,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 72,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_event_bus_backpressure.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.027,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 37,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_equivalent_metadata_validation.py": {
+  "tests": 9,
+  "outcomes": {
+   "passed": 9
+  },
+  "duration_s": 0.026,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 28,
+  "unique_app_lines": 17,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_routing_reserved_and_policy.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.024,
+  "share_of_tier_time": 2e-05,
+  "app_lines": 216,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_sse_queue_full_policy.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.02,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 145,
+  "unique_app_lines": 16,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_real_amount_model.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.019,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 446,
+  "unique_app_lines": 4,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_runner_tick_nested_partial_failures.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.018,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 1139,
+  "unique_app_lines": 9,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_real_planner_determinism.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.018,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 393,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_documentation_models_do_not_filter.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 0.016,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 4,
+  "twin_group": null
+ },
+ "tests/unit/test_measure_swallowed_exceptions_instrument.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.015,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/unit/test_p1_tick_storage_flush_marker.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.015,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 249,
+  "unique_app_lines": 12,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p023_v3_run_gate.py": {
+  "tests": 5,
+  "outcomes": {
+   "passed": 5
+  },
+  "duration_s": 0.014,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 5,
+  "twin_group": null
+ },
+ "tests/unit/test_clearing_auto_clearing_policy.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.012,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 31,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p017_t1702_tier_database_needs_createdb.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.012,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_real_clearing_throttle.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.012,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 483,
+  "unique_app_lines": 16,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_real_events_stress.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.012,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 233,
+  "unique_app_lines": 27,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_canonical_json.py": {
+  "tests": 4,
+  "outcomes": {
+   "passed": 4
+  },
+  "duration_s": 0.011,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 48,
+  "unique_app_lines": 13,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_real_tick_persistence_post_commit.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.011,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 92,
+  "unique_app_lines": 5,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_trustline_timestamps.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.011,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 1,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_admin_token_comparison.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.01,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 22,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_tx_failed_event_schema.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.01,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_sse_rate_limit.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.01,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 62,
+  "unique_app_lines": 9,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p012_t1211_engine_ladder.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.009,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 320,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p019_staged_owner_locks_share_the_service_deadline.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.008,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 69,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_cleanup_cancellation.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.008,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 13,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_request_id_middleware_validation.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.008,
+  "share_of_tier_time": 1e-05,
+  "app_lines": 16,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_participant_race_stays_a_declared_conflict.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.007,
+  "share_of_tier_time": 0.0,
+  "app_lines": 71,
+  "unique_app_lines": 3,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_run_lifecycle_per_run_scenario_isolation.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.007,
+  "share_of_tier_time": 0.0,
+  "app_lines": 101,
+  "unique_app_lines": 2,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_real_flush_pending_storage.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.007,
+  "share_of_tier_time": 0.0,
+  "app_lines": 229,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_p011_sse_event_declares_patches.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.006,
+  "share_of_tier_time": 0.0,
+  "app_lines": 38,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_scenario_allowlist_and_archives.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.006,
+  "share_of_tier_time": 0.0,
+  "app_lines": 33,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_audit_drift_sse_event.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.005,
+  "share_of_tier_time": 0.0,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_crypto_pid.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.005,
+  "share_of_tier_time": 0.0,
+  "app_lines": 10,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_net_balance_utils.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.005,
+  "share_of_tier_time": 0.0,
+  "app_lines": 11,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_storage_schema_contract.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.005,
+  "share_of_tier_time": 0.0,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_clearing_plan_edges_extraction.py": {
+  "tests": 2,
+  "outcomes": {
+   "passed": 2
+  },
+  "duration_s": 0.004,
+  "share_of_tier_time": 0.0,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 2,
+  "twin_group": null
+ },
+ "tests/unit/test_fixtures_runner_clearing_done_amount.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.004,
+  "share_of_tier_time": 0.0,
+  "app_lines": 57,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_actions_serialization.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.004,
+  "share_of_tier_time": 0.0,
+  "app_lines": 1,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_simulator_run_status_response_schema.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.004,
+  "share_of_tier_time": 0.0,
+  "app_lines": 31,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/contract/test_p011_root_routes_bypass_the_policy_gate.py": {
+  "tests": 3,
+  "outcomes": {
+   "passed": 3
+  },
+  "duration_s": 0.003,
+  "share_of_tier_time": 0.0,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 3,
+  "twin_group": null
+ },
+ "tests/unit/test_check_alembic_heads.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.003,
+  "share_of_tier_time": 0.0,
+  "app_lines": 0,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 1,
+  "twin_group": null
+ },
+ "tests/unit/test_edges_by_equivalent_status_filter.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.003,
+  "share_of_tier_time": 0.0,
+  "app_lines": 15,
+  "unique_app_lines": 1,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_freeze_participant_in_memory_status_overwrite.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.003,
+  "share_of_tier_time": 0.0,
+  "app_lines": 52,
+  "unique_app_lines": 9,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_payment_router_invalidate_cache.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.003,
+  "share_of_tier_time": 0.0,
+  "app_lines": 5,
+  "unique_app_lines": 0,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ },
+ "tests/unit/test_routing_constraints_timeout_ms.py": {
+  "tests": 1,
+  "outcomes": {
+   "passed": 1
+  },
+  "duration_s": 0.003,
+  "share_of_tier_time": 0.0,
+  "app_lines": 39,
+  "unique_app_lines": 8,
+  "tests_with_zero_app_lines": 0,
+  "twin_group": null
+ }
+}

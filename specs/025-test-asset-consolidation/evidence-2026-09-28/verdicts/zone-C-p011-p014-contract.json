@@ -1,0 +1,2884 @@
+[
+ {
+  "file": "tests/contract/__init__.py",
+  "lines": 0,
+  "verdict": "KEEP",
+  "basket": "G",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "package marker",
+  "tests": []
+ },
+ {
+  "file": "tests/contract/openapi_response_conformance.py",
+  "lines": 800,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "support module of the runtime conformance gate; validates 2xx only (see gaps)",
+  "tests": []
+ },
+ {
+  "file": "tests/contract/test_openapi_contract.py",
+  "lines": 1841,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_openapi_yaml_is_well_formed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 6
+   },
+   {
+    "name": "test_admin_equivalent_mutation_inputs_preserve_canonical_bounds",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_equivalent_reads_preserve_legacy_visibility_without_weakening_mutations",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 42
+   },
+   {
+    "name": "test_selected_admin_and_integrity_success_schemas_are_exact",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 161
+   },
+   {
+    "name": "test_run_status_schema_preserves_stop_and_counter_fields",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 60
+   },
+   {
+    "name": "test_simulator_event_union_tracks_producer_families_and_wire_aliases",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 98
+   },
+   {
+    "name": "test_simulator_events_documents_replay_cursor_and_gone_response",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 43
+   },
+   {
+    "name": "test_payment_create_declares_exact_response_statuses_and_error_envelopes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 35
+   },
+   {
+    "name": "test_security_normalization_preserves_anonymous_or_and_scopes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 26
+   },
+   {
+    "name": "test_generated_transport_header_mutations_are_not_filtered",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 2,
+    "lines": 31
+   },
+   {
+    "name": "test_canonical_admin_headers_follow_production_policy",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 19
+   },
+   {
+    "name": "test_content_normalization_detects_extra_media_types",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_served_openapi_validation_statuses_are_not_filterable_noise",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 32
+   },
+   {
+    "name": "test_root_health_and_versioned_api_are_explicitly_classified",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 48
+   },
+   {
+    "name": "test_openapi_paths_methods_business_parameter_identities_and_required_bodies_match_and_schemas_are_ratcheted",
+    "verdict": "MERGE",
+    "universal": "U-C-1",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "hard identity asserts -> test_openapi_operation_identities_match; 3 ratchets -> rows parameter/transport_header/request",
+    "collected": 1,
+    "lines": 111
+   },
+   {
+    "name": "test_the_normalizer_drops_only_the_nullable_that_says_nothing",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 87
+   },
+   {
+    "name": "test_openapi_success_error_responses_and_security_are_ratcheted",
+    "verdict": "MERGE",
+    "universal": "U-C-1",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "2xx status-set hard assert -> identity test; 3 ratchets -> rows success/error_response/security",
+    "collected": 1,
+    "lines": 81
+   },
+   {
+    "name": "test_openapi_wire_schemas_use_from_alias_not_python_field_name",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 9
+   },
+   {
+    "name": "test_simulator_action_validation_uses_flat_error_envelope",
+    "verdict": "MERGE",
+    "universal": "U-C-13",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 16
+   },
+   {
+    "name": "test_simulator_invalid_owner_transport_uses_nested_error_envelope",
+    "verdict": "MERGE",
+    "universal": "U-C-13",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 20
+   },
+   {
+    "name": "test_simulator_action_disabled_uses_documented_403_envelope",
+    "verdict": "MERGE",
+    "universal": "U-C-13",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_simulator_terminal_action_uses_documented_409_envelope",
+    "verdict": "MERGE",
+    "universal": "U-C-13",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row must be REWRITTEN: monkeypatch runtime.get_run -> create and stop a real run",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_non_action_validation_keeps_geo_error_envelope",
+    "verdict": "MERGE",
+    "universal": "U-C-13",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 8
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_callable_surface_matches_canon.py",
+  "lines": 137,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_environment_of_the_measurement_is_the_one_this_test_was_written_for",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "mutates os.environ directly and restores by hand; use monkeypatch.setenv/delenv",
+    "collected": 1,
+    "lines": 20
+   },
+   {
+    "name": "test_every_callable_operation_is_in_the_canon_or_a_named_exception",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 17
+   },
+   {
+    "name": "test_the_eight_interact_mode_operations_are_declared",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 16
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_declared_status_reachability.py",
+  "lines": 83,
+  "verdict": "DELETE-DUP",
+  "basket": "C",
+  "universal": null,
+  "stronger": "tests/contract/test_openapi_contract.py::test_openapi_success_error_responses_and_security_are_ratcheted",
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_no_route_declares_503_only_in_the_canon",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/contract/test_openapi_contract.py::test_openapi_success_error_responses_and_security_are_ratcheted",
+    "removed_contract": null,
+    "note": "any change of a 503 declaration on either side changes the ERROR_RESPONSE digest/count",
+    "collected": 1,
+    "lines": 8
+   },
+   {
+    "name": "test_each_route_of_the_class_declares_it_in_the_application_schema",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/contract/test_openapi_contract.py::test_openapi_success_error_responses_and_security_are_ratcheted",
+    "removed_contract": null,
+    "note": "/health/db would ENTER error drift (51->52); metrics/bottlenecks entries change content (digest)",
+    "collected": 3,
+    "lines": 18
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_documentation_models_do_not_filter.py",
+  "lines": 100,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_documented_route_has_no_runtime_response_model",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 3,
+    "lines": 19
+   },
+   {
+    "name": "test_the_two_spellings_really_do_differ",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 34
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_nullable_needs_a_sibling_type.py",
+  "lines": 576,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_canon_declares_no_nullable_without_a_sibling_type",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 13
+   },
+   {
+    "name": "test_canon_declares_no_nullable_beside_an_enum_that_forbids_null",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 12
+   },
+   {
+    "name": "test_sanctioned_null_branches_sit_inside_a_composition",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 16
+   },
+   {
+    "name": "test_predicate_flags_the_broken_form",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 4,
+    "lines": 14
+   },
+   {
+    "name": "test_predicate_passes_the_fixed_form",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 3,
+    "lines": 12
+   },
+   {
+    "name": "test_enum_predicate_flags_the_broken_form",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 2,
+    "lines": 12
+   },
+   {
+    "name": "test_enum_predicate_passes_the_fixed_form",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 4,
+    "lines": 13
+   },
+   {
+    "name": "test_the_two_predicates_do_not_shadow_each_other",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 1,
+    "lines": 14
+   },
+   {
+    "name": "test_enum_predicate_ignores_an_example_that_looks_like_one",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 1,
+    "lines": 5
+   },
+   {
+    "name": "test_enum_predicate_reaches_into_components_and_responses",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 33
+   },
+   {
+    "name": "test_predicate_reaches_every_depth_the_defect_hides_at",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_predicate_ignores_the_word_nullable_inside_an_example",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 1,
+    "lines": 8
+   },
+   {
+    "name": "test_a_null_only_enum_does_not_launder_the_defect",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 1,
+    "lines": 7
+   },
+   {
+    "name": "test_stray_null_branch_check_bites",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of fragment -> (offending, enum_offending, stray) table",
+    "collected": 1,
+    "lines": 10
+   },
+   {
+    "name": "test_openapi_30_really_ignores_nullable_without_a_sibling_type",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the premise table (schema, instance) -> accepts",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_nullable_does_not_widen_an_enum",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the premise table (schema, instance) -> accepts",
+    "collected": 1,
+    "lines": 31
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_rate_limit_status_is_declared.py",
+  "lines": 157,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-C-2",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_a_real_operation_really_answers_429",
+    "verdict": "MERGE",
+    "universal": "U-C-2",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row S5: limiter really answers 429/E009",
+    "collected": 1,
+    "lines": 23
+   },
+   {
+    "name": "test_the_exempt_path_is_really_exempt",
+    "verdict": "MERGE",
+    "universal": "U-C-2",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "the exact-set pin moves into test_s5_is_the_applications_own_derivation, which already asserts the exempt path carries no 429",
+    "collected": 1,
+    "lines": 8
+   },
+   {
+    "name": "test_every_rate_limited_operation_declares_429",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/contract/test_p011_reachable_statuses_are_declared.py::test_no_new_undeclared_reachable_status_in_the_canon",
+    "removed_contract": null,
+    "note": "S5 there is the application's own derivation (_declare_rate_limit_status), canon side; 'absent from canon entirely' is test_every_callable_operation_is_in_the_canon_or_a_named_exception",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_the_path_converter_does_not_hide_an_operation",
+    "verdict": "MERGE",
+    "universal": "U-C-2",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "converter row: GET /participants/{pid} in the S5 set and in the canon",
+    "collected": 1,
+    "lines": 18
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_reachable_statuses_are_declared.py",
+  "lines": 716,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "BLIND SPOT: derives only dependency signals S1-S5; statuses a handler RETURNS (JSONResponse(status_code=...): ~40 status_code= sites in app/api/v1/simulator.py via _action_error:397-405, health.py:102/144) or raises in its body are not derived",
+  "tests": [
+   {
+    "name": "test_no_new_undeclared_reachable_status_in_the_canon",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 12
+   },
+   {
+    "name": "test_the_canon_list_has_no_stale_entries",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "UNDECLARED_REACHABLE_CANON is set(): `set() - measured` is empty by construction",
+    "collected": 1,
+    "lines": 10
+   },
+   {
+    "name": "test_no_new_undeclared_reachable_status_in_the_generated_schema",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 16
+   },
+   {
+    "name": "test_the_generated_list_has_no_stale_entries",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "UNDECLARED_REACHABLE_GENERATED is set(): vacuous",
+    "collected": 1,
+    "lines": 7
+   },
+   {
+    "name": "test_the_predicate_detects_the_shapes_each_signal_names",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 64
+   },
+   {
+    "name": "test_the_str_path_parameter_exemption_is_exactly_that_wide",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 41
+   },
+   {
+    "name": "test_an_operation_that_over_declares_is_not_reported",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 30
+   },
+   {
+    "name": "test_the_guard_bites_when_a_declaration_is_deleted",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 41
+   },
+   {
+    "name": "test_require_admin_really_answers_403_and_never_401",
+    "verdict": "MERGE",
+    "universal": "U-C-2",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows S3: no token -> 403 E006, wrong token -> 403 E006",
+    "collected": 1,
+    "lines": 18
+   },
+   {
+    "name": "test_a_malformed_simulator_owner_header_really_answers_422",
+    "verdict": "MERGE",
+    "universal": "U-C-2",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row S4 422 E009 details.header + control row",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_s5_is_the_applications_own_derivation",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 13
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_responses_conform_to_the_canon.py",
+  "lines": 1582,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "FIX-DOC in module: the skip message and comments tell to run `-m \"not postgres\"` (marker removed 2026-09-23) and describe a 'task-local SQLite file'",
+  "tests": [
+   {
+    "name": "test_the_harness_is_installed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 7
+   },
+   {
+    "name": "test_the_harness_records_a_real_response",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 23
+   },
+   {
+    "name": "test_the_canon_denominator_is_what_we_think_it_is",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 7
+   },
+   {
+    "name": "test_every_observed_2xx_body_validates_against_the_canon",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 12
+   },
+   {
+    "name": "test_the_policy_the_api_really_writes_is_an_object",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "docstring and assert text cite KNOWN_NONCONFORMING entries that no longer exist (the list is empty)",
+    "collected": 1,
+    "lines": 66
+   },
+   {
+    "name": "test_a_participant_created_without_a_profile_conforms",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 40
+   },
+   {
+    "name": "test_a_deliberately_wrong_canon_node_makes_the_check_fail",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 34
+   },
+   {
+    "name": "test_the_two_defect_shapes_are_the_ones_the_harness_catches",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 50
+   },
+   {
+    "name": "test_path_matching_resolves_to_the_operation_the_canon_declares",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 9,
+    "lines": 23
+   },
+   {
+    "name": "test_the_pointer_is_status_specific",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 8
+   },
+   {
+    "name": "test_node_normalization_collapses_array_indices",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 3
+   },
+   {
+    "name": "test_counter_check_mode_non_json_a_body_that_is_not_json_is_not_coverage",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_counter_check_mode_invalid_json_an_unparseable_body_is_not_coverage",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_counter_check_mode_undeclared_2xx_reaches_the_assertion",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 17
+   },
+   {
+    "name": "test_counter_check_mode_unschemad_2xx_reaches_the_assertion",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 18
+   },
+   {
+    "name": "test_counter_check_mode_unmatched_path_reaches_the_assertion",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 19
+   },
+   {
+    "name": "test_counter_check_an_empty_body_under_a_declared_schema_is_not_coverage",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_counter_check_a_streamed_body_nobody_read_is_a_category_and_not_a_crash",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 19
+   },
+   {
+    "name": "test_counter_check_a_non_json_media_declaration_is_named_rather_than_skipped",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 40
+   },
+   {
+    "name": "test_counter_check_mode_json_from_the_artifact_route_is_validated_not_excused",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 42
+   },
+   {
+    "name": "test_counter_check_mode_broken_json_from_the_artifact_route_is_a_failure",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 24
+   },
+   {
+    "name": "test_counter_check_json_the_canon_does_not_declare_is_a_finding_not_a_row",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 33
+   },
+   {
+    "name": "test_counter_check_the_artifact_schema_rejects_a_body_that_is_not_an_object",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_counter_check_an_allowance_row_is_checked_against_the_response_it_excuses",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 32
+   },
+   {
+    "name": "test_counter_check_a_row_records_every_media_type_that_arrived_under_it",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 30
+   },
+   {
+    "name": "test_counter_check_every_artifact_the_app_writes_arrives_under_a_declared_media_type",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 75
+   },
+   {
+    "name": "test_counter_check_mode_wrapper_exception_is_recorded_not_swallowed",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_counter_check_a_broken_recorder_still_lets_the_request_through",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 28
+   },
+   {
+    "name": "test_the_vacuity_verdict_tells_a_filtered_run_from_a_broken_one",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 30
+   },
+   {
+    "name": "test_the_aggregate_run_alone_no_longer_reports_success_over_zero_bodies",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "spawns a child pytest (timeout 600 s, full conftest import) - only end-to-end proof of the vacuity skip; candidate for a milestone tier",
+    "collected": 1,
+    "lines": 42
+   },
+   {
+    "name": "test_a_declared_bodyless_response_with_an_empty_body_is_coverage_not_a_skip",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_a_declared_bodyless_response_that_carries_a_body_is_a_non_conformance",
+    "verdict": "MERGE",
+    "universal": "U-C-3",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row: (canon variant, synthetic response) -> (bodies_checked, observed, unvalidated keys, findings, aggregate)",
+    "collected": 1,
+    "lines": 21
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_root_routes_bypass_the_policy_gate.py",
+  "lines": 104,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_root_routes_do_not_go_through_the_rate_limit_dependency",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/contract/test_p011_root_routes_bypass_the_policy_gate.py::test_adding_root_paths_to_the_exempt_list_would_change_nothing",
+    "removed_contract": null,
+    "note": "the stronger test repeats the identical loop over ROOT_ROUTES and adds two asserts",
+    "collected": 1,
+    "lines": 9
+   },
+   {
+    "name": "test_adding_root_paths_to_the_exempt_list_would_change_nothing",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 26
+   },
+   {
+    "name": "test_the_limiter_is_still_wired_where_it_should_be",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 18
+   }
+  ]
+ },
+ {
+  "file": "tests/contract/test_p011_success_responses_describe_their_content.py",
+  "lines": 506,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "FIX-DOC: ACCEPTED_FREE_FORM[PaymentError.details] cites the prepare path service.py:898-903/:922/:938 - prepare/PREPARED removed by 019/020",
+  "tests": [
+   {
+    "name": "test_no_new_undescribed_success_response",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 9
+   },
+   {
+    "name": "test_the_list_has_no_stale_entries",
+    "verdict": "DELETE-EMPTY",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "own docstring: 'With the list empty this assertion is vacuously true'",
+    "collected": 1,
+    "lines": 13
+   },
+   {
+    "name": "test_accepted_free_form_nodes_are_still_free_form",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 32
+   },
+   {
+    "name": "test_the_predicate_detects_the_forms_it_claims_to",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows of the is_undescribed table",
+    "collected": 1,
+    "lines": 43
+   },
+   {
+    "name": "test_an_uncapped_empty_item_schema_is_still_opaque",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows of the is_undescribed table",
+    "collected": 1,
+    "lines": 23
+   },
+   {
+    "name": "test_the_holes_t1108_found_in_this_predicate_are_closed",
+    "verdict": "MERGE",
+    "universal": "U-C-4",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows of the is_undescribed table",
+    "collected": 1,
+    "lines": 29
+   },
+   {
+    "name": "test_the_free_form_allowlist_does_not_leak_by_property_name",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 50
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p011_admin_money_is_a_decimal_string_on_the_wire.py",
+  "lines": 1044,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_the_admin_wire_checkers_reject_what_they_exist_to_catch",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 47
+   },
+   {
+    "name": "test_admin_trustlines_list_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route=/admin/trustlines",
+    "collected": 1,
+    "lines": 32
+   },
+   {
+    "name": "test_admin_audit_log_declares_no_money_and_leaks_none",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 82
+   },
+   {
+    "name": "test_admin_bottlenecks_money_is_decimal_text_and_threshold_is_a_number",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route=/admin/trustlines/bottlenecks",
+    "collected": 1,
+    "lines": 46
+   },
+   {
+    "name": "test_admin_liquidity_summary_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row /admin/liquidity/summary; totals and per-pid nets as expected values",
+    "collected": 1,
+    "lines": 94
+   },
+   {
+    "name": "test_admin_participant_metrics_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row /admin/participants/{pid}/metrics incl. atoms form",
+    "collected": 1,
+    "lines": 155
+   },
+   {
+    "name": "test_admin_ratio_fields_are_json_numbers_not_strings",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows form=number",
+    "collected": 1,
+    "lines": 48
+   },
+   {
+    "name": "test_one_threshold_parameter_comes_back_as_a_number_twice_and_a_string_once",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 94
+   },
+   {
+    "name": "test_trustline_updated_at_reaches_the_wire_on_every_admin_route_that_serves_one",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "TrustLine.required (incl. updated_at) is validated by the harness once U-C-5 exercises the routes; alias keys stay a row",
+    "collected": 1,
+    "lines": 80
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p011_events_poll_is_always_empty.py",
+  "lines": 74,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_the_poll_answers_an_empty_array_whatever_it_is_asked",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 4,
+    "lines": 25
+   },
+   {
+    "name": "test_the_cursor_makes_no_difference_because_nothing_reads_it",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p011_events_poll_is_always_empty.py::test_the_poll_answers_an_empty_array_whatever_it_is_asked[with-cursor]",
+    "removed_contract": null,
+    "note": "both halves are already asserted == [] by rows [bare] and [with-cursor]",
+    "collected": 1,
+    "lines": 18
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p011_json_artifacts_are_downloaded_and_validated.py",
+  "lines": 140,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_every_json_artifact_is_downloaded_through_the_real_route",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 41
+   },
+   {
+    "name": "test_the_status_document_really_is_the_run_status_shape_after_stop",
+    "verdict": "MERGE",
+    "universal": "U-C-15",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "same finished run as the first test; each test starts its own fixtures-mode run with a 5 s wait",
+    "collected": 1,
+    "lines": 29
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p011_money_is_a_decimal_string_on_the_wire.py",
+  "lines": 419,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "assert_exact_decimal_string and its self-test stay as the checker of U-C-5",
+  "tests": [
+   {
+    "name": "test_the_checker_itself_rejects_float_serialized_money",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 33
+   },
+   {
+    "name": "test_trustline_list_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_trustline_by_id_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_trustline_create_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route",
+    "collected": 1,
+    "lines": 13
+   },
+   {
+    "name": "test_payment_create_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route",
+    "collected": 1,
+    "lines": 9
+   },
+   {
+    "name": "test_payment_by_tx_id_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route",
+    "collected": 1,
+    "lines": 18
+   },
+   {
+    "name": "test_payment_list_money_is_decimal_text",
+    "verdict": "MERGE",
+    "universal": "U-C-5",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row route",
+    "collected": 1,
+    "lines": 24
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_money_form_and_detector_reach_postgres.py",
+  "lines": 762,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_get_debts_renders_plain_decimals_at_the_declared_precision",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows producer=get_debts.outgoing/incoming",
+    "collected": 6,
+    "lines": 65
+   },
+   {
+    "name": "test_the_sql_detectors_render_money_plainly_and_at_the_declared_precision",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows producer=find_triangles_sql/find_quadrangles_sql",
+    "collected": 4,
+    "lines": 53
+   },
+   {
+    "name": "test_no_routed_answer_puts_an_exponent_on_the_wire",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows producer=find_cycles at depth 3/4/6",
+    "collected": 3,
+    "lines": 39
+   },
+   {
+    "name": "test_one_debt_has_one_string_whichever_detector_answered",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "cross-producer equality column",
+    "collected": 1,
+    "lines": 30
+   },
+   {
+    "name": "test_precision_widens_the_clearing_amount_but_never_narrows_the_value",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows (4, 0.01)->0.0100 and (1, 0.05)->0.05 on find_cycles",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_the_api_default_depth_is_past_what_the_sql_detectors_can_reach",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 20
+   },
+   {
+    "name": "test_at_the_api_default_depth_a_triangle_does_not_hide_a_long_cycle",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row triangle + 5-ring at API default depth",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_a_long_cycle_appears_exactly_when_the_caller_asks_deep_enough",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows depth 3..7",
+    "collected": 5,
+    "lines": 36
+   },
+   {
+    "name": "test_the_long_cycle_is_reported_whether_or_not_a_short_one_exists",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows 5-ring alone / beside a triangle",
+    "collected": 1,
+    "lines": 31
+   },
+   {
+    "name": "test_past_the_sql_reach_the_two_answers_are_merged_and_not_swapped",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row 25 disjoint triangles at depth 6",
+    "collected": 1,
+    "lines": 36
+   },
+   {
+    "name": "test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 126
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_rt1_signed_amount_versus_stored_amount_postgres.py",
+  "lines": 549,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_rt_012_1_a_signed_amount_the_column_cannot_hold_reaches_the_ledger_changed",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows payment scale-9/18 -> 4xx and no debt row (the 'ledger holds what was signed' branch is dead since T1201)",
+    "collected": 4,
+    "lines": 51
+   },
+   {
+    "name": "test_rt_012_1_control_a_scale_8_amount_survives_the_chain_unchanged",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "positive row payment 0.12345678 -> 200 COMMITTED, debts::text == 0.12345678",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_end_to_end",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "module/assert text cite engine.py:1545 and 'the prepare lock and the engine' (removed 019/020) and SQLite; the ladder spies private book._refuse_unstorable / MoneyNumeric._refuse_unstorable / _DELTA_DRIFT_TOLERANCE - each barrier has its own test elsewhere (test_p018_b0a_*, test_p015_t1522_*), keep only the composition",
+    "collected": 1,
+    "lines": 214
+   },
+   {
+    "name": "test_rt_012_1_counter_check_the_control_amount_survives_a_widened_door",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "docstring promises an 8-vs-18 comparison, body never widens: it is the row `0.12345678 -> accepted`",
+    "collected": 1,
+    "lines": 13
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_rt2_precision_1_amount_is_erased_on_the_wire_postgres.py",
+  "lines": 461,
+  "verdict": "DELETE-DUP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_rt_012_2_an_amount_accepted_and_stored_is_reported_as_zero_on_the_wire",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p012_t1207_one_money_form_across_producers.py::test_the_edge_patch_and_the_snapshot_report_the_same_trustline[10.00000000-0.05-1]",
+    "removed_contract": null,
+    "note": "same claim Decimal(edge_patch.used)==stored 0.05 at precision 1, plus agreement with the snapshot; the door branch of the disjunction is dead (door is precision-blind by VERDICT-DOOR C); stage-0 probes parse_amount_decimal, which no money caller uses",
+    "collected": 1,
+    "lines": 60
+   },
+   {
+    "name": "test_rt_012_2_counter_check_the_same_amount_at_precision_2_is_reported_faithfully",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p012_t1207_one_money_form_across_producers.py::test_the_edge_patch_and_the_snapshot_report_the_same_trustline[10.00000000-0.05-2]",
+    "removed_contract": null,
+    "note": "the exact string '0.05' at p2 is also pinned by test_a_value_representable_at_its_precision_renders_exactly_as_before[2]",
+    "collected": 1,
+    "lines": 30
+   },
+   {
+    "name": "test_rt_012_2_the_other_producer_in_the_same_file_puts_exponential_money_on_the_wire",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p012_t1207_one_money_form_across_producers.py::test_no_producer_reading_the_ledger_emits_exponential_money",
+    "removed_contract": null,
+    "note": "identical fixture (limit 100.00000000, debt 99.99999999, p2) on build_edge_patch_for_pairs, plus every other producer; this one forges the limit through raw UPDATE",
+    "collected": 1,
+    "lines": 117
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1201_magnitude_bound_is_load_bearing_postgres.py",
+  "lines": 226,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_the_largest_limit_the_column_can_hold_is_stored_unchanged",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row trustline create 999999999999.99999999 -> 201, stored exactly",
+    "collected": 1,
+    "lines": 18
+   },
+   {
+    "name": "test_a_limit_one_digit_too_large_is_a_400_and_never_reaches_the_column",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row trustline create 1000000000000 -> 400 E009, no row",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_counter_check_without_the_magnitude_bound_the_same_request_is_an_http_500",
+    "verdict": "FIX-DOC",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "claims the 500 is PostgreSQL 'numeric field overflow'; since 018 B0a MoneyNumeric(20, 8) on trust_lines.limit refuses at bind first (app/db/types.py:150-181, app/db/models/trustline.py:20). Green (>=500) for a different reason; row-by-row cleanup is redundant under the clone",
+    "collected": 1,
+    "lines": 34
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1201_money_door_at_the_entrances.py",
+  "lines": 555,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-C-8",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_a_trustline_limit_is_a_string_on_the_wire_and_a_json_number_is_a_type_error",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 29
+   },
+   {
+    "name": "test_the_trustline_door_refuses_exponent_notation_written_by_a_client",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 30
+   },
+   {
+    "name": "test_the_smallest_storable_limit_is_signable_by_a_client_that_signs_what_it_sends",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 63
+   },
+   {
+    "name": "test_a_trustline_limit_the_column_holds_exactly_is_accepted_with_trailing_zeros",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 53
+   },
+   {
+    "name": "test_a_trustline_limit_the_column_cannot_hold_is_refused_before_the_signature",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 2,
+    "lines": 32
+   },
+   {
+    "name": "test_the_payment_door_still_refuses_exponent_notation_written_by_a_client",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 4,
+    "lines": 42
+   },
+   {
+    "name": "test_a_payment_amount_with_trailing_zeros_commits_and_is_not_renormalised",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 67
+   },
+   {
+    "name": "test_a_negative_limit_is_refused_at_the_door_on_create_and_update",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 2,
+    "lines": 74
+   },
+   {
+    "name": "test_a_float_in_the_policy_is_refused_as_a_payload_error_not_a_signature_failure",
+    "verdict": "MERGE",
+    "universal": "U-C-8",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 48
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1202_money_modules_read_precision_postgres.py",
+  "lines": 633,
+  "verdict": "MERGE",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_a_triangle_at_the_smallest_expressible_amount_is_detected",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "admission rows (p, quantum)",
+    "collected": 4,
+    "lines": 42
+   },
+   {
+    "name": "test_a_quadrangle_at_the_smallest_expressible_amount_is_detected",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_the_sql_detector_and_the_dfs_fallback_agree_on_what_a_real_debt_is",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/integration/test_p012_money_form_and_detector_reach_postgres.py::test_one_debt_has_one_string_whichever_detector_answered",
+    "removed_contract": null,
+    "note": "identical fixture (UAH p2, 0.01 triangle, API default depth); the stronger asserts presence in both AND identical strings",
+    "collected": 1,
+    "lines": 45
+   },
+   {
+    "name": "test_a_graph_with_an_ordinary_and_a_boundary_cycle_reports_both",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 28
+   },
+   {
+    "name": "test_the_detector_does_not_privately_decide_that_sub_quantum_debt_is_not_debt",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row 0.005 at p2 via SQL and via find_cycles",
+    "collected": 1,
+    "lines": 50
+   },
+   {
+    "name": "test_no_balance_field_is_ever_in_exponent_notation",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row cancelling pair",
+    "collected": 1,
+    "lines": 18
+   },
+   {
+    "name": "test_one_balance_payload_renders_zero_exactly_one_way",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_balance_renders_the_number_of_digits_the_equivalent_declares",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows p in 0,1,2,4,8",
+    "collected": 5,
+    "lines": 53
+   },
+   {
+    "name": "test_precision_never_erases_an_amount_the_ledger_actually_holds",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row (1, 0.05) on get_summary and get_debts",
+    "collected": 1,
+    "lines": 40
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1207_one_money_form_across_producers.py",
+  "lines": 1063,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "clearing.done scale (fakes of ClearingService/session) and topology.changed inject stay (basket F); both producers are inside 021's rewrite scope",
+  "tests": [
+   {
+    "name": "test_the_edge_patch_and_the_snapshot_report_the_same_trustline",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows producer=edge_patch_by_equivalent/snapshot",
+    "collected": 15,
+    "lines": 54
+   },
+   {
+    "name": "test_the_per_transaction_patch_agrees_with_the_other_two",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 5,
+    "lines": 38
+   },
+   {
+    "name": "test_the_three_producers_agree_on_a_legacy_row_above_the_domain",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "legacy row p12 (Core insert)",
+    "collected": 1,
+    "lines": 56
+   },
+   {
+    "name": "test_net_balance_agrees_between_the_snapshot_and_the_node_patch",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 5,
+    "lines": 33
+   },
+   {
+    "name": "test_clearing_done_reports_one_scale_whether_or_not_it_was_cancelled",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 5,
+    "lines": 36
+   },
+   {
+    "name": "test_no_producer_reading_the_ledger_emits_exponential_money",
+    "verdict": "MERGE",
+    "universal": "U-C-6",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row (2, 100/99.99999999) for every producer",
+    "collected": 1,
+    "lines": 66
+   },
+   {
+    "name": "test_the_topology_changed_trustline_limit_is_not_exponential",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 2,
+    "lines": 119
+   },
+   {
+    "name": "test_a_value_representable_at_its_precision_renders_exactly_as_before",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure; move to unit",
+    "collected": 19,
+    "lines": 25
+   },
+   {
+    "name": "test_the_clearing_cancel_path_is_byte_identical_at_the_default_precision",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure; move to unit",
+    "collected": 1,
+    "lines": 14
+   },
+   {
+    "name": "test_every_value_that_did_move_was_one_the_precision_could_not_express",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure; move to unit",
+    "collected": 19,
+    "lines": 37
+   },
+   {
+    "name": "test_the_minimum_digit_promise_does_not_depend_on_the_ambient_decimal_context",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure",
+    "collected": 2,
+    "lines": 19
+   },
+   {
+    "name": "test_a_non_finite_value_is_refused_loudly_not_rendered_as_zero",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure",
+    "collected": 3,
+    "lines": 17
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1210_net_balance_agrees_with_its_atoms.py",
+  "lines": 617,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "the three producer tests stay: a separate rule (string vs atoms vs sign vs colour); _effective_precision pins the live `precision or 2` defect (F-024-14)",
+  "tests": [
+   {
+    "name": "test_the_two_encodings_of_one_net_agree_on_the_findings_own_table",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 4,
+    "lines": 26
+   },
+   {
+    "name": "test_the_two_encodings_agree_at_every_precision_across_the_quantum_boundary",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 5,
+    "lines": 16
+   },
+   {
+    "name": "test_a_zero_net_still_ships_as_zero_in_both_encodings",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 26
+   },
+   {
+    "name": "test_a_value_representable_at_its_precision_keeps_exactly_the_atoms_it_had",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure; move to unit",
+    "collected": 19,
+    "lines": 27
+   },
+   {
+    "name": "test_every_net_whose_atoms_moved_was_one_the_precision_could_not_express",
+    "verdict": "MERGE",
+    "universal": "U-C-7",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "pure; move to unit",
+    "collected": 19,
+    "lines": 51
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1211_negative_zero_cannot_come_back_from_the_ledger_postgres.py",
+  "lines": 75,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_a_negative_zero_cannot_come_back_from_a_numeric_column",
+    "verdict": "MERGE",
+    "universal": "U-C-14",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows literal -> numeric(20,8) read-back",
+    "collected": 5,
+    "lines": 17
+   },
+   {
+    "name": "test_the_renderer_disagreement_this_pins_is_still_real",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p012_t1211_money_rendering_conformance.py::test_negative_zero_is_the_one_place_the_three_copies_disagree",
+    "removed_contract": null,
+    "note": "identical assert to_money_str(Decimal('-0.00'), 2) == '-0.00'; the stronger adds 5.00-5.00 -> '0.00'",
+    "collected": 1,
+    "lines": 14
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1211_shared_edge_order_postgres.py",
+  "lines": 44,
+  "verdict": "DELETE-DUP",
+  "basket": "A",
+  "universal": null,
+  "stronger": "tests/unit/test_p012_t1210_detector_union_default_tier.py::test_within_a_length_the_largest_executable_cycle_comes_first",
+  "removed_contract": "SQLite tier (017 stage 3) - the reason for a PG twin",
+  "note": "",
+  "tests": [
+   {
+    "name": "test_within_a_length_the_largest_executable_cycle_comes_first_pg",
+    "verdict": "DELETE-DUP",
+    "universal": null,
+    "stronger": "tests/unit/test_p012_t1210_detector_union_default_tier.py::test_within_a_length_the_largest_executable_cycle_comes_first",
+    "removed_contract": null,
+    "note": "byte-identical body and fixture; since 017 both run on PostgreSQL, the 'other tier' premise is gone",
+    "collected": 1,
+    "lines": 13
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p012_t1212_declared_precision_exceeds_storage_scale_postgres.py",
+  "lines": 642,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_the_equivalent_door_refuses_a_precision_the_ledger_cannot_keep",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 63
+   },
+   {
+    "name": "test_a_value_at_a_declared_precision_past_the_storage_scale_is_silently_rounded",
+    "verdict": "MERGE",
+    "universal": "U-C-14",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "PG numeric rounding rows; the to_money_str(1.23456789, 12) line is covered by conformance-table rows past precision 8",
+    "collected": 1,
+    "lines": 58
+   },
+   {
+    "name": "test_the_money_door_refuses_the_declared_quantum_of_such_an_equivalent",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows 0.000000000001 refused, 0.00000001 accepted",
+    "collected": 1,
+    "lines": 22
+   },
+   {
+    "name": "test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "fixture check -> admin-ui/scripts/validate-fixtures.mjs (already reads every dataset's equivalents.json); seeds/ go through the Equivalent validator on load",
+    "collected": 1,
+    "lines": 47
+   },
+   {
+    "name": "test_the_census_reports_an_equivalent_dataset_shipped_somewhere_new",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "self-test of the census walker; the walker disappears with the move",
+    "collected": 1,
+    "lines": 44
+   },
+   {
+    "name": "test_an_exclusion_hides_only_its_own_directory_and_not_the_source_beside_it",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "same",
+    "collected": 6,
+    "lines": 49
+   },
+   {
+    "name": "test_every_excluded_directory_name_still_has_its_own_probe",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "same",
+    "collected": 1,
+    "lines": 18
+   },
+   {
+    "name": "test_a_dataset_shipped_under_another_filename_does_not_evade_the_census",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "same",
+    "collected": 1,
+    "lines": 79
+   }
+  ]
+ },
+ {
+  "file": "tests/integration/test_p014_t1402_zero_sum_is_not_published_as_a_check.py",
+  "lines": 261,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_status_endpoint_publishes_no_zero_sum_verdict",
+    "verdict": "MERGE",
+    "universal": "U-C-12",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row GET /integrity/status (+ trust_limits/debt_symmetry still carry verdicts)",
+    "collected": 1,
+    "lines": 23
+   },
+   {
+    "name": "test_verify_endpoint_publishes_no_zero_sum_verdict",
+    "verdict": "MERGE",
+    "universal": "U-C-12",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row POST /integrity/verify",
+    "collected": 1,
+    "lines": 15
+   },
+   {
+    "name": "test_checkpoint_records_the_withdrawal_not_a_pass",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 14
+   },
+   {
+    "name": "test_the_withdrawn_shape_cannot_carry_a_verdict",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 12
+   },
+   {
+    "name": "test_no_production_path_calls_check_zero_sum",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "E guard; the form still exists (InvariantChecker.check_zero_sum, app/core/invariants.py:22, no caller). Deleting the dead method (024 hygiene) makes this guard DELETE-REMOVED",
+    "collected": 1,
+    "lines": 28
+   },
+   {
+    "name": "test_no_checked_in_fixture_publishes_a_zero_sum_verdict",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "fixture check -> admin-ui/scripts/validate-fixtures.mjs",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_a_checkpoint_stored_before_the_withdrawal_still_conforms_to_the_canon",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 58
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p011_sse_event_declares_patches.py",
+  "lines": 114,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_tx_updated_declares_every_key_it_emits",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 17
+   },
+   {
+    "name": "test_declaring_the_patches_does_not_change_the_wire",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 16
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p012_t1201_money_door_bounds.py",
+  "lines": 456,
+  "verdict": "MIXED",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_the_door_and_the_predicate_return_the_same_verdict",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 26,
+    "lines": 26
+   },
+   {
+    "name": "test_trailing_zeros_do_not_make_a_value_unstorable",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 6,
+    "lines": 32
+   },
+   {
+    "name": "test_the_renderer_output_is_admitted_by_the_door",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "133 ids -> 7 (one per value; loop precision 0..18 inside, the failure names the precision)",
+    "collected": 133,
+    "lines": 38
+   },
+   {
+    "name": "test_the_largest_amount_the_column_can_hold_is_admitted",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 1,
+    "lines": 14
+   },
+   {
+    "name": "test_a_magnitude_the_column_cannot_hold_is_refused_at_the_door",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 4,
+    "lines": 33
+   },
+   {
+    "name": "test_counter_check_widening_the_magnitude_bound_admits_what_the_column_refuses",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the widened-constant table",
+    "collected": 3,
+    "lines": 23
+   },
+   {
+    "name": "test_counter_check_widening_the_scale_bound_admits_what_the_column_rounds",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the widened-constant table",
+    "collected": 1,
+    "lines": 20
+   },
+   {
+    "name": "test_is_storable_money_accepts_what_the_column_keeps_unchanged",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 10,
+    "lines": 19
+   },
+   {
+    "name": "test_is_storable_money_refuses_what_the_column_would_change",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 11,
+    "lines": 18
+   },
+   {
+    "name": "test_is_storable_money_answers_rather_than_raises_on_huge_values",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the amount table",
+    "collected": 2,
+    "lines": 5
+   },
+   {
+    "name": "test_counter_check_a_widened_scale_makes_the_predicate_agree_to_rounding",
+    "verdict": "MERGE",
+    "universal": "U-C-9",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row of the widened-constant table",
+    "collected": 3,
+    "lines": 15
+   },
+   {
+    "name": "test_the_lexical_bound_is_about_length_and_not_about_capacity",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 41
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p012_t1210_daily_limit_policy_door.py",
+  "lines": 109,
+  "verdict": "MERGE",
+  "basket": "C",
+  "universal": "U-C-10",
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_daily_limit_accepts_what_the_json_column_stores",
+    "verdict": "MERGE",
+    "universal": "U-C-10",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 7,
+    "lines": 24
+   },
+   {
+    "name": "test_daily_limit_strings_still_obey_the_money_wire_grammar",
+    "verdict": "MERGE",
+    "universal": "U-C-10",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 7,
+    "lines": 17
+   },
+   {
+    "name": "test_daily_limit_non_numeric_types_get_the_type_message",
+    "verdict": "MERGE",
+    "universal": "U-C-10",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 4,
+    "lines": 8
+   },
+   {
+    "name": "test_daily_limit_stays_non_negative",
+    "verdict": "MERGE",
+    "universal": "U-C-10",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 3,
+    "lines": 6
+   },
+   {
+    "name": "test_max_hop_usage_keeps_the_looser_rule",
+    "verdict": "MERGE",
+    "universal": "U-C-10",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p012_t1210_detector_union_default_tier.py",
+  "lines": 327,
+  "verdict": "MIXED",
+  "basket": "A",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "FIX-DOC: module/test docstrings argue 'default tier on purpose, spellings differ only on SQLite'; the file is DB-backed but lives in tests/unit",
+  "tests": [
+   {
+    "name": "test_a_triangle_does_not_hide_a_disjoint_quadrangle",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "rows depth 4/5/6",
+    "collected": 3,
+    "lines": 23
+   },
+   {
+    "name": "test_the_merged_answer_reports_one_cycle_once",
+    "verdict": "MERGE",
+    "universal": "U-C-11",
+    "stronger": null,
+    "removed_contract": null,
+    "note": "row one triangle at depth 5 -> exactly one cycle",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_within_a_length_the_largest_executable_cycle_comes_first",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 25
+   },
+   {
+    "name": "test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_the_small",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 39
+   },
+   {
+    "name": "test_auto_clear_orders_the_union_when_the_sql_path_is_down",
+    "verdict": "REWRITE",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "monkeypatches find_triangles_sql/find_quadrangles_sql to raise; reach the union sort through a public graph instead: two 5-cycles sharing an edge (only the DFS reaches length 5)",
+    "collected": 1,
+    "lines": 39
+   },
+   {
+    "name": "test_the_ladder_widens_when_short_cycles_exist_but_none_executes",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 42
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p012_t1211_engine_ladder.py",
+  "lines": 139,
+  "verdict": "KEEP",
+  "basket": "F",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "simulator RealClearingEngine with doubles; asserts cleared == {'USD': 5.0} (a float money return); inside 021's rewrite scope",
+  "tests": [
+   {
+    "name": "test_the_ladder_survives_to_the_execution_loop",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 59
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p012_t1211_money_path_never_types_a_float.py",
+  "lines": 193,
+  "verdict": "KEEP",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "AST guard, form exists; 29 ids are one per float site (ids carry line numbers and churn) - collapse to 3 set asserts",
+  "tests": [
+   {
+    "name": "test_the_scan_actually_reached_the_money_path",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 10
+   },
+   {
+    "name": "test_no_money_value_is_typed_as_a_float",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 12,
+    "lines": 12
+   },
+   {
+    "name": "test_no_money_value_is_converted_to_a_float",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 10,
+    "lines": 11
+   },
+   {
+    "name": "test_no_money_attribute_is_declared_as_a_float",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 4,
+    "lines": 13
+   },
+   {
+    "name": "test_every_acknowledged_float_attribute_still_exists",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 9
+   },
+   {
+    "name": "test_every_allowlisted_reason_is_actually_used",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 16
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p012_t1211_money_rendering_conformance.py",
+  "lines": 307,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "cross-language table; the stronger test for two dups",
+  "tests": [
+   {
+    "name": "test_the_shared_table_is_actually_read",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 5
+   },
+   {
+    "name": "test_the_table_covers_the_class_it_claims_to",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 13,
+    "lines": 7
+   },
+   {
+    "name": "test_to_money_str_conforms_to_the_shared_table",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 44,
+    "lines": 7
+   },
+   {
+    "name": "test_the_table_can_tell_a_wrong_implementation_apart",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 14,
+    "lines": 18
+   },
+   {
+    "name": "test_negative_zero_is_the_one_place_the_three_copies_disagree",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 17
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p013_t1302_graph_snapshot_include_completeness.py",
+  "lines": 283,
+  "verdict": "KEEP",
+  "basket": "C",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "HTTP+DB test living in tests/unit: move to tests/integration",
+  "tests": [
+   {
+    "name": "test_a_snapshot_says_whether_the_optional_collections_were_asked_for",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 29
+   },
+   {
+    "name": "test_asked_and_empty_is_distinguishable_from_not_asked",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 26
+   },
+   {
+    "name": "test_a_truncated_collection_says_that_it_was_truncated",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 26
+   },
+   {
+    "name": "test_a_payment_row_says_who_it_was_between",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 57
+   },
+   {
+    "name": "test_a_clearing_row_says_whose_debts_it_moved",
+    "verdict": "KEEP",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "",
+    "collected": 1,
+    "lines": 55
+   }
+  ]
+ },
+ {
+  "file": "tests/unit/test_p014_t1406_no_mutable_database_in_the_working_tree.py",
+  "lines": 313,
+  "verdict": "MIXED",
+  "basket": "E",
+  "universal": null,
+  "stronger": null,
+  "removed_contract": null,
+  "note": "",
+  "tests": [
+   {
+    "name": "test_no_mutable_database_sits_outside_the_scratch_tree",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "repo hygiene -> preflight step of scripts/verify_local.ps1 (or scripts/ check); not backend behaviour",
+    "collected": 1,
+    "lines": 10
+   },
+   {
+    "name": "test_the_filesystem_guard_can_actually_see_a_stray",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "counter-test of the moved walker",
+    "collected": 1,
+    "lines": 10
+   },
+   {
+    "name": "test_the_scanned_set_is_not_empty_in_this_repository",
+    "verdict": "MOVE-OUT",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "counter-test; writes a sentinel file into the real .local-run/",
+    "collected": 1,
+    "lines": 20
+   },
+   {
+    "name": "test_no_test_module_builds_a_sqlite_url_outside_the_scratch_tree",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "SQLite removed by 017 stage 3: tests/conftest.py refuses a non-postgresql URL before collection (UsageError), app/config refuses non-asyncpg, aiosqlite is absent from requirements",
+    "collected": 1,
+    "lines": 37
+   },
+   {
+    "name": "test_the_source_guard_detects_what_it_claims_to",
+    "verdict": "DELETE-REMOVED",
+    "universal": null,
+    "stronger": null,
+    "removed_contract": null,
+    "note": "counter-test of the removed source guard",
+    "collected": 6,
+    "lines": 25
+   }
+  ]
+ }
+]
