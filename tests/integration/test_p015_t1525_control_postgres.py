@@ -58,7 +58,7 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.real_debt_snapshot_loader import RealDebtSnapshotLoader
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.core.simulator.real_runner import RealRunner
-from app.core.simulator.real_tick_payments_coordinator import RealTickPaymentsCoordinator
+from app.core.simulator.tick import RealTick
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -438,14 +438,14 @@ async def _scenario_real_tick_fails_after_payments(factory, world, monkeypatch) 
     )
 
     phases: list[Any] = []
-    original_phase = RealTickPaymentsCoordinator.run_payments_phase
+    original_phase = RealTick.run_payments_phase
 
     async def _capture_phase(self, **kwargs):
         res, should_stop = await original_phase(self, **kwargs)
         phases.append(res)
         return res, should_stop
 
-    monkeypatch.setattr(RealTickPaymentsCoordinator, "run_payments_phase", _capture_phase)
+    monkeypatch.setattr(RealTick, "run_payments_phase", _capture_phase)
 
     # WHERE THIS FAILURE IS INJECTED MOVED WITH PROGRAMME 015 / P1, 2026-09-12. It used to be
     # raised from `maybe_run_clearing`, that is, from the tick's TAIL. The tail now runs after the

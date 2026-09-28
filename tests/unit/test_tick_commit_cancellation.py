@@ -1,19 +1,20 @@
+"""Cancellation and failure of each of the tick's own commits: before clearing, of the persistence tail, of decay.
+
+Programme 021 stage 4 (`T2105`): renamed from `test_real_tick_commit_cancellation.py`. The three boundaries were
+three classes (`RealTickClearingCoordinator`, `RealTickPersistence`, `RealTickTrustDriftCoordinator`), each with its
+own copy of the commit-and-resolve helper; they are now three methods of `RealTick` over one copy. The collaborators
+the classes took as arguments are the runner's attributes; every assertion is unchanged.
+"""
+
 import asyncio
 import logging
-import threading
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_tick_clearing_coordinator import (
-    RealTickClearingCoordinator,
-)
-from app.core.simulator.real_tick_persistence import RealTickPersistence
-from app.core.simulator.real_tick_trust_drift_coordinator import (
-    RealTickTrustDriftCoordinator,
-)
+from tests.simulator_tick_stand import unit_tick
 
 
 class _ControlledSession:
@@ -108,12 +109,12 @@ def _public_commit_path(
     resolution: _Resolution,
 ):
     if boundary == "clearing":
-        coordinator = RealTickClearingCoordinator(
-            lock=threading.RLock(),
-            logger=logging.getLogger(__name__),
-            clearing_every_n_ticks=1,
-            real_clearing_time_budget_ms=250,
+        coordinator = unit_tick(
+            _logger=logging.getLogger(__name__),
+            _clearing_every_n_ticks=1,
+            _real_clearing_time_budget_ms=250,
         )
+        coordinator._run_clearing = _unexpected_clearing
         return coordinator.maybe_run_clearing(
             session=session,
             run_id="commit-cancellation",
@@ -121,23 +122,10 @@ def _public_commit_path(
             equivalents=["UAH"],
             planned_len=1,
             tick_t0=0.0,
-            clearing_enabled=True,
-            safe_int_env=lambda _key, default: default,
-            run_clearing=_unexpected_clearing,
             payments_result=resolution,
         )
     if boundary == "persistence":
-        persistence = RealTickPersistence(
-            lock=threading.RLock(),
-            artifacts=_Artifacts(),
-            utc_now=lambda: datetime.now(timezone.utc),
-            db_enabled=lambda: False,
-            logger=logging.getLogger(__name__),
-            real_db_metrics_every_n_ticks=100,
-            real_db_bottlenecks_every_n_ticks=100,
-            real_last_tick_write_every_ms=0,
-            real_artifacts_sync_every_ms=0,
-        )
+        persistence = _persistence_tick()
         return persistence.persist_tick_tail(
             session=session,
             run=_run(),
@@ -151,31 +139,44 @@ def _public_commit_path(
             per_eq={"UAH": {"committed": 1}},
             per_eq_metric_values={"UAH": {}},
             per_eq_edge_stats={"UAH": {}},
-            on_commit=resolution.apply_deferred_effects,
-            on_rollback=resolution.apply_rollback_observations,
-            on_unknown=resolution.apply_unknown_transaction_observations,
+            payments_result=resolution,
         )
     if boundary == "trust":
-        coordinator = RealTickTrustDriftCoordinator(logger=logging.getLogger(__name__))
+        coordinator = _decay_tick(_DecayEngine())
         return coordinator.apply_trust_decay_and_broadcast(
             session=session,
             run_id="commit-cancellation",
             run=_run(),
-            tick_index=1,
             debt_snapshot={},
             scenario={},
-            trust_drift_engine=_DecayEngine(),  # type: ignore[arg-type]
-            build_edge_patch_for_equivalent=_unexpected_edge_patch,
-            broadcast_topology_edge_patch=lambda **_kwargs: None,
-            on_commit=resolution.apply_deferred_effects,
-            on_rollback=resolution.apply_rollback_observations,
-            on_unknown=resolution.apply_unknown_transaction_observations,
+            payments_result=resolution,
         )
     raise AssertionError(f"unknown boundary: {boundary}")
 
 
-async def _unexpected_clearing():
+async def _unexpected_clearing(**_kwargs):
     raise AssertionError("clearing must not run after cancellation")
+
+
+def _persistence_tick():
+    return unit_tick(
+        _logger=logging.getLogger(__name__),
+        _artifacts=_Artifacts(),
+        _db_enabled=lambda: False,
+        _real_db_metrics_every_n_ticks=100,
+        _real_db_bottlenecks_every_n_ticks=100,
+        _real_last_tick_write_every_ms=0,
+        _real_artifacts_sync_every_ms=0,
+    )
+
+
+def _decay_tick(decay_engine):
+    return unit_tick(
+        _logger=logging.getLogger(__name__),
+        _trust_drift_engine=decay_engine,
+        _build_edge_patch_for_equivalent=_unexpected_edge_patch,
+        _broadcast_topology_edge_patch=lambda **_kwargs: None,
+    )
 
 
 async def _cancel_during_commit(task, session: _ControlledSession) -> None:
@@ -257,17 +258,16 @@ async def test_clearing_cancellation_waits_for_commit_and_resolves_commit():
     resolution = _Resolution()
     clearing_called = False
 
-    async def _run_clearing():
+    async def _run_clearing(**_kwargs):
         nonlocal clearing_called
         clearing_called = True
-        return {"UAH": 0.0}
 
-    coordinator = RealTickClearingCoordinator(
-        lock=threading.RLock(),
-        logger=logging.getLogger(__name__),
-        clearing_every_n_ticks=1,
-        real_clearing_time_budget_ms=250,
+    coordinator = unit_tick(
+        _logger=logging.getLogger(__name__),
+        _clearing_every_n_ticks=1,
+        _real_clearing_time_budget_ms=250,
     )
+    coordinator._run_clearing = _run_clearing
     task = asyncio.create_task(
         coordinator.maybe_run_clearing(
             session=session,
@@ -276,9 +276,6 @@ async def test_clearing_cancellation_waits_for_commit_and_resolves_commit():
             equivalents=["UAH"],
             planned_len=1,
             tick_t0=0.0,
-            clearing_enabled=True,
-            safe_int_env=lambda _key, default: default,
-            run_clearing=_run_clearing,
             payments_result=resolution,
         )
     )
@@ -297,17 +294,7 @@ async def test_clearing_cancellation_waits_for_commit_and_resolves_commit():
 async def test_persistence_cancellation_waits_for_commit_and_resolves_commit():
     session = _ControlledSession()
     resolution = _Resolution()
-    persistence = RealTickPersistence(
-        lock=threading.RLock(),
-        artifacts=_Artifacts(),
-        utc_now=lambda: datetime.now(timezone.utc),
-        db_enabled=lambda: False,
-        logger=logging.getLogger(__name__),
-        real_db_metrics_every_n_ticks=100,
-        real_db_bottlenecks_every_n_ticks=100,
-        real_last_tick_write_every_ms=0,
-        real_artifacts_sync_every_ms=0,
-    )
+    persistence = _persistence_tick()
     task = asyncio.create_task(
         persistence.persist_tick_tail(
             session=session,
@@ -322,9 +309,7 @@ async def test_persistence_cancellation_waits_for_commit_and_resolves_commit():
             per_eq={"UAH": {"committed": 1}},
             per_eq_metric_values={"UAH": {}},
             per_eq_edge_stats={"UAH": {}},
-            on_commit=resolution.apply_deferred_effects,
-            on_rollback=resolution.apply_rollback_observations,
-            on_unknown=resolution.apply_unknown_transaction_observations,
+            payments_result=resolution,
         )
     )
 
@@ -342,21 +327,15 @@ async def test_trust_drift_cancellation_waits_for_commit_and_resolves_commit():
     session = _ControlledSession()
     resolution = _Resolution()
     decay_engine = _DecayEngine()
-    coordinator = RealTickTrustDriftCoordinator(logger=logging.getLogger(__name__))
+    coordinator = _decay_tick(decay_engine)
     task = asyncio.create_task(
         coordinator.apply_trust_decay_and_broadcast(
             session=session,
             run_id="commit-cancellation",
             run=_run(),
-            tick_index=1,
             debt_snapshot={},
             scenario={},
-            trust_drift_engine=decay_engine,  # type: ignore[arg-type]
-            build_edge_patch_for_equivalent=_unexpected_edge_patch,
-            broadcast_topology_edge_patch=lambda **_kwargs: None,
-            on_commit=resolution.apply_deferred_effects,
-            on_rollback=resolution.apply_rollback_observations,
-            on_unknown=resolution.apply_unknown_transaction_observations,
+            payments_result=resolution,
         )
     )
 
@@ -376,22 +355,16 @@ async def test_trust_drift_commit_failure_does_not_apply_staged_effects():
     session.release_commit.set()
     resolution = _Resolution()
     decay_engine = _DecayEngine()
-    coordinator = RealTickTrustDriftCoordinator(logger=logging.getLogger(__name__))
+    coordinator = _decay_tick(decay_engine)
 
     with pytest.raises(RuntimeError, match="trust commit failed"):
         await coordinator.apply_trust_decay_and_broadcast(
             session=session,
             run_id="commit-failure",
             run=_run(),
-            tick_index=1,
             debt_snapshot={},
             scenario={},
-            trust_drift_engine=decay_engine,  # type: ignore[arg-type]
-            build_edge_patch_for_equivalent=_unexpected_edge_patch,
-            broadcast_topology_edge_patch=lambda **_kwargs: None,
-            on_commit=resolution.apply_deferred_effects,
-            on_rollback=resolution.apply_rollback_observations,
-            on_unknown=resolution.apply_unknown_transaction_observations,
+            payments_result=resolution,
         )
 
     assert session.rollbacks == 1

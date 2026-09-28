@@ -449,7 +449,7 @@ class TrustDriftEngine:
         """Apply trust decay to overloaded edges that didn't get cleared.
 
         Uses the main tick session. Does NOT commit — caller commits, and the caller owns the rollback on
-        failure (`RealTickTrustDriftCoordinator`). Programme 021, stage 1: the limit changes go through the
+        failure (`tick.py::RealTick.apply_trust_decay_and_broadcast`). Programme 021, stage 1: the limit changes go through the
         trust-line service's internal path and this method finishes its batch - one audit row per changed line,
         one checkpoint pair per touched equivalent - so the caller's commit carries them together.
         Returns count of decayed edges.

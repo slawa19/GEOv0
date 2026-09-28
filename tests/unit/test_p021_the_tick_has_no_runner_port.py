@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tests.p021_support import require_target, target_xfail_021
+from tests.p021_support import require_target
 
 REPO = Path(__file__).resolve().parents[2]
 SCANNED_DIR = "app"
@@ -85,7 +85,6 @@ def _scan(root: Path = REPO) -> tuple[list[str], list[str]]:
     return found, calls
 
 
-@target_xfail_021("T2105 (stage 4)", "six real_tick_* modules and the runner port `_RealRunnerPort`")
 def test_the_tick_is_one_module_without_a_runner_port() -> None:
     found, calls = _scan()
     problems = list(found)

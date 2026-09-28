@@ -1,9 +1,10 @@
 """Programme 023, slice (d): the simulator's tick clearing through the common runner, and the cold-spawn acceptance.
 
-The tick adapter is REAL: `RealTickClearingCoordinator.maybe_run_clearing` (the orchestrator's call, with its hard
-timeout `max(2 s, 4 × budget)` capped by `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealRunner.
-tick_real_mode_clearing` -> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The
-budget is the normal one (`SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS`, 250 ms); nothing is raised for the test.
+The tick adapter is REAL: `RealTick.maybe_run_clearing` (`app/core/simulator/tick.py`, the tick's call, with its
+hard timeout `max(2 s, 4 × budget)` capped by `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC`) -> `RealTick._run_clearing`
+-> `RealClearingEngine` -> the runner, its `spawn` planner process and PostgreSQL. The budget is the normal one
+(`SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS`, 250 ms); nothing is raised for the test. Until 021 stage 4 the adapter
+was `RealTickClearingCoordinator.maybe_run_clearing` -> `RealRunner.tick_real_mode_clearing`.
 
 * THROUGH THE RUNNER - the tick's clearing goes through `execute_occurrence` in the run's perimeter; its
   `clearing.done` carries creditor -> debtor PIDs (decision R3: the runner's progress is debtor -> creditor by
@@ -39,10 +40,8 @@ from sqlalchemy import func, select
 from app.core.clearing.service import ClearingService
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
-from app.core.simulator.runtime_utils import safe_int_env
 from app.db.models.transaction import Transaction
 from tests.p020_support import debt_uuid, participant_uuid, ring, seed_graph
-from tests.p021_support import target_xfail_021
 from tests.p023_support import positive_debt_total, require_target, slow_plan
 from tests.simulator_tick_stand import RecordingSse, install_tick_stand, pooled_sessionmaker_over
 
@@ -89,20 +88,16 @@ class _Stand:
         )
 
     async def tick(self) -> dict:
-        """One clearing tick through the real coordinator (the orchestrator's call, `real_tick_orchestrator.py`)."""
+        """One clearing tick through the tick's own clearing step (`tick.py::RealTick.maybe_run_clearing`)."""
 
-        coordinator = self.runner._real_tick_clearing_coordinator
         async with self.factory() as session:
-            return await coordinator.maybe_run_clearing(
+            return await self.runner._tick.maybe_run_clearing(
                 session=session,
                 run_id=self.run.run_id,
                 run=self.run,
                 equivalents=[CODE],
                 planned_len=0,
                 tick_t0=time.monotonic(),
-                clearing_enabled=True,
-                safe_int_env=safe_int_env,
-                run_clearing=lambda: self.runner.tick_real_mode_clearing(session, self.run.run_id, self.run, [CODE]),
                 payments_result=None,
             )
 
@@ -241,7 +236,7 @@ async def test_cold_spawn_the_first_tick_is_recorded_and_a_later_tick_really_cle
 async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_starts_nothing(factory, monkeypatch, caplog) -> None:
     runner = _runner_module()
     stand = await _stand(factory, T1 + T2)
-    hard_timeout = stand.runner._real_tick_clearing_coordinator.compute_static_clearing_hard_timeout_sec(safe_int_env=safe_int_env)
+    hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
     real_pool = runner._default_planner_executor()
     await asyncio.wrap_future(real_pool.submit(runner.plan_clearing, []))  # warm: the delay, not a spawn, is timed
     pool = _DelegatingPool(real_pool)
@@ -274,7 +269,7 @@ async def test_planning_past_the_hard_timeout_is_reported_and_its_late_result_st
 @pytest.mark.asyncio
 async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monkeypatch, caplog) -> None:
     stand = await _stand(factory, T1 + T2)
-    hard_timeout = stand.runner._real_tick_clearing_coordinator.compute_static_clearing_hard_timeout_sec(safe_int_env=safe_int_env)
+    hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
 
     async def before(n: int) -> None:
         if n == 2:
@@ -298,10 +293,6 @@ async def test_a_tick_cancelled_after_a_commit_keeps_its_progress(factory, monke
 # ------------------------------------------------------------ the committed volume survives the hard timeout
 
 
-@target_xfail_021(
-    "T2105 (stage 4)",
-    "the tick's clearing volume is taken from the successful return, so a timeout after a commit reports zero",
-)
 @pytest.mark.asyncio
 async def test_a_timeout_after_a_commit_reports_the_committed_volume(factory, monkeypatch) -> None:
     """Programme 021 stage 4, `specs/BACKLOG.md` ("Класс 2 из §15-ревью среза (d) программы 023", item 1).
@@ -314,7 +305,7 @@ async def test_a_timeout_after_a_commit_reports_the_committed_volume(factory, mo
     """
 
     stand = await _stand(factory, T1 + T2)
-    hard_timeout = stand.runner._real_tick_clearing_coordinator.compute_static_clearing_hard_timeout_sec(safe_int_env=safe_int_env)
+    hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
 
     async def before(n: int) -> None:
         if n == 2:

@@ -8,11 +8,12 @@ finding is actually named for: **the owner still reports success for work that w
 written.**  The writer swallows its own exception and returns `None`
 (`app/core/simulator/storage.py:666-671`), which is indistinguishable from a successful
 write, and `persist_tick_tail` then advances the flush marker regardless
-(`app/core/simulator/real_tick_persistence.py:134-136`).
+(`app/core/simulator/real_tick_persistence.py:134-136` at the time; since programme 021 stage 4,
+`RealTick.persist_tick_tail` in `app/core/simulator/tick.py`).
 
 Why the loss is permanent rather than transient: `flush_pending_storage` is the retry
 path, and it returns early when `flushed_tick >= last_tick`
-(`app/core/simulator/real_tick_persistence.py:202-204`).  A tick marked flushed but never
+(`app/core/simulator/real_tick_persistence.py:202-204` at the time; now `RealTick.flush_pending_storage`).  A tick marked flushed but never
 written is therefore never retried -- the bottlenecks row is gone for good, and the only
 trace is one `logger.exception` line.
 
@@ -25,18 +26,14 @@ error is fabricated at the boundary being tested.
 from __future__ import annotations
 
 import logging
-import threading
-from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
 import app.core.simulator.storage as simulator_storage
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_tick_persistence import RealTickPersistence
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+from app.core.simulator.tick import RealTick
+from tests.simulator_tick_stand import unit_tick
 
 
 class _Savepoint:
@@ -78,18 +75,16 @@ class _FailingFlushSession:
 
 def _persistence(
     *, metrics_every_n: int = 1, bottlenecks_every_n: int = 1
-) -> RealTickPersistence:
-    return RealTickPersistence(
-        lock=threading.RLock(),
-        artifacts=None,
-        utc_now=_utc_now,
-        db_enabled=lambda: True,
-        logger=logging.getLogger(__name__),
-        real_db_metrics_every_n_ticks=metrics_every_n,
-        real_db_bottlenecks_every_n_ticks=bottlenecks_every_n,
+) -> RealTick:
+    return unit_tick(
+        _artifacts=None,
+        _db_enabled=lambda: True,
+        _logger=logging.getLogger(__name__),
+        _real_db_metrics_every_n_ticks=metrics_every_n,
+        _real_db_bottlenecks_every_n_ticks=bottlenecks_every_n,
         # Keep artifact writing out of this test entirely.
-        real_last_tick_write_every_ms=0,
-        real_artifacts_sync_every_ms=0,
+        _real_last_tick_write_every_ms=0,
+        _real_artifacts_sync_every_ms=0,
     )
 
 
@@ -128,7 +123,7 @@ async def test_swallowed_bottlenecks_failure_does_not_mark_the_tick_flushed(
         per_eq_metric_values={"HOUR": {}},
         # attempts > 0 and errors > 0 -> score > 0, so the writer really builds a row.
         per_eq_edge_stats={"HOUR": {("a", "b"): {"attempts": 2, "errors": 1}}},
-        on_commit=lambda: committed_callbacks.append("commit"),
+        payments_result=SimpleNamespace(apply_deferred_effects=lambda: committed_callbacks.append("commit")),
     )
 
     # The savepoint did its job: the write was undone rather than the whole session.

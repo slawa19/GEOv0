@@ -29,7 +29,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.simulator.real_tick_persistence import RealTickPersistence
+from app.core.simulator.tick import RealTick
 from tests.integration.test_p021_trust_drift_is_audited_postgres import (  # noqa: F401 - `factory` is a fixture
     DECAY,
     factory,
@@ -136,7 +136,7 @@ async def test_control_a_failure_after_the_decay_commit_does_not_undo_the_decay(
         calls.append(1)
         raise RuntimeError("p021 control: the tail's persistence fails after the decay committed")
 
-    monkeypatch.setattr(RealTickPersistence, "persist_tick_tail", failing_tail)
+    monkeypatch.setattr(RealTick, "persist_tick_tail", failing_tail)
 
     await ticks(runner, run, 1)
 
