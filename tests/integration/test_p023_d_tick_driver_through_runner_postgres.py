@@ -169,6 +169,11 @@ class _DelegatingPool:
 async def test_the_tick_clears_through_the_runner_with_creditor_to_debtor_pids(factory, monkeypatch) -> None:
     stand = await _stand(factory, T1 + T2)
     calls = _spy_execute(monkeypatch)
+    # A WARM planner process: this test is about the path, not the first spawn (cold spawn is control 1 below). With
+    # a cold one, the spawn alone can outlast the 250 ms tick budget, and the budget - checked between occurrences -
+    # then lets only the first of the two cycles run this tick (measured 2026-09-28: 360 ms, one occurrence).
+    runner = _runner_module()
+    await asyncio.wrap_future(runner._default_planner_executor().submit(runner.plan_clearing, []))
 
     volumes = await stand.tick()
 

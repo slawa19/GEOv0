@@ -1,0 +1,17 @@
+Programme 023 slice (d): cold-spawn acceptance (consultation 2026-09-28-023d-forks, P2-2), through the real tick adapter
+(RealTickClearingCoordinator.maybe_run_clearing -> RealRunner.tick_real_mode_clearing -> RealClearingEngine -> runner, real spawn pool, PostgreSQL 127.0.0.1).
+Tree: 28abf3e + the warm-up of the path test (committed with this file). Budget SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS default 250 ms; coordinator hard timeout max(2 s, 4 x 0.25 s) = 2 s (cap 8).
+Command (debug variant: -s to print): PYTEST_ADDOPTS='-s -p no:cacheprovider' scripts/verify_local.ps1 -TaskSlug p023d -BackendOnly -BackendSelector tests/integration/test_p023_d_tick_driver_through_runner_postgres.py
+
+Test database guard passed (backend=postgresql, database='geov0_test_p023d').
+..COLD-SPAWN control 1 outcomes:
+  tick 1: 359 ms, left 9.00000000, clearings 1, clearing.done [1]
+  tick 2: 63 ms, left 0, clearings 2, clearing.done [1, 1]
+5 passed in 10.05s
+Alembic head check passed: 031_drop_prepare_locks
+Required backend validation passed.
+
+Control 1: the runner's cached pool set to None, so tick 1 SPAWNS the planner worker (the test process itself is not fresh - its modules are imported; the worker process is). Tick 1 took 359 ms (spawn + plan), within the 2 s hard timeout; the 250 ms budget was spent before the first cycle, which still ran (budget is checked between occurrences), so tick 1 committed 1 of 2 cycles; tick 2 (63 ms) committed the other. Real clearing: 2 CLEARING transactions, debts 15 -> 0, clearing.done [1, 1].
+Control 2: planning delayed hard_timeout + 2 s in the worker (slow_plan): the coordinator logs tick_clearing_hard_timeout, the engine logs clearing_pass_cancelled planner_abandoned=True, the abandoned worker's late plan (2 cycles) starts no occurrence (0 execute_occurrence calls after it completed + 0.3 s), 0 CLEARING transactions and debts unchanged (15); the next tick without the delay commits both cycles.
+Cancellation after a commit: the 2nd occurrence held past the hard timeout - 1 CLEARING transaction durable, debts 15 -> 9 or 6, clearing.done cleared_cycles=1 with the committed amount, engine log committed=1.
+Earlier run of the same module before the warm-up (log kept): tick 1 of control 1 also 360 ms / 1 cycle; the path test then saw 1 of 2 cycles in one tick for the same reason, hence its warm-up.
