@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StoredEquivalent(BaseModel):
@@ -21,14 +21,6 @@ class StoredEquivalent(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-    @field_validator("created_at", "updated_at")
-    @classmethod
-    def attach_utc_to_naive_database_timestamps(cls, value: datetime) -> datetime:
-        # The wire contract is RFC 3339, so a naive server timestamp is interpreted as UTC.
-        if value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
 
 
 class Equivalent(StoredEquivalent):
