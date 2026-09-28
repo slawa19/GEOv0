@@ -281,7 +281,6 @@ def _require(payload: dict, code: str, *, status: str, needles: list[str], forbi
     )
 
 
-@target_xfail_024("T2412.1", "a held equivalent is critical and the alert names the hold")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r024_3_a_held_equivalent_is_critical_and_names_the_hold(client, db_session) -> None:
@@ -297,7 +296,6 @@ async def test_r024_3_a_held_equivalent_is_critical_and_names_the_hold(client, d
     _require(payload, "P24HA", status="critical", needles=["hold", str(failed)])
 
 
-@target_xfail_024("T2412.1", "no stored result is a warning, not a pass")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r024_3_no_stored_result_is_a_warning_and_not_a_verdict(client, db_session) -> None:
@@ -319,7 +317,6 @@ async def test_r024_3_no_stored_result_is_a_warning_and_not_a_verdict(client, db
     )
 
 
-@target_xfail_024("T2412.1", "a latest FAILED without a hold is critical and claims no block")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r024_3_a_failed_result_without_a_hold_is_critical(client, db_session) -> None:
@@ -333,7 +330,6 @@ async def test_r024_3_a_failed_result_without_a_hold_is_critical(client, db_sess
     _require(payload, "P24HC", status="critical", needles=[FAILED, str(failed)], forbidden=("hold", "refused"))
 
 
-@target_xfail_024("T2412.1", "UNVERIFIABLE is a warning naming the missing evidence")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r024_3_an_unverifiable_result_is_a_warning_with_its_missing_evidence(client, db_session) -> None:
@@ -347,7 +343,6 @@ async def test_r024_3_an_unverifiable_result_is_a_warning_with_its_missing_evide
     _require(payload, "P24HD", status="warning", needles=[UNVERIFIABLE, str(unverifiable), "baseline"])
 
 
-@target_xfail_024("T2412.1", "a later PASSED does not cancel the hold; both states and ids are reported")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r024_3_a_later_passed_does_not_hide_the_hold(client, db_session) -> None:
