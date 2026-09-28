@@ -25,7 +25,6 @@ async def test_static_clearing_hard_timeout_cancels_and_does_not_leak_task(monke
         logger=logging.getLogger(__name__),
         clearing_every_n_ticks=1,
         real_clearing_time_budget_ms=250,
-        clearing_policy="static",
     )
 
     # Make the timeout tiny so the test is fast.

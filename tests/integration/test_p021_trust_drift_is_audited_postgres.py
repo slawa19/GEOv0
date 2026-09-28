@@ -215,7 +215,6 @@ async def test_growth_after_a_real_tick_clearing_is_audited_per_transaction(fact
     run = run_for(list(people.values()), eq.code)
     runner = runner_for(run, scenario, clearing_every=1)
     install_tick_stand(monkeypatch, factory)
-    assert runner._real_tick_clearing_coordinator._clearing_policy == "static", "premise: static clearing"
     checkpoints = TrustLineCheckpoints(monkeypatch)
 
     await ticks(runner, run, 1)

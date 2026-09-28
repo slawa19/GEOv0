@@ -231,8 +231,7 @@ flowchart LR
 - (Один раз на run) сидит сценарий в БД и потом выполняет тик‑цикл.
 - На тике планирует платежи (budget от intensity) и вызывает PaymentService.
 - Может запускать клиринг:
-  - **static cadence:** каждые `N` тиков (`SIMULATOR_CLEARING_EVERY_N_TICKS`)
-  - **adaptive policy (direction):** динамически чаще/реже по сигналам сети (`SIMULATOR_CLEARING_POLICY=adaptive`)
+  - **static cadence:** каждые `N` тиков (`SIMULATOR_CLEARING_EVERY_N_TICKS`) — единственная политика (адаптивная удалена 2026-09-28, программа 021, стадия 3)
 
 ### 2.5 Tick‑модель и детерминизм
 
@@ -441,8 +440,7 @@ flowchart TD
 Основные knobs (см. [../../../app/core/simulator/runtime_impl.py](../../../app/core/simulator/runtime_impl.py)):
 - `SIMULATOR_TICK_MS_BASE` — виртуальная длительность тика.
 - `SIMULATOR_ACTIONS_PER_TICK_MAX` — верхний лимит budget действий.
-- `SIMULATOR_CLEARING_POLICY` — политика клиринга: `static|adaptive` (default: static).
-- `SIMULATOR_CLEARING_EVERY_N_TICKS` — cadence клиринга в real mode (используется в `static`).
+- `SIMULATOR_CLEARING_EVERY_N_TICKS` — cadence клиринга в real mode.
 - `SIMULATOR_SCENARIO_ALLOWLIST` — фильтр списка сценариев для UI.
 
 SSE replay buffer:

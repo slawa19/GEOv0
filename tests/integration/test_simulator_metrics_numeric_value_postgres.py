@@ -12,8 +12,9 @@ Covered:
 * a money amount no float can represent survives writer -> column -> reader ->
   wire without changing;
 * ``null`` ("not measured") is still distinguishable from a measured zero;
-* the **adaptive** clearing policy - the non-default branch - carries the cleared
-  volume to the column without narrowing it either.
+* the static clearing coordinator carries the cleared volume to the column
+  without narrowing it either (until 2026-09-28 the same walk also ran on the
+  adaptive policy, removed by programme 021 stage 3).
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ from sqlalchemy import select, text
 import app.db.session as db_session_module
 from app.config import settings
 from app.core.simulator import storage as simulator_storage
-from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.core.simulator.real_tick_clearing_coordinator import RealTickClearingCoordinator
 from app.core.simulator.real_tick_metrics import RealTickMetrics
@@ -272,131 +272,6 @@ async def test_static_clearing_volume_reaches_the_column_exactly(
     )
     resp = await _reader().build_metrics(
         run_id=_RUN_ID, equivalent="UAH", from_ms=3_000, to_ms=3_000, step_ms=1_000
-    )
-    assert _values(resp, "clearing_volume") == ["12345678901.12345678"]
-
-
-# --- adaptive clearing policy: the non-default path must be exact too --------
-
-
-async def test_adaptive_clearing_volume_reaches_the_column_exactly(
-    db_session: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The adaptive policy path narrowed the cleared volume through float.
-
-    The static policy is the default, so covering only it would leave
-    `B-D1-002` closed on one branch and open on the other. This walks the
-    adaptive branch end to end: coordinator -> tick metrics producer -> writer
-    -> numeric(20, 8) column -> reader -> wire.
-    """
-
-    monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
-
-    config = AdaptiveClearingPolicyConfig(
-        window_ticks=5,
-        # Cold-start fallback on every tick: makes the decision deterministic
-        # without having to prime the rolling window.
-        warmup_fallback_cadence=1,
-        min_interval_ticks=1,
-        inflight_threshold=0,
-        queue_depth_threshold=0,
-    )
-    coordinator = RealTickClearingCoordinator(
-        lock=threading.RLock(),
-        logger=logging.getLogger("tests.simulator.t715.adaptive"),
-        clearing_every_n_ticks=1,
-        real_clearing_time_budget_ms=250,
-        clearing_policy="adaptive",
-        adaptive_config=config,
-    )
-    assert coordinator._adaptive_policy is not None  # the adaptive branch is live
-
-    run = SimpleNamespace(
-        run_id=_RUN_ID,
-        tick_index=1,
-        sim_time_ms=2_000,
-        queue_depth=0,
-        _real_in_flight=0,
-        _edges_by_equivalent={"UAH": []},
-        _real_total_debt_by_eq={},
-        _real_total_debt_tick=0,
-    )
-
-    async def _run_clearing_for_eq(eq: str, **_kwargs: Any) -> dict[str, Decimal]:
-        return {str(eq): _TOO_PRECISE_FOR_FLOAT}
-
-    async def _unexpected_static_clearing() -> dict[str, Decimal]:
-        raise AssertionError("the static clearing runner must not be used here")
-
-    clearing_volume_by_eq = await coordinator.maybe_run_clearing(
-        session=db_session,
-        run_id=_RUN_ID,
-        run=run,
-        equivalents=["UAH"],
-        planned_len=0,
-        tick_t0=0.0,
-        clearing_enabled=True,
-        safe_int_env=lambda _name, default: default,
-        run_clearing=_unexpected_static_clearing,
-        run_clearing_for_eq=_run_clearing_for_eq,
-        payments_result=None,
-    )
-
-    # Stage 1: out of the coordinator.
-    assert clearing_volume_by_eq["UAH"] == _TOO_PRECISE_FOR_FLOAT
-    assert isinstance(clearing_volume_by_eq["UAH"], Decimal)
-
-    # Stage 2: through the tick metrics producer. `real_db_metrics_every_n_ticks`
-    # is 5 and the tick index is 1, so the throttled total_debt snapshot is
-    # skipped and this tick measures only the clearing volume.
-    per_eq_metric_values: dict[str, dict[str, Any]] = {"UAH": {}}
-    await RealTickMetrics(
-        lock=threading.RLock(),
-        logger=logging.getLogger("tests.simulator.t715.adaptive"),
-        real_db_metrics_every_n_ticks=5,
-    ).populate_per_eq_metric_values(
-        session=db_session,
-        run=run,
-        scenario={"participants": []},
-        equivalents=["UAH"],
-        per_eq_route={},
-        clearing_volume_by_eq=clearing_volume_by_eq,
-        per_eq_metric_values=per_eq_metric_values,
-    )
-    assert per_eq_metric_values["UAH"]["clearing_volume"] == _TOO_PRECISE_FOR_FLOAT
-    assert "total_debt" not in per_eq_metric_values["UAH"]
-
-    # Stage 3: writer -> numeric(20, 8) column.
-    await simulator_storage.write_tick_metrics(
-        run_id=_RUN_ID,
-        t_ms=2_000,
-        per_equivalent={
-            "UAH": {"committed": 1, "rejected": 0, "errors": 0, "timeouts": 0}
-        },
-        metric_values_by_eq=per_eq_metric_values,
-        session=db_session,
-    )
-
-    stored = (
-        await db_session.execute(
-            select(SimulatorRunMetric.value).where(
-                (SimulatorRunMetric.run_id == _RUN_ID)
-                & (SimulatorRunMetric.key == "clearing_volume")
-                & (SimulatorRunMetric.t_ms == 2_000)
-            )
-        )
-    ).scalar_one()
-    assert stored == _TOO_PRECISE_FOR_FLOAT
-
-    # Stage 4: reader -> wire.
-    monkeypatch.setattr(
-        db_session_module,
-        "AsyncSessionLocal",
-        lambda: _SharedSession(db_session),
-        raising=False,
-    )
-    resp = await _reader().build_metrics(
-        run_id=_RUN_ID, equivalent="UAH", from_ms=2_000, to_ms=2_000, step_ms=1_000
     )
     assert _values(resp, "clearing_volume") == ["12345678901.12345678"]
 

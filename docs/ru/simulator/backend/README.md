@@ -31,7 +31,6 @@
 ## Design and acceptance documents
 
 - [Behavior model spec](behavior-model-spec.md)
-- [Adaptive clearing policy](adaptive-clearing-policy.md)
 - [Backend-driven demo mode](backend-driven-demo-mode-spec.md)
 - [Acceptance criteria](acceptance-criteria.md)
 - [Test plan](test-plan.md)

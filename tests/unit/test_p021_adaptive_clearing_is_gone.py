@@ -26,7 +26,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tests.p021_support import require_target, target_xfail_021
+from tests.p021_support import require_target
 
 REPO = Path(__file__).resolve().parents[2]
 SCANNED_DIR = "app"
@@ -124,7 +124,6 @@ def _scan() -> list[str]:
     return found
 
 
-@target_xfail_021("T2104 (stage 3)", "the adaptive clearing module, its wiring and its 15 environment reads go")
 def test_no_module_in_app_reaches_the_adaptive_clearing_mode() -> None:
     found = _scan()
     require_target(not found, "adaptive clearing mode still reachable from app/:\n" + "\n".join(found))

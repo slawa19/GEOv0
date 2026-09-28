@@ -209,23 +209,7 @@ Real Mode guardrails:
 - `SIMULATOR_CLEARING_MAX_DEPTH` (по умолчанию 6)
 
 Clearing policy:
-- `SIMULATOR_CLEARING_POLICY=static|adaptive` (по умолчанию `static`)
-  - `static` использует `SIMULATOR_CLEARING_EVERY_N_TICKS`
-  - `adaptive` динамически подстраивает периодичность (см. `adaptive-clearing-policy.md`)
-
-Adaptive clearing knobs (используются только при `SIMULATOR_CLEARING_POLICY=adaptive`):
-- `SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS` (default: 30) — длина rolling window (в тиках) для расчёта `no_capacity_rate`.
-- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH` (default: 0.60) — порог `no_capacity_rate` для включения клиринга.
-- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW` (default: 0.30) — порог для выключения (hysteresis).
-- `SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS` (default: 5) — минимальный cooldown между запусками клиринга для одного equivalent.
-- `SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS` (default: 60) — потолок exponential backoff при zero yield.
-- `SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN` (default: 3) / `MAX` (default: 6) — диапазон `max_depth` per-eq.
-- `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN` (default: 50) / `MAX` (default: 250) — диапазон `time_budget_ms` per-eq.
-- `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD` (default: 0, disabled) — если in-flight > threshold, клиринг откладывается.
-- `SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD` (default: 0, disabled) — если queue_depth > threshold, клиринг откладывается.
-- `SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE` (default: `SIMULATOR_CLEARING_EVERY_N_TICKS`, disabled при `<=0`) — cadence (ticks) для warmup fallback.
-
-Cold-start: на первых `WINDOW_TICKS` тиках данные неполные. Если `SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE > 0` (по умолчанию = `SIMULATOR_CLEARING_EVERY_N_TICKS`), clearing запускается периодически с минимальным бюджетом. После заполнения окна policy переключается на полную адаптивную логику.
+- фиксированный cadence `SIMULATOR_CLEARING_EVERY_N_TICKS`; другой политики нет. `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` не читаются с 2026-09-28 (адаптивный режим удалён программой 021, стадия 3).
 
 Real Mode: тюнинг дисковой нагрузки (артефакты) для dev/UI:
 - `SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS` — как часто обновлять `last_tick.json` (по умолчанию `500`).
