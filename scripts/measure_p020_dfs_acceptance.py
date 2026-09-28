@@ -1,5 +1,11 @@
 """Programme 020, stage 2 supplement: acceptance of the single DFS where its amount bound is weak.
 
+HISTORICAL, NOT RUNNABLE ON THE CURRENT TREE (note added 2026-09-28, programme 021 `T2109`; the program below is
+otherwise unchanged, as specs 020 and 023 promise for the 020 runners). It calls symbols that no longer exist:
+`ClearingService.auto_clear` (removed by 023 slice (d)) and the simulator clearing driver `RealClearingEngine` with
+its `tests/unit/test_real_clearing_engine_partial_failure.py` helpers (removed / moved by 021 `T2109`). To run it,
+check out the historical revision `968189a`.
+
 WHY (Codex §15 review of stage 2, 2026-09-25, P2-1 and P2-3). The first measurement
 (`scripts/measure_p020_detector_cost.py`) planted high-value structures, so on part of its cells the
 top-100 cutoff sat above the random bulk and the bound discarded most of the graph. It did not measure a
@@ -17,10 +23,9 @@ WHAT IT MEASURES, all on the single DFS as stage 3 will call it:
 * REPEATED - the stage-3 `auto_clear` (`SingleDfsClearingService`: full depth on every detection, first
   success, re-detect, 101-success ceiling, production execution) on a fresh clone per run: whole-call time,
   detection time, statements.
-* SIMULATOR - REMOVED 2026-09-28 (programme 021 `T2109`). It drove the simulator's clearing driver
-  `RealClearingEngine.tick_real_mode_clearing` with `SingleDfsClearingService` as its service class. Since
-  023 slice (d) the driver ignored its service class (the tick clears through the common runner), so this part
-  no longer measured what it named; `T2109` deleted the driver. The recorded 020 results stay in spec 020.
+* SIMULATOR - the REAL `RealClearingEngine.tick_real_mode_clearing` (its short-rung ladder, its per-tick
+  priority rotation, its 250 ms budget, the run perimeter), with `SingleDfsClearingService` as its service
+  class: per tick the depth and time of every detection (preflight and repeated) and the tick's wall time.
 
 THE FROZEN PART is the block "FROZEN BEFORE MEASUREMENT" below, committed before the first timed run. The
 thresholds are the first runner's constants, imported and checked to be unchanged: p95 <= 500 ms for the
@@ -40,16 +45,19 @@ import argparse
 import asyncio
 import gzip
 import json
+import logging
 import math
 import multiprocessing as mp  # noqa: F401 - spawn context via the base runner
 import random
 import statistics
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -100,6 +108,10 @@ REPEATED_DEPTH = 6
 REPEATED_RUNS = 2
 REPEATED_RUN_CAP_S = 300.0
 REDIS_LEASE_S = 30.0
+
+SIM_DEPTH = 6
+SIM_BUDGET_MS = 250
+SIM_TICKS = 5
 
 # The thresholds are the first runner's, unchanged. Checked, not copied.
 assert (base.P95_MS_SMALL, base.P95_MS_LARGE, base.MAX_CALL_S) == (500.0, 2000.0, 10.0)
@@ -280,6 +292,80 @@ async def _child_repeated(url, out) -> None:
         await engine.dispose()
 
 
+# =============================================================================== child: the real engine
+
+
+def child_simulator(url, family, perimeter, out) -> None:
+    asyncio.run(_child_simulator(url, family, perimeter, out))
+
+
+async def _child_simulator(url, family, perimeter, out) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from app.core.simulator.models import RunRecord
+    from app.core.simulator.real_clearing_engine import RealClearingEngine
+    from scripts.p020_experimental_detectors import single_dfs_service_class
+    from tests.unit.test_real_clearing_engine_partial_failure import _EdgePatchBuilder, _SseCapture, _VizHelper
+
+    engine = base._child_engine(url, pooled=True)
+    stmts = base._Statements(engine)
+    sessions = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    quiet = logging.getLogger("p020.bench.engine")
+    quiet.setLevel(logging.CRITICAL)
+    finds: list[dict] = []
+    executes = {"n": 0}
+    service_base = single_dfs_service_class()
+
+    class Measured(service_base):
+        async def find_cycles(self, equivalent_code, max_depth=6, *, allowed_participant_pids=None):
+            t0 = time.perf_counter()
+            found = await super().find_cycles(equivalent_code, max_depth, allowed_participant_pids=allowed_participant_pids)
+            finds.append({"depth": int(max_depth), "ms": round((time.perf_counter() - t0) * 1000.0, 1), "cycles": len(found)})
+            return found
+
+        async def execute_clearing_with_amount(self, cycle, *, allowed_participant_pids=None):
+            executes["n"] += 1
+            return await super().execute_clearing_with_amount(cycle, allowed_participant_pids=allowed_participant_pids)
+
+    run = RunRecord(run_id=f"p020-bench-{family}", scenario_id="bench", mode="real", state="running")
+    run._real_participants = [(base._uid(family, "p", p), p) for p in perimeter]
+    run._real_viz_by_eq["BENCH"] = _VizHelper()
+    run._edges_by_equivalent = {"BENCH": []}
+    sim = RealClearingEngine(
+        lock=threading.RLock(), sse=_SseCapture(), utc_now=lambda: datetime.now(timezone.utc), logger=quiet,
+        edge_patch_builder=_EdgePatchBuilder(), clearing_max_depth_limit=SIM_DEPTH,
+        clearing_max_fx_edges_limit=8, real_clearing_time_budget_ms=SIM_BUDGET_MS,
+    )
+
+    async def _growth(**_kw):
+        return SimpleNamespace(updated_count=0)
+
+    async def _patch(**_kw):
+        return []
+
+    out.put({"kind": "ready"})
+    try:
+        for tick in range(SIM_TICKS):
+            run.tick_index = tick
+            finds.clear()
+            executes["n"] = 0
+            s0, t0 = stmts.count, time.perf_counter()
+            cleared = await sim.tick_real_mode_clearing(
+                None, run_id=run.run_id, run=run, equivalents=["BENCH"], apply_trust_growth=_growth,
+                build_edge_patch_for_equivalent=_patch, broadcast_topology_edge_patch=lambda **_kw: None,
+                async_session_local=sessions, clearing_service_cls=Measured,
+            )
+            out.put({"kind": "tick", "tick": tick, "tick_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+                     "finds": list(finds), "preflight_ms": finds[0]["ms"] if finds else None,
+                     "executes": executes["n"], "cleared_amount": str(cleared.get("BENCH")),
+                     "statements": stmts.count - s0})
+    except Exception as exc:  # noqa: BLE001
+        out.put({"kind": "timeout" if base._is_timeout(exc) else "error", "error": f"{type(exc).__name__}: {exc}"[:500]})
+    finally:
+        out.put({"kind": "done"})
+        await engine.dispose()
+
+
 # ================================================================================================ main
 
 
@@ -304,7 +390,7 @@ def main() -> None:
         "narrow": NARROW_PALETTE, "allequal": ALL_EQUAL_AMOUNT, "depths": DEPTHS, "scopes": SCOPES,
         "samples": SAMPLES, "warmup": WARMUP, "call_timeout_s": CALL_TIMEOUT_S, "limit": LIMIT,
         "p95_ms_small": base.P95_MS_SMALL, "p95_ms_large": base.P95_MS_LARGE, "max_call_s": base.MAX_CALL_S},
-        "cells": [], "repeated": [], "manifest": {}}
+        "cells": [], "repeated": [], "simulator": [], "manifest": {}}
 
     def save():
         with gzip.open(out_dir / "results.json.gz", "wt", encoding="utf-8") as fh:
@@ -338,21 +424,29 @@ def main() -> None:
                     save()
 
                 if not args.skip_repeated:
-                    for run_no in range(REPEATED_RUNS):
+                    for run_no in range(REPEATED_RUNS + 1):
                         clone = base.checked_bench_name(f"{name}_c")
                         asyncio.run(base.create_db(args.server_url, clone, template=name))
                         created.append(clone)
                         curl = base.database_url(args.server_url, clone)
-                        msgs = base.run_child(child_repeated, (curl, family, graph["perimeter"]),
-                                              first_timeout=base.CHILD_STARTUP_S, call_timeout=REPEATED_RUN_CAP_S)
-                        res = next((m for m in msgs if m["kind"] in ("result", "timeout", "error")), msgs[-1])
-                        if "total_ms" not in res:
-                            # Killed by the parent: the duration is known only as a lower bound.
-                            res = {**res, "total_ms_lower_bound": REPEATED_RUN_CAP_S * 1000.0}
-                        lease = (res["total_ms"] > REDIS_LEASE_S * 1000.0) if "total_ms" in res else "unknown (lower bound > lease)"
-                        entry = {"family": family, "variant": variant, "run": run_no, **res, "exceeds_redis_lease": lease}
-                        results["repeated"].append(entry)
-                        print(f"repeated {family} {variant} run{run_no} {json.dumps({k: v for k, v in entry.items() if k != 'detection_per_call_ms'}, default=str)}", flush=True)
+                        if run_no < REPEATED_RUNS:
+                            msgs = base.run_child(child_repeated, (curl, family, graph["perimeter"]),
+                                                  first_timeout=base.CHILD_STARTUP_S, call_timeout=REPEATED_RUN_CAP_S)
+                            res = next((m for m in msgs if m["kind"] in ("result", "timeout", "error")), msgs[-1])
+                            if "total_ms" not in res:
+                                # Killed by the parent: the duration is known only as a lower bound.
+                                res = {**res, "total_ms_lower_bound": REPEATED_RUN_CAP_S * 1000.0}
+                            lease = (res["total_ms"] > REDIS_LEASE_S * 1000.0) if "total_ms" in res else "unknown (lower bound > lease)"
+                            entry = {"family": family, "variant": variant, "run": run_no, **res, "exceeds_redis_lease": lease}
+                            results["repeated"].append(entry)
+                            print(f"repeated {family} {variant} run{run_no} {json.dumps({k: v for k, v in entry.items() if k != 'detection_per_call_ms'}, default=str)}", flush=True)
+                        else:
+                            msgs = base.run_child(child_simulator, (curl, family, graph["perimeter"]),
+                                                  first_timeout=base.CHILD_STARTUP_S, call_timeout=REPEATED_RUN_CAP_S)
+                            for m in msgs:
+                                if m["kind"] in ("tick", "timeout", "error"):
+                                    results["simulator"].append({"family": family, "variant": variant, **m})
+                                    print(f"simulator {family} {variant} {json.dumps(m, default=str)}", flush=True)
                         asyncio.run(base.drop_db(args.server_url, clone))
                         created.remove(clone)
                     save()
