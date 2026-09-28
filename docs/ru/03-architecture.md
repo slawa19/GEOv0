@@ -137,33 +137,52 @@
 
 ### 2.2. Компоненты MVP
 
+*Сверено с кодом 2026-09-28 (024, `T2411`): дерево ниже — фактическая раскладка `app/`; прежняя версия
+называла `api/v1/router.py` (роутер — `api/router.py`) и не показывала `utils/`, пакеты `core/` и
+маршруты `balance`/`equivalents`/`health`/`simulator`.*
+
 ```
 GEOv0-PROJECT/
 ├── app/                        # Backend (FastAPI)
-│   ├── __init__.py
-│   ├── main.py                 # FastAPI entry point
-│   ├── config.py               # Configuration (env)
+│   ├── main.py                 # FastAPI entry point, lifespan, фоновые циклы
+│   ├── config.py               # Configuration (env, `Settings`)
 │   │
 │   ├── api/
-│   │   ├── __init__.py
-│   │   ├── deps.py             # Dependencies (auth, db session)
+│   │   ├── deps.py             # Dependencies (auth, db session, redis)
+│   │   ├── router.py           # Main router: собирает v1
 │   │   └── v1/                 # API v1 (REST + WS)
-│   │       ├── __init__.py
-│   │       ├── router.py       # Main router
 │   │       ├── auth.py
 │   │       ├── participants.py
 │   │       ├── trustlines.py
 │   │       ├── payments.py
 │   │       ├── clearing.py
+│   │       ├── balance.py
+│   │       ├── equivalents.py
 │   │       ├── integrity.py
+│   │       ├── health.py
 │   │       ├── admin.py        # Admin API endpoints
+│   │       ├── simulator.py    # Simulator API (runs, SSE, Interact)
 │   │       └── websocket.py
 │   │
 │   ├── core/                   # Business logic
-│   ├── db/                     # SQLAlchemy models + sessions
-│   └── schemas/                # Pydantic schemas (API DTO)
+│   │   ├── auth/               # challenge/login/refresh, подписи Ed25519, canonical JSON
+│   │   ├── participants/
+│   │   ├── trustlines/         # TrustLineService — единственный писатель линий
+│   │   ├── payments/           # PaymentService (исполнение), PaymentRouter (маршруты)
+│   │   ├── clearing/           # ClearingService, планировщик потока, раннер
+│   │   ├── ledger/             # Book — единственный писатель долгов; сверка (reconciliation)
+│   │   ├── balance/
+│   │   ├── admin/              # метрики админки
+│   │   ├── simulator/          # симулятор (раны, тик, сценарии, SSE)
+│   │   ├── money_boundary.py   # локи эквивалента, стоп/hold, чтение `FOR SHARE`
+│   │   ├── invariants.py       # InvariantChecker (лимиты, симметрия, нейтральность клиринга)
+│   │   └── integrity.py        # контрольные точки целостности
+│   ├── db/                     # SQLAlchemy models, sessions, журнал долгов (таблицы и триггеры)
+│   ├── schemas/                # Pydantic schemas (API DTO)
+│   └── utils/                  # ошибки, метрики, валидация денег, security, распределённый лок
 │
 ├── admin-ui/                   # Admin UI (Vue 3 + TypeScript + Vite)
+├── simulator-ui/v2/            # Simulator UI (Vue 3 + TypeScript + Vite)
 ├── migrations/                 # Alembic migrations
 ├── tests/                      # Unit + integration tests
 ├── docker/                     # Docker image build
@@ -174,6 +193,24 @@ GEOv0-PROJECT/
 ```
 
 ### 2.3. Сервисы MVP
+
+> **Проектный эскиз ноября 2025, не описание кода** (пометка 2026-09-28, 024 `T2411`). Интерфейсы ниже —
+> замысел MVP; часть названных классов и методов в коде не появилась или была удалена. Сигнатуры
+> реализованных сервисов — в коде, REST-контракт — [`api/openapi.yaml`](../../api/openapi.yaml).
+> Соответствие эскиза коду на 2026-09-28:
+>
+> | Эскиз | В коде |
+> |---|---|
+> | `AuthService.register` | нет: регистрация — `POST /participants` (`ParticipantService.create_participant`, `app/core/participants/service.py`) |
+> | `AuthService.verify_signature` | `verify_signature` в `app/core/auth/crypto.py` (Ed25519) |
+> | `AuthService.create_session` | нет: `AuthService.create_challenge` → `login` → `refresh_tokens` (`app/core/auth/service.py`) |
+> | `TrustLineService.create/update/close` | `app/core/trustlines/service.py` (`create`, `update`, `close`) |
+> | `TrustLineService.get_available_credit` | нет: ёмкость считают `PaymentRouter` (`app/core/payments/router.py`) и `/balance` (`app/core/balance/service.py`) |
+> | `RoutingService.find_paths/split_payment` | нет такого класса: `PaymentRouter.find_flow_routes` (`app/core/payments/router.py`) |
+> | `PaymentEngine` | удалён 2026-09-25 (019): `PaymentService.pay`/`execute` (`app/core/payments/service.py`) |
+> | `ClearingEngine.find_cycles/execute_clearing` | `ClearingService` (`app/core/clearing/service.py`): `find_cycles`, `execute_occurrence`, `execute_clearing_with_amount`; планирование — `app/core/clearing/flow_planner.py`, периодический проход — `app/core/clearing/runner.py` |
+> | `ClearingEngine.process_triggered` | нет |
+> | `IntegrityChecker` | нет такого класса: инварианты — `InvariantChecker` (`app/core/invariants.py`; `check_zero_sum` удалён — он не мог провалиться), контрольные точки — `app/core/integrity.py`, обнаружение расхождений и hold — `app/core/ledger/reconciliation.py` |
 
 #### AuthService
 
