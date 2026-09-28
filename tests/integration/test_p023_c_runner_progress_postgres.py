@@ -305,6 +305,32 @@ async def test_the_replan_limit_ends_the_pass_interrupted_with_the_dropped_tail_
     assert result.remaining_v_edge_atoms == 9 * ATOM + (0 if t1_committed else 6 * ATOM)
 
 
+@pytest.mark.asyncio
+async def test_a_spent_retry_budget_is_an_operational_limit_with_the_first_handed_off(db_session, monkeypatch) -> None:
+    """Decision 4. The boundary's typed refusal `RetryableClearingConflictException` (its retry budget spent on
+    40001/40P01) is raised here by the spy for the second occurrence: HOW the boundary produces it is slice (b)'s
+    evidence (`test_v2_an_exhausted_retry_budget_is_the_typed_retryable_refusal`); this test covers only what the
+    runner does with it - an interrupted pass with the remaining work, not an error and not a skip."""
+
+    api = slice_c_surface()
+    from app.core.clearing.service import RetryableClearingConflictException
+
+    await _seed(db_session)
+    factory = sessionmaker_of(db_session)
+    handed: list = []
+
+    async def refuse_the_second(n, _occurrence):
+        if n == 2:
+            raise RetryableClearingConflictException()
+
+    _spy_execute(monkeypatch, refuse_the_second)
+    result = await api.run_clearing_pass(factory, CODE, on_committed=handed.append)
+    assert result.status == "interrupted" and result.reason == "operational_limit", result
+    assert len(handed) == 1 and list(result.committed) == handed
+    assert result.remaining_cycles == 1
+    assert await _clearings(factory) == [(handed[0].occurrence_id, "COMMITTED")]
+
+
 # ---------------------------------------------------------------------------------------- budget and lease
 
 
