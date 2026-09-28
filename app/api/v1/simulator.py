@@ -6,6 +6,7 @@ import secrets
 import os
 import logging
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
@@ -508,8 +509,7 @@ def _check_run_access(run, actor: "deps.SimulatorActor", run_id: str) -> None:
 def _get_run_checked(run_id: str, actor: "deps.SimulatorActor"):
     """Get run, check access and action-acceptance state. Returns RunRecord or raises.
 
-    Consolidates the _require_run_accepts_actions_or_error + _check_run_access(runtime.get_run())
-    pattern into a single get_run() call (FIX-CR4: eliminates double get_run).
+    One get_run() call for existence, access and action acceptance (FIX-CR4: eliminates double get_run).
 
     Raises:
         NotFoundException (404): run not found.
@@ -663,28 +663,6 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                 },
             )
 
-    return None
-
-
-def _require_run_accepts_actions_or_error(run_id: str) -> Optional[JSONResponse]:
-    try:
-        st = runtime.get_run_status(run_id)
-    except NotFoundException:
-        # Not in spec table; keep stable error anyway.
-        return _action_error(
-            status_code=404,
-            code="RUN_NOT_FOUND",
-            message="Run not found",
-            details={"run_id": str(run_id)},
-        )
-
-    if st.state in ("stopped", "error"):
-        return _action_error(
-            status_code=409,
-            code="RUN_TERMINAL",
-            message="Run is in terminal state",
-            details={"run_id": str(run_id), "state": str(st.state)},
-        )
     return None
 
 
@@ -1021,6 +999,199 @@ class ClearingOnceResponseBody(BaseModel):
 # ----------------------------------
 # Interact Mode action endpoints (MVP)
 # ----------------------------------
+#
+# Programme 021, stage 4 (`T2106`): every mutating action is "perimeter -> service -> SSE". The perimeter half is
+# `_action_parties_or_error`; the domain write is the owning service's (trust lines: `TrustLineService`'s internal
+# path in the handler's transaction, stage 2; payments: `PaymentService.create_payment_internal`; clearing: the
+# common runner, 023(d)); what follows the commit is best effort (`_publish_trustline_change_best_effort`). The
+# checks a handler keeps before the service are the ones that produce the action's own wire codes - the existing-
+# debt check of create is STRONGER than the service's (spec, "Решения" item 5) - and they are not a second
+# implementation of the service's rules.
+
+
+@dataclass(frozen=True)
+class _ActionParties:
+    """What the perimeter half of a mutating action resolved: the run's PIDs, both participants, the equivalent."""
+
+    scoped_pids: set[str]
+    from_p: Participant
+    to_p: Participant
+    eq: Equivalent
+
+
+async def _action_parties_or_error(
+    *, run_id: str, db, from_pid: str, to_pid: str, equivalent: str
+) -> tuple[Optional[_ActionParties], Optional[JSONResponse]]:
+    """The perimeter half of a mutating action, in its fixed order of refusals.
+
+    Lazy seeding first (in Interact Mode the run starts paused, so the tick-level seeding may not have run yet);
+    then the run's perimeter - an unmeasurable one is 503 `RUN_PERIMETER_UNAVAILABLE`, because an empty perimeter
+    would resolve every participant to 404 and tell the caller that somebody the run contains is not in it, a
+    failed measurement of authority dressed as a fact about the data; then `from_pid`, `to_pid` (both only
+    within the perimeter, F-009-1) and the equivalent.
+    """
+
+    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
+        return None, seed_err
+    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+    if not perimeter_available:
+        return None, _perimeter_unavailable_error(run_id)
+    from_p, err = await _resolve_participant_or_error(
+        session=db, pid=from_pid, field="from_pid", scoped_pids=scoped_pids
+    )
+    if err is not None:
+        return None, err
+    to_p, err = await _resolve_participant_or_error(session=db, pid=to_pid, field="to_pid", scoped_pids=scoped_pids)
+    if err is not None:
+        return None, err
+    eq, err = await _resolve_equivalent_or_error(session=db, code=equivalent)
+    if err is not None:
+        return None, err
+    assert from_p is not None and to_p is not None and eq is not None
+    return _ActionParties(scoped_pids=scoped_pids, from_p=from_p, to_p=to_p, eq=eq), None
+
+
+async def _live_trustline(db, parties: _ActionParties) -> Optional[TrustLine]:
+    """The LIVE line of the triple, if any.
+
+    Only a live line counts - protocol precondition of TRUST_LINE_CREATE, docs/ru/02-protocol-spec.md:333. Since
+    migration 019_trust_lines_partial_unique_live the database agrees: uniqueness is over `status <> 'closed'`.
+    """
+
+    return (
+        await db.execute(
+            select(TrustLine).where(
+                and_(
+                    TrustLine.from_participant_id == parties.from_p.id,
+                    TrustLine.to_participant_id == parties.to_p.id,
+                    TrustLine.equivalent_id == parties.eq.id,
+                    TrustLine.status != "closed",
+                )
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _pair_debts_or_error(
+    *, run_id: str, action: str, db, parties: _ActionParties, with_reverse: bool
+) -> tuple[Decimal, Decimal, Optional[JSONResponse]]:
+    """(used, reverse_used) of the triple, or the 503 `TRUSTLINE_USED_UNAVAILABLE` answer.
+
+    `used` is the debt `to -> from` the line covers; `reverse_used` (read only `with_reverse`, else 0) the debt the
+    other way. A failed read is NOT taken as 0: that could create or keep a line whose limit is below its debt.
+    """
+
+    ids = {"from_id": parties.from_p.id, "to_id": parties.to_p.id, "equivalent_id": parties.eq.id}
+    try:
+        used = await _trustline_used_amount(db, **ids)
+        reverse_used = await _trustline_reverse_used_amount(db, **ids) if with_reverse else Decimal("0")
+    except Exception:
+        logger.error(
+            "Failed to read used amount for %s: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
+            action,
+            run_id,
+            parties.eq.code,
+            parties.from_p.pid,
+            parties.to_p.pid,
+            exc_info=True,
+        )
+        return (
+            Decimal("0"),
+            Decimal("0"),
+            _action_error(
+                status_code=503,
+                code="TRUSTLINE_USED_UNAVAILABLE",
+                message="Temporary error while reading current used amount",
+                details={
+                    "equivalent": parties.eq.code,
+                    "from_pid": parties.from_p.pid,
+                    "to_pid": parties.to_p.pid,
+                },
+            ),
+        )
+    return used, reverse_used, None
+
+
+async def _publish_trustline_change_best_effort(
+    *,
+    run_id: str,
+    db,
+    op: str,
+    parties: _ActionParties,
+    limit_raw: str | None = None,
+    limit_dec: Decimal | None = None,
+) -> None:
+    """After a committed trust-line action: the run's in-memory topology, the router cache, `topology.changed`.
+
+    All of it is best effort and never raises: the mutation is durable already, and nothing here may report it
+    as failed. `op` is `create` (the added edge with its limit and an edge patch), `update` (published only when
+    an edge patch could be built) or `close` (the removed edge, no patch - the UI needs the explicit removal).
+    """
+
+    eq_code, from_pid, to_pid = parties.eq.code, parties.from_p.pid, parties.to_p.pid
+    _mutate_runtime_trustline_topology_best_effort(
+        run_id=run_id, op=op, equivalent=eq_code, from_pid=from_pid, to_pid=to_pid, limit=limit_raw
+    )
+    # Trust-line topology is the routing graph.
+    try:
+        PaymentRouter.invalidate_cache(eq_code)
+    except Exception:
+        pass
+
+    try:
+        run = runtime.get_run(run_id)
+        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+        edge_patch: list[dict[str, Any]] | None = None
+        if op in ("create", "update"):
+            try:
+                edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
+                    session=db,
+                    run=run,
+                    equivalent_code=eq_code,
+                    only_edges={(from_pid, to_pid)},
+                    include_width_keys=True,
+                )
+            except Exception:
+                edge_patch = None
+
+        if op == "create":
+            assert limit_dec is not None
+            payload = TopologyChangedPayload(
+                added_edges=[
+                    TopologyChangedEdgeRef(
+                        from_pid=from_pid,
+                        to_pid=to_pid,
+                        equivalent_code=eq_code,
+                        limit=_fmt_decimal_for_api(limit_dec),
+                    )
+                ],
+                node_patch=None,
+                edge_patch=(edge_patch or None),
+            )
+        elif op == "update":
+            if not edge_patch:
+                return
+            payload = TopologyChangedPayload(node_patch=None, edge_patch=edge_patch)
+        else:
+            payload = TopologyChangedPayload(
+                removed_edges=[TopologyChangedEdgeRef(from_pid=from_pid, to_pid=to_pid, equivalent_code=eq_code)],
+                node_patch=None,
+                edge_patch=None,
+            )
+        emitter.emit_topology_changed(
+            run_id=run_id,
+            run=run,
+            equivalent=eq_code,
+            payload=payload,
+            reason=f"interact.trustline_{op}",
+        )
+    except Exception:
+        logger.warning(
+            "Best-effort SSE emission failed: interact.trustline_%s run_id=%s",
+            op,
+            run_id,
+            exc_info=True,
+        )
 
 
 @router.post(
@@ -1064,60 +1235,21 @@ async def action_trustline_create(
             details={"limit": req.limit},
         )
 
-    # Ensure scenario is seeded into DB so participants/equivalents/trustlines exist.
-    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
-    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
-        return seed_err
-
-    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
-    if not perimeter_available:
-        # Same reason as `action_clearing_real`: an unmeasurable perimeter must not be
-        # reported as NO_ROUTE, which would read as a fact about the graph.
-        return _perimeter_unavailable_error(run_id)
-    from_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    parties, err = await _action_parties_or_error(
+        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
     )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
+    assert parties is not None
+    from_p, to_p, eq = parties.from_p, parties.to_p, parties.eq
+
+    # If there is already debt, the new limit may not be below it: the action's own check, STRONGER than the
+    # service's create (spec, "Решения" item 5).
+    used_now, _, err = await _pair_debts_or_error(
+        run_id=run_id, action="trustline-create", db=db, parties=parties, with_reverse=False
     )
     if err is not None:
         return err
-    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
-    if err is not None:
-        return err
-
-    assert from_p is not None and to_p is not None and eq is not None
-
-    # If there is already debt, ensure the new limit is not below it.
-    try:
-        used_now = await _trustline_used_amount(
-            db,
-            from_id=from_p.id,
-            to_id=to_p.id,
-            equivalent_id=eq.id,
-        )
-    except Exception:
-        # Do NOT fall back to 0: it can create an inconsistent trustline (limit < existing debt).
-        logger.error(
-            "Failed to read used amount for trustline-create: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
-            run_id,
-            eq.code,
-            from_p.pid,
-            to_p.pid,
-            exc_info=True,
-        )
-        return _action_error(
-            status_code=503,
-            code="TRUSTLINE_USED_UNAVAILABLE",
-            message="Temporary error while reading current used amount",
-            details={
-                "equivalent": eq.code,
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
-            },
-        )
     if limit_dec < used_now:
         return _action_error(
             status_code=409,
@@ -1132,26 +1264,10 @@ async def action_trustline_create(
             },
         )
 
-    # The action's own copy of the create guard (finding F-009-4 / B-A1a-016): it answers the
-    # action's `TRUSTLINE_EXISTS` code. Since 021 stage 2 the write below goes through
-    # TrustLineService, whose own check is then the second one.
-    #
-    # Only a LIVE line blocks a new one — protocol precondition of TRUST_LINE_CREATE,
-    # docs/ru/02-protocol-spec.md:333.  Since migration 019_trust_lines_partial_unique_live
-    # the database agrees: uniqueness is enforced over `status <> 'closed'` only.
-    existing = (
-        await db.execute(
-            select(TrustLine.id).where(
-                and_(
-                    TrustLine.from_participant_id == from_p.id,
-                    TrustLine.to_participant_id == to_p.id,
-                    TrustLine.equivalent_id == eq.id,
-                    TrustLine.status != "closed",
-                )
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
+    # The action's own copy of the create guard (finding F-009-4 / B-A1a-016): it answers the action's
+    # `TRUSTLINE_EXISTS` code. Since 021 stage 2 the write below goes through TrustLineService, whose own check
+    # is then the second one.
+    if await _live_trustline(db, parties) is not None:
         return _action_error(
             status_code=409,
             code="TRUSTLINE_EXISTS",
@@ -1228,65 +1344,9 @@ async def action_trustline_create(
             },
         )
 
-    # Keep runtime snapshot/cache consistent with action.
-    _mutate_runtime_trustline_topology_best_effort(
-        run_id=run_id,
-        op="create",
-        equivalent=eq.code,
-        from_pid=from_p.pid,
-        to_pid=to_p.pid,
-        limit=req.limit,
+    await _publish_trustline_change_best_effort(
+        run_id=run_id, db=db, op="create", parties=parties, limit_raw=req.limit, limit_dec=limit_dec
     )
-
-    # Trustline topology affects routing graph.
-    try:
-        PaymentRouter.invalidate_cache(eq.code)
-    except Exception:
-        pass
-
-    # Best-effort SSE emission.
-    try:
-        run = runtime.get_run(run_id)
-        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-
-        edge_patch: list[dict[str, Any]] | None = None
-        try:
-            edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
-                session=db,
-                run=run,
-                equivalent_code=eq.code,
-                only_edges={(from_p.pid, to_p.pid)},
-                include_width_keys=True,
-            )
-        except Exception:
-            edge_patch = None
-
-        payload = TopologyChangedPayload(
-            added_edges=[
-                TopologyChangedEdgeRef(
-                    from_pid=from_p.pid,
-                    to_pid=to_p.pid,
-                    equivalent_code=eq.code,
-                    limit=_fmt_decimal_for_api(limit_dec),
-                )
-            ],
-            node_patch=None,
-            edge_patch=(edge_patch or None),
-        )
-        emitter.emit_topology_changed(
-            run_id=run_id,
-            run=run,
-            equivalent=eq.code,
-            payload=payload,
-            reason="interact.trustline_create",
-        )
-    except Exception:
-        # TODO(interact): consider emitting node_patch/edge_patch via VizPatchHelper for immediate UI updates.
-        logger.warning(
-            "Best-effort SSE emission failed: interact.trustline_create run_id=%s",
-            run_id,
-            exc_info=True,
-        )
 
     return SimulatorActionTrustlineCreateResponse(
         trustline_id=str(tl.id),
@@ -1338,89 +1398,36 @@ async def action_trustline_update(
             details={"new_limit": req.new_limit},
         )
 
-    # Ensure scenario is seeded into DB before searching for trustlines.
-    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
-    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
-        return seed_err
-
-    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
-    if not perimeter_available:
-        # An empty perimeter would resolve every participant to 404, telling the caller
-        # that somebody the run contains is not in it. That is a failed measurement of
-        # authority dressed as a fact about the data.
-        return _perimeter_unavailable_error(run_id)
-    from_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    parties, err = await _action_parties_or_error(
+        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
     )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
-    )
-    if err is not None:
-        return err
-    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
-    if err is not None:
-        return err
-
-    assert from_p is not None and to_p is not None and eq is not None
-
-    tl = (
-        await db.execute(
-            select(TrustLine).where(
-                and_(
-                    TrustLine.from_participant_id == from_p.id,
-                    TrustLine.to_participant_id == to_p.id,
-                    TrustLine.equivalent_id == eq.id,
-                    TrustLine.status != "closed",
-                )
-            )
-        )
-    ).scalar_one_or_none()
+    assert parties is not None
+    tl = await _live_trustline(db, parties)
     if tl is None:
         return _action_error(
             status_code=404,
             code="TRUSTLINE_NOT_FOUND",
             message="Trustline not found",
-            details={"from_pid": from_p.pid, "to_pid": to_p.pid, "equivalent": eq.code},
+            details={"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code},
         )
 
     old_limit_dec = Decimal(str(getattr(tl, "limit", 0) or 0))
-    try:
-        used = await _trustline_used_amount(
-            db,
-            from_id=tl.from_participant_id,
-            to_id=tl.to_participant_id,
-            equivalent_id=eq.id,
-        )
-    except Exception:
-        logger.error(
-            "Failed to read used amount for trustline-update: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
-            run_id,
-            eq.code,
-            from_p.pid,
-            to_p.pid,
-            exc_info=True,
-        )
-        return _action_error(
-            status_code=503,
-            code="TRUSTLINE_USED_UNAVAILABLE",
-            message="Temporary error while reading current used amount",
-            details={
-                "equivalent": eq.code,
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
-            },
-        )
+    used, _, err = await _pair_debts_or_error(
+        run_id=run_id, action="trustline-update", db=db, parties=parties, with_reverse=False
+    )
+    if err is not None:
+        return err
     if new_limit_dec < used:
         return _action_error(
             status_code=409,
             code="USED_EXCEEDS_NEW_LIMIT",
             message="Cannot reduce trustline limit below used amount",
             details={
-                "equivalent": eq.code,
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
+                "equivalent": parties.eq.code,
+                "from_pid": parties.from_p.pid,
+                "to_pid": parties.to_p.pid,
                 "used": _fmt_decimal_for_api(used),
                 "new_limit": _fmt_decimal_for_api(new_limit_dec),
             },
@@ -1446,52 +1453,9 @@ async def action_trustline_update(
         await db.rollback()
         raise
 
-    # Keep runtime snapshot consistent with action (limit change).
-    _mutate_runtime_trustline_topology_best_effort(
-        run_id=run_id,
-        op="update",
-        equivalent=eq.code,
-        from_pid=from_p.pid,
-        to_pid=to_p.pid,
-        limit=req.new_limit,
+    await _publish_trustline_change_best_effort(
+        run_id=run_id, db=db, op="update", parties=parties, limit_raw=req.new_limit
     )
-
-    try:
-        PaymentRouter.invalidate_cache(eq.code)
-    except Exception:
-        pass
-
-    try:
-        run = runtime.get_run(run_id)
-        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-        edge_patch: list[dict[str, Any]] | None = None
-        try:
-            edge_patch = await EdgePatchBuilder(logger=logger).build_edge_patch_for_equivalent(
-                session=db,
-                run=run,
-                equivalent_code=eq.code,
-                only_edges={(from_p.pid, to_p.pid)},
-                include_width_keys=True,
-            )
-        except Exception:
-            edge_patch = None
-
-        if edge_patch:
-            payload = TopologyChangedPayload(node_patch=None, edge_patch=edge_patch)
-            emitter.emit_topology_changed(
-                run_id=run_id,
-                run=run,
-                equivalent=eq.code,
-                payload=payload,
-                reason="interact.trustline_update",
-            )
-    except Exception:
-        # TODO(interact): best-effort patches for trustline update.
-        logger.warning(
-            "Best-effort SSE emission failed: interact.trustline_update run_id=%s",
-            run_id,
-            exc_info=True,
-        )
 
     return SimulatorActionTrustlineUpdateResponse(
         trustline_id=str(tl.id),
@@ -1529,94 +1493,35 @@ async def action_trustline_close(
     if (err := _guard_no_self_loop_or_error(from_pid=req.from_pid, to_pid=req.to_pid)) is not None:
         return err
 
-    # Ensure scenario is seeded into DB before searching for trustlines.
-    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
-    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
-        return seed_err
-
-    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
-    if not perimeter_available:
-        # An empty perimeter would resolve every participant to 404, telling the caller
-        # that somebody the run contains is not in it. That is a failed measurement of
-        # authority dressed as a fact about the data.
-        return _perimeter_unavailable_error(run_id)
-    from_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    parties, err = await _action_parties_or_error(
+        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
     )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
-    )
-    if err is not None:
-        return err
-    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
-    if err is not None:
-        return err
-
-    assert from_p is not None and to_p is not None and eq is not None
-
-    tl = (
-        await db.execute(
-            select(TrustLine).where(
-                and_(
-                    TrustLine.from_participant_id == from_p.id,
-                    TrustLine.to_participant_id == to_p.id,
-                    TrustLine.equivalent_id == eq.id,
-                    TrustLine.status != "closed",
-                )
-            )
-        )
-    ).scalar_one_or_none()
+    assert parties is not None
+    tl = await _live_trustline(db, parties)
     if tl is None:
         return _action_error(
             status_code=404,
             code="TRUSTLINE_NOT_FOUND",
             message="Trustline not found",
-            details={"from_pid": from_p.pid, "to_pid": to_p.pid, "equivalent": eq.code},
+            details={"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code},
         )
 
-    try:
-        used = await _trustline_used_amount(
-            db,
-            from_id=tl.from_participant_id,
-            to_id=tl.to_participant_id,
-            equivalent_id=eq.id,
-        )
-        reverse_used = await _trustline_reverse_used_amount(
-            db,
-            from_id=tl.from_participant_id,
-            to_id=tl.to_participant_id,
-            equivalent_id=eq.id,
-        )
-    except Exception:
-        logger.error(
-            "Failed to read used amount for trustline-close: run_id=%s equivalent=%s from_pid=%s to_pid=%s",
-            run_id,
-            eq.code,
-            from_p.pid,
-            to_p.pid,
-            exc_info=True,
-        )
-        return _action_error(
-            status_code=503,
-            code="TRUSTLINE_USED_UNAVAILABLE",
-            message="Temporary error while reading current used amount",
-            details={
-                "equivalent": eq.code,
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
-            },
-        )
+    used, reverse_used, err = await _pair_debts_or_error(
+        run_id=run_id, action="trustline-close", db=db, parties=parties, with_reverse=True
+    )
+    if err is not None:
+        return err
     if used > 0 or reverse_used > 0:
         return _action_error(
             status_code=409,
             code="TRUSTLINE_HAS_DEBT",
             message="Cannot close trustline with non-zero debt",
             details={
-                "equivalent": eq.code,
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
+                "equivalent": parties.eq.code,
+                "from_pid": parties.from_p.pid,
+                "to_pid": parties.to_p.pid,
                 "used": _fmt_decimal_for_api(used),
                 "reverse_used": _fmt_decimal_for_api(reverse_used),
             },
@@ -1640,50 +1545,7 @@ async def action_trustline_close(
         await db.rollback()
         raise
 
-    # Keep runtime snapshot/cache consistent with action.
-    _mutate_runtime_trustline_topology_best_effort(
-        run_id=run_id,
-        op="close",
-        equivalent=eq.code,
-        from_pid=from_p.pid,
-        to_pid=to_p.pid,
-    )
-
-    try:
-        PaymentRouter.invalidate_cache(eq.code)
-    except Exception:
-        pass
-
-    try:
-        run = runtime.get_run(run_id)
-        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-
-        # For close, frontend needs an explicit removal semantic.
-        payload = TopologyChangedPayload(
-            removed_edges=[
-                TopologyChangedEdgeRef(
-                    from_pid=from_p.pid,
-                    to_pid=to_p.pid,
-                    equivalent_code=eq.code,
-                )
-            ],
-            node_patch=None,
-            edge_patch=None,
-        )
-        emitter.emit_topology_changed(
-            run_id=run_id,
-            run=run,
-            equivalent=eq.code,
-            payload=payload,
-            reason="interact.trustline_close",
-        )
-    except Exception:
-        # TODO(interact): best-effort patches for trustline close.
-        logger.warning(
-            "Best-effort SSE emission failed: interact.trustline_close run_id=%s",
-            run_id,
-            exc_info=True,
-        )
+    await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="close", parties=parties)
 
     return SimulatorActionTrustlineCloseResponse(
         trustline_id=str(tl.id),
@@ -1717,31 +1579,13 @@ async def action_payment_real(
         return run_err
     assert run is not None
 
-    # Ensure scenario is seeded into DB so participants/equivalents/trustlines exist.
-    # In Interact Mode the run starts paused so the tick-level seeding may not have run yet.
-    if (seed_err := await _ensure_run_seeded(run_id, db)) is not None:
-        return seed_err
-
-    scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
-    if not perimeter_available:
-        # An empty perimeter would resolve every participant to 404, telling the caller
-        # that somebody the run contains is not in it. That is a failed measurement of
-        # authority dressed as a fact about the data.
-        return _perimeter_unavailable_error(run_id)
-    from_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.from_pid, field="from_pid", scoped_pids=scoped_pids
+    parties, err = await _action_parties_or_error(
+        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
     )
     if err is not None:
         return err
-    to_p, err = await _resolve_participant_or_error(
-        session=db, pid=req.to_pid, field="to_pid", scoped_pids=scoped_pids
-    )
-    if err is not None:
-        return err
-    eq, err = await _resolve_equivalent_or_error(session=db, code=req.equivalent)
-    if err is not None:
-        return err
-    assert from_p is not None and to_p is not None and eq is not None
+    assert parties is not None
+    scoped_pids, from_p, to_p, eq = parties.scoped_pids, parties.from_p, parties.to_p, parties.eq
 
     # Amount validation per spec.
     try:
@@ -2136,7 +1980,7 @@ async def action_participants_list(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    # NOTE: intentionally no _require_run_accepts_actions_or_error here —
+    # NOTE: intentionally not `_get_run_checked_or_error` (it refuses terminal runs) —
     # participants-list is read-only and must work even for stopped/error runs.
 
     # AuthZ: ownership check
@@ -2197,7 +2041,7 @@ async def action_trustlines_list(
 ):
     if (err := _require_actions_enabled_or_error()) is not None:
         return err
-    # NOTE: intentionally no _require_run_accepts_actions_or_error here —
+    # NOTE: intentionally not `_get_run_checked_or_error` (it refuses terminal runs) —
     # trustlines-list is read-only and must work even for stopped/error runs.
 
     # AuthZ: ownership check
