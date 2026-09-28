@@ -60,7 +60,7 @@ param(
     [switch]$NoInstall,
 
     # Optional backend env overrides, e.g.:
-    #   -BackendEnv 'SIMULATOR_CLEARING_POLICY=adaptive','SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS=250'
+    #   -BackendEnv 'SIMULATOR_CLEARING_EVERY_N_TICKS=10','SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS=250'
     [string[]]$BackendEnv = @()
 )
 

@@ -32,7 +32,8 @@ class RealTickPaymentsPhaseResult:
 
     stall_ticks: int
 
-    # Rejection codes breakdown per equivalent (for adaptive clearing policy).
+    # Rejection codes breakdown per equivalent. No reader since programme 021 stage 3 removed the
+    # adaptive clearing policy; kept until stage 4 rebuilds the tick (`tick.py`).
     # Contract: always a dict (never None).
     rejection_codes_by_eq: dict[str, dict[str, int]]
     deferred_effects: DeferredRealPaymentEffects | None = None

@@ -266,7 +266,8 @@ class RealPaymentsResult:
     per_eq_route: dict[str, dict[str, float]]
     per_eq_edge_stats: dict[str, dict[tuple[str, str], dict[str, int]]]
     # Per-eq rejection codes breakdown.
-    # Contract: always a dict (never None) for downstream consumers (adaptive policy).
+    # Contract: always a dict (never None). Its only reader was the adaptive clearing policy, removed by
+    # programme 021 stage 3; the field stays until stage 4 rebuilds the tick (`tick.py`).
     rejection_codes_by_eq: dict[str, dict[str, int]] = field(default_factory=dict)
     deferred_effects: DeferredRealPaymentEffects | None = None
     stop_requested: bool = False

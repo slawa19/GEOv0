@@ -130,9 +130,6 @@ async def test_step5c_a_held_tick_clearing_does_not_spend_the_error_budget(facto
     run = _run(f"s5c-clearing-{uuid.uuid4().hex[:6]}", people, eq.code, intensity=0)
     runner = _runner(run, scenario, actions=1, clearing_every=1, artifacts=_Artifacts())
     _install(monkeypatch, factory)
-    assert runner._real_tick_clearing_coordinator._clearing_policy == "static", (
-        "premise: the stand needs the static clearing policy, which clears on every tick here"
-    )
     ticks = int(runner._real_max_consec_tick_failures_limit) + 2
 
     with caplog.at_level(logging.INFO):

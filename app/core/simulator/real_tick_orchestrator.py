@@ -466,11 +466,6 @@ class RealTickOrchestrator:
                         run_clearing=lambda: rr.tick_real_mode_clearing(
                             session, run_id, run, equivalents
                         ),
-                        run_clearing_for_eq=lambda eq, *, time_budget_ms_override=None, max_depth_override=None: rr.tick_real_mode_clearing(
-                            session, run_id, run, [eq],
-                            time_budget_ms_override=time_budget_ms_override,
-                            max_depth_override=max_depth_override,
-                        ),
                         payments_result=payments_phase,
                     )
 

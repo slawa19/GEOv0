@@ -14,7 +14,6 @@ from app.core.ledger.book import Book, operation_for
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import is_debt_pair_collision
 from app.utils.exceptions import ConflictException
-from app.core.simulator.adaptive_clearing_policy import AdaptiveClearingPolicyConfig
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import (
@@ -42,10 +41,8 @@ from app.core.simulator.real_tick_trust_drift_coordinator import (
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.runtime_utils import (
-    safe_float_env as _safe_float_env,
     safe_int_env as _safe_int_env,
     safe_optional_decimal_env as _safe_optional_decimal_env,
-    safe_str_env as _safe_str_env,
 )
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
@@ -172,33 +169,6 @@ class RealRunnerImpl:
             "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250
         )
 
-        # Adaptive clearing policy knobs (§5 of docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md).
-        self._clearing_policy = _safe_str_env("SIMULATOR_CLEARING_POLICY", "static")
-        if self._clearing_policy not in ("static", "adaptive"):
-            self._clearing_policy = "static"
-        self._adaptive_clearing_config: AdaptiveClearingPolicyConfig | None = None
-        if self._clearing_policy == "adaptive":
-            warmup_fallback_cadence = _safe_int_env(
-                "SIMULATOR_CLEARING_ADAPTIVE_WARMUP_FALLBACK_CADENCE",
-                int(self._clearing_every_n_ticks),
-            )
-            self._adaptive_clearing_config = AdaptiveClearingPolicyConfig(
-                window_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS", 30),
-                no_capacity_high=_safe_float_env("SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH", 0.60),
-                no_capacity_low=_safe_float_env("SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW", 0.30),
-                min_interval_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS", 5),
-                backoff_max_interval_ticks=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS", 60),
-                time_budget_ms_min=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN", 50),
-                time_budget_ms_max=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MAX", 250),
-                max_depth_min=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN", 3),
-                max_depth_max=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MAX", 6),
-                inflight_threshold=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD", 0),
-                queue_depth_threshold=_safe_int_env("SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD", 0),
-                global_max_depth_ceiling=int(self._clearing_max_depth_limit),
-                global_time_budget_ms_ceiling=int(self._real_clearing_time_budget_ms),
-                warmup_fallback_cadence=int(warmup_fallback_cadence),
-            )
-
         # Sub-components: eager init (RealRunner is created once on startup).
         self._edge_patch_builder: EdgePatchBuilder = EdgePatchBuilder(logger=self._logger)
         self._real_debt_snapshot_loader: RealDebtSnapshotLoader = RealDebtSnapshotLoader()
@@ -281,8 +251,6 @@ class RealRunnerImpl:
                 logger=self._logger,
                 clearing_every_n_ticks=int(self._clearing_every_n_ticks),
                 real_clearing_time_budget_ms=int(self._real_clearing_time_budget_ms),
-                clearing_policy=self._clearing_policy,  # type: ignore[arg-type]
-                adaptive_config=self._adaptive_clearing_config,
             )
         )
         self._real_tick_trust_drift_coordinator: RealTickTrustDriftCoordinator = (

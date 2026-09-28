@@ -178,22 +178,8 @@
 - `SIMULATOR_CLEARING_EVERY_N_TICKS=25` (для real mode)
 
 Клиринг (policy):
-- Фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`) остаётся дефолтом для backward compatibility и регрессии.
-- `SIMULATOR_CLEARING_POLICY=static` (default): фиксированный cadence.
-- `SIMULATOR_CLEARING_POLICY=adaptive`: feedback-control, per-eq решения на основе rolling-window `no_capacity_rate`, hysteresis, cooldown, backoff.
-	- каноничное описание: `docs/ru/simulator/backend/adaptive-clearing-policy.md`.
-	- спецификация реализации: `docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`.
-
-Дефолты adaptive knobs:
-- `SIMULATOR_CLEARING_ADAPTIVE_WINDOW_TICKS=30`
-- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_HIGH=0.60`
-- `SIMULATOR_CLEARING_ADAPTIVE_NO_CAPACITY_LOW=0.30`
-- `SIMULATOR_CLEARING_ADAPTIVE_MIN_INTERVAL_TICKS=5`
-- `SIMULATOR_CLEARING_ADAPTIVE_BACKOFF_MAX_INTERVAL_TICKS=60`
-- `SIMULATOR_CLEARING_ADAPTIVE_MAX_DEPTH_MIN=3`, `MAX=6`
-- `SIMULATOR_CLEARING_ADAPTIVE_TIME_BUDGET_MS_MIN=50`, `MAX=250`
-- `SIMULATOR_CLEARING_ADAPTIVE_INFLIGHT_THRESHOLD=0` (disabled)
-- `SIMULATOR_CLEARING_ADAPTIVE_QUEUE_DEPTH_THRESHOLD=0` (disabled)
+- Фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`) — единственная политика клиринга real mode: клиринг на тиках, где `tick_index % N == 0`; `N <= 0` выключает его.
+- **Решение 2026-09-28 (программа 021, стадия 3, `T2104`): адаптивная политика клиринга удалена.** Прежняя запись здесь описывала `SIMULATOR_CLEARING_POLICY=static|adaptive` и 12 ручек `SIMULATOR_CLEARING_ADAPTIVE_*`; режим включался только сырой переменной окружения, нигде не был включён и не был виден в API, SSE и UI. Удаление — решение владельца 2026-09-21 по П3 (`specs/README.md`, «П3 (021)»; `specs/021-simulator-as-domain-client/spec.md`, «Решения», п. 1). Переменные `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` больше не читаются; гард — `tests/unit/test_p021_adaptive_clearing_is_gone.py`. Историческая спецификация режима — `docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`.
 
 Расширение real mode (behavior model):
 - Спецификация: [simulator/backend/behavior-model-spec.md](simulator/backend/behavior-model-spec.md)

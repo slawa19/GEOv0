@@ -20,7 +20,6 @@ class _DummyRunner:
             logger=self._logger,
             clearing_every_n_ticks=1,
             real_clearing_time_budget_ms=1,
-            clearing_policy="static",
         )
 
 
