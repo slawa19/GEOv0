@@ -32,9 +32,8 @@ import app.db.session as db_session_module
 from app.config import settings
 from app.core.simulator import storage as simulator_storage
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
-from app.core.simulator.real_tick_clearing_coordinator import RealTickClearingCoordinator
-from app.core.simulator.real_tick_metrics import RealTickMetrics
 from app.db.models.simulator_storage import SimulatorRunMetric
+from tests.simulator_tick_stand import unit_tick
 
 
 
@@ -177,16 +176,18 @@ async def test_static_clearing_volume_reaches_the_column_exactly(
     The same end-to-end walk - coordinator -> tick metrics producer -> writer -> numeric(20, 8) column ->
     reader -> wire - on the static branch, the only one left once the adaptive mode is removed. The static
     coordinator runs the clearing as a task under its hard timeout (`_execute_clearing_with_timeout`), so this
-    also covers that the task's result is handed back unchanged.
+    also covers that the committed volume is handed back unchanged. Since 021 stage 4 the coordinator and the
+    metrics producer are `RealTick` (`tick.py`), and the volume is what the clearing reported as committed at
+    the tick's one call point (`RealTick._run_clearing`), not the clearing task's return value.
     """
 
     monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
 
-    coordinator = RealTickClearingCoordinator(
-        lock=threading.RLock(),
-        logger=logging.getLogger("tests.simulator.t715.static"),
-        clearing_every_n_ticks=1,
-        real_clearing_time_budget_ms=250,
+    coordinator = unit_tick(
+        _logger=logging.getLogger("tests.simulator.t715.static"),
+        _clearing_every_n_ticks=1,
+        _real_clearing_time_budget_ms=250,
+        _real_db_metrics_every_n_ticks=5,
     )
 
     run = SimpleNamespace(
@@ -202,8 +203,10 @@ async def test_static_clearing_volume_reaches_the_column_exactly(
         _real_total_debt_tick=0,
     )
 
-    async def _run_clearing() -> dict[str, Decimal]:
-        return {"UAH": _TOO_PRECISE_FOR_FLOAT}
+    async def _run_clearing(*, committed, **_kwargs) -> None:
+        committed["UAH"] += _TOO_PRECISE_FOR_FLOAT
+
+    coordinator._run_clearing = _run_clearing
 
     clearing_volume_by_eq = await coordinator.maybe_run_clearing(
         session=db_session,
@@ -212,9 +215,6 @@ async def test_static_clearing_volume_reaches_the_column_exactly(
         equivalents=["UAH"],
         planned_len=0,
         tick_t0=0.0,
-        clearing_enabled=True,
-        safe_int_env=lambda _name, default: default,
-        run_clearing=_run_clearing,
         payments_result=None,
     )
 
@@ -225,11 +225,7 @@ async def test_static_clearing_volume_reaches_the_column_exactly(
 
     # Stage 2: through the tick metrics producer (tick 1 is off the total_debt throttle of 5).
     per_eq_metric_values: dict[str, dict[str, Any]] = {"UAH": {}}
-    await RealTickMetrics(
-        lock=threading.RLock(),
-        logger=logging.getLogger("tests.simulator.t715.static"),
-        real_db_metrics_every_n_ticks=5,
-    ).populate_per_eq_metric_values(
+    await coordinator.populate_per_eq_metric_values(
         session=db_session,
         run=run,
         scenario={"participants": []},

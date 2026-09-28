@@ -7,7 +7,8 @@ per sample (a `CREATE DATABASE ... TEMPLATE` copy), with the inputs fixed by the
 * seed   - `RealScenarioSeeder.seed_scenario_into_db` + commit, the 100/523 community, on an empty migrated DB;
 * reseed - the same call on a copy of a seeded DB (nothing new to apply);
 * growth - `TrustDriftEngine.apply_trust_growth` on 50 UAH lines (it commits itself);
-* decay  - `RealTickTrustDriftCoordinator.apply_trust_decay_and_broadcast` on 25 HOUR + 25 UAH lines.
+* decay  - the tick's decay step `RealTick.apply_trust_decay_and_broadcast` (`app/core/simulator/tick.py`; until
+  021 stage 4 `RealTickTrustDriftCoordinator`, same code) on 25 HOUR + 25 UAH lines.
 
 Per sample: elapsed seconds, client SQL statements (`before_cursor_execute` on the sample's engine, from the
 start of the call through its commit), integrity-checkpoint computations (every module attribute bound to
@@ -319,10 +320,41 @@ class Checkpoints:
         self.fail_on_call = None
 
 
+async def _decay_through_the_tick(session, run, snapshot, scenario, drift_engine) -> None:
+    """The tick's decay step (commits the decay) with no edge patches, on the measured session.
+
+    `RealTick` reads its collaborators from the runner at call time; this runner carries only what the decay
+    step reads, plus the static intervals `RealTick` captures at construction (unused by the decay step).
+    """
+
+    from types import SimpleNamespace
+
+    from app.core.simulator.tick import RealTick
+
+    async def _no_patch(**_kwargs):
+        return []
+
+    runner = SimpleNamespace(
+        _logger=LOGGER,
+        _trust_drift_engine=drift_engine,
+        _build_edge_patch_for_equivalent=_no_patch,
+        _broadcast_topology_edge_patch=lambda **_kw: None,
+        _clearing_every_n_ticks=0,
+        _real_clearing_time_budget_ms=250,
+        _real_db_metrics_every_n_ticks=1,
+        _real_db_bottlenecks_every_n_ticks=1,
+        _real_last_tick_write_every_ms=0,
+        _real_artifacts_sync_every_ms=0,
+    )
+    await RealTick(runner).apply_trust_decay_and_broadcast(
+        session=session, run_id=run.run_id, run=run, debt_snapshot=snapshot, scenario=scenario
+    )
+
+
 def import_code_under_measurement() -> None:
     # Everything that could bind the checkpoint function by name, imported before the counter installs.
     import app.core.simulator.real_scenario_seeder  # noqa: F401
-    import app.core.simulator.real_tick_trust_drift_coordinator  # noqa: F401
+    import app.core.simulator.tick  # noqa: F401
     import app.core.simulator.trust_drift_engine  # noqa: F401
     import app.core.trustlines.service  # noqa: F401
 
@@ -437,8 +469,6 @@ async def run_workload(workload: str, scenario_template: dict, sample_db: str) -
                 statements.active = False
                 figures["result_updated_count"] = int(res.updated_count)
             elif workload == "decay":
-                from app.core.simulator.real_tick_trust_drift_coordinator import RealTickTrustDriftCoordinator
-
                 spec = WORKLOADS["decay"]
                 engine_ = _engine_for_drift(scenario)
                 run = _run_for_drift(scenario, spec["trust_drift"])
@@ -449,16 +479,9 @@ async def run_workload(workload: str, scenario_template: dict, sample_db: str) -
                     for t in decay_edges(scenario)
                 }
 
-                async def _no_patch(**_kwargs):
-                    return []
-
                 statements.active = True
                 t0 = time.perf_counter()
-                await RealTickTrustDriftCoordinator(logger=LOGGER).apply_trust_decay_and_broadcast(
-                    session=session, run_id=run.run_id, run=run, tick_index=1, debt_snapshot=snapshot,
-                    scenario=scenario, trust_drift_engine=engine_, build_edge_patch_for_equivalent=_no_patch,
-                    broadcast_topology_edge_patch=lambda **_kw: None,
-                )
+                await _decay_through_the_tick(session, run, snapshot, scenario, engine_)
                 figures["elapsed_s"] = time.perf_counter() - t0
                 statements.active = False
             else:
@@ -516,8 +539,6 @@ async def run_probe(workload: str, scenario_template: dict, sample_db: str, chec
                     edges = {(t["from"], t["to"]) for t in growth_edges(scenario)}
                     await engine_.apply_trust_growth(run, session, edges, spec["equivalent"], 1, {e: 10.0 for e in edges})
                 elif workload == "decay":
-                    from app.core.simulator.real_tick_trust_drift_coordinator import RealTickTrustDriftCoordinator
-
                     spec = WORKLOADS["decay"]
                     engine_ = _engine_for_drift(scenario)
                     run = _run_for_drift(scenario, spec["trust_drift"])
@@ -528,14 +549,7 @@ async def run_probe(workload: str, scenario_template: dict, sample_db: str, chec
                         for t in decay_edges(scenario)
                     }
 
-                    async def _no_patch(**_kwargs):
-                        return []
-
-                    await RealTickTrustDriftCoordinator(logger=LOGGER).apply_trust_decay_and_broadcast(
-                        session=session, run_id=run.run_id, run=run, tick_index=1, debt_snapshot=snapshot,
-                        scenario=scenario, trust_drift_engine=engine_, build_edge_patch_for_equivalent=_no_patch,
-                        broadcast_topology_edge_patch=lambda **_kw: None,
-                    )
+                    await _decay_through_the_tick(session, run, snapshot, scenario, engine_)
                 outcome["raised"] = False
             except RuntimeError as exc:
                 outcome["raised"] = True

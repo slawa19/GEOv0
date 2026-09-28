@@ -32,7 +32,7 @@ from app.core.simulator.real_payments_executor import (
     DeferredRealPaymentEffects,
     _PaymentObservation,
 )
-from app.core.simulator.real_tick_payments_coordinator import RealTickPaymentsPhaseResult
+from app.core.simulator.tick import TickPaymentsPhase
 from app.utils.exceptions import RetryablePaymentConflictException
 
 _LOGGER = logging.getLogger("tests.p015.p1.money_replay")
@@ -144,7 +144,7 @@ def _phase(
     effect: _PaymentEffect,
     tx_id: str,
     committed: int = 1,
-) -> RealTickPaymentsPhaseResult:
+) -> TickPaymentsPhase:
     """One committed payment and one rejected one - the mix a real tick produces."""
     deferred = DeferredRealPaymentEffects(
         lock=threading.RLock(),
@@ -177,7 +177,7 @@ def _phase(
             ),
         ],
     )
-    return RealTickPaymentsPhaseResult(
+    return TickPaymentsPhase(
         debt_snapshot={},
         planned=[],
         per_eq_metric_values={},
@@ -189,7 +189,6 @@ def _phase(
         per_eq_route={},
         per_eq_edge_stats={},
         stall_ticks=0,
-        rejection_codes_by_eq={},
         deferred_effects=deferred,
         staged_tx_ids=frozenset({tx_id}),
     )
@@ -200,7 +199,7 @@ async def _drive(
     run: RunRecord,
     sessions: list[_Session],
     attempt_errors: list[BaseException | None],
-    phases: list[RealTickPaymentsPhaseResult],
+    phases: list[TickPaymentsPhase],
     max_attempts: int = 3,
 ):
     """Run the policy over a scripted series of attempts."""

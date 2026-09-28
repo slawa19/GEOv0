@@ -22,6 +22,12 @@ What it asserts now, which is the P1 contract:
 The cancellation scenario is kept as it was in substance - a rollback that is interrupted twice
 must still be drained and resolved exactly once - and now runs against the tail's rollback, which
 is where that rollback lives after the boundary moved.
+
+Programme 021 stage 4 (`T2105`): renamed from `test_real_tick_orchestrator_rollback_resolution.py`.
+The orchestrator and its payments and clearing coordinators are one class, `RealTick` (`tick.py`);
+the doubles that replaced the two coordinators on the runner now replace the tick's own
+`run_payments_phase` and `maybe_run_clearing`, looked up on the runner at call time so a test can
+still swap the payments double between ticks. Every assertion is unchanged.
 """
 
 from __future__ import annotations
@@ -33,16 +39,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-import app.core.simulator.real_tick_orchestrator as orchestrator_module
+import app.core.simulator.tick as tick_module
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_payments_executor import (
     DeferredRealPaymentEffects,
     _PaymentObservation,
 )
-from app.core.simulator.real_tick_orchestrator import RealTickOrchestrator
-from app.core.simulator.real_tick_payments_coordinator import (
-    RealTickPaymentsPhaseResult,
-)
+from app.core.simulator.tick import RealTick, TickPaymentsPhase
 from app.utils.exceptions import RetryablePaymentConflictException
 
 
@@ -127,7 +130,7 @@ class _PaymentEffect:
 class _PaymentsCoordinator:
     """Succeeds immediately. The money phase commits and the tail then fails."""
 
-    def __init__(self, phase: RealTickPaymentsPhaseResult) -> None:
+    def __init__(self, phase: TickPaymentsPhase) -> None:
         self.phase = phase
         self.calls = 0
 
@@ -143,7 +146,7 @@ class _RetryableConflictPaymentsCoordinator:
         self,
         *,
         conflicts: int | None = None,
-        phase: RealTickPaymentsPhaseResult | None = None,
+        phase: TickPaymentsPhase | None = None,
     ) -> None:
         self.calls = 0
         self.conflicts = conflicts
@@ -170,15 +173,22 @@ class _Runner:
         self,
         *,
         run: RunRecord,
-        phase: RealTickPaymentsPhaseResult,
+        phase: TickPaymentsPhase,
         logger: logging.Logger,
     ) -> None:
         self._run = run
         self._lock = threading.RLock()
         self._logger = logger
-        self._real_tick_payments_coordinator = _PaymentsCoordinator(phase)
-        self._real_tick_clearing_coordinator = _ClearingCoordinator()
+        self.payments_double = _PaymentsCoordinator(phase)
+        self.clearing_double = _ClearingCoordinator()
         self._real_payments_executor = object()
+        # What `RealTick` captures at construction (static intervals and the clearing budget).
+        self._clearing_every_n_ticks = 1
+        self._real_clearing_time_budget_ms = 250
+        self._real_db_metrics_every_n_ticks = 1
+        self._real_db_bottlenecks_every_n_ticks = 1
+        self._real_last_tick_write_every_ms = 0
+        self._real_artifacts_sync_every_ms = 0
         self._utc_now = lambda: datetime.now(timezone.utc)
         self._real_max_timeouts_per_tick_limit = 3
         self._real_max_errors_total_limit = 10
@@ -207,11 +217,20 @@ class _Runner:
         self.failures.append((code, message))
 
 
+def _tick(runner: _Runner) -> RealTick:
+    """The tick over the fake runner, its payments phase and clearing replaced by the runner's doubles."""
+
+    tick = RealTick(runner)  # type: ignore[arg-type]
+    tick.run_payments_phase = lambda **kwargs: runner.payments_double.run_payments_phase(**kwargs)
+    tick.maybe_run_clearing = lambda **kwargs: runner.clearing_double.maybe_run_clearing(**kwargs)
+    return tick
+
+
 def _run_with_phase(
     *,
     logger: logging.Logger,
     run_id: str,
-) -> tuple[RunRecord, RealTickPaymentsPhaseResult, _Emitter, _PaymentEffect]:
+) -> tuple[RunRecord, TickPaymentsPhase, _Emitter, _PaymentEffect]:
     run = RunRecord(
         run_id=run_id,
         scenario_id="scenario",
@@ -272,7 +291,7 @@ def _run_with_phase(
             ),
         ],
     )
-    phase = RealTickPaymentsPhaseResult(
+    phase = TickPaymentsPhase(
         debt_snapshot={},
         planned=[],
         per_eq_metric_values={},
@@ -284,7 +303,6 @@ def _run_with_phase(
         per_eq_route={},
         per_eq_edge_stats={},
         stall_ticks=0,
-        rejection_codes_by_eq={},
         deferred_effects=deferred,
         staged_tx_ids=frozenset({"tx-1"}),
     )
@@ -297,7 +315,7 @@ async def _no_owner_locks(self, equivalent_codes) -> None:
 
 def _bind_session(monkeypatch, session: _Session) -> None:
     monkeypatch.setattr(
-        orchestrator_module.db_session,
+        tick_module.db_session,
         "AsyncSessionLocal",
         lambda: _SessionContext(session),
     )
@@ -305,7 +323,7 @@ def _bind_session(monkeypatch, session: _Session) -> None:
     # here because the fake had no PostgreSQL bind; the call is now unconditional, so it is stubbed
     # explicitly. Owner locks are measured on PostgreSQL elsewhere, not by this module.
     monkeypatch.setattr(
-        orchestrator_module.PaymentService,
+        tick_module.PaymentService,
         "acquire_shared_equivalent_locks",
         _no_owner_locks,
     )
@@ -328,11 +346,11 @@ async def test_a_transient_conflict_is_replayed_and_never_spends_the_error_budge
     )
     runner = _Runner(run=run, phase=phase, logger=logger)
     coordinator = _RetryableConflictPaymentsCoordinator()
-    runner._real_tick_payments_coordinator = coordinator
+    runner.payments_double = coordinator
     session = _SuccessfulRollbackSession()
     _bind_session(monkeypatch, session)
 
-    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await _tick(runner).tick(run.run_id)
 
     # The whole money phase ran again, up to the budget.
     assert coordinator.calls == 3
@@ -368,11 +386,11 @@ async def test_a_replay_that_succeeds_commits_and_publishes_exactly_once(
     )
     runner = _Runner(run=run, phase=phase, logger=logger)
     coordinator = _RetryableConflictPaymentsCoordinator(conflicts=1, phase=phase)
-    runner._real_tick_payments_coordinator = coordinator
+    runner.payments_double = coordinator
     session = _SuccessfulRollbackSession()
     _bind_session(monkeypatch, session)
 
-    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await _tick(runner).tick(run.run_id)
 
     assert coordinator.calls == 2
     assert session.commit_calls == 1
@@ -383,7 +401,7 @@ async def test_a_replay_that_succeeds_commits_and_publishes_exactly_once(
     assert run._real_consec_money_no_progress_ticks == 0
 
     # The tail still failed (clearing raises), and that is an ordinary tick failure.
-    assert runner._real_tick_clearing_coordinator.calls == 1
+    assert runner.clearing_double.calls == 1
     assert run.last_error["code"] == "REAL_MODE_TICK_FAILED"
     # Two errors, and NEITHER of them is the conflict: one is the phase's own failed payment
     # observation, published by the money commit, and one is the tail failure itself.
@@ -409,7 +427,7 @@ async def test_a_tail_failure_after_the_money_commit_cannot_unpublish_or_replay_
     session = _SuccessfulRollbackSession()
     _bind_session(monkeypatch, session)
 
-    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await _tick(runner).tick(run.run_id)
 
     # The money committed at the boundary and was published exactly once, before the tail ran.
     assert session.commit_calls == 1
@@ -419,14 +437,14 @@ async def test_a_tail_failure_after_the_money_commit_cannot_unpublish_or_replay_
 
     # The tail failed and rolled ITS transaction back, and that rollback resolved nothing of the
     # money: the buffer had already resolved, so it cannot be re-resolved in any direction.
-    assert runner._real_tick_clearing_coordinator.calls == 1
+    assert runner.clearing_double.calls == 1
     assert session.rollback_calls == 1
     assert phase.apply_rollback_observations() is False
     assert phase.apply_unknown_transaction_observations() is False
     assert phase.discard_observations() is False
 
     # The money phase ran once. A tail failure is not a reason to replay money.
-    assert runner._real_tick_payments_coordinator.calls == 1
+    assert runner.payments_double.calls == 1
     assert run._real_money_replays_total == 0
 
     assert run.last_error["code"] == "REAL_MODE_TICK_FAILED"
@@ -453,7 +471,7 @@ async def test_a_programmatic_failure_still_stops_the_run(monkeypatch) -> None:
     session = _SuccessfulRollbackSession()
     _bind_session(monkeypatch, session)
 
-    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await _tick(runner).tick(run.run_id)
 
     assert run.errors_total == 2  # the phase's failed payment, plus the tail failure
     assert run._real_consec_tick_failures == 1
@@ -477,15 +495,15 @@ async def test_permanent_contention_stops_the_run_by_no_progress_and_not_by_a_sq
         run_id="no-progress",
     )
     runner = _Runner(run=run, phase=phase, logger=logger)
-    runner._real_tick_payments_coordinator = _RetryableConflictPaymentsCoordinator()
+    runner.payments_double = _RetryableConflictPaymentsCoordinator()
     runner._real_max_consec_money_no_progress_limit = 3
     session = _SuccessfulRollbackSession()
     _bind_session(monkeypatch, session)
 
-    orchestrator = RealTickOrchestrator(runner)
+    orchestrator = _tick(runner)
     for tick in (1, 2, 3):
         run.tick_index = tick
-        await orchestrator.tick_real_mode(run.run_id)  # type: ignore[arg-type]
+        await orchestrator.tick(run.run_id)
 
     assert run._real_consec_money_no_progress_ticks == 3
     assert run.errors_total == 0
@@ -512,19 +530,19 @@ async def test_a_committed_money_phase_resets_the_no_progress_counter(
     runner = _Runner(run=run, phase=phase, logger=logger)
     runner._real_max_consec_money_no_progress_limit = 3
     conflicting = _RetryableConflictPaymentsCoordinator()
-    runner._real_tick_payments_coordinator = conflicting
+    runner.payments_double = conflicting
     session = _SuccessfulRollbackSession()
     _bind_session(monkeypatch, session)
 
-    orchestrator = RealTickOrchestrator(runner)
+    orchestrator = _tick(runner)
     run.tick_index = 1
-    await orchestrator.tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await orchestrator.tick(run.run_id)
     assert run._real_consec_money_no_progress_ticks == 1
 
     # A tick whose money phase commits clears it.
-    runner._real_tick_payments_coordinator = _PaymentsCoordinator(phase)
+    runner.payments_double = _PaymentsCoordinator(phase)
     run.tick_index = 2
-    await orchestrator.tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await orchestrator.tick(run.run_id)
 
     assert run._real_consec_money_no_progress_ticks == 0
     assert runner.failures == []
@@ -546,7 +564,7 @@ async def test_rollback_failure_in_the_tail_resolves_nothing_of_the_committed_mo
     session = _Session()  # its rollback raises
     _bind_session(monkeypatch, session)
 
-    await RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+    await _tick(runner).tick(run.run_id)
 
     assert session.commit_calls == 1
     assert session.rollback_calls == 1
@@ -584,7 +602,7 @@ async def test_double_cancellation_bounds_the_tail_rollback_and_resolves_once(
     session = _BlockingRollbackSession()
     _bind_session(monkeypatch, session)
     task = asyncio.create_task(
-        RealTickOrchestrator(runner).tick_real_mode(run.run_id)  # type: ignore[arg-type]
+        _tick(runner).tick(run.run_id)
     )
 
     await session.rollback_started.wait()

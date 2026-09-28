@@ -89,3 +89,45 @@ async def pooled_sessionmaker_over(url: str) -> AsyncIterator[async_sessionmaker
     finally:
         # Before the clone is dropped: a pooled connection still open would make the drop race it.
         await engine.dispose()
+
+
+def tick_unit_runner(**collaborators: Any):
+    """A runner for a `RealTick` (`app/core/simulator/tick.py`) in a UNIT test, with no database.
+
+    Programme 021 stage 4 folded the six `real_tick_*` classes into `RealTick`, which reads its collaborators from
+    the runner at call time and captures the static intervals at construction. The unit tests of the old classes
+    built each class with its collaborators as constructor arguments; they now build a `RealTick` over this runner
+    and pass the same collaborators as keyword arguments (`_trust_drift_engine=...`, `_artifacts=...`, ...).
+    Defaults: a real lock and logger, clearing on every tick with the default 250 ms budget, metrics and
+    bottlenecks on every tick, no artifact writes, storage enabled, every warning let through.
+    """
+
+    import logging
+    import threading
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    runner = SimpleNamespace(
+        _lock=threading.RLock(),
+        _logger=logging.getLogger("tick-unit"),
+        _utc_now=lambda: datetime.now(timezone.utc),
+        _clearing_every_n_ticks=1,
+        _real_clearing_time_budget_ms=250,
+        _real_db_metrics_every_n_ticks=1,
+        _real_db_bottlenecks_every_n_ticks=1,
+        _real_last_tick_write_every_ms=0,
+        _real_artifacts_sync_every_ms=0,
+        _db_enabled=lambda: True,
+        _should_warn_this_tick=lambda _run, key: True,
+    )
+    for name, value in collaborators.items():
+        setattr(runner, name, value)
+    return runner
+
+
+def unit_tick(**collaborators: Any):
+    """`RealTick` over `tick_unit_runner(**collaborators)`."""
+
+    from app.core.simulator.tick import RealTick
+
+    return RealTick(tick_unit_runner(**collaborators))

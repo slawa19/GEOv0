@@ -1,26 +1,18 @@
+"""The tick's bounded grace for a clearing task left running by the previous tick.
+
+Programme 021 stage 4 (`T2105`): renamed from `test_real_tick_orchestrator_pending_clearing.py` and moved from
+`RealTickOrchestrator` (with a `RealTickClearingCoordinator` for the hard timeout) onto `RealTick`, which owns both;
+the assertions are unchanged.
+"""
+
 from __future__ import annotations
 
 import asyncio
-import logging
-import threading
 
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_tick_clearing_coordinator import RealTickClearingCoordinator
-from app.core.simulator.real_tick_orchestrator import RealTickOrchestrator
-
-
-class _DummyRunner:
-    def __init__(self) -> None:
-        self._lock = threading.RLock()
-        self._logger = logging.getLogger("test_pending_clearing")
-        self._real_tick_clearing_coordinator = RealTickClearingCoordinator(
-            lock=self._lock,
-            logger=self._logger,
-            clearing_every_n_ticks=1,
-            real_clearing_time_budget_ms=1,
-        )
+from tests.simulator_tick_stand import unit_tick
 
 
 @pytest.mark.asyncio
@@ -28,8 +20,7 @@ async def test_await_pending_clearing_cancels_after_grace(monkeypatch) -> None:
     # Keep test fast: cap hard timeout to 1s => grace 0.5s
     monkeypatch.setenv("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", "1")
 
-    runner = _DummyRunner()
-    orch = RealTickOrchestrator(runner)  # type: ignore[arg-type]
+    orch = unit_tick(_clearing_every_n_ticks=1, _real_clearing_time_budget_ms=1)
 
     run = RunRecord(run_id="r1", scenario_id="s1", mode="real", state="running")
     run.tick_index = 123

@@ -31,20 +31,13 @@ from app.core.simulator.real_payment_action import _RealPaymentAction
 from app.core.simulator.real_payment_planner import RealPaymentPlanner
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
-from app.core.simulator.real_tick_clearing_coordinator import RealTickClearingCoordinator
-from app.core.simulator.real_tick_metrics import RealTickMetrics
-from app.core.simulator.real_tick_orchestrator import RealTickOrchestrator
-from app.core.simulator.real_tick_payments_coordinator import RealTickPaymentsCoordinator
-from app.core.simulator.real_tick_persistence import RealTickPersistence
-from app.core.simulator.real_tick_trust_drift_coordinator import (
-    RealTickTrustDriftCoordinator,
-)
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.runtime_utils import (
     safe_int_env as _safe_int_env,
     safe_optional_decimal_env as _safe_optional_decimal_env,
 )
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
+from app.core.simulator.tick import RealTick
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -225,41 +218,11 @@ class RealRunnerImpl:
             should_warn_this_tick=lambda run, key: self._should_warn_this_tick(run, key=key),
         )
 
-        self._real_tick_persistence: RealTickPersistence = RealTickPersistence(
-            lock=self._lock,
-            artifacts=self._artifacts,
-            utc_now=self._utc_now,
-            db_enabled=self._db_enabled,
-            logger=self._logger,
-            real_db_metrics_every_n_ticks=int(self._real_db_metrics_every_n_ticks),
-            real_db_bottlenecks_every_n_ticks=int(self._real_db_bottlenecks_every_n_ticks),
-            real_last_tick_write_every_ms=int(self._real_last_tick_write_every_ms),
-            real_artifacts_sync_every_ms=int(self._real_artifacts_sync_every_ms),
-        )
-
-        self._real_tick_metrics: RealTickMetrics = RealTickMetrics(
-            lock=self._lock,
-            logger=self._logger,
-            real_db_metrics_every_n_ticks=int(self._real_db_metrics_every_n_ticks),
-        )
-
-        self._real_tick_clearing_coordinator: RealTickClearingCoordinator = (
-            RealTickClearingCoordinator(
-                lock=self._lock,
-                logger=self._logger,
-                clearing_every_n_ticks=int(self._clearing_every_n_ticks),
-                real_clearing_time_budget_ms=int(self._real_clearing_time_budget_ms),
-            )
-        )
-        self._real_tick_trust_drift_coordinator: RealTickTrustDriftCoordinator = (
-            RealTickTrustDriftCoordinator(logger=self._logger)
-        )
-        self._real_tick_payments_coordinator: RealTickPaymentsCoordinator = (
-            RealTickPaymentsCoordinator(lock=self._lock, logger=self._logger)
-        )
         self._real_scenario_seeder: RealScenarioSeeder = RealScenarioSeeder()
 
-        self._real_tick_orchestrator: RealTickOrchestrator = RealTickOrchestrator(self)
+        # Programme 021 stage 4: the tick is one module (`tick.py`). It reads this runner's collaborators and limits
+        # at call time and captures the static intervals and the clearing budget here, once.
+        self._tick: RealTick = RealTick(self)
 
     def _parse_event_time_ms(self, evt: Any) -> int | None:
         if not isinstance(evt, dict):
@@ -926,13 +889,13 @@ class RealRunnerImpl:
         )
 
     async def flush_pending_storage(self, run_id: str) -> None:
-        await self._real_tick_orchestrator.flush_pending_storage(run_id)
+        await self._tick.flush_pending_storage(run_id)
 
     async def tick_real_mode(self, run_id: str) -> None:
-        await self._real_tick_orchestrator.tick_real_mode(run_id)
+        await self._tick.tick(run_id)
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None:
-        await self._real_tick_orchestrator.fail_run(run_id, code=code, message=message)
+        await self._tick.fail_run(run_id, code=code, message=message)
 
     async def tick_real_mode_clearing(
         self,
@@ -946,6 +909,9 @@ class RealRunnerImpl:
         time_budget_ms_override: int | None = None,
         max_depth_override: int | None = None,
     ) -> dict[str, float]:
+        # NO CALLER in `app/` since programme 021 stage 4: the tick calls the driver itself, at one point
+        # (`tick.py::RealTick._run_clearing`). Kept only because `real_runner.py` overrides it through `super()`;
+        # both go with the driver in 021 `T2109`.
         return await self._real_clearing_engine.tick_real_mode_clearing(
             session,
             run_id=run_id,

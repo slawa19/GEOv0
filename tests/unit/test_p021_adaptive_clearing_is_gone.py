@@ -134,10 +134,12 @@ def test_no_module_in_app_reaches_the_adaptive_clearing_mode() -> None:
 
 def test_the_scan_reads_the_simulator_modules_that_carried_the_mode() -> None:
     modules = {path.relative_to(REPO).as_posix() for path in _modules()}
+    # The coordinator that carried two of the reads (`real_tick_clearing_coordinator.py`) was absorbed by
+    # `tick.py` in 021 stage 4; the scan reads the module that holds the clearing cadence now.
     for carrier in (
         "app/config.py",
         "app/core/simulator/real_runner_impl.py",
-        "app/core/simulator/real_tick_clearing_coordinator.py",
+        "app/core/simulator/tick.py",
     ):
         assert carrier in modules, f"the scan does not read {carrier}"
 

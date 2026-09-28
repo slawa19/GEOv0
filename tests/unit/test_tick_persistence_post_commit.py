@@ -1,11 +1,19 @@
+"""The persistence tail's own commit: a failed commit publishes nothing, a failed effect undoes nothing.
+
+Programme 021 stage 4 (`T2105`): renamed from `test_real_tick_persistence_post_commit.py`; `RealTickPersistence`
+became `RealTick.persist_tick_tail`, and the callbacks it took as `on_commit`/`on_rollback` are now read from the
+payments phase result it is handed (`payments_result`), as the tick hands them. Both assertions are unchanged
+(spec 021, Verification plan item 3, "Тик").
+"""
+
 import logging
-import threading
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_tick_persistence import RealTickPersistence
+from tests.simulator_tick_stand import unit_tick
 
 
 class _FailingCommitSession:
@@ -56,16 +64,14 @@ async def test_outer_commit_failure_does_not_apply_payment_effects():
         nonlocal rollback_observed
         rollback_observed += 1
 
-    persistence = RealTickPersistence(
-        lock=threading.RLock(),
-        artifacts=_Artifacts(),
-        utc_now=lambda: datetime.now(timezone.utc),
-        db_enabled=lambda: False,
-        logger=logging.getLogger(__name__),
-        real_db_metrics_every_n_ticks=100,
-        real_db_bottlenecks_every_n_ticks=100,
-        real_last_tick_write_every_ms=0,
-        real_artifacts_sync_every_ms=0,
+    persistence = unit_tick(
+        _logger=logging.getLogger(__name__),
+        _artifacts=_Artifacts(),
+        _db_enabled=lambda: False,
+        _real_db_metrics_every_n_ticks=100,
+        _real_db_bottlenecks_every_n_ticks=100,
+        _real_last_tick_write_every_ms=0,
+        _real_artifacts_sync_every_ms=0,
     )
 
     with pytest.raises(RuntimeError, match="outer commit failed"):
@@ -82,8 +88,9 @@ async def test_outer_commit_failure_does_not_apply_payment_effects():
             per_eq={"UAH": {"committed": 1}},
             per_eq_metric_values={"UAH": {}},
             per_eq_edge_stats={"UAH": {}},
-            on_commit=_on_commit,
-            on_rollback=_on_rollback,
+            payments_result=SimpleNamespace(
+                apply_deferred_effects=_on_commit, apply_rollback_observations=_on_rollback
+            ),
         )
 
     assert session.rollbacks == 1
@@ -104,16 +111,14 @@ async def test_post_commit_callback_failure_does_not_rollback_durable_commit():
     run.sim_time_ms = 1000
     session = _SuccessfulCommitSession()
 
-    persistence = RealTickPersistence(
-        lock=threading.RLock(),
-        artifacts=_Artifacts(),
-        utc_now=lambda: datetime.now(timezone.utc),
-        db_enabled=lambda: False,
-        logger=logging.getLogger(__name__),
-        real_db_metrics_every_n_ticks=100,
-        real_db_bottlenecks_every_n_ticks=100,
-        real_last_tick_write_every_ms=0,
-        real_artifacts_sync_every_ms=0,
+    persistence = unit_tick(
+        _logger=logging.getLogger(__name__),
+        _artifacts=_Artifacts(),
+        _db_enabled=lambda: False,
+        _real_db_metrics_every_n_ticks=100,
+        _real_db_bottlenecks_every_n_ticks=100,
+        _real_last_tick_write_every_ms=0,
+        _real_artifacts_sync_every_ms=0,
     )
 
     await persistence.persist_tick_tail(
@@ -129,7 +134,9 @@ async def test_post_commit_callback_failure_does_not_rollback_durable_commit():
         per_eq={"UAH": {"committed": 1}},
         per_eq_metric_values={"UAH": {}},
         per_eq_edge_stats={"UAH": {}},
-        on_commit=lambda: (_ for _ in ()).throw(RuntimeError("effect failed")),
+        payments_result=SimpleNamespace(
+            apply_deferred_effects=lambda: (_ for _ in ()).throw(RuntimeError("effect failed"))
+        ),
     )
 
     assert session.commits == 1

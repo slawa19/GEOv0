@@ -36,10 +36,11 @@ import app.db.session as db_session
 from app.config import settings
 from app.core.simulator import storage as simulator_storage
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
-from app.core.simulator.real_tick_metrics import RealTickMetrics
+from app.core.simulator.tick import RealTick
 from app.db.models.simulator_storage import SimulatorRunBottleneck, SimulatorRunMetric
 from app.schemas.simulator import MetricSeriesKey, metric_point_value
 from app.utils.exceptions import GeoException
+from tests.simulator_tick_stand import unit_tick
 
 
 LOGGER_NAME = "tests.simulator.metrics_bottlenecks"
@@ -627,11 +628,12 @@ class _DebtSession:
         return _FakeResult(scalar=self._total)
 
 
-def _tick_metrics(every_n: int = 1) -> RealTickMetrics:
-    return RealTickMetrics(
-        lock=threading.RLock(),
-        logger=logging.getLogger(LOGGER_NAME),
-        real_db_metrics_every_n_ticks=every_n,
+def _tick_metrics(every_n: int = 1) -> RealTick:
+    # Programme 021 stage 4: the metrics producer is `RealTick.populate_per_eq_metric_values` (was
+    # `RealTickMetrics`); the throttle is the runner's interval, captured at construction as before.
+    return unit_tick(
+        _logger=logging.getLogger(LOGGER_NAME),
+        _real_db_metrics_every_n_ticks=every_n,
     )
 
 
@@ -646,7 +648,7 @@ def _tick_run(tick_index: int = 1) -> SimpleNamespace:
 
 
 async def _populate(
-    tick_metrics: RealTickMetrics, run: SimpleNamespace, session: Any
+    tick_metrics: RealTick, run: SimpleNamespace, session: Any
 ) -> dict[str, dict[str, Optional[Decimal | float]]]:
     values: dict[str, dict[str, Optional[Decimal | float]]] = {"UAH": {}}
     await tick_metrics.populate_per_eq_metric_values(

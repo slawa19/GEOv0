@@ -16,11 +16,9 @@ from app.core.simulator.real_payments_executor import (
     RealPaymentsResult,
     _PaymentObservation,
 )
-from app.core.simulator.real_tick_payments_coordinator import (
-    RealTickPaymentsCoordinator,
-)
 from app.core.simulator.sse_broadcast import SseEventEmitter
 from app.schemas.payment import PaymentResult
+from tests.simulator_tick_stand import unit_tick
 from app.utils.exceptions import (
     BadRequestException,
     RetryablePaymentConflictException,
@@ -316,14 +314,21 @@ async def test_timeout_stops_tick_but_harvests_and_rolls_back_successful_sibling
     async def _fail_run(_run_id: str, _code: str, _message: str) -> None:
         run.state = "error"
 
-    coordinator = RealTickPaymentsCoordinator(
-        lock=threading.RLock(),
-        logger=logging.getLogger(__name__),
-    )
     actions = [
         _Action(0, "UAH", "A", "B", "1.00"),
         _Action(1, "UAH", "A", "C", "2.00"),
     ]
+    # Programme 021 stage 4: the payments phase is `RealTick.run_payments_phase` (was
+    # `RealTickPaymentsCoordinator`); what the coordinator took as arguments it reads from the runner, and the
+    # in-flight cap from the run - which is where the tick always took it from.
+    coordinator = _payments_tick(
+        load_snapshot=lambda *_args: _empty_snapshot(),
+        plan=lambda *_args, **_kwargs: actions,
+        executor=_executor(sse),
+        max_timeouts_per_tick=1,
+        fail_run=_fail_run,
+    )
+    run._real_max_in_flight = 2
     phase, should_stop = await coordinator.run_payments_phase(
         session=session,
         run_id=run.run_id,
@@ -331,13 +336,6 @@ async def test_timeout_stops_tick_but_harvests_and_rolls_back_successful_sibling
         scenario={},
         participants=[(uuid.uuid4(), "A")],
         equivalents=["UAH"],
-        load_debt_snapshot_by_pid=lambda *_args: _empty_snapshot(),
-        plan_payments=lambda *_args: actions,
-        payments_executor=_executor(sse),
-        max_in_flight=2,
-        max_timeouts_per_tick=1,
-        max_errors_total=100,
-        fail_run=_fail_run,
     )
 
     assert should_stop is True
@@ -354,6 +352,21 @@ async def test_timeout_stops_tick_but_harvests_and_rolls_back_successful_sibling
 
 async def _empty_snapshot() -> dict:
     return {}
+
+
+def _payments_tick(*, load_snapshot, plan, executor, max_timeouts_per_tick, fail_run):
+    async def _fail_run_by_keyword(run_id: str, *, code: str, message: str) -> None:
+        await fail_run(run_id, code, message)
+
+    return unit_tick(
+        _logger=logging.getLogger(__name__),
+        _load_debt_snapshot_by_pid=load_snapshot,
+        _plan_real_payments=plan,
+        _real_payments_executor=executor,
+        _real_max_timeouts_per_tick_limit=max_timeouts_per_tick,
+        _real_max_errors_total_limit=100,
+        fail_run=_fail_run_by_keyword,
+    )
 
 
 def _stop_requested_result(
@@ -419,10 +432,17 @@ def _run_stop_requested_phase(
     run: RunRecord,
     result: RealPaymentsResult,
 ):
-    coordinator = RealTickPaymentsCoordinator(
-        lock=threading.RLock(),
-        logger=logging.getLogger(__name__),
+    async def _no_fail_run(*_args) -> None:
+        return None
+
+    coordinator = _payments_tick(
+        load_snapshot=lambda *_args: _empty_snapshot(),
+        plan=lambda *_args, **_kwargs: [],
+        executor=_StaticPaymentsExecutor(result),
+        max_timeouts_per_tick=0,
+        fail_run=_no_fail_run,
     )
+    run._real_max_in_flight = 1
     return coordinator.run_payments_phase(
         session=session,
         run_id=run.run_id,
@@ -430,13 +450,6 @@ def _run_stop_requested_phase(
         scenario={},
         participants=[(uuid.uuid4(), "A")],
         equivalents=["UAH"],
-        load_debt_snapshot_by_pid=lambda *_args: _empty_snapshot(),
-        plan_payments=lambda *_args: [],
-        payments_executor=_StaticPaymentsExecutor(result),  # type: ignore[arg-type]
-        max_in_flight=1,
-        max_timeouts_per_tick=0,
-        max_errors_total=100,
-        fail_run=lambda *_args: None,
     )
 
 

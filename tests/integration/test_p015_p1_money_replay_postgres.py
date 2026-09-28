@@ -788,7 +788,7 @@ async def test_a_tail_failure_after_the_money_commit_never_replays_money(
             raise RuntimeError("P1 stand: a failure in the tick's tail, after the money commit")
 
         monkeypatch.setattr(
-            runner._real_tick_clearing_coordinator, "maybe_run_clearing", _fail_in_the_tail
+            runner._tick, "maybe_run_clearing", _fail_in_the_tail
         )
 
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)

@@ -14,7 +14,8 @@ with debts that form a clearable triangle, and asserting that clearing completes
 reasonable timeout (no hang) and really cleared the cycle.
 
 If someone removes the early commit, clearing waits on the parent and the test fails - measured
-2026-09-24 on PostgreSQL by removing the commit in `RealTickClearingCoordinator.maybe_run_clearing`:
+2026-09-24 on PostgreSQL by removing the commit in `RealTickClearingCoordinator.maybe_run_clearing` (since
+021 stage 4, `RealTick._execute_clearing_with_timeout` in `app/core/simulator/tick.py`):
 no `clearing.done`, red. That holds only because the stand makes the parent hold the equivalent's
 owner lock when clearing is reached (see the test body); without it the same mutation stayed green.
 
@@ -268,7 +269,7 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
             await tmp.execute(_select(Equivalent.id).where(Equivalent.code == eq_code))
         ).scalar_one()
     parent_held_the_owner_lock: list[int] = []
-    coordinator = runner._real_tick_clearing_coordinator
+    coordinator = runner._tick
     original_maybe_run_clearing = coordinator.maybe_run_clearing
 
     async def _parent_holds_the_owner_lock_then_clears(**kwargs):

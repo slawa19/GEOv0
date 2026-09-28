@@ -16,7 +16,7 @@ import app.core.simulator.storage as simulator_storage
 import app.db.session as app_db_session
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner import RealRunner
-from app.core.simulator.real_tick_persistence import RealTickPersistence
+from app.core.simulator.tick import RealTick
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -165,7 +165,7 @@ async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
             return None
 
     # Inject a controlled drift after persist_tick_tail commits, but before post-tick audit runs.
-    orig_persist = RealTickPersistence.persist_tick_tail
+    orig_persist = RealTick.persist_tick_tail
     injected = {"done": False}
 
     async def _patched_persist_tick_tail(self, *, session, **kwargs) -> None:
@@ -237,7 +237,7 @@ async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
         injected["done"] = True
         await session.flush()
 
-    monkeypatch.setattr(RealTickPersistence, "persist_tick_tail", _patched_persist_tick_tail)
+    monkeypatch.setattr(RealTick, "persist_tick_tail", _patched_persist_tick_tail)
 
     runner = RealRunner(
         lock=threading.RLock(),
