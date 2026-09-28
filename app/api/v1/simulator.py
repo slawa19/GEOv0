@@ -19,6 +19,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.trustlines.service import (
+    TrustLineService,
     _is_live_trustline_uniqueness_violation,
 )
 
@@ -33,6 +34,7 @@ from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, SimulatorPidTakenError
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription
@@ -101,9 +103,20 @@ from app.utils.exceptions import (
     RoutingException,
     TimeoutException,
 )
+from app.schemas.trustline import (
+    TrustLineCloseRequest,
+    TrustLineCreateRequest,
+    TrustLineUpdateRequest,
+)
 from app.utils.validation import parse_money_amount
 
 router = APIRouter(prefix="/simulator")
+
+# Programme 021, stage 2: what the trust-line request models need in their required `signature` field when an
+# Interact action calls the service's internal path. `require_signature=False` is what makes the service skip the
+# check - never this value, which the service does not read on that path. Nothing of the action's request reaches
+# either: the flag is a literal at the call, and the placeholder is this constant.
+_UNSIGNED = "__internal__"
 
 # Uvicorn typically configures this logger at INFO level.
 logger = logging.getLogger("uvicorn.error")
@@ -1117,9 +1130,9 @@ async def action_trustline_create(
             },
         )
 
-    # Second, independent copy of the create guard: this route builds the TrustLine itself
-    # and never goes through TrustLineService, so fixing the service alone does not close
-    # it (finding F-009-4 / B-A1a-016).
+    # The action's own copy of the create guard (finding F-009-4 / B-A1a-016): it answers the
+    # action's `TRUSTLINE_EXISTS` code. Since 021 stage 2 the write below goes through
+    # TrustLineService, whose own check is then the second one.
     #
     # Only a LIVE line blocks a new one — protocol precondition of TRUST_LINE_CREATE,
     # docs/ru/02-protocol-spec.md:333.  Since migration 019_trust_lines_partial_unique_live
@@ -1148,17 +1161,14 @@ async def action_trustline_create(
             },
         )
 
-    tl = TrustLine(
-        from_participant_id=from_p.id,
-        to_participant_id=to_p.id,
-        equivalent_id=eq.id,
-        limit=limit_dec,
-        status="active",
-    )
-    db.add(tl)
+    # Programme 021, stage 2: the write, its audit row and its checkpoint pair are the trust-line service's
+    # (internal path, this handler's transaction). The checks above stay: the existing-debt check is STRONGER than
+    # the service's create ("Решения" item 5), and the codes they answer are the action's wire contract.
+    #
     # Guard and INSERT are not atomic; the partial unique index rejects a concurrent
     # duplicate, and that rejection must surface as a declared 409 rather than as an
-    # unhandled database error (fail-closed).
+    # unhandled database error (fail-closed).  It surfaces at the service's flush (translated
+    # there into a `CONCURRENT_TRUSTLINE_CREATE` conflict) or at the commit below.
     # 2026-08-22 / p009_t905 (`F-009-6`).  The readback happens INSIDE the transaction and
     # nothing after the commit performs a mandatory database read.  This route is one of
     # the three aggravated ones: the runtime snapshot mutation and the router cache
@@ -1166,13 +1176,31 @@ async def action_trustline_create(
     # database and the run's in-memory topology permanently out of step -- not until the
     # next read, but for the lifetime of the run.  `RT-009-5` shows the failure is
     # reachable.
+    trust_lines = TrustLineService(db)
+    batch = trust_lines.begin_internal_batch()
+    concurrent_create = False
     try:
-        # The flush is explicit and INSIDE this handler on purpose.  `refresh()` needs a
-        # persistent instance, and the flush is where the uniqueness conflict surfaces on
-        # PostgreSQL -- putting it outside would turn a declared 409 into an unhandled 500.
-        await db.flush()
+        tl = await trust_lines.execute_create(
+            batch,
+            from_p.id,
+            TrustLineCreateRequest(
+                to=to_p.pid,
+                equivalent=eq.code,
+                limit=format(limit_dec, "f"),
+                policy=dict(SIMULATED_TRUSTLINE_POLICY),
+                signature=_UNSIGNED,
+            ),
+            require_signature=False,
+        )
+        await batch.finish()
         await db.refresh(tl)
         await db.commit()
+    except ConflictException as exc:
+        # This handler owns the transaction: roll back BEFORE translating (spec, "Решения" item 7).
+        await db.rollback()
+        if (exc.details or {}).get("reason") != "CONCURRENT_TRUSTLINE_CREATE":
+            raise
+        concurrent_create = True
     except IntegrityError as exc:
         await db.rollback()
         # Identity check, not a blanket rename: a CHECK or foreign-key violation must not
@@ -1180,6 +1208,11 @@ async def action_trustline_create(
         # reused so both call sites answer the same question the same way.
         if not _is_live_trustline_uniqueness_violation(exc):
             raise
+        concurrent_create = True
+    except Exception:
+        await db.rollback()
+        raise
+    if concurrent_create:
         return _action_error(
             status_code=409,
             code="TRUSTLINE_EXISTS",
@@ -1390,11 +1423,25 @@ async def action_trustline_update(
             },
         )
 
-    tl.limit = new_limit_dec
-    # See the note in `action_trustline_create`: readback before commit.
-    await db.flush()
-    await db.refresh(tl)
-    await db.commit()
+    # Programme 021, stage 2: the write goes through the trust-line service's internal path in this handler's
+    # transaction; the handler rolls back on any failure before it propagates (spec, "Решения" item 7). See the
+    # note in `action_trustline_create`: readback before commit.
+    trust_lines = TrustLineService(db)
+    batch = trust_lines.begin_internal_batch()
+    try:
+        await trust_lines.execute_update(
+            batch,
+            tl.id,
+            tl.from_participant_id,
+            TrustLineUpdateRequest(limit=format(new_limit_dec, "f"), signature=_UNSIGNED),
+            require_signature=False,
+        )
+        await batch.finish()
+        await db.refresh(tl)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     # Keep runtime snapshot consistent with action (limit change).
     _mutate_runtime_trustline_topology_best_effort(
@@ -1572,11 +1619,23 @@ async def action_trustline_close(
             },
         )
 
-    tl.status = "closed"
-    # See the note in `action_trustline_create`: readback before commit.
-    await db.flush()
-    await db.refresh(tl)
-    await db.commit()
+    # Programme 021, stage 2: as in `action_trustline_update`.
+    trust_lines = TrustLineService(db)
+    batch = trust_lines.begin_internal_batch()
+    try:
+        await trust_lines.execute_close(
+            batch,
+            tl.id,
+            tl.from_participant_id,
+            TrustLineCloseRequest(signature=_UNSIGNED),
+            require_signature=False,
+        )
+        await batch.finish()
+        await db.refresh(tl)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     # Keep runtime snapshot/cache consistent with action.
     _mutate_runtime_trustline_topology_best_effort(

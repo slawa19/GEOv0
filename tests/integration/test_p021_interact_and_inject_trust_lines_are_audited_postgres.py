@@ -56,7 +56,6 @@ from tests.p021_support import (
     TrustLineCheckpoints,
     is_transaction_scoped,
     require_target,
-    target_xfail_021,
     trust_line_audit_rows,
 )
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - opt-in fixture of the inject tests
@@ -72,7 +71,6 @@ DEFAULT_POLICY = {
 
 HEADERS = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
-STAGE2 = target_xfail_021("T2103 (stage 2)", "Interact and inject trust-line writes go through the service")
 
 
 def _simulated_key(pid: str) -> str:
@@ -112,7 +110,8 @@ async def _seed_interact(session, w) -> SimpleNamespace:
     )
     session.add_all([eq, a, b])
     await session.commit()
-    return SimpleNamespace(eq=eq, a=a, b=b)
+    # Plain ids: a handler that rolls back expires the loaded rows, and reading one then would do IO.
+    return SimpleNamespace(eq_id=eq.id, a_id=a.id, b_id=b.id)
 
 
 async def _action(client, w, name: str, **body):
@@ -124,9 +123,9 @@ async def _live_line(session, rows) -> TrustLine | None:
     return (
         await session.execute(
             select(TrustLine).where(
-                TrustLine.from_participant_id == rows.a.id,
-                TrustLine.to_participant_id == rows.b.id,
-                TrustLine.equivalent_id == rows.eq.id,
+                TrustLine.from_participant_id == rows.a_id,
+                TrustLine.to_participant_id == rows.b_id,
+                TrustLine.equivalent_id == rows.eq_id,
             ).order_by(TrustLine.created_at.desc())
         )
     ).scalars().first()
@@ -141,7 +140,6 @@ def _one_row_per_action(rows, expected_ops: list[str], w) -> bool:
     )
 
 
-@STAGE2
 @pytest.mark.asyncio
 async def test_interact_actions_write_one_audit_row_and_one_checkpoint_pair_each(
     client, db_session, interact, monkeypatch
@@ -184,7 +182,6 @@ async def test_interact_actions_write_one_audit_row_and_one_checkpoint_pair_each
     )
 
 
-@STAGE2
 @pytest.mark.asyncio
 async def test_interact_create_keeps_its_existing_debt_check(client, db_session, interact, monkeypatch) -> None:
     """Decision 5: Interact create refuses a limit below the debt that already exists - the service does not."""
@@ -192,7 +189,7 @@ async def test_interact_create_keeps_its_existing_debt_check(client, db_session,
     w = interact
     rows = await _seed_interact(db_session, w)
     async with debt_fixture_setup(db_session, label="p021-interact-debt"):
-        db_session.add(Debt(debtor_id=rows.b.id, creditor_id=rows.a.id, equivalent_id=rows.eq.id,
+        db_session.add(Debt(debtor_id=rows.b_id, creditor_id=rows.a_id, equivalent_id=rows.eq_id,
                             amount=Decimal("50")))
     await db_session.commit()
     checkpoints = TrustLineCheckpoints(monkeypatch)
@@ -218,7 +215,6 @@ async def test_interact_create_keeps_its_existing_debt_check(client, db_session,
     )
 
 
-@STAGE2
 @pytest.mark.parametrize("action", ["trustline-create", "trustline-update", "trustline-close"])
 @pytest.mark.asyncio
 async def test_a_failed_interact_action_is_rolled_back_by_its_handler(
@@ -227,8 +223,8 @@ async def test_a_failed_interact_action_is_rolled_back_by_its_handler(
     w = interact
     rows = await _seed_interact(db_session, w)
     if action != "trustline-create":
-        db_session.add(TrustLine(from_participant_id=rows.a.id, to_participant_id=rows.b.id,
-                                 equivalent_id=rows.eq.id, limit=Decimal("100"), status="active",
+        db_session.add(TrustLine(from_participant_id=rows.a_id, to_participant_id=rows.b_id,
+                                 equivalent_id=rows.eq_id, limit=Decimal("100"), status="active",
                                  policy=dict(DEFAULT_POLICY)))
         await db_session.commit()
     body = {"trustline-create": {"limit": "70"}, "trustline-update": {"new_limit": "70"}, "trustline-close": {}}
@@ -322,7 +318,6 @@ async def _inject_audit(factory, w) -> list:
         return await trust_line_audit_rows(s, equivalent_codes=[w.e1.code, w.e2.code])
 
 
-@STAGE2
 @pytest.mark.usefixtures("tier_on_a_clone")
 @pytest.mark.asyncio
 async def test_an_inject_event_writes_one_audit_row_per_line_and_one_checkpoint_pair_per_equivalent(
@@ -370,7 +365,6 @@ async def test_an_inject_event_writes_one_audit_row_per_line_and_one_checkpoint_
     )
 
 
-@STAGE2
 @pytest.mark.usefixtures("tier_on_a_clone")
 @pytest.mark.asyncio
 async def test_a_failed_inject_event_is_rolled_back_by_its_owner(factory, monkeypatch) -> None:

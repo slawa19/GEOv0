@@ -31,7 +31,7 @@ import ast
 import re
 from pathlib import Path
 
-from tests.p021_support import require_target, target_xfail_021
+from tests.p021_support import require_target
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -116,7 +116,6 @@ def _scan() -> tuple[list[str], set[tuple[str, str]]]:
     return found, seen
 
 
-@target_xfail_021("T2103 (stage 2)", "the five remaining simulator writers of trust_lines move to the service")
 def test_the_simulator_writes_trust_lines_only_through_the_service() -> None:
     found, _seen = _scan()
     require_target(not found, "trust-line writes outside the service:\n" + "\n".join(found))

@@ -7,12 +7,15 @@ drift's internal entrances. The rule has three parts, each checked on the source
 1. every call of `execute_*` passes `require_signature=` as a LITERAL `True` or `False` - never a variable, an
    attribute or an expression, which is the only way a request could reach it;
 2. a literal `False`, `import_initial_trustlines` and `begin_internal_batch` appear only in the NAMED trusted
-   modules below (stage 1: the seeder and drift; stage 2 adds the inject executor and the Interact handlers);
-3. no request schema (`app/schemas/`) and no HTTP module (`app/api/`) mentions `require_signature` - there is no
-   field a client could set.
+   modules below (stage 1: the seeder and drift; stage 2: the inject executor and the Interact handlers);
+3. no request schema (`app/schemas/`) mentions `require_signature` at all, and an HTTP module (`app/api/`) names
+   it ONLY as the literal keyword of an `execute_*` call - and only if it is a trusted module (stage 2: the
+   Interact handlers of `app/api/v1/simulator.py`). A field, an annotation, a parameter, a variable, a string or
+   any other use there is refused: there is no field a client could set and no value a request could flow into.
 
 WHAT IT DOES NOT SEE. It reads call syntax: a call made through `getattr(service, name)`, a re-bound method, or
-`functools.partial` is invisible to it, and it says nothing about what the unsigned path does - that is the
+`functools.partial` is invisible to it; rule 3 reads the syntax tree, so a comment naming the flag is not a use;
+and it says nothing about what the unsigned path does - that is the
 behaviour tests' job (`tests/unit/test_p021_public_trust_line_operations_require_a_signature.py` for the public
 side, R-021-2/3/4 for the internal one). A green run here means the syntax above holds, not that the path is
 safe. The counter-checks at the bottom feed the checker sources it must refuse, so a checker that stopped
@@ -30,10 +33,13 @@ APP = REPO / "app"
 EXECUTE = {"execute_create", "execute_update", "execute_close"}
 INTERNAL_ENTRANCES = {"import_initial_trustlines", "begin_internal_batch"}
 
-#: The named trusted callers of the unsigned path, by module (spec, "Решения" item 4). Stage 1.
+#: The named trusted callers of the unsigned path, by module (spec, "Решения" item 4). Stage 1: the seeder and
+#: drift; stage 2: the inject executor and the Interact actions' handlers.
 TRUSTED_UNSIGNED_MODULES = {
     "app/core/simulator/real_scenario_seeder.py",
     "app/core/simulator/trust_drift_engine.py",
+    "app/core/simulator/inject_executor.py",
+    "app/api/v1/simulator.py",
 }
 SERVICE_MODULE = "app/core/trustlines/service.py"
 
@@ -100,12 +106,47 @@ def test_the_public_operations_always_require_a_signature() -> None:
     assert seen == {"create": [True], "update": [True], "close": [True]}, seen
 
 
+FLAG = "require_signature"
+
+
+def _flag_uses_outside_execute_keywords(source: str) -> list[int]:
+    """Line numbers of every syntactic use of the flag in `source` other than `execute_*(..., require_signature=<bool>)`."""
+
+    tree = ast.parse(source)
+    allowed: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in EXECUTE:
+            for k in node.keywords:
+                if k.arg == FLAG and isinstance(k.value, ast.Constant) and isinstance(k.value.value, bool):
+                    allowed.add(id(k))
+    uses: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == FLAG and id(node) not in allowed:
+            uses.append(node.value.lineno)
+        elif isinstance(node, ast.Name) and node.id == FLAG:
+            uses.append(node.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr == FLAG:
+            uses.append(node.lineno)
+        elif isinstance(node, ast.arg) and node.arg == FLAG:
+            uses.append(node.lineno)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and FLAG in node.value:
+            uses.append(node.lineno)
+    return uses
+
+
 def request_surface_offenders(modules: list[tuple[str, str]]) -> list[str]:
-    return [
-        module
-        for module, source in modules
-        if (module.startswith("app/schemas/") or module.startswith("app/api/")) and "require_signature" in source
-    ]
+    out: list[str] = []
+    for module, source in modules:
+        if module.startswith("app/schemas/"):
+            if FLAG in source:
+                out.append(module)
+        elif module.startswith("app/api/"):
+            if module not in TRUSTED_UNSIGNED_MODULES:
+                if FLAG in source:
+                    out.append(module)
+            elif _flag_uses_outside_execute_keywords(source):
+                out.append(module)
+    return out
 
 
 def test_no_request_schema_or_http_module_can_carry_the_flag() -> None:
@@ -113,6 +154,9 @@ def test_no_request_schema_or_http_module_can_carry_the_flag() -> None:
     assert any(m.startswith("app/schemas/") for m, _ in modules), "premise: the scan reaches app/schemas"
     offenders = request_surface_offenders(modules)
     assert not offenders, offenders
+    # Anti-vacuum: the trusted HTTP module is scanned and does carry the literal flag (stage 2).
+    interact = dict(modules)["app/api/v1/simulator.py"]
+    assert FLAG in interact, "premise: the Interact handlers call the internal path"
 
 
 # ---------------------------------------------------------------------------------------- counter-checks
@@ -133,10 +177,27 @@ def test_counter_check_a_missing_flag_and_a_stray_import_are_refused() -> None:
     missing = "async def f(svc, b, d):\n    await svc.execute_create(b, 1, d)\n"
     assert violations_in(missing, "app/core/simulator/trust_drift_engine.py"), "a call without the flag passed"
     stray = "async def f(svc, b):\n    await svc.import_initial_trustlines(b, [])\n"
-    assert violations_in(stray, "app/core/simulator/inject_executor.py"), "an untrusted import call passed"
+    assert violations_in(stray, "app/core/simulator/real_payments_executor.py"), "an untrusted import call passed"
 
 
 def test_counter_check_a_schema_field_is_seen() -> None:
     planted = ("app/schemas/trustline.py", "class TrustLineCreateRequest:\n    require_signature: bool = True\n")
     assert request_surface_offenders([planted]) == ["app/schemas/trustline.py"]
     assert request_surface_offenders([("app/core/payments/service.py", "require_signature=False")]) == []
+
+
+def test_counter_check_the_trusted_http_module_may_only_pass_the_literal() -> None:
+    module = "app/api/v1/simulator.py"
+    literal = "async def h(svc, b, d):\n    await svc.execute_close(b, 1, 2, d, require_signature=False)\n"
+    assert request_surface_offenders([(module, literal)]) == [], "the literal keyword of a trusted call was refused"
+    planted = {
+        "a request field": "class Req(BaseModel):\n    require_signature: bool = True\n",
+        "a handler parameter": "async def h(require_signature: bool = True):\n    pass\n",
+        "a request-derived value": "flag = req.require_signature\n",
+        "a string key": "body = {'require_signature': False}\n",
+        "a non-execute keyword": "make(require_signature=False)\n",
+    }
+    for what, source in planted.items():
+        assert request_surface_offenders([(module, source)]) == [module], f"{what} in the Interact module passed"
+    # An untrusted HTTP module may not name it at all, not even as the literal.
+    assert request_surface_offenders([("app/api/v1/trustlines.py", literal)]) == ["app/api/v1/trustlines.py"]

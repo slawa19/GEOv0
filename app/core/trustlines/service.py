@@ -375,8 +375,18 @@ class TrustLineService:
         data: TrustLineCreateRequest,
         *,
         require_signature: bool,
+        flush: bool = True,
     ) -> TrustLine:
-        """Stage a new ACTIVE trust line in the caller's transaction and record it on `batch`."""
+        """Stage a new ACTIVE trust line in the caller's transaction and record it on `batch`.
+
+        `flush=False` (programme 021, stage 2) leaves the INSERT staged for the caller's next flush instead of
+        sending it here. The inject executor needs it: an inject event's effects see each other only through
+        the event's own flush points (the session runs with `autoflush=False`), and an extra flush here would
+        let a later `inject_debt` of the same event see a line it did not see before 021
+        (`tests/integration/test_p018_mixed_inject_event_is_one_operation_postgres.py`). A uniqueness clash
+        then surfaces as a raw `IntegrityError` at that later flush - which is what the inject owner already
+        classifies - and `batch.finish()` flushes before its after-checkpoint either way.
+        """
 
         if require_signature and (not isinstance(getattr(data, "signature", None), str) or not data.signature):
             raise InvalidSignatureException("Missing signature")
@@ -493,7 +503,8 @@ class TrustLineService:
         # does not block this INSERT.
         self.session.add(trustline)
         try:
-            await self.session.flush()
+            if flush:
+                await self.session.flush()
         except IntegrityError as exc:
             # The conflict surfaces here when the competing transaction has already
             # committed.  Translate it into a declared conflict WITHOUT rolling back
