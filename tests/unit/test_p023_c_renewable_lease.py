@@ -29,7 +29,7 @@ import asyncio
 import pytest
 
 from app.utils.exceptions import ConflictException
-from tests.p023_support import require_target, slice_c_surface, target_xfail_023
+from tests.p023_support import require_target, slice_c_surface
 
 
 KEY = "dlock:clearing:P023C"
@@ -340,7 +340,6 @@ async def _bounded(awaitable, what: str, seconds: float = 2.0):
 _SHORT = dict(ttl_seconds=3.0, renew_interval_seconds=1.0, renew_timeout_seconds=0.2, safety_margin_seconds=1.0)
 
 
-@target_xfail_023("(c) fix-delta", "Redis SET and release are not bounded")
 @pytest.mark.asyncio
 async def test_a_hanging_set_is_bounded_by_the_acquisition_budget() -> None:
     api = slice_c_surface()
@@ -354,7 +353,6 @@ async def test_a_hanging_set_is_bounded_by_the_acquisition_budget() -> None:
     assert lease.lost is True, "an unconfirmed acquisition is not ownership"
 
 
-@target_xfail_023("(c) fix-delta", "Redis SET and release are not bounded")
 @pytest.mark.asyncio
 async def test_a_hanging_release_is_bounded_and_the_block_result_is_delivered() -> None:
     api = slice_c_surface()

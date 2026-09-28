@@ -42,7 +42,7 @@ from sqlalchemy import text
 from app.core.clearing.service import ClearingService
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import Edge, debt_uuid, seed_graph
-from tests.p023_support import positive_debt_total, require_target, slice_c_surface, target_xfail_023
+from tests.p023_support import positive_debt_total, require_target, slice_c_surface
 
 pytestmark = MODE_B
 
@@ -227,7 +227,6 @@ async def test_lease_loss_during_planning_starts_no_cycle_on_the_late_result(db_
 # ------------------------------------------------------------------------------ fix-delta (review P2-2), red-first
 
 
-@target_xfail_023("(c) fix-delta", "a planner pool whose worker died stays cached and fails every later pass")
 @pytest.mark.asyncio
 async def test_a_planner_worker_that_dies_while_idle_does_not_break_every_later_pass(db_session, monkeypatch) -> None:
     from concurrent.futures.process import BrokenProcessPool

@@ -154,7 +154,13 @@ class RenewableLease:
         self._valid_until = sent_at + self.ttl_seconds - self.safety_margin_seconds
 
     async def acquire(self, *, wait_timeout_seconds: float, poll_interval_seconds: float = 0.05) -> None:
-        """Take the key or raise `ConflictException` after `wait_timeout_seconds` (0 = one try)."""
+        """Take the key or raise `ConflictException` after `wait_timeout_seconds` (0 = one try).
+
+        Every `SET` is bounded (review P2-3): it may take at most what is left of the wait budget plus one round
+        trip's latency bound (`renew_timeout_seconds`), so acquisition never outlasts `wait_timeout_seconds +
+        renew_timeout_seconds`. A `SET` that timed out may still have landed with our token: that is not ownership
+        (the lease stays not acquired); our token is removed by one bounded compare-and-delete, else its TTL expires it.
+        """
 
         if self._redis is None:
             self._acquired = True
@@ -164,7 +170,16 @@ class RenewableLease:
         deadline = self._clock() + wait_timeout_seconds
         while True:
             sent_at = self._clock()
-            ok = await self._redis.set(self.key, self.token, nx=True, px=int(self.ttl_seconds * 1000))
+            try:
+                async with asyncio.timeout(max(0.0, deadline - sent_at) + self.renew_timeout_seconds):
+                    ok = await self._redis.set(self.key, self.token, nx=True, px=int(self.ttl_seconds * 1000))
+            except TimeoutError:
+                _lease_logger.warning("event=lease.acquire_timeout key=%s", self.key)
+                await self._delete_own_token(event="acquire_uncertain")
+                raise ConflictException(
+                    "Resource is busy",
+                    details={"lock_key": self.key, "wait_timeout_seconds": wait_timeout_seconds, "reason": "timeout"},
+                )
             if ok:
                 self._acquired = True
                 self._confirm(sent_at)
@@ -203,14 +218,26 @@ class RenewableLease:
         return False
 
     async def release(self) -> None:
+        """Compare-and-delete our token, bounded by `renew_timeout_seconds` (review P2-3): an unresponsive Redis
+        must not hold back a result already computed, or shutdown. An uncertain release relies on the TTL."""
+
         if self._redis is None or not self._acquired:
             return
+        self._acquired = False
+        await self._delete_own_token(event="release_uncertain")
+
+    async def _delete_own_token(self, *, event: str) -> None:
         try:
-            await self._redis.eval(_UNLOCK_LUA, 1, self.key, self.token)
-        except Exception as exc:  # noqa: BLE001 - best effort, like `redis_distributed_lock`; the TTL expires it
-            _lease_logger.warning("event=lease.release_failed key=%s error=%s", self.key, type(exc).__name__)
-        finally:
-            self._acquired = False
+            async with asyncio.timeout(self.renew_timeout_seconds):
+                await self._redis.eval(_UNLOCK_LUA, 1, self.key, self.token)
+        except Exception as exc:  # noqa: BLE001 - timeout or transport error alike: the key's TTL expires it
+            _lease_logger.warning(
+                "event=lease.%s key=%s error=%s relying_on_ttl_seconds=%s",
+                event,
+                self.key,
+                type(exc).__name__,
+                self.ttl_seconds,
+            )
 
     async def _renew_until_lost(self) -> None:
         while not self._stolen and self._acquired:

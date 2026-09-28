@@ -28,7 +28,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.p023_support import require_target, target_xfail_023
+from tests.p023_support import require_target
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _RUNNER = REPO_ROOT / "app" / "core" / "clearing" / "runner.py"
@@ -161,7 +161,6 @@ async def _health_after(monkeypatch, results) -> str:
     return background_health_status(app)
 
 
-@target_xfail_023("(c) fix-delta", "a per-equivalent pass error leaves background health ok")
 @pytest.mark.asyncio
 async def test_an_equivalent_pass_error_degrades_health(monkeypatch) -> None:
     import app.core.clearing.runner as runner

@@ -284,6 +284,15 @@ async def _run_periodic_clearing_once(app: FastAPI) -> None:
         logger.exception("clearing.periodic_failed")
         _record_background_job_event(app, name="clearing", status="failed", event="error", error=error)
         return
+    from app.core.clearing.runner import InterruptReason
+
+    failed = sorted(code for code, result in results.items() if result.reason == InterruptReason.ERROR)
+    if failed:
+        # Review P2-4: a pass stopped by an error (planner, stop/hold, perimeter, unknown commit) degrades health;
+        # a budget, lease, re-plan or retry-budget interruption is ordinary and does not.
+        logger.error("clearing.periodic_equivalents_failed count=%s", len(failed))
+        _record_background_job_event(app, name="clearing", status="failed", event="pass_error")
+        return
     interrupted = sorted(code for code, result in results.items() if result.status != "complete")
     _record_background_job_event(
         app,

@@ -77,7 +77,10 @@ DEFAULT_MAX_REPLANS = 3
 #: Pause before re-planning after a skip - the state moved under the plan; give the concurrent writer a moment.
 DEFAULT_REPLAN_PAUSE_SECONDS = 0.5
 #: The lease of one equivalent's pass. `renew interval + renew timeout + margin < TTL` (10 + 5 + 5 < 30), checked by
-#: `RenewableLease`. The key is the one `/clearing/auto` locks today, so the two exclude each other through Redis.
+#: `RenewableLease`. The key is the one `/clearing/auto` locks today, so each waits for the other to RELEASE it - but
+#: while legacy `/auto` coexists (until slice (d)), its lock is not renewed and expires after 30 s: a longer `/auto`
+#: run can overlap a runner pass. That is not double application - every occurrence revalidates its rows at the 019
+#: boundary - but it is not mutual exclusion either (review P3-7).
 LEASE_TIMINGS = {
     "ttl_seconds": 30.0,
     "renew_interval_seconds": 10.0,
@@ -257,7 +260,12 @@ async def _read_snapshot(session_factory, equivalent_code, allowed_participant_p
 
 async def _plan_off_the_loop(edges, executor: Optional[Executor], state: _PassState):
     pool = executor or _default_planner_executor()
-    worker = pool.submit(plan_clearing, edges)
+    try:
+        # Review P2-2: a worker that died while idle breaks the pool at SUBMISSION, not only at the result.
+        worker = pool.submit(plan_clearing, edges)
+    except BrokenProcessPool:
+        _discard_broken_planner_executor(pool)
+        raise
     try:
         return await asyncio.wrap_future(worker)
     except BrokenProcessPool:
