@@ -1,0 +1,48 @@
+# 023 slice (c), step 2: red evidence of the (c) tests on base b104e293 + the spec edit ccdda87 + the test commit
+# (tests only; no production change).
+# Command: $env:PYTEST_ADDOPTS='--runxfail --tb=line -rf'; scripts/verify_local.ps1 -TaskSlug p023c -BackendOnly
+#          -Python <main .venv> -BackendSelector tests/unit/test_p023_c_renewable_lease.py,
+#          tests/integration/test_p023_c_runner_progress_postgres.py,tests/integration/test_p023_c_planner_off_loop_postgres.py,
+#          tests/integration/test_p023_c_periodic_isolation_postgres.py
+# --runxfail is a DEBUG view that only shows the TargetMismatch text the strict marker hides. The canonical run
+# without it (same four modules): '35 xfailed', exit 0.
+# Every one of the 35 failures below is the strict marker's TargetMismatch, with ONE text (no ImportError,
+# no AttributeError, no stand AssertionError):
+#     35 TargetMismatch: slice (c) is not delivered: no common clearing runner, no committed-progress handoff, no periodic isolation rule and no renewable lease on this tree (app.core.clearing.runner, distributed_lock.RenewableLease, distributed_lock.renewable_lease absent)
+
+35 failed in 5.34s
+FAILED tests/integration/test_p023_c_periodic_isolation_postgres.py::test_a_real_simulator_run_in_the_database_refuses_the_periodic_pass[mode_b]
+FAILED tests/integration/test_p023_c_periodic_isolation_postgres.py::test_clearing_disabled_the_periodic_pass_clears_nothing[mode_b]
+FAILED tests/integration/test_p023_c_periodic_isolation_postgres.py::test_counter_check_a_fixtures_mode_run_does_not_refuse[mode_b]
+FAILED tests/integration/test_p023_c_periodic_isolation_postgres.py::test_positive_control_the_periodic_pass_clears_a_hub_cycle[mode_b]
+FAILED tests/integration/test_p023_c_periodic_isolation_postgres.py::test_the_isolation_check_itself_reads_the_evidence[mode_b]
+FAILED tests/integration/test_p023_c_periodic_isolation_postgres.py::test_without_simulator_persistence_the_periodic_pass_is_refused[mode_b]
+FAILED tests/integration/test_p023_c_planner_off_loop_postgres.py::test_a_concurrent_request_completes_while_planning_runs_and_the_snapshot_is_released[mode_b]
+FAILED tests/integration/test_p023_c_planner_off_loop_postgres.py::test_cancelling_during_planning_starts_no_cycle_even_after_the_workers_late_result[mode_b]
+FAILED tests/integration/test_p023_c_planner_off_loop_postgres.py::test_lease_loss_during_planning_starts_no_cycle_on_the_late_result[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_a_commit_that_lands_while_the_caller_is_cancelled_is_handed_off[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_a_full_pass_hands_off_every_occurrence_and_ends_complete[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_a_planner_error_is_an_interrupted_error_with_no_plan_and_no_effect[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_a_stale_occurrence_drops_the_tail_and_replans_on_a_fresh_snapshot[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_first_commits_next_fails_the_first_is_handed_off_before_the_error_propagates[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_first_commits_next_is_cancelled_the_first_is_handed_off_and_no_next_cycle_runs[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_lease_loss_completes_the_occurrence_in_flight_and_starts_no_new_cycle[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_the_awaited_entry_refuses_when_clearing_is_disabled_and_runs_under_the_equivalents_lease[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_the_callers_budget_is_checked_between_occurrences[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_the_replan_limit_ends_the_pass_interrupted_with_the_dropped_tail_as_remaining_work[mode_b]
+FAILED tests/integration/test_p023_c_runner_progress_postgres.py::test_the_run_perimeter_bounds_the_pass[mode_b]
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_a_hanging_renewal_is_bounded_by_the_renew_timeout
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_a_renewal_that_finds_another_owner_loses_the_lease_and_leaves_the_stranger_alone
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_a_second_owner_is_refused_while_the_first_holds_the_key
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_a_transient_renewal_error_is_not_a_loss_but_the_expiry_still_is
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_acquire_holds_the_key_with_the_owner_token_and_a_millisecond_ttl
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_interval_plus_latency_plus_margin_must_stay_below_the_ttl[10.0-10.0-10.0-False]
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_interval_plus_latency_plus_margin_must_stay_below_the_ttl[10.0-5.0-15.0-False]
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_interval_plus_latency_plus_margin_must_stay_below_the_ttl[10.0-5.0-5.0-True]
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_interval_plus_latency_plus_margin_must_stay_below_the_ttl[20.0-5.0-5.0-False]
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_release_deletes_only_the_owner_token
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_renewal_with_the_owner_token_extends_the_ttl_and_the_local_validity
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_the_context_manager_renews_past_the_ttl_and_releases_on_exit
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_the_context_manager_stops_renewing_after_a_loss
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_without_a_confirmed_renewal_the_lease_is_lost_at_ttl_minus_margin_even_if_redis_still_has_it
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_without_redis_the_lease_claims_no_distributed_exclusivity

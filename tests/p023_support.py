@@ -63,6 +63,58 @@ def slice_b_surface():
     )
 
 
+def slice_c_surface():
+    """The slice (c) surface (spec decisions 7, 9, 10), or `TargetMismatch` naming what the tree lacks.
+
+    The (c) tests read the runner, its committed-progress contract, the periodic isolation rule and the
+    renewable lease through here, so on a tree without slice (c) they end on the target - "no common runner,
+    no committed-progress handoff, no renewable lease" - and not on an `ImportError` the strict marker would
+    not accept.
+    """
+
+    import importlib
+    from types import SimpleNamespace
+
+    from app.utils import distributed_lock
+
+    missing: list[str] = []
+    try:
+        runner = importlib.import_module("app.core.clearing.runner")
+    except ModuleNotFoundError as exc:
+        if exc.name != "app.core.clearing.runner":
+            raise
+        runner = None
+        missing.append("app.core.clearing.runner")
+    names = (
+        "run_clearing_pass",
+        "run_awaited_clearing",
+        "run_periodic_clearing_pass",
+        "check_periodic_isolation",
+        "ClearingPassResult",
+        "CommittedOccurrence",
+        "ClearingPassCancelled",
+        "ClearingPassError",
+        "ClearingPeriodicRefused",
+        "InterruptReason",
+    )
+    if runner is not None:
+        missing.extend(name for name in names if not hasattr(runner, name))
+    for name in ("RenewableLease", "renewable_lease"):
+        if not hasattr(distributed_lock, name):
+            missing.append(f"distributed_lock.{name}")
+    if missing:
+        raise TargetMismatch(
+            "slice (c) is not delivered: no common clearing runner, no committed-progress handoff, no periodic "
+            f"isolation rule and no renewable lease on this tree ({', '.join(missing)} absent)"
+        )
+    return SimpleNamespace(
+        runner=runner,
+        RenewableLease=distributed_lock.RenewableLease,
+        renewable_lease=distributed_lock.renewable_lease,
+        **{name: getattr(runner, name) for name in names},
+    )
+
+
 def target_xfail_023(slice_: str, what: str):
     """The 023 marker: an expected `TargetMismatch`, strict, naming the slice whose switch removes it."""
 
