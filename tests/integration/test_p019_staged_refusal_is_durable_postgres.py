@@ -56,7 +56,6 @@ from app.config import settings
 from app.core.payments.service import PaymentService, PaymentTransactionUnusable
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from app.utils.exceptions import RetryablePaymentConflictException
 from tests.p019_support import allow_below_serializable_for_a_diagnostic
 from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` are fixtures
     ADMIN,
@@ -142,18 +141,25 @@ class _StagedCalls:
         monkeypatch.setattr(PaymentService, "create_payment_internal_staged", recording)
 
 
-async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
+async def _row_lock_waiter_exists(factory, pid: int, *, timeout: float = 10.0) -> bool:  # noqa: F811
+    """Whether the backend `pid` waits on a row lock. Called only while that wait cannot end on its
+    own (the stand holds the lock and the payment's budget is long), so the poll cannot miss it.
+
+    BY PID (2026-09-28). The earlier form asked whether ANY session of the server waited: row-lock
+    waits (`transactionid`, `tuple`) carry no database oid, so with two test tiers on one server
+    (`-TaskSlug` runs in parallel) another tier's waiter satisfied it, the stop came before seq 1
+    had even been called, and `test_stopping_the_run_...` failed (`not enough values to unpack`).
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     async with factory() as observer:
         while True:
-            # A row-lock wait shows as a non-granted `transactionid` (or `tuple`) lock; those carry
-            # no database oid, and this stand's clone is the only database in use.
             waiting = await observer.scalar(
                 text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted "
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = :pid AND NOT granted "
                     "AND locktype IN ('transactionid', 'tuple'))"
-                )
+                ),
+                {"pid": pid},
             )
             await observer.rollback()
             if waiting:
@@ -244,6 +250,8 @@ class _Subject:
     commit_timeout_s: float | None = _SUBJECT_COMMIT_TIMEOUT_S
     boundary: Any = None
     guard: dict[str, Any] = field(default_factory=dict)
+    issued: asyncio.Event = field(default_factory=asyncio.Event)  # the guard statement is about to run
+    pid: int | None = None  # the backend that runs it
 
     def install(self, monkeypatch) -> None:
         from app.core.money_boundary import MoneyBoundary
@@ -265,7 +273,10 @@ class _Subject:
             if self_ is not subject.boundary or not row_lock or subject.guard:
                 return await original_guard(self_, equivalent_ids, row_lock=row_lock)
             held = lambda: subject.gate.reached.is_set() and not subject.gate.release.is_set()  # noqa: E731
+            raw = await (await self_.session.connection()).get_raw_connection()
+            subject.pid = raw.driver_connection.get_server_pid()
             subject.guard["held_at_issue"] = held()
+            subject.issued.set()
             try:
                 result = await original_guard(self_, equivalent_ids, row_lock=row_lock)
             except BaseException as exc:
@@ -708,7 +719,8 @@ async def test_stopping_the_run_while_an_admitted_payment_waits_records_its_canc
             )
         await asyncio.wait_for(t.gate.reached.wait(), timeout=20)
         tick = asyncio.create_task(t.runner.tick_real_mode(t.run.run_id))
-        queued = await _row_lock_waiter_exists(factory)
+        await asyncio.wait_for(t.subject.issued.wait(), timeout=20)
+        queued = await _row_lock_waiter_exists(factory, t.subject.pid)
         tick.cancel()  # the run stops
         await asyncio.wait([tick], timeout=30)
         t.gate.release.set()
