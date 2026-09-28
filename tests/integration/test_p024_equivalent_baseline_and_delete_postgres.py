@@ -115,7 +115,6 @@ async def test_t2412_2_a_created_equivalent_has_a_baseline_and_is_verifiable(cli
     )
 
 
-@target_xfail_024("T2412.3", "an unused deactivated equivalent deletes after an integrity run (R-024-5)")
 @MODE_B
 @pytest.mark.asyncio
 async def test_r024_5_create_integrity_run_deactivate_delete_is_200(client, db_session, monkeypatch) -> None:
@@ -142,6 +141,21 @@ async def test_r024_5_create_integrity_run_deactivate_delete_is_200(client, db_s
     )
     assert await _count(factory, _baselines(equivalent_id)) == 0
     assert await _count(factory, checkpoints) == 0
+
+
+def test_t2412_3_the_canon_and_the_route_declare_the_409() -> None:
+    """The `409` the delete always raised is declared on both sides (F-024-16, contract half for this API).
+
+    The drift ratchet in `tests/contract/test_openapi_contract.py` records that the two halves agree; this
+    names the status itself. MUTATION: drop either declaration - red.
+    """
+
+    from tests.contract.test_openapi_contract import _load_fastapi_openapi, _load_openapi_yaml
+
+    canon = _load_openapi_yaml()["paths"]["/admin/equivalents/{code}"]["delete"]["responses"]
+    generated = _load_fastapi_openapi()["paths"]["/api/v1/admin/equivalents/{code}"]["delete"]["responses"]
+    assert canon["409"] == {"$ref": "#/components/responses/Conflict"}, canon.get("409")
+    assert "409" in generated, sorted(generated)
 
 
 @MODE_B

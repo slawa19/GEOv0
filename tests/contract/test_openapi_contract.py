@@ -430,8 +430,14 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # removed from the application and the canon by the owner's decision of that day. Measured on both
 # trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
 # The 2026-08-23 and 2026-09-11 notes above that mention those two operations are history.
+# 2026-09-29 / programme 024 `T2412.3`: count HOLDS at 51, digest moves. `DELETE /admin/equivalents/{code}`
+# now declares the `409` it always raised, in the canon and through `responses=` on the route, and the
+# two sides' `409` are IDENTICAL after normalisation. The operation was already in this dictionary for its
+# older differences (canon-only 403/429, generated 422), so it stays, carrying the same 409 on both halves.
+# Measured: the new ledger with that one 409 pair removed from that one entry hashes to the previous
+# `e21116aa...322e`, count 51, and no other entry differs.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "e21116aab743124b9067875daf007ef230d369007044ce6e98bbcf49c4bf322e"
+    "90c5cbff258b7fd3a7e6ac7379fdb82d13c5a3c292d0ff83734b515fe3303614"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
