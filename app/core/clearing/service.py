@@ -1689,7 +1689,7 @@ class ClearingService:
         *,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
-        """Execute one plan occurrence with its DECLARED amount (programme 023 slice (b), decisions 5-6). NOT WIRED.
+        """Execute one plan occurrence with its DECLARED amount (programme 023 slice (b), decisions 5-6).
 
         The same boundary as `execute_clearing_with_amount`, not a copy of it: the exclusive equivalent session
         lock, the retry owner `_run_attempts`, the stop/hold read `FOR SHARE`, the authoritative perimeter and
@@ -1700,8 +1700,8 @@ class ClearingService:
         least `c` (else a stale plan: `None`, nothing changed); each edge is reduced by exactly `c` through
         `Book` (deleted at zero), under a CLEARING intent v2 envelope that criterion (b) recomputes.
 
-        Returns `c` (or the durable amount of a verified replay), or `None` for a skip. No production caller
-        until slice (d) (`tests/unit/test_p023_b_occurrence_is_not_wired.py`).
+        Returns `c` (or the durable amount of a verified replay), or `None` for a skip. Since slice (d) the only
+        production caller is the clearing runner (`app/core/clearing/runner.py`).
         """
         if not isinstance(occurrence, ClearingOccurrence):
             raise TypeError("execute_occurrence takes a ClearingOccurrence")
