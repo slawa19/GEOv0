@@ -281,8 +281,10 @@ class TrustLineService:
     uniqueness, the debt floor of an update, the debt check of a close, status rules, audit and checkpoints.
 
     `import_initial_trustlines` is a THIRD, narrower operation: the simulator seeder's import of a scenario's
-    initial state, statuses `active`/`frozen`/`closed` included. It is not a participant's operation, carries no
-    signature at all, and no request reaches it.
+    initial state, statuses `active`/`frozen`/`closed` included. It is not a participant's operation and carries no
+    signature at all. No PUBLIC PARTICIPANT operation reaches it; an AUTHORIZED simulator request does, transitively
+    (upload a scenario, start a run, an action triggers lazy seeding: `app/api/v1/simulator.py` -> the seeder),
+    under the simulator's action authorization and run access, and the seeder refuses real participants' pids.
     """
 
     def __init__(self, session: AsyncSession):
