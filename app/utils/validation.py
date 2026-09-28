@@ -70,19 +70,6 @@ def validate_equivalent_metadata(metadata: Any) -> dict | None:
         raise BadRequestException(f"Invalid equivalent metadata: {exc}")
 
 
-def validate_idempotency_key(key: str) -> str:
-    if not isinstance(key, str):
-        raise BadRequestException("Invalid Idempotency-Key")
-
-    normalized = key.strip()
-    if not normalized:
-        raise BadRequestException("Invalid Idempotency-Key")
-    if len(normalized) > 128:
-        raise BadRequestException("Idempotency-Key too long")
-
-    return normalized
-
-
 _TX_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 

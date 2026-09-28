@@ -808,9 +808,10 @@ class PaymentService:
         # null, an `idempotency` that is not an object, an empty string - is an identity this
         # code cannot verify, and the one before this one crashed on some of them.
         #
-        # FIRST OF THE THREE CHECKS THAT FOLLOW, ahead of the perimeter and of the in-progress
-        # branch: those two answer "whose route is this" and "is it still running", and both
-        # questions presuppose that the row is this request at all.
+        # FIRST OF THE CHECKS THAT FOLLOW, ahead of the perimeter: that one answers "whose route
+        # is this", which presupposes that the row is this request at all. (An "is it still
+        # running" branch stood here too until 2026-09-28, 024 `T2411`; migration 030 leaves a
+        # stored PAYMENT row only `COMMITTED` or `ABORTED`, so it had no reachable row.)
         if not isinstance(existing_fp, str) or not existing_fp:
             logger.error(
                 "event=payment.replay_without_stored_fingerprint tx_id=%s state=%s",
@@ -878,24 +879,6 @@ class PaymentService:
                     insufficient_capacity=False,
                 )
 
-        if existing_tx.state in {
-            "NEW",
-            "ROUTED",
-            "PREPARE_IN_PROGRESS",
-            "PREPARED",
-            "PROPOSED",
-            "WAITING",
-        }:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(
-                    event="create", result="conflict_in_progress"
-                ).inc()
-            except Exception:
-                pass
-            raise ConflictException("Payment with same tx_id is in progress")
-
         try:
             from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 
@@ -908,8 +891,6 @@ class PaymentService:
         self,
         sender_id: uuid.UUID,
         request: PaymentCreateRequest,
-        *,
-        idempotency_key: str | None = None,
     ) -> PaymentResult:
         """A signed payment on THIS service's session: `pay()` with every attempt on that session.
 
@@ -923,7 +904,6 @@ class PaymentService:
             _borrowed_session(self.session),
             sender_id,
             request,
-            idempotency_key=idempotency_key,
             require_signature=True,
             _service_for=lambda _session: self,
         )
@@ -978,22 +958,16 @@ class PaymentService:
         description: str | None = None,
         constraints: PaymentConstraints | None = None,
         idempotency_key: str | None = None,
-        commit: bool = True,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> PaymentResult:
-        """Internal-only payment path for the simulator runner.
+        """Unsigned in-process payment, committed on this service's session.
 
-        IMPORTANT:
-        - This must never be exposed via HTTP endpoints.
-        - It bypasses signature verification and should only be used by trusted
-          in-process code.
+        It bypasses signature verification, so only trusted in-process code may call it. Its one
+        production caller is the simulator's Interact action (`api/v1/simulator.py`,
+        `action_payment_real`), behind the simulator actor and the run perimeter - never a public
+        payment endpoint. Staged work that the caller commits itself goes through
+        `create_payment_internal_staged()`.
         """
-
-        if not commit:
-            raise ValueError(
-                "commit=False is staged work; use create_payment_internal_staged() "
-                "and apply its post-commit effects after the caller commits"
-            )
 
         # Internal-only path: tx_id is generated in-process (or derived from idempotency_key)
         # because no external caller is responsible for retries here.
@@ -1013,7 +987,6 @@ class PaymentService:
             _borrowed_session(self.session),
             sender_id,
             req,
-            idempotency_key=idempotency_key,
             require_signature=False,
             allowed_participant_pids=allowed_participant_pids,
             _service_for=lambda _session: self,
@@ -1052,7 +1025,6 @@ class PaymentService:
         return await self.execute(
             sender_id,
             req,
-            idempotency_key=idempotency_key,
             require_signature=False,
             allowed_participant_pids=allowed_participant_pids,
         )
@@ -1103,7 +1075,6 @@ class PaymentService:
         request: PaymentCreateRequest,
         *,
         require_signature: bool,
-        idempotency_key: str | None = None,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
         deadline: float | None = None,
         use_shared_routing_cache: bool = False,
@@ -1916,7 +1887,7 @@ class PaymentService:
                     type(exc).__name__,
                 )
 
-        await self._boundary.refuse_inactive_equivalents(equivalent_ids, row_lock=True)
+        await self._boundary.refuse_inactive_equivalents(equivalent_ids)
 
         prestate = await _read_payment_prestate(session, declaration.flows())
 
@@ -2214,7 +2185,6 @@ class PaymentService:
         sender_id: uuid.UUID,
         request: PaymentCreateRequest,
         *,
-        idempotency_key: str | None = None,
         require_signature: bool = True,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
         _service_for: "Callable[[AsyncSession], PaymentService] | None" = None,
@@ -2267,7 +2237,6 @@ class PaymentService:
                     sessions,
                     sender_id,
                     request,
-                    idempotency_key=idempotency_key,
                     require_signature=require_signature,
                     allowed_participant_pids=allowed_participant_pids,
                     deadline=deadline,
@@ -2287,7 +2256,6 @@ class PaymentService:
         sender_id: uuid.UUID,
         request: PaymentCreateRequest,
         *,
-        idempotency_key: str | None,
         require_signature: bool,
         allowed_participant_pids: "AbstractSet[str] | None",
         deadline: float,
@@ -2299,7 +2267,6 @@ class PaymentService:
             staged = await self.execute(
                 sender_id,
                 request,
-                idempotency_key=idempotency_key,
                 require_signature=require_signature,
                 allowed_participant_pids=allowed_participant_pids,
                 deadline=deadline,
@@ -2621,17 +2588,6 @@ class PaymentService:
             # The identity check on the row that won: another request owns this tx_id.
             raise failure
         raise GeoException() from failure
-
-    async def get_payment(self, tx_id: str) -> PaymentResult:
-        tx = (
-            await self.session.execute(
-                select(Transaction).where(Transaction.tx_id == tx_id)
-            )
-        ).scalar_one_or_none()
-        if not tx or tx.type != "PAYMENT":
-            raise NotFoundException(f"Payment {tx_id} not found")
-
-        return self._tx_to_payment_result(tx)
 
     async def get_payment_for_participant(
         self,

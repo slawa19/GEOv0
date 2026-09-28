@@ -6,7 +6,7 @@ returns, or the PATCH commits first and the money is refused.
 
 ONE MECHANISM SINCE 019 STAGE 5 (`T1909`): THE ROW. Every money writer - payment, tick, inject and, since
 `T1907`, the clearing in every attempt - reads the equivalent row `FOR SHARE` and holds it through its
-commit (`MoneyBoundary.refuse_inactive_equivalents(row_lock=True)`); the PATCH takes no advisory lock and
+commit (`MoneyBoundary.refuse_inactive_equivalents`); the PATCH takes no advisory lock and
 simply `UPDATE`s the row. So:
 
 * a writer that has already read the row waits for nothing and the PATCH's `UPDATE` queues on the
@@ -759,9 +759,9 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
     payment_pid: list[int] = []
     original_check = MoneyBoundary.refuse_inactive_equivalents
 
-    async def _check_then_hold(self, equivalent_ids, *, row_lock):
-        await original_check(self, equivalent_ids, row_lock=row_lock)
-        if row_lock and not checked.is_set():
+    async def _check_then_hold(self, equivalent_ids):
+        await original_check(self, equivalent_ids)
+        if not checked.is_set():
             payment_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
             checked.set()
             await release_payment.wait()

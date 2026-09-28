@@ -249,7 +249,6 @@ async def test_postcondition_refuses_a_route_that_escapes_the_perimeter(
             equivalent=_EQ,
             amount="50",
             idempotency_key=None,
-            commit=True,
             allowed_participant_pids={"a1", "a2"},
         )
 
@@ -274,7 +273,6 @@ async def test_an_empty_perimeter_admits_nobody(db_session):
             equivalent=_EQ,
             amount="50",
             idempotency_key=None,
-            commit=True,
             allowed_participant_pids=set(),
         )
 
@@ -402,7 +400,6 @@ async def test_an_idempotent_replay_does_not_hand_back_a_foreign_route(db_sessio
         equivalent=_EQ,
         amount="50",
         idempotency_key=idem,
-        commit=True,
     )
     assert first is not None
     assert await _debts_touching(db_session, people["b1"].id) > 0, (
@@ -418,7 +415,6 @@ async def test_an_idempotent_replay_does_not_hand_back_a_foreign_route(db_sessio
             equivalent=_EQ,
             amount="50",
             idempotency_key=idem,
-            commit=True,
             allowed_participant_pids={"a1", "a2"},
         )
 
@@ -460,7 +456,6 @@ async def test_a_replay_whose_route_cannot_be_read_is_refused(db_session):
         equivalent=_EQ,
         amount="50",
         idempotency_key=idem,
-        commit=True,
     )
 
     stored = await db_session.scalar(
@@ -483,7 +478,6 @@ async def test_a_replay_whose_route_cannot_be_read_is_refused(db_session):
             equivalent=_EQ,
             amount="50",
             idempotency_key=idem,
-            commit=True,
             allowed_participant_pids={"a1", "a2"},
         )
 
@@ -511,7 +505,6 @@ async def test_a_reused_key_for_a_different_request_stays_a_conflict(db_session)
         equivalent=_EQ,
         amount="50",
         idempotency_key=idem,
-        commit=True,
     )
 
     # Same key, different amount -> different fingerprint. The stored route also leaves the
@@ -523,6 +516,5 @@ async def test_a_reused_key_for_a_different_request_stays_a_conflict(db_session)
             equivalent=_EQ,
             amount="17",
             idempotency_key=idem,
-            commit=True,
             allowed_participant_pids={"a1", "a2"},
         )

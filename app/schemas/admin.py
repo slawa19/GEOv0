@@ -115,10 +115,6 @@ class AdminAuditLogItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AdminAuditLogResponse(BaseModel):
-    items: list[AdminAuditLogItem]
-
-
 class AdminPaginatedMeta(BaseModel):
     page: StrictInt = Field(..., ge=1)
     per_page: StrictInt = Field(..., ge=1, le=200)

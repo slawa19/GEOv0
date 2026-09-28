@@ -191,8 +191,8 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
         finally:
             self._boundary._p019_subject_commit = False
 
-    async def guard(self, equivalent_ids, *, row_lock):
-        if row_lock and getattr(self, "_p019_subject_commit", False):
+    async def guard(self, equivalent_ids):
+        if getattr(self, "_p019_subject_commit", False):
             stand.touches += 1
             async with factory() as other:
                 await other.execute(
@@ -201,7 +201,7 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
                     .values(description=f"p019-touch-{stand.touches}")
                 )
                 await other.commit()
-        return await original_guard(self, equivalent_ids, row_lock=row_lock)
+        return await original_guard(self, equivalent_ids)
 
     monkeypatch.setattr(PaymentService, "_apply_payment", commit)
     monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", guard)

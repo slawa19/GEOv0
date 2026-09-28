@@ -56,7 +56,6 @@ from app.db.base import Base
 from app.db.types import MONEY_COLUMN_MAX, MoneyNumeric, finite_money_clauses
 
 __all__ = [
-    "DEBT_JOURNAL_TABLE_NAMES",
     "CLEARING_INTENT_ENCODING_VERSION",
     "INTENT_ENCODING_VERSION",
     "MONEY_ENCODING_VERSION",
@@ -368,15 +367,4 @@ debt_operation_equivalents = Table(
     # And an effect outside the declared scope is not something to record: it is something the
     # flush hook must already have refused.
     CheckConstraint("in_scope OR effect_count = 0", name="chk_debt_operation_equivalents_scope"),
-)
-
-
-#: Every table the write guard protects on the journal's own side. Named once so the guard, the
-#: migration and the tests cannot drift apart.
-DEBT_JOURNAL_TABLE_NAMES = frozenset(
-    {
-        debt_operations.name,
-        debt_journal_entries.name,
-        debt_operation_equivalents.name,
-    }
 )

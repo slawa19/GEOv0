@@ -81,28 +81,6 @@ def safe_str_env(name: str, default: str) -> str:
     return str(raw).strip() if str(raw).strip() else str(default)
 
 
-def safe_decimal_env(name: str, default: Decimal) -> Decimal:
-    """Parse Decimal env var with a defensive fallback.
-
-    Behavior matches the historical RealRunner helpers:
-    - missing / empty value -> default
-    - non-positive / NaN -> default
-    - any parsing error -> default
-    - quantize to 0.01 with ROUND_DOWN
-    """
-
-    try:
-        raw = os.getenv(name, "")
-        if not str(raw).strip():
-            return default
-        v = Decimal(str(raw))
-        if v.is_nan() or v <= 0:
-            return default
-        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-    except (InvalidOperation, Exception):
-        return default
-
-
 def safe_optional_decimal_env(name: str) -> Decimal | None:
     """Parse optional Decimal env var.
 

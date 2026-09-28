@@ -620,9 +620,7 @@ async def test_step5c_inactive_and_held_is_refused_as_inactive(db_session) -> No
             )
     async with factory() as session:
         with pytest.raises(ConflictException) as at_helper:
-            await MoneyBoundary(session).refuse_inactive_equivalents(
-                {triangle.equivalent.id}, row_lock=True
-            )
+            await MoneyBoundary(session).refuse_inactive_equivalents({triangle.equivalent.id})
     for refused in (at_prepare, at_helper):
         assert refused.value.details["reason"] == MoneyBoundary.EQUIVALENT_INACTIVE_REASON, (
             refused.value.details
@@ -701,12 +699,11 @@ async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_be
                 seen["reacting"] = False
         return await original_bind(self, tx_id, *args, **kwargs)
 
-    async def _binding_read(self, equivalent_ids, *, row_lock):
+    async def _binding_read(self, equivalent_ids):
         try:
-            return await original_refuse(self, equivalent_ids, row_lock=row_lock)
+            return await original_refuse(self, equivalent_ids)
         except Exception as exc:
-            if row_lock:
-                seen["binding_reads"].append(_sqlstate(exc) or type(exc).__name__)
+            seen["binding_reads"].append(_sqlstate(exc) or type(exc).__name__)
             raise
 
     monkeypatch.setattr(PaymentService, "_bind_payment", _held_at_the_binding_phase)

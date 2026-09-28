@@ -223,9 +223,9 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows(
     if money == "payment":
         original_guard = MoneyBoundary.refuse_inactive_equivalents
 
-        async def _guard_then_hold(self, equivalent_ids, *, row_lock):
-            await original_guard(self, equivalent_ids, row_lock=row_lock)
-            if row_lock and not paused.is_set():
+        async def _guard_then_hold(self, equivalent_ids):
+            await original_guard(self, equivalent_ids)
+            if not paused.is_set():
                 holder_pid.append(await _pid(self.session))
                 paused.set()
                 await release.wait()
@@ -441,7 +441,6 @@ async def test_money_arriving_while_an_admin_path_holds_its_row(
                     amount="5.00",
                     signature="__internal__",
                 ),
-                idempotency_key=tx_id,
                 require_signature=False,
             )
         async with factory() as session:

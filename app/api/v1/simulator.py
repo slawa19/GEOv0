@@ -1632,7 +1632,6 @@ async def action_payment_real(
             equivalent=eq.code,
             amount=req.amount,
             idempotency_key=None,
-            commit=True,
             allowed_participant_pids=scoped_pids,
         )
     except RetryablePaymentConflictException as exc:

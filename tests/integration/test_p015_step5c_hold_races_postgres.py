@@ -308,9 +308,9 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
         payment_pid: list[int] = []
         original_check = MoneyBoundary.refuse_inactive_equivalents
 
-        async def _check_then_wait(self, equivalent_ids, *, row_lock):
-            await original_check(self, equivalent_ids, row_lock=row_lock)
-            if row_lock and not checked.is_set():
+        async def _check_then_wait(self, equivalent_ids):
+            await original_check(self, equivalent_ids)
+            if not checked.is_set():
                 payment_pid.append(int(await self.session.scalar(text("SELECT pg_backend_pid()"))))
                 checked.set()
                 await release_payment.wait()
