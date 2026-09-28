@@ -14,6 +14,7 @@ from app.core.simulator.cache_invalidator import (
     invalidate_caches_after_inject as _invalidate_caches_after_inject,
 )
 from app.core.ledger.book import APPLIED, REFUSED_OPPOSING_DEBT, Book, InjectIncrease
+from app.core.trustlines.service import TrustLineService
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
 from app.core.simulator.real_scenario_seeder import (
@@ -26,17 +27,53 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.schemas.trustline import TrustLineCreateRequest
 from app.schemas.simulator import (
     TopologyChangedEdgeRef,
     TopologyChangedNodeRef,
     TopologyChangedPayload,
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
+from app.utils.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+)
 from app.utils.validation import is_storable_money
 
 # How many effects of one inject event are processed. Shared by staging and by the lock-set
 # helper below, so the helper never names fewer equivalents than staging can reach.
 _MAX_INJECT_EFFECTS = 500
+
+#: The policy of a trust line the simulator creates (inject and Interact create): the model's default
+#: (`app/db/models/trustline.py`), spelled out because the trust-line service stores `{}` for "no policy".
+SIMULATED_TRUSTLINE_POLICY = {
+    "auto_clearing": True,
+    "can_be_intermediate": True,
+    "max_hop_usage": None,
+    "daily_limit": None,
+    "blocked_participants": [],
+}
+
+# Programme 021, stage 2: what the request model needs in its required `signature` field on the internal
+# path. `require_signature=False` is what makes the service skip the check - never this value, which the service
+# does not read on that path (the drift engine's convention).
+_UNSIGNED = "__internal__"
+
+# The trust-line service's REFUSALS: each is raised before the service stages anything or touches the batch, so
+# an inject effect it refuses is skipped like any other unusable effect.
+_TRUST_LINE_REFUSALS = (BadRequestException, ConflictException, ForbiddenException, NotFoundException)
+
+
+class InjectTrustLineWriteFailed(Exception):
+    """A trust-line write of an inject event failed for a reason other than a refusal.
+
+    Programme 021, stage 2 (spec, "Решения" item 7). Raised instead of the effect handler's "skipped", so the
+    failure reaches the owner of the transaction (`RealRunnerImpl._apply_due_scenario_events`), which rolls the
+    whole event back - a checkpoint the checker could not compute must not leave the event's earlier writes for
+    the commit. The cause is chained.
+    """
 
 
 class InjectOwnerLockSetTooNarrow(Exception):
@@ -428,13 +465,47 @@ class InjectExecutor:
         def eq_precision(eq_code: str) -> int:
             return int(eq_precision_by_code.get(eq_code.strip().upper(), 2))
 
-        default_tl_policy = {
-            "auto_clearing": True,
-            "can_be_intermediate": True,
-            "max_hop_usage": None,
-            "daily_limit": None,
-            "blocked_participants": [],
-        }
+        # Programme 021, stage 2: the event's trust-line writes go through the service's internal path, on ONE
+        # batch for this event - one audit row per line, one checkpoint pair per touched equivalent. `finish()`
+        # runs at the end of staging; the owner commits, and rolls back on any failure.
+        trust_lines = TrustLineService(session)
+        batch = trust_lines.begin_internal_batch()
+
+        async def write_trustline(
+            *, from_id: uuid.UUID, to_pid: str, eq_code: str, limit: Decimal
+        ) -> bool:
+            """Create one active line; False if the service refuses it (the effect is then skipped)."""
+
+            try:
+                await trust_lines.execute_create(
+                    batch,
+                    from_id,
+                    TrustLineCreateRequest(
+                        to=to_pid,
+                        equivalent=eq_code.strip().upper(),
+                        limit=format(limit, "f"),
+                        policy=dict(SIMULATED_TRUSTLINE_POLICY),
+                        signature=_UNSIGNED,
+                    ),
+                    require_signature=False,
+                    # The event's flush points stay the event's own (see `execute_create`).
+                    flush=False,
+                )
+            except _TRUST_LINE_REFUSALS as exc:
+                self._logger.warning(
+                    "simulator.real.inject.trustline_refused to=%s eq=%s reason=%s",
+                    to_pid,
+                    eq_code,
+                    type(exc).__name__,
+                )
+                return False
+            except SQLAlchemyError:
+                raise
+            except Exception as exc:
+                raise InjectTrustLineWriteFailed(
+                    f"inject trust-line write failed: {type(exc).__name__}: {exc}"
+                ) from exc
+            return True
 
         async def op_inject_debt(eff: dict[str, Any]) -> bool:
             nonlocal applied, skipped, total_applied
@@ -699,16 +770,10 @@ class InjectExecutor:
                         if existing_tl is not None:
                             continue
 
-                        session.add(
-                            TrustLine(
-                                from_participant_id=from_id,
-                                to_participant_id=to_id,
-                                equivalent_id=eq_id,
-                                limit=tl_limit_val,
-                                status="active",
-                                policy=dict(default_tl_policy),
-                            )
-                        )
+                        if not await write_trustline(
+                            from_id=from_id, to_pid=to_pid_str, eq_code=eq_code, limit=tl_limit_val
+                        ):
+                            continue
                         affected_equivalents.add(eq_code)
                         new_trustlines_for_scenario.append(
                             {
@@ -727,7 +792,12 @@ class InjectExecutor:
 
                 applied += 1
                 return True
-            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError, SimulatorPidTakenError):
+            except (
+                InjectOwnerLockSetTooNarrow,
+                SQLAlchemyError,
+                SimulatorPidTakenError,
+                InjectTrustLineWriteFailed,
+            ):
                 # Programme 015, phase B step 3: the owner decides - widen the lock set, retry a
                 # serialization failure, or record a database failure. Counting either as a
                 # skipped entry would commit whatever the poisoned transaction still holds.
@@ -844,16 +914,11 @@ class InjectExecutor:
                     skipped += 1
                     return False
 
-                session.add(
-                    TrustLine(
-                        from_participant_id=from_id,
-                        to_participant_id=to_id,
-                        equivalent_id=eq_id,
-                        limit=tl_limit_val,
-                        status="active",
-                        policy=dict(default_tl_policy),
-                    )
-                )
+                if not await write_trustline(
+                    from_id=from_id, to_pid=to_pid_val, eq_code=eq_code, limit=tl_limit_val
+                ):
+                    skipped += 1
+                    return False
                 affected_equivalents.add(eq_code)
                 new_trustlines_for_scenario.append(
                     {
@@ -867,7 +932,12 @@ class InjectExecutor:
                 )
                 applied += 1
                 return True
-            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError, SimulatorPidTakenError):
+            except (
+                InjectOwnerLockSetTooNarrow,
+                SQLAlchemyError,
+                SimulatorPidTakenError,
+                InjectTrustLineWriteFailed,
+            ):
                 # Programme 015, phase B step 3 - see op_add_participant.
                 raise
             except Exception as exc:
@@ -960,7 +1030,12 @@ class InjectExecutor:
                 frozen_participant_pids.append(freeze_pid)
                 applied += 1
                 return True
-            except (InjectOwnerLockSetTooNarrow, SQLAlchemyError, SimulatorPidTakenError):
+            except (
+                InjectOwnerLockSetTooNarrow,
+                SQLAlchemyError,
+                SimulatorPidTakenError,
+                InjectTrustLineWriteFailed,
+            ):
                 # Programme 015, phase B step 3 - see op_add_participant.
                 raise
             except Exception as exc:
@@ -992,6 +1067,10 @@ class InjectExecutor:
             if op == "freeze_participant":
                 await op_freeze_participant(eff)
                 continue
+
+        # Programme 021, stage 2: flush, the after-checkpoint of each touched equivalent, the audit rows. A failure
+        # here propagates to the owner, which rolls the event back.
+        await batch.finish()
 
         # No commit here: the owner commits (programme 015, phase B step 3).
         return StagedInjectEvent(
