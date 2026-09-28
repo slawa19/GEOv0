@@ -29,7 +29,7 @@ import asyncio
 import pytest
 
 from app.utils.exceptions import ConflictException
-from tests.p023_support import slice_c_surface
+from tests.p023_support import require_target, slice_c_surface, target_xfail_023
 
 
 KEY = "dlock:clearing:P023C"
@@ -43,6 +43,25 @@ class _Clock:
         return self.now
 
 
+#: The two production scripts, pinned HERE as literals (fix-delta, review P3-8): the double recognises exactly these
+#: texts and refuses any other, so a production script that lost its owner comparison is not "understood" by the
+#: double's own comparison - it is an unexpected script, and every test that sends it is red.
+RENEW_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('pexpire', KEYS[1], ARGV[2])
+else
+  return 0
+end
+""".strip()
+UNLOCK_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+else
+  return 0
+end
+""".strip()
+
+
 class _FakeRedis:
     """The three commands the lease sends, with expiry on `clock`. Anything else is an AssertionError."""
 
@@ -51,6 +70,7 @@ class _FakeRedis:
         self.store: dict[str, tuple[str, float]] = {}
         self.fail_eval = 0
         self.hang_eval = False
+        self.hang_set = False
         self.evals = 0
 
     def _live(self, key: str):
@@ -70,6 +90,8 @@ class _FakeRedis:
 
     async def set(self, key, value, *, nx=False, px=None, ex=None):
         assert nx and px is not None and ex is None, "the lease sets with NX and a millisecond TTL"
+        if self.hang_set:
+            await asyncio.Event().wait()
         if self._live(key) is not None:
             return None
         self.store[key] = (value, self.clock() + px / 1000.0)
@@ -85,12 +107,12 @@ class _FakeRedis:
         assert numkeys == 1
         key, token = args[0], args[1]
         current = self._live(key)
-        if "pexpire" in script.lower():
+        if script == RENEW_SCRIPT:
             if current != token:
                 return 0
             self.store[key] = (current, self.clock() + int(args[2]) / 1000.0)
             return 1
-        if "del" in script.lower():
+        if script == UNLOCK_SCRIPT:
             if current != token:
                 return 0
             del self.store[key]
@@ -303,3 +325,52 @@ async def test_the_context_manager_stops_renewing_after_a_loss() -> None:
         await asyncio.sleep(0.3)
         assert redis.evals == evals_at_loss, "a lost lease is not renewed (and never re-acquired)"
     assert redis.store[KEY][0] == "stranger"
+
+
+# ------------------------------------------------------------------------------ fix-delta (review P2-3), red-first
+
+
+async def _bounded(awaitable, what: str, seconds: float = 2.0):
+    try:
+        return await asyncio.wait_for(awaitable, timeout=seconds)
+    except asyncio.TimeoutError:
+        require_target(False, f"an unresponsive Redis {what} was not bounded by the lease (still waiting after {seconds} s)")
+
+
+_SHORT = dict(ttl_seconds=3.0, renew_interval_seconds=1.0, renew_timeout_seconds=0.2, safety_margin_seconds=1.0)
+
+
+@target_xfail_023("(c) fix-delta", "Redis SET and release are not bounded")
+@pytest.mark.asyncio
+async def test_a_hanging_set_is_bounded_by_the_acquisition_budget() -> None:
+    api = slice_c_surface()
+    import time
+
+    redis = _FakeRedis(time.monotonic)
+    redis.hang_set = True
+    lease = _lease(api, redis, time.monotonic, **_SHORT)
+    with pytest.raises(ConflictException):
+        await _bounded(lease.acquire(wait_timeout_seconds=0.1), "SET")
+    assert lease.lost is True, "an unconfirmed acquisition is not ownership"
+
+
+@target_xfail_023("(c) fix-delta", "Redis SET and release are not bounded")
+@pytest.mark.asyncio
+async def test_a_hanging_release_is_bounded_and_the_block_result_is_delivered() -> None:
+    api = slice_c_surface()
+    import time
+
+    redis = _FakeRedis(time.monotonic)
+    lease = _lease(api, redis, time.monotonic, **_SHORT)
+    await lease.acquire(wait_timeout_seconds=0.0)
+    redis.hang_eval = True
+    await _bounded(lease.release(), "release")
+
+    other = _FakeRedis(time.monotonic)
+
+    async def block() -> str:
+        async with api.renewable_lease(other, KEY, wait_timeout_seconds=0.0, **_SHORT):
+            other.hang_eval = True
+            return "computed"
+
+    assert await _bounded(block(), "release at the end of the block") == "computed"

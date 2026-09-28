@@ -42,7 +42,7 @@ from sqlalchemy import text
 from app.core.clearing.service import ClearingService
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import Edge, debt_uuid, seed_graph
-from tests.p023_support import positive_debt_total, slice_c_surface
+from tests.p023_support import positive_debt_total, require_target, slice_c_surface, target_xfail_023
 
 pytestmark = MODE_B
 
@@ -222,3 +222,43 @@ async def test_lease_loss_during_planning_starts_no_cycle_on_the_late_result(db_
     assert result.remaining_cycles == len(plan.cycles) and result.remaining_cycles > 0
     async with factory() as session:
         assert await positive_debt_total(session, CODE) == total
+
+
+# ------------------------------------------------------------------------------ fix-delta (review P2-2), red-first
+
+
+@target_xfail_023("(c) fix-delta", "a planner pool whose worker died stays cached and fails every later pass")
+@pytest.mark.asyncio
+async def test_a_planner_worker_that_dies_while_idle_does_not_break_every_later_pass(db_session, monkeypatch) -> None:
+    from concurrent.futures.process import BrokenProcessPool
+
+    from tests.p020_support import ring
+
+    api = slice_c_surface()
+    await seed_graph(db_session, "PQB", ring(["p023cb0", "p023cb1", "p023cb2"], ["2", "2", "2"], [debt_uuid(0x2306, k) for k in range(3)]))
+    factory = sessionmaker_of(db_session)
+    # A pool of this test's own: the one the module caches is put back by monkeypatch afterwards.
+    monkeypatch.setattr(api.runner, "_planner_executor", None)
+    created: list = []
+    try:
+        assert (await api.run_clearing_pass(factory, "PQB")).status == "complete"
+        pool = api.runner._planner_executor
+        created.append(pool)
+        for process in list(pool._processes.values()):
+            process.kill()  # the worker dies while idle
+        await _until(lambda: bool(pool._broken), "the pool noticing its dead worker")
+
+        with pytest.raises(api.ClearingPassError) as failed:
+            await api.run_clearing_pass(factory, "PQB")
+        assert isinstance(failed.value.cause, BrokenProcessPool), failed.value.cause  # this pass fails loudly
+
+        try:
+            recovered = await api.run_clearing_pass(factory, "PQB")
+        except api.ClearingPassError as again:
+            require_target(False, f"the broken planner pool stayed cached: the next pass failed too ({again.cause!r})")
+        require_target(recovered.status == "complete", f"the next pass did not recover: {recovered}")
+        created.append(api.runner._planner_executor)
+    finally:
+        for pool in created:
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)

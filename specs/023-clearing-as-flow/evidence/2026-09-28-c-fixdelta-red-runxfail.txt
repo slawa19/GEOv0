@@ -1,0 +1,16 @@
+# 023 slice (c) fix-delta after the §15 review of 71d00a6: red evidence on 71d00a6 + the test commit (tests only).
+# Command: scripts/verify_local.ps1 -TaskSlug p023c -BackendOnly -Python <main .venv> -BackendSelector
+#   tests/unit/test_p023_c_renewable_lease.py tests/unit/test_p023_c_runner_is_not_wired.py
+#   tests/integration/test_p023_c_planner_off_loop_postgres.py
+# Canonical (strict markers): '26 passed, 4 xfailed', exit 0. The 26 include every existing lease test on the
+# double that now recognises exactly the two pinned production scripts (P3-8).
+# --runxfail DEBUG view below: the 4 new tests fail, each on its own TargetMismatch text.
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: an unresponsive Redis SET was not bounded by the lease (still waiting after 2.0 s)
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: an unresponsive Redis release was not bounded by the lease (still waiting after 2.0 s)
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: a pass that stopped on an error left health 'ok'
+tests\p019_support.py:43: tests.p019_support.TargetMismatch: the broken planner pool stayed cached: the next pass failed too (BrokenProcessPool('A child process terminated abruptly, the process pool is not usable anymore'))
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_a_hanging_set_is_bounded_by_the_acquisition_budget
+FAILED tests/unit/test_p023_c_renewable_lease.py::test_a_hanging_release_is_bounded_and_the_block_result_is_delivered
+FAILED tests/unit/test_p023_c_runner_is_not_wired.py::test_an_equivalent_pass_error_degrades_health
+FAILED tests/integration/test_p023_c_planner_off_loop_postgres.py::test_a_planner_worker_that_dies_while_idle_does_not_break_every_later_pass[mode_b]
+4 failed, 26 passed in 15.69s

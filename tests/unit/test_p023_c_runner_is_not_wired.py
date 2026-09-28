@@ -28,6 +28,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.p023_support import require_target, target_xfail_023
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _RUNNER = REPO_ROOT / "app" / "core" / "clearing" / "runner.py"
 _MAIN = REPO_ROOT / "app" / "main.py"
@@ -127,3 +129,51 @@ async def test_an_isolation_refusal_is_recorded_as_a_failed_job_not_swallowed(mo
     assert app.state.background_jobs["clearing"]["status"] == "failed"
     assert app.state.background_jobs["clearing"]["event"] == "refused_simulator_real_runs_in_database"
     assert background_health_status(app) == "degraded"
+
+
+# ------------------------------------------------------------------------------ fix-delta (review P2-4), red-first
+
+
+def _result(runner, reason):
+    return runner.ClearingPassResult(
+        equivalent="PQH",
+        status="interrupted",
+        reason=reason,
+        committed=(),
+        remaining_cycles=None,
+        remaining_v_edge_atoms=None,
+        plans=0,
+        distributed_exclusive=False,
+    )
+
+
+async def _health_after(monkeypatch, results) -> str:
+    import app.core.clearing.runner as runner
+    import app.main as main
+    from app.utils.background_jobs import background_health_status
+
+    async def periodic(_factory, _redis):
+        return results
+
+    monkeypatch.setattr(runner, "run_periodic_clearing_pass", periodic)
+    app = SimpleNamespace(state=SimpleNamespace(redis=None, background_jobs={}))
+    await main._run_periodic_clearing_once(app)
+    return background_health_status(app)
+
+
+@target_xfail_023("(c) fix-delta", "a per-equivalent pass error leaves background health ok")
+@pytest.mark.asyncio
+async def test_an_equivalent_pass_error_degrades_health(monkeypatch) -> None:
+    import app.core.clearing.runner as runner
+
+    status = await _health_after(monkeypatch, {"PQH": _result(runner, runner.InterruptReason.ERROR)})
+    require_target(status == "degraded", f"a pass that stopped on an error left health {status!r}")
+
+
+@pytest.mark.parametrize("reason", ["LEASE_LOST", "BUDGET_EXHAUSTED", "REPLAN_LIMIT", "OPERATIONAL_LIMIT"])
+@pytest.mark.asyncio
+async def test_counter_check_ordinary_interruptions_keep_health_ok(monkeypatch, reason) -> None:
+    import app.core.clearing.runner as runner
+
+    status = await _health_after(monkeypatch, {"PQH": _result(runner, getattr(runner.InterruptReason, reason))})
+    assert status == "ok", (reason, status)
