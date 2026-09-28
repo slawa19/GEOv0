@@ -154,6 +154,29 @@ async def test_create_update_close_answer_and_publish_as_before(client, stand) -
 
 
 @pytest.mark.asyncio
+async def test_without_an_edge_patch_create_still_publishes_and_update_does_not(client, stand) -> None:
+    # The edge patch maps participant UUIDs to PIDs through the run; without them no patch can be built.
+    stand["run"]._real_participants = []
+
+    assert (await _post(client, "trustline-create", {**TRIPLE, "limit": "10"})).status_code == 200
+    [event] = _Recorder.events
+    assert event["reason"] == "interact.trustline_create"
+    assert event["payload"]["edge_patch"] is None
+    assert event["payload"]["added_edges"] == [{"from_pid": "alice", "to_pid": "bob", "equivalent_code": "UAH", "limit": "10"}]
+
+    _Recorder.events.clear()
+    updated = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "12"})
+    assert updated.status_code == 200, updated.text
+    assert _Recorder.events == [], "an update without an edge patch published an event"
+    assert stand["run"]._scenario_raw["trustlines"][0]["limit"] == "12", "the in-memory topology is best effort, not SSE"
+
+    closed = await _post(client, "trustline-close", dict(TRIPLE))
+    assert closed.status_code == 200, closed.text
+    [event] = _Recorder.events
+    assert event["reason"] == "interact.trustline_close" and event["payload"]["edge_patch"] is None
+
+
+@pytest.mark.asyncio
 async def test_refusal_bodies_of_the_trust_line_actions(client, stand) -> None:
     alice, bob, uah, db = stand["alice"], stand["bob"], stand["uah"], stand["db"]
     triple_details = {"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH"}
