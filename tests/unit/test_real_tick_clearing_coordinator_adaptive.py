@@ -366,6 +366,41 @@ def test_volume_probe_is_beyond_float() -> None:
 
 
 @pytest.mark.asyncio
+async def test_static_keeps_the_volume_exact() -> None:
+    """The static branch hands the caller the engine's cleared volume as the same Decimal.
+
+    Static form of `test_adaptive_keeps_the_volume_exact_and_hands_the_policy_a_float` (021 stage 3, `T2104`):
+    the money half of that test - the volume leaves the coordinator exact and as `Decimal` - on the only
+    branch that survives. The float half belonged to the removed backoff heuristic.
+    """
+
+    coordinator = RealTickClearingCoordinator(
+        lock=threading.Lock(),
+        logger=logging.getLogger(__name__),
+        clearing_every_n_ticks=1,
+        real_clearing_time_budget_ms=250,
+    )
+
+    async def run_clearing() -> dict[str, Decimal]:
+        return {"USD": _TOO_PRECISE_FOR_FLOAT}
+
+    volumes = await coordinator.maybe_run_clearing(
+        session=_AsyncSession(),
+        run_id="run-1",
+        run=_make_run(tick_index=1),
+        equivalents=["USD"],
+        planned_len=0,
+        tick_t0=0.0,
+        clearing_enabled=True,
+        safe_int_env=lambda k, d: d,
+        run_clearing=run_clearing,
+    )
+
+    assert volumes["USD"] == _TOO_PRECISE_FOR_FLOAT
+    assert isinstance(volumes["USD"], Decimal)
+
+
+@pytest.mark.asyncio
 async def test_adaptive_keeps_the_volume_exact_and_hands_the_policy_a_float() -> None:
     """The money value stays Decimal; only the backoff heuristic sees a float.
 
@@ -454,6 +489,28 @@ async def test_every_early_return_hands_back_decimal_zeros() -> None:
     )
     assert disabled == {"USD": Decimal("0"), "EUR": Decimal("0")}
     assert all(isinstance(value, Decimal) for value in disabled.values())
+
+    # Seed 1 again (maybe_run_clearing): not a cadence tick, so the static branch returns before clearing.
+    # Added 2026-09-28 (021 stage 3): with the adaptive seed gone this is the static path's own early return.
+    cadence_coordinator = RealTickClearingCoordinator(
+        lock=threading.Lock(),
+        logger=logging.getLogger(__name__),
+        clearing_every_n_ticks=3,
+        real_clearing_time_budget_ms=250,
+    )
+    off_cadence = await cadence_coordinator.maybe_run_clearing(
+        session=_AsyncSession(),
+        run_id="run-1",
+        run=_make_run(tick_index=1),
+        equivalents=["USD"],
+        planned_len=0,
+        tick_t0=0.0,
+        clearing_enabled=True,
+        safe_int_env=lambda k, d: d,
+        run_clearing=run_clearing,
+    )
+    assert off_cadence == {"USD": Decimal("0")}
+    assert all(isinstance(value, Decimal) for value in off_cadence.values())
 
     # Seed 2 (_maybe_run_adaptive): the policy decides not to clear anything.
     adaptive_coordinator = RealTickClearingCoordinator(

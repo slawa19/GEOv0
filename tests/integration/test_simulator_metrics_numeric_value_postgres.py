@@ -166,6 +166,116 @@ async def test_money_metric_survives_the_whole_chain_exactly(
     assert [point["v"] for point in wire_debt] == ["12345678901.12345678"]
 
 
+# --- static clearing: the cleared volume reaches the column exactly ----------
+
+
+async def test_static_clearing_volume_reaches_the_column_exactly(
+    db_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Static form of `test_adaptive_clearing_volume_reaches_the_column_exactly` (021 stage 3, `T2104`).
+
+    The same end-to-end walk - coordinator -> tick metrics producer -> writer -> numeric(20, 8) column ->
+    reader -> wire - on the static branch, the only one left once the adaptive mode is removed. The static
+    coordinator runs the clearing as a task under its hard timeout (`_execute_clearing_with_timeout`), so this
+    also covers that the task's result is handed back unchanged.
+    """
+
+    monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
+
+    coordinator = RealTickClearingCoordinator(
+        lock=threading.RLock(),
+        logger=logging.getLogger("tests.simulator.t715.static"),
+        clearing_every_n_ticks=1,
+        real_clearing_time_budget_ms=250,
+    )
+
+    run = SimpleNamespace(
+        run_id=_RUN_ID,
+        tick_index=1,
+        sim_time_ms=3_000,
+        queue_depth=0,
+        current_phase=None,
+        _real_in_flight=0,
+        _real_clearing_task=None,
+        _edges_by_equivalent={"UAH": []},
+        _real_total_debt_by_eq={},
+        _real_total_debt_tick=0,
+    )
+
+    async def _run_clearing() -> dict[str, Decimal]:
+        return {"UAH": _TOO_PRECISE_FOR_FLOAT}
+
+    clearing_volume_by_eq = await coordinator.maybe_run_clearing(
+        session=db_session,
+        run_id=_RUN_ID,
+        run=run,
+        equivalents=["UAH"],
+        planned_len=0,
+        tick_t0=0.0,
+        clearing_enabled=True,
+        safe_int_env=lambda _name, default: default,
+        run_clearing=_run_clearing,
+        payments_result=None,
+    )
+
+    # Stage 1: out of the coordinator, and the clearing task is not left behind.
+    assert clearing_volume_by_eq["UAH"] == _TOO_PRECISE_FOR_FLOAT
+    assert isinstance(clearing_volume_by_eq["UAH"], Decimal)
+    assert run._real_clearing_task is None
+
+    # Stage 2: through the tick metrics producer (tick 1 is off the total_debt throttle of 5).
+    per_eq_metric_values: dict[str, dict[str, Any]] = {"UAH": {}}
+    await RealTickMetrics(
+        lock=threading.RLock(),
+        logger=logging.getLogger("tests.simulator.t715.static"),
+        real_db_metrics_every_n_ticks=5,
+    ).populate_per_eq_metric_values(
+        session=db_session,
+        run=run,
+        scenario={"participants": []},
+        equivalents=["UAH"],
+        per_eq_route={},
+        clearing_volume_by_eq=clearing_volume_by_eq,
+        per_eq_metric_values=per_eq_metric_values,
+    )
+    assert per_eq_metric_values["UAH"]["clearing_volume"] == _TOO_PRECISE_FOR_FLOAT
+    assert "total_debt" not in per_eq_metric_values["UAH"]
+
+    # Stage 3: writer -> numeric(20, 8) column.
+    await simulator_storage.write_tick_metrics(
+        run_id=_RUN_ID,
+        t_ms=3_000,
+        per_equivalent={
+            "UAH": {"committed": 1, "rejected": 0, "errors": 0, "timeouts": 0}
+        },
+        metric_values_by_eq=per_eq_metric_values,
+        session=db_session,
+    )
+
+    stored = (
+        await db_session.execute(
+            select(SimulatorRunMetric.value).where(
+                (SimulatorRunMetric.run_id == _RUN_ID)
+                & (SimulatorRunMetric.key == "clearing_volume")
+                & (SimulatorRunMetric.t_ms == 3_000)
+            )
+        )
+    ).scalar_one()
+    assert stored == _TOO_PRECISE_FOR_FLOAT
+
+    # Stage 4: reader -> wire.
+    monkeypatch.setattr(
+        db_session_module,
+        "AsyncSessionLocal",
+        lambda: _SharedSession(db_session),
+        raising=False,
+    )
+    resp = await _reader().build_metrics(
+        run_id=_RUN_ID, equivalent="UAH", from_ms=3_000, to_ms=3_000, step_ms=1_000
+    )
+    assert _values(resp, "clearing_volume") == ["12345678901.12345678"]
+
+
 # --- adaptive clearing policy: the non-default path must be exact too --------
 
 
