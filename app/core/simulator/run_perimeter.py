@@ -14,9 +14,9 @@ def run_perimeter_pids(run) -> "set[str] | None":
     Three states, and the difference between the last two is the whole point:
 
     * `None` — the participant list has not been LOADED yet, so no perimeter can be applied.
-      `tick_real_mode` loads it before reaching any money path
-      (`app/core/simulator/real_tick_orchestrator.py:249-252`, after seeding at `:237-247`),
-      so this state is not reachable from clearing or payments.
+      The tick loads it before reaching any money path (`RealTick._open_money_phase` in
+      `app/core/simulator/tick.py`, after seeding), so this state is not reachable from
+      clearing or payments.
     * an EMPTY set — the list was loaded and the run has nobody in it.  That is a perimeter
       admitting nobody, NOT an absence of one.  Collapsing it into `None` would mean a run
       with an empty scenario clears and routes across the whole equivalent, which is the

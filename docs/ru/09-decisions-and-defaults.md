@@ -100,7 +100,7 @@
 
 | `Transaction.type` | Ожидаемые `state` (MVP сейчас) | Финальные `state` | Internal-only | Комментарий |
 |---|---|---|---|---|
-| `PAYMENT` | `NEW → PREPARED → COMMITTED` или `NEW → PREPARED → ABORTED` | `COMMITTED`, `ABORTED` (зарезервировано: `REJECTED`) | `NEW`, `PREPARED` (зарезервировано: `ROUTED`, `PREPARE_IN_PROGRESS`, `PROPOSED`, `WAITING`) | Payment engine фактически выставляет `NEW`, затем `PREPARED`, далее `COMMITTED`/`ABORTED`. Остальные состояния присутствуют для операционной надёжности и будущих расширений, но в MVP не используются как переходы. |
+| `PAYMENT` | строка вставляется сразу `COMMITTED` или `ABORTED` (~~`NEW → PREPARED → COMMITTED`/`ABORTED`~~ — до 2026-09-25) | `COMMITTED`, `ABORTED` | нет: промежуточных состояний платежа хаб не хранит (`chk_transaction_payment_terminal`, миграция `030`) | **Уточнено 2026-09-28 (024, `T2411`):** строка отставала от §1.7 — `PaymentEngine` с фазами удалён 019 (стадия 4); платёж исполняет `PaymentService.execute` одной транзакцией. ~~Payment engine фактически выставляет `NEW`, затем `PREPARED`, далее `COMMITTED`/`ABORTED`.~~ Остальные значения CHECK `chk_transaction_state` для `PAYMENT` недопустимы. |
 | `CLEARING` | `NEW → COMMITTED` | `COMMITTED` | `NEW` | Clearing выполняется в рамках одной DB-транзакции. В случае ошибки — rollback; запись `Transaction` может не сохраниться, поэтому `ABORTED` для clearing сейчас скорее «концептуально возможен», чем наблюдаем в БД. |
 | `TRUST_LINE_CREATE` | n/a (не создаётся `Transaction`) | n/a | n/a | TrustLine create/update/close в MVP пишут audit (`IntegrityAuditLog`), но не создают запись в `transactions`. Если позже потребуется унификация аудита через `Transaction`, ожидаемый поток будет single-phase: `NEW → COMMITTED/ABORTED`. |
 | `TRUST_LINE_UPDATE` | n/a (не создаётся `Transaction`) | n/a | n/a | См. `TRUST_LINE_CREATE`. |
@@ -108,7 +108,7 @@
 | `COMPENSATION` | n/a (зарезервировано) | n/a | n/a | Зарезервировано под операторские компенсирующие операции. При реализации, вероятнее всего, будет single-phase `NEW → COMMITTED/ABORTED`. |
 | `COMMODITY_REDEMPTION` | n/a (зарезервировано) | n/a | n/a | Зарезервировано под операции погашения товарных эквивалентов. При реализации, вероятнее всего, будет single-phase `NEW → COMMITTED/ABORTED`. |
 
-**PAYMENT (2PC-подобный поток, реализация MVP):**
+**PAYMENT (2PC-подобный поток) — историческая схема `PaymentEngine`, действовала до 2026-09-25** (019, стадия 4; с миграции `030` строка `PAYMENT` бывает только `COMMITTED` или `ABORTED`; пометка — 2026-09-28, 024 `T2411`):
 
 | Состояние | Смысл (MVP) |
 |----------|-------------|

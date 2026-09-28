@@ -44,10 +44,6 @@ from app.db.models.debt import Debt
 
 __all__ = [
     "GUC_OPERATION_ID",
-    "SQLSTATE_GUARD",
-    "SQLSTATE_KEY_CHANGED",
-    "SQLSTATE_NO_OPEN_OPERATION",
-    "JOURNAL_SEQUENCE",
     "JOURNAL_FUNCTIONS",
     "JOURNAL_TRIGGERS",
 ]
@@ -55,15 +51,11 @@ __all__ = [
 #: The transaction-local setting that names the operation a statement belongs to.
 GUC_OPERATION_ID = "geo.operation_id"
 
-#: A write to `debts` with no OPEN operation named by `geo.operation_id` in this transaction.
-SQLSTATE_NO_OPEN_OPERATION = "GE001"
-#: An UPDATE of `debts` that moves the row to another edge or equivalent.
-SQLSTATE_KEY_CHANGED = "GE002"
-#: Every other refusal of this module (journal-table guards, TRUNCATE, the deferred completion
-#: check): a standard integrity-constraint class. The spec names two own SQLSTATEs and no more.
-SQLSTATE_GUARD = "23000"
-
-JOURNAL_SEQUENCE = "debt_journal_entries_ordinal_seq"
+# SQLSTATEs the SQL below raises, spelled as literals there: `GE001` - a write to `debts` with no
+# OPEN operation named by `geo.operation_id`; `GE002` - an UPDATE of `debts` that moves the row to
+# another edge or equivalent; `23000` - every other refusal (journal-table guards, TRUNCATE, the
+# deferred completion check). The spec names two own SQLSTATEs and no more. No Python code
+# classifies them; the constants that once named them had no reader and were removed by 024 `T2411`.
 
 _CREATE_SEQUENCE = (
     "CREATE SEQUENCE debt_journal_entries_ordinal_seq AS bigint START WITH 1 INCREMENT BY 1 "

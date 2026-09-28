@@ -241,9 +241,7 @@ class ClearingService:
         debt rows, the same as the payment's shared lock -> row -> debts.
         """
         try:
-            await MoneyBoundary(self.session).refuse_inactive_equivalents(
-                equivalent_ids, row_lock=True
-            )
+            await MoneyBoundary(self.session).refuse_inactive_equivalents(equivalent_ids)
         except ConflictException as refusal:
             # Step 5c: the same helper also refuses an integrity hold; the reason names which.
             logger.info("event=clearing.refused_%s", (refusal.details or {}).get("reason"))

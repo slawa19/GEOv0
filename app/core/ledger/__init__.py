@@ -1,9 +1,12 @@
-"""The debt ledger's own machinery: the operation journal (programme 015, phase B step 4).
+"""The debt ledger: its single writer and its detector.
 
-`journal` is the only module here today, and since step 4 slice C (2026-09-12) it is LIVE: importing
-it arms the journal on the `Engine` and `Session` classes for the whole process, and
-`app/db/models/__init__.py` imports it alongside the tables it protects. From then on a row in
-`debts` may only change inside a declared debt operation, on every engine this process creates - a
-process that imported only the models included, which is what the protection has to survive
-(`C15`). Slice A built the mechanism and registered nothing; slice C is the registration.
+* `book.py` - the only writer of `debts` (programme 018): every caller declares an operation
+  envelope and hands the book its effects.
+* `reconciliation.py` - criteria (a) and (b) of programme 015 and the reaction to a confirmed
+  `FAILED` (an integrity hold).
+
+The journal itself is written by the DATABASE: triggers on `debts` and on the three journal tables
+(`app/db/journal_triggers.py`, migration 029, programme 018 stage B). HISTORY: until then this
+package held `journal.py`, a listener armed on `Engine`/`Session` at import (015, phase B step 4,
+slice C, 2026-09-12); stage B deleted it.
 """

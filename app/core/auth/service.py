@@ -8,7 +8,7 @@ from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
 from app.utils.security import decode_token, create_access_token, create_refresh_token, revoke_jti
-from app.utils.exceptions import BadRequestException, UnauthorizedException, NotFoundException
+from app.utils.exceptions import UnauthorizedException, NotFoundException
 from app.config import settings
 
 class AuthService:
@@ -104,17 +104,6 @@ class AuthService:
                 "status": participant.status,
             },
         }
-
-    async def revoke_refresh_token(self, refresh_token: str) -> None:
-        payload = await decode_token(refresh_token, expected_type="refresh")
-        if not payload:
-            raise BadRequestException("Invalid refresh token")
-
-        jti = payload.get("jti")
-        if not isinstance(jti, str) or not jti:
-            raise BadRequestException("Refresh token missing jti")
-
-        await revoke_jti(jti, exp=payload.get("exp"))
 
     async def refresh_tokens(self, refresh_token: str) -> dict:
         payload = await decode_token(refresh_token, expected_type="refresh")

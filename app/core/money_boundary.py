@@ -20,7 +20,7 @@ a change of semantics. Stage 5 (`T1909`, decision `KEEP-EQUIVALENT-LOCK` of the 
 There are no transaction or pair advisory locks and no reservations any more (`prepare_locks` is dropped by
 migration `031`). Admin stop/hold and the equivalent `DELETE` take NO advisory lock: they `UPDATE`/`DELETE`
 the equivalent row, which every money writer reads `FOR SHARE` through its commit
-(`refuse_inactive_equivalents(row_lock=True)`); reconciliation reads at its chosen isolation and sets a hold
+(`refuse_inactive_equivalents`); reconciliation reads at its chosen isolation and sets a hold
 the same way.
 
 THE ONE LOCK ORDER: the equivalent lock (a staged caller takes its COMPLETE set, sorted by key, before any
@@ -287,8 +287,6 @@ class MoneyBoundary:
     async def refuse_inactive_equivalents(
         self,
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
-        *,
-        row_lock: bool,
     ) -> None:
         """T1544: money does not move in an equivalent the operator has deactivated - and, since
         step 5c (`T1546`), in one under an integrity hold.
@@ -301,7 +299,7 @@ class MoneyBoundary:
         The flag is read as columns, never through an `Equivalent` instance: the payment service
         loads one before routing, and its cached `is_active` can still say True.
 
-        `row_lock=True` renders `FOR SHARE` on PostgreSQL, and IT is what binds a money writer to the
+        The read is always `FOR SHARE`, and IT is what binds a money writer to the
         stop: SERIALIZABLE takes its snapshot before any lock wait, and a plain read after the wait
         still returns the value from before the PATCH committed (measured 2026-09-13, `FOR KEY SHARE`
         equally stale). `FOR SHARE` instead waits for an uncommitted PATCH and then fails with 40001,
@@ -311,18 +309,17 @@ class MoneyBoundary:
         the whole protocol. Order: the equivalent advisory lock the writer holds (shared, or the
         clearing's exclusive) first, this row second, the debt rows after.
 
-        Since 019 stage 5 (`T1907`, `FORK-7`) the clearing reads with `row_lock=True` too, in every
-        attempt, and holds the row lock through its commit (`ClearingService._refuse_if_equivalent_inactive`).
-        `row_lock=False` has no caller left in the application.
+        Since 019 stage 5 (`T1907`, `FORK-7`) the clearing reads it too, in every attempt, and holds the
+        row lock through its commit (`ClearingService._refuse_if_equivalent_inactive`). A `row_lock=False`
+        switch - a plain read, fail-open against the stop - stood here with no caller until 2026-09-28
+        and was removed by 024 `T2411`.
         """
         ids = sorted(set(equivalent_ids), key=str)
         if not ids:
             return
         stmt = select(
             Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id
-        ).where(Equivalent.id.in_(ids))
-        if row_lock:
-            stmt = stmt.with_for_update(read=True)
+        ).where(Equivalent.id.in_(ids)).with_for_update(read=True)
         rows = (await self.session.execute(stmt)).all()
         inactive = sorted(str(code) for code, is_active, _hold in rows if not is_active)
         if inactive:

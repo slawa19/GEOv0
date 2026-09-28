@@ -1,8 +1,8 @@
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from uuid import UUID
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
 class TrustLineBase(BaseModel):
@@ -21,12 +21,6 @@ class TrustLine(TrustLineBase):
     status: str
     created_at: datetime
     updated_at: datetime
-
-    @field_validator("created_at", "updated_at")
-    @classmethod
-    def ensure_utc_for_naive_database_timestamp(cls, value: datetime) -> datetime:
-        # A naive server timestamp is interpreted as UTC.
-        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

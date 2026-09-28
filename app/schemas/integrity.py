@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-
-def _attach_utc_to_naive_timestamp(value: datetime) -> datetime:
-    if value.utcoffset() is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvariantResult(BaseModel):
@@ -24,9 +18,9 @@ class InvariantResult(BaseModel):
 class InvariantWithdrawn(BaseModel):
     """An invariant that is NOT evaluated, said so that no reader can mistake it for a verdict.
 
-    T1402 of programme 014. `check_zero_sum` sums the same `Debt` rows grouped by creditor and
-    grouped by debtor and returns the difference, so it telescopes to zero for any row set: it
-    cannot fail on data corruption, and publishing `passed: true` for it was a claim the code
+    T1402 of programme 014. `check_zero_sum` (removed by 024 `T2411`) summed the same `Debt` rows
+    grouped by creditor and grouped by debtor and returned the difference, so it telescoped to zero
+    for any row set: it could not fail on data corruption, and publishing `passed: true` for it was a claim the code
     could not support. Measured on PostgreSQL 2026-09-11 - one debt inflated by one storage
     quantum, and a three-edge cycle inflated uniformly, both leave it PASSED.
 
@@ -63,14 +57,6 @@ class EquivalentIntegrityStatus(BaseModel):
     # the false assurance would simply move from the entry to the summary.
     unverified: List[str] = Field(default_factory=list)
 
-    @field_validator("last_verified")
-    @classmethod
-    def attach_utc_to_naive_database_timestamp(
-        cls,
-        value: Optional[datetime],
-    ) -> Optional[datetime]:
-        return _attach_utc_to_naive_timestamp(value) if value is not None else None
-
 
 class IntegrityStatusResponse(BaseModel):
     status: str  # healthy | warning | critical
@@ -84,11 +70,6 @@ class IntegrityChecksumResponse(BaseModel):
     checksum: str
     created_at: datetime
     invariants_status: Dict[str, Any]
-
-    @field_validator("created_at")
-    @classmethod
-    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
-        return _attach_utc_to_naive_timestamp(value)
 
 
 class IntegrityVerifyRequest(BaseModel):
@@ -109,11 +90,6 @@ class IntegrityAuditLogItem(BaseModel):
     object_type: Optional[str] = None
     object_id: Optional[str] = None
     after_state: Optional[Dict[str, Any]] = None
-
-    @field_validator("timestamp")
-    @classmethod
-    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
-        return _attach_utc_to_naive_timestamp(value)
 
 
 class IntegrityAuditLogResponse(BaseModel):

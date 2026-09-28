@@ -139,7 +139,6 @@ async def _replay(db_session, people, *, tx_id: str, amount: str = "50"):
         equivalent=_EQ,
         amount=amount,
         idempotency_key=tx_id,
-        commit=True,
     )
 
 
@@ -240,7 +239,6 @@ async def test_the_refusal_is_decided_before_the_perimeter(db_session):
             equivalent=_EQ,
             amount="50",
             idempotency_key=tx_id,
-            commit=True,
             allowed_participant_pids={people["t1548s"].pid, people["t1548r"].pid},
         )
     assert (excinfo.value.details or {}).get(
@@ -318,7 +316,6 @@ async def test_the_insert_race_row_is_refused_by_the_same_policy(db_session):
             equivalent=_EQ,
             amount="50",
             idempotency_key=tx_id,
-            commit=True,
         )
 
     assert ran_after_the_lookup["yes"], (

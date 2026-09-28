@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.types import StrictInt
 
 from app.schemas.trustline import TrustLine as TrustLineSchema
@@ -105,18 +105,7 @@ class AdminAuditLogItem(BaseModel):
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
 
-    @field_validator("timestamp")
-    @classmethod
-    def attach_utc_to_naive_database_timestamp(cls, value: datetime) -> datetime:
-        if value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-
     model_config = ConfigDict(from_attributes=True)
-
-
-class AdminAuditLogResponse(BaseModel):
-    items: list[AdminAuditLogItem]
 
 
 class AdminPaginatedMeta(BaseModel):
@@ -154,15 +143,6 @@ class AdminIncidentItem(BaseModel):
     age_seconds: StrictInt = Field(..., ge=0)
     sla_seconds: StrictInt = Field(..., ge=0)
     created_at: Optional[datetime] = None
-
-    @field_validator("created_at")
-    @classmethod
-    def attach_utc_to_naive_database_timestamp(
-        cls, value: Optional[datetime]
-    ) -> Optional[datetime]:
-        if value is not None and value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
 
 
 class AdminIncidentsListResponse(AdminPaginatedMeta):

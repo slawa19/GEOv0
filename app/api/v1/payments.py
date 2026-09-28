@@ -61,6 +61,9 @@ async def create_payment(
     session: AsyncSession = Depends(deps.get_db),
     current_participant: Participant = Depends(deps.get_current_participant),
     redis_client=Depends(deps.get_redis_client),
+    # Legacy header: declared by the canon as deprecated and accepted but ignored - `tx_id` is
+    # mandatory and signed, and is the only idempotency identity. Kept so the operation still
+    # accepts it; nothing below reads it.
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     payment_sessions=Depends(deps.get_payment_session_factory),
 ):
@@ -88,8 +91,6 @@ async def create_payment(
             payment_sessions,
             current_participant.id,
             payment_req,
-            # Legacy header is accepted but ignored (tx_id is mandatory and signed).
-            idempotency_key=idempotency_key,
         )
 
 @router.get("/{tx_id}", response_model=PaymentResult)

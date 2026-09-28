@@ -70,19 +70,6 @@ def validate_equivalent_metadata(metadata: Any) -> dict | None:
         raise BadRequestException(f"Invalid equivalent metadata: {exc}")
 
 
-def validate_idempotency_key(key: str) -> str:
-    if not isinstance(key, str):
-        raise BadRequestException("Invalid Idempotency-Key")
-
-    normalized = key.strip()
-    if not normalized:
-        raise BadRequestException("Invalid Idempotency-Key")
-    if len(normalized) > 128:
-        raise BadRequestException("Idempotency-Key too long")
-
-    return normalized
-
-
 _TX_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
@@ -251,7 +238,8 @@ def parse_amount_decimal(
     BadRequestException("Amount must be positive").
 
     NOTE ON THE DEFAULTS.  These are generic parser bounds, not storage bounds: the default
-    `max_scale` of 18 is wider than the `Numeric(20, 8)` money columns.  Anything that will be
+    `max_scale` is `DEFAULT_MAX_AMOUNT_SCALE` (8 since 012) and the default precision (50 digits)
+    is far wider than the `Numeric(20, 8)` money columns.  Anything that will be
     written to `Debt.amount` or `TrustLine.limit` must go through `parse_money_amount` instead,
     which supplies the capacity bounds.  See the `MONEY_MAX_*` note above.
 

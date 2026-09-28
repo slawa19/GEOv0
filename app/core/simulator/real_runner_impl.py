@@ -361,34 +361,6 @@ class RealRunnerImpl:
             # Unknown / unsupported event types are ignored, but we still mark them fired once due.
             run._real_fired_scenario_event_indexes.add(idx)
 
-    async def _apply_inject_event(
-        self,
-        session,
-        *,
-        run_id: str,
-        run: RunRecord,
-        scenario: dict[str, Any],
-        event_index: int,
-        event_time_ms: int,
-        event: dict[str, Any] | None,
-        pid_to_participant_id: dict[str, uuid.UUID],
-    ) -> None:
-        # No caller in the tree (T1519 lists it as dead code). Until it is deleted it goes through
-        # the same owner as the due-events phase, so it cannot be a way around the owner lock
-        # (programme 015, phase B step 3).
-        self._require_no_unflushed_changes(session)
-        await self._apply_inject_unit_of_work(
-            session,
-            run_id=run_id,
-            run=run,
-            scenario=scenario,
-            event_index=event_index,
-            event_time_ms=event_time_ms,
-            event=event,
-            pid_to_participant_id=pid_to_participant_id,
-        )
-        await self._end_open_transaction(session)
-
     async def _resolve_inject_debt_equivalent_ids(
         self,
         session,
@@ -562,9 +534,7 @@ class RealRunnerImpl:
                 # retried below on a fresh snapshot; the refusal is a non-retryable
                 # `ConflictException`, which the handler below rolls back and re-raises, with no
                 # envelope ever opened.
-                await MoneyBoundary(session).refuse_inactive_equivalents(
-                    intent_equivalent_ids, row_lock=True
-                )
+                await MoneyBoundary(session).refuse_inactive_equivalents(intent_equivalent_ids)
                 # THE OPERATION ENVELOPE (programme 015, phase B step 4). Staging and its flush
                 # are one declared operation: `stage_inject_event` is what writes the debts, and
                 # the flush below is what sends them.

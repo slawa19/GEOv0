@@ -68,13 +68,5 @@ class PaymentResult(BaseModel):
     created_at: datetime
     committed_at: Optional[datetime] = None
 
-class PaymentDetail(BaseModel):
-    tx_id: str
-    type: str
-    state: str
-    payload: Dict[str, Any]
-    created_at: datetime
-    error: Optional[Dict[str, Any]] = None
-
 class PaymentsList(BaseModel):
     items: List[PaymentResult]

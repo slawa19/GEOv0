@@ -456,11 +456,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-
-def get_settings() -> Settings:
-    """Return the global settings instance.
-
-    Provided as a callable for FastAPI Depends() and test mocking convenience.
-    """
-    return settings

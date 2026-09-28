@@ -235,7 +235,7 @@ class _Subject:
     """Seq 1's money phase, instrumented: its commit budget, and how its commit guard ended.
 
     THE PREMISE IS READ, NOT POLLED. The guard is the `FOR SHARE` of the second equivalent's row
-    (`MoneyBoundary.refuse_inactive_equivalents(row_lock=True)`, `service.py:1919`). The recorder
+    (`MoneyBoundary.refuse_inactive_equivalents`, `service.py:1919`). The recorder
     notes whether the operator's edit held that row uncommitted - its commit reached and not released
     - when the guard statement was issued AND when it ended, and how it ended. A `FOR SHARE` on a
     row another open transaction has updated cannot complete while that transaction stays open, so
@@ -269,16 +269,16 @@ class _Subject:
                     kwargs["commit_timeout_s"] = subject.commit_timeout_s
             return await original_operation(self_, attempt, **kwargs)
 
-        async def guard(self_, equivalent_ids, *, row_lock):
-            if self_ is not subject.boundary or not row_lock or subject.guard:
-                return await original_guard(self_, equivalent_ids, row_lock=row_lock)
+        async def guard(self_, equivalent_ids):
+            if self_ is not subject.boundary or subject.guard:
+                return await original_guard(self_, equivalent_ids)
             held = lambda: subject.gate.reached.is_set() and not subject.gate.release.is_set()  # noqa: E731
             raw = await (await self_.session.connection()).get_raw_connection()
             subject.pid = raw.driver_connection.get_server_pid()
             subject.guard["held_at_issue"] = held()
             subject.issued.set()
             try:
-                result = await original_guard(self_, equivalent_ids, row_lock=row_lock)
+                result = await original_guard(self_, equivalent_ids)
             except BaseException as exc:
                 subject.guard["ended"] = type(exc).__name__
                 raise
