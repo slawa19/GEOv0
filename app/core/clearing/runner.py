@@ -172,7 +172,9 @@ class ClearingPassError(Exception):
 
 
 class ClearingPeriodicRefused(Exception):
-    """Decision 9, form (b): the periodic runner refuses on a database with simulator data."""
+    """Decision 9, form (b): the periodic runner refuses where simulator use is DETECTED (a real-mode run row, or
+    run persistence off). It does not prove the database holds no simulator data: `cleanup-simulator` deletes run
+    rows but not simulator debts. Separate databases are the actual guarantee (spec decision 9)."""
 
     def __init__(self, reason: str):
         super().__init__(f"periodic clearing refused: {reason}")
@@ -436,7 +438,8 @@ async def run_awaited_clearing(
 
 
 async def check_periodic_isolation(session) -> None:
-    """Decision 9, form (b): refuse on a database with simulator data (see the spec's "Выбор формы").
+    """Decision 9, form (b): refuse where simulator use is detected - a real-mode run row, or run persistence
+    off (see the spec's "Выбор формы"). Detection, not proof: a cleaned-up run leaves its debts behind.
 
     Run inside the snapshot's transaction, so the check and the snapshot see one state.
     """

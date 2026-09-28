@@ -157,9 +157,10 @@ class RenewableLease:
         """Take the key or raise `ConflictException` after `wait_timeout_seconds` (0 = one try).
 
         Every `SET` is bounded (review P2-3): it may take at most what is left of the wait budget plus one round
-        trip's latency bound (`renew_timeout_seconds`), so acquisition never outlasts `wait_timeout_seconds +
-        renew_timeout_seconds`. A `SET` that timed out may still have landed with our token: that is not ownership
-        (the lease stays not acquired); our token is removed by one bounded compare-and-delete, else its TTL expires it.
+        trip's latency bound (`renew_timeout_seconds`). A `SET` that timed out may still have landed with our token:
+        that is not ownership (the lease stays not acquired); our token is removed by one bounded compare-and-delete
+        (another `renew_timeout_seconds` at most), else its TTL expires it. So the worst case with an unresponsive
+        Redis is about `wait_timeout_seconds + 2 * renew_timeout_seconds`: bounded, but not the SET allowance alone.
         """
 
         if self._redis is None:
