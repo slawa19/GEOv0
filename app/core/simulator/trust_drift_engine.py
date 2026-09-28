@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import Any, Callable
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
@@ -21,10 +21,12 @@ from app.core.simulator.models import (
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
+from app.core.trustlines.service import TrustLineService, TrustLineWriteBatch
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import TopologyChangedPayload
+from app.schemas.trustline import TrustLineUpdateRequest
 
 # The grain of the ledger, not of a currency's display. `trust_lines.limit` and `debts.amount` are
 # `Numeric(20, 8)`, and since 012/T1201 the money door refuses anything the column cannot hold
@@ -37,6 +39,32 @@ from app.schemas.simulator import TopologyChangedPayload
 # (`app/utils/money.py`), not the ledger's grain, and rounding stored money to it would be the same
 # defect wearing a different constant.
 _LEDGER_QUANTUM = Decimal(1).scaleb(-MONEY_MAX_SCALE)
+
+# Programme 021, stage 1: the placeholder the request model needs in its required `signature` field on the
+# internal path. `require_signature=False` is what makes the service skip the check - never this value, which
+# the service does not read on that path (the same convention as the payment service's internal wrappers).
+_UNSIGNED = "__internal__"
+
+
+async def _set_limit_internally(
+    service: TrustLineService,
+    batch: TrustLineWriteBatch,
+    *,
+    trustline_id: uuid.UUID,
+    creditor_id: uuid.UUID,
+    new_limit: Decimal,
+) -> None:
+    """Drift's one write: a limit change through the trust-line service's internal path, in the caller's
+    transaction. `format(..., "f")` because the money door refuses exponent notation and `str(Decimal)` would
+    write a limit below 1E-6 in it."""
+
+    await service.execute_update(
+        batch,
+        trustline_id,
+        creditor_id,
+        TrustLineUpdateRequest(limit=format(new_limit, "f"), signature=_UNSIGNED),
+        require_signature=False,
+    )
 
 
 def broadcast_trust_drift_changed(
@@ -236,13 +264,79 @@ class TrustDriftEngine:
         if not eq_id:
             return TrustDriftResult(updated_count=0)
 
-        updated = 0
-        isolation_checked = False
         updated_edges: set[tuple[str, str]] = set()
         committed_limit_updates: list[TrustDriftLimitUpdate] = []
         scenario = getattr(run, "_scenario_raw", None) or self._get_scenario_raw(
             run.scenario_id
         )
+        # Programme 021, stage 1: this method OWNS the growth transaction (it commits below), so it also rolls
+        # it back on any failure before the failure leaves it (T2100 P2-4). The limit changes go through the
+        # trust-line service's internal path: one audit row per changed line, one checkpoint pair for this
+        # transaction's equivalent.
+        service = TrustLineService(clearing_session)
+        batch = service.begin_internal_batch()
+        try:
+            await self._grow_edges(
+                run=run,
+                clearing_session=clearing_session,
+                service=service,
+                batch=batch,
+                touched_edges=touched_edges,
+                eq_upper=eq_upper,
+                eq_id=eq_id,
+                tick_index=tick_index,
+                cleared_amount_per_edge=cleared_amount_per_edge,
+                cfg=cfg,
+                pid_to_uuid=pid_to_uuid,
+                updated_edges=updated_edges,
+                committed_limit_updates=committed_limit_updates,
+            )
+            await batch.finish()
+        except Exception:
+            await clearing_session.rollback()
+            raise
+        updated = len(committed_limit_updates)
+
+        touched_eqs = {eq_upper} if updated_edges else set()
+        touched_edges_by_eq = {eq_upper: updated_edges} if updated_edges else {}
+        result = TrustDriftResult(
+            updated_count=int(updated),
+            touched_equivalents=touched_eqs,
+            touched_edges_by_eq=touched_edges_by_eq,
+            committed_limit_updates=tuple(committed_limit_updates),
+        )
+        if updated:
+            await resolve_commit_under_cancellation(
+                commit=clearing_session.commit,
+                rollback=clearing_session.rollback,
+                on_commit=lambda: self.apply_committed_effects(
+                    scenario=scenario,
+                    result=result,
+                ),
+                on_rollback=lambda: None,
+                on_unknown=lambda: None,
+                logger=self._logger,
+            )
+        return result
+
+    async def _grow_edges(
+        self,
+        *,
+        run: RunRecord,
+        clearing_session,
+        service: TrustLineService,
+        batch: TrustLineWriteBatch,
+        touched_edges: set[tuple[str, str]],
+        eq_upper: str,
+        eq_id,
+        tick_index: int,
+        cleared_amount_per_edge: dict[tuple[str, str], float],
+        cfg: TrustDriftConfig,
+        pid_to_uuid: dict[str, uuid.UUID],
+        updated_edges: set[tuple[str, str]],
+        committed_limit_updates: list[TrustDriftLimitUpdate],
+    ) -> None:
+        isolation_checked = False
         for creditor_pid, debtor_pid in touched_edges:
             key = f"{creditor_pid}:{debtor_pid}:{eq_upper}"
             hist = run._edge_clearing_history.get(key)
@@ -274,18 +368,19 @@ class TrustDriftEngine:
             # Get current limit from DB.  Drift applies to the ACTIVE line only: a
             # closed incarnation is history and a frozen one is quarantined, and since
             # migration 019 both may coexist with the active row.
-            tl_limit_row = (
+            tl_row = (
                 await clearing_session.execute(
-                    select(TrustLine.limit).where(
+                    select(TrustLine.id, TrustLine.limit).where(
                         TrustLine.from_participant_id == creditor_uuid,
                         TrustLine.to_participant_id == debtor_uuid,
                         TrustLine.equivalent_id == eq_id,
                         TrustLine.status == "active",
                     )
                 )
-            ).scalar_one_or_none()
-            if tl_limit_row is None:
+            ).one_or_none()
+            if tl_row is None:
                 continue
+            tl_id, tl_limit_row = tl_row
 
             try:
                 # T1514: read the stored limit AS STORED. Truncating it to cents here was the
@@ -320,17 +415,10 @@ class TrustDriftEngine:
                     # 019 stage 5 (`T1907`, `FORK-2`): before the first write of this unit of work.
                     await MoneyBoundary.require_serializable(clearing_session, writer="trust_growth")
                     isolation_checked = True
-                await clearing_session.execute(
-                    update(TrustLine)
-                    .where(
-                        TrustLine.from_participant_id == creditor_uuid,
-                        TrustLine.to_participant_id == debtor_uuid,
-                        TrustLine.equivalent_id == eq_id,
-                        # ACTIVE only: migration 019 lets a closed incarnation coexist,
-                        # and drift must never rewrite history.
-                        TrustLine.status == "active",
-                    )
-                    .values(limit=new_limit)
+                # The ACTIVE row selected above: migration 019 lets a closed incarnation coexist,
+                # and drift must never rewrite history.
+                await _set_limit_internally(
+                    service, batch, trustline_id=tl_id, creditor_id=creditor_uuid, new_limit=new_limit
                 )
 
                 committed_limit_updates.append(
@@ -348,30 +436,7 @@ class TrustDriftEngine:
                     current_limit,
                     new_limit,
                 )
-                updated += 1
                 updated_edges.add((creditor_pid, debtor_pid))
-
-        touched_eqs = {eq_upper} if updated_edges else set()
-        touched_edges_by_eq = {eq_upper: updated_edges} if updated_edges else {}
-        result = TrustDriftResult(
-            updated_count=int(updated),
-            touched_equivalents=touched_eqs,
-            touched_edges_by_eq=touched_edges_by_eq,
-            committed_limit_updates=tuple(committed_limit_updates),
-        )
-        if updated:
-            await resolve_commit_under_cancellation(
-                commit=clearing_session.commit,
-                rollback=clearing_session.rollback,
-                on_commit=lambda: self.apply_committed_effects(
-                    scenario=scenario,
-                    result=result,
-                ),
-                on_rollback=lambda: None,
-                on_unknown=lambda: None,
-                logger=self._logger,
-            )
-        return result
 
     async def apply_trust_decay(
         self,
@@ -383,7 +448,10 @@ class TrustDriftEngine:
     ) -> TrustDriftResult:
         """Apply trust decay to overloaded edges that didn't get cleared.
 
-        Uses the main tick session. Does NOT commit — caller commits.
+        Uses the main tick session. Does NOT commit — caller commits, and the caller owns the rollback on
+        failure (`RealTickTrustDriftCoordinator`). Programme 021, stage 1: the limit changes go through the
+        trust-line service's internal path and this method finishes its batch - one audit row per changed line,
+        one checkpoint pair per touched equivalent - so the caller's commit carries them together.
         Returns count of decayed edges.
         """
 
@@ -402,6 +470,8 @@ class TrustDriftEngine:
         touched_edges_by_eq: dict[str, set[tuple[str, str]]] = {}
         committed_limit_updates: list[TrustDriftLimitUpdate] = []
         trustlines = scenario.get("trustlines") or []
+        service = TrustLineService(session)
+        batch = service.begin_internal_batch()
 
         for tl in trustlines:
             eq_code = str(effective_equivalent(scenario, tl) or "").strip().upper()
@@ -521,23 +591,31 @@ class TrustDriftEngine:
             if new_limit == current_limit:
                 continue
 
+            # Drift applies to the ACTIVE line only: a closed incarnation is history and a frozen one is
+            # quarantined (migration 019 lets both coexist with the active row). Before 021 the `UPDATE ...
+            # WHERE status = 'active'` matched no row here and the edge was still counted and published as
+            # decayed; now there is nothing to write, and the edge is not reported.
+            tl_id = (
+                await session.execute(
+                    select(TrustLine.id).where(
+                        TrustLine.from_participant_id == creditor_uuid,
+                        TrustLine.to_participant_id == debtor_uuid,
+                        TrustLine.equivalent_id == eq_id,
+                        TrustLine.status == "active",
+                    )
+                )
+            ).scalar_one_or_none()
+            if tl_id is None:
+                continue
+
             if not isolation_checked:
                 # 019 stage 5 (`T1907`, `FORK-2`): the floor above is a read of the debt row that
                 # holds against a concurrent payment only at SERIALIZABLE (the read-write cycle
                 # below); refused before the first write of this call.
                 await MoneyBoundary.require_serializable(session, writer="trust_decay")
                 isolation_checked = True
-            await session.execute(
-                update(TrustLine)
-                .where(
-                    TrustLine.from_participant_id == creditor_uuid,
-                    TrustLine.to_participant_id == debtor_uuid,
-                    TrustLine.equivalent_id == eq_id,
-                    # ACTIVE only: migration 019 lets a closed incarnation coexist,
-                    # and drift must never rewrite history.
-                    TrustLine.status == "active",
-                )
-                .values(limit=new_limit)
+            await _set_limit_internally(
+                service, batch, trustline_id=tl_id, creditor_id=creditor_uuid, new_limit=new_limit
             )
 
             committed_limit_updates.append(
@@ -560,6 +638,7 @@ class TrustDriftEngine:
             )
             updated += 1
 
+        await batch.finish()
         return TrustDriftResult(
             updated_count=int(updated),
             touched_equivalents=set(touched_eq_codes),
