@@ -354,3 +354,42 @@ async def test_cycle_edges_are_creditor_to_debtor_pids(monkeypatch, topology, ex
     [call] = growth
     assert call["touched_edges"] == {("bob", "alice")}
     assert call["cleared_amount_per_edge"] == {("bob", "alice"): 1.0}
+
+
+# --- the runner's caller deadline is the tick's clearing budget, per equivalent --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_each_pass_gets_the_tick_budget_as_its_deadline(monkeypatch) -> None:
+    """023 decision 10: the budget is the runner's caller deadline, checked before every cycle start.
+
+    Budget 300 ms: each equivalent's pass is handed `now + 0.3 s` of the event loop's clock, measured when the pass
+    starts - not one deadline for the whole tick, not the hard timeout, and not missing (the runner has no budget of
+    its own). The run perimeter reaches every pass.
+    """
+
+    run = _run("deadline-run", 2)
+    seen: list[tuple[str, float, object]] = []
+
+    async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
+        seen.append((equivalent, deadline - asyncio.get_running_loop().time(), allowed_participant_pids))
+        await asyncio.sleep(0.05)  # the second equivalent starts later, so a shared deadline would show
+        return _result([], status="complete", reason=None)
+
+    async def _apply_trust_growth(**_kwargs):
+        raise AssertionError("nothing was committed: no trust growth")
+
+    tick = clearing_unit_tick(
+        monkeypatch,
+        sse=_SseCapture(),
+        session_factory=lambda: _SessionContext(),
+        runner_pass=_clearing_pass,
+        apply_trust_growth=_apply_trust_growth,
+        budget_ms=300,
+    )
+    await tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=["USD", "EUR"], committed={})
+
+    assert [eq for eq, _, _ in seen] == ["USD", "EUR"]
+    for _, remaining, scope in seen:
+        assert 0.25 < remaining <= 0.3, remaining
+        assert scope == {"alice", "bob"}
