@@ -144,6 +144,28 @@ class RunLifecycle:
             except Exception:
                 break
 
+    def _start_heartbeat_locked(self, run: RunRecord) -> None:
+        run._heartbeat_task = asyncio.create_task(
+            self._heartbeat_loop(run.run_id),
+            name=f"simulator-heartbeat:{run.run_id}",
+        )
+
+    async def _ensure_heartbeat(self, run: RunRecord) -> None:
+        """One live heartbeat for a `running` run (024 T2416.2): keep a live loop, replace an ended one.
+
+        A cancelled loop still unwinding is awaited outside the lock and the state re-checked, so two
+        ticking loops never coexist and a run stopped meanwhile gets none.
+        """
+        while True:
+            with self._lock:
+                task = run._heartbeat_task
+                if run.state != "running" or (task is not None and not task.done() and not task.cancelling()):
+                    return
+                if task is None or task.done():
+                    self._start_heartbeat_locked(run)
+                    return
+            await asyncio.wait({task})
+
     def _get_run(self, run_id: str) -> RunRecord:
         with self._lock:
             run = self._runs.get(run_id)
@@ -283,11 +305,7 @@ class RunLifecycle:
             # Start artifacts writer (best-effort; no-op if artifacts disabled).
             self._artifacts.start_events_writer(run_id)
 
-            # Start heartbeat loop.
-            run._heartbeat_task = asyncio.create_task(
-                self._heartbeat_loop(run_id),
-                name=f"simulator-heartbeat:{run_id}",
-            )
+            self._start_heartbeat_locked(run)
 
             # Emit immediate status event (so SSE clients don't wait for first tick).
             self._publish_run_status(run_id)
@@ -329,6 +347,7 @@ class RunLifecycle:
             else:
                 run.state = "running"
 
+        await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
         return self._run_to_status(run)
@@ -433,21 +452,7 @@ class RunLifecycle:
     async def restart(self, run_id: str) -> RunStatus:
         run = self._get_run(run_id)
         with self._lock:
-            run.sim_time_ms = 0
-            run.tick_index = 0
-            run.errors_total = 0
-            run.last_error = None
-            run.last_event_type = None
-            run.current_phase = None
-            run.queue_depth = 0
-            run.ops_sec = 0.0
-            run.stopped_at = None
-            run.state = "running"
-            run.started_at = self._utc_now()
-
-            # Keep buffer but prune to avoid unbounded growth across long sessions.
-            self._sse.prune_event_buffer_locked(run)
-
+            # Refuse before any mutation: a refused restart must leave the run as it was (024 T2416.2).
             # Restore active mapping removed during stop(). Without this,
             # get_active_run_id(owner_id) → None and admin stop-all won't see
             # the restarted run (§FIX-CR2).
@@ -469,6 +474,22 @@ class RunLifecycle:
                 # _set_active_run_id is always set (non-Optional Callable)
                 self._set_active_run_id(run_id, run.owner_id)
 
+            run.sim_time_ms = 0
+            run.tick_index = 0
+            run.errors_total = 0
+            run.last_error = None
+            run.last_event_type = None
+            run.current_phase = None
+            run.queue_depth = 0
+            run.ops_sec = 0.0
+            run.stopped_at = None
+            run.state = "running"
+            run.started_at = self._utc_now()
+
+            # Keep buffer but prune to avoid unbounded growth across long sessions.
+            self._sse.prune_event_buffer_locked(run)
+
+        await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)
         await simulator_storage.upsert_run(run)
         return self._run_to_status(run)
