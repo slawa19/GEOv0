@@ -20,6 +20,7 @@ from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.db.models.debt import Debt
 from app.db.models.audit_log import IntegrityAuditLog
+from app.db.sqlstate import deliberate_chain, sqlstate
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import (
@@ -56,16 +57,12 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     if orig is None:
         return False
 
-    # Collect the whole cause chain once: drivers wrap differently, nesting depth is not
-    # fixed, and the facts we need are spread across several links of it.  This is the
-    # shape `ClearingService._postgres_error_codes` already uses in this codebase.
-    chain: list = []
-    seen: set[int] = set()
-    node = orig
-    while node is not None and id(node) not in seen:
-        seen.add(id(node))
-        chain.append(node)
-        node = getattr(node, "__cause__", None) or getattr(node, "__context__", None)
+    # Collect the deliberate chain once: drivers wrap differently, nesting depth is not fixed,
+    # and the facts we need are spread across several links of it.  Never `__context__`
+    # (rule 2026-09-12, `app/db/sqlstate.py`; 024 `T2415.1`): a failure raised while another
+    # was being handled would inherit that one's constraint and be renamed into this clash.
+    # From `orig`, not `exc`: the wrapper's text embeds the INSERT and its column list.
+    chain = list(deliberate_chain(orig))
 
     for link in chain:
         name = getattr(link, "constraint_name", None)
@@ -82,7 +79,7 @@ def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     # and rejected a genuine live-triple conflict -- a 500 on exactly the path this
     # classifier exists to keep declared.
     if any(
-        (getattr(link, "sqlstate", None) or getattr(link, "pgcode", None)) == "23505"
+        sqlstate(link, walk=False, bare_code=False) == "23505"
         for link in chain
     ):
         tables = [str(getattr(link, "table_name", "") or "") for link in chain]

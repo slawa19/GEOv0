@@ -25,6 +25,11 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
+# The deliberate chain and the SQLSTATE on it (`orig`/`__cause__`, never `__context__`; rule 2026-09-12). The
+# private names stay for the readers outside this module (tests, `scripts/seed_recipe.py`).
+from app.db.sqlstate import ROLLED_BACK_SQLSTATES
+from app.db.sqlstate import deliberate_chain as _iter_exception_chain
+from app.db.sqlstate import sqlstate as _payment_db_sqlstate
 from app.schemas.payment import (
     PaymentConstraints,
     PaymentCreateRequest,
@@ -50,68 +55,15 @@ from app.utils.validation import validate_equivalent_code, validate_tx_id, parse
 logger = logging.getLogger(__name__)
 
 
-_RETRYABLE_PAYMENT_SQLSTATES = frozenset({"40001", "40P01"})
+#: What `pay()` retries besides the book's version conflict and the debt-pair `23505`; not `55P03` -
+#: that is the refusal recording giving up (`RefusalNotRecorded`), not a rolled-back attempt.
+_RETRYABLE_PAYMENT_SQLSTATES = ROLLED_BACK_SQLSTATES
 
 #: `details.reason` of the 409 that refuses a `tx_id` replay whose stored PAYMENT row carries no
 #: fingerprint (T1548). It names WHY the request is refused rather than answered: the stored row's
 #: request identity cannot be verified, so "the same request" cannot be established. Not retryable -
 #: repeating the request cannot make the stored row grow a fingerprint.
 UNVERIFIABLE_LEGACY_IDENTITY_REASON = "unverifiable_legacy_identity"
-
-
-def _iter_exception_chain(exc: BaseException):
-    """The chain a CLASSIFICATION may read: `orig` / `__cause__` only, never `__context__`.
-
-    ONE RULE FOR BOTH DECISIONS BELOW, 2026-09-12. `_payment_db_sqlstate` and
-    `_classify_payment_db_error` both walk this generator, so they cannot drift apart:
-    the exception under inspection decides if it carries its own code, and otherwise only
-    DELIBERATE wrapping is followed.
-
-    WHY `__context__` IS EXCLUDED, on both backends. Python sets `__context__` to whatever was
-    being handled when this exception was raised, which may be an unrelated earlier failure.
-    Retry code that catches a conflict and then hits a terminal error inside that `except` block
-    is an ordinary shape, and it made the terminal error inherit the conflict's identity: a
-    SQLITE_CONSTRAINT_PRIMARYKEY (1555) raised inside a SQLITE_BUSY handler, and equally a
-    PostgreSQL 23505 raised inside a 40001 handler, were both classified as retryable and retried
-    although retrying them cannot succeed. The SQLite busy predicate (deleted with SQLite, 017 stage
-    3) was narrowed for this reason; until this change the fix was defeated one layer up, because
-    THIS traversal still handed it nodes found through `__context__`.
-
-    Nothing legitimate is lost. SQLAlchemy raises `DBAPIError` FROM the driver error, so the
-    genuine cause is always reachable as `orig` (and as `__cause__`, since `raise ... from` sets
-    it). `__context__` adds only the incidental case, which is
-    the masking hazard itself rather than a capability.
-    """
-
-    current: BaseException | None = exc
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        yield current
-
-        following = getattr(current, "orig", None)
-        if not isinstance(following, BaseException):
-            following = current.__cause__
-        current = following if isinstance(following, BaseException) else None
-
-
-def _payment_db_sqlstate(exc: BaseException) -> str | None:
-    chain = list(_iter_exception_chain(exc))
-    for attribute in ("sqlstate", "pgcode"):
-        for current in chain:
-            value = getattr(current, attribute, None)
-            if value:
-                return str(value)
-    for current in chain:
-        # SQLAlchemy's wrapper-level `.code` identifies its documentation page
-        # (for example "dbapi"), not PostgreSQL SQLSTATE. Driver exceptions may
-        # expose SQLSTATE as `.code`, so inspect only non-wrapper nodes here.
-        if isinstance(current, DBAPIError):
-            continue
-        value = getattr(current, "code", None)
-        if value:
-            return str(value)
-    return None
 
 
 def _conflict_cause(exc: BaseException) -> str:
