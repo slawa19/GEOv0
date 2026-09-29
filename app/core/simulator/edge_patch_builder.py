@@ -140,9 +140,7 @@ class EdgePatchBuilder:
             except Exception:
                 used_amt = Decimal("0")
 
-            avail_amt = limit_amt - used_amt
-            if avail_amt < 0:
-                avail_amt = Decimal("0")
+            avail_amt = limit_amt - used_amt  # 026 `T2602`: signed, never clamped (see snapshot_builder)
 
             try:
                 limit_num = float(limit_amt)
@@ -267,7 +265,7 @@ class EdgePatchBuilder:
 
             used_amt = debt_by_pair.get((src_part.id, dst_part.id), Decimal("0"))
             limit_amt, tl_status = tl_by_pair.get((src_part.id, dst_part.id), (Decimal("0"), None))
-            available_amt = max(Decimal("0"), limit_amt - used_amt)
+            available_amt = limit_amt - used_amt  # 026 `T2602`: signed, never clamped
 
             edge_viz = helper.edge_viz(status=tl_status, used=used_amt, limit=limit_amt)
             edge_patch_list.append(

@@ -2620,6 +2620,9 @@ paths:
     patch:
       tags: [TrustLines]
       summary: Update trustline
+      description: >-
+        Changes the limit and/or policy. A limit below the current debt is accepted: it changes trust, not
+        debt - nothing is written off or moved, `available` becomes negative, new debt growth is refused.
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
       requestBody:
@@ -3229,7 +3232,7 @@ paths:
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':
-          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE, TRUSTLINE_USED_UNAVAILABLE or SEEDING_FAILED (flat envelope)
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE or SEEDING_FAILED (flat envelope)
           content:
             application/json:
               schema:
@@ -3935,6 +3938,7 @@ components:
           type: string
         available:
           type: string
+          description: Signed `limit - used`, as on TrustLine; negative when the limit is below the debt.
         status:
           type: string
 
@@ -5251,13 +5255,20 @@ components:
           $ref: '#/components/schemas/EquivalentCode'
         limit:
           type: string
-          description: Maximum debt allowed (decimal string)
+          description: >-
+            The creditor's trust in the debtor (decimal string): the ceiling the debt may GROW to. It may be
+            below `used` - lowering trust below the current debt is accepted (026 `T2602`); the debt above it
+            cannot grow and can still be repaid.
         used:
           type: string
           description: Current debt against this line (decimal string)
         available:
           type: string
-          description: Available credit (limit - used)
+          description: >-
+            Unused trust, `limit - used`, a SIGNED decimal string. Negative when the limit was lowered below the
+            current debt: the debt's excess over trust, not an amount that can be paid. Not the payment capacity
+            of the pair, which also counts the reverse debt.
+          example: '-30.00000000'
         policy:
           type: object
           additionalProperties: true
@@ -6656,6 +6667,7 @@ components:
             - type: string
             - type: number
         available:
+          description: Signed `trust_limit - used`, as on TrustLine; negative when the limit is below the debt.
           oneOf:
             - type: string
             - type: number
@@ -6802,6 +6814,7 @@ components:
             - type: string
             - type: number
         available:
+          description: Signed `trust_limit - used`, as on TrustLine; negative when the limit is below the debt.
           oneOf:
             - type: string
             - type: number

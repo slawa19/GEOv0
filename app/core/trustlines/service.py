@@ -264,7 +264,7 @@ class TrustLineService:
 
     What unsigned execution gives up is exactly proof of key possession and binding the request to a signature.
     Everything else holds on both entrances: owner matching, the money door (`parse_money_amount`), live-line
-    uniqueness, the debt floor of an update, the debt check of a close, status rules and audit.
+    uniqueness, the debt check of a close, status rules and audit.
 
     `import_initial_trustlines` is a THIRD, narrower operation: the simulator seeder's import of a scenario's
     initial state, statuses `active`/`frozen`/`closed` included. It is not a participant's operation and carries no
@@ -520,9 +520,21 @@ class TrustLineService:
         *,
         require_signature: bool,
     ) -> TrustLine:
-        """Change a live line's limit and/or policy in the caller's transaction and record it on `batch`."""
+        """Change a live line's limit and/or policy in the caller's transaction and record it on `batch`.
 
-        stmt = select(TrustLine).where(TrustLine.id == trustline_id)
+        A limit below the line's current debt is ACCEPTED (026 `T2602`, owner 2026-09-29, F-026-1): it changes
+        trust, not debt - nothing is written off or moved, `available` goes negative, and the debt above the new
+        limit cannot grow (the growth gate of `Book`/`PaymentService`) but can still be repaid.
+
+        THE ROW LOCK (spec 026, fork 5): the line is read `FOR UPDATE` before any decision. It is the only lock
+        this path takes (no debt read, no equivalent lock), so it cannot close a cycle with the money path
+        (equivalent lock -> lines `FOR SHARE` -> equivalent row `FOR SHARE` -> debts): an in-flight payment makes
+        it wait; a payment that starts later waits for it or, on an older snapshot, fails its `FOR SHARE` with
+        40001 and retries on the new limit (024 `T2415.3`). A 40001/40P01 here is NOT retried: it propagates,
+        the caller rolls the whole transaction back (the public PATCH answers 500 `E010`), nothing is applied.
+        """
+
+        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update()
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
 
@@ -576,15 +588,8 @@ class TrustLineService:
             except Exception:
                 raise InvalidSignatureException("Invalid signature")
 
-        # Every refusal BEFORE the first mutation and before the batch is touched (same order of
-        # refusals as before 021: the debt floor, then the policy).
-        if new_limit is not None:
-            used = await self._get_used_amount(trustline)
-            if new_limit < used:
-                raise BadRequestException(
-                    "Cannot reduce trustline limit below used amount",
-                    details={"used": str(used), "limit": data.limit},
-                )
+        # Every refusal BEFORE the first mutation and before the batch is touched. There is no debt floor
+        # any more (026 `T2602`): a limit below `used` is a trust change, see the docstring.
         if data.policy is not None:
             validate_trustline_policy(data.policy)
 

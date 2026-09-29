@@ -82,7 +82,9 @@ describe('TrustlineManagementPanel', () => {
     host.remove()
   })
 
-  it('TL-1: when newLimit < used, shows inline warn and disables Update', async () => {
+  // INTENTIONAL, 026 `T2602` (owner 2026-09-29): a limit below used was blocked here with a warning; it is now a
+  // trust change and is allowed. A negative `available` is shown as the excess over trust, not as an amount.
+  it('TL-1: newLimit < used is allowed, and a negative available reads as the excess over trust', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -95,8 +97,8 @@ describe('TrustlineManagementPanel', () => {
           state,
           unit: 'EQ',
           used: '10',
-          currentLimit: '20',
-          available: '10',
+          currentLimit: '0',
+          available: '-10',
           participants: [],
           // Внешнее ревью 013 (P2): панель ПРАВИТ существующую линию, значит основание для её
           // чисел — `row` (источник ответил, и строка для пары есть). Прежнее `no-row` описывало
@@ -121,13 +123,13 @@ describe('TrustlineManagementPanel', () => {
     input!.dispatchEvent(new Event('input'))
     await nextTick()
 
-    const warn = host.querySelector('[data-testid="tl-limit-too-low"]') as HTMLElement | null
-    expect(warn).toBeTruthy()
-    expect((warn!.textContent ?? '').trim()).toContain('New limit must be ≥ used')
+    expect(host.querySelector('[data-testid="tl-limit-too-low"]')).toBeNull()
+    expect(host.textContent ?? '').toContain('over limit by 10 EQ')
+    expect(host.textContent ?? '').not.toContain('-10')
 
     const btn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Update') as HTMLButtonElement | undefined
     expect(btn).toBeTruthy()
-    expect(btn!.disabled).toBe(true)
+    expect(btn!.disabled).toBe(false)
 
     app.unmount()
     host.remove()

@@ -8,7 +8,7 @@ import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
-import { renderOrDash } from '../utils/valueFormat'
+import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
@@ -143,22 +143,11 @@ watch(
   },
 )
 
-const usedNum = computed(() => {
-  const v = parseAmountNumber(effectiveUsed.value)
-  return Number.isFinite(v) ? v : 0
-})
-
 const createLimitNormalized = computed(() => parseAmountStringOrNull(limit.value))
 const createLimitNum = computed(() => parseAmountNumber(createLimitNormalized.value))
 
 const updateLimitNormalized = computed(() => parseAmountStringOrNull(newLimit.value))
 const newLimitNum = computed(() => parseAmountNumber(updateLimitNormalized.value))
-
-const updateLimitTooLow = computed(() => {
-  if (updateLimitNormalized.value == null) return false
-  if (!Number.isFinite(newLimitNum.value)) return false
-  return newLimitNum.value < usedNum.value
-})
 
 const closeBlocked = computed(() => {
   const u = parseAmountNumber(effectiveUsed.value)
@@ -196,12 +185,12 @@ const createValid = computed(() => {
 })
 
 const updateValid = computed(() => {
-  // `F-013-7`: `usedNum` below is 0 whenever the source is unavailable, so without this guard the
-  // "new limit >= used" check would wave through any non-negative number.
+  // `F-013-7`: no update of a line whose figures the source did not give. 026 `T2602`: a limit below `used`
+  // is accepted (a trust change), so there is no "new limit >= used" floor any more.
   if (noExistingLineFigures.value) return false
   if (updateLimitNormalized.value == null) return false
   if (!Number.isFinite(newLimitNum.value)) return false
-  return newLimitNum.value >= 0 && newLimitNum.value >= usedNum.value
+  return newLimitNum.value >= 0
 })
 
 async function onCreate() {
@@ -430,7 +419,7 @@ defineExpose({
         </div>
         <div class="tl-stats__item">
           <div class="ds-label">Available</div>
-          <div class="ds-value ds-mono">{{ renderOrDash(effectiveAvailable) }} {{ unit }}</div>
+          <div class="ds-value ds-mono">{{ renderAvailable(effectiveAvailable) }} {{ unit }}</div>
         </div>
       </div>
 
@@ -481,10 +470,6 @@ defineExpose({
 
       <div v-if="isEdit && newLimit.trim() && updateLimitNormalized === null" class="ds-help tl-pick-help">
         Invalid amount format. Use digits and '.' for decimals.
-      </div>
-
-      <div v-if="isEdit && updateLimitTooLow" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-limit-too-low">
-        New limit must be ≥ used ({{ renderOrDash(effectiveUsed) }} {{ unit }}).
       </div>
 
       <div

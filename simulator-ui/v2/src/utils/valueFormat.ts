@@ -19,3 +19,9 @@ export function renderOrDash(v: unknown): string {
   const s = String(v).trim()
   return s ? s : '—'
 }
+
+/** 026 `T2602`: `available` is signed; a negative one is the debt's excess over a lowered limit, not a payable amount. */
+export function renderAvailable(v: unknown): string {
+  const s = renderOrDash(v)
+  return s.startsWith('-') ? `over limit by ${s.slice(1)}` : s
+}

@@ -242,9 +242,8 @@ class SnapshotBuilder:
                 except (InvalidOperation, ValueError):
                     limit_amt = Decimal("0")
 
+            # 026 `T2602` (fork 7): signed, never clamped - a debt above a lowered limit shows as negative.
             available_amt = limit_amt - used_amt
-            if available_amt < 0:
-                available_amt = Decimal("0")
 
             link.trust_limit = _to_money_str(limit_amt)
             link.used = _to_money_str(used_amt)

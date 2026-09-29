@@ -7,7 +7,8 @@ carries it - the SSE edge patch of the action (`build_edge_patch_for_pairs`), th
 clamps-to-zero that hid it are gone; each assertion below is the one that reddens when its clamp returns.
 
 The debt of 7 is set up within the limit of 10 (not an excess); the excess comes only from the action lowering
-the limit to 5 (Verification plan §4). Mode A, no concurrency.
+the limit to 5 (Verification plan §4). Mode A, no concurrency. The payment and clearing after the lowering are
+exercised on the public path (`tests/integration/test_p026_s2_limit_below_used_postgres.py`).
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from decimal import Decimal
 import pytest
 
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
-from tests.p019_support import TargetMismatch, require_target
+from app.core.simulator.real_scenario_seeder import simulated_public_key
+from tests.p019_support import require_target
 from tests.unit.test_p021_interact_trust_line_actions_wire import (  # noqa: F401 - `stand` is a fixture
     TRIPLE,
     HEADERS,
@@ -29,11 +31,12 @@ from tests.unit.test_p021_interact_trust_line_actions_wire import (  # noqa: F40
 )
 
 
-@pytest.mark.xfail(raises=TargetMismatch, strict=True,
-                   reason="026 target, delivered by T2602: Interact update below used; signed available in the simulator")
 @pytest.mark.asyncio
 async def test_update_below_used_is_accepted_and_every_projection_is_signed(client, stand) -> None:
     alice, bob, uah, db, run = stand["alice"], stand["bob"], stand["uah"], stand["db"], stand["run"]
+    for p in (alice, bob):  # simulator-created rows: the run snapshot reads DB state only for those
+        p.public_key = simulated_public_key(p.pid)
+    await db.commit()
     assert (await _post(client, "trustline-create", {**TRIPLE, "limit": "10"})).status_code == 200
     await _debt(db, debtor=bob, creditor=alice, eq=uah, amount="7")
     _Recorder.events.clear()

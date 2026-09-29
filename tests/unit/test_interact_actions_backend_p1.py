@@ -312,7 +312,7 @@ async def test_action_trustline_create_schema_validation_is_invalid_request(
 
 
 @pytest.mark.asyncio
-async def test_action_trustline_update_happy_and_used_exceeds_new_limit(
+async def test_action_trustline_update_happy_and_below_used(
     client, db_session, interact_actions_enabled
 ):
     # Arrange
@@ -365,7 +365,8 @@ async def test_action_trustline_update_happy_and_used_exceeds_new_limit(
         )
     await db_session.commit()
 
-    # Act 2: error update (new_limit < used)
+    # Act 2: update below used. INTENTIONAL, 026 `T2602` (owner 2026-09-29): was 409 USED_EXCEEDS_NEW_LIMIT; a
+    # limit below the debt is a trust change and is accepted.
     r2 = await client.post(
         "/api/v1/simulator/runs/test-run/actions/trustline-update",
         headers=headers,
@@ -377,9 +378,8 @@ async def test_action_trustline_update_happy_and_used_exceeds_new_limit(
             "client_action_id": "c_tl_update_2",
         },
     )
-    assert r2.status_code == 409
-    p2 = r2.json()
-    assert p2.get("code") == "USED_EXCEEDS_NEW_LIMIT"
+    assert r2.status_code == 200, r2.text
+    assert (r2.json()["old_limit"], r2.json()["new_limit"]) == ("150.00000000", "40")
 
 
 @pytest.mark.asyncio

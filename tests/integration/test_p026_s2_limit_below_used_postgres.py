@@ -40,11 +40,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_update_request,
     register_and_login,
 )
-from tests.p019_support import TargetMismatch, require_target
-
-
-def target_xfail_026(what: str):
-    return pytest.mark.xfail(raises=TargetMismatch, strict=True, reason=f"026 target, delivered by T2602: {what}")
+from tests.p019_support import require_target
 
 
 async def _world(client, db_session):
@@ -101,7 +97,6 @@ async def _patch_limit(client, creditor, line_id: str, limit: str):
 
 @MODE_B
 @pytest.mark.asyncio
-@target_xfail_026("PATCH below used is accepted as a trust change; available is served signed everywhere")
 async def test_patch_below_used_is_accepted_and_changes_trust_only(client, db_session) -> None:
     code, p, lines, factory = await _world(client, db_session)
     a, b = p["A"], p["B"]
@@ -129,7 +124,6 @@ async def test_patch_below_used_is_accepted_and_changes_trust_only(client, db_se
 
 @MODE_B
 @pytest.mark.asyncio
-@target_xfail_026("after the lowering the debt cannot grow, and a payment the other way and clearing reduce it")
 async def test_after_lowering_the_debt_cannot_grow_but_is_reduced_by_payment_and_clearing(client, db_session) -> None:
     code, p, lines, factory = await _world(client, db_session)
     a, b, c = p["A"], p["B"], p["C"]
