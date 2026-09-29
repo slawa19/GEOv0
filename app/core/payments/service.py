@@ -1773,8 +1773,9 @@ class PaymentService:
         return (await self._segment(sender_id, receiver_id, equivalent_id))[0]
 
     async def _segment(self, sender_id, receiver_id, equivalent_id) -> "tuple[Decimal, list]":
-        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy)`, read in THIS
-        transaction (SERIALIZABLE): a line frozen, closed or re-policied after routing is seen here."""
+        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy)`, a plain read in THIS
+        transaction's snapshot: a line change committed before the snapshot is seen; one committed after it
+        is not (SERIALIZABLE may order this payment first - specs/BACKLOG.md)."""
 
         tl = TrustLine
         pair = {sender_id, receiver_id}

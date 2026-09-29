@@ -516,7 +516,7 @@ class PaymentRouter:
                     continue
 
                 for v, cap in residual_graph.get(u, {}).items():
-                    # The same policy as a payment's route, so the estimate promises no refused route.
+                    # Policy per augmenting path only: residual re-routing may still overstate (BACKLOG).
                     if route_breaks_policy(path + [v], self._hop_rules, payee=to_pid):
                         continue
                     if v not in visited and cap > 0:

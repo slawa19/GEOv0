@@ -12,7 +12,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 
 from app.config import settings
 from app.core.balance.service import BalanceService
@@ -24,6 +24,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 from tests.debt_setup import debt_fixture_setup
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.p019_support import TargetMismatch, require_target, target_xfail
 
 
@@ -230,7 +231,6 @@ async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, m
     assert sorted(left) == [Decimal("50"), Decimal("50")]
 
 
-@target_xfail("024 T2415.2 §15 fix-delta round", "max_hop_usage '0' as a string does not forbid mediation")
 @pytest.mark.asyncio
 async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
     # §15 round 2, P1: the API stores numeric strings; the router before T2415.2 read int(...) == 0.
@@ -245,3 +245,33 @@ async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
         pass
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
     require_target(outcome == "refused" and not left, f"payment W -> Y 30: {outcome}; debts {[str(a) for a in left]}")
+
+
+@MODE_B
+@target_xfail("024 T2415.2, owner decision on FOR SHARE", "a freeze committed after routing, before binding")
+@pytest.mark.asyncio
+async def test_a_freeze_committed_between_routing_and_binding(db_session, monkeypatch):
+    # §15 round 2, P2: P routes (its snapshot is taken), F freezes the pair's only line and COMMITS, then P binds.
+    eq, people = await _seed(db_session)
+    bind, seen = PaymentService._bind_payment, []
+
+    async def freeze_then_bind(self, *args, **kwargs):
+        if not seen:
+            async with sessionmaker_of(db_session)() as other:
+                await other.execute(update(TrustLine).where(TrustLine.equivalent_id == eq.id).values(status="frozen"))
+                await other.commit()
+        seen.append(await self.session.scalar(text("SHOW transaction_isolation")))
+        return await bind(self, *args, **kwargs)
+
+    monkeypatch.setattr(PaymentService, "_bind_payment", freeze_then_bind)
+    async with sessionmaker_of(db_session)() as session:
+        try:
+            result = await PaymentService(session).create_payment_internal(
+                people["A"].id, to_pid=people["B"].pid, equivalent=eq.code, amount="30")
+            outcome = result.status
+        except RoutingException as exc:
+            outcome = f"refused {exc}"
+    assert seen and seen[0] == "serializable", seen
+    left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
+    require_target(not outcome.startswith("COMMITTED"),
+                   f"after the freeze: {outcome}, attempts {len(seen)}, debts {[str(a) for a in left]}")

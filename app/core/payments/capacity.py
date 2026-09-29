@@ -31,8 +31,12 @@ def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str]
     blocked: set[str] = set()
     for owner_pid, policy in lines:
         policy = policy if isinstance(policy, dict) else {}
-        hops = policy.get("max_hop_usage")
-        if not policy.get("can_be_intermediate", True) or (isinstance(hops, int) and hops == 0):
+        forbids = not bool(policy.get("can_be_intermediate", True))
+        try:  # the pre-T2415.2 router's reading, kept exactly: the API stores numeric strings ("0")
+            forbids = forbids or int(policy.get("max_hop_usage", 1)) == 0
+        except Exception:
+            pass
+        if forbids:
             forbid.add(owner_pid)
         listed = policy.get("blocked_participants")
         blocked.update(x for x in (listed if isinstance(listed, list) else []) if isinstance(x, str) and x)
