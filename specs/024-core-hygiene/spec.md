@@ -453,6 +453,39 @@ PRODUCT-QUESTIONS: 1
 - **Гейты:** полный тир `verify_local.ps1 -TaskSlug p024sh3 -BackendOnly` на `38bfbac` — exit 0, `3468 passed, 2 skipped, 21 deselected, 1 xfailed` (917 s), Alembic head `032_audit_row_may_record_no_check`; первый полный прогон на `be66a3d` — `5 failed, 3463 passed` (step 5b ×4 — ожидание `true`; гард блоков фикстур 015 B4 на стенде), исправлено `38bfbac`, пять упавших и стенд — `51 passed`. Ruff 0.1.14 `app migrations` — чисто. §15-ревью (контракт OpenAPI, миграция, деньги) — не выполнено, за оркестратором.
 - **Документация:** `docs/ru/02-protocol-spec.md` §11.4 (датированная запись и `verification_passed BOOLEAN` с `NULL`), `docs/ru/03-architecture.md` (та же схема).
 
+## Ш5 (`T2415.1`) — SQLSTATE: инвентарь, матрица, один извлекатель, 2026-09-29
+
+Ветка `claude/024-sh5a` от `7f9550d`. `T2415.2` (ёмкость) не начата: ждёт П1.
+
+**Инвентарь на `7f9550d` (§16 п. 1).** Всё в `app/` и `scripts/`, что читает SQLSTATE, `orig`, `__cause__` или `__context__` исключения; `flow_planner.py` не читает. Извлекатели (как код достаётся) и политики (что с ним делают) разделены.
+
+| # | Извлекатель | Обход | Атрибуты |
+|---|---|---|---|
+| E1 | `payments/service.py:62` `_iter_exception_chain` → `:98` `_payment_db_sqlstate`, `:263` `_constraint_name` | узел, затем `orig`, иначе `__cause__`; `__context__` — никогда (правило 2026-09-12, докстринг `:63-83`) | `sqlstate` по всей цепи, затем `pgcode`, затем `.code` только не-`DBAPIError` узлов; имя ограничения — `constraint_name` / `diag.constraint_name` |
+| E2 | `clearing/service.py:472` `_postgres_error_codes` | тот же, своей копией | **множество** всех `sqlstate`/`pgcode`/`code` цепи, включая `.code` обёртки (`dbapi`, `gkpj` — не SQLSTATE; ни с одним множеством не пересекаются) |
+| E3 | `simulator/money_replay.py:136` (внутри `money_conflict_name`) | только `exc.orig`, один уровень | `sqlstate` или `pgcode` или `code` |
+| E4 | `simulator/real_runner_impl.py:59` (внутри `_is_transient_inject_db_error`) | только `exc.orig`, один уровень | `sqlstate` или `pgcode`; `.code` не читает |
+| E5 | `trustlines/service.py:59-68` (внутри `_is_live_trustline_uniqueness_violation`) | от `exc.orig` по `__cause__` **или `__context__`** — дефект F-024-10 | `constraint_name`, `sqlstate`/`pgcode` = `23505`, `table_name`, `detail` |
+
+| Политика | Множество / правило | Вызывающие |
+|---|---|---|
+| платёж `_classify_payment_db_error` (`payments/service.py:128`) | `_RETRYABLE_PAYMENT_SQLSTATES = {40001, 40P01}` (`:53`) + `DebtVersionConflict` + `is_debt_pair_collision` | `payments/service.py:498`, `:751`, `:1069`, `:1651`, `:2041`, `:2053`, `:2388`, `:2440` |
+| платёж, прямое чтение множества | то же множество | `payments/service.py:2426` (отказ `COMMIT`, классы `23`/`40`/`P0` — `:2423`), `:2752`; `scripts/seed_recipe.py:387` |
+| платёж, `55P03` — **не повтор**: запись отказа сдалась на `lock_timeout` → `RefusalNotRecorded` | `== "55P03"` | `payments/service.py:1065`, `:2750` |
+| `is_debt_pair_collision` (`payments/service.py:290`) | первый `IntegrityError` цепи: `23505` + `uq_debts_debtor_creditor_equivalent` | `payments/service.py:146`, `money_replay.py:143`, `real_runner_impl.py:62` |
+| `_is_tx_id_collision` (`payments/service.py:276`) | `IntegrityError`, `23505` + `transactions_tx_id_key` | `payments/service.py:1648` |
+| `_conflict_cause` (`payments/service.py:117`) — только лог | SQLSTATE или имя типа | `payments/service.py:2310` |
+| клиринг `_is_retryable_concurrency_error` (`clearing/service.py:513`) | `{40001, 40P01}` ∩ E2 (литерал `:535`) | `clearing/service.py:249`, `:273` (единый классификатор попытки) |
+| клиринг, лог исчерпания | `{40001, 40P01}` ∩ E2 (литерал `:1648`) | `clearing/service.py:1648` |
+| клиринг, межблокировка | `"55P03" in` E2 → `TimeoutException` (не повтор) | `clearing/service.py:1883` |
+| денежная фаза `money_conflict_name` (`money_replay.py:104`) | `_TRANSIENT_SQLSTATES = {40001, 40P01}` (`:91`) + debt-pair + типизированные конфликты | `money_replay.py:644`, `simulator/tick.py:393` |
+| инжект `_is_transient_inject_db_error` (`real_runner_impl.py:54`) | `{40001, 40P01, 55P03}` (`:51`, `55P03` — намеренно, Р-4.3) + debt-pair | `real_runner_impl.py:587`, `:661` |
+| линии `_is_live_trustline_uniqueness_violation` (`trustlines/service.py:36`) | имя ограничения живой линии, иначе `23505` + таблица + DETAIL | `trustlines/service.py:315`, `:503`, `api/v1/simulator.py:1327` |
+
+Множество `{40001, 40P01}` объявлено четырежды (`payments/service.py:53`, `clearing/service.py:535` и `:1648` литералом, `money_replay.py:91`) плюс надмножество инжекта. Расхождения извлечения, которые не являются названным дефектом и **сохраняются** (матрица их фиксирует): E3/E4 читают один уровень `orig`, а debt-pair — по всей цепи через E1; E4 не читает `.code`; E2 — множество, E1 — первый код.
+
+**Названный дефект** — только E5: обход `__context__` вопреки правилу 2026-09-12. Форма: ошибка без имени ограничения (`23502`), поднятая драйвером во время обработки конфликта живой линии, классифицируется как этот конфликт → `create` отвечает 409 «линия уже есть» на постороннюю ошибку. Достижимость на живом драйвере не показана: форма построена в тесте.
+
 ## Стадии
 
 **Историческая таблица 2026-09-27 — план, по которому программа специфицирована.** Действующий план с 2026-09-28 — шаги Ш1–Ш7 в разделе «Решения консультации T2400»; судьба каждой строки ниже — там же, «Что снято и слито».
