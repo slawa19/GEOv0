@@ -18,7 +18,7 @@ from app.core.simulator.models import RunRecord
 from app.core.simulator.run_lifecycle import RunLifecycle
 from app.db.models.simulator_storage import SimulatorRunBottleneck, SimulatorRunMetric
 from tests.conftest import MODE_B, sessionmaker_of
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import unit_tick
 
 
@@ -49,7 +49,7 @@ async def _restart(run: RunRecord) -> None:
 @MODE_B
 @pytest.mark.parametrize(
     "previous_sequence",
-    [None, pytest.param(7, marks=pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 Sh6 P2"))],
+    [None, 7],
 )
 @pytest.mark.asyncio
 async def test_a_failed_tick_commit_leaves_the_tail_to_the_final_flush(db_session, monkeypatch, previous_sequence) -> None:

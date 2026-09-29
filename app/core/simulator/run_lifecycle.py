@@ -476,6 +476,10 @@ class RunLifecycle:
 
             run.sim_time_ms = 0
             run.tick_index = 0
+            # 024 Sh6 fix-delta (§15 P2): the flush mark and the tail it refers to belong to the old tick
+            # sequence; a retained mark >= the new tick numbers made the final flush skip a lost new tail.
+            run._real_last_tick_storage_flushed_tick = -1
+            run._real_last_tick_storage_payload = None
             run.errors_total = 0
             run.last_error = None
             run.last_event_type = None
