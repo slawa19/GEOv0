@@ -9,6 +9,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.core.payments.capacity import pair_capacity
 from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
 from app.db.models.equivalent import Equivalent
@@ -59,30 +60,11 @@ class BalanceService:
                 _summary_cache.popitem(last=False)
 
     async def get_summary(self, participant_id: uuid.UUID) -> BalanceSummary:
-        """
-        Get aggregated balance by equivalents for a participant.
-        Balance = (Total Credits) - (Total Debts)
-        Available to Spend = Sum(TrustLine Limits from Me to Others) + Sum(Debts Others owe Me) - Sum(Debts I owe Others)
-          Wait, simplified:
-          Available to Spend on a TrustLine = Limit - Debt(Me->Other) + Debt(Other->Me).
-          But limits are per-trustline. 
-          Aggregated available is tricky because it depends on connectivity. 
-          But here we likely mean "Direct Liquidity".
-          
-          Let's follow the schema definition:
-          - total_debt: Sum of all debts I owe.
-          - total_credit: Sum of all debts others owe me.
-          - net_balance: total_credit - total_debt.
-          - available_to_spend: Sum of (Limit(Me->Neighbor) - Used(Me->Neighbor) + Debt(Neighbor->Me)).
-             Actually: Capacity on each link (Me->Neighbor).
-             Capacity = Limit(Me->N) - Debt(Me->N) + Debt(N->Me).
-             Wait, if I owe N, I consume my limit.
-             Correct formula for capacity Me->N:
-               Limit(Me->N) - Debt(Me->N) + Debt(N->Me)
-             So "Available to spend" is sum of capacities of all outgoing links.
-             
-          - available_to_receive: Sum of capacities of all incoming links (N->Me).
-             Capacity N->Me = Limit(N->Me) - Debt(N->Me) + Debt(Me->N).
+        """Aggregated balance by equivalent for a participant.
+
+        `total_debt` / `total_credit` - what I owe / what others owe me; `net_balance` - their difference.
+        `available_to_spend` / `available_to_receive` - the direct capacity to / from every peer, summed:
+        one `pair_capacity` per peer (protocol §6.3.1); a pair without an active line carries nothing.
         """
         
         cached = self._get_cached_summary(participant_id)
@@ -171,10 +153,12 @@ class BalanceService:
             limit = tl.limit
             peer_id = tl.from_participant_id
 
-            d_me_peer = debts_i_owe.get((peer_id, code), Decimal('0'))
-            d_peer_me = debts_others_owe.get((peer_id, code), Decimal('0'))
-
-            capacity = limit - d_me_peer + d_peer_me
+            capacity = pair_capacity(
+                line_limit=limit,
+                payer_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
+                payee_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
+                pair_has_active_line=True,
+            )
             get_eq_entry(code)['spend_capacity'] += capacity
 
         # Receive capacity comes from Outgoing TrustLines (Me -> Peer)
@@ -183,13 +167,15 @@ class BalanceService:
             limit = tl.limit
             peer_id = tl.to_participant_id
 
-            d_peer_me = debts_others_owe.get((peer_id, code), Decimal('0'))
-            d_me_peer = debts_i_owe.get((peer_id, code), Decimal('0'))
-
-            capacity = limit - d_peer_me + d_me_peer
+            capacity = pair_capacity(
+                line_limit=limit,
+                payer_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
+                payee_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
+                pair_has_active_line=True,
+            )
             get_eq_entry(code)['receive_capacity'] += capacity
 
-        # Debts without trustlines still contribute positive capacity with Limit=0.
+        # A peer whose line to me is not active: the offset counts only if MY line to them is active.
         all_peers_equivalents = set(debts_i_owe.keys()) | set(debts_others_owe.keys())
 
         processed_spend = set((tl.from_participant_id, tl.equivalent.code) for tl in in_tls)
@@ -197,16 +183,22 @@ class BalanceService:
 
         for (peer, code) in all_peers_equivalents:
             if (peer, code) not in processed_spend:
-                d_me_peer = debts_i_owe.get((peer, code), Decimal('0'))
-                d_peer_me = debts_others_owe.get((peer, code), Decimal('0'))
-                cap = Decimal('0') - d_me_peer + d_peer_me
+                cap = pair_capacity(
+                    line_limit=None,
+                    payer_owes=debts_i_owe.get((peer, code), Decimal('0')),
+                    payee_owes=debts_others_owe.get((peer, code), Decimal('0')),
+                    pair_has_active_line=(peer, code) in processed_receive,
+                )
                 if cap > 0:
                     get_eq_entry(code)['spend_capacity'] += cap
 
             if (peer, code) not in processed_receive:
-                d_peer_me = debts_others_owe.get((peer, code), Decimal('0'))
-                d_me_peer = debts_i_owe.get((peer, code), Decimal('0'))
-                cap = Decimal('0') - d_peer_me + d_me_peer
+                cap = pair_capacity(
+                    line_limit=None,
+                    payer_owes=debts_others_owe.get((peer, code), Decimal('0')),
+                    payee_owes=debts_i_owe.get((peer, code), Decimal('0')),
+                    pair_has_active_line=(peer, code) in processed_spend,
+                )
                 if cap > 0:
                     get_eq_entry(code)['receive_capacity'] += cap
 

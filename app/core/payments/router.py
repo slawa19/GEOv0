@@ -11,6 +11,7 @@ from app.utils.observability import log_duration
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.payments.capacity import pair_capacity, pair_rules, route_breaks_policy
 from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -56,6 +57,8 @@ class PaymentRouter:
         self.edge_can_be_intermediate: Dict[str, Dict[str, bool]] = {}
         # Edge policy: { from_pid: { to_pid: set(blocked_pid) } }
         self.edge_blocked_participants: Dict[str, Dict[str, Set[str]]] = {}
+        # Owners (pids) whose active line on the pair forbids them to mediate over the hop u -> v.
+        self.edge_no_transit: Dict[str, Dict[str, frozenset]] = {}
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
 
@@ -158,9 +161,9 @@ class PaymentRouter:
                     # Backward-compatible cache unpacking.
                     if len(cached) == 5:
                         cached_at, graph, edge_policy, pids, uuids = cached  # type: ignore[misc]
-                        edge_blocked = {}
+                        edge_blocked, no_transit = {}, []
                     else:
-                        cached_at, graph, edge_policy, edge_blocked, pids, uuids = cached
+                        cached_at, graph, edge_policy, edge_blocked, pids, uuids, *no_transit = cached
                     if (time.time() - cached_at) <= ttl:
                         # Shallow copies are enough because nested values are Decimals/bools.
                         self.graph = {u: dict(v) for u, v in graph.items()}
@@ -170,6 +173,7 @@ class PaymentRouter:
                         }
                         self.pids = dict(pids)
                         self.uuids = dict(uuids)
+                        self.edge_no_transit = {u: dict(v) for u, v in (no_transit or [{}])[0].items()}
                         return
 
             await self._build_graph_impl(
@@ -241,63 +245,33 @@ class PaymentRouter:
         self.graph = {pid: {} for pid in self.pids.values()}
         self.edge_can_be_intermediate = {pid: {} for pid in self.pids.values()}
         self.edge_blocked_participants = {pid: {} for pid in self.pids.values()}
+        self.edge_no_transit = {}
 
         # 4. Process Debts into a lookup: (debtor_id, creditor_id) -> amount
         debt_map = {} # (debtor_uuid, creditor_uuid) -> amount
         for d in debts:
             debt_map[(d.debtor_id, d.creditor_id)] = d.amount
 
-        # 5. Build edges. No reservations are subtracted: REST payments hold none (programme 019 stage 5,
-        # `T1909`; `prepare_locks` and every reader of it are gone - protocol §7.6.1).
-        # Payment flow direction is Sender -> Receiver.
-        # A payment S -> R increases S's debt to R.
-        # Therefore, the credit limit that enables S -> R is the TrustLine R -> S
-        # (R trusts S up to a limit).
-        for tl in trustlines:
-            creditor_id = tl.from_participant_id  # trusts
-            debtor_id = tl.to_participant_id      # can owe
-
-            creditor_pid = self.pids.get(creditor_id)
-            debtor_pid = self.pids.get(debtor_id)
-
-            if not creditor_pid or not debtor_pid:
-                continue
-
-            limit = tl.limit
-            can_be_intermediate = True
-            blocked_participants: Set[str] = set()
-            if tl.policy is not None:
-                can_be_intermediate = bool(tl.policy.get('can_be_intermediate', True))
-                # Best-effort: if max_hop_usage is explicitly 0, treat as forbid intermediate usage.
-                try:
-                    if int(tl.policy.get('max_hop_usage', 1)) == 0:
-                        can_be_intermediate = False
-                except Exception:
-                    pass
-
-                try:
-                    bp = tl.policy.get("blocked_participants", None)
-                    if isinstance(bp, list):
-                        blocked_participants = {str(x) for x in bp if isinstance(x, str) and x}
-                except Exception:
-                    blocked_participants = set()
-
-            # Debt(debtor -> creditor)
-            debt_debtor_owes_creditor = debt_map.get((debtor_id, creditor_id), Decimal('0'))
-            debt_creditor_owes_debtor = debt_map.get((creditor_id, debtor_id), Decimal('0'))
-
-            # Capacity for debtor -> creditor:
-            # - can create more debt up to (limit - current_debt)
-            # - can also offset reverse debt (creditor owes debtor)
-            cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor
-            if cap > 0:
-                self._add_capacity(debtor_pid, creditor_pid, cap)
-                self._set_edge_policy(debtor_pid, creditor_pid, can_be_intermediate)
-                self._set_edge_blocked_participants(debtor_pid, creditor_pid, blocked_participants)
-
-        # Debt-only capacity is already included via the trustline-based formula:
-        # cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor.
-        # If limit=0 and creditor owes debtor, debt_creditor_owes_debtor still provides positive capacity.
+        # 5. Build edges (protocol §6.3.1, `capacity.py`). No reservations are subtracted: REST payments
+        # hold none (019 `T1909`). A pair with an active line gets a hop in each direction whose capacity
+        # is positive; a pair without one gets none (024 `T2415.2`, owner decision 2026-09-29, GEO).
+        lines = {(tl.from_participant_id, tl.to_participant_id): tl for tl in trustlines}
+        for x, y in {frozenset(k) for k in lines if k[0] != k[1]}:
+            pair = [lines[k] for k in ((x, y), (y, x)) if k in lines]
+            forbid, blocked = pair_rules((self.pids.get(tl.from_participant_id), tl.policy) for tl in pair)
+            for payer, payee in ((x, y), (y, x)):
+                payer_pid, payee_pid = self.pids.get(payer), self.pids.get(payee)
+                cap = pair_capacity(
+                    line_limit=getattr(lines.get((payee, payer)), "limit", None),
+                    payer_owes=debt_map.get((payer, payee), Decimal('0')),
+                    payee_owes=debt_map.get((payee, payer), Decimal('0')),
+                    pair_has_active_line=True,
+                )
+                if payer_pid and payee_pid and cap > 0:
+                    self._add_capacity(payer_pid, payee_pid, cap)
+                    self._set_edge_policy(payer_pid, payee_pid, payee_pid not in forbid)
+                    self._set_edge_blocked_participants(payer_pid, payee_pid, set(blocked))
+                    self.edge_no_transit.setdefault(payer_pid, {})[payee_pid] = forbid
 
         ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
         if write_shared_cache and ttl > 0:
@@ -308,6 +282,7 @@ class PaymentRouter:
                 {u: {v: set(s) for v, s in m.items()} for u, m in self.edge_blocked_participants.items()},
                 dict(self.pids),
                 dict(self.uuids),
+                {u: dict(v) for u, v in self.edge_no_transit.items()},
             )
 
     def _add_capacity(self, u: str, v: str, amount: Decimal):
@@ -332,6 +307,12 @@ class PaymentRouter:
     def _edge_blocked(self, u: str, v: str) -> Set[str]:
         return self.edge_blocked_participants.get(u, {}).get(v, set())
 
+    def _hop_rules(self, u: str, v: str) -> Tuple[frozenset, frozenset]:
+        forbid = self.edge_no_transit.get(u, {}).get(v, frozenset())
+        if not self._edge_allows_intermediate(u, v):
+            forbid = forbid | {v}
+        return forbid, frozenset(self._edge_blocked(u, v))
+
     def _bfs_single_path(
         self,
         from_pid: str,
@@ -355,14 +336,13 @@ class PaymentRouter:
         if from_pid in static_forbidden_nodes or to_pid in static_forbidden_nodes:
             return None
 
-        # Track cumulative blocked_participants from policies along the current path.
-        queue: List[Tuple[str, List[str], Set[str]]] = [(from_pid, [from_pid], set())]
+        queue: List[Tuple[str, List[str]]] = [(from_pid, [from_pid])]
 
         while queue:
             if deadline is not None and time.perf_counter() >= deadline:
                 raise TimeoutException("Routing timed out")
 
-            current, path, blocked_so_far = queue.pop(0)
+            current, path = queue.pop(0)
             if current == to_pid:
                 return path
 
@@ -381,33 +361,11 @@ class PaymentRouter:
                 if neighbor in path:
                     continue
 
-                # Enforce blocked_participants from earlier edges: forbid using such nodes as intermediates.
-                if neighbor not in {from_pid, to_pid} and neighbor in blocked_so_far:
+                # One policy rule for the router and the core (`capacity.route_breaks_policy`).
+                if route_breaks_policy(path + [neighbor], self._hop_rules, payee=to_pid):
                     continue
 
-                edge_blocked = self._edge_blocked(current, neighbor)
-                if edge_blocked:
-                    # Block using forbidden PIDs as intermediate nodes (endpoints allowed).
-                    if neighbor not in {from_pid, to_pid} and neighbor in edge_blocked:
-                        continue
-
-                    # Also forbid adding this edge if it blocks any already-used intermediate node.
-                    if len(path) > 2:
-                        intermediates = set(path[1:-1])
-                        if intermediates & edge_blocked:
-                            continue
-
-                # Enforce can_be_intermediate on the edge when neighbor is used as intermediate.
-                if neighbor not in {from_pid, to_pid}:
-                    if not self._edge_allows_intermediate(current, neighbor):
-                        continue
-
-                next_blocked = blocked_so_far
-                if edge_blocked:
-                    next_blocked = set(blocked_so_far)
-                    next_blocked.update(edge_blocked)
-
-                queue.append((neighbor, path + [neighbor], next_blocked))
+                queue.append((neighbor, path + [neighbor]))
 
         return None
 
@@ -558,6 +516,9 @@ class PaymentRouter:
                     continue
 
                 for v, cap in residual_graph.get(u, {}).items():
+                    # Policy per augmenting path only: residual re-routing may still overstate (BACKLOG).
+                    if route_breaks_policy(path + [v], self._hop_rules, payee=to_pid):
+                        continue
                     if v not in visited and cap > 0:
                         visited.add(v)
                         new_flow = min(flow, cap)
