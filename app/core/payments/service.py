@@ -17,6 +17,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
+from app.core.payments.capacity import pair_capacity
 from app.core.payments.router import PaymentRouter
 from app.config import settings
 from app.db.models.audit_log import IntegrityAuditLog
@@ -1774,10 +1775,9 @@ class PaymentService:
                 )
             )
         ).scalar_one_or_none()
-        limit = line if line is not None else Decimal("0")
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
-        return limit - sender_owes + receiver_owes
+        return pair_capacity(line_limit=line, payer_owes=sender_owes, payee_owes=receiver_owes)
 
     async def _debt_amount(
         self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID

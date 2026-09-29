@@ -11,6 +11,7 @@ from app.utils.observability import log_duration
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.payments.capacity import pair_capacity
 from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -252,7 +253,8 @@ class PaymentRouter:
         # Payment flow direction is Sender -> Receiver.
         # A payment S -> R increases S's debt to R.
         # Therefore, the credit limit that enables S -> R is the TrustLine R -> S
-        # (R trusts S up to a limit).
+        # (R trusts S up to a limit). The arithmetic is `pair_capacity` (protocol §6.3.1).
+        lined_edges: Set[Tuple[UUID, UUID]] = set()
         for tl in trustlines:
             creditor_id = tl.from_participant_id  # trusts
             debtor_id = tl.to_participant_id      # can owe
@@ -282,22 +284,32 @@ class PaymentRouter:
                 except Exception:
                     blocked_participants = set()
 
-            # Debt(debtor -> creditor)
-            debt_debtor_owes_creditor = debt_map.get((debtor_id, creditor_id), Decimal('0'))
-            debt_creditor_owes_debtor = debt_map.get((creditor_id, debtor_id), Decimal('0'))
-
-            # Capacity for debtor -> creditor:
-            # - can create more debt up to (limit - current_debt)
-            # - can also offset reverse debt (creditor owes debtor)
-            cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor
+            # The payer is the line's debtor, the payee its creditor; the counter-debt is inside the rule.
+            lined_edges.add((debtor_id, creditor_id))
+            cap = pair_capacity(
+                line_limit=limit,
+                payer_owes=debt_map.get((debtor_id, creditor_id), Decimal('0')),
+                payee_owes=debt_map.get((creditor_id, debtor_id), Decimal('0')),
+            )
             if cap > 0:
                 self._add_capacity(debtor_pid, creditor_pid, cap)
                 self._set_edge_policy(debtor_pid, creditor_pid, can_be_intermediate)
                 self._set_edge_blocked_participants(debtor_pid, creditor_pid, blocked_participants)
 
-        # Debt-only capacity is already included via the trustline-based formula:
-        # cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor.
-        # If limit=0 and creditor owes debtor, debt_creditor_owes_debtor still provides positive capacity.
+        # 6. Debt-only edges (024 `T2415.2`, owner decision 2026-09-29): a payee who owes the payer can
+        # be paid up to that debt without any line of theirs. Where the payee's active line exists, the
+        # edge above already counts the debt. No line means no policy: permissive, as the core is.
+        for (payee_id, payer_id), payee_owes in debt_map.items():
+            if (payer_id, payee_id) in lined_edges:
+                continue
+            payer_pid, payee_pid = self.pids.get(payer_id), self.pids.get(payee_id)
+            cap = pair_capacity(
+                line_limit=None,
+                payer_owes=debt_map.get((payer_id, payee_id), Decimal('0')),
+                payee_owes=payee_owes,
+            )
+            if payer_pid and payee_pid and cap > 0:
+                self._add_capacity(payer_pid, payee_pid, cap)
 
         ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
         if write_shared_cache and ttl > 0:

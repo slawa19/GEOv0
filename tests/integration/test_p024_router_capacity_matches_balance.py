@@ -23,9 +23,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import TargetMismatch, require_target, target_xfail
-
-_RED = target_xfail("024 T2415.2", "the router builds no edge from a counter-debt without a line")
+from tests.p019_support import TargetMismatch, require_target
 
 
 async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None):
@@ -96,7 +94,6 @@ async def _agree(db_session, *, capacity: str, **seed) -> None:
     )
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_a_counter_debt_alone_carries_a_payment_up_to_the_debt(db_session):
     await _agree(db_session, capacity="50")
@@ -115,7 +112,6 @@ async def test_without_a_debt_or_a_line_there_is_no_route(db_session):
     assert not _routable(await _router(db_session, eq), people, "0.01")
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_a_payment_offsets_the_counter_debt_and_creates_no_debt(db_session):
     eq, people = await _seed(db_session)
@@ -134,7 +130,6 @@ async def test_a_payment_offsets_the_counter_debt_and_creates_no_debt(db_session
     assert {(debtor, amount) for debtor, amount in rows} == {(people["B"].id, Decimal("20"))}
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_a_debt_only_edge_is_an_intermediate_hop_as_the_core_allows(db_session):
     # C trusts B: B may pay C. A -> B is the counter-debt only; the core checks no role per hop.
