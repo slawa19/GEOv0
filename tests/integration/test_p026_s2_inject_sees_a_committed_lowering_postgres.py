@@ -4,7 +4,9 @@ Schedule (Codex, §15 on `32e5975`): the inject reads the line (limit 100, debt 
 -> the Interact-path update lowers it to 0 and COMMITS -> the inject adds 1. SSI accepts it as the serial order
 "inject, then update" (the update reads nothing the inject writes). Target, as for payments (decision A, 024
 `T2415.3`): the committed lowering is seen, the inject is refused or retried onto it - the debt stays 80.
-Two PostgreSQL sessions; the order is forced by events at the book's `apply`, no sleeps.
+Two PostgreSQL sessions; the order is forced by events at the inject's line read (after its snapshot is
+taken, before the read), no sleeps - the barrier sits before the read so the stand cannot deadlock on the lock
+the fix takes.
 """
 
 from __future__ import annotations
@@ -15,8 +17,6 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-import app.core.ledger.book as book_module
-from app.core.ledger.book import InjectIncrease
 from app.core.trustlines.service import TrustLineService
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineUpdateRequest
@@ -30,23 +30,12 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 @pytest.mark.xfail(raises=TargetMismatch, strict=True,
                    reason="026 target, delivered by the T2602 fix-delta: the inject reads its line FOR SHARE")
 @pytest.mark.asyncio
-async def test_an_inject_does_not_grow_a_debt_past_a_lowering_committed_before_it(factory, monkeypatch) -> None:
+async def test_an_inject_does_not_grow_a_debt_past_a_lowering_committed_before_it(factory) -> None:
     world = await _seed(factory)
     a, b, eq = world.creditor, world.debtor, world.equivalents[0]
     await _baseline(factory, world)
     await _inject(factory, world, [_effect(world, creditor=a, debtor=b, amount="80")], "p026s2-first")
-    line_read, lowered, applies = asyncio.Event(), asyncio.Event(), []
-    original = book_module.Posting.apply
-
-    async def apply_after_the_lowering(self, effect):
-        if isinstance(effect, InjectIncrease):
-            applies.append(effect)
-            if len(applies) == 1:
-                line_read.set()  # the inject has read the line (limit 100) in its snapshot
-                await lowered.wait()
-        return await original(self, effect)
-
-    monkeypatch.setattr(book_module.Posting, "apply", apply_after_the_lowering)
+    line_read, lowered, statements, line_reads = asyncio.Event(), asyncio.Event(), [], []
     scenario = {"equivalents": [eq.code], "participants": [{"id": a.pid}, {"id": b.pid}], "trustlines": [],
                 "behaviorProfiles": [], "events": [{"type": "inject", "time": 0,
                                                     "effects": [_effect(world, creditor=a, debtor=b, amount="1")]}]}
@@ -55,6 +44,18 @@ async def test_an_inject_does_not_grow_a_debt_past_a_lowering_committed_before_i
 
     async def inject() -> None:
         async with factory() as session:
+            original = session.execute
+
+            async def execute(stmt, *args, **kwargs):
+                if str(stmt).startswith('SELECT trust_lines."limit", trust_lines.status'):
+                    line_reads.append(len(statements))
+                    if not line_read.is_set():
+                        line_read.set()  # the snapshot is taken (statements ran), the line is not read yet
+                        await lowered.wait()
+                statements.append(stmt)
+                return await original(stmt, *args, **kwargs)
+
+            session.execute = execute
             await runner._apply_due_scenario_events(session, run_id=run.run_id, run=run, scenario=scenario)
 
     task = asyncio.create_task(inject())
@@ -72,7 +73,7 @@ async def test_an_inject_does_not_grow_a_debt_past_a_lowering_committed_before_i
     lowered.set()
     await asyncio.wait_for(task, timeout=60)
 
-    assert applies, "CONTROL: the inject never reached the book - the schedule was not exercised"
+    assert line_reads and line_reads[0] > 0, f"CONTROL: no snapshot before the line read: {line_reads}"
     debt = (await _debts(factory, world))[("B", "A")]
     require_target(debt == Decimal("80"), f"the inject grew B's debt 80 -> {debt} past a limit lowered to 0 "
-                                          f"and committed before it (book applies: {len(applies)})")
+                                          f"and committed before it (line reads: {len(line_reads)})")
