@@ -16,6 +16,9 @@ which retries a retryable conflict on a fresh snapshot):
   stored `ABORTED`). Since stage 3 the payment is one SERIALIZABLE snapshot taken before the UPDATE:
   prepare re-checks capacity against THAT snapshot and the payment commits - the serial order
   "payment, then the lowering" - so this is no longer a refusal. The row stays in the table to show it.
+  Since 024 `T2415.3` (owner decision A) the core's final check reads the pair's lines `FOR SHARE`: it
+  meets the lowered row (`40001`), `pay()` retries, and the admitted request is refused - `E002`,
+  stored `ABORTED`, as before stage 3.
 * `stop_before_new` / `hold_before_new` - the operator stop / integrity hold is in force when the
   request arrives; the service pre-check refuses before the insert.
 * `stop_at_commit` - the real `PATCH` deactivating the equivalent is run after `prepare`, before
@@ -252,7 +255,6 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
             cause=lambda b, w=w: post(w, b),
             lift=lambda w=w: _set_limit(factory, w, "100.00"),
             amount="10.00",
-            refused=False,
         )
     premises["recheck_after_new"] = fired
 
@@ -416,8 +418,8 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "recheck_after_new": {
-            "first": (200, "COMMITTED", None), "stored": ("COMMITTED", None),
-            "replay": (200, "COMMITTED", None), "replay_moved": False,
+            "first": (400, "E002", None), "stored": ("ABORTED", "E002"),
+            "replay": (200, "ABORTED", "E002"), "replay_moved": False,
         },
         "stop_before_new": {
             "first": (409, "E008", inactive), "stored": None,
