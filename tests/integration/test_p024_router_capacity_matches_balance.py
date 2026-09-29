@@ -24,7 +24,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import TargetMismatch, require_target, target_xfail
 
 
 async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None, a_b_status="active"):
@@ -228,3 +228,20 @@ async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, m
         )
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
     assert sorted(left) == [Decimal("50"), Decimal("50")]
+
+
+@target_xfail("024 T2415.2 §15 fix-delta round", "max_hop_usage '0' as a string does not forbid mediation")
+@pytest.mark.asyncio
+async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
+    # §15 round 2, P1: the API stores numeric strings; the router before T2415.2 read int(...) == 0.
+    eq, p = await _chain(db_session, [("X", "W", {"max_hop_usage": "0"}), ("Y", "X", {})], [])
+    outcome = "refused"
+    try:
+        result = await PaymentService(db_session).create_payment_internal(
+            p["W"].id, to_pid=p["Y"].pid, equivalent=eq.code, amount="30"
+        )
+        outcome = f"{result.status} via {[r.path for r in result.routes or []]}"
+    except RoutingException:
+        pass
+    left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
+    require_target(outcome == "refused" and not left, f"payment W -> Y 30: {outcome}; debts {[str(a) for a in left]}")
