@@ -185,8 +185,9 @@ async def test_a_commit_refused_by_ssi_is_retried_and_counted_once(
     """The payment's execute() SUCCEEDS and its one COMMIT is refused with a real `40001`.
 
     THE SCHEDULE. Right before the first attempt's COMMIT another SERIALIZABLE transaction reads the
-    pair's debt row (the old version - the payment's write is not visible to it) and rewrites the trust
-    line the payment's routing and capacity re-check read, and commits. The payment now has a
+    pair's debt row (the old version - the payment's write is not visible to it), rewrites the receiver's
+    participant row the payment read unlocked (not its line - `FOR SHARE` since 024 `T2415.3`) and
+    commits. The payment now has a
     read-write dependency in both directions with a committed transaction; PostgreSQL refuses its
     COMMIT (`40001`), and nothing of it landed. `pay()` retries the whole attempt, which commits.
 
@@ -195,7 +196,7 @@ async def test_a_commit_refused_by_ssi_is_retried_and_counted_once(
     `payment.received`) for the refused attempt as well - two instead of one.
     """
 
-    from app.db.models.trustline import TrustLine
+    from app.db.models.participant import Participant
 
     factory = serializable_factory
     world = await _seed(factory)
@@ -214,14 +215,11 @@ async def test_a_commit_refused_by_ssi_is_retried_and_counted_once(
             competed.append(1)
             async with factory() as other:
                 await other.execute(select(Debt.amount).where(Debt.equivalent_id == world.equivalent.id))
+                # A row the payment read WITHOUT a lock (024 `T2415.3`: its pair's lines are `FOR SHARE` now,
+                # so rewriting the line here would wait for the payment instead of racing its COMMIT).
                 await other.execute(
-                    update(TrustLine)
-                    .where(
-                        TrustLine.from_participant_id == world.receiver.id,
-                        TrustLine.to_participant_id == world.sender.id,
-                        TrustLine.equivalent_id == world.equivalent.id,
-                    )
-                    .values(limit=TrustLine.limit)
+                    update(Participant).where(Participant.id == world.receiver.id)
+                    .values(display_name=Participant.display_name)
                 )
                 await other.commit()
         return await real_commit(self)
@@ -268,7 +266,7 @@ async def test_a_commit_refused_by_ssi_with_no_budget_left_records_nothing(
     `T1905` the exhausted commit conflict was recorded `ABORTED/E008` and the resubmission answered it
     (`T1902`, confirmed on prepare and commit)."""
 
-    from app.db.models.trustline import TrustLine
+    from app.db.models.participant import Participant
     from app.utils.exceptions import RetryablePaymentConflictException
 
     factory = serializable_factory
@@ -288,14 +286,11 @@ async def test_a_commit_refused_by_ssi_with_no_budget_left_records_nothing(
             competed.append(1)
             async with factory() as other:
                 await other.execute(select(Debt.amount).where(Debt.equivalent_id == world.equivalent.id))
+                # A row the payment read WITHOUT a lock (024 `T2415.3`: its pair's lines are `FOR SHARE` now,
+                # so rewriting the line here would wait for the payment instead of racing its COMMIT).
                 await other.execute(
-                    update(TrustLine)
-                    .where(
-                        TrustLine.from_participant_id == world.receiver.id,
-                        TrustLine.to_participant_id == world.sender.id,
-                        TrustLine.equivalent_id == world.equivalent.id,
-                    )
-                    .values(limit=TrustLine.limit)
+                    update(Participant).where(Participant.id == world.receiver.id)
+                    .values(display_name=Participant.display_name)
                 )
                 await other.commit()
         return await real_commit(self)

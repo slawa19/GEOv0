@@ -25,7 +25,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 from tests.debt_setup import debt_fixture_setup
 from tests.conftest import MODE_B, sessionmaker_of
-from tests.p019_support import TargetMismatch, require_target, target_xfail
+from tests.p019_support import TargetMismatch, require_target
 
 
 async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None, a_b_status="active"):
@@ -231,10 +231,13 @@ async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, m
     assert sorted(left) == [Decimal("50"), Decimal("50")]
 
 
+@pytest.mark.parametrize("hops, forbids", [("0", True), (0, True), (0.0, True), ("0.5", False), ("0.0", True),
+                                            ("0.00", True), ("-0.0", True), ("0e0", True), (0.5, False)], ids=repr)
 @pytest.mark.asyncio
-async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
-    # §15 round 2, P1: the API stores numeric strings; the router before T2415.2 read int(...) == 0.
-    eq, p = await _chain(db_session, [("X", "W", {"max_hop_usage": "0"}), ("Y", "X", {})], [])
+async def test_max_hop_usage_forbids_mediation_exactly_at_zero(db_session, hops, forbids):
+    # §15 round 2, P1: the API stores numeric strings; owner decision B (2026-09-29): forbid iff exactly zero.
+    # A float 0.5 cannot pass the signed API (canonical_json refuses floats); the stand writes the column directly.
+    eq, p = await _chain(db_session, [("X", "W", {"max_hop_usage": hops}), ("Y", "X", {})], [])
     outcome = "refused"
     try:
         result = await PaymentService(db_session).create_payment_internal(
@@ -244,14 +247,15 @@ async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
     except RoutingException:
         pass
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
-    require_target(outcome == "refused" and not left, f"payment W -> Y 30: {outcome}; debts {[str(a) for a in left]}")
+    require_target((outcome == "refused") == forbids and len(left) == (0 if forbids else 2),
+                   f"max_hop_usage {hops!r}: payment W -> Y 30: {outcome}; debts {[str(a) for a in left]}")
 
 
 @MODE_B
-@target_xfail("024 T2415.2, owner decision on FOR SHARE", "a freeze committed after routing, before binding")
 @pytest.mark.asyncio
-async def test_a_freeze_committed_between_routing_and_binding(db_session, monkeypatch):
+async def test_a_freeze_committed_between_routing_and_binding(db_session, monkeypatch, caplog):
     # §15 round 2, P2: P routes (its snapshot is taken), F freezes the pair's only line and COMMITS, then P binds.
+    # Owner decision A (T2415.3): the core's FOR SHARE fails with 40001, the retry refuses on a fresh snapshot.
     eq, people = await _seed(db_session)
     bind, seen = PaymentService._bind_payment, []
 
@@ -273,5 +277,8 @@ async def test_a_freeze_committed_between_routing_and_binding(db_session, monkey
             outcome = f"refused {exc}"
     assert seen and seen[0] == "serializable", seen
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
+    retried = [r.getMessage() for r in caplog.records if "payment.attempt_retry" in r.getMessage()]
     require_target(not outcome.startswith("COMMITTED"),
                    f"after the freeze: {outcome}, attempts {len(seen)}, debts {[str(a) for a in left]}")
+    # The mechanism, not only the outcome: the lock failed with 40001, the fresh attempt refused (re-routing).
+    assert [m for m in retried if "pgcode=40001" in m] and left == [Decimal("50")], (outcome, retried, left)

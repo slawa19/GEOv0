@@ -1773,15 +1773,17 @@ class PaymentService:
         return (await self._segment(sender_id, receiver_id, equivalent_id))[0]
 
     async def _segment(self, sender_id, receiver_id, equivalent_id) -> "tuple[Decimal, list]":
-        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy)`, a plain read in THIS
-        transaction's snapshot: a line change committed before the snapshot is seen; one committed after it
-        is not (SERIALIZABLE may order this payment first - specs/BACKLOG.md)."""
+        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy)`: the core's FINAL check.
+
+        Both active lines are read `FOR SHARE` and held to the end of the money transaction (owner decision A,
+        024 `T2415.3`): a line change committed after this snapshot fails the lock with 40001 and the retry
+        re-checks on a fresh snapshot (refused only if capacity or policy now fails); a later change waits for this payment. Not the router's nor `/balance`'s."""
 
         tl = TrustLine
         pair = {sender_id, receiver_id}
         lines = (await self.session.execute(select(tl.from_participant_id, tl.limit, tl.policy).where(
             tl.from_participant_id.in_(pair), tl.to_participant_id.in_(pair), tl.from_participant_id != tl.to_participant_id,
-            tl.equivalent_id == equivalent_id, tl.status == "active"))).all()
+            tl.equivalent_id == equivalent_id, tl.status == "active").with_for_update(read=True))).all()
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
         limit = next((limit for owner, limit, _ in lines if owner == receiver_id), None)
