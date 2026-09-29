@@ -64,7 +64,9 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
       if (!isActiveStatus(l.status)) continue
       activeTrustlines += 1
       totalUsed += parseAmountNumberOrZero(l.used)
-      totalAvailable += parseAmountNumberOrZero(l.available)
+      // 026 `T2602`: a negative `available` is the debt's excess over a lowered limit, not negative capacity;
+      // it adds nothing here (its debt is already in `totalUsed`).
+      totalAvailable += Math.max(0, parseAmountNumberOrZero(l.available))
     }
 
     let activeParticipants = 0

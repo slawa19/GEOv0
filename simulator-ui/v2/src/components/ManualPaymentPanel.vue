@@ -305,6 +305,9 @@ function toOptionLabel(p: ParticipantInfo): string {
   const pid = (p?.pid ?? '').trim()
   const cap = pid ? capacityByToPid.value.get(pid) : undefined
   if (cap == null) return `${participantLabel(p)} — …`
+  // 026 `T2602`: a negative `available` is trust excess, not an amount this payment can carry; no amount is shown
+  // and the recipient stays selectable (another route may exist).
+  if (String(cap).trim().startsWith('-')) return participantLabel(p)
   return `${participantLabel(p)} — ${cap} ${props.unit}`
 }
 

@@ -23,12 +23,10 @@ from app.schemas.trustline import TrustLineUpdateRequest
 from tests.integration.test_p015_f01512_inject_refuses_an_opposing_debt_postgres import (  # noqa: F401
     _baseline, _debts, _effect, _inject, _seed, factory)
 from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import _Artifacts, _run, _runner
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 
-@pytest.mark.xfail(raises=TargetMismatch, strict=True,
-                   reason="026 target, delivered by the T2602 fix-delta: the inject reads its line FOR SHARE")
 @pytest.mark.asyncio
 async def test_an_inject_does_not_grow_a_debt_past_a_lowering_committed_before_it(factory) -> None:
     world = await _seed(factory)
