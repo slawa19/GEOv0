@@ -797,7 +797,11 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
-  it("MP-2: To option renders capacity '0' (does not treat '0' as unknown)", async () => {
+  // 026 `T2602` (§15 P2): a negative `available` is trust excess, not a recipient amount; no amount is shown.
+  it.each([
+    ['0', '0 UAH'],
+    ['-2', null],
+  ])("MP-2: To option renders capacity for available %s (does not treat '0' as unknown)", async (available, shown) => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -833,7 +837,7 @@ describe('ManualPaymentPanel', () => {
               equivalent: 'UAH',
               limit: '10.00',
               used: '10.00',
-              available: '0',
+              available,
               status: 'active',
             },
           ],
@@ -860,7 +864,8 @@ describe('ManualPaymentPanel', () => {
 
     const opt = host.querySelector('#mp-to option[value="bob"]') as HTMLOptionElement | null
     expect(opt).toBeTruthy()
-    expect((opt?.textContent ?? '').trim()).toContain('0 UAH')
+    if (shown) expect((opt?.textContent ?? '').trim()).toContain(shown)
+    else expect((opt?.textContent ?? '').trim()).toBe('Bob (bob)')
     expect((opt?.textContent ?? '').trim()).not.toContain('…')
 
     app.unmount()

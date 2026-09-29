@@ -117,6 +117,18 @@ describe('useSystemBalance', () => {
     scope.stop()
   })
 
+  // 026 `T2602` (§15 P2): a negative `available` is the debt's excess over a lowered limit, not negative capacity.
+  it('a negative available does not reduce the available capacity', () => {
+    const links = [makeLink('a', 'b', { used: '7', available: '-2' }), makeLink('b', 'c', { used: '0', available: '10' })]
+    const scope = effectScope()
+    let balance: ReturnType<typeof useSystemBalance>['balance'] | undefined
+    scope.run(() => {
+      balance = useSystemBalance(ref<GraphSnapshot | null>(makeSnapshot(links, []))).balance
+    })
+    expect(balance!.value.totalAvailable).toBe(10)
+    scope.stop()
+  })
+
   it('isClean = true when no debt (totalUsed == 0)', () => {
     const links = [makeLink('alice', 'shop', { used: '0', available: '1000' })]
     const snapshot = ref<GraphSnapshot | null>(makeSnapshot(links, [makeNode('alice'), makeNode('shop')]))
