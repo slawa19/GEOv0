@@ -17,7 +17,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.capacity import pair_capacity
+from app.core.payments.capacity import pair_capacity, pair_rules, route_breaks_policy
 from app.core.payments.router import PaymentRouter
 from app.config import settings
 from app.db.models.audit_log import IntegrityAuditLog
@@ -1718,15 +1718,16 @@ class PaymentService:
         # edge); no other transaction reserves anything (019 stage 5, `T1909`).
         local_reserved: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
         declared_routes: list[tuple[DeclaredFlow, ...]] = []
+        pid_of = {participant_id: pid for pid, participant_id in participants.items()}
         for path, route_amount in routes:
             segments: list[DeclaredFlow] = []
+            hop_rules: dict[tuple[str, str], tuple[frozenset[str], frozenset[str]]] = {}
             for sender_pid, receiver_pid in zip(path, path[1:]):
                 sender_id = participants[sender_pid]
                 receiver_id = participants[receiver_pid]
-                available = await self._segment_capacity(
-                    sender_id=sender_id,
-                    receiver_id=receiver_id,
-                    equivalent_id=equivalent_id,
+                available, lines = await self._segment(sender_id, receiver_id, equivalent_id)
+                hop_rules[(sender_pid, receiver_pid)] = pair_rules(
+                    (pid_of[owner_id], policy) for owner_id, _limit, policy in lines
                 )
                 reserved = local_reserved.get((sender_id, receiver_id), Decimal("0"))
                 if available < (route_amount + reserved):
@@ -1753,6 +1754,10 @@ class PaymentService:
                         equivalent_id=equivalent_id,
                     )
                 )
+            # The router's policy rule again, on lines read here: a route handed to the core is not trusted.
+            if why := route_breaks_policy(list(path), lambda u, v: hop_rules[(u, v)]):
+                raise RoutingException(f"Route breaks a trust line policy: {why}", insufficient_capacity=False,
+                                       details={"path": list(path), "reason": why})
             declared_routes.append(tuple(segments))
         return PaymentDeclaration(tx_id=tx_id, routes=tuple(declared_routes))
 
@@ -1765,19 +1770,22 @@ class PaymentService:
     ) -> Decimal:
         """The available capacity of one flow edge, read in this attempt's snapshot."""
 
-        line = (
-            await self.session.execute(
-                select(TrustLine.limit).where(
-                    TrustLine.from_participant_id == receiver_id,
-                    TrustLine.to_participant_id == sender_id,
-                    TrustLine.equivalent_id == equivalent_id,
-                    TrustLine.status == "active",
-                )
-            )
-        ).scalar_one_or_none()
+        return (await self._segment(sender_id, receiver_id, equivalent_id))[0]
+
+    async def _segment(self, sender_id, receiver_id, equivalent_id) -> "tuple[Decimal, list]":
+        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy)`, read in THIS
+        transaction (SERIALIZABLE): a line frozen, closed or re-policied after routing is seen here."""
+
+        tl = TrustLine
+        pair = {sender_id, receiver_id}
+        lines = (await self.session.execute(select(tl.from_participant_id, tl.limit, tl.policy).where(
+            tl.from_participant_id.in_(pair), tl.to_participant_id.in_(pair), tl.from_participant_id != tl.to_participant_id,
+            tl.equivalent_id == equivalent_id, tl.status == "active"))).all()
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
-        return pair_capacity(line_limit=line, payer_owes=sender_owes, payee_owes=receiver_owes)
+        limit = next((limit for owner, limit, _ in lines if owner == receiver_id), None)
+        return pair_capacity(line_limit=limit, payer_owes=sender_owes, payee_owes=receiver_owes,
+                             pair_has_active_line=bool(lines)), list(lines)
 
     async def _debt_amount(
         self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID

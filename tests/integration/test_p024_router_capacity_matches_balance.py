@@ -14,6 +14,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from app.config import settings
 from app.core.balance.service import BalanceService
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
@@ -23,10 +24,10 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import TargetMismatch, require_target, target_xfail
+from tests.p019_support import TargetMismatch, require_target
 
 
-async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None):
+async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None, a_b_status="active"):
     code = f"C{uuid.uuid4().hex[:6].upper()}"
     eq = Equivalent(code=code, precision=2)
     people = {
@@ -44,7 +45,7 @@ async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None):
                     to_participant_id=people[debtor].id,
                     equivalent_id=eq.id,
                     limit=Decimal(limit),
-                    status="active",
+                    status=a_b_status if (creditor, debtor) == ("A", "B") else "active",
                 )
             )
     if debt_b_a is not None:
@@ -131,16 +132,23 @@ async def test_a_payment_offsets_the_counter_debt_and_creates_no_debt(db_session
 
 
 @pytest.mark.asyncio
-async def test_a_debt_only_edge_is_an_intermediate_hop_as_the_core_allows(db_session):
-    # C trusts B: B may pay C. A -> B is the counter-debt only; the core checks no role per hop.
+async def test_an_offset_hop_over_an_active_permissive_pair_is_a_transit_hop(db_session):
+    # GEO transit (owner decision (2), 2026-09-29): A -> B offsets B's debt over A's active line.
     eq, people = await _seed(db_session, line_c_b="100")
-    service = PaymentService(db_session)
-    await service._bind_payment(
+    await PaymentService(db_session)._bind_payment(
         f"hop-{uuid.uuid4()}", [([people[n].pid for n in "ABC"], Decimal("30"))], eq.id
     )
     router = await _router(db_session, eq)
     assert not _routable(router, people, "50.01", to="C")
-    require_target(_routable(router, people, "30", to="C"), "router has no A -> B -> C route")
+    assert _routable(router, people, "30", to="C")
+
+
+@pytest.mark.asyncio
+async def test_a_frozen_pair_carries_no_offset_direct_or_transit(db_session):
+    eq, people = await _seed(db_session, line_c_b="100", a_b_status="frozen")
+    assert await _core_and_balance(db_session, eq, people) == (Decimal("0"), Decimal("0"))
+    router = await _router(db_session, eq)
+    assert not _routable(router, people, "0.01") and not _routable(router, people, "0.01", to="C")
 
 
 async def _chain(session, lines, debts):
@@ -150,6 +158,7 @@ async def _chain(session, lines, debts):
     session.add_all(p.values())
     await session.flush()
     for creditor, debtor, policy in lines:
+        policy = {k: [p[n].pid for n in v] if k == "blocked_participants" else v for k, v in policy.items()}
         session.add(TrustLine(from_participant_id=p[creditor].id, to_participant_id=p[debtor].id,
                               equivalent_id=eq.id, limit=Decimal("100"), status="active", policy=policy))
     async with debt_fixture_setup(session, label="setup"):
@@ -159,21 +168,34 @@ async def _chain(session, lines, debts):
     return eq, p
 
 
-@target_xfail("024 T2415.2 fix-delta", "a debt-only pair mediates a payment (§15 P1)")
-@pytest.mark.parametrize("variant", ["can_be_intermediate", "blocked_participants"])
+_CASES = {  # variant: (lines, debts, payee); every policy below must hold, "permissive" is the control
+    "can_be_intermediate": ([("W", "X", {}), ("X", "Y", {"can_be_intermediate": False})], "XW YX", "Y"),
+    "blocked_participants": ([("W", "X", {}), ("X", "Y", {"blocked_participants": ["Y"]}), ("Y", "Z", {})],
+                             "XW YX ZY", "Z"),
+    "payer_side_of_two_lines": ([("W", "X", {}), ("X", "Y", {"max_hop_usage": 0}), ("Y", "X", {})], "XW", "Y"),
+    "payee_side_of_two_lines": ([("W", "X", {}), ("X", "Y", {}), ("Y", "X", {"can_be_intermediate": False}),
+                                 ("Z", "Y", {})], "XW", "Z"),
+    "permissive": ([("W", "X", {}), ("X", "Y", {})], "XW YX", "Y"),
+}
+
+
+@pytest.mark.parametrize("through_core", [False, True], ids=["router", "core_bypassing_router"])
+@pytest.mark.parametrize("variant", list(_CASES))
 @pytest.mark.asyncio
-async def test_a_debt_only_pair_never_mediates_a_payment(db_session, variant):
-    # §15 P1: X forbids mediation on its own line, yet W -> X -> Y(-> Z) ran over debt-only pairs.
-    if variant == "can_be_intermediate":
-        lines = [("W", "X", {}), ("X", "Y", {"can_be_intermediate": False})]
-        debts, payee = [("X", "W"), ("Y", "X")], "Y"
-    else:
-        lines = [("W", "X", {}), ("X", "Y", {"blocked_participants": ["Y"]}), ("Y", "Z", {})]
-        debts, payee = [("X", "W"), ("Y", "X"), ("Z", "Y")], "Z"
+async def test_every_active_line_of_a_pair_keeps_its_policy(db_session, variant, through_core):
+    # §15 P1 (2026-09-29): W -> X -> Y(-> Z) over offset hops made X a mediator against its own line.
+    lines, debts, payee = _CASES[variant]
+    debts = debts.split()
     eq, p = await _chain(db_session, lines, debts)
+    service = PaymentService(db_session)
+    routed = (await _router(db_session, eq)).find_flow_routes(p["W"].pid, p[payee].pid, Decimal("30"))
+    assert bool(routed) == (variant == "permissive"), f"router: {routed}"
+    if through_core:  # the core must refuse a route it is handed, whoever chose it
+        path = [p[n].pid for n in "WXYZ"[: "WXYZ".index(payee) + 1]]
+        service.router.find_flow_routes = lambda *_a, **_k: [(path, Decimal("30"))]
     status = "refused"
     try:
-        result = await PaymentService(db_session).create_payment_internal(
+        result = await service.create_payment_internal(
             p["W"].id, to_pid=p[payee].pid, equivalent=eq.code, amount="30"
         )
         status = f"{result.status} via {[r.path for r in result.routes or []]}"
@@ -181,5 +203,28 @@ async def test_a_debt_only_pair_never_mediates_a_payment(db_session, variant):
         pass
     left = sorted(a for (a,) in (await db_session.execute(
         select(Debt.amount).where(Debt.equivalent_id == eq.id))).all())
-    require_target(status == "refused" and left == [Decimal("50")] * len(debts),
+    ok = variant == "permissive"
+    expected = ("COMMITTED" if ok else "refused", [Decimal("20" if ok else "50")] * len(debts))
+    require_target((status.split(" ")[0], left) == expected,
                    f"payment W -> {payee} 30: {status}; debts now {[str(a) for a in left]}")
+
+
+@pytest.mark.parametrize("change", ["freeze", "forbid_mediation"])
+@pytest.mark.asyncio
+async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, monkeypatch, change):
+    # The router may route over a cached graph; the core decides on the lines as they are in its transaction.
+    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
+    eq, p = await _chain(db_session, [("W", "X", {}), ("X", "Y", {})], ["XW", "YX"])
+    await PaymentRouter(db_session).build_graph(eq.code)
+    line = (await db_session.execute(select(TrustLine).where(TrustLine.from_participant_id == p["X"].id))).scalar_one()
+    line.status, line.policy = ("frozen", {}) if change == "freeze" else ("active", {"can_be_intermediate": False})
+    await db_session.commit()
+    stale = PaymentRouter(db_session)
+    await stale.build_graph(eq.code)
+    assert stale.find_flow_routes(p["W"].pid, p["Y"].pid, Decimal("30")), "control: the cached graph still routes"
+    with pytest.raises(RoutingException):
+        await PaymentService(db_session).create_payment_internal(
+            p["W"].id, to_pid=p["Y"].pid, equivalent=eq.code, amount="30"
+        )
+    left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
+    assert sorted(left) == [Decimal("50"), Decimal("50")]

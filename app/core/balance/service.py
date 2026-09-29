@@ -64,7 +64,7 @@ class BalanceService:
 
         `total_debt` / `total_credit` - what I owe / what others owe me; `net_balance` - their difference.
         `available_to_spend` / `available_to_receive` - the direct capacity to / from every peer, summed:
-        one `pair_capacity` per peer (protocol §6.3.1), a peer with a debt but no active line included.
+        one `pair_capacity` per peer (protocol §6.3.1); a pair without an active line carries nothing.
         """
         
         cached = self._get_cached_summary(participant_id)
@@ -157,6 +157,7 @@ class BalanceService:
                 line_limit=limit,
                 payer_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
                 payee_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
+                pair_has_active_line=True,
             )
             get_eq_entry(code)['spend_capacity'] += capacity
 
@@ -170,10 +171,11 @@ class BalanceService:
                 line_limit=limit,
                 payer_owes=debts_others_owe.get((peer_id, code), Decimal('0')),
                 payee_owes=debts_i_owe.get((peer_id, code), Decimal('0')),
+                pair_has_active_line=True,
             )
             get_eq_entry(code)['receive_capacity'] += capacity
 
-        # Debts without trustlines still contribute positive capacity with Limit=0.
+        # A peer whose line to me is not active: the offset counts only if MY line to them is active.
         all_peers_equivalents = set(debts_i_owe.keys()) | set(debts_others_owe.keys())
 
         processed_spend = set((tl.from_participant_id, tl.equivalent.code) for tl in in_tls)
@@ -185,6 +187,7 @@ class BalanceService:
                     line_limit=None,
                     payer_owes=debts_i_owe.get((peer, code), Decimal('0')),
                     payee_owes=debts_others_owe.get((peer, code), Decimal('0')),
+                    pair_has_active_line=(peer, code) in processed_receive,
                 )
                 if cap > 0:
                     get_eq_entry(code)['spend_capacity'] += cap
@@ -194,6 +197,7 @@ class BalanceService:
                     line_limit=None,
                     payer_owes=debts_others_owe.get((peer, code), Decimal('0')),
                     payee_owes=debts_i_owe.get((peer, code), Decimal('0')),
+                    pair_has_active_line=(peer, code) in processed_spend,
                 )
                 if cap > 0:
                     get_eq_entry(code)['receive_capacity'] += cap
