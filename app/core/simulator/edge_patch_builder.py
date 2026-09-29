@@ -68,7 +68,7 @@ class EdgePatchBuilder:
         if not eq_row:
             return []
         eq_id = eq_row[0]
-        precision = int(eq_row[1] or 2)
+        precision = int(2 if eq_row[1] is None else eq_row[1])  # 024 T2416.1: 0 is a precision
 
         def _to_money_str(v: Decimal) -> str:
             return to_money_str(v, precision)

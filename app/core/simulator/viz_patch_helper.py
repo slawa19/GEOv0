@@ -51,7 +51,7 @@ class VizPatchHelper:
         eq = (await session.execute(select(Equivalent).where(Equivalent.code == eq_code))).scalar_one_or_none()
         if eq is None:
             raise ValueError(f"Equivalent {eq_code} not found")
-        precision = int(getattr(eq, "precision", 2) or 2)
+        precision = int(2 if getattr(eq, "precision", None) is None else eq.precision)  # 024 T2416.1
         r = int(refresh_every_ticks or 0)
         if r <= 0:
             r = 10

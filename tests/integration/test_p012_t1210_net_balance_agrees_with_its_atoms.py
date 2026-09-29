@@ -102,8 +102,10 @@ from tests.debt_setup import debt_fixture_setup
 # this module writes an `Equivalent` row, and the ORM validator now refuses 18, so the case would
 # be testing the validator rather than the two encodings.  The invariant here is about the
 # QUANTUM (`sign(atoms) == sign(net)`, `atoms == 0 iff net == 0`), which every remaining
-# precision exercises, and the corner this module was built for is `_effective_precision`
-# coercing a declared 0 to 2 - not the top of the range.
+# precision exercises, and a corner of this module is a declared 0 - not the top of the range.
+#
+# 024 `T2416.1`: the compensation `_effective_precision` (0 -> 2) is gone; precision 0 is checked
+# as declared.
 PRECISIONS = [0, 1, 2, 4, 8]
 
 # `Debt.amount` is `Numeric(20, 8)`.  A probe finer than this is not a test of the code, it is
@@ -115,13 +117,13 @@ STORAGE_QUANTUM = Decimal("0.00000001")
 # driven through the real producers rather than through the two helpers in isolation:
 #   row 1  the defect - `"0.04"` next to zero atoms, zero sign and the neutral colour;
 #   rows 2-3  differences of RESOLUTION, which the contract accepts and pins;
-#   row 4  not a `precision: 0` case at all - both producers coerce a declared 0 to 2, so this
-#          ships as `"0.60"` with 60 atoms, in exact agreement.  See `_effective_precision`.
+#   row 4  `precision: 0` - `"0.6"` with 1 atom (until 024 `T2416.1` both producers coerced a
+#          declared 0 to 2 and shipped `"0.60"` with 60 atoms).
 FINDING_TABLE = [
     pytest.param(1, "0.04", id="prec1-0.04-was-erased-to-zero-atoms"),
     pytest.param(1, "0.05", id="prec1-0.05-the-RT-012-2-value"),
     pytest.param(1, "0.14", id="prec1-0.14-resolution-difference-only"),
-    pytest.param(0, "0.6", id="prec0-0.6-precision-zero-is-coerced-to-two"),
+    pytest.param(0, "0.6", id="prec0-0.6-at-its-declared-precision"),
 ]
 
 _WHY = (
@@ -137,32 +139,6 @@ _WHY = (
 
 def _utc_now() -> datetime:
     return datetime(2026, 8, 24, tzinfo=timezone.utc)
-
-
-def _effective_precision(declared: int) -> int:
-    """The precision the producers ACTUALLY use for an equivalent that declares `declared`.
-
-    A SEPARATE DEFECT, FOUND BY THIS TEST'S POPULATION AND DELIBERATELY NOT FIXED HERE.  Both
-    producers resolve the equivalent's precision as `int(getattr(eq, "precision", 2) or 2)`
-    (`snapshot_builder.py:173`, `viz_patch_helper.py:54`).  `Equivalent.precision` is declared
-    `ge=0`, and `0` is a legitimate value - a whole-units equivalent - but `0 or 2` is `2`, so
-    a declared `precision: 0` is silently replaced by an invented `2`.  Measured: a stored net
-    of `0.6` under a `precision: 0` equivalent ships as `net_balance: "0.60"` with `60` atoms,
-    not as `"0.6"` with `1`.
-
-    Not fixed by this task, for a measured reason rather than a scoping one: the same
-    expression lives in `edge_patch_builder.py:71`, `inject_executor.py:266,271` and
-    `real_clearing_engine.py:86`, which this task does not own, and repairing it in these two
-    files alone would make `snapshot_builder` and `edge_patch_builder` disagree about `used`
-    and `available` at precision 0 - breaking `T1207`'s cross-producer agreement, which is
-    parametrised over exactly that precision.  It is reported instead.
-
-    So the contract below is checked against the precision the code really used.  What the two
-    producers must do IDENTICALLY is asserted regardless, which is the part that protects the
-    encoding while the coercion is still there.
-    """
-
-    return int(declared) or 2
 
 
 async def _fixture(session: AsyncSession, *, precision: int, amount: str):
@@ -279,10 +255,7 @@ async def _both_producers(session: AsyncSession, eq, creditor, debtor):
 def _check_one_payload(
     payload: dict, *, producer: str, precision: int, expected: Decimal
 ) -> None:
-    """Properties 1-5 of the contract, on one participant's fields in one payload.
-
-    `precision` here is the EFFECTIVE precision - see `_effective_precision`.
-    """
+    """Properties 1-5 of the contract, on one participant's fields in one payload."""
 
     q = Decimal(1).scaleb(-precision)
     where = f"{producer}, precision {precision}, stored net {expected}"
@@ -354,10 +327,8 @@ def _check_one_payload(
 
 
 def _check_both(both: dict, *, precision: int, amount: Decimal) -> None:
-    """`precision` is the DECLARED `Equivalent.precision`; the contract is checked against the
-    effective one, for the reason recorded in `_effective_precision`."""
+    """`precision` is the DECLARED `Equivalent.precision`, and the contract is checked against it."""
 
-    effective = _effective_precision(precision)
     creditor_pid, debtor_pid = list(both.keys())
     expected_by_pid = {creditor_pid: amount, debtor_pid: -amount}
 
@@ -365,13 +336,13 @@ def _check_both(both: dict, *, precision: int, amount: Decimal) -> None:
         _check_one_payload(
             snapshot_node,
             producer="snapshot_builder.build_graph_snapshot",
-            precision=effective,
+            precision=precision,
             expected=expected_by_pid[pid],
         )
         _check_one_payload(
             node_patch,
             producer="viz_patch_helper.compute_node_patches",
-            precision=effective,
+            precision=precision,
             expected=expected_by_pid[pid],
         )
         # `T1207`'s property, extended from the string to the whole encoding: the two
@@ -399,22 +370,10 @@ async def test_the_two_encodings_of_one_net_agree_on_the_findings_own_table(
     _check_both(both, precision=precision, amount=Decimal(amount))
 
     if precision == 0:
-        # WHAT THIS ROW ACTUALLY MEASURES, and it is not what the finding's table predicts.
-        # The table gives `net_balance: "0.6"` with `1` atom for a `precision: 0` equivalent.
-        # Driving the real producers gives `"0.60"` with `60`, because both of them resolve
-        # the precision as `... or 2` and a declared `0` is falsy.  The table's row is a
-        # measurement of `to_money_str`/`net_decimal_to_atoms` in isolation, not of the
-        # producers.  Pinned here so the divergence is a recorded fact rather than a surprise;
-        # see `_effective_precision` for why it is reported and not repaired by this task.
-        creditor_pid = list(both.keys())[0]
-        snapshot_node = both[creditor_pid][0]
-        assert snapshot_node["net_balance"] == "0.60", (
-            f"a `precision: 0` equivalent is expected to be silently rendered at precision 2 "
-            f"by the shipped producers, but `net_balance` came out "
-            f"{snapshot_node['net_balance']!r}.  If this is now {'0.6'!r}, the `or 2` "
-            f"coercion has been fixed - remove `_effective_precision` and this assertion, and "
-            f"check that `edge_patch_builder.py:71` was fixed with it."
-        )
+        # The finding's table: `"0.6"` with `1` atom.  Until 024 `T2416.1` this row pinned the
+        # `... or 2` coercion instead (`"0.60"` with `60`).
+        snapshot_node = both[list(both.keys())[0]][0]
+        assert (snapshot_node["net_balance"], snapshot_node["net_balance_atoms"]) == ("0.6", "1"), snapshot_node
 
 
 # ---------------------------------------------------------------------------
@@ -463,9 +422,7 @@ def _probes_for(precision: int) -> list[Decimal]:
 async def test_the_two_encodings_agree_at_every_precision_across_the_quantum_boundary(
     db_session: AsyncSession, precision: int
 ) -> None:
-    # Generated from the precision the producers really use, so that the population actually
-    # straddles the quantum they round at rather than the one the equivalent declares.
-    probes = _probes_for(_effective_precision(precision))
+    probes = _probes_for(precision)
     assert probes, f"precision {precision} generated no storable probes"
 
     for amount in probes:

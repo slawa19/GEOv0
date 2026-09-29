@@ -793,7 +793,7 @@ class RealTick:
             with self._runner._lock:
                 helper = (run._real_viz_by_eq or {}).get(str(eq))
             if helper is not None:
-                precision = int(getattr(helper, "precision", 2) or 2)
+                precision = int(2 if getattr(helper, "precision", None) is None else helper.precision)
         except Exception:
             precision = 2
         return to_money_str(amount, precision)
@@ -1540,12 +1540,22 @@ class RealTick:
 
         # Marking a tick flushed is what makes `flush_pending_storage` skip it on stop. Marking it after a
         # swallowed failure turns a retryable write error into permanent loss - the reported half of `F-009-2`.
+        # 024 `T2416.3`: and only once the commit is CONFIRMED - in `on_commit`, which the resolver also calls
+        # when the commit completed under cancellation (a line after the `await` would not run then).
+        callbacks = self._phase_callbacks(payments_result)
         if (should_write_metrics or should_write_bottlenecks) and wrote_everything:
-            with rr._lock:
-                run._real_last_tick_storage_flushed_tick = int(run.tick_index)
+            flushed_tick, phase_on_commit = int(run.tick_index), callbacks["on_commit"]
+
+            def _on_commit() -> None:
+                with rr._lock:
+                    run._real_last_tick_storage_flushed_tick = flushed_tick
+                if phase_on_commit is not None:
+                    phase_on_commit()
+
+            callbacks["on_commit"] = _on_commit
 
         commit_t0 = time.monotonic()
-        await self._commit_and_resolve(session, **self._phase_callbacks(payments_result))
+        await self._commit_and_resolve(session, **callbacks)
         commit_ms = (time.monotonic() - commit_t0) * 1000.0
         if commit_ms > 500.0:
             rr._logger.warning(

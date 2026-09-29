@@ -13,7 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.core.simulator.storage as simulator_storage
 from app.core.simulator.models import RunRecord
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import unit_tick
 
 
@@ -320,6 +322,48 @@ async def test_persistence_cancellation_waits_for_commit_and_resolves_commit():
     assert resolution.commits == 1
     assert resolution.rollbacks == 0
     assert resolution.unknowns == 0
+
+
+_ENDINGS = {  # ending -> (commit error, cancel during commit, every_n, expected exception, expected mark)
+    "confirmed": (None, False, 1, None, 1),
+    "confirmed_under_cancellation": (None, True, 1, asyncio.CancelledError, 1),
+    "failed": (RuntimeError("commit failed"), False, 1, RuntimeError, -1),
+    "unknown": (asyncio.CancelledError(), False, 1, asyncio.CancelledError, -1),
+    "throttled": (None, False, 100, None, -1),
+}
+
+
+@pytest.mark.parametrize("ending", list(_ENDINGS))
+@pytest.mark.asyncio
+async def test_the_tail_is_marked_flushed_only_by_a_confirmed_commit(monkeypatch, ending: str):
+    """024 `T2416.3`: pending, failed or unknown commit sets no mark; a confirmed one does, even under cancellation."""
+
+    commit_error, cancel, every_n, raises, mark = _ENDINGS[ending]
+    monkeypatch.setattr(simulator_storage, "db_enabled", lambda: False)  # the writers succeed with nothing to write
+    tick = unit_tick(_artifacts=_Artifacts(), _db_enabled=lambda: False, _real_db_metrics_every_n_ticks=every_n,
+        _real_db_bottlenecks_every_n_ticks=every_n,
+    )
+    run, session = _run(), _ControlledSession(commit_error=commit_error)
+    run._real_last_tick_storage_flushed_tick = -1
+    task = asyncio.create_task(
+        tick.persist_tick_tail(
+            session=session, run=run, equivalents=["UAH"], tick_t0=0.0, planned_len=1, committed=1, rejected=0,
+            errors=0, timeouts=0, per_eq={"UAH": {"committed": 1}}, per_eq_metric_values={"UAH": {}},
+            per_eq_edge_stats={"UAH": {}},
+        )
+    )
+    await session.commit_started.wait()
+    while_pending = run._real_last_tick_storage_flushed_tick
+    if cancel:
+        task.cancel()
+    session.release_commit.set()
+    if raises is None:
+        await task
+    else:
+        with pytest.raises(raises):
+            await task
+    got = (while_pending, run._real_last_tick_storage_flushed_tick)
+    require_target(got == (-1, mark), f"{ending}: mark (while pending, after)={got}, target (-1, {mark})")
 
 
 @pytest.mark.asyncio
