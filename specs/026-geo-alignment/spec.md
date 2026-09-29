@@ -1,11 +1,11 @@
 # 026 — Приведение поведения линий доверия к оригинальному GEO
 
 - **Date:** 2026-09-29, против `main` на `d9db06e`.
-- **Status:** SPECIFIED — implementation not authorized. Ответы владельца на В1–В7 даны 2026-09-29 (раздел «Решения владельца»); ждёт технической консультации объёма (`T2600`) и отдельной авторизации реализации.
+- **Status:** SPECIFIED — консультация T2600 выполнена (ACCEPT-WITH-CHANGES, рекомендует авторизацию объёма); реализация не авторизована — ждёт решения владельца. Ответы владельца на В1–В7 — раздел «Решения владельца»; технические решения — раздел «Решения консультации T2600 (2026-09-29)».
 - **Status authority:** метка описательная; завершённость устанавливают критерии приёмки (Verification plan) и записанные evidence, а не поле статуса.
-- **Owner surface:** `app/core/trustlines/` (снижение лимита, закрытие), `app/core/invariants.py` (`check_trust_limits`), `app/core/ledger/book.py` — только переход закрывающейся линии в `closed` при нулевом долге (если В1 решён так), `app/core/clearing/service.py` — только набор статусов линий, по которым идёт клиринг, `app/core/balance/service.py`, `api/openapi.yaml` — только по решению В7, миграции — только если В1 потребует нового состояния линии, `docs/ru/02-protocol-spec.md` (§3.3, §5.2, §5.3, §6.3.1, §11.5.2), `docs/ru/09-decisions-and-defaults.md`, `docs/ru/concept/` — только пометки историчности, тесты этих поверхностей. **Исключено:** правило ёмкости платежа и политика маршрута (`app/core/payments/capacity.py`, роутер, `_segment_capacity`) — владелец `T2415.2` программы 024 до его слияния; после слияния 026 меняет их только датированной поправкой к решению владельца. Также исключены объединение таблиц `trust_lines` и `debts` (вариант B, отклонён ниже), клиринг после каждого платежа (В4), оба UI — кроме потребителей, которые сломает изменение контракта (перечисляются в плане).
+- **Owner surface:** `app/core/trustlines/` (снижение лимита, закрытие), `app/core/invariants.py` (`check_trust_limits`), `app/core/ledger/book.py` — только переход закрывающейся линии в `closed` при нулевом долге (если В1 решён так), `app/core/clearing/service.py` — только набор статусов линий, по которым идёт клиринг, `app/core/balance/service.py`, `api/openapi.yaml` — только по решению В7, миграции — только если В1 потребует нового состояния линии, `docs/ru/02-protocol-spec.md` (§3.3, §5.2, §5.3, §6.3.1, §11.5.2), `docs/ru/09-decisions-and-defaults.md`, `docs/ru/concept/` — только пометки историчности, тесты этих поверхностей. **Исключено:** правило ёмкости платежа и политика маршрута (`app/core/payments/capacity.py`, роутер, `_segment_capacity`) — владелец `T2415.2` программы 024 до его слияния; после слияния 026 меняет их только датированной поправкой к решению владельца. Также исключены объединение таблиц `trust_lines` и `debts` (вариант B, отклонён ниже), клиринг после каждого платежа (В4), оба UI — кроме потребителей, которые сломает изменение контракта (перечисляются в плане). **Расширено 2026-09-29 по консультации `T2600` (P2-1):** развёрнутые границы — раздел «Owner surface»; они действуют вместо оговорок «только по решению В7» и «только если В1 потребует» выше.
 - **Origin:** решение владельца 2026-09-29: «у нас линия и долг — отдельные сущности… надо убрать и максимально привести к оригинальному GEO». Затем read-only инвентаризация v0 против эталона GEO на `d9db06e` и указание владельца писать спеку по варианту A (две таблицы сохраняются). Эталон GEO: клиент [`GEO-Protocol/GEO-network-client`](https://github.com/GEO-Protocol/GEO-network-client) (ветка `develop`) и спецификация [`GEO-Protocol/specs-protocol`](https://github.com/GEO-Protocol/specs-protocol) (`trust_lines/trust_lines.md`).
-- **Depends on:** слияние `T2415.2` программы 024 (правило ёмкости и активной линии, решение владельца (2) 2026-09-29).
+- **Depends on:** слияние `T2415.2` программы 024 (правило ёмкости и активной линии, решение владельца (2) 2026-09-29). По консультации `T2600` обязательной входной зависимостью считается и `T2415.3` (024; `FOR SHARE` на пути платежа): срез S1 идёт после него; в замороженном клоне консультации его реализации не было.
 
 ## Problem
 
@@ -21,6 +21,27 @@
    - В GEO закрытие = «моё доверие = 0». Линия остаётся активной, пока баланс не станет нулевым, и архивируется только тогда (`TrustLinesManager.cpp:194-198, 250-260`; `isTrustLineEmpty` `:789-801`; `SetOutgoingTrustLineTransaction.cpp:318-341`).
 3. **Инвариант «долг ≤ лимит» запрещает само состояние «долг выше лимита».** Проверка (`app/core/invariants.py:22-50`) считает нарушением любой такой долг, а закрытую или отсутствующую линию — лимитом 0. Поэтому п. 1–2 нельзя изменить, не пересмотрев инвариант: GEO допускает долг выше сниженного доверия и запрещает только его **рост** (`TrustLine.cpp:289-315`).
 4. **Поле `available` у линии в API** считает `limit − used` (`api/openapi.yaml:5260`, `service.py:1000`). Сумма, которую можно провести платежом (правило §6.3.1 после `T2415.2`), учитывает ещё встречный долг. Это разные величины, и одно поле не может честно показывать обе.
+
+## Owner surface
+
+Внесено 2026-09-29 по поправке P2-1 консультации `T2600`: исходный front matter не покрывал реальные предусловия Interact, жизненный цикл топологии симулятора и три clamp знаковых сумм, так что пользовательский путь остался бы со старым поведением. Якоря — на `e5a28e8`; перед каждым срезом перепроверяются по текущему `main`. Подробная инвентаризация с решением по каждой строке — раздел «Решения консультации T2600».
+
+**Меняется (часть 026):**
+- линии доверия: `app/core/trustlines/service.py` (PATCH, close, аудит запроса и завершения, импорт с `close_requested_at = NULL`); `app/db/models/trustline.py` (новый столбец и CHECK); одна новая миграция в `migrations/versions/`;
+- писатель долгов: `app/core/ledger/book.py` — общий gate роста и автозакрытие в завершении `Book.operation` (`:733`, `:987`), учёт `INJECT` (`:451`, `:504`, `:529`);
+- платёж: `app/core/payments/service.py` — окончательная проверка лимита по before/after (`:1728`–`:1887`), передача уже прочитанного prestate (`:630`); `app/core/payments/capacity.py` и `app/core/payments/router.py` — **только** датированное дополнение В2 для транзита через пару с запросом закрытия, после слияния `T2415.2`;
+- проверки: `app/core/invariants.py` (`check_trust_limits`, `:22`–`:82`); `app/core/integrity.py`, `app/api/v1/integrity.py`, `app/schemas/integrity.py`;
+- контракты: `api/openapi.yaml` (TrustLine, close-result, отрицательное `available`, аудит, integrity, simulator); `app/schemas/trustline.py`, `app/api/v1/trustlines.py`; `app/db/models/audit_log.py`;
+- Admin backend: `app/schemas/admin.py`, `app/schemas/metrics.py`, `app/api/v1/admin.py`, `app/core/admin/metrics.py` — добавление timestamp в SELECT и словари;
+- симулятор backend: `app/api/v1/simulator.py` — отказы Interact `:1252`, `:1421`, `:1515`, топология закрытия `:926`, `:1123`, `:1175`, `:1547`, list/action `:2114`–`:2179`; `app/core/simulator/snapshot_builder.py:245` и `app/core/simulator/edge_patch_builder.py:143`, `:270` — три clamp `available`; `app/core/simulator/tick.py` (`:872`, `:1067`, `:1136`, `:1341`); `app/core/simulator/trust_drift_engine.py` (рост и decay не поднимают pending-линию); `app/schemas/simulator.py`;
+- Simulator UI v2: декодеры `src/api/simulatorTypes.ts`, `src/api/simulatorContracts.ts`; потребители SSE (`normalizeSimulatorEvent.ts`, `realEventPipeline.ts`, `demo/patches.ts`, `useSimulatorApp.ts`, `types.ts`); `TrustlineManagementPanel.vue`, `EdgeDetailPopup.vue`, `useInteractMode.ts`, `interact/useInteractDataCache.ts`, `ManualPaymentPanel.vue` (не блокировать погашение по отрицательному `available`);
+- Admin UI: `src/types/domain.ts`, `src/api/realApi.ts`, `src/api/mockApi.ts`, страницы линий/дашборда/ликвидности/графа — индикатор запроса закрытия и подписи; `src/content/tooltips.ts`, `src/i18n/en.ts`, `src/i18n/ru.ts`;
+- документация: `docs/ru/02-protocol-spec.md` (`:182`, `:345`, `:366`, `:470`, `:1009`, `:1151`, `:2102`), `docs/ru/09-decisions-and-defaults.md`;
+- тесты этих поверхностей, включая намеренные замены ожиданий (Verification plan, п. 3).
+
+**Проверяется, но не переделывается:** создание и частичный уникальный индекс живой линии; seeder и измерительные seed-конструкторы (default нового столбца); создание линий в inject; заморозка; платёжный порядок «сначала погашение встречного долга»; статусы и согласие клиринга, его исполнение и нейтральность; `/balance`; симметрия долгов; сверка 015 и hold; историческое `used = 0`; агрегаты участников.
+
+**Не трогается:** clamp в планировщике, визуализации и аналитике симулятора (`real_payment_planner.py`, `runtime_utils.py`, `real_runner_impl.py`, `viz_patch_helper.py`, `viz_rules.py`, `metrics_bottlenecks.py`) — это ограничения ёмкости и отображения, а не wire `available`; массовая замена запрещена. Enum `Transaction` (`app/db/models/transaction.py:24`) не расширяется: закрытие — запись аудита, а не транзакция.
 
 ## Findings
 
@@ -101,6 +122,93 @@
 
 и только потом утверждается бюджет.
 
+## Решения консультации T2600 (2026-09-29)
+
+**Условия прогона.** Codex, запрошенная модель `gpt-6-astra` (reasoning high; resolved model ID по §15 не подтверждается), read-only, замороженный клон ветки `claude/026-answers` на `e5a28e8`, чистое дерево. Артефакты — `.local-run/codex-review/2026-09-29-026-t2600/` (не коммитятся). **Python и PostgreSQL в окружении ревьюера отсутствовали: тесты, миграции и канонические гейты не запускались.** Всё ниже — статическое ревью и технические решения, а не runtime evidence; R-026-1..4 признаны осуществимыми на текущих путях, но **не воспроизведены**.
+
+**Маркеры:** `VERDICT-026: ACCEPT-WITH-CHANGES`, `T2600-DECISION: AUTHORIZE-RECOMMENDED`, `MIGRATION-NEEDED: YES`, `SLICES: 5`, `PRODUCT-QUESTIONS: 0`, `P1-COUNT: 0`, `P2-COUNT: 2`, `P3-COUNT: 0`. `AUTHORIZE-RECOMMENDED` — рекомендация авторизовать именно этот объём, а не авторизация. В6 остаётся открытым и 026 не блокирует. Обе P2 внесены: P2-1 — раздел «Owner surface», P2-2 — Verification plan, п. 1 и 3.
+
+### Инвентаризация (сокращённо)
+
+«Изменить» — необходимая часть 026; «сохранить» — проверить, но не переделывать. Якоря — на `e5a28e8`.
+
+| Поверхность | Якоря | Решение |
+|---|---|---|
+| Подписанные create/update/close | `trustlines/service.py:286`, `:324`, `:342` | Сохранить подписи, гидратацию до commit, инвалидацию после; close возвращает фактическое состояние |
+| Живая линия и уникальность | `service.py:456`, `:472`; `db/models/trustline.py:42`; `migrations/versions/019_trust_lines_partial_unique_live.py:109` | Сохранить: pending-линия живая и блокирует новую строку; индекс не менять |
+| Изменение лимита/политики | `service.py:525`, `:540`, `:581`, `:595`, `:601` | Изменить: снять запрет `new_limit < used`; положительный лимит не отменяет pending молча; row lock до решения |
+| Закрытие | `service.py:626`, `:641`, `:665`, `:667`, `:673` | Изменить: лимит 0, timestamp запроса, проверка только поддерживаемого направления, при нуле — немедленное закрытие |
+| Unsigned-путь | `service.py:254`, `:279`, `:357`, `:615`; `api/v1/simulator.py:1300`, `:1441`, `:1533` | Те же правила через `execute_*`; отдельной реализации не создавать |
+| Аудит линии | `service.py:172`, `:194`, `:215`, `:604`, `:676` | Изменить: различать запрос и завершение; атомарность batch/commit и честное `verification_passed=None` сохранить |
+| Начальный импорт | `service.py:239`, `:687`–`:764` | Изменить: импорт с `close_requested_at=NULL`; нулевой лимит не превращать в запрос закрытия |
+| Seeder и измерительные скрипты | `real_scenario_seeder.py:253`–`:279`; `scripts/seed_db.py:188`, `:415`; `scripts/measure_*` (`:214`, `:386`, `:248`, `:233`) | Сохранить: проверить default столбца; формат сценария не расширять |
+| Inject: линии и рост долга | `inject_executor.py:471`–`:903`, `:564`–`:594`; `book.py:451`, `:504`, `:529` | Сохранить отказ по ceiling; книга проверяет реальный лимит, а не только переданный ceiling |
+| Simulator growth / decay | `trust_drift_engine.py:49`–`:420`, `:557`–`:617` | Изменить: pending не растёт автоматически и не поднимается decay/debt floor с нуля; алгоритм decay не менять; поправить объяснение «любой excess — нарушение» |
+| Freeze | `inject_executor.py:991`–`:1009`; `cache_invalidator.py:86` | Сохранить признак при заморозке; закрытие не размораживает |
+| Отказы Interact API | `api/v1/simulator.py:1252`, `:1421`, `:1515` | Изменить: удалить устаревшие ограничения update/close; ограничение create не трогать |
+| Платёжный писатель | `book.py:332`, `:351`, `:367`, `:388` | Сохранить порядок «погашение, затем обратный долг»; линию внутри flow не закрывать |
+| Клиринговый писатель | `book.py:432`, `:443`; `clearing/service.py:2286`, `:2303` | Только уменьшение; завершение закрытия — через общий конец операции книги |
+| Прочие входы книги | `book.py:535`, `:574`, `:601`, `:1000`; `real_runner_impl.py:527`; `scripts/seed_db.py:437`, `:483` | Охватить production effects; pre-baseline `SEED/TEST_FIXTURE` сохранить |
+| Граница завершения и журнал | `book.py:733`, `:738`, `:748`, `:753`, `:783`, `:987` | Изменить: общий gate роста и автозакрытие до выхода из savepoint; журнал уже читает before/after |
+| Prestate платежа | `payments/service.py:630`, `:647`, `:683`, `:1834` | Сохранить один пакетный SELECT обоих направлений; не перечитывать долг ради `before` |
+| Финальные проверки платежа | `payments/service.py:1728`, `:1758`, `:1782`, `:1885`–`:1887` | Изменить: snapshot-only проверку лимита заменить before/after; capacity/policy, symmetry, payment delta сохранить |
+| Capacity/policy | `capacity.py:17`, `:27`, `:46`; `router.py:100`–`:520` | Базовое правило `T2415.2` сохранить; дополнение В2 — в маршрутизатор и в окончательный gate ядра |
+| `/balance` | `balance/service.py:83`–`:184` | Сохранить pair capacity; не подменять отрицательным `available` |
+| Клиринг: статусы, согласие, исполнение | `clearing/service.py:43`–`:1093`, `:1992`–`:2349`; `flow_planner.py:466`–`:517` | Сохранить `active/frozen`, `closed` не добавлять; locked prestate, consent revalidation, neutrality, retry/commit ownership |
+| Snapshot-инвариант лимита | `invariants.py:22`, `:45`, `:51`, `:54`, `:82` | Изменить: разделить разрешённый excess, структурный дефект и проверку роста |
+| Debt symmetry | `invariants.py:90`, `:121`, `:164` | Без ослабления |
+| Integrity endpoints, checkpoint, checksum, schema | `api/v1/integrity.py:153`, `:269`; `core/integrity.py:34`, `:56`, `:95`–`:127`; `schemas/integrity.py:9`–`:50`; `openapi.yaml:6274`–`:6336` | Изменить: excess без ложного critical и без заявления «рост проверен»; request-state в явно новой форме checksum |
+| Сверка и hold | `ledger/reconciliation.py:8`–`:1220` | Сохранить; исторического лимита не восстанавливает; excess сам по себе не даёт `FAILED`/hold |
+| Public TrustLine/close wire | `schemas/trustline.py:11`, `:49`; `api/v1/trustlines.py:79`, `:88`; `openapi.yaml:2651`–`:5474` | Изменить: timestamp, фактический close-result, отрицательное `available`; подписываемый запрос остаётся ID-only |
+| Audit wire | `db/models/audit_log.py:35`; `openapi.yaml:6137`–`:8220` | Изменить operation/action enums и metadata; enum `Transaction` (`transaction.py:24`) не расширять |
+| Admin: проекции | `schemas/admin.py:131`–`:185`; `schemas/metrics.py:79`; `api/v1/admin.py:729`, `:1844`, `:2208`; `core/admin/metrics.py:505` | Изменить: timestamp в SELECT/словари — одной Pydantic-модели мало |
+| Admin: status/limit/available, агрегаты | `api/v1/admin.py:94`–`:2183`; `core/admin/metrics.py:198`–`:626`; `participants/service.py:96`–`:126` | Сохранить signed arithmetic и выбор живой инкарнации; ratio-метрики не делать контрактом |
+| Историческое `used=0` | `trustlines/service.py:986`–`:1026` | Сохранить: посылка остаётся верной для **её направления** |
+| Simulator snapshot и SSE amounts | `snapshot_builder.py:163`, `:239`, `:245`; `edge_patch_builder.py:88`, `:143`, `:249`, `:270` | Изменить: удалить **три** clamp-to-zero; не возвращать старый scenario status после автозакрытия |
+| Simulator close topology | `api/v1/simulator.py:926`, `:1123`, `:1175`, `:1547`; `tick.py:872`, `:1067`, `:1136`, `:1341` | Изменить: запрос — patch, не removal; завершение — topology только после подтверждённого commit |
+| Simulator schemas | `schemas/simulator.py:50`–`:764`; `api/v1/simulator.py:2114`–`:2179`; `openapi.yaml:3790`, `:6724` | Изменить: timestamp/state через snapshot, list, close-response; поправить комментарий о reverse debt |
+| Simulator UI: декодеры, SSE, controls, cache | `simulatorTypes.ts:128`, `:189`; `simulatorContracts.ts:71`–`:533`; `normalizeSimulatorEvent.ts:127`; `realEventPipeline.ts:280`; `TrustlineManagementPanel.vue:160`–`:510`; `EdgeDetailPopup.vue:151`–`:308`; `useInteractMode.ts:577`–`:596`; `useInteractDataCache.ts:167`, `:179` | Изменить: новые поля через `onlyKeys`; убрать запреты ниже used/при долге; «закрытие запрошено»; не сообщать безусловное «закрыто» |
+| Simulator UI: отображение и capacity | `EdgeTooltip.vue:58`, `NodeCardOverlay.vue`, `useSystemBalance.ts:67`, `SimulatorAppRoot.vue` и др.; `ManualPaymentPanel.vue:204`–`:434`, `useInteractMode.ts:280` | Сохранить знак (точечные тесты); не блокировать погашение по отрицательному unused trust; полное переключение — срез S5 |
+| Simulator planner/viz/analytics | `real_payment_planner.py:119`–`:636`; `runtime_utils.py:49`; `real_runner_impl.py:420`; `viz_patch_helper.py:120`, `:198`; `viz_rules.py:30`; `metrics_bottlenecks.py:458` | Не трогать: это capacity/визуальные ограничения; массовой заменой clamp не удалять |
+| Admin UI | `domain.ts:18`; `realApi.ts:58`, `:106`; `TrustlinesPage.vue`, `DashboardPage.vue`, `LiquidityPage.vue`, `GraphAnalyticsDrawer.vue`; `useGraph*`, `mockApi.ts:699`–`:1085`; `tooltips.ts:223`, `:507`; `i18n/en.ts:100`, `i18n/ru.ts:238` | Изменить: индикатор запроса и подписи «неиспользованное доверие, может быть отрицательным, не равно ёмкости»; status-фильтры сохранить; close-формы в Admin нет |
+| Протокол | `docs/ru/02-protocol-spec.md:182`, `:345`, `:366`, `:470`, `:1009`, `:1151`, `:2102` | Изменить: invariant, PATCH, close, pending-transit, реакция на excess; cadence клиринга сохранить |
+
+### Технические развилки
+
+1. **Признак — `close_requested_at TIMESTAMP WITH TIME ZONE NULL`.** Timestamp выражает и наличие запроса, и его время; boolean не дублируется; policy-ключ непригоден (обычный policy PATCH его перезапишет). Одна новая миграция после фактического merged head (в клоне последний revision — `032_audit_row_may_record_no_check`, `migrations/versions/032_audit_row_may_record_no_check.py:25`). Старым строкам — `NULL`, включая `closed` и active с нулевым лимитом. Частичный индекс не меняется. Ограничение `CHECK`: timestamp задан ⇒ лимит равен нулю. Downgrade отказывает при pending live lines и не теряет намерение молча; для возврата к старому приложению отдельно проверяется отсутствие несовместимого over-limit состояния, долг автоматически не исправляется; остановка писателей и согласованный rollback обязательны.
+2. **Автозакрытие — один hook в завершении `Book.operation`**: после всех effects и final flush, до выхода из savepoint (`book.py:733`, `:987`). Не внутри `_apply_payment_flow`, не в двух сервисах, не после commit. Порядок: окончательное изменение → проверка роста и структурных условий → запрошенные линии затронутых пар → при нулевом **поддерживаемом** долге смена статуса и completion-аудит → завершение операции. Любой последующий отказ откатывает долг, статус и аудит вместе. Немедленное закрытие при самом запросе остаётся в `execute_close` (денежной операции там нет) — с тем же направлением долга и тем же форматом completion-аудита.
+3. **Рост — по каждой направленной задолженности в окончательном состоянии пары:** `after > before ⇒ after ≤ applicable_limit`. Уменьшение или неизменность уже превышающего лимит долга допустимы. Проверка только `abs(net)` запрещена: она скрывает создание нового долга в обратном направлении. У платежа `before` берётся из уже существующего пакетного prestate (`payments/service.py:630`) и передаётся явно; отсутствие обязательного prestate — ошибка, а не ноль. Общий gate книги использует уже читаемые строки журнала: первый `amount_before` и окончательный `amount_after` каждого направления в операции (`book.py:748`) — это защищает и прямой вызов production book, не только `PaymentService`; реализация независимой сверки в писатель не импортируется. Клиринг проходит тот же completion gate (штатно только уменьшает, `book.py:432`). `INJECT` сохраняет свои отказы, но не обходит реальный лимит через произвольный ceiling. `SEED/TEST_FIXTURE` остаются явно обозначенными начальными состояниями до baseline (`book.py:783`).
+4. **Периодическая проверка — наблюдение excess, а не доказательство отсутствия роста.** Разрешённый excess на active/frozen поддерживающей линии отдаётся как `over_limit_allowed` с debt, limit и excess; без critical, без автозаморозки, без integrity hold. Структурные нарушения (например, долг без поддерживающей живой инкарнации) остаются нарушениями. Snapshot-ответ явно говорит о росте «не проверено: требуется состояние операции до изменения». Затрагиваются обе integrity API-функции, checkpoint и их OpenAPI/schema — изменения одного `InvariantChecker` недостаточно. Сверка 015 не расширяется: исторического лимита в её доказательствах нет (`reconciliation.py:33`, `:40`), универсального восстановления истории не строить. Для новых операций диагностические значения проверенного перехода и лимита пишутся в существующую audit metadata; старые записи доказательством growth compliance от этого не становятся.
+5. **PATCH ниже used — изменение доверия, а не долга:** не списывает, не переносит и не переоценивает долг; сразу возвращает отрицательное `available`. Update и close берут row lock в существующем SELECT до чтения и решения. С `T2415.3` допустимы два исхода: платёж завершился первым — последующий PATCH законно оставляет excess; PATCH завершился первым — денежный final check обязан увидеть новый предел или повториться на свежем snapshot. Порядок захвата строк пары обязан совпадать у денежных и trustline-путей. Проверяются upgrade `FOR SHARE → UPDATE` при автозакрытии и обработка настоящих `40P01/40001`; повтор из того же savepoint запрещён. Сам факт `FOR SHARE` не доказывает отсутствия deadlock.
+6. **Повторное открытие — новая инкарнация только после `closed`.** Pending блокирует create существующим индексом. Положительный PATCH при pending — явный conflict и запрос не отменяет; policy PATCH допустим. Повторный запрос закрытия при pending возвращает тот же результат с первоначальным timestamp и без дубля request-события. После `closed` создаётся новый ID с timestamp `NULL`; старый ID — история, его `used=0` не подтягивает долг новой строки. Отдельный cancel-close API в 026 не вводится. Freeze сохраняется: запрос закрытия не размораживает frozen-линию; pending, замороженная позднее, может завершиться через клиринг (следствие В5).
+7. **`available` — signed decimal string без clamp.** Формула сохраняется буквально; описания `limit`/`available` исправляются, в OpenAPI — отрицательный пример; три simulator clamp удаляются; знак проводится через snapshot, SSE и list. Отрицательное значение показывается как превышение долга над доверием, а не как отрицательная сумма возможного платежа. Платёжная ёмкость — отдельный последний срез: поле `payment_capacity` с явным направлением — для линии A→B ёмкость прямого платежа B→A на текущем состоянии пары, не маршрутная и не max-flow гарантия. `available` оно не заменяет; whole-route policy и final core check остаются обязательными.
+
+### Техническая конкретизация В2 (2026-09-29)
+
+Нулевого лимита одной линии **недостаточно**, когда обратная линия пары имеет положительный лимит: текущая формула допускает погашение с переходом долга через ноль (`capacity.py:17`, `book.py:365`). Для транзита через пару с запросом закрытия проверяется итог **всей операции**:
+
+```text
+D_before = debt[A→B]_before + debt[B→A]_before
+D_after  = debt[A→B]_after  + debt[B→A]_after
+D_after < D_before
+```
+
+При сохранённой симметрии это абсолютный долг пары; дополнительно действуют направленные growth limits и запреты обеих линий. Следствие: переход `50 → 20` в обратную сторону уменьшает долг пары и допустим при достаточном обратном доверии; `50 → 50` и `50 → 70` — нет. Запрет любого перехода через ноль был бы новым ограничением, которого В2 не содержит. Линия не закрывается между flows; проверка не ограничивается первым уменьшающим hop. Конкретизация входит в owner surface маршрутизатора и ядра как датированное дополнение; базовая формула `T2415.2` для обычных пар не переписывается. Отдельно проверяются multipath и пара с двумя активными линиями.
+
+### Порядок и бюджет
+
+Потолки изменения, а **не измерения** LOC или времени. Product LOC — backend, UI, schema; без документации и миграции.
+
+| Срез | Содержание и зависимости | Product / test LOC | Сущности / миграции | Добавочные запросы | Контракт и ревью |
+|---|---|---:|---|---|---|
+| S1 — `T2601` | Before/after growth gate в книге и платеже; periodic/integrity reporting. После `T2415.3` | ≤300 / ≤550 | 0 таблиц, 0 модулей / 0 | ≤1 пакетный SELECT на денежную операцию; существующий payment prestate | `Contract: yes`; §15 до S2 |
+| S2 — `T2602` | PATCH ниже used; предусловия endpoint и UI; signed `available` во всех проекциях | ≤220 / ≤350 | 0 / 0 | PATCH может потерять старый used-запрос; новых per-row запросов нет | `Contract: yes`; §15 |
+| S3 — `T2603.1` | Timestamp, close request/result/audit, автозакрытие в книге, reopen, locks, pending-transit В2 | ≤500 / ≤850 | 1 столбец, 1 CHECK; без таблицы и worker / 1 | S1+S3 совокупно ≤2 дополнительных пакетных SELECT на денежную операцию; UPDATE/аудит только реально закрытых строк | `Contract: yes`; §15 по деньгам, миграции и locks |
+| S4 — `T2603.2` | Lifecycle симулятора (scenario, cache, snapshot, SSE, обе точки входа close), индикатор в Admin; completion после commit | ≤350 / ≤550 | 0 / 0 | Без N+1; не более одного пакетного refresh затронутых линий, если результат нельзя передать существующим путём | `Contract: yes`; §15, UI smoke |
+| S5 — `T2604` | Отдельное поле прямой платёжной ёмкости и точечные потребители | ≤160 / ≤250 | 0 / 0 | ≤1 пакетный запрос недостающего состояния обратных пар, не запрос на строку списка | `Contract: yes`; отдельное §15 |
+
+**Итого потолок: 1530 product LOC, 2550 test LOC, одна миграция ≤70 LOC, документация ≤350 LOC.** Превышение — повод пересчитать и сузить срез до продолжения, а не разрешение увеличить бюджет. Не создаются outbox, новая таблица пары, watcher закрытия, система исторических лимитов. S3 и S4 — последовательные reviewable срезы, но **единый milestone выпуска lifecycle**: автозакрытие нельзя выпустить с прежним simulator removal/fallback. Документация (`T2605`) обновляется вместе с соответствующим срезом и не ждёт конца программы.
+
 ## Вариант B отклонён — объединение таблиц
 
 Одна запись пары с двумя доверенностями и знаковым балансом по §19.2 п. 1 должна назвать денежную потерю, которую не закрывает вариант A. Инвентаризация её не нашла: баланс уже совпадает (Problem, первый абзац).
@@ -120,6 +228,7 @@
 - Не вводит резервирование ёмкости: в GEO оно есть, у одного хаба его заменяет SERIALIZABLE.
 - Не решает В6.
 - Не трогает EN/PL документацию: она заморожена.
+- Не вводит отдельный cancel-close API, outbox, новую таблицу пары, watcher закрытия и систему исторических лимитов; не расширяет сверку 015 восстановлением исторического лимита (консультация `T2600`, 2026-09-29).
 
 ## §19.2
 
@@ -135,6 +244,7 @@
    - «Закрытие = лимит 0 без смены статуса» без В3 ломает инвариант, без В1 оставляет открытым вопрос о состоянии «закрывается».
    - Объединение таблиц дороже и потерю не закрывает лучше.
 5. **Цена.** Оценка, не утверждённый объём: 6–8 модулей приложения, тексты протокола, возможно одна миграция (В1) и один контрактный срез (В7). Уточняется консультацией `T2600` с учётом проверки инвариантов, клиринга закрывающихся линий и контракта API.
+   - **Уточнено 2026-09-29 (`T2600`):** потолки 1530 product LOC, 2550 test LOC, одна миграция ≤70 LOC (1 столбец, 1 CHECK), документация ≤350 LOC, 0 новых таблиц и модулей, S1+S3 ≤2 пакетных SELECT на денежную операцию — раздел «Порядок и бюджет». Это потолки, а не измерения.
 6. **Крайние случаи.** Берутся только имеющие путь в приложении:
    - снижение ниже долга и закрытие с долгом (API линий);
    - погашение встречным платежом и клирингом;
@@ -149,6 +259,12 @@
 - **R-026-3.** Закрытие A→B при долге A перед B (обратная сторона) → сейчас отказ вопреки §5.3. Цель: принято, линия A→B закрыта; долг A перед B принадлежит линии B→A и не затронут.
 - **R-026-4.** Инвариант: долг выше лимита после снижения не отчитывается нарушением; попытка увеличить такой долг платежом или транзитом отказывает (рост проверяется по состоянию пары до и после операции на пути записи); клиринг проверяется как способ **уменьшения** такого долга (нынешний клиринг долг не создаёт).
 
+Ожидаемые исходы текущего кода и честная постройка (`T2600`, 2026-09-29; осуществимость установлена статически, репродьюсеры **не воспроизведены**):
+- R-026-1 — отказ `"Cannot reduce trustline limit below used amount"` (`service.py:583`). Долг создаётся настоящим платежом, затем подписанный PATCH до нуля; после изменения — частичное погашение и повторная попытка занять.
+- R-026-2 — отказ `"Cannot close trustline with non-zero debt"` (`service.py:667`). Две независимые ветки погашения: платёж и клиринг. Долг, статус, timestamp и аудит читаются из другой транзакции после commit и после принудительного rollback.
+- R-026-3 — тот же отказ из-за `reverse_used`. Поддерживающая обратная линия и обратный долг; закрываемое направление имеет `used = 0`; обратный долг не меняется.
+- **R-026-4 — осуществимость поэтапная.** Сейчас старый инвариант отказывает по snapshot excess (`invariants.py:82`), но получить excess честно (настоящим PATCH/close) на старом коде нельзя: setup остановится раньше, на отказах R-026-1/R-026-2. Это записывается как остановка setup, а **не** выдаётся за отдельный провал инварианта. В S1 до разрешения PATCH отдельно проверяются before/after-предикат и попытка production book превысить существующий лимит. Полный R-026-4 (excess через PATCH/close → snapshot-наблюдение → уменьшение → попытка роста через production book) становится acceptance evidence только после S2. Прямая вставка excess в `debts` его не заменяет.
+
 **2. Инварианты, обязанные выжить:**
 - симметрия долгов пары;
 - единственный писатель долгов;
@@ -158,20 +274,46 @@
 
 Контрпроверка к В3: нарушение «рост выше лимита» по-прежнему ловится. Поднять долг выше лимита прямым писателем → отказ.
 
-**3. Существующие селекторы:**
-- `tests/integration/test_p024_router_capacity_matches_balance.py`;
-- тесты закрытия и изменения линий (`grep -l "close" tests/**/test_trustline*`);
-- `check_trust_limits` / `check_debt_symmetry`;
-- клиринг по замороженным линиям (T1551);
-- `tests/contract/test_openapi_contract.py`.
+**3. Существующие селекторы** (зафиксированы `T2600` 2026-09-29, P2-2). Проходят на итоговой реализации — но «остаться зелёными» **не означает сохранить отменённые владельцем продуктовые assertions** (см. «Намеренные замены ожиданий» ниже).
 
-Точный список фиксирует `T2600`.
+- Деньги и книга: `tests/integration/test_p024_router_capacity_matches_balance.py`, `tests/integration/test_p019_direct_execution_effects_postgres.py`, `tests/integration/test_p018_b_book_transaction_contract_postgres.py`, `tests/integration/test_p018_book_keeps_each_kind_to_its_semantics.py`, `tests/integration/test_p018_mixed_inject_event_is_one_operation_postgres.py`, `tests/unit/test_p018_only_book_writes_debts.py`, `tests/unit/test_debt_symmetry.py`, `tests/unit/test_invariants.py`.
+- Клиринг и сверка: `tests/integration/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line_postgres.py`, `tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py`, `tests/unit/test_clearing_auto_clearing_policy.py`, `tests/integration/test_p023_b_occurrence_execution_postgres.py`, `tests/unit/test_p023_b_clearing_intent_v2_rule.py`, `tests/integration/test_clearing_commit_replay_postgres.py`, `tests/integration/test_concurrent_clearing_payment_lost_update_postgres.py`, `tests/integration/test_p015_step5a_reconciliation_postgres.py`, `tests/unit/test_p015_step5a_reconciliation.py`, `tests/unit/test_p015_step5c_reaction_and_hold.py`, `tests/integration/test_p015_step5c_hold_races_postgres.py`.
+- Линии, API, история: `tests/integration/test_trustline_negative_constraints.py`, `tests/integration/test_p1_trustline_reopen_postgres.py`, `tests/integration/test_trustline_cache_invalidation.py`, `tests/integration/test_trustlines_get_by_id.py`, `tests/integration/test_trustlines_list_filters_pagination.py`, `tests/unit/test_trustline_audit_fail_closed.py`, `tests/unit/test_trustline_signatures.py`, `tests/unit/test_trustline_timestamps.py`, `tests/unit/test_trustline_conflict_identity.py`.
+- Integrity и отчётность: `tests/unit/test_integrity_checkpoints.py`, `tests/integration/test_integrity_endpoints.py`, `tests/integration/test_p014_t1402_zero_sum_is_not_published_as_a_check.py`, `tests/unit/test_p015_t1543_frozen_line_is_not_limit_zero.py`, `tests/integration/test_p024_integrity_status_sees_hold_postgres.py`.
+- Unsigned-путь и писатели симулятора: `tests/unit/test_interact_actions_backend_p1.py`, `tests/unit/test_p021_interact_trust_line_actions_wire.py`, `tests/unit/test_p021_public_trust_line_operations_require_a_signature.py`, `tests/unit/test_p021_unsigned_trust_line_path_is_never_request_controlled.py`, `tests/unit/test_p021_simulator_writes_trust_lines_only_through_the_service.py`, `tests/unit/test_p021_trust_line_write_batch.py`, `tests/integration/test_p021_interact_and_inject_trust_lines_are_audited_postgres.py`, `tests/integration/test_p021_seed_writes_trust_lines_through_the_service_postgres.py`, `tests/integration/test_p021_seed_and_growth_failures_are_rolled_back_by_their_owners_postgres.py`, `tests/integration/test_p021_decay_failure_is_rolled_back_by_its_owner_postgres.py`, `tests/integration/test_p021_trust_drift_is_audited_postgres.py`, `tests/integration/test_p019_trust_decay_respects_concurrent_debt_postgres.py`, `tests/unit/test_trust_drift.py`, `tests/unit/test_trust_drift_decay_does_not_break_trust_limits.py`, `tests/integration/test_simulator_sse_trust_drift_decay_topology_patch.py`, `tests/unit/test_simulator_sse_trust_drift_decay_topology_patch.py`.
+- Wire и Admin: `tests/contract/test_openapi_contract.py`, `tests/contract/test_p011_responses_conform_to_the_canon.py`, `tests/contract/test_p011_success_responses_describe_their_content.py`, `tests/unit/test_p011_sse_event_declares_patches.py`, `tests/integration/test_p011_money_is_a_decimal_string_on_the_wire.py`, `tests/integration/test_p011_admin_money_is_a_decimal_string_on_the_wire.py`, `tests/unit/test_admin_trustlines_bottlenecks.py`, `tests/unit/test_admin_trustlines_list.py`.
+- UI: `simulator-ui/v2/src/components/` — `TrustlineManagementPanel.test.ts`, `EdgeDetailPopup.test.ts`, `EdgeDetailPopup.sourceUnavailable.test.ts`, `EdgeDetailPopup.noPositiveClaim.test.ts`, `EdgeDetailPopup.frozenGround.test.ts`, `NodeCardOverlay.test.ts`, `ManualPaymentPanel.test.ts`; `simulator-ui/v2/src/composables/useInteractMode.test.ts`; `simulator-ui/v2/src/composables/interact/useInteractDataCache.snapshotTrustlines.test.ts`; `admin-ui/src/api/` — `realApi.listContracts.test.ts`, `api.contract.test.ts`, `mockApi.participantMetrics.test.ts`; `admin-ui/src/composables/useGraphAnalytics.test.ts`.
+- Селекторы `T2415.3` добавляются из реально слитого дерева; их имена здесь не выдумываются.
+
+**Намеренные замены ожиданий (INTENTIONAL).** Эти assertions прямо утверждают отказы, которые владелец отменил 2026-09-29; они заменяются датированно owner-backed приёмочными случаями, с сохранением контрпроверок auth, rollback, audit, direction и corruption. Их покраснение на новом коде — ожидаемое, а не регрессия; замена делается в том же срезе, что меняет поведение, с записью в Changelog:
+- запреты PATCH и close: `tests/integration/test_trustline_negative_constraints.py:31`, `:102`;
+- snapshot excess как нарушение: `tests/unit/test_p015_t1543_frozen_line_is_not_limit_zero.py:231`, `:276`; `tests/unit/test_invariants.py:70`;
+- аналогичные отказы симулятора: `tests/unit/test_interact_actions_backend_p1.py:315`, `:386`; `tests/unit/test_p021_interact_trust_line_actions_wire.py:180`.
+
+**Запуск.** `scripts/verify_local.ps1 -TaskSlug <уникальный_slug> -BackendOnly -BackendSelector <точные пути>`, затем полный milestone-раннер; для затронутых UI — их test/typecheck/build и smoke по AGENTS.md §5. Новые селекторы включаются явно; число собранных тестов ненулевое.
 
 **4. Запрещено:**
 - доказывать долг выше лимита прямой вставкой в `debts` вместо настоящего снижения лимита или закрытия;
 - ослаблять `check_trust_limits` глобально без проверки роста;
-- менять смысл поля `available` попутно;
-- считать зелёный тест закрытия доказательством погашения без прогона платежа и клиринга после закрытия.
+- менять смысл поля `available` попутно (в том числе подменять его ёмкостью) и прятать отрицательное `available` clamp;
+- считать зелёный тест закрытия доказательством погашения без прогона платежа и клиринга после закрытия;
+- выводить «periodic green ⇒ роста не было»; удалять growth check ради погашения;
+- mock вместо конкурентного расписания PostgreSQL; проверка автозакрытия после отдельного commit; сравнение писателя с самим собой;
+- выдавать старую сверку за проверку исторического лимита;
+- `xfail`, нулевой отбор или неподтверждённый CI как успех.
+
+**5. Обязательные новые проверки** (`T2600`, 2026-09-29):
+- обычная active-линия с лимитом 0 без timestamp **не** закрывается автоматически;
+- частичное погашение оставляет pending; точный ноль закрывает; обратный долг не удерживает;
+- полный эффект нескольких flows, включая временный ноль и обратное направление;
+- В2: обе стороны политики, обе ориентации, две активные линии, итоговое уменьшение / равенство / рост;
+- прямой вызов книги не обходит growth gate;
+- реальное PostgreSQL barrier-расписание для PATCH / close / платежа / клиринга, включая lock upgrade;
+- rollback, retry и commit-unknown не дают преждевременного completion-аудита/SSE и дублей;
+- pending не оживает через drift, импорт, положительный PATCH или устаревший сценарий;
+- signed `available` одинаков в public, Admin, simulator list, snapshot и SSE;
+- автозакрытие после клиринга сохраняет согласие и не включает `closed` в поиск;
+- миграция: upgrade с legacy zero-limit/closed строками, отказ небезопасного downgrade, единственный head.
 
 ## Tasks
 
@@ -179,16 +321,26 @@
 
 | ID | Задача | Статус |
 |---|---|---|
-| `T2600` | Ответы владельца на В1–В7 — **даны 2026-09-29**; консультация Codex: точный перечень писателей, проверок и контрактов, миграция признака закрытия, порядок срезов, точные селекторы, бюджет; затем авторизация владельцем | `[ ]` |
-| `T2601` | В3: инвариант «рост выше лимита» — писатель, проверка в платеже, периодическая проверка; R-026-4 | `[!]` |
-| `T2602` | F-026-1: снижение лимита ниже долга; R-026-1 | `[!]` |
-| `T2603` | В1, В2: закрытие с долгом (признак запроса закрытия при статусе `active`, отражение в API и аудите, переход в `closed` при нулевом долге этого направления в той же транзакции, транзит); R-026-2, R-026-3; §5.3 | `[!]` |
-| `T2604` | В7: поле суммы, проводимой платежом (контрактный срез, §15) — только по решению В7 | `[!]` |
-| `T2605` | Документация: §3.3, §5.2, §5.3, §6.3.1, §11.5.2, решения, пометка историчности концептуального черновика (F-026-7) | `[!]` |
-| `T2606` | Независимое внешнее ревью §15 и публикация evidence на точном HEAD (деньги, контракт, миграция) | `[!]` |
-| `T2610` | Закрытие программы | `[!]` |
+| `T2600` | Ответы владельца на В1–В7 — **даны 2026-09-29**; консультация Codex — **выполнена 2026-09-29** (`ACCEPT-WITH-CHANGES`, `AUTHORIZE-RECOMMENDED`, P1 = 0, P2 = 2 — внесены; раздел «Решения консультации T2600»). Авторизация реализации — за владельцем, не выполнена | `[x]` |
+| `T2601` | **S1.** В3: before/after growth gate в книге (строки журнала) и в платеже (существующий prestate); periodic/integrity отдают `over_limit_allowed`, рост «не проверено»; R-026-4 поэтапно (полный — после S2). Только после слияния `T2415.3`. Потолок: ≤300 product / ≤550 test LOC; 0 таблиц, 0 модулей, 0 миграций; ≤1 пакетный SELECT на денежную операцию; `Contract: yes`; §15 до S2 | `[!]` |
+| `T2602` | **S2.** F-026-1: PATCH ниже used с row lock; предусловия endpoint и UI (в т. ч. `simulator.py:1421`, `:1515`); signed `available` во всех проекциях, три simulator clamp сняты; R-026-1. Потолок: ≤220 / ≤350 LOC; 0 сущностей, 0 миграций; новых per-row запросов нет; `Contract: yes`; §15 | `[!]` |
+| `T2603.1` | **S3.** В1, В2: `close_requested_at` + CHECK (одна миграция ≤70 LOC), close request/result/audit, автозакрытие в конце `Book.operation`, reopen, порядок locks с `T2415.3`, pending-transit по конкретизации В2; R-026-2, R-026-3; §5.3. Потолок: ≤500 / ≤850 LOC; 1 столбец, 1 CHECK, 1 миграция; S1+S3 ≤2 пакетных SELECT на денежную операцию; `Contract: yes`; §15 по деньгам, миграции и locks | `[!]` |
+| `T2603.2` | **S4.** Lifecycle симулятора (scenario, cache, snapshot, SSE, обе точки входа close — `simulator.py:1547` и др.), completion после commit, индикатор запроса в Admin. **S3 и S4 — один milestone выпуска.** Потолок: ≤350 / ≤550 LOC; 0 сущностей, 0 миграций; без N+1, ≤1 пакетный refresh; `Contract: yes`; §15, UI smoke | `[!]` |
+| `T2604` | **S5.** В7: отдельное поле `payment_capacity` (прямой платёж по направлению, не маршрутная гарантия) и точечные потребители. Потолок: ≤160 / ≤250 LOC; 0 сущностей, 0 миграций; ≤1 пакетный запрос; `Contract: yes`; отдельное §15 | `[!]` |
+| `T2605` | Документация — **вместе с каждым срезом**, не в конце: §3.3, §5.2, §5.3, §6.3.1, §11.5.2 протокола (`02-protocol-spec.md:182`, `:345`, `:366`, `:470`, `:1009`, `:1151`, `:2102`), решения, пометка историчности концептуального черновика (F-026-7). Потолок: ≤350 LOC документации | `[!]` |
+| `T2606` | Независимое внешнее ревью §15: по срезу на каждой критической границе (S1 до S2, S3 по деньгам/миграции/locks, S4, S5 отдельно) и итоговое с публикацией evidence на точном HEAD; итоговое не заменяет проверки зависимостей между срезами | `[!]` |
+| `T2610` | Закрытие программы по §19.5: находки класса 2 закрывающего ревью уходят в `specs/BACKLOG.md` с получателем и не открывают нового круга | `[!]` |
+
+**Baseline для §19.5.** До консультации в таблице было **8 задач**; после деления `T2603` на `T2603.1` и `T2603.2` (S3 и S4 — разные reviewable срезы одного milestone) baseline авторизации — **9 задач**, включая консультацию, документацию, внешнее ревью и закрытие. Дальнейшими дроблениями baseline не обнуляется. Признаки петли (AGENTS.md §19.5), при любом — остановка работы над механизмом и §19.4:
+- **14 задач** — уже больше 1,5 × baseline;
+- больше 10 новых задач за день;
+- четыре находки подряд только про механизм;
+- review-fix породил денежный дефект — откатить или сузить, а не строить следующий механизм.
+
+Суммарные потолки (1530 product LOC, 2550 test LOC, одна миграция ≤70 LOC, документация ≤350 LOC) — **потолки, а не измерения**; превышение — повод пересчитать и сузить срез.
 
 ## Changelog
 
 - **2026-09-29** — заведена по решению владельца (вариант A) на основании read-only инвентаризации v0 против эталона GEO. Несущие якоря перепроверены оркестратором по коду (`invariants.py:22-50`, `clearing/service.py:43-49`, `trustlines/service.py:581-587, 664-668, 1000-1012`, GEO `TrustLinesManager.cpp:172-208`). Реализация не авторизована.
-- **2026-09-29 (позже)** — ответы владельца на В1–В7 записаны (раздел «Решения владельца»): признак запроса закрытия вместо нового статуса; транзит только при уменьшении долга пары; рост долга — по состоянию до и после операции на пути записи; клиринг после платежа не включается; расширения GEO сохраняются; В6 открыт; vailable = limit − used сохраняется, отрицательное значение описывается в контракте. Реализация не авторизована: ждёт консультации объёма T2600.
+- **2026-09-29 (позже)** — ответы владельца на В1–В7 записаны (раздел «Решения владельца»): признак запроса закрытия вместо нового статуса; транзит только при уменьшении долга пары; рост долга — по состоянию до и после операции на пути записи; клиринг после платежа не включается; расширения GEO сохраняются; В6 открыт; `available = limit − used` сохраняется, отрицательное значение описывается в контракте. Реализация не авторизована: ждёт консультации объёма `T2600`.
+- **2026-09-29 (консультация `T2600`)** — Codex (`gpt-6-astra` запрошенная, reasoning high, read-only) на замороженном клоне `claude/026-answers` @ `e5a28e8`; артефакты `.local-run/codex-review/2026-09-29-026-t2600/`. Python и PostgreSQL у ревьюера отсутствовали — тесты, миграции и гейты не запускались, репродьюсеры не воспроизведены. Маркеры: `VERDICT-026: ACCEPT-WITH-CHANGES`, `T2600-DECISION: AUTHORIZE-RECOMMENDED`, `MIGRATION-NEEDED: YES`, `SLICES: 5`, `PRODUCT-QUESTIONS: 0`, P1 = 0, P2 = 2, P3 = 0. Внесены: раздел «Решения консультации T2600» (инвентаризация, развилки 1–7, конкретизация В2, бюджет), P2-1 — раздел «Owner surface», P2-2 — точные селекторы, намеренные замены ожиданий и поэтапная осуществимость R-026-4 в Verification plan; таблица задач заменена планом из пяти срезов (baseline 8 → 9). Попутно исправлен управляющий символ BEL (0x07) в предыдущей записи Changelog: восстановлено `available`. Реализация не авторизована — ждёт решения владельца.
