@@ -44,7 +44,7 @@ from app.core.simulator.money_replay import money_conflict_name
 from app.core.simulator.real_runner_impl import _is_transient_inject_db_error
 from app.core.trustlines.service import _LIVE_TRUSTLINE_INDEX, _is_live_trustline_uniqueness_violation
 from app.utils.exceptions import RetryablePaymentConflictException
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 CODES = {
     "40001": ("40001", None),
@@ -272,9 +272,6 @@ def test_every_policy_answers_every_shape_as_pinned():
     assert len(EXPECTED) == len(actual) and not mismatches, "\n".join(mismatches) or "\n".join(actual)
 
 
-@pytest.mark.xfail(
-    raises=TargetMismatch, strict=True, reason="024 target, delivered by T2415.1: trust-line classifier reads __context__"
-)
 @pytest.mark.parametrize("carrier", CARRIERS)
 def test_trustline_classifier_does_not_read_context(carrier):
     """F-024-10: a not-null violation raised while a live-line clash was being handled is not that clash.
