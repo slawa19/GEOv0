@@ -1777,7 +1777,7 @@ class PaymentService:
 
         Both active lines are read `FOR SHARE` and held to the end of the money transaction (owner decision A,
         024 `T2415.3`): a line change committed after this snapshot fails the lock with 40001 and the retry
-        refuses on a fresh snapshot; a later change waits for this payment. Not the router's nor `/balance`'s."""
+        re-checks on a fresh snapshot (refused only if capacity or policy now fails); a later change waits for this payment. Not the router's nor `/balance`'s."""
 
         tl = TrustLine
         pair = {sender_id, receiver_id}
