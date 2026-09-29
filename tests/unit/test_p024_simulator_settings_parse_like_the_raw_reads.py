@@ -8,11 +8,13 @@ those rules, read through a fresh `Settings()` from the process environment.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 import pytest
 
 from app.config import Settings
+
+_RED = pytest.mark.xfail(raises=InvalidOperation, strict=True, reason="024 T2414 fix-delta P2: quantize outside the boundary")
 
 
 @pytest.mark.parametrize(
@@ -38,6 +40,11 @@ from app.config import Settings
         ("SIMULATOR_REAL_AMOUNT_CAP", "0", None),
         ("SIMULATOR_REAL_AMOUNT_CAP", "NaN", None),
         ("SIMULATOR_REAL_AMOUNT_CAP", "cap", None),
+        # Values the quantization refuses (024 `T2414` §15 fix-delta, P2): the raw read caught those too.
+        pytest.param("SIMULATOR_REAL_AMOUNT_CAP", "Infinity", None, marks=_RED),
+        ("SIMULATOR_REAL_AMOUNT_CAP", "-Infinity", None),
+        pytest.param("SIMULATOR_REAL_AMOUNT_CAP", "1e100", None, marks=_RED),
+        ("SIMULATOR_REAL_AMOUNT_CAP", "sNaN", None),
         ("SIMULATOR_SCENARIO_ALLOWLIST", "all", "all"),
     ],
 )
