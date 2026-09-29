@@ -28,6 +28,7 @@ from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.ledger.book import Book, ClearingReduction, operation_for
 from app.db.journal_tables import CLEARING_INTENT_ENCODING_VERSION
+from app.db.sqlstate import ROLLED_BACK_SQLSTATES, chain_codes
 
 logger = logging.getLogger(__name__)
 
@@ -470,44 +471,15 @@ class ClearingService:
 
     @staticmethod
     def _postgres_error_codes(exc: BaseException) -> set[str]:
-        """Codes carried by THIS failure: `orig` / `__cause__` only, never `__context__`.
+        """Codes carried by THIS failure: `orig` / `__cause__` only, never `__context__` (`app/db/sqlstate.py`).
 
-        WHICH EXCEPTION THE CODES ARE READ FROM - and this is NOT the recorded limitation below.
-        `_is_retryable_concurrency_error` remains PostgreSQL-SQLSTATE-only: that decision is about
-        WHICH CODES count as transient (40001/40P01, and deliberately not SQLITE_BUSY_SNAPSHOT),
-        and it stands unchanged. What changed on 2026-09-12 is WHICH EXCEPTION IN THE CHAIN those
-        codes may be read from. The two are independent, and the next reader should not take this
-        for a quiet reversal of the recorded SQLite decision.
-
-        WHY, since clearing writes debt. Python sets `__context__` to whatever was being handled
-        when an exception was raised. Walking it meant a TERMINAL failure raised inside a `40001`
-        handler inherited the conflict's code and was called retryable - the same defect fixed in
-        `app/core/payments/service.py`, on the same money path. Following `orig`/`__cause__` loses
-        nothing: SQLAlchemy raises `DBAPIError` FROM the driver error, so a genuine code is always
-        reachable through deliberate wrapping.
-
-        The consumers are `_is_retryable_concurrency_error` (`:1717`, `:1743`, `:2121`) and the
-        `55P03` interlock branch (`:1611`); each receives the `DBAPIError` itself, so the code sits
-        on it or on its `orig`. That a real `55P03` and a real `40001` are still found through the
-        narrowed walk is measured, not assumed, by
+        The consumers are `_is_retryable_concurrency_error` and the `55P03` interlock branch; each
+        receives the `DBAPIError` itself. That a real `55P03` and a real `40001` are still found through
+        the deliberate walk is measured by
         `tests/integration/test_p015_t1525_classification_reads_deliberate_wrapping_only_postgres.py`.
         """
 
-        current: BaseException | None = exc
-        seen: set[int] = set()
-        codes: set[str] = set()
-        while current is not None and id(current) not in seen:
-            seen.add(id(current))
-            for attr in ("sqlstate", "pgcode", "code"):
-                value = getattr(current, attr, None)
-                if value is not None:
-                    codes.add(str(value).strip())
-
-            following = getattr(current, "orig", None)
-            if not isinstance(following, BaseException):
-                following = current.__cause__
-            current = following if isinstance(following, BaseException) else None
-        return codes
+        return chain_codes(exc)
 
     @classmethod
     def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
@@ -532,7 +504,7 @@ class ClearingService:
         # and five multi-session modules ten times each, all with zero busy errors from clearing.
         # HISTORY: the SQLite half of this note no longer applies - SQLite, its busy predicate and
         # `app/db/sqlite_transaction_control.py` left the application in programme 017 stage 3.
-        return bool(cls._postgres_error_codes(exc) & {"40001", "40P01"})
+        return bool(cls._postgres_error_codes(exc) & ROLLED_BACK_SQLSTATES)
 
     async def _reconcile_committed_execution(
         self,
@@ -1645,7 +1617,7 @@ class ClearingService:
             except _ClearingAttemptConflict as conflict:
                 cause = conflict.cause
             self.session.expunge_all()
-            codes = sorted(self._postgres_error_codes(cause) & {"40001", "40P01"})
+            codes = sorted(self._postgres_error_codes(cause) & ROLLED_BACK_SQLSTATES)
             delay = min(cap_seconds, base_seconds * (2 ** (attempt_no - 1)))
             delay *= 1.0 + 0.25 * random.random()
             if attempt_no >= attempts or loop.time() + delay >= deadline:

@@ -80,15 +80,13 @@ from app.core.payments.service import (
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
 from app.core.simulator.models import RunRecord
 from app.db.models.transaction import Transaction
+from app.db.sqlstate import ROLLED_BACK_SQLSTATES, sqlstate
 from app.utils.exceptions import RetryablePaymentConflictException
 
-#: PostgreSQL reports these for a transaction IT has already rolled back, which is what makes the
-#: attempt known not to have landed. 40001 serialization_failure, 40P01 deadlock_detected. The
-#: payment retry owner (`app/core/payments/service.py`) and the inject loop
-#: (`real_runner_impl.py`, which adds `55P03`) declare their own sets; nothing keeps them in step
-#: yet - one extractor with per-owner retry policies is 024 `T2415.1`. (Until 019 this named
-#: `PaymentEngine._is_retryable_db_error`, which is gone.)
-_TRANSIENT_SQLSTATES = frozenset({"40001", "40P01"})
+#: What the money-phase replay repeats besides the typed conflicts and the debt-pair `23505`: the codes
+#: PostgreSQL reports for a transaction it has already rolled back. The payment owner declares the same
+#: policy on the same fact; the inject adds `55P03` (`app/db/sqlstate.py`, 024 `T2415.1`).
+_TRANSIENT_SQLSTATES = ROLLED_BACK_SQLSTATES
 
 
 class MoneyCommitOutcomeUnknown(RuntimeError):
@@ -132,14 +130,10 @@ def money_conflict_name(exc: BaseException | None) -> str | None:
     if isinstance(exc, DebtVersionConflict):
         return "DEBT_VERSION_CONFLICT"
     if isinstance(exc, DBAPIError):
-        orig = getattr(exc, "orig", None)
-        sqlstate = (
-            getattr(orig, "sqlstate", None)
-            or getattr(orig, "pgcode", None)
-            or getattr(orig, "code", None)
-        )
-        if sqlstate in _TRANSIENT_SQLSTATES:
-            return str(sqlstate)
+        # The driver error the wrapper carries, one level: this owner never walked further.
+        code = sqlstate(getattr(exc, "orig", None), walk=False)
+        if code in _TRANSIENT_SQLSTATES:
+            return code
         if is_debt_pair_collision(exc):
             # 019 stage 5 (`T1909`, precondition 1): two writers inserted the same new debt row; the
             # constraint is named, and no other 23505 passes (`is_debt_pair_collision`).

@@ -38,6 +38,7 @@ from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.db.sqlstate import ROLLED_BACK_SQLSTATES, sqlstate
 
 # 40001 serialization_failure, 40P01 deadlock_detected: PostgreSQL has rolled the transaction back
 # and the whole unit of work may run again.
@@ -48,18 +49,17 @@ from app.db.models.trustline import TrustLine
 # inject whenever another writer held the equivalent a little too long. The tick orchestrator's own
 # lock timeout fails the tick without firing anything; the inject owner now does the same once its
 # single retry is spent. Nothing else is retried.
-_INJECT_TRANSIENT_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
+_INJECT_TRANSIENT_SQLSTATES = ROLLED_BACK_SQLSTATES | {"55P03"}
 
 
 def _is_transient_inject_db_error(exc: BaseException) -> bool:
     if not isinstance(exc, DBAPIError):
         return False
-    orig = getattr(exc, "orig", None)
-    # asyncpg's adapted error carries `sqlstate`, psycopg's `pgcode`.
-    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    # The driver error the wrapper carries, one level, `sqlstate`/`pgcode` only (never `.code`).
+    code = sqlstate(getattr(exc, "orig", None), walk=False, bare_code=False)
     # 019 stage 5 (`T1909`, precondition 1): a concurrent writer inserted the same new debt row - a
     # `23505` on exactly `uq_debts_debtor_creditor_equivalent`, transient like 40001; no other 23505.
-    return sqlstate in _INJECT_TRANSIENT_SQLSTATES or is_debt_pair_collision(exc)
+    return code in _INJECT_TRANSIENT_SQLSTATES or is_debt_pair_collision(exc)
 
 
 class RealRunnerImpl:
