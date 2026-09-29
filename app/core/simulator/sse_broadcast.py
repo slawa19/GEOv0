@@ -6,8 +6,8 @@ import time
 import threading
 from typing import Any, Callable, Optional
 
+from app.config import settings
 from app.core.simulator.models import RunRecord, _Subscription
-from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.schemas.simulator import (
     SimulatorAuditDriftEvent,
     SimulatorClearingDoneEvent,
@@ -52,12 +52,9 @@ class SseBroadcast:
         self._queue_full_drop_by_type: dict[str, int] = {}
         self._queue_full_close_total = 0
 
-        # Best-effort concurrent connection limits. Cached to avoid reading env on every
-        # `subscribe()` call.
-        self._max_subs_total = _safe_int_env("SIMULATOR_SSE_MAX_CONNECTIONS", 50)
-        self._max_subs_per_run = _safe_int_env(
-            "SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", 10
-        )
+        # Best-effort concurrent connection limits, read once at construction.
+        self._max_subs_total = settings.SIMULATOR_SSE_MAX_CONNECTIONS
+        self._max_subs_per_run = settings.SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN
 
     def _count_total_subs_locked(self) -> int:
         """Counts subscriptions across all runs.

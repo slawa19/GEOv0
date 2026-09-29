@@ -18,7 +18,7 @@ from tests.simulator_tick_stand import unit_tick
 @pytest.mark.asyncio
 async def test_await_pending_clearing_cancels_after_grace(monkeypatch) -> None:
     # Keep test fast: cap hard timeout to 1s => grace 0.5s
-    monkeypatch.setenv("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 1)
 
     orch = unit_tick(_clearing_every_n_ticks=1, _real_clearing_time_budget_ms=1)
 

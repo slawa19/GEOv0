@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import time
 from datetime import datetime, timezone
 
@@ -16,7 +15,10 @@ from app.schemas.common import AdminDbHealthResponse, ErrorEnvelope, HealthRespo
 from app.utils.background_jobs import background_health_status
 
 
+# Public probes, mounted twice: under /api/v1 (rate limited, `app/api/router.py`) and at the root (`app/main.py`).
 router = APIRouter()
+# The admin diagnostic, under /api/v1 only.
+admin_router = APIRouter()
 
 _START_TIME = time.time()
 
@@ -26,11 +28,8 @@ def _utc_now_iso() -> str:
 
 
 def _best_effort_version() -> str:
-    v = (os.getenv("GEO_APP_VERSION") or os.getenv("APP_VERSION") or "").strip()
-    if v:
-        return v
     # No packaging metadata in this repo; default to a dev marker.
-    return "dev"
+    return settings.GEO_APP_VERSION.strip() or "dev"
 
 
 def _best_effort_environment() -> str:
@@ -109,7 +108,7 @@ async def health_db_check():
         )
 
 
-@router.get(
+@admin_router.get(
     "/admin/health/db",
     tags=["Admin"],
     responses={

@@ -104,7 +104,7 @@ def test_the_snapshot_drops_an_edge_whose_end_is_not_a_participant(caplog) -> No
 async def test_trustlines_list_does_not_read_an_orphan_edge(client, db_session, monkeypatch) -> None:
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr(simulator_storage, "db_enabled", lambda: True)
     eq, s1, s2, r1, r2, scenario = await _world(db_session)
     client.cookies.clear()

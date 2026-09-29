@@ -768,11 +768,7 @@ class RealPaymentsExecutor:
                                         patch_session,
                                         equivalent_code=str(eq),
                                         refresh_every_ticks=int(
-                                            getattr(
-                                                settings,
-                                                "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS",
-                                                10,
-                                            )
+                                            settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS
                                             or 10
                                         ),
                                     )

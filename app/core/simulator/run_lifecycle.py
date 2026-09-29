@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
-import os
 import random
 from datetime import datetime
 from typing import Any, Callable, Optional
 
 import app.core.simulator.storage as simulator_storage
+from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import RunRecord
 from app.core.simulator.sse_broadcast import SseBroadcast
@@ -182,13 +182,8 @@ class RunLifecycle:
         )
 
         if mode == "real":
-            try:
-                run._real_max_in_flight = max(
-                    1,
-                    int(os.getenv("SIMULATOR_REAL_MAX_IN_FLIGHT", str(self._real_max_in_flight_default))),
-                )
-            except Exception:
-                run._real_max_in_flight = self._real_max_in_flight_default
+            configured = settings.SIMULATOR_REAL_MAX_IN_FLIGHT
+            run._real_max_in_flight = max(1, self._real_max_in_flight_default if configured is None else configured)
 
         # Precompute per-equivalent edges for quick event generation.
         # (Needed for both fixtures + real runners.)

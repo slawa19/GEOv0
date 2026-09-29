@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import os
 import secrets
 import time
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,75 +30,11 @@ def local_state_dir() -> Path:
 FIXTURES_DIR = repo_root() / "fixtures" / "simulator"
 SCENARIO_SCHEMA_PATH = FIXTURES_DIR / "scenario.schema.json"
 
-# Runner constants (MVP, see docs/ru/simulator/backend/runner-algorithm.md)
-TICK_MS_BASE = 1000
-ACTIONS_PER_TICK_MAX = 20
-CLEARING_EVERY_N_TICKS = 25
-
-# Real-mode guardrails (PR-B hardening). Values can be overridden via env vars.
+# Real-mode guardrail defaults (PR-B hardening); `SIMULATOR_REAL_MAX_*` in `Settings` override them.
 REAL_MAX_IN_FLIGHT_DEFAULT = 1
 REAL_MAX_CONSEC_TICK_FAILURES_DEFAULT = 3
 REAL_MAX_TIMEOUTS_PER_TICK_DEFAULT = 5
 REAL_MAX_ERRORS_TOTAL_DEFAULT = 200
-
-
-def safe_int_env(name: str, default: int) -> int:
-    """Parse int env var with a defensive fallback.
-
-    Behavior is intentionally lenient and matches the prior local helpers:
-    - missing / empty value -> default
-    - any parsing error -> default
-    """
-
-    try:
-        return int(os.getenv(name, str(default)) or str(default))
-    except Exception:
-        return int(default)
-
-
-def safe_float_env(name: str, default: float) -> float:
-    """Parse float env var with a defensive fallback.
-
-    - missing / empty value -> default
-    - any parsing error -> default
-    """
-
-    try:
-        raw = os.getenv(name, "")
-        if not str(raw).strip():
-            return float(default)
-        return float(raw)
-    except Exception:
-        return float(default)
-
-
-def safe_str_env(name: str, default: str) -> str:
-    """Read string env var with a defensive fallback."""
-
-    raw = os.getenv(name, "")
-    return str(raw).strip() if str(raw).strip() else str(default)
-
-
-def safe_optional_decimal_env(name: str) -> Decimal | None:
-    """Parse optional Decimal env var.
-
-    Behavior matches the historical RealRunner helpers:
-    - missing / empty value -> None
-    - non-positive / NaN -> None
-    - any parsing error -> None
-    - quantize to 0.01 with ROUND_DOWN
-    """
-
-    try:
-        raw = os.getenv(name, "")
-        if not str(raw).strip():
-            return None
-        v = Decimal(str(raw))
-        if v.is_nan() or v <= 0:
-            return None
-        return v.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-    except (InvalidOperation, Exception):
-        return None
 
 
 def new_run_id() -> str:

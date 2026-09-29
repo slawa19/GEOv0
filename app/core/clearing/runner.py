@@ -439,7 +439,7 @@ async def run_awaited_clearing(
     `wait_timeout_seconds`. The entry of `POST /clearing/auto` since slice (d).
     """
 
-    if not bool(getattr(settings, "CLEARING_ENABLED", True)):
+    if not settings.CLEARING_ENABLED:
         raise BadRequestException("Clearing is disabled")
     validate_equivalent_code(equivalent_code)
     async with renewable_lease(
@@ -458,7 +458,7 @@ async def check_periodic_isolation(session) -> None:
     Run inside the snapshot's transaction, so the check and the snapshot see one state.
     """
 
-    if not bool(getattr(settings, "SIMULATOR_DB_ENABLED", False)):
+    if not settings.SIMULATOR_DB_ENABLED:
         # This process's real runs would leave no `simulator_runs` row: the absence of rows proves nothing.
         raise ClearingPeriodicRefused("simulator_persistence_disabled")
     real_run = (
@@ -475,7 +475,7 @@ async def run_periodic_clearing_pass(session_factory, redis_client) -> dict[str,
     its interrupted result kept; the other equivalents still run.
     """
 
-    if not bool(getattr(settings, "CLEARING_ENABLED", True)):
+    if not settings.CLEARING_ENABLED:
         logger.info("event=clearing.periodic.disabled")
         return {}
     async with session_factory() as session:

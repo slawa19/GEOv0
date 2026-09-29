@@ -455,7 +455,7 @@ async def test_super_smoke_part1_fixtures_http_visual_contract(
 ) -> None:
     """Part 1: fixtures-mode HTTP + SSE + visual contract."""
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
 
     dump = _DumpCollector(test_name="test_super_smoke_part1_fixtures_http_visual_contract")
     scenario_id = "greenfield-village-100-realistic-v2"

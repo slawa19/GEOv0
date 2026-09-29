@@ -79,7 +79,15 @@ trustline-update и `PATCH` кредитора — читают долг без 
   переменную с умолчанием `false`), из `ENV` он не выводится;
 - simulator: `SIMULATOR_DB_ENABLED`, `SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS`,
   `SIMULATOR_SESSION_*`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`,
-  `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`;
+  `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`, а с 2026-09-29 (024 `T2414.1`) и прежние прямые чтения
+  окружения — `SIMULATOR_ACTIONS_ENABLE`, `SIMULATOR_SCENARIO_ALLOWLIST`, `SIMULATOR_REAL_*`,
+  `SIMULATOR_SSE_*` и остальные ручки рантайма симулятора. Имена и дефолты прежние; пустое или
+  нечисловое значение по-прежнему даёт дефолт, а не отказ старта. Новое: они читаются вместе с
+  остальными настройками, в том числе из `.env`, один раз при старте процесса. Вне
+  `app/config.py` приложение окружение не читает (`tests/unit/test_p024_no_os_environ_outside_config.py`);
+- версия для `/health`: `GEO_APP_VERSION`, при его отсутствии — `APP_VERSION`, иначе `dev`. Оговорка (§15-ревью
+  `T2414`, `specs/BACKLOG.md`): имя `GEO_APP_VERSION` из `.env` побеждает `APP_VERSION` процессного окружения —
+  задавайте версию одним именем в одном месте;
 - Admin graph include limits: `ADMIN_GRAPH_INCLUDE_MAX_*`.
 
 In-memory fallback rate limiter хранит не более `10_000` bucket/host-записей

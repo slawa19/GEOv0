@@ -39,6 +39,7 @@ class ErrorDetail(BaseModel):
     code: str
     message: str
     details: Optional[Dict[str, Any]] = None
+    request_id: Optional[str] = None  # = the `X-Request-ID` response header (024 `T2414.2`)
 
 class ErrorEnvelope(BaseModel):
     error: ErrorDetail

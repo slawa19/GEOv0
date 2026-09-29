@@ -31,10 +31,7 @@ from app.core.simulator.real_payment_planner import RealPaymentPlanner
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
 from app.core.simulator.scenario_equivalent import effective_equivalent
-from app.core.simulator.runtime_utils import (
-    safe_int_env as _safe_int_env,
-    safe_optional_decimal_env as _safe_optional_decimal_env,
-)
+from app.config import settings
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.tick import RealTick
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
@@ -103,62 +100,33 @@ class RealRunnerImpl:
         self._real_max_errors_total_default = int(real_max_errors_total_default)
         self._logger = logger
 
-        # Cache env-derived limits (avoid getenv on every tick).
-        self._real_max_consec_tick_failures_limit = _safe_int_env(
-            "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
-            int(self._real_max_consec_tick_failures_default),
-        )
-        self._real_max_timeouts_per_tick_limit = _safe_int_env(
-            "SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK",
-            int(self._real_max_timeouts_per_tick_default),
-        )
-        self._real_max_errors_total_limit = _safe_int_env(
-            "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
-            int(self._real_max_errors_total_default),
-        )
+        # Limits from Settings (024 `T2414.1`); None there keeps the runtime default passed in.
+        self._real_max_consec_tick_failures_limit = self._real_max_consec_tick_failures_default if settings.SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES is None else settings.SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES
+        self._real_max_timeouts_per_tick_limit = self._real_max_timeouts_per_tick_default if settings.SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK is None else settings.SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK
+        self._real_max_errors_total_limit = self._real_max_errors_total_default if settings.SIMULATOR_REAL_MAX_ERRORS_TOTAL is None else settings.SIMULATOR_REAL_MAX_ERRORS_TOTAL
         # `SIMULATOR_CLEARING_MAX_DEPTH` is no longer read (programme 023 slice (d), R4): clearing execution has no
         # depth. The runbook records the variable as removed.
-        self._clearing_max_fx_edges_limit = _safe_int_env(
-            "SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", 30
-        )
+        self._clearing_max_fx_edges_limit = settings.SIMULATOR_CLEARING_MAX_EDGES_FOR_FX
         # Amount cap is opt-in. Default must not override scenario amount_model bounds.
-        self._real_amount_cap_limit = _safe_optional_decimal_env(
-            "SIMULATOR_REAL_AMOUNT_CAP"
-        )
-        self._real_enable_inject = (
-            int(_safe_int_env("SIMULATOR_REAL_ENABLE_INJECT", 0)) >= 1
-        )
+        self._real_amount_cap_limit = settings.SIMULATOR_REAL_AMOUNT_CAP
+        self._real_enable_inject = settings.SIMULATOR_REAL_ENABLE_INJECT >= 1
 
         # Programme 015 / P1: the bounded replay of the tick's money phase.
         # `..._MONEY_REPLAY_ATTEMPTS` counts ATTEMPTS, not retries, so 1 disables the replay.
         # `..._MAX_CONSEC_MONEY_NO_PROGRESS` is the explicit no-progress criterion that may stop a
         # run under permanent contention - the replacement for stopping a run on a SQLSTATE.
-        self._real_money_replay_attempts_limit = _safe_int_env(
-            "SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS", 3
-        )
-        self._real_max_consec_money_no_progress_limit = _safe_int_env(
-            "SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS", 10
-        )
+        self._real_money_replay_attempts_limit = settings.SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS
+        self._real_max_consec_money_no_progress_limit = settings.SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS
 
-        # Cache env-derived throttling knobs (avoid getenv on every tick).
-        self._real_db_metrics_every_n_ticks = _safe_int_env(
-            "SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS", 5
-        )
-        self._real_db_bottlenecks_every_n_ticks = _safe_int_env(
-            "SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS", 10
-        )
-        self._real_last_tick_write_every_ms = _safe_int_env(
-            "SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS", 500
-        )
-        self._real_artifacts_sync_every_ms = _safe_int_env(
-            "SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS", 5000
-        )
+        # Throttling knobs from Settings.
+        self._real_db_metrics_every_n_ticks = settings.SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS
+        self._real_db_bottlenecks_every_n_ticks = settings.SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS
+        self._real_last_tick_write_every_ms = settings.SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS
+        self._real_artifacts_sync_every_ms = settings.SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS
 
         # Clearing loop throttling: keep default behavior, but avoid long event-loop stalls.
         # If budget is exceeded, clearing will continue on the next tick.
-        self._real_clearing_time_budget_ms = _safe_int_env(
-            "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 250
-        )
+        self._real_clearing_time_budget_ms = settings.SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS
 
         # Sub-components: eager init (the runner is created once on startup).
         self._edge_patch_builder: EdgePatchBuilder = EdgePatchBuilder(logger=self._logger)

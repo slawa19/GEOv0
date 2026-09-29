@@ -1298,15 +1298,15 @@ class PaymentService:
         # hub settings may cap it from above).
         client_constraints: PaymentConstraints | None = request.constraints
 
-        multipath_enabled = bool(getattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", True))
+        multipath_enabled = settings.FEATURE_FLAGS_MULTIPATH_ENABLED
 
-        server_max_hops = int(getattr(settings, "ROUTING_MAX_HOPS", 6) or 6)
-        server_max_paths = int(getattr(settings, "ROUTING_MAX_PATHS", 3) or 3)
+        server_max_hops = int(settings.ROUTING_MAX_HOPS or 6)
+        server_max_paths = int(settings.ROUTING_MAX_PATHS or 3)
         if not multipath_enabled:
             server_max_paths = 1
 
         server_timeout_ms = int(
-            getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 500) or 500
+            settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 500
         )
 
         def _effective_int(*, client_value: int | None, server_default: int) -> int:
@@ -1332,10 +1332,10 @@ class PaymentService:
             effective_avoid = [str(x) for x in client_constraints.avoid if isinstance(x, str) and x]
 
         routing_timeout_s = float(max(1, effective_timeout_ms)) / 1000.0
-        prepare_timeout_s = float(getattr(settings, "PREPARE_TIMEOUT_SECONDS", 3) or 3)
-        commit_timeout_s = float(getattr(settings, "COMMIT_TIMEOUT_SECONDS", 5) or 5)
+        prepare_timeout_s = float(settings.PREPARE_TIMEOUT_SECONDS or 3)
+        commit_timeout_s = float(settings.COMMIT_TIMEOUT_SECONDS or 5)
         total_timeout_s = float(
-            getattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 10) or 10
+            settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10
         )
 
         try:
@@ -2201,9 +2201,9 @@ class PaymentService:
         _count_create_start()
         make_service = _service_for or cls
         loop = asyncio.get_running_loop()
-        total_timeout_s = float(getattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 10) or 10)
+        total_timeout_s = float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10)
         deadline = loop.time() + total_timeout_s
-        attempts = max(1, int(getattr(settings, "COMMIT_RETRY_ATTEMPTS", 1) or 1))
+        attempts = max(1, int(settings.COMMIT_RETRY_ATTEMPTS or 1))
         attempt_no = 0
         admission: _Admission | None = None
         while True:
@@ -2714,14 +2714,14 @@ async def record_definitive_refusal(
 
     values = dict(refusal.row)
     values.update(state="ABORTED", error=refusal.error, signatures=[])
-    tries = max(1, int(getattr(settings, "COMMIT_RETRY_ATTEMPTS", 1) or 1))
+    tries = max(1, int(settings.COMMIT_RETRY_ATTEMPTS or 1))
     last_error: BaseException | None = None
     for _ in range(tries):
         # BOUNDED (stage-3 review, P2 #5): the rest of the deadline, at least the grace.
         if deadline is not None:
             remaining_ms = int((deadline - asyncio.get_running_loop().time()) * 1000)
         else:
-            remaining_ms = int(float(getattr(settings, "COMMIT_TIMEOUT_SECONDS", 5) or 5) * 1000)
+            remaining_ms = int(float(settings.COMMIT_TIMEOUT_SECONDS or 5) * 1000)
         lock_timeout_ms = max(_REFUSAL_RECORD_LOCK_GRACE_MS, remaining_ms)
         async with sessions() as session:
             try:

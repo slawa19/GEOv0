@@ -376,7 +376,7 @@ def run_owning_the_cycle(monkeypatch):
     """A simulator run whose scenario holds s1/s2/s3, the participants of the cycle below."""
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_run",

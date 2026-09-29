@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def db_enabled() -> bool:
-    return bool(getattr(settings, "SIMULATOR_DB_ENABLED", False))
+    return settings.SIMULATOR_DB_ENABLED
 
 
 def _validate_run_for_storage(run: RunRecord) -> None:
@@ -103,9 +102,7 @@ async def sync_artifacts(run: RunRecord) -> None:
         return
 
     try:
-        sha_max_bytes = int(
-            os.getenv("SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "524288") or "524288"
-        )
+        sha_max_bytes = settings.SIMULATOR_ARTIFACT_SHA_MAX_BYTES
 
         items: list[dict[str, object]] = []
         for p in sorted(base.iterdir()):

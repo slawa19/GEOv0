@@ -11,7 +11,7 @@ async def test_simulator_fixtures_mode_emits_clearing_done_with_plan_id(
     auth_headers,
     monkeypatch,
 ):
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
 
     resp = await client.post(
         "/api/v1/simulator/runs",

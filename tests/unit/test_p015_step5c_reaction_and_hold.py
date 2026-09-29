@@ -859,7 +859,7 @@ async def test_step5c_clearing_real_reports_the_hold_as_its_declared_409(client,
     import app.api.v1.simulator as simulator_module
     from app.core.simulator.models import RunRecord
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_run",

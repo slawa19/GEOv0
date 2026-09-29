@@ -88,7 +88,7 @@ def interact(monkeypatch, db_session):
 
     n = uuid.uuid4().hex[:6].upper()
     w = SimpleNamespace(run_id=f"p021-i-{n}", a=f"P21I_A_{n}", b=f"P21I_B_{n}", eq=f"P21I{n}")
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_run",

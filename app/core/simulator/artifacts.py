@@ -13,6 +13,7 @@ from sqlalchemy import delete
 
 import app.core.simulator.storage as simulator_storage
 import app.db.session as db_session
+from app.config import settings
 from app.core.simulator.helpers import artifact_content_type, artifact_sha256
 from app.core.simulator.models import RunRecord
 from app.db.models.simulator_storage import SimulatorRunArtifact
@@ -131,7 +132,7 @@ class ArtifactsManager:
                 bundle_url=None,
             )
 
-        sha_max_bytes = int(os.getenv("SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "524288") or "524288")
+        sha_max_bytes = settings.SIMULATOR_ARTIFACT_SHA_MAX_BYTES
 
         items: list[ArtifactItem] = []
         for p in sorted(base.iterdir()):

@@ -1,7 +1,7 @@
 """Programme 024, step Sh2, slice `T2412.1`: the verdict of the debt reconciliation is visible.
 
 R-024-4 (spec `specs/024-core-hygiene/spec.md`, Verification plan 1). The scheduled integrity job hosts the
-reconciliation (`app/main.py`, `_run_integrity_checkpoints_once`). Before this slice an ERROR while verifying
+reconciliation (`app/core/maintenance_jobs.py` since 024 `T2414.2`, `_run_integrity_checkpoints_once`). Before this slice an ERROR while verifying
 one equivalent - or while reacting to its FAILED - was only logged: `run_scheduled_reconciliation` counts it
 and returns the counts, nobody read them, and the job recorded `<reason>_success`, so `/health` stayed `ok`.
 
@@ -57,10 +57,10 @@ async def _equivalent(factory, code: str) -> uuid.UUID:
 
 
 async def _run_the_host(monkeypatch, factory) -> SimpleNamespace:
-    """`app.main._run_integrity_checkpoints_once` on the clone, as the integrity loop calls it."""
+    """`app.core.maintenance_jobs._run_integrity_checkpoints_once` on the clone, as the integrity loop calls it."""
 
     import app.db.session as app_db_session
-    import app.main as main_module
+    import app.core.maintenance_jobs as main_module
 
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", factory)
     app = SimpleNamespace(state=SimpleNamespace(redis=None, background_jobs={}))
@@ -432,7 +432,7 @@ class _Stand:
         monkeypatch.setattr(reconciliation, "run_scheduled_reconciliation", reconcile)
 
     async def run(self) -> dict:
-        import app.main as main_module
+        import app.core.maintenance_jobs as main_module
 
         await main_module._run_integrity_checkpoints_once(self.app, reason="periodic")
         return dict(self.app.state.background_jobs["integrity"])

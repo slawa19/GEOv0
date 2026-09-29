@@ -138,27 +138,33 @@ def get_payment_session_factory():
 
     return db_session.AsyncSessionLocal
 
+async def _active_participant_from_token(db: AsyncSession, token: str) -> Participant | None:
+    """The one chain "bearer token -> participant -> active" (024 `T2414.2`; it was copied three times).
+
+    None when the token does not decode or names no subject - each caller decides what that means: the
+    participant and participant-or-admin dependencies refuse, the simulator actor falls through to its cookie.
+    A subject with no participant is 401, a participant who is not active is 403.
+    """
+    payload = await decode_token(token)
+    pid: str | None = payload.get("sub") if payload else None
+    if not pid:
+        return None
+    result = await db.execute(select(Participant).where(Participant.pid == pid))
+    participant = result.scalar_one_or_none()
+    if not participant:
+        raise UnauthorizedException("Participant not found")
+    if participant.status != "active":
+        raise ForbiddenException("Participant account is not active")
+    return participant
+
+
 async def get_current_participant(
     db: AsyncSession = Depends(get_db),
     token: str = Depends(reusable_oauth2)
 ) -> Participant:
-    payload = await decode_token(token)
-    if not payload:
+    participant = await _active_participant_from_token(db, token)
+    if participant is None:
         raise UnauthorizedException("Could not validate credentials")
-    
-    pid: str = payload.get("sub")
-    if pid is None:
-        raise UnauthorizedException("Could not validate credentials")
-    
-    result = await db.execute(select(Participant).where(Participant.pid == pid))
-    participant = result.scalar_one_or_none()
-    
-    if not participant:
-        raise UnauthorizedException("Participant not found")
-    
-    if participant.status != 'active':
-        raise ForbiddenException("Participant account is not active")
-        
     return participant
 
 
@@ -173,26 +179,9 @@ async def require_participant_or_admin(
             raise ForbiddenException("Admin token required")
         return None
 
-    if not token:
+    participant = await _active_participant_from_token(db, token) if token else None
+    if participant is None:
         raise UnauthorizedException("Could not validate credentials")
-
-    payload = await decode_token(token)
-    if not payload:
-        raise UnauthorizedException("Could not validate credentials")
-
-    pid: str = payload.get("sub")
-    if pid is None:
-        raise UnauthorizedException("Could not validate credentials")
-
-    result = await db.execute(select(Participant).where(Participant.pid == pid))
-    participant = result.scalar_one_or_none()
-
-    if not participant:
-        raise UnauthorizedException("Participant not found")
-
-    if participant.status != 'active':
-        raise ForbiddenException("Participant account is not active")
-
     return participant
 
 
@@ -207,9 +196,9 @@ async def require_admin(
         return
 
     # Dev-only convenience: allow missing token for trusted client IPs.
-    if getattr(settings, "ENV", "dev") == "dev" and bool(getattr(settings, "ADMIN_DEV_MODE", False)):
+    if settings.ENV == "dev" and settings.ADMIN_DEV_MODE:
         client_host = (request.client.host if request.client else None) or ""
-        allow_raw = str(getattr(settings, "ADMIN_DEV_ALLOWLIST", "") or "")
+        allow_raw = settings.ADMIN_DEV_ALLOWLIST
         allow = {h.strip() for h in allow_raw.split(",") if h.strip()}
         if client_host and client_host in allow:
             return
@@ -315,23 +304,14 @@ async def require_simulator_actor(
 
     # 2. Bearer JWT → participant
     if _actor is None and token:
-        payload = await decode_token(token)
-        if payload:
-            pid: str | None = payload.get("sub")
-            if pid:
-                # Validate participant exists and is active.
-                result = await db.execute(select(Participant).where(Participant.pid == pid))
-                participant = result.scalar_one_or_none()
-                if not participant:
-                    raise UnauthorizedException("Participant not found")
-                if participant.status != "active":
-                    raise ForbiddenException("Participant account is not active")
-                _actor = SimulatorActor(
-                    kind="participant",
-                    owner_id=f"pid:{pid}",
-                    is_admin=False,
-                    participant_pid=pid,
-                )
+        participant = await _active_participant_from_token(db, token)
+        if participant is not None:
+            _actor = SimulatorActor(
+                kind="participant",
+                owner_id=f"pid:{participant.pid}",
+                is_admin=False,
+                participant_pid=participant.pid,
+            )
 
     # 3. Cookie geo_sim_sid → anon
     if _actor is None:
