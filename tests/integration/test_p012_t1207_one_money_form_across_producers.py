@@ -80,9 +80,15 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p019_support import TargetMismatch, require_target
 from tests.simulator_tick_stand import clearing_unit_tick
 
 _LOG = logging.getLogger("test.p012.t1207")
+
+# 024 `T2416.1` (R-024-10): five producers read the precision as `... or 2`, so a declared 0 became 2.
+_T2416_1 = pytest.mark.xfail(
+    raises=TargetMismatch, strict=True, reason="024 target, delivered by T2416.1: precision 0 is not replaced by 2"
+)
 
 # `Equivalent.precision` is declared `ge=0, le=8` (app/schemas/equivalents.py).  The set below
 # spans the shipped values (`HOUR` is 1, the default is 2) and both ends of that range.
@@ -479,6 +485,49 @@ async def test_net_balance_agrees_between_the_snapshot_and_the_node_patch(
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("used", "available", "atoms"),
+    [pytest.param("7", "3", 7, marks=_T2416_1), pytest.param("0.6", "9.4", 1, marks=_T2416_1)],
+)
+async def test_a_precision_zero_equivalent_is_rendered_at_its_own_precision(
+    db_session: AsyncSession, used: str, available: str, atoms: int
+) -> None:
+    """024 `T2416.1`: explicit strings, not only agreement - the producers agreed on the wrong `2`.
+
+    precision is a display MINIMUM (`to_money_str`): a whole amount prints with no fraction, a fraction is kept.
+    """
+
+    eq, creditor, debtor = await _fixture(db_session, precision=0, limit="10", used=used)
+    run = _run_for(eq, creditor, debtor)
+    edge = (
+        await EdgePatchBuilder(logger=_LOG).build_edge_patch_for_equivalent(
+            session=db_session, run=run, equivalent_code=eq.code
+        )
+    )[0]
+    snap = await _snapshot_link(db_session, run, eq.code)
+    helper = await VizPatchHelper.create(db_session, equivalent_code=eq.code)
+    patches = await helper.compute_node_patches(
+        db_session, pids=[creditor.pid], pid_to_participant={creditor.pid: creditor}
+    )
+    node = {n.id: n for n in snap.nodes}[creditor.pid]
+    # Controls: the stand reached every producer and the numbers are the stored ones.
+    assert Decimal(edge["used"]) == Decimal(snap.links[0].used) == Decimal(used)
+    assert Decimal(patches[0]["net_balance"]) == Decimal(node.net_balance) == Decimal(used)
+
+    want = {"trust_limit": "10", "used": used, "available": available}
+    got = (
+        {k: edge[k] for k in want},
+        {k: getattr(snap.links[0], k) for k in want},
+        (node.net_balance, node.net_balance_atoms),
+        (patches[0]["net_balance"], patches[0]["net_balance_atoms"]),
+    )
+    require_target(
+        got == (want, want, (used, atoms), (used, atoms)),
+        f"precision 0 rendered as {got!r}; target {want!r}, net ({used!r}, {atoms} atoms)",
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2. `clearing.done.cleared_amount`: one scale, cancelled or not
 # ---------------------------------------------------------------------------
@@ -545,7 +594,7 @@ _ALICE = uuid.uuid5(uuid.NAMESPACE_DNS, "alice.t1207")
 _BOB = uuid.uuid5(uuid.NAMESPACE_DNS, "bob.t1207")
 
 
-def _cycle_pass(failure_kind: str):
+def _cycle_pass(failure_kind: str, amount: Decimal = CLEARED):
     """The runner seam of the engine (programme 023 slice (d)): clears `CLEARED` once, then fails or cancels.
 
     MIGRATED 2026-09-28: this was a `ClearingService` double (`find_cycles` + `execute_clearing_with_amount`); the
@@ -568,7 +617,7 @@ def _cycle_pass(failure_kind: str):
             occurrence_id=str(uuid.uuid4()),
             plan_id=uuid.uuid4(),
             ordinal=0,
-            amount_atoms=int(CLEARED.scaleb(8)),
+            amount_atoms=int(amount.scaleb(8)),
             edges=(CommittedEdge(uuid.uuid4(), _ALICE, _BOB),),
             after_cancellation=failure_kind == "committed_cancel",
         )
@@ -584,7 +633,7 @@ def _cycle_pass(failure_kind: str):
     return _pass
 
 
-async def _drive_clearing(monkeypatch, *, precision: int, failure_kind: str) -> str:
+async def _drive_clearing(monkeypatch, *, precision: int, failure_kind: str, amount: Decimal = CLEARED) -> str:
     sse = _SseCapture()
     run = RunRecord(
         run_id=f"t1207-clearing-{uuid.uuid4().hex[:6]}",
@@ -606,7 +655,7 @@ async def _drive_clearing(monkeypatch, *, precision: int, failure_kind: str) -> 
         monkeypatch,
         sse=sse,
         session_factory=lambda: _ClearingSessionContext(),
-        runner_pass=_cycle_pass(failure_kind),
+        runner_pass=_cycle_pass(failure_kind, amount),
         apply_trust_growth=_apply_trust_growth,
         edge_patch_builder=_NoopEdgePatchBuilder(),
         max_fx_edges=8,
@@ -660,6 +709,19 @@ async def test_clearing_done_reports_one_scale_whether_or_not_it_was_cancelled(
         f"precision {precision}.  Rendering may pad; it may not truncate a committed total."
     )
     assert "e" not in happy.lower()
+
+
+@_T2416_1
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["geo", "cancelled_execute", "committed_cancel"])
+async def test_clearing_done_reports_a_whole_amount_at_precision_zero_without_a_fraction(
+    monkeypatch, failure_kind: str
+) -> None:
+    """024 `T2416.1`: `5.0625` above cannot tell precision 0 from 2; a whole 7 can (`tick.py` `_cleared_amount_str`)."""
+
+    shown = await _drive_clearing(monkeypatch, precision=0, failure_kind=failure_kind, amount=Decimal(7))
+    assert Decimal(shown) == 7, shown
+    require_target(shown == "7", f"clearing.done.cleared_amount={shown!r} for 7 at precision 0; target '7'")
 
 
 # ---------------------------------------------------------------------------
@@ -757,18 +819,20 @@ class _NoopArtifacts:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("scenario_limit", "exponential_spelling"),
+    ("scenario_limit", "exponential_spelling", "precision", "wire"),
     [
         # `E-`: the same class the ledger producers can reach.
-        ("0.00000001", "1E-8"),
+        ("0.00000001", "1E-8", 2, None),
         # `E+`: NOT reachable from storage (T1200 measured that), but this producer renders a
         # scenario-supplied value before it is ever stored, and `Decimal(str("1e3"))` is
         # `Decimal('1E+3')`.  So the invariant needs both signs after all.
-        ("1e3", "1E+3"),
+        ("1e3", "1E+3", 2, None),
+        # 024 `T2416.1`: a whole limit of a precision-0 equivalent is not padded to `.00`.
+        pytest.param("7", "7", 0, "7", marks=_T2416_1),
     ],
 )
 async def test_the_topology_changed_trustline_limit_is_not_exponential(
-    db_session: AsyncSession, scenario_limit: str, exponential_spelling: str
+    db_session: AsyncSession, scenario_limit: str, exponential_spelling: str, precision: int, wire: str | None
 ) -> None:
     """`inject` renders a trustline limit onto the wire before storage ever sees it."""
 
@@ -778,7 +842,7 @@ async def test_the_topology_changed_trustline_limit_is_not_exponential(
     )
 
     nonce = uuid.uuid4().hex[:8]
-    eq = Equivalent(code=f"IJ{nonce}".upper()[:16], precision=2, is_active=True)
+    eq = Equivalent(code=f"IJ{nonce}".upper()[:16], precision=precision, is_active=True)
     a = Participant(
         pid=f"IA_{nonce}",
         display_name="a",
@@ -874,6 +938,8 @@ async def test_the_topology_changed_trustline_limit_is_not_exponential(
             f"topology.changed reported limit={value!r} for a scenario limit of "
             f"{scenario_limit!r}: the rendering changed the number."
         )
+    if wire is not None:
+        require_target(limits == [wire], f"topology.changed limit {limits!r} at precision {precision}; target {wire!r}")
 
 
 # ---------------------------------------------------------------------------
