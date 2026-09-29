@@ -85,7 +85,9 @@ trustline-update и `PATCH` кредитора — читают долг без 
   нечисловое значение по-прежнему даёт дефолт, а не отказ старта. Новое: они читаются вместе с
   остальными настройками, в том числе из `.env`, один раз при старте процесса. Вне
   `app/config.py` приложение окружение не читает (`tests/unit/test_p024_no_os_environ_outside_config.py`);
-- версия для `/health`: `GEO_APP_VERSION`, при его отсутствии — `APP_VERSION`, иначе `dev`;
+- версия для `/health`: `GEO_APP_VERSION`, при его отсутствии — `APP_VERSION`, иначе `dev`. Оговорка (§15-ревью
+  `T2414`, `specs/BACKLOG.md`): имя `GEO_APP_VERSION` из `.env` побеждает `APP_VERSION` процессного окружения —
+  задавайте версию одним именем в одном месте;
 - Admin graph include limits: `ADMIN_GRAPH_INCLUDE_MAX_*`.
 
 In-memory fallback rate limiter хранит не более `10_000` bucket/host-записей
