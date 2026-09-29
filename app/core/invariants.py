@@ -136,16 +136,20 @@ class InvariantChecker:
 
         order = (Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id)
         rows = (await self.session.execute(query.order_by(*order))).all()
-        violations = [_limit_item(row) for row in rows if row.line_id is None]
-        if violations:
-            raise _trust_limit_violation(
-                f"Debt without a supporting live trust line: {len(violations)} debt(s)", violations
-            )
         allowed = []
         for row in rows:
-            item = _limit_item(row)
-            item["excess"] = item.pop("violation_amount")
-            allowed.append(item)
+            if row.line_id is not None:
+                item = _limit_item(row)
+                item["excess"] = item.pop("violation_amount")
+                allowed.append(item)
+        violations = [_limit_item(row) for row in rows if row.line_id is None]
+        if violations:
+            # The allowed excess of other pairs stays observable beside the structural violation.
+            exc = _trust_limit_violation(
+                f"Debt without a supporting live trust line: {len(violations)} debt(s)", violations
+            )
+            exc.over_limit_allowed = allowed
+            raise exc
         return allowed
 
     async def check_debt_symmetry(

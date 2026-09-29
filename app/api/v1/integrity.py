@@ -44,7 +44,10 @@ async def _trust_limits(checker: InvariantChecker, equivalent_id) -> TrustLimits
         allowed = await checker.check_trust_limits(equivalent_id=equivalent_id)
     except IntegrityViolationException as exc:
         violations = (exc.details or {}).get("violations") or []
-        return TrustLimitsResult(passed=False, violations=len(violations), details=exc.details)
+        allowed = getattr(exc, "over_limit_allowed", [])
+        return TrustLimitsResult(
+            passed=False, violations=len(violations), details=exc.details, over_limit_allowed=allowed
+        )
     return TrustLimitsResult(passed=True, violations=0, over_limit_allowed=allowed)
 
 

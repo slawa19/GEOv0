@@ -107,6 +107,7 @@ async def compute_integrity_checkpoint_for_equivalent(
             "passed": False,
             "violations": len(violations),
             "details": exc.details,
+            "over_limit_allowed": getattr(exc, "over_limit_allowed", []),
             "growth": growth,
         }
         overall_status = "critical"

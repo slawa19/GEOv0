@@ -530,3 +530,32 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
         .all()
     )
     assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_a_structural_violation_does_not_hide_the_allowed_excess_of_another_pair(db_session):
+    # 026 `T2601`, §15 P3: both categories stay observable together - the debt of C with no line of A
+    # is structural (critical), the debt of B above A's line of 100 is allowed excess (reported).
+    nonce = uuid.uuid4().hex[:10]
+    eq = Equivalent(code=("T" + nonce[:15]).upper(), symbol="T", description=None, precision=2, metadata_={}, is_active=True)
+    a, b, c = (Participant(pid=r + nonce, display_name=r, public_key=f"pk{r}-" + nonce, type="person", status="active",
+                           profile={}) for r in "ABC")
+    db_session.add_all([eq, a, b, c])
+    await db_session.flush()
+    db_session.add(TrustLine(from_participant_id=a.id, to_participant_id=b.id, equivalent_id=eq.id,
+                             limit=Decimal("100"), status="active"))
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("150")))
+        db_session.add(Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("7")))
+    await db_session.flush()
+
+    with pytest.raises(IntegrityViolationException) as exc_info:
+        await InvariantChecker(db_session).check_trust_limits(equivalent_id=eq.id)
+    (violation,) = exc_info.value.details["violations"]
+    assert violation["debtor_id"] == str(c.id)
+    (allowed,) = exc_info.value.over_limit_allowed
+    assert (allowed["debtor_id"], Decimal(allowed["excess"])) == (str(b.id), Decimal("50"))
+
+    trust = (await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)).invariants_status[
+        "checks"]["trust_limits"]
+    assert (trust["passed"], trust["violations"], trust["over_limit_allowed"]) == (False, 1, [allowed])

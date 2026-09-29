@@ -6030,7 +6030,7 @@ components:
               type: integer
               minimum: 0
             over_limit_allowed:
-              # Since 026 `T2601` (pass path); absent on older rows, as is `growth`.
+              # Since 026 `T2601`; absent on older rows, as is `growth`.
               type: array
               items:
                 $ref: '#/components/schemas/OverLimitAllowedDebt'
