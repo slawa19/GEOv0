@@ -144,7 +144,7 @@
 ```
 GEOv0-PROJECT/
 ├── app/                        # Backend (FastAPI)
-│   ├── main.py                 # FastAPI entry point, lifespan, фоновые циклы
+│   ├── main.py                 # FastAPI entry point, lifespan, middleware, обработчики ошибок
 │   ├── config.py               # Configuration (env, `Settings`)
 │   │
 │   ├── api/
@@ -176,10 +176,12 @@ GEOv0-PROJECT/
 │   │   ├── simulator/          # симулятор (раны, тик, сценарии, SSE)
 │   │   ├── money_boundary.py   # локи эквивалента, стоп/hold, чтение `FOR SHARE`
 │   │   ├── invariants.py       # InvariantChecker (лимиты, симметрия, нейтральность клиринга)
+│   │   ├── maintenance_jobs.py # фоновые циклы: целостность со сверкой, периодический клиринг
 │   │   └── integrity.py        # контрольные точки целостности
 │   ├── db/                     # SQLAlchemy models, sessions, журнал долгов (таблицы и триггеры)
 │   ├── schemas/                # Pydantic schemas (API DTO)
-│   └── utils/                  # ошибки, метрики, валидация денег, security, распределённый лок
+│   └── utils/                  # ошибки, метрики, валидация денег, security, распределённый лок,
+│                               # супервизор фоновых задач (background_jobs.py)
 │
 ├── admin-ui/                   # Admin UI (Vue 3 + TypeScript + Vite)
 ├── simulator-ui/v2/            # Simulator UI (Vue 3 + TypeScript + Vite)

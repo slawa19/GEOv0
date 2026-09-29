@@ -23,13 +23,11 @@ from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
 from app.db.models.audit_log import AuditLog
 from app.main import app
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
-_RED = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 T2414.2: request id not in the error")
 _RID = "p024-t2414-rid"
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_a_refusal_envelope_carries_the_request_id(client: AsyncClient) -> None:
     response = await client.get("/api/v1/admin/config", headers={"X-Admin-Token": "wrong", "X-Request-ID": _RID})
@@ -39,7 +37,6 @@ async def test_a_refusal_envelope_carries_the_request_id(client: AsyncClient) ->
     require_target(response.json()["error"].get("request_id") == _RID, f"envelope: {response.json()}")
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_a_validation_envelope_carries_the_request_id(client: AsyncClient) -> None:
     response = await client.post("/api/v1/auth/challenge", json={}, headers={"X-Request-ID": _RID})
@@ -48,7 +45,6 @@ async def test_a_validation_envelope_carries_the_request_id(client: AsyncClient)
     require_target(response.json()["error"].get("request_id") == _RID, f"envelope: {response.json()}")
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_an_unhandled_error_is_an_envelope_with_the_request_id_and_is_logged_under_it(caplog) -> None:
     detail = "driver said something about db.internal"
@@ -83,7 +79,6 @@ async def test_an_unhandled_error_is_an_envelope_with_the_request_id_and_is_logg
     )
 
 
-@_RED
 @pytest.mark.asyncio
 async def test_the_login_audit_records_the_request_id_the_response_carries(client: AsyncClient, db_session) -> None:
     public, private = generate_keypair()

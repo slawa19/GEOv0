@@ -3,7 +3,7 @@
 R1 (2026-09-28): `CLEARING_PERIODIC_ENABLED` stays `false` by default - general, dev/test and simulator stands; a
 SEPARATE hub deployment sets it `true` explicitly through its deployment entrypoint (`docker-compose.yml` passes
 the variable). It is never inferred from `ENV=prod`. Three profiles, each through the application's REAL loop
-(`app.main._start_configured_background_tasks` -> `_clearing_loop` -> the runner) on a disposable clone:
+(`app.main` lifespan -> `_start_configured_background_tasks` -> `_clearing_loop` -> the runner) on a disposable clone:
 
 * hub profile - the variable set to `true` in the environment reaches `Settings`, the loop starts and clears an
   eligible debt;

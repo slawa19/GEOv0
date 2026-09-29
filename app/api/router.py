@@ -16,6 +16,7 @@ api_router.include_router(clearing.router, prefix="/clearing", tags=["Clearing"]
 api_router.include_router(integrity.router, prefix="/integrity", tags=["Integrity"], dependencies=_http_deps)
 api_router.include_router(equivalents.router, prefix="/equivalents", tags=["Equivalents"], dependencies=_http_deps)
 api_router.include_router(health.router, tags=["Health"], dependencies=_http_deps)
+api_router.include_router(health.admin_router, tags=["Health"], dependencies=_http_deps)
 api_router.include_router(admin.router, tags=["Admin"], dependencies=_http_deps)
 api_router.include_router(simulator.router, tags=["Simulator"], dependencies=_http_deps)
 api_router.include_router(websocket.router, tags=["WebSocket"])

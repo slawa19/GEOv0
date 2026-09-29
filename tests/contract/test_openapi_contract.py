@@ -442,8 +442,13 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # older differences (canon-only 403/429, generated 422), so it stays, carrying the same 409 on both halves.
 # Measured: the new ledger with that one 409 pair removed from that one entry hashes to the previous
 # `e21116aa...322e`, count 51, and no other entry differs.
+# 2026-09-29 / programme 024 `T2414.2`: count HOLDS at 51, digest moves. `ErrorEnvelope.error` gains the
+# optional `request_id`, in the canon and in `ErrorDetail`, so every entry that already carried an envelope
+# carries it on both halves; `GET /admin/health/db` declared its 403/422 as an inline copy of the envelope
+# and now refers to `ErrorEnvelope`, so it does not enter. Measured on both trees: the same 51 keys, and the
+# ledger with every `request_id` key removed equals the previous ledger (`90c5cbff...3614`).
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "90c5cbff258b7fd3a7e6ac7379fdb82d13c5a3c292d0ff83734b515fe3303614"
+    "6e1aca426f561a70a0800c683d5a7c0e18aa12831c8210070211f8747d532345"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

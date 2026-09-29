@@ -9,7 +9,9 @@ from httpx import AsyncClient
 
 import app.core.integrity as integrity_module
 import app.db.session as db_session_module
+import app.core.maintenance_jobs as maintenance_jobs
 import app.main as main_module
+import app.utils.background_jobs as background_jobs
 from app.utils.background_jobs import background_jobs_degraded
 
 
@@ -32,7 +34,7 @@ async def test_task_factory_failure_marks_job_degraded(caplog) -> None:
         raise RuntimeError("factory failed")
 
     with caplog.at_level(logging.ERROR):
-        task = main_module._start_supervised_background_task(
+        task = background_jobs._start_supervised_background_task(
             app,
             name="integrity",
             coroutine_factory=broken_factory,
@@ -54,10 +56,10 @@ async def test_task_creation_failure_marks_job_degraded(monkeypatch, caplog) -> 
     def fail_create_task(coroutine, *, name):
         raise RuntimeError(f"cannot create {name}")
 
-    monkeypatch.setattr(main_module.asyncio, "create_task", fail_create_task)
+    monkeypatch.setattr(background_jobs.asyncio, "create_task", fail_create_task)
 
     with caplog.at_level(logging.ERROR):
-        task = main_module._start_supervised_background_task(
+        task = background_jobs._start_supervised_background_task(
             app,
             name="integrity",
             coroutine_factory=worker,
@@ -77,7 +79,7 @@ async def test_unexpected_task_exception_is_observable(caplog) -> None:
         raise RuntimeError("worker failed")
 
     with caplog.at_level(logging.ERROR):
-        task = main_module._start_supervised_background_task(
+        task = background_jobs._start_supervised_background_task(
             app,
             name="integrity",
             coroutine_factory=fail_unexpectedly,
@@ -100,7 +102,7 @@ async def test_shutdown_cancellation_is_not_reported_as_failure() -> None:
         started.set()
         await asyncio.Event().wait()
 
-    task = main_module._start_supervised_background_task(
+    task = background_jobs._start_supervised_background_task(
         app,
         name="integrity",
         coroutine_factory=wait_forever,
@@ -161,7 +163,7 @@ async def test_lifespan_stops_supervised_tasks_before_closing_resources(
             assert engine_sentinel.disposed is False
 
     def start_background_tasks(app) -> None:
-        main_module._start_supervised_background_task(
+        background_jobs._start_supervised_background_task(
             app,
             name="integrity",
             coroutine_factory=resource_using_worker,
@@ -205,7 +207,7 @@ async def test_clean_stop_is_not_reported_as_unexpected_exit() -> None:
     async def stop_cleanly() -> None:
         await app.state._bg_stop_event.wait()
 
-    task = main_module._start_supervised_background_task(
+    task = background_jobs._start_supervised_background_task(
         app,
         name="integrity",
         coroutine_factory=stop_cleanly,
@@ -254,7 +256,7 @@ async def test_integrity_failure_degrades_and_later_success_recovers(
         compute,
     )
 
-    completed = await main_module._run_integrity_checkpoints_once(
+    completed = await maintenance_jobs._run_integrity_checkpoints_once(
         app,
         reason=reason,
     )
@@ -264,7 +266,7 @@ async def test_integrity_failure_degrades_and_later_success_recovers(
     assert background_jobs_degraded(app) is True
 
     compute.side_effect = None
-    completed = await main_module._run_integrity_checkpoints_once(
+    completed = await maintenance_jobs._run_integrity_checkpoints_once(
         app,
         reason=reason,
     )

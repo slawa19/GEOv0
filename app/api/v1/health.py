@@ -15,7 +15,10 @@ from app.schemas.common import AdminDbHealthResponse, ErrorEnvelope, HealthRespo
 from app.utils.background_jobs import background_health_status
 
 
+# Public probes, mounted twice: under /api/v1 (rate limited, `app/api/router.py`) and at the root (`app/main.py`).
 router = APIRouter()
+# The admin diagnostic, under /api/v1 only.
+admin_router = APIRouter()
 
 _START_TIME = time.time()
 
@@ -105,7 +108,7 @@ async def health_db_check():
         )
 
 
-@router.get(
+@admin_router.get(
     "/admin/health/db",
     tags=["Admin"],
     responses={

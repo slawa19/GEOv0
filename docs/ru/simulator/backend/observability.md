@@ -39,7 +39,7 @@ HTTP метрики собираются middleware в `app/main.py`.
 В middleware (`app/main.py`) реализован request id:
 
 - Принимается входной `X-Request-ID` (если есть), иначе генерируется.
-- Возвращается клиенту в `X-Request-ID`.
+- Возвращается клиенту в `X-Request-ID` и, для ошибок в `ErrorEnvelope`, в `error.request_id` (024 `T2414.2`).
 
 Есть утилита для измерения длительности операций в логах:
 

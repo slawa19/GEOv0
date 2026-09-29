@@ -8,6 +8,7 @@ from app.core.auth.service import AuthService
 from app.db.models.audit_log import AuditLog
 from app.schemas.auth import ChallengeRequest, ChallengeResponse, LoginRequest, RefreshRequest, TokenPair
 from app.utils.exceptions import GeoException
+from app.utils.request_id import request_id_var
 
 router = APIRouter()
 
@@ -78,7 +79,7 @@ async def login(
                     if request.device_info
                     else None
                 },
-                request_id=http_request.headers.get("X-Request-ID"),
+                request_id=request_id_var.get(),
                 ip_address=client_host,
                 user_agent=http_request.headers.get("user-agent"),
             )

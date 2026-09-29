@@ -146,20 +146,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [error]
-                properties:
-                  error:
-                    type: object
-                    required: [code, message]
-                    properties:
-                      code:
-                        type: string
-                      message:
-                        type: string
-                      details:
-                        type: object
-                        nullable: true
+                $ref: '#/components/schemas/ErrorEnvelope'
         '503':
           description: Database unavailable
           content:
@@ -171,20 +158,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [error]
-                properties:
-                  error:
-                    type: object
-                    required: [code, message]
-                    properties:
-                      code:
-                        type: string
-                      message:
-                        type: string
-                      details:
-                        type: object
-                        nullable: true
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -4195,6 +4169,11 @@ components:
               type: string
             details:
               type: object
+              nullable: true
+            request_id:
+              # 024 `T2414.2`: the id of the request, equal to the `X-Request-ID` response header, so that
+              # the error can be found in the server log and the audit trail (AGENTS.md section 12).
+              type: string
               nullable: true
 
     AdminConfigItem:

@@ -2,8 +2,8 @@
 
 Program 011, finding `F-011-4`, recorded behaviour of decision `T1103b` (2026-08-23: keep as is).
 
-`/metrics`, `/health`, `/healthz` and `/health/db` are declared with `@app.get` (`app/main.py`),
-so they never inherit `dependencies=[Depends(deps.rate_limit)]` from `api_router`.  The finding
+`/metrics` is declared with `@app.get` and `/health`, `/healthz`, `/health/db` are the public health
+router mounted at the root without dependencies (`app/main.py`, 024 `T2414.2`), so they never inherit `dependencies=[Depends(deps.rate_limit)]` from `api_router`.  The finding
 worth keeping is the consequence: adding their paths to `_RATE_LIMIT_EXEMPT_PATHS` cannot change
 anything, because that list is consulted *inside* `rate_limit`, which is never called for them.
 A remediation written against that list would look like a fix and do nothing.

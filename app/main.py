@@ -1,362 +1,28 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 import asyncio
-import inspect
 import logging
 import time
-from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import text
 
 from app.api.router import api_router
+from app.api.v1 import health
 from app.config import settings
 from app.db.session import engine
-from app.schemas.common import ErrorEnvelope, HealthResponse
+from app.schemas.common import ErrorEnvelope
 from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
 from app.utils.exceptions import GeoException
-from app.utils.background_jobs import (
-    background_health_status,
-    background_job_states as _background_job_states,
-)
+from app.utils.request_id import new_request_id, request_id_var, validate_request_id
+from app.core.maintenance_jobs import _start_configured_background_tasks
 
 
 logger = logging.getLogger(__name__)
-
-
-def _record_background_job_event(
-    app: FastAPI,
-    *,
-    name: str,
-    status: str,
-    event: str,
-    error: BaseException | None = None,
-) -> None:
-    state = {"status": status, "event": event}
-    if error is not None:
-        state["error_type"] = type(error).__name__
-    _background_job_states(app)[name] = state
-
-    try:
-        from app.utils.metrics import BACKGROUND_JOB_EVENTS_TOTAL
-
-        BACKGROUND_JOB_EVENTS_TOTAL.labels(job=name, event=event).inc()
-    except Exception:
-        # Job state remains authoritative even if metrics collection is degraded.
-        logger.debug(
-            "background_job.metric_failed name=%s event=%s",
-            name,
-            event,
-            exc_info=True,
-        )
-
-
-def _on_background_task_done(app: FastAPI, name: str, task: asyncio.Task) -> None:
-    stop_event = getattr(app.state, "_bg_stop_event", None)
-    stopping = bool(stop_event is not None and stop_event.is_set())
-
-    if task.cancelled():
-        if stopping:
-            _record_background_job_event(
-                app,
-                name=name,
-                status="stopped",
-                event="cancelled_for_shutdown",
-            )
-        else:
-            error = RuntimeError("background task was cancelled unexpectedly")
-            _record_background_job_event(
-                app,
-                name=name,
-                status="failed",
-                event="unexpected_exit",
-                error=error,
-            )
-            logger.error("background_job.unexpected_exit name=%s cancelled=true", name)
-        return
-
-    error = task.exception()
-    if error is None and stopping:
-        _record_background_job_event(
-            app,
-            name=name,
-            status="stopped",
-            event="stopped",
-        )
-        return
-
-    if error is None:
-        error = RuntimeError("background task exited before shutdown")
-
-    _record_background_job_event(
-        app,
-        name=name,
-        status="failed",
-        event="unexpected_exit",
-        error=error,
-    )
-    logger.error(
-        "background_job.unexpected_exit name=%s",
-        name,
-        exc_info=(type(error), error, error.__traceback__),
-    )
-
-
-def _start_supervised_background_task(
-    app: FastAPI,
-    *,
-    name: str,
-    coroutine_factory: Callable[[], Awaitable[None]],
-) -> asyncio.Task | None:
-    coroutine: Awaitable[None] | None = None
-    _record_background_job_event(
-        app,
-        name=name,
-        status="starting",
-        event="starting",
-    )
-    try:
-        coroutine = coroutine_factory()
-        task = asyncio.create_task(coroutine, name=f"geo:{name}")
-    except Exception as error:
-        if inspect.iscoroutine(coroutine):
-            coroutine.close()
-        _record_background_job_event(
-            app,
-            name=name,
-            status="failed",
-            event="start_failed",
-            error=error,
-        )
-        logger.exception("background_job.start_failed name=%s", name)
-        return None
-
-    app.state._bg_tasks.append(task)
-    _record_background_job_event(
-        app,
-        name=name,
-        status="running",
-        event="started",
-    )
-    task.add_done_callback(
-        lambda completed, job_name=name: _on_background_task_done(
-            app,
-            job_name,
-            completed,
-        )
-    )
-    return task
-
-
-def _emit_integrity_metric(result: str) -> None:
-    try:
-        from app.utils.metrics import RECOVERY_EVENTS_TOTAL
-
-        RECOVERY_EVENTS_TOTAL.labels(
-            event="integrity_checkpoints",
-            result=result,
-        ).inc()
-    except Exception:
-        logger.debug(
-            "integrity.checkpoints_metric_failed result=%s",
-            result,
-            exc_info=True,
-        )
-
-
-async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool:
-    """Programme 015 steps 5a and 5b: debt reconciliation, criteria (a) and (b) - detection of change made
-    around the application, and of a recorded change that disagrees with its recorded intent.
-
-    THE ONLY HOST. Not `POST /integrity/verify`, which participants can call, and not the payment or
-    clearing checkpoints, which run inside the money transaction. It runs after the checkpoints have
-    committed, in fresh transactions of its own, and its result is its own row: it never enters a
-    checkpoint's `checks`, `passed`, `status` or `alerts`, and never an audit row.
-
-    Returns False on any ERROR - the run itself, an equivalent the verifier could not verify, or a FAILED
-    whose hold reaction raised - and the caller then records the job as failed (024 `T2412.1`, R-024-4;
-    until then the error was only logged and the job read `*_success`). An error still never becomes a
-    result, and never turns the committed checkpoints into something else. A verdict (`FAILED`,
-    `UNVERIFIABLE`) is not an error of the job. It reads every equivalent, active or not - the T1544
-    operator stop is a refusal to MOVE money.
-    """
-
-    from app.core.ledger.reconciliation import run_scheduled_reconciliation
-
-    try:
-        counts = await run_scheduled_reconciliation(session_factory)
-    except Exception:  # noqa: BLE001 - an error is recorded as an error; no result is substituted
-        logger.exception("integrity.debt_reconciliation_failed reason=%s", reason)
-        _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
-        return False
-    if counts["error"] or counts["hold_errors"]:
-        logger.error(
-            "integrity.debt_reconciliation_errors reason=%s errors=%d hold_errors=%d",
-            reason,
-            counts["error"],
-            counts["hold_errors"],
-        )
-        _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
-        return False
-    return True
-
-
-async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
-    from app.core.integrity import compute_and_store_integrity_checkpoints
-    from app.db.session import AsyncSessionLocal
-    from app.utils.distributed_lock import redis_distributed_lock
-    from app.utils.exceptions import ConflictException
-
-    interval = int(
-        settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
-    )
-    lock_ttl_seconds = int(
-        settings.INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS
-    )
-    if lock_ttl_seconds <= 0:
-        lock_ttl_seconds = max(30, interval)
-
-    _emit_integrity_metric(f"{reason}_start")
-    try:
-        async with redis_distributed_lock(
-            getattr(app.state, "redis", None),
-            "geo:integrity:checkpoints",
-            ttl_seconds=lock_ttl_seconds,
-            wait_timeout_seconds=0.0,
-        ):
-            async with AsyncSessionLocal() as session:
-                await compute_and_store_integrity_checkpoints(session)
-            # After the checkpoints have COMMITTED, and under the same distributed lock.
-            reconciled = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
-    except ConflictException:
-        _emit_integrity_metric(f"{reason}_skipped_locked")
-        # A skipped run proves nothing: a recorded failure (checkpoints or reconciliation) is kept, with its
-        # event, until a run of this job completes cleanly (024 `T2412.1`, §15 fix-delta P2-1).
-        if _background_job_states(app).get("integrity", {}).get("status") == "failed":
-            return True
-        _record_background_job_event(
-            app,
-            name="integrity",
-            status="running",
-            event=f"{reason}_skipped_locked",
-        )
-        return True
-    except Exception as error:
-        logger.exception("integrity.checkpoints_failed reason=%s", reason)
-        _emit_integrity_metric(f"{reason}_error")
-        _record_background_job_event(
-            app,
-            name="integrity",
-            status="failed",
-            event=f"{reason}_error",
-            error=error,
-        )
-        return False
-
-    if not reconciled:
-        _record_background_job_event(
-            app,
-            name="integrity",
-            status="failed",
-            event=f"{reason}_debt_reconciliation_error",
-        )
-        return False
-
-    _emit_integrity_metric(f"{reason}_success")
-    _record_background_job_event(
-        app,
-        name="integrity",
-        status="running",
-        event=f"{reason}_success",
-    )
-    return True
-
-
-async def _integrity_loop(app: FastAPI) -> None:
-    interval = int(
-        settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
-    )
-    await _run_integrity_checkpoints_once(app, reason="startup")
-
-    while not app.state._bg_stop_event.is_set():
-        try:
-            await asyncio.wait_for(app.state._bg_stop_event.wait(), timeout=interval)
-            break
-        except asyncio.TimeoutError:
-            await _run_integrity_checkpoints_once(app, reason="periodic")
-
-
-async def _run_periodic_clearing_once(app: FastAPI) -> None:
-    """Programme 023 (decisions 7, 9): one periodic clearing pass. A refusal or an error is recorded, never silent."""
-
-    from app.core.clearing.runner import ClearingPeriodicRefused, run_periodic_clearing_pass
-    from app.db.session import AsyncSessionLocal
-
-    try:
-        results = await run_periodic_clearing_pass(AsyncSessionLocal, getattr(app.state, "redis", None))
-    except ClearingPeriodicRefused as refusal:
-        logger.error("clearing.periodic_refused reason=%s", refusal.reason)
-        _record_background_job_event(
-            app, name="clearing", status="failed", event=f"refused_{refusal.reason}", error=refusal
-        )
-        return
-    except Exception as error:
-        logger.exception("clearing.periodic_failed")
-        _record_background_job_event(app, name="clearing", status="failed", event="error", error=error)
-        return
-    from app.core.clearing.runner import InterruptReason
-
-    failed = sorted(code for code, result in results.items() if result.reason == InterruptReason.ERROR)
-    if failed:
-        # Review P2-4: a pass stopped by an error (planner, stop/hold, perimeter, unknown commit) degrades health;
-        # a budget, lease, re-plan or retry-budget interruption is ordinary and does not.
-        logger.error("clearing.periodic_equivalents_failed count=%s", len(failed))
-        _record_background_job_event(app, name="clearing", status="failed", event="pass_error")
-        return
-    interrupted = sorted(code for code, result in results.items() if result.status != "complete")
-    _record_background_job_event(
-        app,
-        name="clearing",
-        status="running",
-        event="pass_interrupted" if interrupted else "pass_complete",
-    )
-
-
-async def _clearing_loop(app: FastAPI) -> None:
-    interval = max(1, int(settings.CLEARING_PERIODIC_INTERVAL_SECONDS or 300))
-    while not app.state._bg_stop_event.is_set():
-        await _run_periodic_clearing_once(app)
-        try:
-            await asyncio.wait_for(app.state._bg_stop_event.wait(), timeout=interval)
-            break
-        except asyncio.TimeoutError:
-            continue
-
-
-def _start_configured_background_tasks(app: FastAPI) -> None:
-    # No payment recovery loop since programme 019, stage 4: the hub executes a payment as one
-    # transaction and persists no intermediate state for it to finish (migration 030). The
-    # `RECOVERY_*` settings are inert until П4 decides their fate with the incidents screen.
-    if settings.INTEGRITY_CHECKPOINT_ENABLED:
-        _start_supervised_background_task(
-            app,
-            name="integrity",
-            coroutine_factory=lambda: _integrity_loop(app),
-        )
-    # Programme 023 (decision R1): the periodic clearing runner, started only where the deployment sets
-    # `CLEARING_PERIODIC_ENABLED` - a separate hub; off by default and on simulator stands.
-    if settings.CLEARING_PERIODIC_ENABLED:
-        _start_supervised_background_task(
-            app,
-            name="clearing",
-            coroutine_factory=lambda: _clearing_loop(app),
-        )
 
 
 @asynccontextmanager
@@ -456,15 +122,27 @@ app.add_middleware(
 )
 
 
+def _error_with_request_id(content: dict) -> dict:
+    """The GEO error envelope with the request id beside the code (024 `T2414.2`, AGENTS.md §12)."""
+    rid = request_id_var.get()
+    if rid is not None:
+        content["error"]["request_id"] = rid
+    return content
+
+
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    from app.utils.request_id import request_id_var, new_request_id, validate_request_id
-
     incoming_rid = request.headers.get("X-Request-ID")
     rid = validate_request_id(incoming_rid) or new_request_id()
     token = request_id_var.set(rid)
     try:
         response = await call_next(request)
+    except Exception:
+        # No handler answered it. Logged here, under the request id and with its traceback; the caller gets the
+        # internal-error envelope with the same id and none of the exception's text (024 `T2414.2`).
+        logger.exception("http.unhandled_error request_id=%s method=%s path=%s", rid, request.method, request.url.path)
+        internal = {"error": {"code": ErrorCode.E010.value, "message": ERROR_MESSAGES[ErrorCode.E010]}}
+        response = JSONResponse(status_code=500, content=_error_with_request_id(internal))
     finally:
         request_id_var.reset(token)
 
@@ -506,7 +184,7 @@ async def metrics_middleware(request: Request, call_next):
 
 @app.exception_handler(GeoException)
 async def geo_exception_handler(request: Request, exc: GeoException):
-    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+    return JSONResponse(status_code=exc.status_code, content=_error_with_request_id(exc.to_dict()))
 
 
 @app.exception_handler(RequestValidationError)
@@ -531,27 +209,22 @@ async def request_validation_exception_handler(
     # Spec: E009 (Invalid input).
     return JSONResponse(
         status_code=422,
-        content={
-            "error": {
-                "code": ErrorCode.E009.value,
-                "message": ERROR_MESSAGES[ErrorCode.E009],
-                "details": {"errors": exc.errors()},
+        content=_error_with_request_id(
+            {
+                "error": {
+                    "code": ErrorCode.E009.value,
+                    "message": ERROR_MESSAGES[ErrorCode.E009],
+                    "details": {"errors": exc.errors()},
+                }
             }
-        },
+        ),
     )
 
 
 app.include_router(api_router, prefix="/api/v1")
-
-_START_TIME = time.time()
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _best_effort_version() -> str:
-    return settings.GEO_APP_VERSION.strip() or "dev"
+# The same three public health routes at the root, without the /api/v1 rate limit: the container healthcheck
+# and probes call /health, /healthz and /health/db. One router, `app/api/v1/health.py` (024 `T2414.2`).
+app.include_router(health.router, tags=["Health"])
 
 
 if settings.METRICS_ENABLED:
@@ -562,72 +235,6 @@ if settings.METRICS_ENABLED:
 
         payload, content_type = render_metrics()
         return Response(content=payload, media_type=content_type)
-
-
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    response_model_exclude_none=True,
-    responses={503: {"model": HealthResponse, "description": "Service degraded"}},
-)
-async def health_check(response: Response):
-    status = background_health_status(app)
-    if status == "degraded":
-        response.status_code = 503
-    return {
-        "status": status,
-        "version": _best_effort_version(),
-        "uptime_seconds": int(max(0.0, time.time() - _START_TIME)),
-        "timestamp": _utc_now_iso(),
-    }
-
-
-@app.get("/healthz")
-async def healthz_check():
-    return {"status": "ok"}
-
-
-@app.get(
-    "/health/db",
-    responses={
-        503: {
-            # 2026-08-22 / p011_t1105.  Declared inline rather than as ErrorEnvelope because
-            # the canonical shape for this route is its own `{status: error}` object
-            # (`api/openapi.yaml:108-118`); a mismatched schema would keep the operation in
-            # the drift under a different heading instead of removing it.
-            "description": "DB unavailable",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "required": ["status"],
-                        "properties": {"status": {"type": "string", "enum": ["error"]}},
-                    }
-                }
-            },
-        }
-    },
-)
-async def health_db_check():
-    try:
-        t0 = time.perf_counter()
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        latency_ms = int(round((time.perf_counter() - t0) * 1000.0))
-        return {
-            "status": "ok",
-            "db": {"reachable": True, "latency_ms": latency_ms},
-            "timestamp": _utc_now_iso(),
-        }
-    except Exception:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "error",
-                "db": {"reachable": False, "latency_ms": None},
-                "timestamp": _utc_now_iso(),
-            },
-        )
 
 
 def _register_openapi_model_schema(document: dict, model: type) -> None:

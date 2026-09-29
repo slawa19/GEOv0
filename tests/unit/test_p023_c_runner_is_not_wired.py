@@ -79,7 +79,7 @@ def test_the_walker_sees_the_forms_it_looks_for() -> None:
 
 
 def _started_names(monkeypatch, *, periodic: bool | None) -> list[str]:
-    import app.main as main
+    import app.core.maintenance_jobs as main
     from app.config import settings
 
     if periodic is not None:
@@ -104,7 +104,7 @@ def test_the_periodic_loop_is_off_by_default_and_starts_only_when_configured(mon
 @pytest.mark.asyncio
 async def test_an_isolation_refusal_is_recorded_as_a_failed_job_not_swallowed(monkeypatch) -> None:
     import app.core.clearing.runner as runner
-    import app.main as main
+    import app.core.maintenance_jobs as main
     from app.utils.background_jobs import background_health_status
 
     async def refuse(_factory, _redis):
@@ -136,7 +136,7 @@ def _result(runner, reason):
 
 async def _health_after(monkeypatch, results) -> str:
     import app.core.clearing.runner as runner
-    import app.main as main
+    import app.core.maintenance_jobs as main
     from app.utils.background_jobs import background_health_status
 
     async def periodic(_factory, _redis):

@@ -82,7 +82,7 @@ async def _delete(client, code: str):
 
 async def _scheduled_integrity_run(monkeypatch, factory) -> None:
     import app.db.session as app_db_session
-    import app.main as main_module
+    import app.core.maintenance_jobs as main_module
 
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", factory)
     app = SimpleNamespace(state=SimpleNamespace(redis=None, background_jobs={}))

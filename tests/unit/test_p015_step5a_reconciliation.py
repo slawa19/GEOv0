@@ -239,10 +239,10 @@ async def _results(factory, equivalent_id) -> list[tuple[str, dict]]:
 
 
 async def _scheduled_run(monkeypatch, factory) -> None:
-    """The real scheduled host, `app.main._run_integrity_checkpoints_once`, on the test database."""
+    """The real scheduled host, `app.core.maintenance_jobs._run_integrity_checkpoints_once`, on the test database."""
 
     import app.db.session as app_db_session
-    import app.main as main_module
+    import app.core.maintenance_jobs as main_module
 
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", factory)
     app = SimpleNamespace(state=SimpleNamespace(redis=None, background_jobs={}))
