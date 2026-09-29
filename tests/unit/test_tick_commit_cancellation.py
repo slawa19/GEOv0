@@ -15,7 +15,7 @@ import pytest
 
 import app.core.simulator.storage as simulator_storage
 from app.core.simulator.models import RunRecord
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import unit_tick
 
 
@@ -333,10 +333,7 @@ _ENDINGS = {  # ending -> (commit error, cancel during commit, every_n, expected
 }
 
 
-_T2416_3 = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 target, delivered by T2416.3")
-
-
-@pytest.mark.parametrize("ending", [e if e == "throttled" else pytest.param(e, marks=_T2416_3) for e in _ENDINGS])
+@pytest.mark.parametrize("ending", list(_ENDINGS))
 @pytest.mark.asyncio
 async def test_the_tail_is_marked_flushed_only_by_a_confirmed_commit(monkeypatch, ending: str):
     """024 `T2416.3`: pending, failed or unknown commit sets no mark; a confirmed one does, even under cancellation."""
