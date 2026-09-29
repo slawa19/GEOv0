@@ -56,6 +56,7 @@ async def test_http_rate_limit_falls_back_to_memory_and_resets_next_window(
             "code": "E009",
             "message": "Too many requests",
             "details": {"window_seconds": 10, "limit": 2},
+            "request_id": limited.headers["X-Request-ID"],
         }
     }
     assert {bucket for bucket, _host in deps._rate_limit_counters} == {60}

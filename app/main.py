@@ -135,14 +135,11 @@ async def request_id_middleware(request: Request, call_next):
     incoming_rid = request.headers.get("X-Request-ID")
     rid = validate_request_id(incoming_rid) or new_request_id()
     token = request_id_var.set(rid)
+    # Also on the request state: an exception no handler answered reaches `unhandled_exception_handler` in
+    # Starlette's outermost middleware, after this function - and the context variable - have been left.
+    request.state.request_id = rid
     try:
         response = await call_next(request)
-    except Exception:
-        # No handler answered it. Logged here, under the request id and with its traceback; the caller gets the
-        # internal-error envelope with the same id and none of the exception's text (024 `T2414.2`).
-        logger.exception("http.unhandled_error request_id=%s method=%s path=%s", rid, request.method, request.url.path)
-        internal = {"error": {"code": ErrorCode.E010.value, "message": ERROR_MESSAGES[ErrorCode.E010]}}
-        response = JSONResponse(status_code=500, content=_error_with_request_id(internal))
     finally:
         request_id_var.reset(token)
 
@@ -180,6 +177,23 @@ async def metrics_middleware(request: Request, call_next):
         pass
 
     return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """An exception no handler answered (024 `T2414.2`): logged once under the request id with its traceback; the
+    caller gets the internal-error envelope with that id and none of the exception's text. Starlette still re-raises
+    the exception to the server after this response, as it did before."""
+    rid = getattr(request.state, "request_id", None) or new_request_id()
+    logger.error(
+        "http.unhandled_error request_id=%s method=%s path=%s",
+        rid,
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    internal = {"error": {"code": ErrorCode.E010.value, "message": ERROR_MESSAGES[ErrorCode.E010], "request_id": rid}}
+    return JSONResponse(status_code=500, content=internal, headers={"X-Request-ID": rid})
 
 
 @app.exception_handler(GeoException)

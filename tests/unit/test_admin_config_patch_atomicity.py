@@ -121,6 +121,7 @@ async def test_config_patch_rejects_entire_batch_when_later_key_is_not_mutable(
             "code": "E009",
             "message": "Config key not mutable: NOT_MUTABLE",
             "details": {},
+            "request_id": response.headers["X-Request-ID"],
         }
     }
     assert settings.ROUTING_MAX_PATHS == 3
@@ -146,6 +147,7 @@ async def test_config_patch_rejects_string_for_boolean_without_mutation(
             "code": "E009",
             "message": "Invalid value for config key: RATE_LIMIT_ENABLED",
             "details": {"key": "RATE_LIMIT_ENABLED"},
+            "request_id": response.headers["X-Request-ID"],
         }
     }
     assert settings.RATE_LIMIT_ENABLED is True

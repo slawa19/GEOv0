@@ -35,6 +35,13 @@ from tests.conftest import MODE_B
 from tests.integration.test_scenarios import register_and_login, _sign_payment_request
 
 
+
+def _envelope_error(response) -> dict:
+    """The envelope's error without `request_id`, which must equal the response's X-Request-ID (024 `T2414.2`)."""
+    error = dict(response.json()["error"])
+    assert error.pop("request_id") == response.headers["X-Request-ID"]
+    return error
+
 async def _seed_http_payment(client: AsyncClient, db_session, *, suffix: str):
     equivalent = (
         await db_session.execute(select(Equivalent).where(Equivalent.code == "USD"))
@@ -334,7 +341,7 @@ async def test_http_insert_serialization_failure_returns_declared_conflict(
 
     assert inserts, "premise: the payment's insert was never reached"
     assert response.status_code == 409
-    assert response.json()["error"] == {
+    assert _envelope_error(response) == {
         "code": "E008",
         "message": "State conflict",
         "details": {
@@ -458,7 +465,7 @@ async def test_prepare_preserves_typed_client_error_in_http_and_transaction(
         "details": expected_error.details,
     }
     assert response.status_code == expected_status, response.text
-    assert response.json()["error"] == expected_payload
+    assert _envelope_error(response) == expected_payload
     assert calls == ["single" if route_count == 1 else "multipath"]
 
     transaction = (
@@ -525,7 +532,7 @@ async def test_operational_prepare_error_is_sanitized_everywhere(
         json=body,
     )
     assert first_response.status_code == 500, first_response.text
-    assert first_response.json()["error"] == safe_error
+    assert _envelope_error(first_response) == safe_error
     assert calls == ["single" if route_count == 1 else "multipath"]
 
     transaction = (
@@ -610,7 +617,7 @@ async def test_typed_server_prepare_error_is_sanitized(
         "details": {},
     }
     assert response.status_code == 500, response.text
-    assert response.json()["error"] == safe_error
+    assert _envelope_error(response) == safe_error
     assert calls == ["single"]
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
@@ -838,7 +845,7 @@ async def test_operational_commit_error_is_sanitized_in_response_and_transaction
         "details": {},
     }
     assert response.status_code == 500, response.text
-    assert response.json()["error"] == safe_error
+    assert _envelope_error(response) == safe_error
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one()
