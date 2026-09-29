@@ -458,7 +458,7 @@ class InjectExecutor:
             ).one_or_none()
             if row is not None:
                 eq_id_by_code[eq_upper] = row[0]
-                eq_precision_by_code[eq_upper] = int(row[1] or 2)
+                eq_precision_by_code[eq_upper] = int(2 if row[1] is None else row[1])  # 024 T2416.1
                 return row[0]
             return None
 

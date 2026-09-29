@@ -105,9 +105,8 @@ from tests.debt_setup import debt_fixture_setup
 # precision exercises, and a corner of this module is a declared 0 - not the top of the range.
 #
 # 024 `T2416.1`: the compensation `_effective_precision` (0 -> 2) is gone; precision 0 is checked
-# as declared, and is red until the five `... or 2` producers are fixed.
-_T2416_1 = pytest.mark.xfail(raises=AssertionError, strict=True, reason="024 T2416.1: precision 0 read as 2")
-PRECISIONS = [pytest.param(0, marks=_T2416_1), 1, 2, 4, 8]
+# as declared.
+PRECISIONS = [0, 1, 2, 4, 8]
 
 # `Debt.amount` is `Numeric(20, 8)`.  A probe finer than this is not a test of the code, it is
 # a test of what the column silently did to it on write.
@@ -124,7 +123,7 @@ FINDING_TABLE = [
     pytest.param(1, "0.04", id="prec1-0.04-was-erased-to-zero-atoms"),
     pytest.param(1, "0.05", id="prec1-0.05-the-RT-012-2-value"),
     pytest.param(1, "0.14", id="prec1-0.14-resolution-difference-only"),
-    pytest.param(0, "0.6", id="prec0-0.6-at-its-declared-precision", marks=_T2416_1),
+    pytest.param(0, "0.6", id="prec0-0.6-at-its-declared-precision"),
 ]
 
 _WHY = (
@@ -374,7 +373,7 @@ async def test_the_two_encodings_of_one_net_agree_on_the_findings_own_table(
         # The finding's table: `"0.6"` with `1` atom.  Until 024 `T2416.1` this row pinned the
         # `... or 2` coercion instead (`"0.60"` with `60`).
         snapshot_node = both[list(both.keys())[0]][0]
-        assert (snapshot_node["net_balance"], snapshot_node["net_balance_atoms"]) == ("0.6", 1), snapshot_node
+        assert (snapshot_node["net_balance"], snapshot_node["net_balance_atoms"]) == ("0.6", "1"), snapshot_node
 
 
 # ---------------------------------------------------------------------------

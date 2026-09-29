@@ -80,15 +80,10 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import clearing_unit_tick
 
 _LOG = logging.getLogger("test.p012.t1207")
-
-# 024 `T2416.1` (R-024-10): five producers read the precision as `... or 2`, so a declared 0 became 2.
-_T2416_1 = pytest.mark.xfail(
-    raises=TargetMismatch, strict=True, reason="024 target, delivered by T2416.1: precision 0 is not replaced by 2"
-)
 
 # `Equivalent.precision` is declared `ge=0, le=8` (app/schemas/equivalents.py).  The set below
 # spans the shipped values (`HOUR` is 1, the default is 2) and both ends of that range.
@@ -488,10 +483,10 @@ async def test_net_balance_agrees_between_the_snapshot_and_the_node_patch(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("used", "available", "atoms"),
-    [pytest.param("7", "3", 7, marks=_T2416_1), pytest.param("0.6", "9.4", 1, marks=_T2416_1)],
+    [("7", "3", "7"), ("0.6", "9.4", "1")],
 )
 async def test_a_precision_zero_equivalent_is_rendered_at_its_own_precision(
-    db_session: AsyncSession, used: str, available: str, atoms: int
+    db_session: AsyncSession, used: str, available: str, atoms: str
 ) -> None:
     """024 `T2416.1`: explicit strings, not only agreement - the producers agreed on the wrong `2`.
 
@@ -711,7 +706,6 @@ async def test_clearing_done_reports_one_scale_whether_or_not_it_was_cancelled(
     assert "e" not in happy.lower()
 
 
-@_T2416_1
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_kind", ["geo", "cancelled_execute", "committed_cancel"])
 async def test_clearing_done_reports_a_whole_amount_at_precision_zero_without_a_fraction(
@@ -828,7 +822,7 @@ class _NoopArtifacts:
         # `Decimal('1E+3')`.  So the invariant needs both signs after all.
         ("1e3", "1E+3", 2, None),
         # 024 `T2416.1`: a whole limit of a precision-0 equivalent is not padded to `.00`.
-        pytest.param("7", "7", 0, "7", marks=_T2416_1),
+        ("7", "7", 0, "7"),
     ],
 )
 async def test_the_topology_changed_trustline_limit_is_not_exponential(

@@ -181,7 +181,7 @@ class SnapshotBuilder:
 
         eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair = loaded
 
-        precision = int(getattr(eq, "precision", 2) or 2)
+        precision = int(2 if getattr(eq, "precision", None) is None else eq.precision)  # 024 T2416.1
 
         def _to_money_str(v: Decimal) -> str:
             # 012 / T1207: was a private `format(v.quantize(1/10**precision, ROUND_DOWN), "f")`

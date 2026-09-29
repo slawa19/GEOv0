@@ -793,7 +793,7 @@ class RealTick:
             with self._runner._lock:
                 helper = (run._real_viz_by_eq or {}).get(str(eq))
             if helper is not None:
-                precision = int(getattr(helper, "precision", 2) or 2)
+                precision = int(2 if getattr(helper, "precision", None) is None else helper.precision)
         except Exception:
             precision = 2
         return to_money_str(amount, precision)

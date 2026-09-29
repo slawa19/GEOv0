@@ -239,9 +239,8 @@ def _loses_the_sign_only_at_precision_zero(value: str, precision: int) -> str:
 
 
 def _reads_precision_zero_as_absent(value: str, precision: int) -> str:
-    """Not hypothetical: `int(getattr(eq, "precision", 2) or 2)` is live in five simulator
-    producers, and `or 2` turns a declared 0 into 2. Recorded by T1210 and deliberately unfixed
-    there; the table must at least be able to SEE it."""
+    """Not hypothetical: `int(getattr(eq, "precision", 2) or 2)` was live in five simulator
+    producers until 024 `T2416.1`, and `or 2` turns a declared 0 into 2; the table must SEE it."""
     return to_money_str(Decimal(value), precision or 2)
 
 
