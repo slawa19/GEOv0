@@ -6024,10 +6024,18 @@ components:
           additionalProperties: true
           properties:
             passed:
+              # 026 `T2601`: false only for a structural violation; see TrustLimitsResult.
               type: boolean
             violations:
               type: integer
               minimum: 0
+            over_limit_allowed:
+              # Since 026 `T2601` (pass path); absent on older rows, as is `growth`.
+              type: array
+              items:
+                $ref: '#/components/schemas/OverLimitAllowedDebt'
+            growth:
+              $ref: '#/components/schemas/GrowthNotVerifiedBySnapshot'
             details:
               # Absent or an object - never null, unlike the `details` on InvariantResult below.
               # This node is a plain dict literal, not a pydantic model, so an unset key is simply
@@ -6241,6 +6249,9 @@ components:
                   type: string
                 violation_amount:
                   type: string
+                debt_before:
+                  # 026 `T2601`: only on a growth refusal of the write path - the debt before the operation.
+                  type: string
               additionalProperties: false
         additionalProperties: false
       # check_debt_symmetry, item built at app/core/invariants.py:218-227.
@@ -6291,6 +6302,64 @@ components:
         reason:
           type: string
           enum: [check_withdrawn]
+
+    OverLimitAllowedDebt:
+      # 026 `T2601` (owner, В3): a debt above the stored limit of its live (`active`/`frozen`) line -
+      # allowed and reported, not alerted: no critical status, no freeze, no hold.
+      type: object
+      required: [debtor_id, creditor_id, equivalent_id, debt_amount, trust_limit, excess]
+      properties:
+        debtor_id:
+          type: string
+        creditor_id:
+          type: string
+        equivalent_id:
+          type: string
+        debt_amount:
+          type: string
+        trust_limit:
+          type: string
+        excess:
+          type: string
+      additionalProperties: false
+
+    GrowthNotVerifiedBySnapshot:
+      # A snapshot cannot see the state before an operation: growth is refused on the write path
+      # (payment, book completion), and a green snapshot is no evidence it did not happen (026 `T2601`).
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          type: string
+          enum: [not_verified]
+        reason:
+          type: string
+          enum: [requires_operation_prestate]
+      additionalProperties: false
+
+    TrustLimitsResult:
+      # `trust_limits` since 026 `T2601`: `passed` is false only for a structural violation (a debt
+      # with no supporting live line); `details` is then its TRUST_LIMIT_VIOLATION payload, else null.
+      type: object
+      required: [passed, violations, details, over_limit_allowed, growth]
+      properties:
+        passed:
+          type: boolean
+        violations:
+          type: integer
+          minimum: 0
+        details:
+          oneOf:
+            - $ref: '#/components/schemas/InvariantViolationDetails'
+            - nullable: true
+              enum: [null]
+        over_limit_allowed:
+          type: array
+          items:
+            $ref: '#/components/schemas/OverLimitAllowedDebt'
+        growth:
+          $ref: '#/components/schemas/GrowthNotVerifiedBySnapshot'
+      additionalProperties: false
 
     InvariantResult:
       # An invariant that WAS evaluated. `passed` stays required: this schema describes a verdict,
@@ -6351,6 +6420,9 @@ components:
           # construction - InvariantResult requires `passed`, InvariantWithdrawn forbids it - so
           # `oneOf` here is exclusive and not merely a union of conveniences.
           type: object
+          properties:
+            trust_limits:
+              $ref: '#/components/schemas/TrustLimitsResult'
           additionalProperties:
             oneOf:
               - $ref: '#/components/schemas/InvariantWithdrawn'
@@ -8402,7 +8474,10 @@ components:
             zero_sum:
               $ref: '#/components/schemas/InvariantResult'
             trust_limits:
-              $ref: '#/components/schemas/InvariantResult'
+              # TrustLimitsResult since 026 `T2601`; rows stored before it carry InvariantResult.
+              oneOf:
+                - $ref: '#/components/schemas/TrustLimitsResult'
+                - $ref: '#/components/schemas/InvariantResult'
             debt_symmetry:
               $ref: '#/components/schemas/InvariantResult'
 

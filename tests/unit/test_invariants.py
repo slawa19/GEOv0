@@ -89,12 +89,15 @@ async def test_trust_limit_violation_detected(db_session):
         db_session.add(Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("150")))
     await db_session.flush()
 
+    # INTENTIONAL, 026 `T2601` (owner, В3, 2026-09-29): the snapshot no longer raises a debt above the
+    # stored limit of a live line - it is the allowed state after a lowered limit, and is REPORTED with
+    # its excess. Growth over the limit is refused on the write path
+    # (`tests/integration/test_p026_s1_debt_growth_gate_postgres.py`); a debt with no live line still
+    # raises (`test_edge_model_attributes_a_debt_directionally` above).
     checker = InvariantChecker(db_session)
-    with pytest.raises(IntegrityViolationException) as exc_info:
-        await checker.check_trust_limits(equivalent_id=eq.id)
-
-    assert exc_info.value.code == "E008"
-    assert exc_info.value.details.get("invariant") == "TRUST_LIMIT_VIOLATION"
+    (entry,) = await checker.check_trust_limits(equivalent_id=eq.id)
+    assert (entry["debtor_id"], entry["creditor_id"]) == (str(b.id), str(a.id))
+    assert (Decimal(entry["trust_limit"]), Decimal(entry["excess"])) == (Decimal("100"), Decimal("50"))
 
 
 # `test_payment_commit_aborts_on_trust_limit_violation` drove `PaymentEngine.commit` over a hand-seeded
@@ -225,16 +228,9 @@ async def test_integrity_checkpoint_status_critical_for_trust_limits(db_session)
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    # Controlling trustline for debt(B->A) is trustline(A->B)
-    db_session.add(
-        TrustLine(
-            from_participant_id=a.id,
-            to_participant_id=b.id,
-            equivalent_id=eq.id,
-            limit=Decimal("100"),
-            status="active",
-        )
-    )
+    # INTENTIONAL, 026 `T2601`: this used a live line of 100 under a debt of 150 - an allowed state
+    # since the owner's В3 (2026-09-29), reported as `over_limit_allowed`, not critical. What stays
+    # critical is a STRUCTURAL violation: the debt of B to A with no supporting line of A at all.
     async with debt_fixture_setup(db_session, label="setup"):
         db_session.add(
             Debt(

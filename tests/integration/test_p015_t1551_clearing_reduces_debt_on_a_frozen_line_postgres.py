@@ -16,7 +16,6 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import select
 
 from app.core.clearing.service import ClearingService
@@ -25,7 +24,6 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.utils.exceptions import IntegrityViolationException
 from tests.debt_setup import debt_fixture_setup
 
 # Every test here commits through several sessions and runs on a disposable clone of the migrated
@@ -127,10 +125,9 @@ async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line_postgres() 
                 )
             ).all()
         }
-        with pytest.raises(IntegrityViolationException) as exc_info:
-            await checker.check_trust_limits(equivalent_id=equivalent_id)
+        # INTENTIONAL, 026 `T2601` (owner, В3): the remaining excess is reported as allowed, not raised.
+        (entry,) = await checker.check_trust_limits(equivalent_id=equivalent_id)
 
     assert positions_after == positions_before
     assert amounts == {debt_ids[2]: Decimal("120")}
-    (violation,) = exc_info.value.details["violations"]
-    assert Decimal(violation["violation_amount"]) == Decimal("20")
+    assert Decimal(entry["excess"]) == Decimal("20")

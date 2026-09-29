@@ -28,6 +28,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
+import app.core.payments.service as payment_service
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
 from app.core.ledger.book import Book, InjectIncrease, PaymentFlow
@@ -42,13 +43,9 @@ from app.utils.exceptions import IntegrityViolationException
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import writer_operation
 from tests.integration.test_scenarios import register_and_login
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 NOT_VERIFIED_GROWTH = {"status": "not_verified", "reason": "requires_operation_prestate"}
-
-
-def target_xfail_026(what: str):
-    return pytest.mark.xfail(raises=TargetMismatch, strict=True, reason=f"026 target, delivered by T2601: {what}")
 
 
 async def _parties(session, *lines: tuple[str, str, str]):
@@ -107,7 +104,6 @@ async def _over_limit_world(db_session):
 
 
 @MODE_B
-@target_xfail_026("a payment that only reduces an over-limit debt is not refused by the snapshot")
 @pytest.mark.asyncio
 async def test_a_payment_that_only_reduces_an_over_limit_debt_commits(db_session) -> None:
     factory, (eq_id, eq_code, a_id, _a_pid, b_id, b_pid) = await _over_limit_world(db_session)
@@ -122,7 +118,6 @@ async def test_a_payment_that_only_reduces_an_over_limit_debt_commits(db_session
 
 
 @MODE_B
-@target_xfail_026("the snapshot reports an over-limit debt as allowed, not as a critical violation")
 @pytest.mark.asyncio
 async def test_the_periodic_check_reports_an_over_limit_debt_as_allowed(db_session, client) -> None:
     factory, (eq_id, eq_code, a_id, _a_pid, b_id, _b_pid) = await _over_limit_world(db_session)
@@ -147,8 +142,11 @@ async def test_the_periodic_check_reports_an_over_limit_debt_as_allowed(db_sessi
                      await client.post("/api/v1/integrity/verify", json={"equivalent": eq_code},
                                        headers=user["headers"])):
         assert response.status_code == 200, response.text
-        view = response.json()["equivalents"][eq_code]
-        assert view["status"] == "healthy", view
+        body = response.json()
+        view = body["equivalents"][eq_code]
+        # `/status` also folds in the reconciliation (no result here: warning); the limit adds nothing.
+        assert view["status"] != "critical" and not any("Trust limit" in a for a in body["alerts"]), body
+        assert view["invariants"]["trust_limits"]["passed"] is True
         assert view["invariants"]["trust_limits"]["over_limit_allowed"] == allowed
         assert view["invariants"]["trust_limits"]["growth"] == NOT_VERIFIED_GROWTH
 
@@ -163,7 +161,6 @@ async def _book_refusal(db_session, kind: str, eq, effect) -> IntegrityViolation
     return None
 
 
-@target_xfail_026("a direct production Book payment cannot grow a debt past the creditor's limit")
 @pytest.mark.asyncio
 async def test_a_direct_book_payment_cannot_grow_a_debt_over_the_limit(db_session) -> None:
     eq, a, b = await _parties(db_session, ("A", "B", "10"))
@@ -177,7 +174,6 @@ async def test_a_direct_book_payment_cannot_grow_a_debt_over_the_limit(db_sessio
     assert await _debts(db_session, eq.id) == {(b.id, a.id): Decimal("10")}
 
 
-@target_xfail_026("the rule is per directed debt: shrinking |net| does not license a new reverse debt")
 @pytest.mark.asyncio
 async def test_a_direct_book_payment_cannot_create_a_reverse_debt_without_a_line(db_session) -> None:
     eq, a, b = await _parties(db_session, ("A", "B", "100"))
@@ -190,7 +186,6 @@ async def test_a_direct_book_payment_cannot_create_a_reverse_debt_without_a_line
     assert await _debts(db_session, eq.id) == {(b.id, a.id): Decimal("50")}
 
 
-@target_xfail_026("INJECT keeps its own ceiling refusal but cannot pass the real limit with a larger ceiling")
 @pytest.mark.asyncio
 async def test_inject_cannot_pass_the_real_limit_with_a_larger_ceiling(db_session) -> None:
     eq, a, b = await _parties(db_session, ("A", "B", "10"))
@@ -199,3 +194,26 @@ async def test_inject_cannot_pass_the_real_limit_with_a_larger_ceiling(db_sessio
     refused = await _book_refusal(db_session, "INJECT", eq, effect)
     require_target(refused is not None, "INJECT wrote B->A 20 against A's limit of 10 because its ceiling said 100")
     assert await _debts(db_session, eq.id) == {}
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_payment_missing_the_prestate_of_a_touched_debt_is_refused_not_read_as_zero(
+    db_session, monkeypatch
+) -> None:
+    eq, a, b = await _parties(db_session, ("A", "B", "100"))
+    eq_id, eq_code, a_id, a_pid, b_id = eq.id, eq.code, a.id, a.pid, b.id
+    await db_session.commit()
+    original = payment_service._read_payment_prestate
+
+    async def one_direction_dropped(session, flows):
+        return (await original(session, flows))[1:]
+
+    monkeypatch.setattr(payment_service, "_read_payment_prestate", one_direction_dropped)
+    factory = sessionmaker_of(db_session)
+    with pytest.raises(Exception) as refused:
+        await _pay(factory, b_id, a_pid, eq_code, "5")
+    chain = [refused.value, refused.value.__cause__, refused.value.__context__]
+    assert any("no prestate" in str(exc) for exc in chain if exc is not None), chain
+    async with factory() as s:
+        assert await _debts(s, eq_id) == {}

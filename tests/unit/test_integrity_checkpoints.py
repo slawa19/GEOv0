@@ -151,18 +151,11 @@ async def test_integrity_checkpoint_marks_trust_limit_violation_as_critical(db_s
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
+    # INTENTIONAL, 026 `T2601` (owner, В3, 2026-09-29): this held a live line of 5 under a debt of 10,
+    # which is now an allowed, reported state. What stays critical is a STRUCTURAL violation: the same
+    # debt with no supporting line of B at all.
     async with debt_fixture_setup(db_session, label="setup"):
         db_session.add(Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")))
-        db_session.add(
-            TrustLine(
-                from_participant_id=b.id,
-                to_participant_id=a.id,
-                equivalent_id=eq.id,
-                limit=Decimal("5"),
-                status="active",
-                policy={"auto_clearing": True},
-            )
-        )
     await db_session.commit()
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)

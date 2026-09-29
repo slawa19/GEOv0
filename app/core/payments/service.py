@@ -1581,7 +1581,7 @@ class PaymentService:
         2. THE MONEY (`_apply_payment`, phase name `commit`): the operator stop/hold `FOR SHARE`, the
            authoritative pre-state of both directions of every pair (`_read_payment_prestate`), the v2
            envelope carrying the declaration and the pre-state - BEFORE the first debt write - the book's
-           flows, and inside the same rollback boundary `check_payment_delta`, `check_trust_limits`,
+           flows, and inside the same rollback boundary `check_payment_delta`, `check_debt_growth`,
            `check_debt_symmetry` and the integrity audit row.
 
         A refusal sets `attempt.refusal` - what the payment would be terminalized with - and raises; it
@@ -1820,7 +1820,7 @@ class PaymentService:
         with it, and being able to disagree is the entire reason it is recorded (criterion (b)).
 
         THE CHECKS (`FORK-9`), after the writes and a flush, inside the operation's rollback boundary:
-        `check_payment_delta` against the declared flows, `check_trust_limits` and `check_debt_symmetry`
+        `check_payment_delta` against the declared flows, `check_debt_growth` and `check_debt_symmetry`
         over the affected pairs (`Book.post` replaces none of them). Their refusal raises and the
         operation savepoint rolls everything back, the `COMMITTED` row included. Then the integrity audit
         row per equivalent, TRANSACTIONALLY: a database error writing it propagates; any other failure of
@@ -1882,9 +1882,19 @@ class PaymentService:
             # 014 (it could not fail); nothing replaces it here - the replacement invariant is 015's.
             from app.core.invariants import InvariantChecker
 
+            # 026 `T2601`: the limit forbids GROWTH, checked against the prestate read above - never
+            # re-read, and a directed debt the prestate does not name is an error, not a zero.
+            before = {
+                (uuid.UUID(row["equivalent"]), uuid.UUID(row["debtor"]), uuid.UUID(row["creditor"])):
+                Decimal(row["amount"])
+                for row in prestate
+            }
             checker = InvariantChecker(session)
             for eq_id, pairs in pairs_by_equivalent.items():
-                await checker.check_trust_limits(equivalent_id=eq_id, participant_pairs=list(pairs))
+                edges = {(eq_id, debtor_id, creditor_id) for debtor_id, creditor_id in pairs}
+                if missing := edges - before.keys():
+                    raise RuntimeError(f"payment {tx_id}: no prestate for {len(missing)} directed debt(s)")
+                await checker.check_debt_growth({edge: before[edge] for edge in edges})
                 await checker.check_debt_symmetry(equivalent_id=eq_id, participant_pairs=list(pairs))
                 await self._boundary.check_payment_delta(
                     equivalent_id=eq_id,

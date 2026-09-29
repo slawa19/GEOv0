@@ -127,7 +127,13 @@ async def test_a_frozen_line_within_its_limit_leaves_the_checkpoint_healthy(db_s
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
 
-    assert cp.invariants_status["checks"]["trust_limits"] == {"passed": True, "violations": 0}
+    # 026 `T2601`: the entry also lists allowed excess (none here) and says growth is not verified.
+    assert cp.invariants_status["checks"]["trust_limits"] == {
+        "passed": True,
+        "violations": 0,
+        "over_limit_allowed": [],
+        "growth": {"status": "not_verified", "reason": "requires_operation_prestate"},
+    }
     assert cp.invariants_status["status"] == "healthy"
     assert cp.invariants_status["alerts"] == []
     assert cp.invariants_status["passed"] is True
@@ -228,26 +234,23 @@ async def test_a_partial_repayment_of_debt_on_a_frozen_line_commits(db_session, 
 
 
 @pytest.mark.asyncio
-async def test_a_frozen_line_over_its_limit_is_still_a_violation_against_that_limit(db_session):
-    # §11.5.2 freezes a line BECAUSE its debt exceeds the limit. Excluding frozen lines from the
-    # check would make that freeze erase the evidence of the breach it responds to.
+async def test_a_frozen_line_over_its_limit_is_reported_against_that_limit(db_session):
+    # INTENTIONAL, 026 `T2601` (owner, В3, 2026-09-29): a debt over the limit is no longer a snapshot
+    # violation but an allowed, REPORTED state; growth is refused on the write path. What T1543 pins
+    # survives: the frozen line is compared with its stored limit (excess 50), not with zero (150).
     eq, creditor, debtor = await _line_with_debt(
         db_session, status="frozen", limit="100", debt="150"
     )
 
-    with pytest.raises(IntegrityViolationException) as exc_info:
-        await InvariantChecker(db_session).check_trust_limits(equivalent_id=eq.id)
-
-    assert exc_info.value.details["invariant"] == "TRUST_LIMIT_VIOLATION"
-    (violation,) = exc_info.value.details["violations"]
-    assert violation["creditor_id"] == str(creditor.id)
-    assert violation["debtor_id"] == str(debtor.id)
-    assert Decimal(violation["trust_limit"]) == Decimal("100")
-    assert Decimal(violation["violation_amount"]) == Decimal("50")
+    (entry,) = await InvariantChecker(db_session).check_trust_limits(equivalent_id=eq.id)
+    assert entry["creditor_id"] == str(creditor.id)
+    assert entry["debtor_id"] == str(debtor.id)
+    assert Decimal(entry["trust_limit"]) == Decimal("100")
+    assert Decimal(entry["excess"]) == Decimal("50")
 
     cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
-    assert cp.invariants_status["status"] == "critical"
-    assert cp.invariants_status["alerts"] == ["trust_limits"]
+    assert cp.invariants_status["status"] == "healthy"
+    assert cp.invariants_status["checks"]["trust_limits"]["over_limit_allowed"] == [entry]
 
 
 @pytest.mark.asyncio
@@ -283,7 +286,7 @@ async def test_an_active_line_is_compared_with_its_stored_limit(db_session, debt
         assert await checker.check_trust_limits(equivalent_id=eq.id) == []
         return
 
-    with pytest.raises(IntegrityViolationException) as exc_info:
-        await checker.check_trust_limits(equivalent_id=eq.id)
-    (violation,) = exc_info.value.details["violations"]
-    assert Decimal(violation["trust_limit"]) == Decimal("100")
+    # INTENTIONAL, 026 `T2601`: over the stored limit is reported as allowed excess, not raised.
+    (entry,) = await checker.check_trust_limits(equivalent_id=eq.id)
+    assert Decimal(entry["trust_limit"]) == Decimal("100")
+    assert Decimal(entry["excess"]) == Decimal("0.01")
