@@ -89,12 +89,15 @@ async def test_trust_limit_violation_detected(db_session):
         db_session.add(Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("150")))
     await db_session.flush()
 
+    # INTENTIONAL, 026 `T2601` (owner, В3, 2026-09-29): the snapshot no longer raises a debt above the
+    # stored limit of a live line - it is the allowed state after a lowered limit, and is REPORTED with
+    # its excess. Growth over the limit is refused on the write path
+    # (`tests/integration/test_p026_s1_debt_growth_gate_postgres.py`); a debt with no live line still
+    # raises (`test_edge_model_attributes_a_debt_directionally` above).
     checker = InvariantChecker(db_session)
-    with pytest.raises(IntegrityViolationException) as exc_info:
-        await checker.check_trust_limits(equivalent_id=eq.id)
-
-    assert exc_info.value.code == "E008"
-    assert exc_info.value.details.get("invariant") == "TRUST_LIMIT_VIOLATION"
+    (entry,) = await checker.check_trust_limits(equivalent_id=eq.id)
+    assert (entry["debtor_id"], entry["creditor_id"]) == (str(b.id), str(a.id))
+    assert (Decimal(entry["trust_limit"]), Decimal(entry["excess"])) == (Decimal("100"), Decimal("50"))
 
 
 # `test_payment_commit_aborts_on_trust_limit_violation` drove `PaymentEngine.commit` over a hand-seeded
@@ -225,16 +228,9 @@ async def test_integrity_checkpoint_status_critical_for_trust_limits(db_session)
     db_session.add_all([eq, a, b])
     await db_session.flush()
 
-    # Controlling trustline for debt(B->A) is trustline(A->B)
-    db_session.add(
-        TrustLine(
-            from_participant_id=a.id,
-            to_participant_id=b.id,
-            equivalent_id=eq.id,
-            limit=Decimal("100"),
-            status="active",
-        )
-    )
+    # INTENTIONAL, 026 `T2601`: this used a live line of 100 under a debt of 150 - an allowed state
+    # since the owner's В3 (2026-09-29), reported as `over_limit_allowed`, not critical. What stays
+    # critical is a STRUCTURAL violation: the debt of B to A with no supporting line of A at all.
     async with debt_fixture_setup(db_session, label="setup"):
         db_session.add(
             Debt(
@@ -534,3 +530,32 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
         .all()
     )
     assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_a_structural_violation_does_not_hide_the_allowed_excess_of_another_pair(db_session):
+    # 026 `T2601`, §15 P3: both categories stay observable together - the debt of C with no line of A
+    # is structural (critical), the debt of B above A's line of 100 is allowed excess (reported).
+    nonce = uuid.uuid4().hex[:10]
+    eq = Equivalent(code=("T" + nonce[:15]).upper(), symbol="T", description=None, precision=2, metadata_={}, is_active=True)
+    a, b, c = (Participant(pid=r + nonce, display_name=r, public_key=f"pk{r}-" + nonce, type="person", status="active",
+                           profile={}) for r in "ABC")
+    db_session.add_all([eq, a, b, c])
+    await db_session.flush()
+    db_session.add(TrustLine(from_participant_id=a.id, to_participant_id=b.id, equivalent_id=eq.id,
+                             limit=Decimal("100"), status="active"))
+    async with debt_fixture_setup(db_session, label="setup"):
+        db_session.add(Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("150")))
+        db_session.add(Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("7")))
+    await db_session.flush()
+
+    with pytest.raises(IntegrityViolationException) as exc_info:
+        await InvariantChecker(db_session).check_trust_limits(equivalent_id=eq.id)
+    (violation,) = exc_info.value.details["violations"]
+    assert violation["debtor_id"] == str(c.id)
+    (allowed,) = exc_info.value.over_limit_allowed
+    assert (allowed["debtor_id"], Decimal(allowed["excess"])) == (str(b.id), Decimal("50"))
+
+    trust = (await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)).invariants_status[
+        "checks"]["trust_limits"]
+    assert (trust["passed"], trust["violations"], trust["over_limit_allowed"]) == (False, 1, [allowed])

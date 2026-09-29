@@ -27,6 +27,7 @@ from app.core.ledger.book import (
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
@@ -77,6 +78,10 @@ async def test_inject_refuses_an_opposing_debt_and_never_nets(db_session) -> Non
 @pytest.mark.asyncio
 async def test_inject_refuses_a_result_over_its_ceiling(db_session) -> None:
     eq, a, b, _ = await _world(db_session, debt_b_owes_a="5.00")
+    # 026 `T2601`: the book refuses growth past the REAL limit whatever the ceiling says, so the
+    # ceiling of 10 is backed by A's line of 10 - as the inject executor always passes it.
+    db_session.add(TrustLine(from_participant_id=a.id, to_participant_id=b.id, equivalent_id=eq.id,
+                             limit=Decimal("10"), status="active"))
     async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
         posting = Book.current(db_session)
         over = await posting.apply(

@@ -323,8 +323,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # `after_state` dict, so the difference stays the one this entry already carried. Measured with a per-entry dump of
 # every ledger on `c64289c` and on this tree: success, error and security ledgers identical except that one key;
 # counts 62 / 51 / 66 on both.
+# 2026-09-29 / programme 026 `T2601`: count HOLDS at 62, digest moves. SEVEN entries change content, none enters or
+# leaves: the `trust_limits` entry becomes `TrustLimitsResult` (`over_limit_allowed`, `growth`) on
+# `GET /integrity/status`, `POST /integrity/verify`, the checkpoint of `GET /integrity/checksum/{equivalent}` and
+# the verify row of `GET /integrity/audit-log`; the TRUST_LIMIT_VIOLATION item gains the optional `debt_before`,
+# which `PaymentError.details` carries into `GET /payments`, `GET /payments/{tx_id}` and `POST /payments`. All
+# seven were already in the ledger. Measured with a per-entry dump of every ledger on `d05a763` and on this tree:
+# error and security ledgers identical, counts 62 / 51 / 66 on both.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "164281434dbae616933e6b68cf92b8647bd71a533270c4358bc425807e5624c5"
+    "211991343c1097c486bbf5de4b95b6296a2e2e4a023a54c21829202aaca2ec02"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

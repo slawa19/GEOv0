@@ -67,7 +67,7 @@ async def compute_integrity_checkpoint_for_equivalent(
     # FIX-010: protocol-aligned invariant checks recorded in the checkpoint.
     # Expected invariant violations are recorded for operators. An unavailable
     # checker is not a successful verification and must fail the owning UoW.
-    from app.core.invariants import InvariantChecker
+    from app.core.invariants import GROWTH_NOT_VERIFIED_BY_SNAPSHOT, InvariantChecker
     from app.utils.exceptions import IntegrityViolationException
 
     checker = InvariantChecker(session)
@@ -90,16 +90,25 @@ async def compute_integrity_checkpoint_for_equivalent(
     checks["zero_sum"] = dict(ZERO_SUM_WITHDRAWN)
     unverified = ["zero_sum"]
 
-    # trust limits (critical)
+    # trust limits (critical only for a structural violation). 026 `T2601`: a debt above a lowered
+    # limit is an allowed state, listed and not alerted; growth is not verified by a snapshot.
+    growth = dict(GROWTH_NOT_VERIFIED_BY_SNAPSHOT)
     try:
-        await checker.check_trust_limits(equivalent_id=equivalent_id)
-        checks["trust_limits"] = {"passed": True, "violations": 0}
+        allowed = await checker.check_trust_limits(equivalent_id=equivalent_id)
+        checks["trust_limits"] = {
+            "passed": True,
+            "violations": 0,
+            "over_limit_allowed": allowed,
+            "growth": growth,
+        }
     except IntegrityViolationException as exc:
         violations = (exc.details or {}).get("violations") or []
         checks["trust_limits"] = {
             "passed": False,
             "violations": len(violations),
             "details": exc.details,
+            "over_limit_allowed": getattr(exc, "over_limit_allowed", []),
+            "growth": growth,
         }
         overall_status = "critical"
         alerts.append("trust_limits")

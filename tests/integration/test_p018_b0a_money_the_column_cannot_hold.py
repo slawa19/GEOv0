@@ -137,6 +137,10 @@ async def test_the_book_accepts_trailing_zeros_and_the_full_width(db_session) ->
     """Counter-check: the refusals above are not a refusal of long spellings or of large money."""
 
     eq, a, b = await _world(db_session, debt_b_owes_a="1.00")
+    # 026 `T2601`: the book refuses growth past the REAL limit, so the full width needs a line of A
+    # that wide; the ceiling alone no longer licenses it.
+    db_session.add(TrustLine(from_participant_id=a.id, to_participant_id=b.id, equivalent_id=eq.id,
+                             limit=FULL_WIDTH, status="active"))
     async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
         posting = Book.current(db_session)
         # Ten fraction digits, the last two zero: the same number as 0.10000000.

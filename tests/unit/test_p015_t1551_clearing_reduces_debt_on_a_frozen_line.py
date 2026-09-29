@@ -43,7 +43,6 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.utils.exceptions import IntegrityViolationException
 from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
 from tests.conftest import MODE_B, sessionmaker_of
@@ -224,10 +223,9 @@ async def test_clearing_reduces_the_over_limit_debt_on_a_frozen_line(db_session,
 
     # Still over the limit after the reduction: this is the case the task exists for, and the
     # clearing above committed through it rather than being refused by its own verification.
-    with pytest.raises(IntegrityViolationException) as exc_info:
-        await checker.check_trust_limits(equivalent_id=ring.eq_id)
-    (violation,) = exc_info.value.details["violations"]
-    assert Decimal(violation["violation_amount"]) == Decimal("20")
+    # INTENTIONAL, 026 `T2601` (owner, В3): the remaining excess is reported as allowed, not raised.
+    (entry,) = await checker.check_trust_limits(equivalent_id=ring.eq_id)
+    assert Decimal(entry["excess"]) == Decimal("20")
 
 
 # --- control: consent is still required -------------------------------------------------------

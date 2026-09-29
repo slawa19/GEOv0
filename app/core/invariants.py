@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
@@ -12,6 +12,51 @@ from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 
+#: A directed debt: (equivalent_id, debtor_id, creditor_id).
+DebtEdge = Tuple[UUID, UUID, UUID]
+
+#: What the snapshot says about growth (026 `T2601`, fork 4): it cannot see the state before an
+#: operation, so it cannot prove that no debt grew - growth is checked on the write path only.
+GROWTH_NOT_VERIFIED_BY_SNAPSHOT: Dict[str, str] = {
+    "status": "not_verified",
+    "reason": "requires_operation_prestate",
+}
+
+
+def _supporting_line():
+    """The creditor's live line toward the debtor of a `Debt` row, at its stored limit (T1543).
+
+    `active` and `frozen` support a debt; a `closed` or missing line supports none (limit 0).
+    """
+
+    return and_(
+        TrustLine.from_participant_id == Debt.creditor_id,
+        TrustLine.to_participant_id == Debt.debtor_id,
+        TrustLine.equivalent_id == Debt.equivalent_id,
+        TrustLine.status.in_(("active", "frozen")),
+    )
+
+
+def _limit_item(row, before: Optional[Decimal] = None) -> dict:
+    limit = row.trust_limit or Decimal("0")
+    item = {
+        "debtor_id": str(row.debtor_id),
+        "creditor_id": str(row.creditor_id),
+        "equivalent_id": str(row.equivalent_id),
+        "debt_amount": str(row.debt_amount),
+        "trust_limit": str(limit),
+        "violation_amount": str(row.debt_amount - limit),
+    }
+    if before is not None:
+        item["debt_before"] = str(before)
+    return item
+
+
+def _trust_limit_violation(message: str, violations: List[dict]) -> IntegrityViolationException:
+    return IntegrityViolationException(
+        message, details={"invariant": "TRUST_LIMIT_VIOLATION", "violations": violations}
+    )
+
 
 class InvariantChecker:
     """Checks protocol invariants against persisted state."""
@@ -19,16 +64,48 @@ class InvariantChecker:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def check_debt_growth(self, before: Mapping[DebtEdge, Decimal]) -> None:
+        """THE growth rule (026 В3, `T2601`): no directed debt grows above its creditor's limit.
+
+        For every directed debt in `before` - its amount before the operation - the current amount
+        `after` must satisfy `after > before => after <= limit` (the supporting line's stored limit,
+        0 without one). A debt already above the limit may shrink or stay. Per DIRECTED debt, never
+        per `abs(net)`: repaying one direction and creating the reverse lowers `|net|` and is still
+        growth of the reverse debt. ONE SELECT over the named debts. The two write-path callers:
+        `PaymentService._apply_payment` (`before` = the payment's prestate) and `Book`'s completion
+        (`before` = the journal's first `amount_before`), which also covers direct `Book` calls.
+        """
+
+        if not before:
+            return
+        named = [and_(Debt.equivalent_id == e, Debt.debtor_id == d, Debt.creditor_id == c) for e, d, c in before]
+        query = select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id, Debt.amount.label("debt_amount"),
+                       TrustLine.limit.label("trust_limit"))
+        rows = (await self.session.execute(
+            query.select_from(Debt).outerjoin(TrustLine, _supporting_line()).where(or_(*named)))).all()
+        violations = []
+        for row in rows:
+            was = before[(row.equivalent_id, row.debtor_id, row.creditor_id)]
+            if row.debt_amount > was and row.debt_amount > (row.trust_limit or Decimal("0")):
+                violations.append(_limit_item(row, was))
+        if violations:
+            raise _trust_limit_violation(
+                f"Trust limit exceeded: {len(violations)} debt(s) grew above the limit", violations
+            )
+
     async def check_trust_limits(
         self,
         *,
         equivalent_id: Optional[UUID] = None,
         participant_pairs: Optional[List[Tuple[UUID, UUID]]] = None,
     ) -> List[dict]:
-        """Check trust limit invariant.
+        """The SNAPSHOT side of the trust limit (026 `T2601`, fork 4): observation, not proof.
 
-        Invariant: debt[debtor→creditor, E] ≤ trustline[creditor→debtor, E].limit
-        (active or frozen trustline at its stored limit; closed or missing treated as limit 0).
+        A debt above the stored limit of its supporting live line (`active`/`frozen`) is ALLOWED - the
+        limit was lowered under it (owner, В3) - and is returned as an `over_limit_allowed` entry with
+        debt, limit and excess. A snapshot cannot see growth (`GROWTH_NOT_VERIFIED_BY_SNAPSHOT`); that is
+        `check_debt_growth`'s, on the write path. A debt with NO supporting live line (closed or
+        missing) is structural and still raises `TRUST_LIMIT_VIOLATION` against a limit of 0.
         """
 
         tl = TrustLine
@@ -39,18 +116,11 @@ class InvariantChecker:
                 Debt.creditor_id,
                 Debt.equivalent_id,
                 Debt.amount.label("debt_amount"),
-                func.coalesce(tl.limit, Decimal("0")).label("trust_limit"),
+                tl.id.label("line_id"),
+                tl.limit.label("trust_limit"),
             )
             .select_from(Debt)
-            .outerjoin(
-                tl,
-                and_(
-                    tl.from_participant_id == Debt.creditor_id,
-                    tl.to_participant_id == Debt.debtor_id,
-                    tl.equivalent_id == Debt.equivalent_id,
-                    tl.status.in_(("active", "frozen")),
-                ),
-            )
+            .outerjoin(tl, _supporting_line())
             .where(Debt.amount > func.coalesce(tl.limit, Decimal("0")))
         )
 
@@ -64,28 +134,23 @@ class InvariantChecker:
             ]
             query = query.where(or_(*pair_conditions))
 
-        rows = (await self.session.execute(query)).all()
-        violations: List[dict] = []
-
+        order = (Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id)
+        rows = (await self.session.execute(query.order_by(*order))).all()
+        allowed = []
         for row in rows:
-            violations.append(
-                {
-                    "debtor_id": str(row.debtor_id),
-                    "creditor_id": str(row.creditor_id),
-                    "equivalent_id": str(row.equivalent_id),
-                    "debt_amount": str(row.debt_amount),
-                    "trust_limit": str(row.trust_limit),
-                    "violation_amount": str(row.debt_amount - row.trust_limit),
-                }
-            )
-
+            if row.line_id is not None:
+                item = _limit_item(row)
+                item["excess"] = item.pop("violation_amount")
+                allowed.append(item)
+        violations = [_limit_item(row) for row in rows if row.line_id is None]
         if violations:
-            raise IntegrityViolationException(
-                f"Trust limit exceeded for {len(violations)} debt(s)",
-                details={"invariant": "TRUST_LIMIT_VIOLATION", "violations": violations},
+            # The allowed excess of other pairs stays observable beside the structural violation.
+            exc = _trust_limit_violation(
+                f"Debt without a supporting live trust line: {len(violations)} debt(s)", violations
             )
-
-        return []
+            exc.over_limit_allowed = allowed
+            raise exc
+        return allowed
 
     async def check_debt_symmetry(
         self,

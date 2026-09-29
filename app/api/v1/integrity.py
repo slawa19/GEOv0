@@ -26,6 +26,7 @@ from app.schemas.integrity import (
     IntegrityVerifyRequest,
     IntegrityVerifyResponse,
     InvariantResult,
+    TrustLimitsResult,
 )
 from app.utils.exceptions import (
     IntegrityViolationException,
@@ -34,6 +35,20 @@ from app.utils.exceptions import (
 from app.utils.validation import validate_equivalent_code
 
 router = APIRouter()
+
+
+async def _trust_limits(checker: InvariantChecker, equivalent_id) -> TrustLimitsResult:
+    """026 `T2601`: only a structural violation fails; an over-limit debt is listed as allowed."""
+
+    try:
+        allowed = await checker.check_trust_limits(equivalent_id=equivalent_id)
+    except IntegrityViolationException as exc:
+        violations = (exc.details or {}).get("violations") or []
+        allowed = getattr(exc, "over_limit_allowed", [])
+        return TrustLimitsResult(
+            passed=False, violations=len(violations), details=exc.details, over_limit_allowed=allowed
+        )
+    return TrustLimitsResult(passed=True, violations=0, over_limit_allowed=allowed)
 
 
 def _unverified_names(invariants: dict[str, InvariantOutcome]) -> list[str]:
@@ -149,19 +164,11 @@ async def get_integrity_status(
         # visible in the summary rather than implied by a missing key.
         invariants["zero_sum"] = InvariantWithdrawn()
 
-        try:
-            await checker.check_trust_limits(equivalent_id=eq.id)
-            invariants["trust_limits"] = InvariantResult(passed=True, violations=0)
-        except IntegrityViolationException as exc:
-            violations = (exc.details or {}).get("violations") or []
-            invariants["trust_limits"] = InvariantResult(
-                passed=False,
-                violations=len(violations),
-                details=exc.details,
-            )
+        invariants["trust_limits"] = trust = await _trust_limits(checker, eq.id)
+        if not trust.passed:
             status = "critical"
             overall_status = "critical"
-            alerts.append(f"Trust limit violations in {eq.code}: {len(violations)}")
+            alerts.append(f"Trust limit violations in {eq.code}: {trust.violations}")
 
         try:
             await checker.check_debt_symmetry(equivalent_id=eq.id)
@@ -265,19 +272,11 @@ async def verify_integrity(
         # visible in the summary rather than implied by a missing key.
         invariants["zero_sum"] = InvariantWithdrawn()
 
-        try:
-            await checker.check_trust_limits(equivalent_id=eq.id)
-            invariants["trust_limits"] = InvariantResult(passed=True, violations=0)
-        except IntegrityViolationException as exc:
-            violations = (exc.details or {}).get("violations") or []
-            invariants["trust_limits"] = InvariantResult(
-                passed=False,
-                violations=len(violations),
-                details=exc.details,
-            )
+        invariants["trust_limits"] = trust = await _trust_limits(checker, eq.id)
+        if not trust.passed:
             status = "critical"
             overall_status = "critical"
-            alerts.append(f"Trust limit violations in {eq.code}: {len(violations)}")
+            alerts.append(f"Trust limit violations in {eq.code}: {trust.violations}")
 
         try:
             await checker.check_debt_symmetry(equivalent_id=eq.id)

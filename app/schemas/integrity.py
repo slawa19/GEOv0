@@ -37,9 +37,49 @@ class InvariantWithdrawn(BaseModel):
     reason: Literal["check_withdrawn"] = "check_withdrawn"
 
 
+class OverLimitAllowed(BaseModel):
+    """A debt above the stored limit of its supporting live line: allowed, not a violation (026 В3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    debtor_id: str
+    creditor_id: str
+    equivalent_id: str
+    debt_amount: str
+    trust_limit: str
+    excess: str
+
+
+class GrowthNotVerified(BaseModel):
+    """A snapshot cannot see the state before an operation, so it does not verify growth (026 `T2601`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["not_verified"] = "not_verified"
+    reason: Literal["requires_operation_prestate"] = "requires_operation_prestate"
+
+
+class TrustLimitsResult(BaseModel):
+    """The `trust_limits` verdict (026 `T2601`): `passed` covers structural violations only.
+
+    `over_limit_allowed` lists debts above a lowered limit - an allowed state - and `growth` says the
+    snapshot did not verify growth; that is the write path's (`InvariantChecker.check_debt_growth`).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    passed: bool
+    violations: int
+    details: Optional[Dict[str, Any]] = None
+    over_limit_allowed: List[OverLimitAllowed] = Field(default_factory=list)
+    growth: GrowthNotVerified = Field(default_factory=GrowthNotVerified)
+
+
 # The union order matters: `InvariantWithdrawn` forbids extra keys, so a real result can never
 # match it, while a withdrawn entry has no `passed` and can never match `InvariantResult`.
-InvariantOutcome = Union[InvariantWithdrawn, InvariantResult]
+# `TrustLimitsResult` forbids extra keys and carries its own required-by-default keys, so an
+# `InvariantResult` (which has `value`) never validates as one.
+InvariantOutcome = Union[InvariantWithdrawn, TrustLimitsResult, InvariantResult]
 
 ZERO_SUM_WITHDRAWN: Dict[str, Any] = {
     "status": "not_verified",

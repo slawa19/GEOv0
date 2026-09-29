@@ -179,10 +179,15 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 }
 ```
 
-**Инвариант:**
+**Инвариант (с 2026-09-29: программа 026, `T2601`, решение владельца В3):** операция не может увеличить долг выше лимита.
 ```
-∀ (from, to, equivalent): debt[to→from] ≤ limit
+∀ операция, ∀ (from, to, equivalent):
+  debt_after[to→from] > debt_before[to→from]  ⇒  debt_after[to→from] ≤ limit
 ```
+- `limit` — сохранённый лимит линии `active` или `frozen`; у `closed` или отсутствующей линии — 0.
+- Проверяется по каждому **направленному** долгу, а не по модулю сальдо пары: погасить долг в одну сторону и создать долг в обратную — рост обратного долга.
+- Долг выше лимита (лимит снижен под существующим долгом) — допустимое состояние: его можно погашать, но нельзя увеличить. Снижение лимита ниже долга через API — срез S2 программы 026.
+- Проверка роста — на пути записи: в платеже (по снимку пар до операции) и при завершении каждой операции книги долгов (по журналу). Периодическая проверка состояния рост не видит (§11.2.2).
 
 **Политики:**
 
@@ -1871,12 +1876,16 @@ baseline сверкой не ловятся (перечень — в `reconcilia
 
 #### 11.2.2. Trust Limit Invariant (Инвариант лимита доверия)
 
-**Определение:** Долг не может превышать лимит линии доверия.
+**Определение (с 2026-09-29, 026 `T2601`):** операция не может увеличить долг выше лимита линии доверия (§3.3). Долг выше лимита без роста допустим.
 
 ```
-∀ (debtor, creditor, equivalent):
-  debt[debtor → creditor, E] ≤ trust_line[creditor → debtor, E].limit
+∀ операция, ∀ (debtor, creditor, E):
+  debt_after > debt_before  ⇒  debt_after ≤ trust_line[creditor → debtor, E].limit
 ```
+
+**Где проверяется рост:** только на пути записи — `InvariantChecker.check_debt_growth` (`app/core/invariants.py`), вызываемый платежом со снимком пар до операции и завершением операции книги (`app/core/ledger/book.py`) по первому `amount_before` журнала. Отказ — `TRUST_LIMIT_VIOLATION` с `debt_before`.
+
+**Запрос ниже — наблюдение состояния, а не проверка роста.** Строка с поддерживающей линией отдаётся как `over_limit_allowed` (долг, лимит, превышение); строка без живой линии — структурное нарушение. Снимок не видит состояния «до» и о росте отвечает «не проверено» (`growth: not_verified`).
 
 **SQL-проверка:**
 ```sql
@@ -1896,7 +1905,7 @@ LEFT JOIN trust_lines tl ON
 WHERE d.amount > COALESCE(tl.limit, 0);
 ```
 
-**Частота проверки:** После каждой транзакции
+**Частота проверки:** рост — в каждой денежной операции; снимок — периодически и в `POST /integrity/verify`.
 
 #### 11.2.3. Clearing Neutrality Invariant (Инвариант нейтральности клиринга)
 
@@ -2101,6 +2110,8 @@ async def handle_zero_sum_violation(equivalent: str, imbalance: Decimal):
 
 #### 11.5.2. При обнаружении нарушения Trust Limit
 
+**Hub v0.1, с 2026-09-29 (026 `T2601`).** Долг выше сниженного лимита — не нарушение: он показывается как `over_limit_allowed`, без статуса `critical`, без заморозки линии и без integrity hold. Рост выше лимита отказывается в самой операции и в состояние не попадает. `critical` остаётся для структурного нарушения — долга без поддерживающей живой линии. Процедура ниже — историческая модель реакции; хаб её не выполняет.
+
 ```python
 async def handle_trust_limit_violation(
     debtor: str, 
@@ -2194,7 +2205,9 @@ async def integrity_check_task():
       "last_verified": "ISO8601",
       "invariants": {
         "zero_sum": {"passed": true, "value": "0.00"},
-        "trust_limits": {"passed": true, "violations": 0},
+        "trust_limits": {"passed": true, "violations": 0, "details": null,
+                         "over_limit_allowed": [],
+                         "growth": {"status": "not_verified", "reason": "requires_operation_prestate"}},
         "debt_symmetry": {"passed": true, "violations": 0}
       }
     }

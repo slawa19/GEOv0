@@ -94,6 +94,7 @@ from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.auth.canonical import canonical_json
+from app.core.invariants import InvariantChecker
 from app.db.journal_tables import (
     MONEY_ENCODING_VERSION,
     OPERATION_KINDS,
@@ -779,6 +780,22 @@ async def _complete(
                 f"outside its declared scope {sorted(str(v) for v in scope)}",
                 reason=Refusal.OUT_OF_SCOPE,
             )
+
+    # 026 `T2601`: NO DIRECTED DEBT GROWS ABOVE ITS LIMIT, whoever called the book. `before` is the
+    # first `amount_before` of each debt in this operation, `after` its final amount; a row the
+    # operation inserted starts from NULL = no debt. `SEED`/`TEST_FIXTURE` are designated initial
+    # states before a baseline (below) and are not growth. The rule is `check_debt_growth`'s; the
+    # payment runs it earlier against its prestate, this covers every other production caller.
+    if op.kind not in _PRE_BASELINE_ONLY_KINDS:
+        before: dict[tuple[Any, Any, Any], Decimal] = {}
+        after: dict[tuple[Any, Any, Any], Decimal] = {}
+        for row in rows:
+            edge = (row.equivalent_id, row.debtor_id, row.creditor_id)
+            before.setdefault(edge, Decimal(row.amount_before or 0))
+            after[edge] = Decimal(row.amount_after or 0)
+        grown = {edge: was for edge, was in before.items() if after[edge] > was}
+        if grown:
+            await InvariantChecker(session).check_debt_growth(grown)
 
     # T1501: A SEED OR TEST_FIXTURE WRITE AFTER THE BASELINE IS REFUSED, never recorded. Read from the
     # stored entries, so it covers every statement of the operation. Under PostgreSQL SERIALIZABLE a
