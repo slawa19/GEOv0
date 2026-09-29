@@ -33,6 +33,7 @@ from app.core.ledger.book import Book, NewDebt, PaymentFlow, operation_for
 from app.core.payments.service import _classify_payment_db_error
 from app.utils.exceptions import RetryablePaymentConflictException
 from app.db.models.transaction import Transaction
+from app.db.models.trustline import TrustLine
 from tests.p018_support import (
     SERIALIZATION_FAILURE,
     context_of,
@@ -74,6 +75,9 @@ async def test_t1801_a_serialization_failure_inside_the_book_leaves_no_envelope_
                             state="COMMITTED")
                 for tx_id in (winner_tx, loser_tx)
             )
+            # 026 `T2601`: the book refuses growth past the creditor's real limit, so p1 extends p0 a line.
+            setup.add(TrustLine(from_participant_id=world.p(1), to_participant_id=world.p(0),
+                                equivalent_id=world.eq, limit=Decimal("100"), status="active"))
             await Book.post(
                 setup,
                 operation_for("TEST_FIXTURE", f"t1801-40001-{uuid.uuid4()}", {"seed": True}),
