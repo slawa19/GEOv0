@@ -223,19 +223,19 @@ async def _graph_optional_collections(
         incidents = await _take(
             "incidents",
             _graph_fetch_incidents,
-            int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 50) or 50),
+            int(settings.ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS or 50),
         )
     if "audit_log" in include_set:
         audit_log = await _take(
             "audit_log",
             _graph_fetch_audit_log,
-            int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 50) or 50),
+            int(settings.ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS or 50),
         )
     if "transactions" in include_set:
         transactions = await _take(
             "transactions",
             _graph_fetch_transactions,
-            int(getattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 50) or 50),
+            int(settings.ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS or 50),
         )
 
     return incidents, audit_log, transactions, included, truncated

@@ -78,7 +78,7 @@ def _canonical_operations() -> set[tuple[str, str]]:
     }
 
 
-def test_environment_of_the_measurement_is_the_one_this_test_was_written_for() -> None:
+def test_environment_of_the_measurement_is_the_one_this_test_was_written_for(monkeypatch) -> None:
     """Pin the flags the counts depend on, so the surface cannot change unnoticed."""
 
     assert settings.METRICS_ENABLED is True, (
@@ -87,17 +87,13 @@ def test_environment_of_the_measurement_is_the_one_this_test_was_written_for() -
     )
     # Interact Mode visibility no longer depends on this flag (011/T1101) - asserted here so the
     # day someone reintroduces the coupling, this test says so instead of quietly shrinking.
-    for value in (None, "1"):
-        if value is None:
-            os.environ.pop("SIMULATOR_ACTIONS_ENABLE", None)
-        else:
-            os.environ["SIMULATOR_ACTIONS_ENABLE"] = value
+    for value in (False, True):
+        monkeypatch.setattr(settings, "SIMULATOR_ACTIONS_ENABLE", value)
         assert {
             method_path
             for method_path in _callable_operations()
             if "/actions/" in method_path[1]
         }, "Interact Mode routes vanished from the route table"
-    os.environ.pop("SIMULATOR_ACTIONS_ENABLE", None)
 
 
 def test_every_callable_operation_is_in_the_canon_or_a_named_exception() -> None:

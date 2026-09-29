@@ -10,8 +10,8 @@ from app.utils.exceptions import TooManyRequestsException
 
 @pytest.mark.asyncio
 async def test_sse_subscribe_rate_limit_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SIMULATOR_SSE_MAX_CONNECTIONS", "100")
-    monkeypatch.setenv("SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SSE_MAX_CONNECTIONS", 100)
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", 1)
 
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
@@ -35,8 +35,8 @@ async def test_sse_subscribe_rate_limit_per_run(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.asyncio
 async def test_sse_subscribe_rate_limit_total(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SIMULATOR_SSE_MAX_CONNECTIONS", "1")
-    monkeypatch.setenv("SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", "100")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SSE_MAX_CONNECTIONS", 1)
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN", 100)
 
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}

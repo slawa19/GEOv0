@@ -1,5 +1,4 @@
 import importlib
-import os
 
 from fastapi import FastAPI
 import pytest
@@ -11,7 +10,7 @@ from app.config import settings
 async def test_simulator_actions_endpoints_disabled_returns_403_actions_disabled(client, monkeypatch):
     """When SIMULATOR_ACTIONS_ENABLE is off, any /actions/* endpoint must fail fast with a stable error envelope."""
 
-    monkeypatch.delenv("SIMULATOR_ACTIONS_ENABLE", raising=False)
+    monkeypatch.setattr(settings, "SIMULATOR_ACTIONS_ENABLE", False)
 
     # Use admin token to bypass participant auth so the test is only about the feature flag.
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
@@ -28,7 +27,7 @@ async def test_simulator_actions_endpoints_disabled_returns_403_actions_disabled
     assert body.get("details", {}).get("env") == "SIMULATOR_ACTIONS_ENABLE"
 
 
-def test_simulator_actions_are_documented_regardless_of_the_feature_flag() -> None:
+def test_simulator_actions_are_documented_regardless_of_the_feature_flag(monkeypatch) -> None:
     """Interact Mode operations are published; the flag gates execution, not documentation.
 
     Until 2026-08-23 these eight routes carried `include_in_schema=_actions_enabled()`, so the
@@ -54,13 +53,9 @@ def test_simulator_actions_are_documented_regardless_of_the_feature_flag() -> No
         "/api/v1/simulator/runs/{run_id}/payment-targets",
     }
 
-    for value in (None, "1"):
-        # include_in_schema is evaluated at import, so the flag is exercised by reloading the
-        # module rather than by monkeypatching the environment of an already-imported one.
-        if value is None:
-            os.environ.pop("SIMULATOR_ACTIONS_ENABLE", None)
-        else:
-            os.environ["SIMULATOR_ACTIONS_ENABLE"] = value
+    for value in (False, True):
+        # include_in_schema was evaluated at import, so the flag is exercised by reloading the module.
+        monkeypatch.setattr(settings, "SIMULATOR_ACTIONS_ENABLE", value)
         importlib.reload(simulator_module)
         app = FastAPI()
         app.include_router(simulator_module.router, prefix="/api/v1")
@@ -71,5 +66,5 @@ def test_simulator_actions_are_documented_regardless_of_the_feature_flag() -> No
             f"SIMULATOR_ACTIONS_ENABLE={value!r}: {sorted(missing)}"
         )
 
-    os.environ.pop("SIMULATOR_ACTIONS_ENABLE", None)
+    monkeypatch.undo()
     importlib.reload(simulator_module)

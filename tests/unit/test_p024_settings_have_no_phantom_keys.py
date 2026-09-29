@@ -20,10 +20,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from app.config import Settings
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 APP = Path(__file__).resolve().parents[2] / "app"
 
@@ -99,7 +97,6 @@ def test_the_guard_sees_each_shape_it_names() -> None:
         assert _findings(ast.parse(clean), "clean")[0] == [], clean
 
 
-@pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 T2414.1: settings read through getattr defaults")
 def test_app_reads_settings_by_declared_keys_without_second_defaults() -> None:
     found, reads = _scan_app()
     # The scan reaches the code: direct reads exist in the application today.

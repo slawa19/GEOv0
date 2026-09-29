@@ -55,7 +55,7 @@ def _both_ways(a: Participant, b: Participant, eq: Equivalent) -> list[TrustLine
 def run_world(monkeypatch):
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
 
     def install(owner_id: str, scenario: dict) -> str:
         run_id = f"p024-targets-{uuid.uuid4().hex[:6]}"

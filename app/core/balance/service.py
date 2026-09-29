@@ -20,6 +20,10 @@ from app.utils.observability import log_duration
 
 logger = logging.getLogger(__name__)
 
+# A fixed bound. It was read as `BALANCE_SUMMARY_CACHE_MAX_ENTRIES`, a key `Settings` never declared, so the
+# environment could not change it and 1024 was always the value (024 `T2414.1`, R-024-7).
+_SUMMARY_CACHE_MAX_ENTRIES = 1024
+
 _summary_cache: "OrderedDict[uuid.UUID, tuple[float, BalanceSummary]]" = OrderedDict()
 
 class BalanceService:
@@ -27,7 +31,7 @@ class BalanceService:
         self.session = session
 
     def _get_cached_summary(self, participant_id: uuid.UUID) -> BalanceSummary | None:
-        ttl = int(getattr(settings, "BALANCE_SUMMARY_CACHE_TTL_SECONDS", 0) or 0)
+        ttl = settings.BALANCE_SUMMARY_CACHE_TTL_SECONDS
         if ttl <= 0:
             return None
 
@@ -45,15 +49,13 @@ class BalanceService:
         return summary
 
     def _set_cached_summary(self, participant_id: uuid.UUID, summary: BalanceSummary) -> None:
-        ttl = int(getattr(settings, "BALANCE_SUMMARY_CACHE_TTL_SECONDS", 0) or 0)
+        ttl = settings.BALANCE_SUMMARY_CACHE_TTL_SECONDS
         if ttl <= 0:
             return
         _summary_cache[participant_id] = (time.time(), summary)
         _summary_cache.move_to_end(participant_id, last=True)
 
-        max_entries = int(getattr(settings, "BALANCE_SUMMARY_CACHE_MAX_ENTRIES", 1024) or 1024)
-        if max_entries > 0:
-            while len(_summary_cache) > max_entries:
+        while len(_summary_cache) > _SUMMARY_CACHE_MAX_ENTRIES:
                 _summary_cache.popitem(last=False)
 
     async def get_summary(self, participant_id: uuid.UUID) -> BalanceSummary:

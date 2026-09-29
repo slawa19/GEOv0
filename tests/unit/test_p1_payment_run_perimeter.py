@@ -42,7 +42,7 @@ _EQ = "RPY"
 def _register_run(monkeypatch, *, run_id: str, pids: list[str]):
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr(
         simulator_module.runtime,
         "get_run",

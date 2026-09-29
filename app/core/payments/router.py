@@ -151,7 +151,7 @@ class PaymentRouter:
         """Loads all trustlines and debts for the given equivalent and builds the capacity graph."""
         validate_equivalent_code(equivalent_code)
         with log_duration(logger, "router.build_graph", equivalent=equivalent_code):
-            ttl = int(getattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0) or 0)
+            ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
             if use_shared_cache and ttl > 0:
                 cached = self._graph_cache.get(equivalent_code)
                 if cached is not None:
@@ -299,7 +299,7 @@ class PaymentRouter:
         # cap = (limit - debt_debtor_owes_creditor) + debt_creditor_owes_debtor.
         # If limit=0 and creditor owes debtor, debt_creditor_owes_debtor still provides positive capacity.
 
-        ttl = int(getattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0) or 0)
+        ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
         if write_shared_cache and ttl > 0:
             self._graph_cache[equivalent_code] = (
                 time.time(),
@@ -440,7 +440,7 @@ class PaymentRouter:
         effective_timeout_ms = int(
             timeout_ms
             if timeout_ms is not None
-            else (getattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 50) or 50)
+            else (settings.ROUTING_PATH_FINDING_TIMEOUT_MS or 50)
         )
         effective_timeout_ms = max(1, effective_timeout_ms)
         deadline = time.perf_counter() + (effective_timeout_ms / 1000.0)
@@ -588,7 +588,7 @@ class PaymentRouter:
         # For MVP, just listing edges on paths that have 0 remaining capacity in original direction?
         # Let's return empty bottlenecks for now or simple heuristic.
         
-        include_metadata = bool(getattr(settings, "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED", False))
+        include_metadata = settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED
 
         return MaxFlowResponse(
             max_amount=str(max_flow),

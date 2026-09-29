@@ -310,7 +310,7 @@ async def test_interact_seeding_of_a_real_participant_is_409_with_code_pid_and_r
 ) -> None:
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     real = _real_row()
     db_session.add(real)
     await db_session.commit()
@@ -387,7 +387,7 @@ async def test_read_actions_that_seed_answer_the_declared_409(
     import app.api.v1.simulator as simulator_module
     from app.main import app as fastapi_app
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     real = _real_row()
     db_session.add(real)
     await db_session.commit()

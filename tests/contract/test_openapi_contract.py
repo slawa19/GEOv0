@@ -1839,7 +1839,7 @@ async def test_simulator_terminal_action_uses_documented_409_envelope(
         mode="real",
         state="stopped",
     )
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr(runtime, "get_run", lambda _run_id: terminal_run)
 
     response = await client.post(

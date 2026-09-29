@@ -66,7 +66,6 @@ from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.real_payments_executor import DeferredRealPaymentEffects, RealPaymentsResult
 from app.core.simulator.real_scenario_seeder import SIMULATOR_PID_TAKEN, SimulatorPidTakenError
 from app.core.simulator.run_perimeter import run_perimeter_pids
-from app.core.simulator.runtime_utils import safe_int_env as _safe_int_env
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
@@ -668,7 +667,7 @@ class RealTick:
         """The hard timeout of the tick's clearing: `max(2 s, 4 × budget)`, capped by
         `SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC` (default 8), never below 0.1 s."""
         clearing_hard_timeout_sec = max(2.0, float(self._real_clearing_time_budget_ms) / 1000.0 * 4.0)
-        env_timeout_cap = float(_safe_int_env("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 8))
+        env_timeout_cap = float(settings.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC)
         if env_timeout_cap > 0:
             clearing_hard_timeout_sec = min(clearing_hard_timeout_sec, env_timeout_cap)
         return float(max(0.1, float(clearing_hard_timeout_sec)))
@@ -758,7 +757,7 @@ class RealTick:
         2026-08-20 / p007_t715: the cleared volume is money and feeds the `clearing_volume` metric series, so it
         stays Decimal across every branch - including the early returns.
         """
-        if not bool(getattr(settings, "CLEARING_ENABLED", True)) or self._clearing_every_n_ticks <= 0:
+        if not settings.CLEARING_ENABLED or self._clearing_every_n_ticks <= 0:
             return {str(eq): Decimal("0") for eq in equivalents}
 
         # Static cadence - the only clearing policy since programme 021 stage 3 removed the adaptive mode.
@@ -1117,7 +1116,7 @@ class RealTick:
                 helper = await VizPatchHelper.create(
                     clearing_session,
                     equivalent_code=eq,
-                    refresh_every_ticks=int(getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10),
+                    refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
                 )
                 with rr._lock:
                     run._real_viz_by_eq[eq] = helper

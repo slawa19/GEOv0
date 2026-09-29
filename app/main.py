@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 import asyncio
 import inspect
 import logging
-import os
 import time
 from datetime import datetime, timezone
 
@@ -215,10 +214,10 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
     from app.utils.exceptions import ConflictException
 
     interval = int(
-        getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300
+        settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
     )
     lock_ttl_seconds = int(
-        getattr(settings, "INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS", 0) or 0
+        settings.INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS
     )
     if lock_ttl_seconds <= 0:
         lock_ttl_seconds = max(30, interval)
@@ -281,7 +280,7 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
 
 async def _integrity_loop(app: FastAPI) -> None:
     interval = int(
-        getattr(settings, "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", 300) or 300
+        settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300
     )
     await _run_integrity_checkpoints_once(app, reason="startup")
 
@@ -330,7 +329,7 @@ async def _run_periodic_clearing_once(app: FastAPI) -> None:
 
 
 async def _clearing_loop(app: FastAPI) -> None:
-    interval = max(1, int(getattr(settings, "CLEARING_PERIODIC_INTERVAL_SECONDS", 300) or 300))
+    interval = max(1, int(settings.CLEARING_PERIODIC_INTERVAL_SECONDS or 300))
     while not app.state._bg_stop_event.is_set():
         await _run_periodic_clearing_once(app)
         try:
@@ -344,7 +343,7 @@ def _start_configured_background_tasks(app: FastAPI) -> None:
     # No payment recovery loop since programme 019, stage 4: the hub executes a payment as one
     # transaction and persists no intermediate state for it to finish (migration 030). The
     # `RECOVERY_*` settings are inert until П4 decides their fate with the incidents screen.
-    if getattr(settings, "INTEGRITY_CHECKPOINT_ENABLED", True):
+    if settings.INTEGRITY_CHECKPOINT_ENABLED:
         _start_supervised_background_task(
             app,
             name="integrity",
@@ -352,7 +351,7 @@ def _start_configured_background_tasks(app: FastAPI) -> None:
         )
     # Programme 023 (decision R1): the periodic clearing runner, started only where the deployment sets
     # `CLEARING_PERIODIC_ENABLED` - a separate hub; off by default and on simulator stands.
-    if getattr(settings, "CLEARING_PERIODIC_ENABLED", False):
+    if settings.CLEARING_PERIODIC_ENABLED:
         _start_supervised_background_task(
             app,
             name="clearing",
@@ -475,7 +474,7 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
-    if not getattr(settings, "METRICS_ENABLED", True):
+    if not settings.METRICS_ENABLED:
         return await call_next(request)
 
     start = time.perf_counter()
@@ -552,11 +551,10 @@ def _utc_now_iso() -> str:
 
 
 def _best_effort_version() -> str:
-    v = (os.getenv("GEO_APP_VERSION") or os.getenv("APP_VERSION") or "").strip()
-    return v or "dev"
+    return settings.GEO_APP_VERSION.strip() or "dev"
 
 
-if getattr(settings, "METRICS_ENABLED", True):
+if settings.METRICS_ENABLED:
 
     @app.get("/metrics")
     async def metrics():

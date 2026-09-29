@@ -73,7 +73,7 @@ def test_real_amount_cap_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_real_amount_model_is_respected_with_env_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SIMULATOR_REAL_AMOUNT_CAP", "500")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_REAL_AMOUNT_CAP", Decimal("500.00"))
 
     runner = _runner()
     scenario = {

@@ -15,9 +15,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 APP = Path(__file__).resolve().parents[2] / "app"
 _ENV_NAMES = {"environ", "getenv", "environb", "getenvb"}
@@ -54,7 +52,6 @@ def test_the_guard_sees_each_shape_it_names() -> None:
     assert _findings(ast.parse('os.path.join("a", "b")'), "clean") == []
 
 
-@pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 T2414.1: environment read beside Settings")
 def test_no_environment_read_outside_config() -> None:
     config = APP / "config.py"
     files = [path for path in sorted(APP.rglob("*.py")) if path != config]

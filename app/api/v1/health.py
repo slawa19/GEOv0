@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import time
 from datetime import datetime, timezone
 
@@ -26,11 +25,8 @@ def _utc_now_iso() -> str:
 
 
 def _best_effort_version() -> str:
-    v = (os.getenv("GEO_APP_VERSION") or os.getenv("APP_VERSION") or "").strip()
-    if v:
-        return v
     # No packaging metadata in this repo; default to a dev marker.
-    return "dev"
+    return settings.GEO_APP_VERSION.strip() or "dev"
 
 
 def _best_effort_environment() -> str:

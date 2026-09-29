@@ -39,7 +39,7 @@ def interact_actions_enabled(monkeypatch):
 
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     # Avoid depending on in-memory runtime run registry.
     # NOTE: endpoints call `_get_run_checked()` which uses `runtime.get_run()` (FIX-CR4).
     monkeypatch.setattr(
@@ -129,7 +129,7 @@ async def test_action_trustline_close_seeds_when_run_paused(client, db_session, 
 
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
 
     scenario = {
         "participants": [
@@ -1459,7 +1459,7 @@ async def test_trustline_create_used_read_error_returns_503_and_error_envelope(
 ):
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     # Keep the test focused on the used_now failure path.
     # NOTE: endpoints call `_get_run_checked()` which uses `runtime.get_run()`.
     monkeypatch.setattr(

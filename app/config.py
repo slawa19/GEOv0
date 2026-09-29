@@ -1,8 +1,9 @@
 import re
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any, ClassVar, FrozenSet
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
@@ -105,6 +106,23 @@ def _require_serializable_isolation(value: str) -> str:
             "setting or set it to SERIALIZABLE."
         )
     return REQUIRED_POSTGRES_ISOLATION_LEVEL
+
+
+#: Integer simulator knobs parsed by the lenient rule of the raw reads they replace (024 `T2414.1`).
+_LENIENT_SIMULATOR_INTS = (
+    "SIMULATOR_TICK_MS_BASE", "SIMULATOR_ACTIONS_PER_TICK_MAX", "SIMULATOR_CLEARING_EVERY_N_TICKS",
+    "SIMULATOR_MAX_ACTIVE_RUNS", "SIMULATOR_MAX_RUN_RECORDS", "SIMULATOR_RUN_PERSIST_EVERY_MS",
+    "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS", "SIMULATOR_ARTIFACTS_TTL_HOURS",
+    "SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "SIMULATOR_EVENT_BUFFER_SIZE", "SIMULATOR_EVENT_BUFFER_TTL_SEC",
+    "SIMULATOR_SSE_SUB_QUEUE_MAX", "SIMULATOR_SSE_MAX_CONNECTIONS", "SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN",
+    "SIMULATOR_REAL_MAX_IN_FLIGHT", "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
+    "SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK", "SIMULATOR_REAL_MAX_ERRORS_TOTAL",
+    "SIMULATOR_CLEARING_MAX_EDGES_FOR_FX", "SIMULATOR_REAL_ENABLE_INJECT",
+    "SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS", "SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS",
+    "SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS", "SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS",
+    "SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS", "SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS",
+    "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", "SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC",
+)
 
 
 class Settings(BaseSettings):
@@ -223,6 +241,46 @@ class Settings(BaseSettings):
     SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER: int = 1
     SIMULATOR_CSRF_ORIGIN_ALLOWLIST: str = ""  # comma-separated origins, empty = allow all in dev
 
+    # --- Simulator runtime knobs (024 `T2414.1`: until then raw `os.getenv` reads beside Settings) ---
+    # Names and defaults are the ones the raw reads had. So is the parsing: an empty or unparseable value
+    # falls back to the default instead of refusing to start (`_lenient_simulator_value`). What changed: they
+    # are read with every other setting - from the environment and from `.env` - once, at process start.
+    SIMULATOR_ACTIONS_ENABLE: bool = False  # Interact mode; true only for "1", "true", "TRUE", "yes"
+    SIMULATOR_SCENARIO_ALLOWLIST: str = ""  # empty: the canonical demo presets; "*"/"all": every scenario
+    SIMULATOR_TICK_MS_BASE: int = 1000
+    SIMULATOR_ACTIONS_PER_TICK_MAX: int = 20
+    SIMULATOR_CLEARING_EVERY_N_TICKS: int = 25
+    SIMULATOR_MAX_ACTIVE_RUNS: int = 1
+    SIMULATOR_MAX_RUN_RECORDS: int = 200
+    SIMULATOR_RUN_PERSIST_EVERY_MS: int = 5000
+    SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS: int = 1000
+    SIMULATOR_ARTIFACTS_TTL_HOURS: int = 0
+    SIMULATOR_ARTIFACT_SHA_MAX_BYTES: int = 524288
+    SIMULATOR_EVENT_BUFFER_SIZE: int = 2000
+    SIMULATOR_EVENT_BUFFER_TTL_SEC: int = 600
+    SIMULATOR_SSE_SUB_QUEUE_MAX: int = 500
+    SIMULATOR_SSE_MAX_CONNECTIONS: int = 50
+    SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN: int = 10
+    # None: the runtime's own default (`app/core/simulator/runtime_utils.py`, `REAL_MAX_*_DEFAULT`).
+    SIMULATOR_REAL_MAX_IN_FLIGHT: int | None = None
+    SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES: int | None = None
+    SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK: int | None = None
+    SIMULATOR_REAL_MAX_ERRORS_TOTAL: int | None = None
+    SIMULATOR_CLEARING_MAX_EDGES_FOR_FX: int = 30
+    SIMULATOR_REAL_AMOUNT_CAP: Decimal | None = None  # opt-in; positive, quantized down to 0.01
+    SIMULATOR_REAL_ENABLE_INJECT: int = 0  # enabled at >= 1
+    SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS: int = 3
+    SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS: int = 10
+    SIMULATOR_REAL_DB_METRICS_EVERY_N_TICKS: int = 5
+    SIMULATOR_REAL_DB_BOTTLENECKS_EVERY_N_TICKS: int = 10
+    SIMULATOR_REAL_LAST_TICK_WRITE_EVERY_MS: int = 500
+    SIMULATOR_REAL_ARTIFACTS_SYNC_EVERY_MS: int = 5000
+    SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS: int = 250
+    SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC: int = 8
+
+    # Reported by `/health`. GEO_APP_VERSION wins over the older APP_VERSION; neither set: "dev".
+    GEO_APP_VERSION: str = Field(default="", validation_alias=AliasChoices("GEO_APP_VERSION", "APP_VERSION"))
+
     # Admin API (minimal MVP)
     # NOTE: Shared secret to unblock Admin UI integration in MVP.
     # Replace with proper role-based auth in production.
@@ -323,6 +381,35 @@ class Settings(BaseSettings):
         # _resolve_environment_alias can diagnose them when canonical ENV is absent.
         raw = str(value or "").strip().lower()
         return cls._ENV_ALIASES.get(raw, raw)
+
+    @field_validator(*_LENIENT_SIMULATOR_INTS, mode="before")
+    @classmethod
+    def _lenient_simulator_value(cls, value: object, info: ValidationInfo) -> object:
+        """The rule of the raw reads these replace: empty or not an integer -> the default."""
+        text = "" if value is None else str(value).strip()
+        try:
+            return int(text)
+        except ValueError:
+            return cls.model_fields[info.field_name].default
+
+    @field_validator("SIMULATOR_ACTIONS_ENABLE", mode="before")
+    @classmethod
+    def _actions_enable(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip() in {"1", "true", "TRUE", "yes"}
+
+    @field_validator("SIMULATOR_REAL_AMOUNT_CAP", mode="before")
+    @classmethod
+    def _amount_cap(cls, value: object) -> Decimal | None:
+        """Empty, not a number, NaN or not positive -> None (no cap); otherwise quantized down to 0.01."""
+        try:
+            cap = Decimal(str(value if value is not None else "").strip())
+        except InvalidOperation:
+            return None
+        if cap.is_nan() or cap <= 0:
+            return None
+        return cap.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
     def model_post_init(self, __context: Any) -> None:
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).

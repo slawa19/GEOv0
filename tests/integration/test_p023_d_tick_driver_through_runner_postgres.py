@@ -188,7 +188,7 @@ def _budget_does_not_bind(monkeypatch, stand: "_Stand") -> float:
     default value (2 s) through its own cap, so the timeout under test is the product's. Nothing in `app/` changes.
     Returns the hard timeout."""
 
-    monkeypatch.setenv("SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", "2")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_REAL_CLEARING_HARD_TIMEOUT_SEC", 2)
     stand.runner._tick._real_clearing_time_budget_ms = 60_000
     hard_timeout = stand.runner._tick.clearing_hard_timeout_sec()
     assert hard_timeout == 2.0, hard_timeout

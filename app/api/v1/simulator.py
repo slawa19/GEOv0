@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-import os
 import logging
 import uuid
 from dataclasses import dataclass
@@ -319,7 +318,7 @@ async def _compute_viz_patches_best_effort(
             helper = await VizPatchHelper.create(
                 session,
                 equivalent_code=eq_upper,
-                refresh_every_ticks=int(getattr(settings, "SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS", 10) or 10),
+                refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
             )
             try:
                 with runtime._lock:  # type: ignore[attr-defined]
@@ -402,7 +401,7 @@ _ACTION_FORBIDDEN_RESPONSE: dict[str, Any] = {
 
 
 def _actions_enabled() -> bool:
-    return str(os.environ.get("SIMULATOR_ACTIONS_ENABLE", "") or "").strip() in {"1", "true", "TRUE", "yes"}
+    return settings.SIMULATOR_ACTIONS_ENABLE
 
 
 def _require_actions_enabled() -> None:
@@ -1619,7 +1618,7 @@ async def action_payment_real(
         any_path_exists = router.has_topology_path(
             str(from_p.pid),
             str(to_p.pid),
-            max_hops=int(getattr(settings, "ROUTING_MAX_HOPS", 6) or 6),
+            max_hops=int(settings.ROUTING_MAX_HOPS or 6),
         )
     except Exception:
         any_path_exists = None

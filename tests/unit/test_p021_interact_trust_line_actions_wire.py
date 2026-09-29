@@ -57,7 +57,7 @@ class _Recorder:
 async def stand(db_session, monkeypatch):
     import app.api.v1.simulator as simulator_module
 
-    monkeypatch.setenv("SIMULATOR_ACTIONS_ENABLE", "1")
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     alice = Participant(pid="alice", display_name="Alice", public_key="A" * 64, type="person", status="active", profile={})
     bob = Participant(pid="bob", display_name="Bob", public_key="B" * 64, type="person", status="active", profile={})
     # Outside the run: exists in the database, not in the run's perimeter.

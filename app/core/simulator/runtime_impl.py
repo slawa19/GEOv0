@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import threading
 import time
 from typing import Any, Optional
@@ -26,22 +25,19 @@ from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.core.simulator.models import RunRecord, ScenarioRecord, _Subscription
 from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.core.simulator.run_lifecycle import RunLifecycle
+from app.config import settings
 from app.core.simulator.runtime_utils import (
-    ACTIONS_PER_TICK_MAX,
-    CLEARING_EVERY_N_TICKS,
     FIXTURES_DIR,
     REAL_MAX_CONSEC_TICK_FAILURES_DEFAULT,
     REAL_MAX_ERRORS_TOTAL_DEFAULT,
     REAL_MAX_IN_FLIGHT_DEFAULT,
     REAL_MAX_TIMEOUTS_PER_TICK_DEFAULT,
     SCENARIO_SCHEMA_PATH,
-    TICK_MS_BASE,
     dict_to_last_error as _dict_to_last_error,
     edges_by_equivalent as _edges_by_equivalent,
     local_state_dir as _local_state_dir,
     new_run_id as _new_run_id,
     run_to_status as _run_to_status,
-    safe_int_env as _safe_int_env,
     utc_now as _utc_now,
 )
 from app.core.simulator.scenario_registry import ScenarioRegistry
@@ -62,7 +58,7 @@ def _scenario_allowlist() -> Optional[set[str]]:
     - If set to comma-separated ids: show only those.
     """
 
-    raw = str(os.environ.get("SIMULATOR_SCENARIO_ALLOWLIST", "")).strip()
+    raw = settings.SIMULATOR_SCENARIO_ALLOWLIST.strip()
     if raw:
         if raw in {"*", "all", "ALL"}:
             return None
@@ -96,30 +92,20 @@ class _SimulatorRuntimeBase:
         self._is_shutting_down = False
 
         # Runtime knobs (env-configurable; defaults preserve existing behavior).
-        self._tick_ms_base = _safe_int_env("SIMULATOR_TICK_MS_BASE", TICK_MS_BASE)
-        self._actions_per_tick_max = _safe_int_env(
-            "SIMULATOR_ACTIONS_PER_TICK_MAX", ACTIONS_PER_TICK_MAX
-        )
-        self._clearing_every_n_ticks = _safe_int_env(
-            "SIMULATOR_CLEARING_EVERY_N_TICKS", CLEARING_EVERY_N_TICKS
-        )
-        self._max_active_runs = _safe_int_env("SIMULATOR_MAX_ACTIVE_RUNS", 1)
-        self._max_run_records = _safe_int_env("SIMULATOR_MAX_RUN_RECORDS", 200)
-        self._max_active_runs_per_owner = _safe_int_env(
-            "SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER", 1
-        )
+        self._tick_ms_base = settings.SIMULATOR_TICK_MS_BASE
+        self._actions_per_tick_max = settings.SIMULATOR_ACTIONS_PER_TICK_MAX
+        self._clearing_every_n_ticks = settings.SIMULATOR_CLEARING_EVERY_N_TICKS
+        self._max_active_runs = settings.SIMULATOR_MAX_ACTIVE_RUNS
+        self._max_run_records = settings.SIMULATOR_MAX_RUN_RECORDS
+        self._max_active_runs_per_owner = settings.SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER
 
         # DB persistence throttling for run status row.
         # Defaults reduce write amplification in heartbeat loop.
-        self._run_persist_every_ms = _safe_int_env(
-            "SIMULATOR_RUN_PERSIST_EVERY_MS", 5000
-        )
-        self._run_persist_dirty_every_ms = _safe_int_env(
-            "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS", 1000
-        )
+        self._run_persist_every_ms = settings.SIMULATOR_RUN_PERSIST_EVERY_MS
+        self._run_persist_dirty_every_ms = settings.SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS
 
         # Local artifact retention (0 disables).
-        self._artifacts_ttl_hours = _safe_int_env("SIMULATOR_ARTIFACTS_TTL_HOURS", 0)
+        self._artifacts_ttl_hours = settings.SIMULATOR_ARTIFACTS_TTL_HOURS
 
         self._artifacts = ArtifactsManager(
             lock=self._lock,
@@ -165,11 +151,9 @@ class _SimulatorRuntimeBase:
             logger.exception("simulator.artifacts.cleanup_failed")
 
         # SSE replay buffer sizing/TTL. Best-effort; does not change OpenAPI.
-        self._event_buffer_max = _safe_int_env("SIMULATOR_EVENT_BUFFER_SIZE", 2000)
-        self._event_buffer_ttl_sec = _safe_int_env(
-            "SIMULATOR_EVENT_BUFFER_TTL_SEC", 600
-        )
-        self._sse_sub_queue_max = _safe_int_env("SIMULATOR_SSE_SUB_QUEUE_MAX", 500)
+        self._event_buffer_max = settings.SIMULATOR_EVENT_BUFFER_SIZE
+        self._event_buffer_ttl_sec = settings.SIMULATOR_EVENT_BUFFER_TTL_SEC
+        self._sse_sub_queue_max = settings.SIMULATOR_SSE_SUB_QUEUE_MAX
 
         self._sse = SseBroadcast(
             lock=self._lock,
