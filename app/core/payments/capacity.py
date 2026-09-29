@@ -10,7 +10,7 @@ line's `blocked_participants` applies to the whole route. Clearing is a differen
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Optional
 
 
@@ -32,9 +32,9 @@ def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str]
     for owner_pid, policy in lines:
         policy = policy if isinstance(policy, dict) else {}
         forbids = not bool(policy.get("can_be_intermediate", True))
-        try:  # the pre-T2415.2 router's reading, kept exactly: the API stores numeric strings ("0")
-            forbids = forbids or int(policy.get("max_hop_usage", 1)) == 0
-        except Exception:
+        try:  # owner decision B (024 T2415.3): forbids EXACTLY at zero - "0.0", "0e0", 0 yes, 0.5 no
+            forbids = forbids or Decimal(str(policy.get("max_hop_usage", 1))) == 0
+        except (InvalidOperation, ValueError, TypeError):  # unparsable (None, "abc", NaN signal): permits, as before
             pass
         if forbids:
             forbid.add(owner_pid)
