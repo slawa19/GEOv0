@@ -231,10 +231,17 @@ async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, m
     assert sorted(left) == [Decimal("50"), Decimal("50")]
 
 
+_EXACT_ZERO = target_xfail("024 T2415.3, owner decision B", "max_hop_usage forbids exactly at zero")
+
+
+@pytest.mark.parametrize("hops, forbids", [("0", True), (0, True), (0.0, True), ("0.5", False)] + [
+    pytest.param(v, f, marks=_EXACT_ZERO) for v, f in [("0.0", True), ("0.00", True), ("-0.0", True),
+                                                        ("0e0", True), (0.5, False)]], ids=repr)
 @pytest.mark.asyncio
-async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
-    # §15 round 2, P1: the API stores numeric strings; the router before T2415.2 read int(...) == 0.
-    eq, p = await _chain(db_session, [("X", "W", {"max_hop_usage": "0"}), ("Y", "X", {})], [])
+async def test_max_hop_usage_forbids_mediation_exactly_at_zero(db_session, hops, forbids):
+    # §15 round 2, P1: the API stores numeric strings; owner decision B (2026-09-29): forbid iff exactly zero.
+    # A float 0.5 cannot pass the signed API (canonical_json refuses floats); the stand writes the column directly.
+    eq, p = await _chain(db_session, [("X", "W", {"max_hop_usage": hops}), ("Y", "X", {})], [])
     outcome = "refused"
     try:
         result = await PaymentService(db_session).create_payment_internal(
@@ -244,7 +251,8 @@ async def test_a_string_zero_max_hop_usage_forbids_mediation(db_session):
     except RoutingException:
         pass
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
-    require_target(outcome == "refused" and not left, f"payment W -> Y 30: {outcome}; debts {[str(a) for a in left]}")
+    require_target((outcome == "refused") == forbids and len(left) == (0 if forbids else 2),
+                   f"max_hop_usage {hops!r}: payment W -> Y 30: {outcome}; debts {[str(a) for a in left]}")
 
 
 @MODE_B
