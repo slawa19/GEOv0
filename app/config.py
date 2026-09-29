@@ -403,13 +403,14 @@ class Settings(BaseSettings):
     @classmethod
     def _amount_cap(cls, value: object) -> Decimal | None:
         """Empty, not a number, NaN or not positive -> None (no cap); otherwise quantized down to 0.01."""
+        # One boundary around the whole parse, as the raw read had: quantize() refuses Infinity and 1e100 too.
         try:
             cap = Decimal(str(value if value is not None else "").strip())
+            if cap.is_nan() or cap <= 0:
+                return None
+            return cap.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         except InvalidOperation:
             return None
-        if cap.is_nan() or cap <= 0:
-            return None
-        return cap.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
     def model_post_init(self, __context: Any) -> None:
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
