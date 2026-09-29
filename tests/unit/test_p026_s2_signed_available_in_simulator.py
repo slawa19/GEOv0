@@ -2,9 +2,10 @@
 
 The Interact `trustline-update` action has the same rule as the public PATCH: a limit below `used` is a trust
 change and is accepted. After it, `available = limit - used` is negative in every simulator projection that
-carries it - the SSE edge patch of the action (`build_edge_patch_for_pairs`), the per-equivalent edge patch
-(`build_edge_patch_for_equivalent`) and the run snapshot behind `actions/trustlines-list`. The three
-clamps-to-zero that hid it are gone; each assertion below is the one that reddens when its clamp returns.
+carries it - the SSE edge patch of the action and of the tick (`build_edge_patch_for_equivalent`), the per-tx
+and clearing edge patch (`build_edge_patch_for_pairs`) and the run snapshot behind `actions/trustlines-list`.
+The three clamps-to-zero that hid it are gone; each assertion below is the one that reddens when its clamp
+returns.
 
 The debt of 7 is set up within the limit of 10 (not an excess); the excess comes only from the action lowering
 the limit to 5 (Verification plan §4). Mode A, no concurrency. The payment and clearing after the lowering are
@@ -20,6 +21,7 @@ import pytest
 
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.real_scenario_seeder import simulated_public_key
+from app.core.simulator.viz_patch_helper import VizPatchHelper
 from tests.p019_support import require_target
 from tests.unit.test_p021_interact_trust_line_actions_wire import (  # noqa: F401 - `stand` is a fixture
     TRIPLE,
@@ -49,9 +51,13 @@ async def test_update_below_used_is_accepted_and_every_projection_is_signed(clie
     [patch] = event["payload"]["edge_patch"]
     assert (patch["used"], patch["available"]) == ("7.00", "-2.00"), patch
 
-    [full] = await EdgePatchBuilder(logger=logging.getLogger(__name__)).build_edge_patch_for_equivalent(
-        session=db, run=run, equivalent_code="UAH")
+    builder = EdgePatchBuilder(logger=logging.getLogger(__name__))
+    [full] = await builder.build_edge_patch_for_equivalent(session=db, run=run, equivalent_code="UAH")
     assert (full["trust_limit"], full["used"], full["available"]) == ("5.00", "7.00", "-2.00"), full
+    helper = await VizPatchHelper.create(db, equivalent_code="UAH", refresh_every_ticks=1)
+    [pair] = await builder.build_edge_patch_for_pairs(
+        session=db, helper=helper, edges_pairs=[("alice", "bob")], pid_to_participant={"alice": alice, "bob": bob})
+    assert (pair["used"], pair["available"]) == ("7.00", "-2.00"), pair
 
     listed = await client.get(f"/api/v1/simulator/runs/{run.run_id}/actions/trustlines-list",
                               headers=HEADERS, params={"equivalent": "UAH"})
