@@ -205,16 +205,6 @@ async def test_refusal_bodies_of_the_trust_line_actions(client, stand) -> None:
         _error("TRUSTLINE_EXISTS", "Active trustline already exists", {"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH"}),
     )
 
-    r = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "6"})
-    assert (r.status_code, r.json()) == (
-        409,
-        _error(
-            "USED_EXCEEDS_NEW_LIMIT",
-            "Cannot reduce trustline limit below used amount",
-            {**triple_details, "used": "7.00000000", "new_limit": "6"},
-        ),
-    )
-
     # Close refuses on debt either way; both amounts are reported.
     await _debt(db, debtor=alice, creditor=bob, eq=uah, amount="2")
     r = await _post(client, "trustline-close", dict(TRIPLE))
@@ -228,9 +218,14 @@ async def test_refusal_bodies_of_the_trust_line_actions(client, stand) -> None:
     )
     assert _Recorder.events[-1]["reason"] == "interact.trustline_create", "a refusal published an event"
 
+    # INTENTIONAL, 026 `T2602` (owner 2026-09-29): the update below used (7) was 409 USED_EXCEEDS_NEW_LIMIT here;
+    # it is now accepted as a trust change (`tests/unit/test_p026_s2_signed_available_in_simulator.py`).
+    r = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "6"})
+    assert r.status_code == 200, r.text
+
 
 @pytest.mark.asyncio
-async def test_a_failed_debt_read_answers_503_on_every_trust_line_action(client, stand, monkeypatch) -> None:
+async def test_a_failed_debt_read_answers_503_on_close_and_does_not_touch_update(client, stand, monkeypatch) -> None:
     import app.api.v1.simulator as simulator_module
 
     assert (await _post(client, "trustline-create", {**TRIPLE, "limit": "10"})).status_code == 200
@@ -244,9 +239,12 @@ async def test_a_failed_debt_read_answers_503_on_every_trust_line_action(client,
         "Temporary error while reading current used amount",
         {"equivalent": "UAH", "from_pid": "alice", "to_pid": "bob"},
     )
-    for action, extra in (("trustline-update", {"new_limit": "5"}), ("trustline-close", {})):
-        r = await _post(client, action, {**TRIPLE, **extra})
-        assert (r.status_code, r.json()) == (503, unavailable), action
+    r = await _post(client, "trustline-close", dict(TRIPLE))
+    assert (r.status_code, r.json()) == (503, unavailable)
+    # INTENTIONAL, 026 `T2602`: the update no longer reads the debt (no debt floor), so a failed debt read
+    # cannot refuse it.
+    r = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "5"})
+    assert r.status_code == 200, r.text
 
 
 @pytest.mark.asyncio

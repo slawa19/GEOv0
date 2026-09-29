@@ -2,7 +2,7 @@
 import type { CSSProperties } from 'vue'
 
 import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
-import { renderOrDash } from '../utils/valueFormat'
+import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 
 type HoveredEdge = {
   key: string | null
@@ -55,7 +55,7 @@ const edgeTooltipSurface = getOverlaySurfaceDescriptor('edge-tooltip')
       </div>
       <div class="ds-ov-tooltip__row">
         <span class="ds-ov-tooltip__label">Avail</span>
-        <span class="ds-ov-tooltip__val">{{ renderOrDash(edge.available) }}</span>
+        <span class="ds-ov-tooltip__val">{{ renderAvailable(edge.available) }}</span>
       </div>
       <div v-if="edge.edgeStatus" class="ds-ov-tooltip__row">
         <span class="ds-ov-tooltip__label">Status</span>

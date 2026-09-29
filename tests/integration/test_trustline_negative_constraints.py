@@ -28,7 +28,7 @@ async def _seed_equivalent(db_session, code: str = "USD") -> None:
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_trustline_update_rejects_limit_below_used(client: AsyncClient, db_session):
+async def test_trustline_update_accepts_limit_below_used(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")
 
     alice = await register_and_login(client, "Alice_TS07")
@@ -78,7 +78,8 @@ async def test_trustline_update_rejects_limit_below_used(client: AsyncClient, db
     assert pay.status_code == 200, pay.text
     assert pay.json()["status"] == "COMMITTED"
 
-    # Attempt to reduce limit below used (10.00) must be rejected.
+    # INTENTIONAL, 026 `T2602` (owner 2026-09-29, F-026-1): reducing the limit below used (10.00) was refused;
+    # it is now a trust change - accepted, the debt untouched, `available` signed.
     update = await client.patch(
         f"/api/v1/trustlines/{tl_id}",
         headers=bob["headers"],
@@ -91,10 +92,9 @@ async def test_trustline_update_rejects_limit_below_used(client: AsyncClient, db
             ),
         },
     )
-    assert update.status_code == 400, update.text
+    assert update.status_code == 200, update.text
     body = update.json()
-    assert body["error"]["code"] == "E009"
-    assert Decimal(body["error"]["details"]["used"]) >= Decimal("10.00")
+    assert [Decimal(body[k]) for k in ("limit", "used", "available")] == [Decimal("5"), Decimal("10"), Decimal("-5")]
 
 
 @MODE_B

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { parseAmountNumber } from '../utils/numberFormat'
-import { renderOrDash } from '../utils/valueFormat'
+import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
 import {
@@ -243,7 +243,7 @@ function onCloseLine() {
       <div class="ds-label">Limit</div>
       <div class="ds-value ds-mono">{{ renderOrDash(figures.limit) }} {{ unit }}</div>
       <div class="ds-label">Available</div>
-      <div class="ds-value ds-mono">{{ renderOrDash(figures.available) }} {{ unit }}</div>
+      <div class="ds-value ds-mono">{{ renderAvailable(figures.available) }} {{ unit }}</div>
       <div class="ds-label">Status</div>
       <div class="ds-value ds-mono">{{ renderOrDash(figures.status) }}</div>
     </div>

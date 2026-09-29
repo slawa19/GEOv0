@@ -220,7 +220,10 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
   },
   'trustlines.available': {
     title: 'available',
-    body: ['Remaining capacity on this trustline.', 'Low values indicate a likely bottleneck.'],
+    body: [
+      'Unused trust: limit − used. Low values indicate a likely bottleneck.',
+      'Negative when the creditor lowered the limit below the debt: the debt exceeds trust by that amount; it cannot grow, only be repaid. It is not a payable amount and not the payment capacity.',
+    ],
   },
   'trustlines.status': {
     title: 'status',
@@ -504,7 +507,10 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   },
   'trustlines.available': {
     title: 'available',
-    body: ['Сколько лимита ещё доступно.', 'Низкие значения — признак узкого места.'],
+    body: [
+      'Неиспользованное доверие: limit − used. Низкие значения — признак узкого места.',
+      'Отрицательное, если кредитор снизил лимит ниже долга: долг превышает доверие на эту величину; расти он не может, только гаситься. Это не сумма к оплате и не ёмкость платежа.',
+    ],
   },
   'trustlines.status': {
     title: 'status',

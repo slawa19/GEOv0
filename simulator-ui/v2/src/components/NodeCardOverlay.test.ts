@@ -153,7 +153,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
    * now states the amount it expects, and a second case substitutes the equivalent to show
    * the expectation is not a constant.
    */
-  function availableTextFor(equivalent: string): Promise<string> {
+  function availableTextFor(equivalent: string, available = '9.00'): Promise<string> {
     const trustlines = [
       {
         from_pid: 'alice',
@@ -163,7 +163,7 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
         equivalent,
         limit: '10.00',
         used: '1.00',
-        available: '9.00',
+        available,
         status: 'active',
       },
     ]
@@ -189,6 +189,11 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     // UAH declares precision 2, so 9.00 available must read as 9.00 — not as `9`, which is
     // what the previous `parseFloat`-based formatter printed.
     expect(await availableTextFor('UAH')).toBe('avail: 9.00')
+  })
+
+  // 026 `T2602`: a limit lowered below the debt makes `available` negative - the excess over trust, not an amount.
+  it('NC-2: a negative available reads as the excess over trust', async () => {
+    expect(await availableTextFor('UAH', '-2.00')).toBe('avail: over limit by 2.00')
   })
 
   it('NC-2: the same available amount must not render identically under UAH and HOUR', async () => {

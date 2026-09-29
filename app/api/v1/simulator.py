@@ -1367,7 +1367,7 @@ async def action_trustline_create(
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        503: {"model": SimulatorActionError, "description": "Run perimeter, seeding or engine unavailable (flat envelope)"},
     },
 )
 async def action_trustline_update(
@@ -1413,24 +1413,8 @@ async def action_trustline_update(
         )
 
     old_limit_dec = Decimal(str(getattr(tl, "limit", 0) or 0))
-    used, _, err = await _pair_debts_or_error(
-        run_id=run_id, action="trustline-update", db=db, parties=parties, with_reverse=False
-    )
-    if err is not None:
-        return err
-    if new_limit_dec < used:
-        return _action_error(
-            status_code=409,
-            code="USED_EXCEEDS_NEW_LIMIT",
-            message="Cannot reduce trustline limit below used amount",
-            details={
-                "equivalent": parties.eq.code,
-                "from_pid": parties.from_p.pid,
-                "to_pid": parties.to_p.pid,
-                "used": _fmt_decimal_for_api(used),
-                "new_limit": _fmt_decimal_for_api(new_limit_dec),
-            },
-        )
+    # 026 `T2602`: no debt floor - a limit below `used` is a trust change, same rule as the public PATCH; the
+    # service takes the row lock (`TrustLineService.execute_update`).
 
     # Programme 021, stage 2: the write goes through the trust-line service's internal path in this handler's
     # transaction; the handler rolls back on any failure before it propagates (spec, "Решения" item 7). See the

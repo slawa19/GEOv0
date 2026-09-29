@@ -561,12 +561,15 @@ class InjectExecutor:
             tl = (
                 await session.execute(
                     # Live row only (migration 019): a closed incarnation may coexist.
+                    # `FOR SHARE` to the end of the transaction (026 `T2602` fix-delta, as the payment's
+                    # `_segment`, 024 `T2415.3`): a lowering committed after this snapshot fails the read with
+                    # 40001 and the runner's retry sees the new limit; a later lowering waits for this inject.
                     select(TrustLine.limit, TrustLine.status).where(
                         TrustLine.from_participant_id == creditor_id,
                         TrustLine.to_participant_id == debtor_id,
                         TrustLine.equivalent_id == eq_id,
                         TrustLine.status != "closed",
-                    )
+                    ).with_for_update(read=True)
                 )
             ).one_or_none()
             if tl is None:

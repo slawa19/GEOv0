@@ -6,6 +6,7 @@ import { VIZ_MAPPING } from '../vizMapping'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { atomsToMoney, formatMoney } from '../utils/money'
+import { renderAvailable } from '../utils/valueFormat'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -242,11 +243,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 'nco-trustline-row',
                 { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
               ]"
-              :title="`avail: ${rowMoney(tl, tl.available)}`"
+              :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.to_name }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">avail: {{ rowMoney(tl, tl.available) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">avail: {{ renderAvailable(rowMoney(tl, tl.available)) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
@@ -266,11 +267,11 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
                 'nco-trustline-row',
                 { 'nco-trustline-row--saturated': isSaturatedAvailable(tl.available) },
               ]"
-              :title="`avail: ${rowMoney(tl, tl.available)}`"
+              :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
             >
               <span class="nco-trustline-row__peer ds-mono">{{ tl.from_name }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
-              <span class="nco-trustline-row__avail ds-mono">avail: {{ rowMoney(tl, tl.available) }}</span>
+              <span class="nco-trustline-row__avail ds-mono">avail: {{ renderAvailable(rowMoney(tl, tl.available)) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
