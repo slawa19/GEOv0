@@ -11,9 +11,7 @@ import app.core.simulator.runtime_impl as runtime_impl
 import app.core.simulator.storage as simulator_storage
 from app.core.simulator.runtime import runtime
 from app.utils.exceptions import ConflictException
-from tests.p019_support import TargetMismatch, require_target
-
-RED = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 T2416.2: no heartbeat after resume/restart")
+from tests.p019_support import require_target
 
 
 class _Clock:  # `asyncio` inside runtime_impl: `sleep` waits for a beat (no real time), the rest is asyncio's
@@ -58,7 +56,6 @@ async def _started(clock: _Clock, owner_id: str = ""):
     return run
 
 
-@RED
 async def test_stop_then_restart_ticks_and_emits_again(clock) -> None:
     run = await _started(clock)
     await runtime.stop(run.run_id)
@@ -67,7 +64,6 @@ async def test_stop_then_restart_ticks_and_emits_again(clock) -> None:
     require_target(progress[0] == 1 and progress[1] >= 1 and _heartbeats(run.run_id) == 1, f"after restart {progress=}")
 
 
-@RED
 @pytest.mark.parametrize("old_heartbeat", ["finished", "cancelled"])
 async def test_error_then_resume_ticks_and_emits_again(clock, old_heartbeat) -> None:
     run = await _started(clock)
@@ -94,7 +90,6 @@ async def test_resume_keeps_the_live_heartbeat_and_stopped_stays_stopped(clock) 
     assert _heartbeats(run.run_id) == 0 and (await clock.progress(run))[0] == 0
 
 
-@RED
 async def test_refused_restart_starts_no_worker_and_stays_stopped(clock) -> None:
     first = await _started(clock, "anon:p024-t2416-2")
     await runtime.stop(first.run_id)
