@@ -5,7 +5,8 @@ a limit of zero when none matched, so a debt on a FROZEN line counted as exceedi
 Three observable consequences followed, and each has a test below that was red before the fix:
 
 * the checkpoint of any equivalent holding such a line was `critical`;
-* every payment in that equivalent wrote an audit row with `verification_passed=false`;
+* every payment in that equivalent wrote an audit row with `verification_passed=false` (since 024
+  `T2413.2` a payment's audit row runs no check, so its test was removed with that contract);
 * a payment that partly repaid the debt on a frozen line was ABORTED as a trust-limit violation,
   because the commit-time check saw the remaining debt against a limit of zero.
 
@@ -36,7 +37,6 @@ from app.core.invariants import InvariantChecker
 import app.core.ledger.book as book_module
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
-from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -174,51 +174,6 @@ async def _pay_with_the_flow_perturbed(
     finally:
         PaymentRouter.invalidate_cache(eq_code)
     return result, request.tx_id, perturbed
-
-
-@MODE_B
-@pytest.mark.asyncio
-async def test_a_payment_beside_a_frozen_line_is_recorded_as_verified(db_session, monkeypatch):
-    # A frozen line with debt inside its limit, in the SAME equivalent as the payment but on an
-    # unrelated pair: the commit-time check is scoped to the payment's pairs and passes, while the
-    # audit row is computed from the whole equivalent's checkpoint.
-    eq, _creditor, _debtor = await _line_with_debt(
-        db_session, status="frozen", limit="100", debt="42"
-    )
-    nonce = uuid.uuid4().hex[:10]
-    a = _participant("A", nonce)
-    b = _participant("B", nonce)
-    db_session.add_all([a, b])
-    await db_session.flush()
-    # Debt(A->B) is controlled by trustline(B->A).
-    db_session.add(
-        TrustLine(
-            from_participant_id=b.id,
-            to_participant_id=a.id,
-            equivalent_id=eq.id,
-            limit=Decimal("100"),
-            status="active",
-        )
-    )
-    await db_session.commit()
-
-    result, tx_id, perturbed = await _pay_with_the_flow_perturbed(
-        db_session, monkeypatch, eq_code=eq.code, sender_id=a.id, receiver_pid=b.pid, amount="1"
-    )
-    assert result.status == "COMMITTED", result
-    assert len(perturbed) == 1, perturbed
-
-    async with sessionmaker_of(db_session)() as observer:
-        log = (
-            await observer.execute(
-                select(IntegrityAuditLog).where(
-                    IntegrityAuditLog.operation_type == "PAYMENT",
-                    IntegrityAuditLog.tx_id == tx_id,
-                )
-            )
-        ).scalar_one()
-    assert log.verification_passed is True, log.error_details
-    assert log.error_details is None
 
 
 @MODE_B

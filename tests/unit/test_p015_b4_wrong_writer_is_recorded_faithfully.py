@@ -7,7 +7,8 @@ at all, so it is worth stating the claim plainly before the code:
     EVERY BARRIER THIS SYSTEM HAS TODAY CAN BE PASSED BY A WRITER THAT MOVES THE MONEY TO THE WRONG
     PLACE, as long as it moves the right TOTAL. A payment routed `A -> B -> C` may write a single
     `A -> C` obligation; a clearing cycle may leave one atom on every edge instead of closing it.
-    Both commit. Both are audited. Both are recorded as verified.
+    Both commit. Both are audited. Both were recorded as verified until 024 `T2413.2`; since then the
+    audit row runs no check in the transaction and records `verification_passed = null`.
 
 The two criteria, named in design v2 §9 `C5` and reused by `C6`:
 
@@ -897,7 +898,8 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
     * the integrity checkpoint (`app/core/integrity.py:93-104`) DOES scan the whole equivalent, so
       the `C -> A` trustline in this stand is what makes `verification_passed` true - binding
       condition 5 requires it explicitly, because without it the audit row would be false for the
-      wrong reason and the counterexample would prove something weaker.
+      wrong reason and the counterexample would prove something weaker. (Historical since 024 `T2413.2`:
+      the transaction computes no checkpoint and the row is null; the line is kept, it changes nothing.)
     * `check_debt_symmetry` sees no mutual pair.
 
     WHAT THE JOURNAL ADDS. Criterion (a) still holds - a faithful journal records `A -> C += 5`,
@@ -974,10 +976,11 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
         f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
     )
     assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
-    assert audit == [True], (
-        f"stand: the integrity audit did not record this payment as verified ({audit}), so the "
-        f"counterexample is no longer about a writer that passes every barrier. If this is a "
-        f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
+    # 024 `T2413.2`: the audit row runs no check (null) - it is no barrier, it neither passes nor fails C6.
+    assert audit == [None], (
+        f"stand: the integrity audit row is not the no-check record ({audit}), so the counterexample "
+        f"is no longer about a writer that passes every barrier. If this is a real improvement, the "
+        f"barrier that caught it must be named and C6 rewritten around it."
     )
 
     # THE STAND, and it needs no journal: what the payment DECLARED - the router's result, captured
@@ -1030,8 +1033,8 @@ async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_toda
     # CRITERION (a). RED TODAY, and this is the counterexample.
     entries = await _entries_for_tx(factory, tx_id)
     assert entries is not None, (
-        f"a payment routed A -> B -> C committed a single A -> C obligation of 5, was recorded "
-        f"as verified (verification_passed={audit}), left the transaction {state}, and passed "
+        f"a payment routed A -> B -> C committed a single A -> C obligation of 5, was audited "
+        f"without a check (verification_passed={audit}), left the transaction {state}, and passed "
         f"check_payment_delta, check_trust_limits and check_debt_symmetry - because the total "
         f"is right and only the ROUTE is a lie. The database now holds {after}; the payment "
         f"declared {implied}. "
@@ -1290,8 +1293,9 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
         f"stand: the under-clearing did not leave exactly one atom on every edge: {after}"
     )
     assert [row.state for row in clearing_tx] == ["COMMITTED"], clearing_tx
-    assert list(audit) == [True], (
-        f"stand: the clearing was not recorded as verified ({list(audit)}), so this is no "
+    # 024 `T2413.2`: the audit row runs no check (null) - no barrier, it neither passes nor fails C6.
+    assert list(audit) == [None], (
+        f"stand: the clearing's audit row is not the no-check record ({list(audit)}), so this is no "
         f"longer a writer that passes every barrier"
     )
 
@@ -1336,8 +1340,8 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
     # CRITERION (a). This is the counterexample.
     entries = await _entries_for_tx(factory, clearing_tx_id)
     assert entries is not None, (
-        f"a clearing cycle of 10/10/10 was committed, reported as clearing 10, recorded as "
-        f"verified (verification_passed={list(audit)}) and left every participant's net "
+        f"a clearing cycle of 10/10/10 was committed, reported as clearing 10, audited "
+        f"without a check (verification_passed={list(audit)}) and left every participant's net "
         f"position unchanged - while leaving {after} behind instead of closing the cycle. "
         f"verify_clearing_neutrality cannot see this, because one atom owed and one atom owed "
         f"to you net to nothing. " + missing_journal_tables(entries, ENTRIES_TABLE)

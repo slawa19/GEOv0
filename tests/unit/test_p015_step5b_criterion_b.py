@@ -316,7 +316,8 @@ async def test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind(db_s
         tx_id = await _prepare_payment(factory, triangle, ["a", "b", "c"], Decimal("5"))
         patch.undo()
         assert await _edges(factory, triangle) == {("a", "c"): Decimal("5.00000000")}
-        assert await _audit(factory, tx_id) == [True], "stand: C6 is no longer a writer every barrier passes"
+        # 024 `T2413.2`: the payment's audit row runs no check (null) - no barrier either way.
+        assert await _audit(factory, tx_id) == [None], "stand: C6 is no longer a writer every barrier passes"
 
         outcome = await _verify(factory, triangle.equivalent.id)
         assert _a_findings(outcome) == [], f"criterion (a) was expected blind to a faithful wrong writer: {outcome}"
@@ -973,7 +974,8 @@ async def test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_
             )
         ).scalars().all()
     assert set(status["checks"]) == CHECKPOINT_CHECKS and status["passed"] is True, status
-    assert "reconcil" not in json.dumps(status).lower() and await _audit(factory, tx_id) == [True]
+    # 024 `T2413.2`: the payment's audit row runs no check (null).
+    assert "reconcil" not in json.dumps(status).lower() and await _audit(factory, tx_id) == [None]
 
     (first,) = await _result_rows(factory, triangle.equivalent.id)
     await _pay(factory, triangle, ["a", "b"], "1")

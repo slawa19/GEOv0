@@ -15,7 +15,7 @@ merely unexercised - they RETURN EARLY:
 A counterexample that only ran on SQLite could therefore be answered with "the real backend would
 have caught it". This module is the answer to that: it runs the SAME two wrong writers with every
 lock, every interlock and `SERIALIZABLE` isolation in force, and they still commit, are still
-audited, and are still recorded as verified.
+audited, and were still recorded as verified (since 024 `T2413.2` the audit row runs no check: null).
 
 It also runs them at FULL MONEY SIZE. PostgreSQL is the money-acceptance tier (design v2 §4 rule 1),
 so the amounts here are `999999999999.99999999` - the largest scale-8 value `NUMERIC(20,8)` holds -
@@ -673,7 +673,8 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
     * the integrity checkpoint (`app/core/integrity.py:93-104`) DOES scan the whole equivalent, so
       the `C -> A` trustline in this stand is what makes `verification_passed` true - binding
       condition 5 requires it explicitly, because without it the audit row would be false for the
-      wrong reason and the counterexample would prove something weaker.
+      wrong reason and the counterexample would prove something weaker. (Historical since 024 `T2413.2`:
+      the transaction computes no checkpoint and the row is null; the line is kept, it changes nothing.)
 
     WHAT THE JOURNAL ADDS. Criterion (a) still holds: a faithful journal records `A -> C += x`,
     which is what happened. Criterion (b) fails, because the intent said `A -> B` and `B -> C`. The
@@ -720,10 +721,11 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
         f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
     )
     assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
-    assert audit == [True], (
-        f"stand: the integrity audit did not record this payment as verified ({audit}), so the "
-        f"counterexample is no longer about a writer that passes every barrier. If this is a "
-        f"real improvement, the barrier that caught it must be named and C6 rewritten around it."
+    # 024 `T2413.2`: the audit row runs no check (null) - it is no barrier, it neither passes nor fails C6.
+    assert audit == [None], (
+        f"stand: the integrity audit row is not the no-check record ({audit}), so the counterexample "
+        f"is no longer about a writer that passes every barrier. If this is a real improvement, the "
+        f"barrier that caught it must be named and C6 rewritten around it."
     )
 
     # THE STAND, and it needs no journal: what the payment DECLARED - the route the router handed the
@@ -777,7 +779,7 @@ async def test_c6_p_a_payment_that_writes_the_wrong_edge_passes_every_barrier_to
     assert entries is not None, (
         f"on PostgreSQL, with the equivalent owner lock and both segment locks held under "
         f"SERIALIZABLE, a payment routed A -> B -> C committed a single A -> C obligation of "
-        f"{FULL_SIZE}, was recorded as verified (verification_passed={audit}), left the "
+        f"{FULL_SIZE}, was audited without a check (verification_passed={audit}), left the "
         f"transaction {state} and passed check_payment_delta, check_trust_limits and "
         f"check_debt_symmetry - because the total is right and only the ROUTE is a lie. The "
         f"database holds {after} in atoms; the payment declared {implied}. "
@@ -980,8 +982,9 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
         f"stand: the under-clearing did not leave exactly one atom on every edge: {after}"
     )
     assert [row.state for row in clearing_tx] == ["COMMITTED"], clearing_tx
-    assert audit == [True], (
-        f"stand: the clearing was not recorded as verified ({audit}), so this is no longer a "
+    # 024 `T2413.2`: the audit row runs no check (null) - no barrier, it neither passes nor fails C6.
+    assert audit == [None], (
+        f"stand: the clearing's audit row is not the no-check record ({audit}), so this is no longer a "
         f"writer that passes every barrier"
     )
 
@@ -1026,7 +1029,7 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
     assert entries is not None, (
         f"on PostgreSQL, through the clearing interlock and with the cycle's debts held "
         f"FOR UPDATE, a cycle of {FULL_SIZE} on every edge was committed, reported as clearing "
-        f"{cleared}, recorded as verified (verification_passed={audit}) and left every "
+        f"{cleared}, audited without a check (verification_passed={audit}) and left every "
         f"participant's net position unchanged - while leaving one atom on every edge instead "
         f"of closing the cycle. verify_clearing_neutrality cannot see this, because one atom "
         f"owed and one atom owed to you net to nothing. "

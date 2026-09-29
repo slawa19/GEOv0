@@ -24,7 +24,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineUpdateRequest
-from tests.p021_support import TrustLineCheckpoints, is_transaction_scoped, trust_line_audit_rows
+from tests.p021_support import TrustLineBatchPoints, is_transaction_scoped, trust_line_audit_rows
 
 _UNSIGNED = "__internal__"
 
@@ -56,7 +56,7 @@ async def _world(session):
 @pytest.mark.asyncio
 async def test_one_checkpoint_pair_per_touched_equivalent_per_batch(db_session, monkeypatch) -> None:
     owner, (l1, l2, l3), (e1, e2) = await _world(db_session)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     service = TrustLineService(db_session)
     batch = service.begin_internal_batch()
 
@@ -74,10 +74,9 @@ async def test_one_checkpoint_pair_per_touched_equivalent_per_batch(db_session, 
     rows = await trust_line_audit_rows(db_session, equivalent_codes=[e1, e2])
     assert sorted(r.operation_type for r in rows) == ["TRUST_LINE_CLOSE", "TRUST_LINE_UPDATE", "TRUST_LINE_UPDATE"]
     assert all(is_transaction_scoped(r) for r in rows)
-    pairs = {code: {(r.state_checksum_before, r.state_checksum_after) for r in rows if r.equivalent_code == code}
-             for code in (e1, e2)}
-    assert all(len(p) == 1 for p in pairs.values()), pairs
-    assert all(before != after for (before, after), in pairs.values()), pairs
+    # 024 `T2413.2`: no full-equivalent scan inside the caller's transaction; each row says no check ran.
+    assert {(r.verification_passed, r.state_checksum_before, r.state_checksum_after, r.error_details)
+            for r in rows} == {(None, "", "", None)}, rows
 
 
 @pytest.mark.asyncio
@@ -101,7 +100,7 @@ async def test_a_commit_without_finish_is_refused_and_a_rollback_disarms(db_sess
 @pytest.mark.asyncio
 async def test_control_an_empty_batch_computes_nothing_and_commits(db_session, monkeypatch) -> None:
     await _world(db_session)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     batch = TrustLineService(db_session).begin_internal_batch()
     await batch.finish()
     await db_session.commit()

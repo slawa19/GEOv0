@@ -250,7 +250,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
             assert transaction is not None and transaction.state == "COMMITTED"
             assert debt_amount == Decimal("10.00000000")
             assert len(audits) == 1
-            assert audits[0].verification_passed is True
+            assert audits[0].verification_passed is None  # 024 `T2413.2`: None = the row records the operation, no check ran
 
         assert len(publications) == 1
         assert publications[0]["event"] == "payment.received"

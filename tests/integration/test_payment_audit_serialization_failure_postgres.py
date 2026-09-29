@@ -9,12 +9,14 @@ operation of `PaymentService` (`_write_integrity_audit`: a database error propag
 is best-effort), and `pay()` owns the retries: the whole attempt re-runs on a fresh session. This module
 holds the same property on that path (manifest `t1901`, 5.1, rows of the dropped engine module).
 
-THE CONFLICT IS REAL. On the second checkpoint call (the "after" checkpoint of the first attempt) the
-payment reads the sender's participant row, a competitor commits an update of that row, and the payment
-updates it too: PostgreSQL raises `40001`; no DBAPI error is fabricated. The competitor's wait is
-bounded: if a future change row-locks that participant, the test goes red on `competitor_timed_out`
-instead of hanging. The countercheck: the first checkpoint of the RE-RUN raises a non-database error,
-which stays best-effort - the payment still commits.
+THE CONFLICT IS REAL. At the first statement of the first attempt's audit write (since 024 `T2413.2` the
+audit computes no checkpoint; its own statement - the equivalent code lookup - is the site) the payment
+reads the sender's participant row, a competitor commits an update of that row, and the payment updates
+it too: PostgreSQL raises `40001` inside the audit's `try`; no DBAPI error is fabricated. The
+competitor's wait is bounded: if a future change row-locks that participant, the test goes red on
+`competitor_timed_out` instead of hanging. The countercheck: the same site of the RE-RUN raises a
+non-database error, which stays best-effort - the payment still commits, without its audit row, and the
+skip is logged.
 
 MUTATION that must redden this: in `_write_integrity_audit`, swallow `DBAPIError` like any other failure
 (the transaction is then poisoned and the payment fails with 25P02 / a safe 500 instead of retrying).
@@ -26,14 +28,12 @@ import asyncio
 import logging
 import uuid
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-import app.core.payments.service as service_module
 from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.participant import Participant
@@ -68,7 +68,7 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
 ) -> None:
     world = await _seed(factory)
     sender_id = world.sender.id
-    checkpoint_calls = 0
+    audit_calls = 0
     competitor_timed_out = False
 
     async def _competitor_updates_the_contended_row() -> None:
@@ -78,28 +78,43 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
             )
             await competitor.commit()
 
-    async def conflicting_checkpoint(session, *, equivalent_id):
-        nonlocal checkpoint_calls, competitor_timed_out
-        checkpoint_calls += 1
-        if checkpoint_calls == 2:
-            await session.execute(select(Participant.display_name).where(Participant.id == sender_id))
-            competitor_task = asyncio.create_task(_competitor_updates_the_contended_row())
-            done, _pending = await asyncio.wait({competitor_task}, timeout=_COMPETITOR_TIMEOUT_S)
-            if not done:
-                competitor_timed_out = True
-                competitor_task.cancel()
-                await asyncio.wait({competitor_task}, timeout=5.0)
-                raise AssertionError("the competitor waited on a lock the payment holds")
-            competitor_task.result()
-            await session.execute(
-                update(Participant).where(Participant.id == sender_id).values(display_name="payment")
-            )
-        if checkpoint_calls == 3:
-            # Countercheck: on the re-run, a non-database diagnostics failure stays best-effort.
-            raise ValueError("non-database audit diagnostics failure")
-        return SimpleNamespace(checksum=f"c{checkpoint_calls}", invariants_status={"passed": True, "checks": []})
+    async def _conflict(session) -> None:
+        nonlocal competitor_timed_out
+        await session.execute(select(Participant.display_name).where(Participant.id == sender_id))
+        competitor_task = asyncio.create_task(_competitor_updates_the_contended_row())
+        done, _pending = await asyncio.wait({competitor_task}, timeout=_COMPETITOR_TIMEOUT_S)
+        if not done:
+            competitor_timed_out = True
+            competitor_task.cancel()
+            await asyncio.wait({competitor_task}, timeout=5.0)
+            raise AssertionError("the competitor waited on a lock the payment holds")
+        competitor_task.result()
+        await session.execute(update(Participant).where(Participant.id == sender_id).values(display_name="payment"))
 
-    monkeypatch.setattr(service_module, "compute_integrity_checkpoint_for_equivalent", conflicting_checkpoint)
+    original_audit = PaymentService._write_integrity_audit
+
+    async def audit_with_a_conflict(self, tx_id, **kwargs):
+        nonlocal audit_calls
+        audit_calls += 1
+        call, session = audit_calls, self.session
+        real_execute = session.execute
+
+        async def first_statement(*args, **kw):
+            session.execute = real_execute  # only the audit's first statement is the site
+            if call == 1:
+                await _conflict(session)
+            elif call == 2:
+                # Countercheck: on the re-run, a non-database audit failure stays best-effort.
+                raise ValueError("non-database audit failure")
+            return await real_execute(*args, **kw)
+
+        session.execute = first_statement
+        try:
+            return await original_audit(self, tx_id, **kwargs)
+        finally:
+            session.__dict__.pop("execute", None)
+
+    monkeypatch.setattr(PaymentService, "_write_integrity_audit", audit_with_a_conflict)
 
     request = PaymentCreateRequest(
         tx_id=str(uuid.uuid4()),
@@ -121,7 +136,8 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
     # PREMISE: the retry was a genuine 40001 met in the payment's money phase, not a pass with no conflict.
     retries = [r.getMessage() for r in caplog.records if "event=payment.attempt_retry" in r.getMessage()]
     assert any("pgcode=40001" in message for message in retries), retries
-    assert checkpoint_calls >= 4, checkpoint_calls
+    assert audit_calls == 2, audit_calls
+    assert any("event=payment.audit_log_failed" in r.getMessage() for r in caplog.records), "countercheck not reached"
 
     assert result.status == "COMMITTED", result
     assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING + Decimal("7.00")}
@@ -132,6 +148,6 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
         ).scalars().all()
         name = await fresh.scalar(select(Participant.display_name).where(Participant.id == sender_id))
     assert state == "COMMITTED"
-    assert len(audits) == 1, "the re-run attempt writes exactly one audit row; the first attempt's is gone"
+    assert audits == [], "the first attempt's row is gone, and the re-run skipped its own (best-effort)"
     # The failed first attempt's update of the contended row was rolled back with it.
     assert name == "competitor", name

@@ -2031,6 +2031,8 @@ def update_checksum_incremental(
 }
 ```
 
+**Hub v0.1, с 2026-09-29 (программа 024, `T2413.2`, миграция `032`).** Платёж, клиринг и операции с линиями доверия пишут эту запись как **след операции** и не вычисляют в своей транзакции контрольные суммы и проверки всего эквивалента: `state_checksum_before/after` — пустая строка, `invariants_checked` — `{}`, `verification_passed` — `null` («проверка не выполнялась»; отличается и от `false` — «проверка нашла нарушение», и от `true`). Операцию охраняют её собственные проверки по затронутым парам, которые отказывают; весь эквивалент проверяют периодические контрольные точки, `POST /integrity/verify` и сверка долгов. Замер и основание — `specs/024-core-hygiene/spec.md`, «Ш3 (`T2413`)».
+
 #### 11.4.2. SQL-схема журнала аудита
 
 ```sql
@@ -2044,7 +2046,7 @@ CREATE TABLE integrity_audit_log (
     state_checksum_after VARCHAR(64) NOT NULL,
     affected_participants JSONB NOT NULL,
     invariants_checked JSONB NOT NULL,
-    verification_passed BOOLEAN NOT NULL,
+    verification_passed BOOLEAN,  -- NULL: проверка не выполнялась (миграция 032, 2026-09-29)
     error_details JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

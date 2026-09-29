@@ -370,8 +370,8 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 (audit.operation_type, audit.tx_id, audit.verification_passed)
                 for audit in audits
             } == {
-                ("PAYMENT", payment_tx_id, True),
-                ("CLEARING", clearing_tx.tx_id, True),
+                ("PAYMENT", payment_tx_id, None),  # 024 `T2413.2`: None = the row records the operation, no check ran
+                ("CLEARING", clearing_tx.tx_id, None),
             }
 
         assert len(publications) == 1

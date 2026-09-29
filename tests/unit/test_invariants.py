@@ -328,7 +328,7 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
     db_session,
     monkeypatch,
 ):
-    """FIX-014 on the real payment path: one passed `IntegrityAuditLog` row naming the route's participants.
+    """FIX-014 on the real payment path: one `IntegrityAuditLog` row naming the route's participants.
 
     Since programme 019 stage 4 the payment executes directly (`PaymentService._apply_payment`) - no
     engine commit of a seeded PREPARED payment. THE PERTURBATION is kept: after the book applies the
@@ -416,7 +416,9 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
                 )
             )
         ).scalar_one()
-    assert log.verification_passed is True
+    # 024 `T2413.2`: the row is the operation's record, and says that no full-equivalent check ran.
+    assert (log.verification_passed, log.state_checksum_before, log.state_checksum_after) == (None, "", "")
+    assert (log.invariants_checked, log.error_details) == ({}, None)
     assert log.affected_participants == {
         "participants": expected_audit_participants,
     }
@@ -522,7 +524,9 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
             )
         )
     ).scalar_one()
-    assert log.verification_passed is True
+    # 024 `T2413.2`: the row is the operation's record, and says that no full-equivalent check ran.
+    assert (log.verification_passed, log.state_checksum_before, log.state_checksum_after) == (None, "", "")
+    assert (log.invariants_checked, log.error_details) == ({}, None)
 
     remaining = (
         (await db_session.execute(select(Debt).where(Debt.equivalent_id == eq_id)))

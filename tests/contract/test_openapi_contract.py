@@ -317,8 +317,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # the open tail of `error.details` (pydantic's `dict[str, Any]` states neither). Measured with a per-entry dump of
 # every ledger on `ad992a0` and on this tree: success, error, security and request ledgers identical except that one
 # key; counts 62 / 51 / 66 / 13 on both.
+# 2026-09-29 / programme 024 `T2413.2`: count HOLDS at 62, digest moves. ONE entry changes content, none enters or
+# leaves: `GET /integrity/audit-log`, whose `IntegrityAuditLogAfterState.verification_passed` becomes
+# `nullable: true` (a money operation's row says that no check ran; migration 032). The pydantic side is an open
+# `after_state` dict, so the difference stays the one this entry already carried. Measured with a per-entry dump of
+# every ledger on `c64289c` and on this tree: success, error and security ledgers identical except that one key;
+# counts 62 / 51 / 66 on both.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "e5c6840599b14e2e5ee28fa8e9cd425081eea3fe6b95b02b81f433285bf65efb"
+    "164281434dbae616933e6b68cf92b8647bd71a533270c4358bc425807e5624c5"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

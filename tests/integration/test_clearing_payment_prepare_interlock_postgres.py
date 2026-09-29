@@ -349,7 +349,7 @@ async def test_clearing_exclusive_lock_blocks_a_reverse_payment_postgres(
         assert {
             (audit.operation_type, audit.tx_id, audit.verification_passed)
             for audit in audits
-        } == {("CLEARING", clearing_tx.tx_id, True), ("PAYMENT", payment_tx_id, True)}
+        } == {("CLEARING", clearing_tx.tx_id, None), ("PAYMENT", payment_tx_id, None)}  # 024 `T2413.2`: None = the row records the operation, no check ran
         # A -> B: 100 - 30 (the clearing, version 2) - 5 (the reverse payment, version 3); the cleared
         # B -> C is gone; C -> A: 40 - 30.
         assert debts == {

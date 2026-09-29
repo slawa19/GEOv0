@@ -266,7 +266,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
             assert shared_debt == Decimal("8.00000000")
             assert shared_debt <= Decimal("10.00")
             assert [(audit.tx_id, audit.verification_passed) for audit in audits] == [
-                (committed_tx_id, True)
+                (committed_tx_id, None)  # 024 `T2413.2`: None = the row records the operation, no check ran
             ]
 
         assert len(publications) == 1

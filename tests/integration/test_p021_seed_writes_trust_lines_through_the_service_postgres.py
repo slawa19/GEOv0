@@ -32,7 +32,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.p021_support import (
-    TrustLineCheckpoints,
+    TrustLineBatchPoints,
     is_transaction_scoped,
     require_target,
     trust_line_audit_rows,
@@ -154,7 +154,7 @@ async def test_repeated_seeding_imports_only_the_closed_line_again(db_session) -
 async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session, monkeypatch) -> None:
     w = _world()
     await _preexisting_live_line(db_session, w)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
 
     await _seed(db_session, w)
     first_seed_checkpoints = checkpoints.count
@@ -188,7 +188,8 @@ async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session,
         pairs: dict[str, set] = {}
         for r in rows:
             pairs.setdefault(r.equivalent_code, set()).add((r.state_checksum_before, r.state_checksum_after))
-        return all(len(v) == 1 and next(iter(v))[0] != next(iter(v))[1] for v in pairs.values())
+        # 024 `T2413.2`: no checkpoint in the transaction - every row of the batch carries the empty pair.
+        return bool(pairs) and all(v == {("", "")} for v in pairs.values())
 
     require_target(
         described(first_rows) == applied_first

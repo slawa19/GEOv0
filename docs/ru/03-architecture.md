@@ -617,7 +617,7 @@ CREATE TABLE integrity_audit_log (
     state_checksum_after VARCHAR(64) NOT NULL,
     affected_participants JSONB NOT NULL,
     invariants_checked JSONB NOT NULL,
-    verification_passed BOOLEAN NOT NULL,
+    verification_passed BOOLEAN,  -- NULL: проверка не выполнялась (миграция 032, 2026-09-29)
     error_details JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

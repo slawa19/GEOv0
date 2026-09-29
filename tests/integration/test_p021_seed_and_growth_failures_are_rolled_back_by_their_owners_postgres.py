@@ -27,7 +27,7 @@ from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.p021_support import TrustLineCheckpoints, trust_line_audit_rows
+from tests.p021_support import TrustLineBatchPoints, trust_line_audit_rows
 
 
 @pytest.mark.asyncio
@@ -54,10 +54,10 @@ async def test_a_growth_failing_after_its_mutation_is_rolled_back_by_the_engine(
     run._scenario_raw = {"trustlines": []}
     engine = TrustDriftEngine(sse=None, utc_now=None, logger=logging.getLogger("tests.p021.growth"),
                               get_scenario_raw=lambda _s: run._scenario_raw)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     checkpoints.fail_on_call = 2  # one equivalent: call 2 is the after-mutation checkpoint
 
-    with pytest.raises(RuntimeError, match="forced trust-line checkpoint failure"):
+    with pytest.raises(RuntimeError, match="forced trust-line batch failure"):
         await engine.apply_trust_growth(run, db_session, {(a_pid, b_pid)}, eq_code, 1, {(a_pid, b_pid): 5.0})
     assert checkpoints.count == 2, "premise: the failure point was reached"
 
@@ -82,7 +82,7 @@ async def test_a_failed_http_seeding_is_rolled_back_before_its_503(db_session, m
     run = SimpleNamespace(run_id=f"p021-h-{n}", scenario_id="p021-h", _scenario_raw=scenario, _real_seeded=False,
                           _real_seeding_lock=None)
     monkeypatch.setattr(simulator_module.runtime, "get_run", lambda _rid: run)
-    checkpoints = TrustLineCheckpoints(monkeypatch)
+    checkpoints = TrustLineBatchPoints(monkeypatch)
     checkpoints.fail_on_call = 2  # one equivalent: call 2 is the after-mutation checkpoint
 
     response = await simulator_module._ensure_run_seeded(run.run_id, db_session)

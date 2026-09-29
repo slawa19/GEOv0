@@ -221,7 +221,7 @@ async def test_a_staged_batch_writes_one_payment_audit_row_per_committed_payment
 
     assert states == {tx_id: "COMMITTED" for tx_id in tx_ids}, states
     assert sorted(audits) == sorted(
-        (tx_id, "PAYMENT", seed["equivalent_code"], True) for tx_id in tx_ids
+        (tx_id, "PAYMENT", seed["equivalent_code"], None) for tx_id in tx_ids  # 024 `T2413.2`: None = the row records the operation, no check ran
     ), audits
     assert debts == {
         (seed["participant_a_id"], seed["participant_b_id"], Decimal("2.00000000")),

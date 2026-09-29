@@ -961,7 +961,7 @@ async def test_step5a_the_scheduled_result_is_its_own_row_and_never_enters_a_che
 async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves(
     db_session, monkeypatch
 ) -> None:
-    """`C6` (i) with a baseline: COMMITTED, `audit == [True]`, then the scheduled result.
+    """`C6` (i) with a baseline: COMMITTED, `audit == [None]` (no check, 024 `T2413.2`), then the scheduled result.
 
     WHAT THE RESULT IS: criterion (a) has NO finding on the C6 state. C6's writer journals its wrong edge
     faithfully, so `debt - sum(delta)` still equals the offset - criterion (a) cannot refute a faithful
@@ -985,7 +985,7 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
 
     assert await _edges(factory, triangle) == {("a", "c"): Decimal("5.00000000")}
     assert await _tx_state(factory, tx_id) == "COMMITTED"
-    assert await _audit(factory, tx_id) == [True]
+    assert await _audit(factory, tx_id) == [None]  # 024 `T2413.2`: the audit row runs no check
 
     await _scheduled_run(monkeypatch, factory)
     results = await _results(factory, triangle.equivalent.id)
@@ -1017,4 +1017,4 @@ async def test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_u
     # Two FAILED rows since step 5b: the first carries only (b), the transition adds (a)'s residual.
     assert sorted(s for s, _ in rows) == [FAILED, FAILED], rows
     assert any(f["kind"] == "edge_residual" for _, detail in rows for f in detail["findings"]), rows
-    assert await _audit(factory, tx_id) == [True], "the scheduled run touched the payment's audit row"
+    assert await _audit(factory, tx_id) == [None], "the scheduled run touched the payment's audit row"

@@ -28,7 +28,6 @@ from app.utils.validation import (
     validate_equivalent_code,
     validate_trustline_policy,
 )
-from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.payments.router import PaymentRouter
 
 _LIVE_TRUSTLINE_INDEX = "uq_trust_lines_live_from_to_equivalent"
@@ -107,7 +106,8 @@ def _matches_live_triple(text: str) -> bool:
     )
 
 
-#: Where the internal trust-line path writes the checkpoint scope of an audit row (programme 021, stage 1).
+#: Where the internal trust-line path labels an audit row as part of a caller transaction (programme 021, stage 1;
+#: the name predates 024 `T2413.2`, which removed the checkpoints themselves - the key is wire-stable).
 #: `affected_participants` is the audit row's open metadata object (`api/openapi.yaml`,
 #: `IntegrityAuditLogAffectedParticipants`, `additionalProperties: true`).
 CHECKPOINT_SCOPE_KEY = "checkpoint_scope"
@@ -121,26 +121,25 @@ _IMPORT_LOOKUP_CHUNK = 1000
 
 
 class TrustLineWriteBatch:
-    """The trust-line writes of ONE caller transaction: checkpoints per equivalent, audit rows per operation.
+    """The trust-line writes of ONE caller transaction: one audit row per operation, the batch owns them.
 
-    Programme 021, stage 1 (spec, "Решения" item 9; `T2100`, `CHECKPOINT-GRANULARITY: PER-CALLER-TRANSACTION`).
-    Each touched equivalent gets exactly ONE before/after pair of integrity checkpoints for the whole batch: the
-    before-checkpoint when the first mutation of that equivalent is about to be staged, the after-checkpoint in
-    `finish()`, after every mutation is flushed and before the caller commits. Every applied operation still gets
-    its own `IntegrityAuditLog` row, carrying the pair of its equivalent.
+    Programme 021, stage 1 (spec, "Решения" item 9; `T2100`) made the batch the owner of the trust-line audit of
+    a caller transaction; programme 024, step Ш3 (`T2413.2`) removed the full-equivalent integrity checkpoints
+    it used to compute before the first and after the last mutation of each equivalent. Every applied operation
+    still gets its own `IntegrityAuditLog` row - the record of the operation - staged in `finish()`, after every
+    mutation is flushed and before the caller commits. The row says that no check ran in this transaction:
+    `verification_passed = null`, empty checksums, `invariants_checked = {}`. What guards a trust-line
+    operation are its own refusals, which raise (`execute_update`: a limit below the used amount;
+    `execute_close`: a debt in either direction); the whole equivalent is checked by the periodic checkpoint,
+    by `POST /integrity/verify` and by the reconciliation.
 
-    WHAT THIS GIVES UP, deliberately: attribution of intermediate states. When one batch holds several operations
-    of one equivalent, the rows share the transaction's checksums, and no row says which operation produced which
-    intermediate state. A batch of an internal caller therefore labels its rows
-    (`affected_participants.checkpoint_scope = "caller_transaction"`). A public operation is a batch of one, whose
-    pair is its own; its rows keep their historical shape.
+    A batch of an internal caller labels its rows (`affected_participants.checkpoint_scope =
+    "caller_transaction"`): they belong to one caller transaction that may hold several operations of one
+    equivalent. A public operation is a batch of one; its rows keep their historical shape.
 
     NOT A TRANSACTION OWNER. It never commits, rolls back or retries. The caller commits after `finish()`, and on
-    any failure - a refusal, a checkpoint the checker could not compute, an audit row that did not flush - the
-    caller rolls its transaction back BEFORE it continues or translates the error (spec, item 7). What the
-    checkpoint FINDS is recorded, not raised: a detected invariant violation lands in the rows'
-    `verification_passed`/`error_details`, exactly as `compute_integrity_checkpoint_for_equivalent` reports it
-    (`app/core/integrity.py:92-119`), while a checker that fails raises through `finish()`.
+    any failure - a refusal, an audit row that did not flush - the caller rolls its transaction back BEFORE it
+    continues or translates the error (spec, item 7).
 
     A DETECTOR FOR A FORGOTTEN `finish()`. A batch that has applied operations arms a `before_commit` listener on
     its session: committing such a batch without `finish()` raises instead of making mutations durable without
@@ -151,7 +150,6 @@ class TrustLineWriteBatch:
     def __init__(self, session: AsyncSession, *, transaction_scoped: bool) -> None:
         self.session = session
         self._transaction_scoped = transaction_scoped
-        self._before: dict[UUID, object] = {}
         self._codes: dict[UUID, str] = {}
         self._operations: list[tuple[str, UUID, dict]] = []
         self._finishing = False
@@ -168,19 +166,14 @@ class TrustLineWriteBatch:
         return sorted({eq_id for _op, eq_id, _a in self._operations}, key=str)
 
     async def _touch(self, equivalent_id: UUID, equivalent_code: str) -> None:
-        """Before the first mutation of `equivalent_id` in this batch: its before-checkpoint."""
+        """Before the first mutation of `equivalent_id` in this batch: remember its code for the audit rows."""
 
         if self._finishing:
             raise RuntimeError("TrustLineWriteBatch: already finished; open a new batch for new writes")
-        if equivalent_id not in self._before:
-            self._before[equivalent_id] = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=equivalent_id,
-            )
-            self._codes[equivalent_id] = equivalent_code
+        self._codes.setdefault(equivalent_id, equivalent_code)
 
     def _record(self, operation_type: str, equivalent_id: UUID, affected: dict) -> None:
-        if equivalent_id not in self._before:
+        if equivalent_id not in self._codes:
             raise RuntimeError("TrustLineWriteBatch: an operation was recorded before its equivalent was touched")
         self._operations.append((operation_type, equivalent_id, affected))
         if not self._armed:
@@ -192,7 +185,7 @@ class TrustLineWriteBatch:
         if self._operations and not self._finished and not self._discarded:
             raise RuntimeError(
                 "TrustLineWriteBatch: a commit would make trust-line mutations durable without their "
-                "checkpoints and audit rows; call finish() first"
+                "audit rows; call finish() first"
             )
 
     def _on_rollback(self, _session, previous_transaction) -> None:
@@ -202,15 +195,15 @@ class TrustLineWriteBatch:
             self._discarded = True
 
     async def finish(self) -> None:
-        """Flush, compute the after-checkpoint of each touched equivalent once, stage the audit rows, flush."""
+        """Flush the mutations, stage one audit row per operation, flush."""
 
         if self._finishing:
             raise RuntimeError("TrustLineWriteBatch: finish() called twice")
         if self._discarded:
             raise RuntimeError("TrustLineWriteBatch: its transaction was rolled back; nothing to finish")
-        # `_finished` only once everything below succeeded: a finish() that fails half-way (a checker that
-        # could not run, an audit row that did not flush) leaves the detector armed, so a commit that skips
-        # the owner's rollback still cannot make the batch durable.
+        # `_finished` only once everything below succeeded: a finish() that fails half-way (an audit row that
+        # did not flush) leaves the detector armed, so a commit that skips the owner's rollback still cannot
+        # make the batch durable.
         self._finishing = True
         if not self._operations:
             self._finished = True
@@ -218,36 +211,32 @@ class TrustLineWriteBatch:
 
         await self.session.flush()
         for equivalent_id in self.touched_equivalent_ids:
-            checkpoint_before = self._before[equivalent_id]
-            checkpoint_after = await compute_integrity_checkpoint_for_equivalent(
-                self.session,
-                equivalent_id=equivalent_id,
-            )
-            invariants_status = checkpoint_after.invariants_status or {}
-            passed = bool(invariants_status.get("passed", False))
-            before_sum = checkpoint_before.checksum if checkpoint_before else ""
-            after_sum = checkpoint_after.checksum or before_sum
-            for operation_type, eq_id, affected in self._operations:
-                if eq_id != equivalent_id:
-                    continue
-                affected = dict(affected)
-                if self._transaction_scoped:
-                    affected[CHECKPOINT_SCOPE_KEY] = CHECKPOINT_SCOPE_CALLER_TRANSACTION
-                self.session.add(
-                    IntegrityAuditLog(
-                        operation_type=operation_type,
-                        tx_id=None,
-                        equivalent_code=self._codes[equivalent_id],
-                        state_checksum_before=before_sum,
-                        state_checksum_after=after_sum,
-                        affected_participants=affected,
-                        invariants_checked=invariants_status.get("checks") or invariants_status,
-                        verification_passed=passed,
-                        error_details=None if passed else invariants_status,
-                    )
-                )
+            await self._stage_audit_rows(equivalent_id)
         await self.session.flush()
         self._finished = True
+
+    async def _stage_audit_rows(self, equivalent_id: UUID) -> None:
+        """The audit rows of one equivalent's operations: the operation's record, no check ran (`T2413.2`)."""
+
+        for operation_type, eq_id, affected in self._operations:
+            if eq_id != equivalent_id:
+                continue
+            affected = dict(affected)
+            if self._transaction_scoped:
+                affected[CHECKPOINT_SCOPE_KEY] = CHECKPOINT_SCOPE_CALLER_TRANSACTION
+            self.session.add(
+                IntegrityAuditLog(
+                    operation_type=operation_type,
+                    tx_id=None,
+                    equivalent_code=self._codes[equivalent_id],
+                    state_checksum_before="",
+                    state_checksum_after="",
+                    affected_participants=affected,
+                    invariants_checked={},
+                    verification_passed=None,
+                    error_details=None,
+                )
+            )
 
 
 @dataclass(frozen=True)
@@ -278,7 +267,7 @@ class TrustLineService:
 
     What unsigned execution gives up is exactly proof of key possession and binding the request to a signature.
     Everything else holds on both entrances: owner matching, the money door (`parse_money_amount`), live-line
-    uniqueness, the debt floor of an update, the debt check of a close, status rules, audit and checkpoints.
+    uniqueness, the debt floor of an update, the debt check of a close, status rules and audit.
 
     `import_initial_trustlines` is a THIRD, narrower operation: the simulator seeder's import of a scenario's
     initial state, statuses `active`/`frozen`/`closed` included. It is not a participant's operation and carries no
@@ -385,7 +374,7 @@ class TrustLineService:
         let a later `inject_debt` of the same event see a line it did not see before 021
         (`tests/integration/test_p018_mixed_inject_event_is_one_operation_postgres.py`). A uniqueness clash
         then surfaces as a raw `IntegrityError` at that later flush - which is what the inject owner already
-        classifies - and `batch.finish()` flushes before its after-checkpoint either way.
+        classifies - and `batch.finish()` flushes before it stages the audit rows either way.
         """
 
         if require_signature and (not isinstance(getattr(data, "signature", None), str) or not data.signature):
@@ -493,7 +482,7 @@ class TrustLineService:
         )
         # NOTE ON TRANSACTION SHAPE.  The INSERT is deliberately left staged in the
         # caller-owned transaction rather than isolated in a SAVEPOINT.  The fail-closed
-        # contract of this service depends on it: if any later step fails (checkpoint,
+        # contract of this service depends on it: if any later step fails (the
         # audit), the exception propagates and the caller's rollback must remove the row.
         # `tests/unit/test_trustline_audit_fail_closed.py` pins exactly that, and an
         # earlier attempt to wrap the flush in a savepoint broke it.
@@ -590,7 +579,7 @@ class TrustLineService:
             except Exception:
                 raise InvalidSignatureException("Invalid signature")
 
-        # Every refusal BEFORE the first mutation and before the batch's checkpoint (same order of
+        # Every refusal BEFORE the first mutation and before the batch is touched (same order of
         # refusals as before 021: the debt floor, then the policy).
         if new_limit is not None:
             used = await self._get_used_amount(trustline)
@@ -648,7 +637,7 @@ class TrustLineService:
             raise ForbiddenException("Not authorized to close this trustline")
 
         # Symmetry with `update()`: a closed row is history.  Closing it again would write a
-        # fresh TRUST_LINE_CLOSE audit entry and recompute checkpoints for a line that was
+        # fresh TRUST_LINE_CLOSE audit entry for a line that was
         # closed long ago -- history written after the fact.  Harmless to the state, wrong
         # in the journal.  Found by an independent scan after migration 019 made a closed
         # incarnation coexist with a live one.
