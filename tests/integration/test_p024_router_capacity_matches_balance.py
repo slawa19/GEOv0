@@ -23,7 +23,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RoutingException
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import TargetMismatch, require_target, target_xfail
 
 
 async def _seed(session, *, debt_b_a="50", line_b_a=None, line_c_b=None):
@@ -141,3 +141,45 @@ async def test_a_debt_only_edge_is_an_intermediate_hop_as_the_core_allows(db_ses
     router = await _router(db_session, eq)
     assert not _routable(router, people, "50.01", to="C")
     require_target(_routable(router, people, "30", to="C"), "router has no A -> B -> C route")
+
+
+async def _chain(session, lines, debts):
+    """Lines creditor -> debtor (limit 100, given policy) and debts debtor -> creditor (50) among W..Z."""
+    eq, _ = await _seed(session, debt_b_a=None)
+    p = {n: Participant(pid=f"{n}-{eq.code}", display_name=n, public_key=f"pk-{n}-{eq.code}") for n in "WXYZ"}
+    session.add_all(p.values())
+    await session.flush()
+    for creditor, debtor, policy in lines:
+        session.add(TrustLine(from_participant_id=p[creditor].id, to_participant_id=p[debtor].id,
+                              equivalent_id=eq.id, limit=Decimal("100"), status="active", policy=policy))
+    async with debt_fixture_setup(session, label="setup"):
+        session.add_all([Debt(debtor_id=p[d].id, creditor_id=p[c].id, equivalent_id=eq.id,
+                              amount=Decimal("50")) for d, c in debts])
+    await session.commit()
+    return eq, p
+
+
+@target_xfail("024 T2415.2 fix-delta", "a debt-only pair mediates a payment (§15 P1)")
+@pytest.mark.parametrize("variant", ["can_be_intermediate", "blocked_participants"])
+@pytest.mark.asyncio
+async def test_a_debt_only_pair_never_mediates_a_payment(db_session, variant):
+    # §15 P1: X forbids mediation on its own line, yet W -> X -> Y(-> Z) ran over debt-only pairs.
+    if variant == "can_be_intermediate":
+        lines = [("W", "X", {}), ("X", "Y", {"can_be_intermediate": False})]
+        debts, payee = [("X", "W"), ("Y", "X")], "Y"
+    else:
+        lines = [("W", "X", {}), ("X", "Y", {"blocked_participants": ["Y"]}), ("Y", "Z", {})]
+        debts, payee = [("X", "W"), ("Y", "X"), ("Z", "Y")], "Z"
+    eq, p = await _chain(db_session, lines, debts)
+    status = "refused"
+    try:
+        result = await PaymentService(db_session).create_payment_internal(
+            p["W"].id, to_pid=p[payee].pid, equivalent=eq.code, amount="30"
+        )
+        status = f"{result.status} via {[r.path for r in result.routes or []]}"
+    except RoutingException:
+        pass
+    left = sorted(a for (a,) in (await db_session.execute(
+        select(Debt.amount).where(Debt.equivalent_id == eq.id))).all())
+    require_target(status == "refused" and left == [Decimal("50")] * len(debts),
+                   f"payment W -> {payee} 30: {status}; debts now {[str(a) for a in left]}")
