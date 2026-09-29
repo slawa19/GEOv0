@@ -112,11 +112,11 @@ async def _seed(factory) -> dict:
             s.add(TrustLine(from_participant_id=people[creditor].id, to_participant_id=people[debtor].id,
                             equivalent_id=eq.id, limit=Decimal("1000.00"), status="active"))
         await s.flush()
+        pairs = [("S1", "R1"), ("S2", "R2")] + [(f"F{(i + 1) % FILLER}", f"F{i}") for i in range(FILLER)]
+        debts = [Debt(debtor_id=people[d].id, creditor_id=people[c].id, equivalent_id=eq.id,
+                      amount=Decimal("100.00")) for d, c in pairs]
         async with debt_fixture_setup(s, label="p024-t2413-stand"):
-            debts = [("S1", "R1"), ("S2", "R2")] + [(f"F{(i + 1) % FILLER}", f"F{i}") for i in range(FILLER)]
-            for debtor, creditor in debts:
-                s.add(Debt(debtor_id=people[debtor].id, creditor_id=people[creditor].id,
-                           equivalent_id=eq.id, amount=Decimal("100.00")))
+            s.add_all(debts)
         await s.commit()
     async with factory() as s:
         for table in ("debts", "trust_lines", "participants", "transactions"):
