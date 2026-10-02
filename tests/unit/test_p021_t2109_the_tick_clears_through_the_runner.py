@@ -17,10 +17,8 @@ monkeypatch hook. After `T2109`, over every Python module under `app/`, `tests/`
    caller deadline (`deadline`) and the tick's own progress callback (`on_committed`) by keyword - no wrapper that
    forwards `**kwargs` stands between the tick and the runner.
 
-ONE NAMED EXEMPTION: `scripts/measure_p020_dfs_acceptance.py`, a frozen 020 evidence program that specs 020 and 023
-keep unchanged as dated evidence. It still names the driver and is not runnable on this tree; it is exempt only while
-its docstring carries the historical note (`HISTORICAL_MARKER`) naming the revision to run it at. Anything else under
-`scripts/` is scanned.
+NO EXEMPTION: every module under `scripts/` is scanned. The one exempt historical program
+(`scripts/measure_p020_dfs_acceptance.py`) was retired by 025 `T2504.1` (source at `dcd50a9c`) with its exemption.
 
 WHAT IT DOES NOT SEE. It reads syntax. A driver rebuilt under another name, a module imported through a name
 assembled at run time, or a second call of the runner through `getattr` are invisible to it. A green run says the
@@ -58,9 +56,6 @@ TICK_FUNCTION = "_run_clearing"
 RUNNER_ENTRY = "run_clearing_pass"
 REQUIRED_KEYWORDS = frozenset({"allowed_participant_pids", "deadline", "on_committed"})
 _DOTTED_MODULE = re.compile(r"^app(\.\w+)+$")
-#: Frozen historical programs, exempt from rules 2-3 only while they carry the marker (spec 021, `T2109` fix-delta).
-HISTORICAL_EXEMPT = frozenset({"scripts/measure_p020_dfs_acceptance.py"})
-HISTORICAL_MARKER = "HISTORICAL, NOT RUNNABLE ON THE CURRENT TREE"
 
 
 def _names_a_removed_module(dotted: str) -> bool:
@@ -140,12 +135,7 @@ def _scan(root: Path = REPO) -> list[str]:
     found = [f"{relative}: the module file exists" for relative in REMOVED_FILES if (root / relative).exists()]
     for path in _modules(root):
         module = path.relative_to(root).as_posix()
-        source = path.read_text(encoding="utf-8")
-        if module in HISTORICAL_EXEMPT:
-            if HISTORICAL_MARKER not in (ast.get_docstring(ast.parse(source)) or ""):
-                found.append(f"{module}: exempt only as a marked historical program, and the marker is missing")
-            continue
-        found.extend(scan_source(source, module))
+        found.extend(scan_source(path.read_text(encoding="utf-8"), module))
     return found
 
 
@@ -245,21 +235,3 @@ def test_benign_siblings_are_not_mistaken_for_the_removed_driver() -> None:
         "async def maybe_run_clearing(self, *, max_depth=None):\n    return None\n"
     )
     assert scan_source(benign, "planted/benign.py") == []
-
-
-def test_the_historical_exemption_is_one_marked_file(tmp_path) -> None:
-    for relative in ("app/x.py", "tests/x.py"):
-        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / relative).write_text("x = 1", encoding="utf-8")
-    driver = "\ndef f():\n    from app.core.simulator.real_clearing_engine import RealClearingEngine\n"
-    (tmp_path / "scripts").mkdir()
-    exempt = tmp_path / "scripts" / "measure_p020_dfs_acceptance.py"
-    other = tmp_path / "scripts" / "measure_anything_else.py"
-    exempt.write_text(f'"""{HISTORICAL_MARKER}."""' + driver, encoding="utf-8")
-    other.write_text(f'"""{HISTORICAL_MARKER}."""' + driver, encoding="utf-8")
-    found = _scan(tmp_path)
-    assert found and all(f.startswith("scripts/measure_anything_else.py:") for f in found), found
-    exempt.write_text('"""A note without the marker."""' + driver, encoding="utf-8")
-    missing = "scripts/measure_p020_dfs_acceptance.py: exempt only as a marked historical program, and the marker is missing"
-    assert missing in _scan(tmp_path)
-    assert HISTORICAL_EXEMPT == {"scripts/measure_p020_dfs_acceptance.py"}
