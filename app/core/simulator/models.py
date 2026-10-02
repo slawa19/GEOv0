@@ -179,9 +179,11 @@ class RunRecord:
 
     _rng: random.Random | None = None
     _edges_by_equivalent: dict[str, list[tuple[str, str]]] | None = None
-    # 026 `T2603.2`: (equivalent, creditor PID, debtor PID) -> a counter every runtime mutation that (re)adds or
-    # updates that pair bumps (`bump_topology_epoch`). A closure publication skips a pair whose counter moved after
-    # it began: the line was re-created meanwhile (`sse_broadcast.publish_closed_trustlines`).
+    # 026 `T2603.2`: (equivalent, creditor PID, debtor PID) -> a counter bumped by Interact create/update and by
+    # inject adding pairs (`bump_topology_epoch`; trust drift does not bump). A closure publication skips a pair whose
+    # counter moved after it began (`sse_broadcast.publish_closed_trustlines`). A STOPGAP, not a guarantee: it is
+    # per run (another run re-creating the pair does not move it) and a moved counter does not prove a live line
+    # (a delayed close-request update moves it too) - `specs/BACKLOG.md`, class 2 of the S4 review.
     _topology_epoch: dict[tuple[str, str, str], int] = field(default_factory=dict)
     _next_tx_at_ms: int = 0
     _next_clearing_at_ms: int = 0
