@@ -3244,7 +3244,14 @@ paths:
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
         '409':
-          $ref: '#/components/responses/SimulatorActionConflict'
+          description: >-
+            Run is terminal, the action conflicts with current state, the run's scenario names a participant the
+            simulator did not create - SIMULATOR_PID_TAKEN, or the line's close is requested and the new limit is
+            positive - TRUSTLINE_CLOSE_REQUESTED (the request is not cancelled; a zero limit is accepted) (flat envelope)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorActionError'
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':

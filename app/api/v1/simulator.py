@@ -1419,6 +1419,13 @@ async def action_trustline_update(
     # Programme 021, stage 2: the write goes through the trust-line service's internal path in this handler's
     # transaction; the handler rolls back on any failure before it propagates (spec, "Решения" item 7). See the
     # note in `action_trustline_create`: readback before commit.
+    # Read before the write: a rollback expires the ORM rows, and the refusal below names the line after it.
+    refusal_details = {
+        "from_pid": parties.from_p.pid,
+        "to_pid": parties.to_p.pid,
+        "equivalent": parties.eq.code,
+        "trustline_id": str(tl.id),
+    }
     trust_lines = TrustLineService(db)
     batch = trust_lines.begin_internal_batch()
     try:
@@ -1432,6 +1439,20 @@ async def action_trustline_update(
         await batch.finish()
         await db.refresh(tl)
         await db.commit()
+    except ConflictException as exc:
+        # Roll back BEFORE translating (spec 021, "Решения" item 7). A positive limit on a line whose close is
+        # requested (026 `T2603.1`) is this action's own refusal and answers in its flat body; any other conflict
+        # propagates unchanged.
+        await db.rollback()
+        details = exc.details or {}
+        if details.get("reason") != "TRUSTLINE_CLOSE_REQUESTED":
+            raise
+        return _action_error(
+            status_code=409,
+            code="TRUSTLINE_CLOSE_REQUESTED",
+            message=exc.message,
+            details=refusal_details,
+        )
     except Exception:
         await db.rollback()
         raise
