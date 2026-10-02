@@ -71,6 +71,19 @@ async def _requested(client, db_session):
     return code, p, lines, factory
 
 
+async def _tick_payment(session, run: RunRecord, sse: RecordingSse, code: str, p: dict):
+    """B pays A 50 through the production tick executor on `session` (outcome left to the caller)."""
+
+    executor = RealPaymentsExecutor(
+        lock=threading.RLock(), sse=sse, utc_now=lambda: datetime.now(timezone.utc), logger=_LOG,
+        edge_patch_builder=EdgePatchBuilder(logger=_LOG), should_warn_this_tick=lambda *_: False,
+        sim_idempotency_key=lambda **_kw: "s4-" + uuid.uuid4().hex)
+    a, b = p["A"]["pid"], p["B"]["pid"]
+    return await executor.execute_planned_payments(
+        session=session, run_id=run.run_id, run=run, planned=[_Planned(0, code, a, b, "50")], equivalents=[code],
+        sender_id_by_pid={a: p["A"]["id"]}, max_in_flight=1, max_timeouts_per_tick=0, fail_run=lambda *_: None)
+
+
 def _removals(events: list[dict]) -> list:
     return [e["payload"]["removed_edges"] for e in events if e.get("type") == "topology.changed"]
 
@@ -82,16 +95,9 @@ async def test_the_tick_removes_a_closed_line_only_after_a_confirmed_commit(clie
     code, p, lines, factory = await _requested(client, db_session)
     a, b = p["A"]["pid"], p["B"]["pid"]
     run, sse = _run(code, p), RecordingSse()
-    executor = RealPaymentsExecutor(
-        lock=threading.RLock(), sse=sse, utc_now=lambda: datetime.now(timezone.utc), logger=_LOG,
-        edge_patch_builder=EdgePatchBuilder(logger=_LOG), should_warn_this_tick=lambda *_: False,
-        sim_idempotency_key=lambda **_kw: "s4-" + uuid.uuid4().hex)
 
     async with factory() as session:
-        result = await executor.execute_planned_payments(
-            session=session, run_id=run.run_id, run=run, planned=[_Planned(0, code, a, b, "50")], equivalents=[code],
-            sender_id_by_pid={a: p["A"]["id"]}, max_in_flight=1, max_timeouts_per_tick=0,
-            fail_run=lambda *_: None)
+        result = await _tick_payment(session, run, sse, code, p)
         assert result.committed == 1, result
         effects = result.deferred_effects
         assert sse.events == [], "an observation was published before the transaction's outcome"
@@ -152,27 +158,15 @@ async def test_an_interact_clearing_that_completes_a_close_removes_the_edge_once
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_close(client, db_session, monkeypatch) -> None:
-    """Internal adversarial S4, cause B: the publication trusts a closure seen before it ran.
-
-    The schedule: the payment's commit closes A -> B, and before its observations are published (a commit of
-    unknown outcome resolved by `_attempt_landed`, money_replay.py) A re-creates A -> B - a new live incarnation the
-    run's scenario and cache already carry (`_mutate_runtime_trustline_topology_best_effort`, as Interact create
-    does after its commit). The publication must not remove a pair that has a live row when it runs.
-    """
+    """Adversarial S4, cause B: the commit closed A -> B, A re-created it (Interact create mutates the run after its
+    commit), and only then were the observations published (a late `_attempt_landed`, money_replay.py)."""
 
     code, p, lines, factory = await _requested(client, db_session)
     a, b = p["A"]["pid"], p["B"]["pid"]
     run, sse = _run(code, p), RecordingSse()
     monkeypatch.setitem(simulator_module.runtime._runs, run.run_id, run)
-    executor = RealPaymentsExecutor(
-        lock=threading.RLock(), sse=sse, utc_now=lambda: datetime.now(timezone.utc), logger=_LOG,
-        edge_patch_builder=EdgePatchBuilder(logger=_LOG), should_warn_this_tick=lambda *_: False,
-        sim_idempotency_key=lambda **_kw: "s4-" + uuid.uuid4().hex)
     async with factory() as session:
-        result = await executor.execute_planned_payments(
-            session=session, run_id=run.run_id, run=run, planned=[_Planned(0, code, a, b, "50")], equivalents=[code],
-            sender_id_by_pid={a: p["A"]["id"]}, max_in_flight=1, max_timeouts_per_tick=0,
-            fail_run=lambda *_: None)
+        result = await _tick_payment(session, run, sse, code, p)
         assert result.committed == 1, result
         await session.commit()
     assert (await _line(client, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
