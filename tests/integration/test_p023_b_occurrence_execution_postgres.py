@@ -42,7 +42,7 @@ from tests.integration.test_clearing_commit_replay_postgres import (
     _conflicting_clearing_service,
     _seed_conflict_cycle,
 )
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.p023_support import historical_v1_clearing, occurrence_of, slice_b_surface
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: F401 - autouse: every test on a clone
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _edges, _seed_triangle
@@ -305,7 +305,6 @@ async def test_v2_a_descriptor_that_does_not_match_the_locked_rows_is_refused(wr
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="024 target, delivered by T2417: no execution without an occurrence")
 async def test_the_boundary_refuses_an_execution_without_an_occurrence_before_any_money_moves() -> None:
     """024 `T2417`: the shared boundary runs only inside `execute_occurrence`; called bare it refuses, nothing moves."""
 
