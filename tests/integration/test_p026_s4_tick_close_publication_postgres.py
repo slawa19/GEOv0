@@ -13,6 +13,8 @@ production `DeferredRealPaymentEffects` resolution. Interact clearing is the pro
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
 import threading
 import uuid
@@ -20,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import pytest
+from nacl.signing import SigningKey
 
 import app.api.v1.simulator as simulator_module
 from app.config import settings
@@ -29,7 +32,8 @@ from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from tests.conftest import MODE_B
 from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _world
 from tests.integration.test_p026_s3_close_request_postgres import _close, _line
-from tests.p019_support import require_target
+from tests.integration.test_scenarios import _sign_trustline_create_request
+from tests.p019_support import TargetMismatch, require_target
 from tests.simulator_tick_stand import RecordingSse
 
 _LOG = logging.getLogger(__name__)
@@ -141,4 +145,53 @@ async def test_an_interact_clearing_that_completes_a_close_removes_the_edge_once
         and (a, b) not in run._edges_by_equivalent[code],
         f"after the committed clearing closed {a} -> {b}: removals {_removals(sse.events)}, "
         f"cache {run._edges_by_equivalent[code]}",
+    )
+
+
+@MODE_B
+@pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="026 S4 adversarial cause B, fixed next")
+@pytest.mark.asyncio
+async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_close(client, db_session, monkeypatch) -> None:
+    """Internal adversarial S4, cause B: the publication trusts a closure seen before it ran.
+
+    The schedule: the payment's commit closes A -> B, and before its observations are published (a commit of
+    unknown outcome resolved by `_attempt_landed`, money_replay.py) A re-creates A -> B - a new live incarnation the
+    run's scenario and cache already carry (`_mutate_runtime_trustline_topology_best_effort`, as Interact create
+    does after its commit). The publication must not remove a pair that has a live row when it runs.
+    """
+
+    code, p, lines, factory = await _requested(client, db_session)
+    a, b = p["A"]["pid"], p["B"]["pid"]
+    run, sse = _run(code, p), RecordingSse()
+    monkeypatch.setitem(simulator_module.runtime._runs, run.run_id, run)
+    executor = RealPaymentsExecutor(
+        lock=threading.RLock(), sse=sse, utc_now=lambda: datetime.now(timezone.utc), logger=_LOG,
+        edge_patch_builder=EdgePatchBuilder(logger=_LOG), should_warn_this_tick=lambda *_: False,
+        sim_idempotency_key=lambda **_kw: "s4-" + uuid.uuid4().hex)
+    async with factory() as session:
+        result = await executor.execute_planned_payments(
+            session=session, run_id=run.run_id, run=run, planned=[_Planned(0, code, a, b, "50")], equivalents=[code],
+            sender_id_by_pid={a: p["A"]["id"]}, max_in_flight=1, max_timeouts_per_tick=0,
+            fail_run=lambda *_: None)
+        assert result.committed == 1, result
+        await session.commit()
+    assert (await _line(client, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
+
+    key = SigningKey(base64.b64decode(p["A"]["priv"]))
+    r = await client.post("/api/v1/trustlines", headers=p["A"]["headers"], json={
+        "to": b, "equivalent": code, "limit": "30",
+        "signature": _sign_trustline_create_request(signing_key=key, to_pid=b, equivalent=code, limit="30")})
+    assert r.status_code == 201, r.text
+    simulator_module._mutate_runtime_trustline_topology_best_effort(
+        run_id=run.run_id, op="create", equivalent=code, from_pid=a, to_pid=b, limit="30")
+
+    effects = result.deferred_effects
+    assert effects.apply_after_commit()
+    await asyncio.gather(*getattr(effects, "closed_publications", ()))
+    assert sse.published("tx.updated") == 1
+    require_target(
+        _removals(sse.events) == [] and (a, b) in run._edges_by_equivalent[code]
+        and any(t["from"] == a and t["to"] == b and t["limit"] == "30" for t in run._scenario_raw["trustlines"]),
+        f"the live A -> B re-created before the publication: removals {_removals(sse.events)}, cache "
+        f"{run._edges_by_equivalent[code]}, scenario {[t for t in run._scenario_raw['trustlines'] if t['from'] == a]}",
     )
