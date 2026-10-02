@@ -231,6 +231,14 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
         def enqueue_event_artifact(self, *a, **kw):
             pass
 
+    # Give clearing a generous budget - the point is it should NOT deadlock. The budget is read from
+    # settings once, when the runner is built (real_runner_impl.py) and copied once more into the tick
+    # (tick.py `RealTick.__init__`), so it must be set BEFORE construction; assigning it to the runner
+    # afterwards never reaches the tick.
+    from app.config import settings as _settings
+
+    monkeypatch.setattr(_settings, "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 5000)
+
     runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _: run,
@@ -248,8 +256,8 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
         logger=logging.getLogger("test_deadlock"),
     )
 
-    # Give clearing a generous budget — the point is it should NOT deadlock
-    runner._real_clearing_time_budget_ms = 5000
+    # Precondition: the tick (the object that enforces the budget) really holds the generous budget.
+    assert runner._tick._real_clearing_time_budget_ms == 5000
 
     # THE PARENT HOLDS WHAT CLEARING NEEDS when clearing is reached (added 2026-09-24, 017 stage 3,
     # slice S2a). Since programme 015 / P1 the money commits at its own boundary, so by the time the

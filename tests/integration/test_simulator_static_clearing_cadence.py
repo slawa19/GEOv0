@@ -140,6 +140,13 @@ def _make_runner(run: RunRecord, scenario: dict, session_factory, monkeypatch) -
 
     sse = _DummySse()
 
+    # Generous clearing budget. It is read from settings once, when the runner is built, and copied once
+    # more into the tick (tick.py `RealTick.__init__`), so it must be set BEFORE construction; assigning
+    # it to the runner afterwards never reaches the tick.
+    from app.config import settings as _settings
+
+    monkeypatch.setattr(_settings, "SIMULATOR_REAL_CLEARING_TIME_BUDGET_MS", 5000)
+
     runner = RealRunnerImpl(
         lock=threading.RLock(),
         get_run=lambda _: run,
@@ -156,7 +163,8 @@ def _make_runner(run: RunRecord, scenario: dict, session_factory, monkeypatch) -
         real_max_errors_total_default=50,
         logger=logging.getLogger("test_static_cadence"),
     )
-    runner._real_clearing_time_budget_ms = 5000
+    # Precondition: the tick (the object that enforces the budget) really holds the generous budget.
+    assert runner._tick._real_clearing_time_budget_ms == 5000
 
     return runner, sse
 
