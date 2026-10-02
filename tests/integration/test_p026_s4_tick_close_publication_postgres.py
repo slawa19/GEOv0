@@ -189,3 +189,50 @@ async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_clos
         f"the live A -> B re-created before the publication: removals {_removals(sse.events)}, cache "
         f"{run._edges_by_equivalent[code]}, scenario {[t for t in run._scenario_raw['trustlines'] if t['from'] == a]}",
     )
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_line_recreated_after_the_liveness_read_is_not_erased(client, db_session, monkeypatch) -> None:
+    """§15 review of S4, P2-1: the re-read is not atomic with the removal - leaving its session can suspend. Here the
+    re-create commits and mutates the run AFTER the SELECT found no live row and BEFORE the publisher takes the lock
+    (the barrier is placed inside the re-read, after its SELECT); the old publication must not remove the new line."""
+
+    import app.core.simulator.sse_broadcast as sse_broadcast
+
+    code, p, lines, factory = await _requested(client, db_session)
+    a, b = p["A"]["pid"], p["B"]["pid"]
+    run, sse = _run(code, p), RecordingSse()
+    monkeypatch.setitem(simulator_module.runtime._runs, run.run_id, run)
+    async with factory() as session:
+        result = await _tick_payment(session, run, sse, code, p)
+        assert result.committed == 1, result
+        await session.commit()
+    assert (await _line(client, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
+
+    read_live = sse_broadcast._live_pairs
+    seen: list = []
+
+    async def _recreate_after_the_select(eq, pairs):
+        live = await read_live(eq, pairs)  # the SELECT ran: A -> B has no live row
+        seen.append(set(live))
+        key = SigningKey(base64.b64decode(p["A"]["priv"]))
+        r = await client.post("/api/v1/trustlines", headers=p["A"]["headers"], json={
+            "to": b, "equivalent": code, "limit": "30",
+            "signature": _sign_trustline_create_request(signing_key=key, to_pid=b, equivalent=code, limit="30")})
+        assert r.status_code == 201, r.text
+        simulator_module._mutate_runtime_trustline_topology_best_effort(
+            run_id=run.run_id, op="create", equivalent=code, from_pid=a, to_pid=b, limit="30")
+        return live
+
+    monkeypatch.setattr(sse_broadcast, "_live_pairs", _recreate_after_the_select)
+    effects = result.deferred_effects
+    assert effects.apply_after_commit()
+    await asyncio.gather(*effects.closed_publications)
+    assert seen == [set()], f"the barrier did not run after a SELECT that found A -> B closed: {seen}"
+    require_target(
+        _removals(sse.events) == [] and (a, b) in run._edges_by_equivalent[code]
+        and any(t["from"] == a and t["to"] == b and t["limit"] == "30" for t in run._scenario_raw["trustlines"]),
+        f"the live A -> B re-created after the re-read: removals {_removals(sse.events)}, cache "
+        f"{run._edges_by_equivalent[code]}, scenario {[t for t in run._scenario_raw['trustlines'] if t['from'] == a]}",
+    )
