@@ -682,7 +682,8 @@ def _money_text(value: Any) -> str:
 
 
 def _entry_digest(codes: Iterable[tuple[Any, ...]]) -> str:
-    """A SUMMARY of entries for a recount to compare against - not a seal (no chain, no anchor)."""
+    """A SUMMARY of entries, stored on completion. NOTHING compares it today: no recount or reconciliation reads
+    `effect_digest` (audit 2026-10-02, `specs/BACKLOG.md` G1). Not a seal either (no chain, no anchor)."""
 
     digest = hashlib.sha256()
     for code in codes:
