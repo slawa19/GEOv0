@@ -1792,16 +1792,18 @@ class PaymentService:
         tl = TrustLine
         pair = {sender_id, receiver_id}
         shared = frozenset(pair) not in getattr(self.router, "pending_pairs", ())
-        lines = (await self.session.execute(select(
-            tl.from_participant_id, tl.limit, tl.policy, tl.close_requested_at, tl.id).where(
+        rows = (await self.session.execute(select(  # + a frozen requested line: pending and locked, no capacity
+            tl.from_participant_id, tl.limit, tl.policy, tl.close_requested_at, tl.id, tl.status).where(
             tl.from_participant_id.in_(pair), tl.to_participant_id.in_(pair), tl.from_participant_id != tl.to_participant_id,
-            tl.equivalent_id == equivalent_id, tl.status == "active").with_for_update(read=shared))).all()
+            tl.equivalent_id == equivalent_id, or_(tl.status == "active", and_(
+                tl.status == "frozen", tl.close_requested_at.is_not(None)))).with_for_update(read=shared))).all()
+        lines = [row for row in rows if row.status == "active"]
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
         limit = next((limit for owner, limit, *_ in lines if owner == receiver_id), None)
         capacity = pair_capacity(line_limit=limit, payer_owes=sender_owes, payee_owes=receiver_owes,
                                  pair_has_active_line=bool(lines))
-        if requested := [line_id for *_, asked, line_id in lines if asked is not None]:
+        if requested := [row.id for row in rows if row.close_requested_at is not None]:
             capacity = pending_pair_capacity(capacity, payee_owes=receiver_owes)
             if shared:
                 await self._lock_requested_lines(requested)

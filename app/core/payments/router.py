@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.utils.observability import log_duration
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.payments.capacity import pair_capacity, pair_rules, pending_pair_capacity, route_breaks_policy
@@ -201,14 +201,20 @@ class PaymentRouter:
 
         # 2. Load all TrustLines for this equivalent
         # We need to join with Participant to get PIDs
+        # 026 `T2603.1`: plus the frozen lines with a requested close - they mark their pair pending (В2) and
+        # carry no capacity or policy (024 `T2415.2`).
         stmt = select(TrustLine).where(
             and_(
                 TrustLine.equivalent_id == equivalent.id,
-                TrustLine.status == 'active'
+                or_(TrustLine.status == 'active',
+                    and_(TrustLine.status == 'frozen', TrustLine.close_requested_at.is_not(None))),
             )
         )
         result = await self.session.execute(stmt)
-        trustlines = result.scalars().all()
+        loaded = result.scalars().all()
+        requested = {frozenset((tl.from_participant_id, tl.to_participant_id))
+                     for tl in loaded if tl.close_requested_at is not None}
+        trustlines = [tl for tl in loaded if tl.status == 'active']
 
         # 3. Load all Debts for this equivalent
         stmt = select(Debt).where(Debt.equivalent_id == equivalent.id)
@@ -263,7 +269,7 @@ class PaymentRouter:
         for x, y in {frozenset(k) for k in lines if k[0] != k[1]}:
             pair = [lines[k] for k in ((x, y), (y, x)) if k in lines]
             forbid, blocked = pair_rules((self.pids.get(tl.from_participant_id), tl.policy) for tl in pair)
-            pending = any(tl.close_requested_at is not None for tl in pair)  # 026 В2, `capacity.py` addendum
+            pending = frozenset((x, y)) in requested  # 026 В2, `capacity.py` addendum
             if pending:
                 self.pending_pairs.add(frozenset((x, y)))
             for payer, payee in ((x, y), (y, x)):

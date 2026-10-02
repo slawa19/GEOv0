@@ -171,7 +171,6 @@ async def test_the_book_judges_the_whole_operation_not_each_flow(db_session) -> 
         f"book: opposite flows {refused}; 50->0->20 {partial} {debts_partial}; final zero {closing} {final}")
 
 
-@pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="red: a frozen requested line is invisible to the router and the core")
 @pytest.mark.parametrize("amount", ["120", "50"])
 @MODE_B
 @pytest.mark.asyncio

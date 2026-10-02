@@ -1458,7 +1458,7 @@ async def action_trustline_update(
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
         409: {"model": SimulatorActionError, "description": "Run is terminal, or the action conflicts with current state (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
-        503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
+        503: {"model": SimulatorActionError, "description": "Run perimeter, seeding or engine unavailable (flat envelope)"},
     },
 )
 async def action_trustline_close(

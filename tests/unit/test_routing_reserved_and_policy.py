@@ -32,6 +32,7 @@ class _TL:
         # Router expects tl.policy to be a dict-like JSON.
         self.policy = {"can_be_intermediate": can_be_intermediate}
         self.close_requested_at = None  # 026 `T2603.1`: the model's column; no close requested here
+        self.status = "active"  # the router loads frozen requested lines too and keeps only active ones
 
 
 class _Debt:

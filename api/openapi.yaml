@@ -3270,7 +3270,10 @@ paths:
               $ref: '#/components/schemas/SimulatorActionTrustlineCloseRequest'
       responses:
         '200':
-          description: Trust line closed
+          description: >-
+            Close accepted (026 `T2603.1`, protocol §5.3): the trust line is closed when the debt it supports
+            is 0; otherwise the close is requested - limit 0, the line stays live until that debt is 0. The
+            same body either way: it does not say which (state in the response is 026 S4, `T2603.2`).
           content:
             application/json:
               schema:
@@ -3288,7 +3291,7 @@ paths:
         '422':
           $ref: '#/components/responses/SimulatorActionUnprocessable'
         '503':
-          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE, TRUSTLINE_USED_UNAVAILABLE or SEEDING_FAILED (flat envelope)
+          description: Action unavailable - RUN_PERIMETER_UNAVAILABLE or SEEDING_FAILED (flat envelope)
           content:
             application/json:
               schema:
@@ -6573,6 +6576,7 @@ components:
             - integrity.trust_line_create
             - integrity.trust_line_update
             - integrity.trust_line_close
+            - integrity.trust_line_close_request
             - integrity.payment
             - integrity.clearing
             - integrity.simulator_audit_drift

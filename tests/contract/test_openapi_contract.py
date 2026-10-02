@@ -335,8 +335,11 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # bottleneck, liquidity, metrics and graph reads), `DELETE /trustlines/{id}` answers `{status, message, trustline}`,
 # and `GET /integrity/audit-log` gains `TRUST_LINE_CLOSE_REQUEST`, `completed_by` and `debt_growth`. Measured with a per-entry dump of
 # every ledger on `d9cce2d` and on this tree: security ledger identical; counts 62 / 51 / 66 on both.
+# Same day, S3 adversarial pass (F2): count HOLDS at 62, digest moves. ONE entry changes content: the canon's
+# `GET /integrity/audit-log` `action` enum gains `integrity.trust_line_close_request`, which the handler emits for
+# the request rows. Measured with the per-entry dump on `beb7795` and on this tree: error ledger identical, 62 / 51.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "90079224e204aa2d77661ac9e084111f963b0d7c57296426ea7e499c81653c88"
+    "06a07516a005fd4621574fd8f82d33a8d241a9aa9b2306cb7039f3de291f814f"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;
