@@ -584,8 +584,9 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await activateButton(page, 'Manage Trustline')
     await chooseTrustlineFromWhenRequested(page)
     await chooseOverlayOption(page, 'To', 'bob', /Bob/, true)
-    await expect(page.locator('[data-testid="tl-close-blocked"]')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Close TL' })).toBeDisabled()
+    // INTENTIONAL, 026 `T2603.2` (owner В1): a close with debt is a request - announced, not blocked.
+    await expect(page.locator('[data-testid="tl-close-request-note"]')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Close TL' })).toBeEnabled()
     await activateButton(page, 'Cancel')
 
     await activateButton(page, 'Run Clearing')
