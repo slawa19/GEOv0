@@ -229,6 +229,17 @@ async def test_the_recipe_runs_and_every_acceptance_check_passes(templates):
             assert examined["operations_examined"] == 34
             assert examined["limited"] == {"UAH": [], "EUR": [], "HOUR": []}
 
+            # 024 `T2417`: the executed clearing is ONE v2 plan occurrence of the declared 940.00 - persisted amount,
+            # descriptor and envelope version read back, and the three edges it reduced (recipe 033 `expect`).
+            ((payload,),) = await _rows(factory, "SELECT payload FROM transactions WHERE type = 'CLEARING'")
+            occurrence = payload["occurrence"]
+            assert (payload["amount"], occurrence["version"], occurrence["amount_atoms"]) == ("940.00", 2, "94000000000")
+            assert await _scalar(factory, "SELECT intent_encoding_version FROM debt_operations WHERE kind = 'CLEARING'") == 2
+            remaining = await _rows(
+                factory, "SELECT amount FROM debts WHERE id::text = ANY(:ids) ORDER BY amount", {"ids": occurrence["debt_ids"]}
+            )
+            assert len(occurrence["debt_ids"]) == 3 and [row[0] for row in remaining] == [Decimal("210.00"), Decimal("540.00")]
+
             # The bottleneck the recipe builds, measured rather than asserted by name.
             assert Decimal(
                 report.acceptance["bottleneck_edge_below_threshold"]["tightest_residual_share"]

@@ -31,7 +31,7 @@ import pytest
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import ClearingOccurrenceRefused, ClearingService
 from app.core.ledger.reconciliation import FAILED, PASSED
 from app.db.journal_tables import debt_operations
 from app.db.models.equivalent import Equivalent
@@ -42,6 +42,7 @@ from tests.integration.test_clearing_commit_replay_postgres import (
     _conflicting_clearing_service,
     _seed_conflict_cycle,
 )
+from tests.p019_support import require_target
 from tests.p023_support import historical_v1_clearing, occurrence_of, slice_b_surface
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: F401 - autouse: every test on a clone
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _edges, _seed_triangle
@@ -301,6 +302,24 @@ async def test_v2_a_descriptor_that_does_not_match_the_locked_rows_is_refused(wr
         await _execute(occurrence)
     assert await _clearings() == []
     assert await _edges(_factory(), triangle) == {("a", "b"): Decimal("5"), ("b", "c"): Decimal("5"), ("c", "a"): Decimal("5")}
+
+
+@pytest.mark.asyncio
+async def test_the_boundary_refuses_an_execution_without_an_occurrence_before_any_money_moves() -> None:
+    """024 `T2417`: the shared boundary runs only inside `execute_occurrence`; called bare it refuses, nothing moves."""
+
+    triangle, debts = await _triangle()
+    try:
+        async with _factory()() as session:
+            outcome = await ClearingService(session).execute_clearing_with_amount([{"debt_id": str(d.id)} for d in debts])
+    except ClearingOccurrenceRefused as refusal:
+        outcome = refusal.reason
+    edges, clearings, envelopes = await _edges(_factory(), triangle), await _clearings(), await _envelopes()
+    require_target(
+        outcome == "occurrence_missing" and not clearings and not envelopes
+        and edges == {("a", "b"): Decimal("5"), ("b", "c"): Decimal("5"), ("c", "a"): Decimal("5")},
+        f"a call without an occurrence returned {outcome!r}; clearings={len(clearings)} edges={edges}",
+    )
 
 
 @pytest.mark.asyncio

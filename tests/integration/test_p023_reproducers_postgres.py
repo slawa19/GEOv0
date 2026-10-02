@@ -70,6 +70,7 @@ from tests.p023_support import (
     remaining_debts,
     require_auto_progress,
     require_target,
+    v1_clearing_tx_id,
 )
 
 
@@ -268,7 +269,8 @@ async def test_r023_4a_distinct_occurrences_get_distinct_identities(db_session, 
     other_plan = _occurrence(uuid.uuid4())
     # Control: the v1 set-hash gives one id to any two occurrences of this debt set - the case the plan scope
     # exists for.
-    assert ClearingService._execution_tx_id(list(debt_ids)) == ClearingService._execution_tx_id(list(reversed(debt_ids)))
+    # (The v1 rule is the test copy since 024 `T2417` removed the application's.)
+    assert v1_clearing_tx_id(debt_ids) == v1_clearing_tx_id(reversed(debt_ids))
     require_target(
         stored == [occurrence["occurrence_id"]] == [this_plan.occurrence_id]
         and other_plan.occurrence_id != this_plan.occurrence_id,

@@ -717,47 +717,6 @@ async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_execute_clearing_nonpositive_defensive_skip_rolls_back(db_session, monkeypatch):
-    # 025 `T2508.1`: LEFT ON THE EXECUTION WITHOUT AN OCCURRENCE ON PURPOSE. The branch it reaches - a computed
-    # cycle minimum <= 0 - exists only there: an occurrence declares a positive amount, and a row below it is the
-    # stale-plan skip. The test goes with that mode (024 `T2417`).
-    eq, _ = await _setup_committed_triangle(db_session, code_prefix="N")
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
-    assert cycles
-
-    debt_id = uuid.UUID(str(cycles[0][0]["debt_id"]))
-    # The database CHECK makes a committed nonpositive Debt impossible. Keep
-    # the defensive branch covered through the non-flushed identity map only.
-    #
-    # THE IDENTITY MAP OF THE SESSION THAT EXECUTES, which is not always the caller's (017 stage 2b).
-    # On SQLite clearing executes on `db_session`; on PostgreSQL it executes on its own interlock
-    # session over a connection of its own, and reads the debt fresh from there. Dirtying the
-    # caller's map, as this test did, reaches the branch on SQLite only: on PostgreSQL in mode B the
-    # clearing simply succeeded (`assert Decimal('10.00000000') is None`), and in mode A the
-    # connection-bound refusal hid that. So the debt is dirtied in whichever session
-    # `_execute_clearing_with_amount` runs on, immediately before it runs.
-    real_execute = ClearingService._execute_clearing_with_amount
-    dirtied_in: list[object] = []
-
-    async def _dirty_then_execute(self, *args, **kwargs):
-        dirty_debt = await self.session.get(Debt, debt_id)
-        assert dirty_debt is not None
-        dirty_debt.amount = Decimal("0")
-        dirtied_in.append(self.session)
-        return await real_execute(self, *args, **kwargs)
-
-    monkeypatch.setattr(ClearingService, "_execute_clearing_with_amount", _dirty_then_execute)
-
-    result = await service.execute_clearing_with_amount(cycles[0])
-
-    assert len(dirtied_in) == 1, "non-vacuity: the executing session's debt was never dirtied"
-    assert result is None
-    assert not db_session.in_transaction()
-
-
-@MODE_B
-@pytest.mark.asyncio
 async def test_execute_clearing_commit_failure_rolls_back_without_visible_effects(
     db_session,
     monkeypatch,

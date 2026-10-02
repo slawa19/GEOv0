@@ -32,8 +32,6 @@ from app.db.sqlstate import ROLLED_BACK_SQLSTATES, chain_codes
 
 logger = logging.getLogger(__name__)
 
-_CLEARING_REPLAY_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
-
 # The longest cycle the SQL fast path can express, in edges.  `find_triangles_sql` joins three
 # `debts` rows and `find_quadrangles_sql` four; there is no five-table variant, so five is
 # beyond their reach by construction rather than by configuration.  `find_cycles` uses this to
@@ -63,13 +61,17 @@ class ClearingCommittedAfterCancellation(asyncio.CancelledError):
 
 
 #: Programme 023 slice (b), decision 6: the namespace of a v2 plan occurrence's identity. Its own and versioned,
-#: so a v2 id is never a v1 set-hash (`_CLEARING_REPLAY_NAMESPACE`, kept for historical occurrences).
-#: `app/core/ledger/reconciliation.py` holds an independent copy and derives the id itself.
+#: so a v2 id is never a v1 set-hash (the v1 namespace left the application with the v1 writer, 024 `T2417`;
+#: historical v1 rows are read, never written). `app/core/ledger/reconciliation.py` holds an independent copy and
+#: derives the id itself.
 _CLEARING_OCCURRENCE_V2_NAMESPACE = uuid.UUID("5f3c2e7a-0d6b-4a53-9e8f-023b00000002")
 
 
 class ClearingOccurrenceRefused(ConflictException):
     """A v2 plan occurrence that cannot run as declared, or whose id is already committed with another descriptor.
+
+    Also the refusal of an execution that carries no occurrence at all (`occurrence_missing`, 024 `T2417`): the
+    shared boundary runs only inside `ClearingService.execute_occurrence`.
 
     Programme 023 slice (b), decision 6: the same occurrence id with a different intent is a refusal, not a
     replay. Raised with nothing changed (the attempt is rolled back first), and never retried - a descriptor
@@ -177,7 +179,8 @@ class _ClearingAttemptConflict(Exception):
 
 
 class ClearingService:
-    #: The v2 occurrence being executed (`execute_occurrence`), or None on the v1 path. Instance state on
+    #: The v2 occurrence being executed (`execute_occurrence`); None outside it, and then the boundary refuses
+    #: (024 `T2417`: execution without an occurrence is removed). Instance state on
     #: purpose, like `self.session` during the interlock: every replay resolver reads it, so no path of the
     #: boundary can drop the descriptor the way a forgotten keyword would.
     _occurrence: ClearingOccurrence | None = None
@@ -380,24 +383,12 @@ class ClearingService:
         return await cls._drain_task(asyncio.create_task(_cleanup()))
 
     @staticmethod
-    def _execution_tx_id(debt_ids: List[uuid.UUID]) -> str:
-        canonical_debt_set = ":".join(sorted({str(debt_id) for debt_id in debt_ids}))
-        return str(uuid.uuid5(_CLEARING_REPLAY_NAMESPACE, canonical_debt_set))
-
-    def _occurrence_tx_id(self, debt_ids: List[uuid.UUID]) -> str:
-        """The execution's tx id: the v2 occurrence id when one is executing, else the v1 set-hash."""
-
-        if self._occurrence is not None:
-            return self._occurrence.occurrence_id
-        return self._execution_tx_id(debt_ids)
-
-    @staticmethod
     async def _read_committed_execution_amount(
         session: AsyncSession,
         tx_id: str,
         *,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
-        occurrence: ClearingOccurrence | None = None,
+        occurrence: ClearingOccurrence,
     ) -> Decimal | None:
         transaction = (
             await session.execute(
@@ -442,14 +433,13 @@ class ClearingService:
         if amount <= 0:
             logger.error("event=clearing.replay_amount_invalid tx_id=%s", tx_id)
             raise GeoException()
-        if occurrence is not None:
-            # 023 slice (b), decision 6: a v2 id is a replay only of the SAME intent. The committed
-            # descriptor is compared whole, and the committed amount must be the one it declares.
-            if (transaction.payload or {}).get("occurrence") != occurrence.descriptor():
-                raise ClearingOccurrenceRefused("occurrence_descriptor_mismatch")
-            if amount != occurrence.amount:
-                logger.error("event=clearing.replay_amount_differs_from_descriptor tx_id=%s", tx_id)
-                raise ClearingOccurrenceRefused("occurrence_amount_mismatch")
+        # 023 slice (b), decision 6: a v2 id is a replay only of the SAME intent. The committed
+        # descriptor is compared whole, and the committed amount must be the one it declares.
+        if (transaction.payload or {}).get("occurrence") != occurrence.descriptor():
+            raise ClearingOccurrenceRefused("occurrence_descriptor_mismatch")
+        if amount != occurrence.amount:
+            logger.error("event=clearing.replay_amount_differs_from_descriptor tx_id=%s", tx_id)
+            raise ClearingOccurrenceRefused("occurrence_amount_mismatch")
         return amount
 
     async def _committed_execution_amount(
@@ -458,10 +448,6 @@ class ClearingService:
         *,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
-        if self._occurrence is None:
-            return await self._read_committed_execution_amount(
-                self.session, tx_id, allowed_participant_pids=allowed_participant_pids
-            )
         return await self._read_committed_execution_amount(
             self.session,
             tx_id,
@@ -531,19 +517,12 @@ class ClearingService:
         for attempt in range(3):
             try:
                 async with session_factory() as recovery_session:
-                    if self._occurrence is None:
-                        amount = await self._read_committed_execution_amount(
-                            recovery_session,
-                            tx_id,
-                            allowed_participant_pids=allowed_participant_pids,
-                        )
-                    else:
-                        amount = await self._read_committed_execution_amount(
-                            recovery_session,
-                            tx_id,
-                            allowed_participant_pids=allowed_participant_pids,
-                            occurrence=self._occurrence,
-                        )
+                    amount = await self._read_committed_execution_amount(
+                        recovery_session,
+                        tx_id,
+                        allowed_participant_pids=allowed_participant_pids,
+                        occurrence=self._occurrence,
+                    )
             except ClearingOccurrenceRefused:
                 # A durable occurrence with another descriptor is a fact, not a transient read failure.
                 raise
@@ -1638,19 +1617,6 @@ class ClearingService:
             )
             await asyncio.sleep(delay)
 
-    async def execute_clearing(
-        self,
-        cycle: List[Dict],
-        *,
-        allowed_participant_pids: "AbstractSet[str] | None" = None,
-    ) -> bool:
-        """Backward-compatible API: execute clearing and return success flag."""
-        return (
-            await self.execute_clearing_with_amount(
-                cycle, allowed_participant_pids=allowed_participant_pids
-            )
-        ) is not None
-
     async def execute_occurrence(
         self,
         occurrence: ClearingOccurrence,
@@ -1659,7 +1625,7 @@ class ClearingService:
     ) -> Decimal | None:
         """Execute one plan occurrence with its DECLARED amount (programme 023 slice (b), decisions 5-6).
 
-        The same boundary as `execute_clearing_with_amount`, not a copy of it: the exclusive equivalent session
+        The shared boundary `execute_clearing_with_amount`, not a copy of it: the exclusive equivalent session
         lock, the retry owner `_run_attempts`, the stop/hold read `FOR SHARE`, the authoritative perimeter and
         consent checks on the rows locked `FOR UPDATE`, the commit resolver and `ClearingCommittedAfterCancellation`
         all run unchanged. What the occurrence changes: the tx id is its occurrence id; a committed occurrence
@@ -1702,19 +1668,19 @@ class ClearingService:
         forgotten transition would be a way around the guard, and the guard is the second
         line of defence — detection is the first, and a caller may hand us a cycle that
         detection never produced.
+
+        It runs only inside `execute_occurrence` (024 `T2417`): without an occurrence it refuses with
+        `ClearingOccurrenceRefused("occurrence_missing")` before its first query - execution without an
+        occurrence (v1: the locked cycle minimum under a set-hash id) is removed.
         """
+        occurrence = self._occurrence
+        if occurrence is None:
+            await self._raise_unexpected_execution(ClearingOccurrenceRefused("occurrence_missing"))
         allowed_ids = await self._resolve_scope_ids(allowed_participant_pids)
         if allowed_participant_pids is not None and not allowed_ids:
             # An empty perimeter admits nobody; there is nothing this cycle can legally be.
             await self._raise_unexpected_execution(
                 RuntimeError("Clearing cycle escaped participant scope: empty perimeter")
-            )
-
-        if not cycle:
-            return await self._execute_clearing_with_amount(
-                cycle,
-                allowed_participant_ids=allowed_ids,
-                allowed_participant_pids=allowed_participant_pids,
             )
 
         bind = getattr(self.session, "bind", None)
@@ -1732,16 +1698,8 @@ class ClearingService:
             await self._raise_unexpected_execution(GeoException())
         lock_bind = bind
 
-        try:
-            debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
-        except Exception:
-            return await self._run_attempts(
-                cycle,
-                allowed_participant_ids=allowed_ids,
-                allowed_participant_pids=allowed_participant_pids,
-            )
-
-        execution_tx_id = self._occurrence_tx_id(debt_ids)
+        debt_ids = list(occurrence.debt_ids)
+        execution_tx_id = occurrence.occurrence_id
         try:
             preflight_debts = (
                 (
@@ -1918,16 +1876,13 @@ class ClearingService:
         """Execute clearing for a specific cycle and return the *actual* cleared amount.
 
         Returns:
-        - Decimal amount on success (the min debt amount among the locked cycle edges at execution time)
-        - None when the candidate is invalid or skipped by lock/policy checks.
+        - Decimal amount on success (the occurrence's declared amount, or a verified replay's durable one)
+        - None when the occurrence is skipped (its rows are gone, a stale plan, or withheld consent).
 
         Unexpected execution failures are rolled back and surfaced through the
         application's sanitized internal-error path.
         """
-        if not cycle:
-            await self._rollback_skipped_execution()
-            return None
-
+        occurrence = self._occurrence
         logger.info("event=clearing.execute cycle_len=%s", len(cycle))
         try:
             CLEARING_EVENTS_TOTAL.labels(event="execute", result="start").inc()
@@ -1937,23 +1892,8 @@ class ClearingService:
                 exc_info=True,
             )
 
-        # Load debts for this cycle to avoid relying on debtor/creditor fields in the API output.
-        try:
-            debt_ids = [uuid.UUID(str(edge["debt_id"])) for edge in cycle]
-        except Exception:
-            try:
-                CLEARING_EVENTS_TOTAL.labels(
-                    event="execute", result="bad_request"
-                ).inc()
-            except Exception:
-                logger.debug(
-                    "event=clearing.metrics_inc_failed metric=CLEARING_EVENTS_TOTAL label=execute.bad_request",
-                    exc_info=True,
-                )
-            await self._rollback_skipped_execution()
-            return None
-
-        execution_tx_id = self._occurrence_tx_id(debt_ids)
+        debt_ids = list(occurrence.debt_ids)
+        execution_tx_id = occurrence.occurrence_id
         try:
             replay_amount = await self._committed_execution_amount(
                 execution_tx_id, allowed_participant_pids=allowed_participant_pids
@@ -2055,39 +1995,31 @@ class ClearingService:
                     GeoException("Clearing cycle escaped participant scope")
                 )
 
-        occurrence = self._occurrence
-        if occurrence is None:
-            # 1. Determine clearing amount (min amount in cycle)
-            clear_amount = min([d.amount for d in debts])
-        else:
-            # 023 slice (b): the DECLARED amount of a plan occurrence, checked against the rows just locked.
-            # The descriptor must describe them - its equivalent, its cycle in its order - or it is refused
-            # (a wrong descriptor is not a stale plan); an edge now below `c` is a stale plan, skipped whole.
-            debts_by_declared_id = {debt.id: debt for debt in debts}
-            ordered = [debts_by_declared_id[debt_id] for debt_id in occurrence.debt_ids]
-            if any(debt.equivalent_id != occurrence.equivalent_id for debt in ordered):
-                await self._raise_unexpected_execution(
-                    ClearingOccurrenceRefused("occurrence_equivalent_differs_from_the_rows")
-                )
-            debtors = [debt.debtor_id for debt in ordered]
-            if len(set(debtors)) != len(debtors) or any(
-                ordered[k].creditor_id != ordered[(k + 1) % len(ordered)].debtor_id for k in range(len(ordered))
-            ):
-                await self._raise_unexpected_execution(
-                    ClearingOccurrenceRefused("occurrence_is_not_one_simple_directed_cycle")
-                )
-            debts = ordered
-            clear_amount = occurrence.amount
-            if any(debt.amount < clear_amount for debt in debts):
-                logger.info("event=clearing.skip_stale_plan cycle_len=%s", len(debts))
-                try:
-                    CLEARING_EVENTS_TOTAL.labels(event="execute", result="skip_stale").inc()
-                except Exception:
-                    pass
-                await self._rollback_skipped_execution()
-                return None
-
-        if clear_amount <= 0:
+        # 023 slice (b): the DECLARED amount of a plan occurrence, checked against the rows just locked.
+        # The descriptor must describe them - its equivalent, its cycle in its order - or it is refused
+        # (a wrong descriptor is not a stale plan); an edge now below `c` is a stale plan, skipped whole.
+        # `c` is positive by construction (`ClearingOccurrence.__post_init__`).
+        debts_by_declared_id = {debt.id: debt for debt in debts}
+        ordered = [debts_by_declared_id[debt_id] for debt_id in occurrence.debt_ids]
+        if any(debt.equivalent_id != occurrence.equivalent_id for debt in ordered):
+            await self._raise_unexpected_execution(
+                ClearingOccurrenceRefused("occurrence_equivalent_differs_from_the_rows")
+            )
+        debtors = [debt.debtor_id for debt in ordered]
+        if len(set(debtors)) != len(debtors) or any(
+            ordered[k].creditor_id != ordered[(k + 1) % len(ordered)].debtor_id for k in range(len(ordered))
+        ):
+            await self._raise_unexpected_execution(
+                ClearingOccurrenceRefused("occurrence_is_not_one_simple_directed_cycle")
+            )
+        debts = ordered
+        clear_amount = occurrence.amount
+        if any(debt.amount < clear_amount for debt in debts):
+            logger.info("event=clearing.skip_stale_plan cycle_len=%s", len(debts))
+            try:
+                CLEARING_EVENTS_TOTAL.labels(event="execute", result="skip_stale").inc()
+            except Exception:
+                pass
             await self._rollback_skipped_execution()
             return None
 
@@ -2160,7 +2092,7 @@ class ClearingService:
         # the repository reads this field: it is in no hash (`compute_integrity_checkpoint_for_
         # equivalent` digests `debts` and `trust_lines` rows, never a payload), in no signature
         # (CLEARING rows are not signed), and in no key (`idempotency_key` is
-        # `clearing:{tx_id}`, and `tx_id` is a uuid5 over the sorted DEBT IDS alone), and the
+        # `clearing:{tx_id}`, and `tx_id` is the occurrence id - a uuid5 of plan, equivalent and ordinal), and the
         # only other CLEARING-payload readers - `app/core/admin/metrics.py:723` and
         # `app/api/v1/admin.py:203,1035` - read `equivalent` and `edges[].debtor/creditor`.
         # `to_money_str` never drops a digit the value carries, so the amount a replay hands
@@ -2232,7 +2164,6 @@ class ClearingService:
             ),
             "edges": edges_payload,
         }
-        intent_version: int | None = None
         intent_cycle = [
             {
                 "debt_id": str(debt.id),
@@ -2248,12 +2179,10 @@ class ClearingService:
             "equivalent_id": str(debts[0].equivalent_id),
             "cycle": intent_cycle,
         }
-        if occurrence is not None:
-            # 023 slice (b), decision 5 (4): ONE descriptor in the intent and the transaction row; the
-            # verifier (`reconciliation._clearing_v2`) and the replay check read it from both.
-            tx_payload["occurrence"] = occurrence.descriptor()
-            intent["occurrence"] = occurrence.descriptor()
-            intent_version = CLEARING_INTENT_ENCODING_VERSION
+        # 023 slice (b), decision 5 (4): ONE descriptor in the intent and the transaction row; the
+        # verifier (`reconciliation._clearing_v2`) and the replay check read it from both.
+        tx_payload["occurrence"] = occurrence.descriptor()
+        intent["occurrence"] = occurrence.descriptor()
 
         new_tx = Transaction(
             id=tx_uuid,
@@ -2292,7 +2221,7 @@ class ClearingService:
                     intent=intent,
                     scope_equivalent_ids={debts[0].equivalent_id},
                     intent_equivalent_ids={debts[0].equivalent_id},
-                    intent_encoding_version=intent_version,
+                    intent_encoding_version=CLEARING_INTENT_ENCODING_VERSION,
                 ),
             ) as posting:
                 for debt in debts:

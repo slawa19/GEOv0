@@ -326,9 +326,9 @@ def occurrence_of(debt_ids, *, equivalent_id, amount, plan_id: uuid.UUID, ordina
     )
 
 
-#: The v1 execution namespace, COPIED (not imported) from `app/core/clearing/service.py`
-#: (`_CLEARING_REPLAY_NAMESPACE`): a v1 clearing's tx id is the uuid5 of its sorted debt-id set. Copied so the
-#: historical rows stay buildable after programme 024 `T2417` removes the execution without an occurrence.
+#: The v1 execution namespace: a v1 clearing's tx id is the uuid5 of its sorted debt-id set. COPIED from
+#: `app/core/clearing/service.py` (`_CLEARING_REPLAY_NAMESPACE`, at `6e25aaa` line 35), which programme 024 `T2417`
+#: removed with the execution without an occurrence; this copy is now the only one, so historical rows stay buildable.
 _V1_CLEARING_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
 
 

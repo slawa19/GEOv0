@@ -296,6 +296,43 @@ def test_nothing_detected_matches_nothing():
     assert _match_cycle([], frozenset({("A", "B"), ("B", "C"), ("C", "A")})) is None
 
 
+async def test_a_retried_clearing_replays_the_occurrence_its_first_attempt_built(monkeypatch):
+    """024 `T2417`: an attempt that met a transient failure after building the occurrence (here: after its commit
+    landed) is retried with THAT occurrence - one identity, one descriptor - and does not detect again a cycle
+    the committed clearing consumed (the stand detects it once only)."""
+
+    import types
+    import uuid
+
+    import scripts.seed_recipe as seed
+
+    detections, executed = [], []
+    detected = [{**edge, "debt_id": str(uuid.uuid4())} for edge in _cycle(("B", "C"), ("C", "A"), ("A", "B"))]
+
+    class _Service:
+        def __init__(self, session):
+            pass
+
+        async def find_cycles(self, equivalent, max_depth):
+            detections.append(equivalent)
+            return [detected] if len(detections) == 1 else []
+
+        async def execute_occurrence(self, occurrence):
+            executed.append(occurrence)
+            if len(executed) == 1:
+                raise _dbapi_error("40001")
+            return occurrence.amount
+
+    monkeypatch.setattr(seed, "ClearingService", _Service)
+    run = _run_with_fake_sessions()
+    run.identities = {ref: types.SimpleNamespace(pid=ref.upper()) for ref in "abc"}
+    run.equivalent_ids = {"UAH": uuid.uuid4()}
+    await run._clearing({"id": "c", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "1.00", "mode": "execute", "expect": "-"})
+    assert (len(detections), len(executed), run.report.retries) == (1, 2, 1)
+    assert executed[0] == executed[1] and executed[0].amount_atoms == 10**8
+    assert [str(debt_id) for debt_id in executed[0].debt_ids] == [detected[k]["debt_id"] for k in (2, 0, 1)]
+
+
 # =================================================================================================
 # The activity check counts what the DESCRIPTION declares, not what the database happens to hold
 # =================================================================================================

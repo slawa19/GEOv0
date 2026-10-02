@@ -265,8 +265,8 @@ def test_a_cleared_cycle_lives_inside_one_equivalent(community_id, documents):
             line = lines.get((command["equivalent"], creditor, debtor))
             assert line is not None, f"{command['id']}: {creditor} -> {debtor} is not a line"
             assert line["status"] == "active", command["id"]
-            # Every edge needs consent, or `execute_clearing` skips the cycle
-            # (`app/core/clearing/service.py:1905-1922`).
+            # Every edge needs consent, or clearing execution skips the cycle
+            # (`ClearingService._cycle_respects_auto_clearing`).
             assert line["policy"]["auto_clearing"] is True, command["id"]
 
 

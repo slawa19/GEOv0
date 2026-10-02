@@ -374,9 +374,9 @@ def validate_recipe(recipe: Any, community: Any, *, source: str = "<recipe>") ->
                     _fail(
                         source,
                         f"{where}: the trustline {creditor!r} -> {debtor!r} in {equivalent} "
-                        f"has auto_clearing false, and execute_clearing skips a cycle whose "
+                        f"has auto_clearing false, and clearing execution skips a cycle whose "
                         f"every edge has not consented "
-                        f"(app/core/clearing/service.py:1905-1922)",
+                        f"(ClearingService._cycle_respects_auto_clearing)",
                     )
 
                 builders = [
