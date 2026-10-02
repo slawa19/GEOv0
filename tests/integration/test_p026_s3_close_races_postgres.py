@@ -152,8 +152,9 @@ async def test_a_close_committed_inside_a_clearing_is_completed_by_its_retry(
 @pytest.mark.asyncio
 async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_result(
         client, db_session, monkeypatch, caplog) -> None:
-    # Two payments repay the requested line's debt to zero. P2 binds - the router's hint makes it lock A -> B
-    # `FOR UPDATE` at once - and waits; P1 routes and reaches the same lock while P2 completes. P1 must WAIT
+    # Two payments repay the requested line's debt to zero. P2 reads A -> B - the router's hint makes it lock the
+    # line `FOR UPDATE` at once (probed: a third session's `FOR SHARE NOWAIT` fails 55P03) - and waits; P1 routes
+    # and reaches the same lock while P2 completes. P1 must WAIT
     # (not deadlock), fail 40001 on the line P2 closed, and its retry routes around it (A -> C -> B). Measured before this
     # shape: a `FOR SHARE -> FOR UPDATE` upgrade deadlocked both payments on every retry until both spent
     # their budget (`refused RetryablePaymentConflictException` twice, 40P01 and pivot 40001 alternating).
@@ -161,21 +162,21 @@ async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_r
     code, p, line_id, line_key, factory = await _stand(client, db_session)
     async with factory() as s:
         assert await _close(s, line_id, p["A"]["id"]) == "active"
-    apply, segment, who = PaymentService._apply_payment, PaymentService._segment, contextvars.ContextVar("payment")
+    debt_amount, segment, who = PaymentService._debt_amount, PaymentService._segment, contextvars.ContextVar("p")
     p2_locked, release = asyncio.Event(), asyncio.Event()
 
-    async def apply_payment(self, declaration, **kwargs):
+    async def debt_amount_of(self, *args):
         if who.get(None) == "p2" and not p2_locked.is_set():
-            p2_locked.set()  # P2 holds A -> B FOR UPDATE (bind is done) and has not written money yet
+            p2_locked.set()  # P2 has just read A -> B with its lock, before any upgrade or money
             await release.wait()
-        return await apply(self, declaration, **kwargs)
+        return await debt_amount(self, *args)
 
     async def segment_of(self, *args):
         if who.get(None) == "p1":
             release.set()  # P1 has routed (its snapshot is taken) and now locks A -> B, held by P2
         return await segment(self, *args)
 
-    monkeypatch.setattr(PaymentService, "_apply_payment", apply_payment)
+    monkeypatch.setattr(PaymentService, "_debt_amount", debt_amount_of)
     monkeypatch.setattr(PaymentService, "_segment", segment_of)
 
     async def pay(tx_id: str) -> str:
@@ -189,13 +190,20 @@ async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_r
 
     p2 = asyncio.create_task(pay("p2"))
     await asyncio.wait_for(p2_locked.wait(), timeout=30)
+    async with factory() as probe:
+        try:
+            await probe.execute(select(TrustLine.id).where(TrustLine.id == line_id).with_for_update(read=True, nowait=True))
+            held = "shared"
+        except DBAPIError as exc:
+            held = sqlstate(exc)
+        await probe.rollback()
     outcomes = await asyncio.wait_for(asyncio.gather(pay("p1"), p2), timeout=60)
     conflicts = [m for m in _retries(caplog, "payment.attempt_retry") if "40P01" in m or "40001" in m]
     audit = [op for op, _ in await _audit(factory, line_key)]
     assert release.is_set() and conflicts, f"the schedule did not race: {conflicts}"
     a, b, c = (p[n]["id"] for n in "ABC")
-    require_target(outcomes == ["COMMITTED", "COMMITTED"] and not [m for m in conflicts if "40P01" in m]
+    require_target(held == "55P03" and outcomes == ["COMMITTED", "COMMITTED"] and not [m for m in conflicts if "40P01" in m]
                    and await _status(factory, line_id) == "closed"
                    and await _debts(factory, code) == {(a, c): Decimal("50"), (c, b): Decimal("50")}
                    and audit == ["TRUST_LINE_CLOSE", "TRUST_LINE_CLOSE_REQUEST"],
-                   f"p1, p2 -> {outcomes}, audit {audit}, retries {conflicts}")
+                   f"P2's lock {held}; p1, p2 -> {outcomes}, audit {audit}, retries {conflicts}")
