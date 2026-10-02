@@ -470,7 +470,7 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
 
             await _use_serializable(clearing_session)
             clearing = asyncio.create_task(
-                ClearingService(clearing_session).execute_clearing_with_amount(seed["cycle"])
+                ClearingService(clearing_session).execute_occurrence(seed["occurrence"])
             )
             clearing_pid = _assert_row_wait(
                 await _waiters_behind(reaction_pid[0]), what="the clearing", behind="the reaction's hold"
@@ -548,7 +548,7 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
         service = ClearingService(clearing_session)
         original_policy = service._cycle_respects_auto_clearing
 
-        # Execution only: this stand calls `execute_clearing_with_amount` directly, so detection (the
+        # Execution only: this stand calls `execute_occurrence` directly, so detection (the
         # other caller of the policy check) never runs here.
         async def _pause_before_mutation(debts):
             respects = await original_policy(debts)
@@ -562,7 +562,7 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
         seen_at_hold = _observe_commits_when_the_hold_is_written(
             monkeypatch, lambda: _clearing_transactions(factory, seed)
         )
-        clearing = asyncio.create_task(service.execute_clearing_with_amount(seed["cycle"]))
+        clearing = asyncio.create_task(service.execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(paused.wait(), timeout=20)
         assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == ["ExclusiveLock"], (
             "premise: the parked clearing does not hold its exclusive equivalent lock"

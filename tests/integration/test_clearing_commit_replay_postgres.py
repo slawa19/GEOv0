@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import sys
 import uuid
 from decimal import Decimal
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 from tests.debt_setup import debt_fixture_setup
 from tests.p019_support import require_target
+from tests.p023_support import LATER_PLAN_ID, TEST_PLAN_ID, occurrence_of
 
 # Every test here commits through several sessions, so each runs on a disposable clone of the migrated
 # template and its rows go with the clone's drop - nothing is deleted row by row (018 B0b; see
@@ -88,7 +90,11 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
     participant_ids = [uuid.uuid4() for _ in range(3)]
     a_id, b_id, c_id = participant_ids
     debt_ids = [uuid.uuid4() for _ in range(3)]
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    # 025 `T2508.1`: BOTH workers execute ONE plan occurrence of the cycle (declared 30, the minimum); the second
+    # is the durable replay of the first. (Under v1 the second worker passed the cycle reversed - one set-hash.)
+    occurrence = occurrence_of(
+        debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0
+    )
     sessions = []
     workers = []
     observer = None
@@ -202,13 +208,13 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 
         workers = [
             asyncio.create_task(
-                ClearingService(session).execute_clearing_with_amount(
-                    ordered_cycle
+                ClearingService(session).execute_occurrence(
+                    replayed
                 )
             )
-            for session, ordered_cycle in zip(
+            for session, replayed in zip(
                 sessions,
-                (cycle, list(reversed(cycle))),
+                (occurrence, dataclasses.replace(occurrence)),
                 strict=True,
             )
         ]
@@ -437,7 +443,7 @@ async def _clearing_evidence(equivalent_code: str, execution_tx_id: str, equival
     return transactions, audits, operations, entries, debts
 
 
-async def _run_owner(service_cls, cycle):
+async def _run_owner(service_cls, occurrence):
     from tests.conftest import TestingSessionLocal
 
     owner_session = TestingSessionLocal()
@@ -446,7 +452,7 @@ async def _run_owner(service_cls, cycle):
         isolation = (await owner_session.execute(text("SHOW transaction_isolation"))).scalar_one()
         assert str(isolation).lower() == "serializable"
         try:
-            return await asyncio.wait_for(service_cls(owner_session).execute_clearing_with_amount(cycle), 30)
+            return await asyncio.wait_for(service_cls(owner_session).execute_occurrence(occurrence), 30)
         except Exception as exc:  # noqa: BLE001 - compared by the caller
             return exc
     finally:
@@ -474,15 +480,13 @@ async def test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_sna
     if dialect not in {"postgresql", "postgres"}:
         pytest.skip("Postgres-only: SERIALIZABLE clearing retry")
 
-    from app.core.clearing.service import ClearingService
-
     equivalent_id, equivalent_code, _participants, debt_ids = await _seed_conflict_cycle("CN")
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
-    execution_tx_id = ClearingService._execution_tx_id(debt_ids)
+    occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
+    execution_tx_id = occurrence.occurrence_id
     observed: list[str] = []
     service_cls = _conflicting_clearing_service(debt_ids[0], [Decimal("101.00")], observed)
 
-    outcome = await _run_owner(service_cls, cycle)
+    outcome = await _run_owner(service_cls, occurrence)
 
     # Controls: the conflict was real and it is PostgreSQL's 40001.
     assert observed and set(observed) == {"40001"}, observed
@@ -528,18 +532,17 @@ async def test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryab
         pytest.skip("Postgres-only: SERIALIZABLE clearing retry")
 
     from app.config import settings
-    from app.core.clearing.service import ClearingService
 
     monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
     monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
     equivalent_id, equivalent_code, _participants, debt_ids = await _seed_conflict_cycle("CX")
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
-    execution_tx_id = ClearingService._execution_tx_id(debt_ids)
+    occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
+    execution_tx_id = occurrence.occurrence_id
     observed: list[str] = []
     writes = [Decimal("101.00"), Decimal("102.00"), Decimal("103.00"), Decimal("104.00")]
     service_cls = _conflicting_clearing_service(debt_ids[0], writes, observed)
 
-    outcome = await _run_owner(service_cls, cycle)
+    outcome = await _run_owner(service_cls, occurrence)
 
     # Control: the conflicts were real 40001s.
     assert observed and set(observed) == {"40001"}, observed
@@ -602,13 +605,17 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
     participant_ids = [uuid.uuid4() for _ in range(3)]
     a_id, b_id, c_id = participant_ids
     debt_ids = [uuid.uuid4() for _ in range(3)]
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    # 025 `T2508.1`: the occurrence, declared (30, the minimum); its replay is the same descriptor again; the
+    # replacement - a later plan over a new debt set - is a distinct occurrence (declared 5).
+    occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
     replacement_debt_id = uuid.uuid4()
-    replacement_cycle = [
-        {"debt_id": str(debt_ids[0])},
-        {"debt_id": str(replacement_debt_id)},
-        {"debt_id": str(debt_ids[2])},
-    ]
+    replacement = occurrence_of(
+        [debt_ids[0], replacement_debt_id, debt_ids[2]],
+        equivalent_id=equivalent_id,
+        amount="5.00",
+        plan_id=LATER_PLAN_ID,
+        ordinal=0,
+    )
 
     service_session = None
     replay_session = None
@@ -730,7 +737,7 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
         monkeypatch.setattr(AsyncSession, "commit", _commit_then_delay_ack)
 
         service_task = asyncio.create_task(
-            service.execute_clearing_with_amount(cycle),
+            service.execute_occurrence(occurrence),
             name="clearing-post-commit-cancellation",
         )
         await asyncio.wait_for(commit_completed.wait(), timeout=5.0)
@@ -758,14 +765,14 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
         )
         replay_amount = await ClearingService(
             replay_session
-        ).execute_clearing_with_amount(list(reversed(cycle)))
+        ).execute_occurrence(dataclasses.replace(occurrence))
 
         assert replay_amount == Decimal("30.00000000")
         assert boundary_amount == replay_amount
         assert not replay_session.in_transaction()
 
-        # Anti-vacuum: a genuinely new occurrence has a new Debt-ID set and must
-        # not be mistaken for replay of the committed cycle.
+        # Anti-vacuum: a genuinely new occurrence (another plan, a new debt set) must
+        # not be mistaken for replay of the committed one.
         async with TestingSessionLocal() as add_replacement:
             async with debt_fixture_setup(add_replacement, label="setup-2"):
                 add_replacement.add(
@@ -782,7 +789,7 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
         replacement_session = TestingSessionLocal()
         replacement_amount = await ClearingService(
             replacement_session
-        ).execute_clearing_with_amount(replacement_cycle)
+        ).execute_occurrence(replacement)
         assert replacement_amount == Decimal("5.00000000")
 
         async with TestingSessionLocal() as verify:

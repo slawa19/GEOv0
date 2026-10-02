@@ -28,7 +28,7 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import ClearingOccurrenceRefused, ClearingService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -36,6 +36,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 
 @pytest_asyncio.fixture
@@ -104,6 +105,12 @@ async def _seed(sessionmaker) -> tuple[str, uuid.UUID, dict[str, uuid.UUID]]:
     return eq_code, eq_id, ids
 
 
+def _occurrence_of(cycle, eq_id):
+    """025 `T2508.1`: the plan occurrence of the detected run-B cycle (in detection's order), declared 100."""
+
+    return occurrence_of(cycle, equivalent_id=eq_id, amount="100", plan_id=TEST_PLAN_ID, ordinal=0)
+
+
 async def _amounts(sessionmaker, eq_id) -> list[Decimal]:
     async with sessionmaker() as s:
         rows = (
@@ -128,10 +135,12 @@ async def test_interlock_path_refuses_a_cycle_outside_the_perimeter(
         cycles = await service.find_cycles(eq_code, max_depth=6)
         assert len(cycles) == 1, f"the stand must hold exactly one cycle: {cycles}"
 
-        with pytest.raises(GeoException):
-            await service.execute_clearing_with_amount(
-                cycles[0], allowed_participant_pids=foreign_scope
+        with pytest.raises(GeoException) as refused:
+            await service.execute_occurrence(
+                _occurrence_of(cycles[0], eq_id), allowed_participant_pids=foreign_scope
             )
+        # 025 `T2508.1`: the perimeter refused it, not the occurrence's own descriptor check.
+        assert not isinstance(refused.value, ClearingOccurrenceRefused), refused.value
 
     after = await _amounts(sessionmaker, eq_id)
     assert after == [Decimal("100")] * 3, (
@@ -156,8 +165,8 @@ async def test_interlock_path_still_clears_for_the_owning_run(
         )
         assert len(cycles) == 1, f"the owning run must still see its cycle: {cycles}"
 
-        cleared = await service.execute_clearing_with_amount(
-            cycles[0], allowed_participant_pids=own_scope
+        cleared = await service.execute_occurrence(
+            _occurrence_of(cycles[0], eq_id), allowed_participant_pids=own_scope
         )
 
     assert cleared == Decimal("100"), cleared

@@ -22,6 +22,7 @@ from sqlalchemy import select, text
 
 from app.config import settings
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # Every test here commits through several sessions and runs on a disposable clone of the migrated
 # template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
@@ -99,7 +100,8 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
     participant_pids = [f"{label}_CP_{nonce}" for label in ("A", "B", "C")]
     a_id, b_id, c_id = participant_ids
     a_pid, b_pid, c_pid = participant_pids
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    # 025 `T2508.1`: the plan occurrence of the cycle, declared (30, the minimum), executed while the payment waits.
+    occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
 
     publications: list[dict] = []
 
@@ -268,7 +270,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         )
 
         clearing_task = asyncio.create_task(
-            clearing_service.execute_clearing_with_amount(cycle)
+            clearing_service.execute_occurrence(occurrence)
         )
         await asyncio.wait_for(clearing_parked.wait(), timeout=5.0)
         assert clearing_work_pid is not None

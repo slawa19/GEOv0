@@ -42,7 +42,7 @@ from tests.integration.test_clearing_commit_replay_postgres import (
     _conflicting_clearing_service,
     _seed_conflict_cycle,
 )
-from tests.p023_support import slice_b_surface
+from tests.p023_support import historical_v1_clearing, occurrence_of, slice_b_surface
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: F401 - autouse: every test on a clone
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _edges, _seed_triangle
 from tests.unit.test_p015_step5a_reconciliation import (
@@ -74,12 +74,14 @@ async def _triangle(pre=("5", "5", "5")):
 
 
 def _occurrence(api, triangle, debts, *, plan=PLAN_A, ordinal=0, units: str = "2", order=(0, 1, 2), equivalent_id=None):
-    return api.ClearingOccurrence(
-        plan_id=plan,
+    # The construction lives in `tests/p023_support.py::occurrence_of` (025 `T2508.1`); `api` stays in the signature
+    # because every caller has already looked the slice (b) surface up through it.
+    return occurrence_of(
+        [debts[k].id for k in order],
         equivalent_id=equivalent_id or triangle.equivalent.id,
+        amount=units,
+        plan_id=plan,
         ordinal=ordinal,
-        debt_ids=tuple(debts[k].id for k in order),
-        amount_atoms=int(Decimal(units) * ATOM),
     )
 
 
@@ -197,20 +199,35 @@ async def test_v2_an_exact_occurrence_deletes_at_zero_and_is_recomputed_passed()
 
 
 @pytest.mark.asyncio
-async def test_v2_writes_intent_version_two_and_the_payload_descriptor_while_v1_still_writes_one() -> None:
+async def test_v2_writes_intent_version_two_and_the_payload_descriptor_and_a_historical_v1_record_still_reconciles() -> None:
+    """The v2 record next to a HISTORICAL v1 one on the same rows, and both read back.
+
+    025 `T2508.1` (spec `T2500`, P2-4): the v1 clearing is history, not a fresh execution without an occurrence. A
+    later occurrence clears the locked minimum (3) - what the v1 writer cleared - and its record is FORGED into the
+    one the v1 writer left (`historical_v1_clearing`). What is tested in the APPLICATION: v2 writes intent version
+    2 and the descriptor in the payload (the `api.version` pair and the `occurrence` payload key of the v2 tx), and
+    the verifier reads the v1-encoded record next to it (criterion (b) PASSED, `full_recomputation` `{"CLEARING":
+    2}`). The two assertions on the v1 side - `(v1_tx, 1)` in the envelopes and no `occurrence` key in its payload -
+    only confirm the forged record (the stand), not that any application code path writes v1: that execution
+    WITHOUT an occurrence is the mode which 024 `T2417` removes.
+    """
     api = slice_b_surface()
     triangle, debts = await _triangle(("5", "5", "5"))
+    await _baseline(_factory(), triangle.equivalent.id)
     occurrence = _occurrence(api, triangle, debts)
     assert await _execute(occurrence) == Decimal("2")
-    v1_tx = ClearingService._execution_tx_id([d.id for d in debts])
-    async with _factory()() as session:
-        # Control: the baseline path on the same rows clears the locked minimum (3) under v1.
-        assert await ClearingService(session).execute_clearing_with_amount([{"debt_id": str(d.id)} for d in debts]) == Decimal("3")
+    later = _occurrence(api, triangle, debts, plan=PLAN_B, units="3")
+    assert await _execute(later) == Decimal("3")
+    v1_tx = await historical_v1_clearing(_factory(), later)
     assert await _envelopes() == sorted([(occurrence.occurrence_id, api.version), (v1_tx, 1)])
     payloads = {tx_id: payload for tx_id, _state, payload in await _clearings()}
     assert payloads[occurrence.occurrence_id]["occurrence"] == occurrence.descriptor()
     assert Decimal(payloads[occurrence.occurrence_id]["amount"]) == Decimal("2")
     assert "occurrence" not in payloads[v1_tx]
+    assert await _edges(_factory(), triangle) == {}
+    outcome = await _verify(_factory(), triangle.equivalent.id)
+    assert outcome.status == PASSED, outcome
+    assert outcome.detail()["criterion_b"]["coverage"]["full_recomputation"] == {"CLEARING": 2}, outcome.detail()
 
 
 @pytest.mark.asyncio

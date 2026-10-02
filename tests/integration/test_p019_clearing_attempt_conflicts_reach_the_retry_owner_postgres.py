@@ -182,7 +182,7 @@ async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, 
         async def clear():
             async with stand() as session:
                 try:
-                    return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
+                    return await ClearingService(session).execute_occurrence(seed["occurrence"])
                 except Exception as exc:  # noqa: BLE001 - compared below
                     return exc
 

@@ -92,7 +92,7 @@ async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag
 
         monkeypatch.setattr(service, "_refuse_if_equivalent_inactive", _park_after_the_stop_read)
 
-        clearing = asyncio.create_task(service.execute_clearing_with_amount(seed["cycle"]))
+        clearing = asyncio.create_task(service.execute_occurrence(seed["occurrence"]))
         clearing.add_done_callback(lambda _t: completed.append("clearing"))
         await asyncio.wait_for(paused.wait(), timeout=20)
         assert await advisory_locks_held(observer) == 0, "the lock switch is not on: an advisory lock is held"

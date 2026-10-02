@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select, text
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # Every test here commits through several sessions and runs on a disposable clone of the migrated
 # template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
@@ -122,7 +123,10 @@ async def test_skip_ends_service_owned_transaction_postgres(
     await session.commit()
 
     try:
-        cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+        # 025 `T2508.1`: "missing" and "policy" execute the plan occurrence of the cycle (declared 30). "empty" and
+        # "malformed" are inputs only the execution WITHOUT an occurrence accepts (an occurrence of no debts or of a
+        # non-UUID is refused at construction): they test that mode and go with it (024 `T2417`).
+        cycle_ids = list(debt_ids)
         if skip_branch in {"empty", "malformed"}:
             # Prove that even a pre-SQL rejection closes a transaction already
             # opened by the caller's candidate lookup.
@@ -130,7 +134,7 @@ async def test_skip_ends_service_owned_transaction_postgres(
             assert session.in_transaction()
             cycle = [] if skip_branch == "empty" else [{"debt_id": "not-a-uuid"}]
         elif skip_branch == "missing":
-            cycle[-1] = {"debt_id": str(uuid.uuid4())}
+            cycle_ids[-1] = uuid.uuid4()
 
         service = ClearingService(session)
         branch_witness = False
@@ -150,7 +154,12 @@ async def test_skip_ends_service_owned_transaction_postgres(
                 _witness_policy,
             )
 
-        result = await service.execute_clearing_with_amount(cycle)
+        if skip_branch in {"empty", "malformed"}:
+            result = await service.execute_clearing_with_amount(cycle)
+        else:
+            result = await service.execute_occurrence(
+                occurrence_of(cycle_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
+            )
 
         assert result is None
         assert not session.in_transaction(), f"skip_branch={skip_branch}"
@@ -204,7 +213,8 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
     participant_pids = [f"{label}_CS_{nonce}" for label in ("A", "B", "C")]
     a_pid, b_pid, c_pid = participant_pids
     debt_ids = [uuid.uuid4() for _ in range(3)]
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    # 025 `T2508.1`: the plan occurrence of the cycle, declared (30, the minimum); the policy refuses it.
+    occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
     blocked_payment_tx_id = str(uuid.uuid4())
     payment_tx_ids = [blocked_payment_tx_id]
 
@@ -333,7 +343,7 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
         )
         skipped_amount = await ClearingService(
             clearing_session
-        ).execute_clearing_with_amount(cycle)
+        ).execute_occurrence(occurrence)
         monkeypatch.setattr(
             MoneyBoundary, "acquire_exclusive_equivalent_session_lock", original_exclusive
         )

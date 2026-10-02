@@ -43,7 +43,7 @@ THE STAND. The P1 SERIALIZABLE engine on a mode-B clone (`factory`), the real ad
 world for both money operations (a three-edge cycle for clearing, the A -> B line for a payment). No
 sleeps on the clock: waits are observed in `pg_locks`. The clearing is parked at its auto-clearing policy
 check (`_cycle_respects_auto_clearing`), the first step after its cycle's `FOR UPDATE` and before any
-mutation; this stand calls `execute_clearing_with_amount` directly, so detection - the other caller of
+mutation; this stand calls `execute_occurrence` directly, so detection - the other caller of
 that check - never runs here.
 
 WHAT IT DOES NOT PROVE: that no OTHER interleaving deadlocks; the order for writers not listed here
@@ -261,7 +261,7 @@ async def test_an_admin_path_arriving_while_money_holds_its_rows(
 
         async def _money():
             try:
-                return await service.execute_clearing_with_amount(seed["cycle"])
+                return await service.execute_occurrence(seed["occurrence"])
             finally:
                 await clearing_session.close()
 
@@ -444,7 +444,7 @@ async def test_money_arriving_while_an_admin_path_holds_its_row(
                 require_signature=False,
             )
         async with factory() as session:
-            return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
+            return await ClearingService(session).execute_occurrence(seed["occurrence"])
 
     # Which schedules finish money while the admin is still parked (see the docstring).
     money_finishes_first = admin_path == "delete" or (admin_path == "hold_clear" and money == "payment")

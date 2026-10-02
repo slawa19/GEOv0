@@ -302,6 +302,33 @@ def test_v2_the_occurrence_id_is_plan_equivalent_and_ordinal_and_nothing_else() 
     assert stand.findings() == []
 
 
+def test_the_copied_v1_clearing_namespace_matches_the_applications_while_both_exist() -> None:
+    """`tests/p023_support.py::v1_clearing_tx_id` (its copied `_V1_CLEARING_NAMESPACE`) equals the application's
+    `ClearingService._execution_tx_id` (`_CLEARING_REPLAY_NAMESPACE`) on the same debt ids.
+
+    The test copy exists so historical v1 rows stay buildable after programme 024 `T2417` deletes the application
+    side. T2417 deletes `_execution_tx_id` and this check goes with it; until then a drifting copy would let
+    `historical_v1_clearing` forge ids no v1 writer produced. It pins the NAMESPACE and the set-hash rule only: it
+    says nothing about the other things the helper does not rebuild (see its docstring).
+    """
+    from app.core.clearing.service import ClearingService
+    from tests.p023_support import v1_clearing_tx_id
+
+    cases = [
+        [_debt(0), _debt(1), _debt(2)],
+        [_debt(2), _debt(0), _debt(1)],  # the same set in another order: v1's id is order-insensitive
+        [_debt(7), _debt(3), _debt(9), _debt(5)],  # another cycle length and set
+        [{"debt_id": _debt(4)}, {"debt_id": _debt(1)}],  # the `{"debt_id": ...}` edge form a cycle list carries
+    ]
+    for debt_ids in cases:
+        ids = [uuid.UUID(str(item["debt_id"] if isinstance(item, dict) else item)) for item in debt_ids]
+        assert v1_clearing_tx_id(debt_ids) == ClearingService._execution_tx_id(ids), (
+            f"the test copy of the v1 namespace (tests/p023_support.py `_V1_CLEARING_NAMESPACE`) drifted from "
+            f"app/core/clearing/service.py `_CLEARING_REPLAY_NAMESPACE` for {debt_ids}. Programme 024 T2417 deletes "
+            f"the application side; this check goes with it - until then fix the copy, not the assertion."
+        )
+
+
 @pytest.mark.parametrize(
     "bad",
     [

@@ -31,7 +31,6 @@ from scripts.p020_experimental_detectors import (
     detect_cte,
     detect_dfs,
     load_eligible_edges,
-    render_for_find_cycles,
 )
 from tests.conftest import MODE_B
 from tests.p020_support import (
@@ -43,6 +42,7 @@ from tests.p020_support import (
     ring,
     seed_graph,
 )
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 _DEPTHS = [3, 4, 6, 7, 10]
 
@@ -282,16 +282,26 @@ async def test_an_empty_perimeter_admits_nobody(db_session) -> None:
 
 async def amount_first_auto_clear(service: ClearingService, detect, equivalent, max_depth: int) -> int:
     """The stage-3 `auto_clear` semantics over an experimental detector: full depth on every detection,
-    candidates in order until the first success, then detect again; the 101-success ceiling kept."""
+    candidates in order until the first success, then detect again; the 101-success ceiling kept.
 
-    equivalent_id, precision = equivalent.id, equivalent.precision  # read once: execution expires the row
-    count = 0
+    025 `T2508.1`: each candidate is executed as a plan occurrence declaring the amount the detector reported
+    for it (its minimum - what the stage-3 executor cleared); every attempt is its own occurrence (ordinal)."""
+
+    equivalent_id = equivalent.id  # read once: execution expires the row
+    count = attempts = 0
     while True:
         cycles = await detect(service.session, equivalent_id, max_depth)
-        rendered = await render_for_find_cycles(service.session, cycles, precision=precision)
         executed = False
-        for cycle in rendered:
-            if await service.execute_clearing(cycle):
+        for cycle in cycles:
+            occurrence = occurrence_of(
+                [edge[0] for edge in cycle.edges],
+                equivalent_id=equivalent_id,
+                amount=cycle.amount,
+                plan_id=TEST_PLAN_ID,
+                ordinal=attempts,
+            )
+            attempts += 1
+            if await service.execute_occurrence(occurrence) is not None:
                 executed = True
                 count += 1
                 break

@@ -13,7 +13,9 @@ EXPORTS AND THEIR IMPORTERS (`git grep -n p019_interlock_support -- tests/`):
   a disposable clone (`tier_on_a_clone` / `tier_sessions_on_a_clone`, 018 B0b). Since stage 4 it seeds
   NO `PAYMENT` row: the `NEW` payment it used to insert is refused by CHECK `030`
   (`chk_transaction_payment_terminal`), and no importer read its `payment_tx_id`. A test that needs a
-  payment makes one through `PaymentService`.
+  payment makes one through `PaymentService`. Since 025 `T2508.1` it also returns `occurrence`, the declared
+  plan occurrence of that cycle (amount 30, `tests/p023_support.py::occurrence_of`): the schedules execute it
+  through `ClearingService.execute_occurrence`, never the execution without an occurrence.
 * `_use_serializable(session)` - pins the session's transaction to SERIALIZABLE, asserts it, and
   returns the backend pid.
 * `_no_advisory_lock_is_held(caplog)` - no advisory lock is held on THIS database (T1537: `pg_locks`
@@ -30,6 +32,7 @@ from decimal import Decimal
 from sqlalchemy import text
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 
 async def _use_serializable(session) -> int:
@@ -160,4 +163,9 @@ async def _seed_interlock_case():
         "participant_pids": participant_pids,
         "debt_ids": debt_ids,
         "cycle": [{"debt_id": str(debt_id)} for debt_id in debt_ids],
+        # 025 `T2508.1`: what the schedules execute - the plan occurrence of this cycle, declared, not computed:
+        # the cycle in its order, the minimum 30 a plan on this seed declares, plan `TEST_PLAN_ID`, ordinal 0.
+        "occurrence": occurrence_of(
+            debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0
+        ),
     }

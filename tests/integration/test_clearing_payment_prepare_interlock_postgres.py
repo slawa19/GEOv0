@@ -36,6 +36,7 @@ from tests.integration.p019_interlock_support import (
     _seed_interlock_case,
     _use_serializable,
 )
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # A test that seeds (`_seed_interlock_case`) commits through several sessions and runs on a disposable
 # clone of the migrated template: `@pytest.mark.usefixtures("tier_on_a_clone")`, and its rows go with
@@ -43,6 +44,15 @@ from tests.integration.p019_interlock_support import (
 # over `committed_database.url`. Tests that commit nothing stay on the tier and pay for no clone.
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 
+
+
+def _occurrence_of_absent_debts():
+    """025 `T2508.1`: an occurrence whose three debts and equivalent do not exist - for the boundary checks that
+    refuse or block before any cycle row is read (the external bind, the preflight SELECT)."""
+
+    return occurrence_of(
+        [uuid.uuid4() for _ in range(3)], equivalent_id=uuid.uuid4(), amount="1", plan_id=TEST_PLAN_ID, ordinal=0
+    )
 
 
 def _require_postgres(db_session) -> None:
@@ -251,7 +261,7 @@ async def test_clearing_exclusive_lock_blocks_a_reverse_payment_postgres(
             _park_inside_the_money_transaction,
         )
         clearing_task = asyncio.create_task(
-            clearing_service.execute_clearing_with_amount(seed["cycle"]),
+            clearing_service.execute_occurrence(seed["occurrence"]),
             name="clearing-first-exclusive",
         )
         await asyncio.wait_for(clearing_parked.wait(), timeout=5.0)
@@ -432,8 +442,8 @@ async def test_clearing_interlock_completes_with_single_connection_pool_postgres
     clearing_session = sessions()
     try:
         amount = await asyncio.wait_for(
-            ClearingService(clearing_session).execute_clearing_with_amount(
-                seed["cycle"]
+            ClearingService(clearing_session).execute_occurrence(
+                seed["occurrence"]
             ),
             timeout=3.0,
         )
@@ -470,8 +480,8 @@ async def test_postgres_clearing_rejects_external_connection_bind_postgres(
                 with pytest.raises(GeoException):
                     await ClearingService(
                         external_session
-                    ).execute_clearing_with_amount(
-                        [{"debt_id": str(uuid.uuid4())}]
+                    ).execute_occurrence(
+                        _occurrence_of_absent_debts()
                     )
                 assert not external_session.in_transaction()
                 assert one_connection_engine.pool.checkedout() == 1
@@ -532,8 +542,8 @@ async def test_cancellation_after_interlock_checkout_returns_connection_postgres
     task = None
     try:
         task = asyncio.create_task(
-            ClearingService(clearing_session).execute_clearing_with_amount(
-                seed["cycle"]
+            ClearingService(clearing_session).execute_occurrence(
+                seed["occurrence"]
             )
         )
         await asyncio.wait_for(isolation_setup_entered.wait(), timeout=3.0)
@@ -594,7 +604,7 @@ async def test_cancellation_during_interlocked_work_rolls_back_before_unlock_pos
         _pause_inside_money_uow,
     )
     try:
-        task = asyncio.create_task(service.execute_clearing_with_amount(seed["cycle"]))
+        task = asyncio.create_task(service.execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(work_entered.wait(), timeout=5.0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -675,8 +685,8 @@ async def test_cancellation_during_preflight_select_rolls_back_caller_postgres(
         await holder_session.execute(text("LOCK TABLE debts IN ACCESS EXCLUSIVE MODE"))
 
         task = asyncio.create_task(
-            ClearingService(clearing_session).execute_clearing_with_amount(
-                [{"debt_id": str(uuid.uuid4())}]
+            ClearingService(clearing_session).execute_occurrence(
+                _occurrence_of_absent_debts()
             )
         )
         assert await _wait_for_exact_blocker(
@@ -739,8 +749,8 @@ async def test_cancellation_during_interlock_release_preserves_durable_amount_po
     )
     try:
         task = asyncio.create_task(
-            ClearingService(clearing_session).execute_clearing_with_amount(
-                seed["cycle"]
+            ClearingService(clearing_session).execute_occurrence(
+                seed["occurrence"]
             )
         )
         await asyncio.wait_for(cleanup_entered.wait(), timeout=5.0)
@@ -825,8 +835,8 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
             [seed["equivalent_id"]]
         )
         clearing_task = asyncio.create_task(
-            ClearingService(clearing_session).execute_clearing_with_amount(
-                seed["cycle"]
+            ClearingService(clearing_session).execute_occurrence(
+                seed["occurrence"]
             )
         )
         assert (
@@ -881,7 +891,7 @@ async def test_interlock_timeout_rolls_back_work_and_releases_owner_postgres(
         # Same budget story as `_PROBE_TIMEOUT`: a fresh `NullPool` connection plus a whole clearing,
         # now with an envelope of its own, does not fit in three seconds on this machine.
         amount = await asyncio.wait_for(
-            ClearingService(retry_session).execute_clearing_with_amount(seed["cycle"]),
+            ClearingService(retry_session).execute_occurrence(seed["occurrence"]),
             timeout=_PROBE_TIMEOUT,
         )
         assert amount == Decimal("30.00000000")

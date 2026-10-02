@@ -55,6 +55,7 @@ from app.db.journal_tables import (
 from app.db.models.debt import Debt
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from tests.conftest import MODE_B, sessionmaker_of
+from tests.p023_support import TEST_PLAN_ID, historical_v1_clearing, occurrence_of
 
 # Every test commits through sessions of its own, so it runs on a disposable clone of the migrated
 # template and leaves its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`): the two
@@ -544,11 +545,27 @@ async def test_step5b_a_v1_payment_with_an_edge_outside_its_flow_pairs_is_failed
 _CYCLE = [("a", "b", "10"), ("b", "c", "20"), ("c", "a", "30")]
 
 
-async def _clear_cycle(factory, debts) -> Decimal:
+async def _clear_cycle(factory, debts, *, amount: str = "10", historical_v1: bool = True) -> Decimal:
+    """Clear the cycle by its minimum `amount` (10 for `_CYCLE`) as a plan occurrence; by default then make its
+    record the one a v1 clearing left.
+
+    025 `T2508.1`: these are the tests of criterion (b)'s `("CLEARING", 1)` rule, which reads HISTORICAL v1
+    clearings. The clearing runs as a declared occurrence (the minimum - what a v1 clearing cleared) and its record
+    is then turned into the v1 form (`tests/p023_support.py::historical_v1_clearing`), so the rule keeps its reading
+    without the execution mode that wrote v1. `historical_v1=False` leaves the occurrence's own (v2) record.
+    """
+
+    occurrence = occurrence_of(
+        [debt.id for debt in debts],
+        equivalent_id=debts[0].equivalent_id,
+        amount=amount,
+        plan_id=TEST_PLAN_ID,
+        ordinal=0,
+    )
     async with factory() as session:
-        cleared = await ClearingService(session).execute_clearing_with_amount(
-            [{"debt_id": str(debt.id)} for debt in debts]
-        )
+        cleared = await ClearingService(session).execute_occurrence(occurrence)
+    if historical_v1:
+        await historical_v1_clearing(factory, occurrence)
     return cleared
 
 
@@ -596,11 +613,16 @@ async def test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind(d
         debts = await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "c", "10"), ("c", "a", "10")])
         await _baseline(factory, triangle.equivalent.id)
         armed, remove_listener = _under_clear_by_one_atom(patch)
+        # 025 `T2508.1`: the occurrence declares the minimum 10; the record is then the v1 one this rule reads.
+        occurrence = occurrence_of(
+            [d.id for d in debts], equivalent_id=triangle.equivalent.id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0
+        )
         async with factory() as session:
-            await ClearingService(session).execute_clearing_with_amount([{"debt_id": str(d.id)} for d in debts])
+            await ClearingService(session).execute_occurrence(occurrence)
         remove_listener()
         remove_listener = None
         patch.undo()
+        await historical_v1_clearing(factory, occurrence)
         assert armed["hits"] == 3 and len(await _edges(factory, triangle)) == 3, "stand: the skim did not fire"
 
         outcome = await _verify(factory, triangle.equivalent.id)
@@ -859,7 +881,11 @@ async def test_step5b_an_inject_outside_its_subset_is_failed(db_session, corrupt
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tier_on_a_clone")
 async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_session) -> None:
-    """Only PAYMENT writes intent version 2; the CHECK admits 2 and refuses 3.
+    """PAYMENT and a CLEARING occurrence write intent version 2; the CHECK admits 2 and refuses 3.
+
+    025 `T2508.1`: the clearing here is the plan occurrence the live writer executes, so its envelope says 2. It
+    said 1 while the test executed the clearing WITHOUT an occurrence - a property of that mode, which 024 `T2417`
+    removes; historical v1 clearings are still read, by the `("CLEARING", 1)` tests above.
 
     Also: the money version did not move - a 2 there is refused. The SCHEMA version did move, once, by
     018 stage B1 (migration 029): every new envelope is `schema_version = 2` ("ordinal is the sequence
@@ -878,7 +904,7 @@ async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_se
     triangle = await _seed_triangle(
         factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("a", "c", "100"), ("a", "b", "100")]
     )
-    await _clear_cycle(factory, await _fixture_debts(factory, triangle, _CYCLE))
+    await _clear_cycle(factory, await _fixture_debts(factory, triangle, _CYCLE), historical_v1=False)
     await _pay(factory, triangle, ["b", "a"], "1")
     ops = debt_operations.c
     async with factory() as session:
@@ -892,7 +918,7 @@ async def test_step5b_the_version_split_and_the_check_on_the_metadata_path(db_se
                 )
             ).all()
         }
-    assert versions == {("PAYMENT", 2, 1, 2), ("TEST_FIXTURE", 2, 1, 1), ("CLEARING", 2, 1, 1)}, versions
+    assert versions == {("PAYMENT", 2, 1, 2), ("TEST_FIXTURE", 2, 1, 1), ("CLEARING", 2, 1, 2)}, versions
 
     engine = factory.kw["bind"]
 

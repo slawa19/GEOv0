@@ -10,10 +10,14 @@
   cycles); it is slow by design and only for graphs of a handful of vertices and small capacities.
 * `edge_volume_on_debts` - `V_edge` measured the way the reproducers must measure it: the sum of positive debt
   amounts of one equivalent in the database, before minus after.
+* `occurrence_of`, `historical_v1_clearing` (programme 025 `T2508.1`) - an execution test builds the plan
+  occurrence it executes from what it DECLARES, and a historical v1 clearing is made from a committed occurrence
+  the way the pre-023(b) writer left it, so no test needs the execution mode without an occurrence.
 """
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Hashable, Sequence
 
@@ -283,3 +287,128 @@ def slow_plan(delay_seconds: float, edges):
 
     time.sleep(delay_seconds)
     return plan_clearing(edges)
+
+
+# --------------------------------------------------------------------------------------- 025 `T2508.1`
+
+
+#: Atoms per unit of money: a descriptor's amount is a whole number of 1e-8.
+ATOMS_PER_UNIT = 10**8
+
+#: The plan identity of the occurrences an execution test builds by hand (programme 025 `T2508.1`). Any UUID
+#: would do; a fixed one keeps a test's occurrence ids reproducible. A REPLAY is the same descriptor again; a
+#: LATER execution of the same rows is another occurrence - `LATER_PLAN_ID`, or another ordinal of the plan.
+TEST_PLAN_ID = uuid.UUID("0a025081-0000-4000-8000-000000000001")
+LATER_PLAN_ID = uuid.UUID("0a025081-0000-4000-8000-000000000002")
+
+
+def occurrence_of(debt_ids, *, equivalent_id, amount, plan_id: uuid.UUID, ordinal: int):
+    """A `ClearingOccurrence` from what the test DECLARES - never from what the executor computes.
+
+    `debt_ids` is the cycle in its order (debtor -> creditor of one edge is the debtor of the next): UUIDs, their
+    strings, or the `{"debt_id": ...}` edges of a cycle list. `amount` is the declared `c` as a decimal string or
+    `Decimal`; one that is not a whole number of atoms is a test bug and is refused here, not rounded. Every
+    field is required: an execution test states its plan identity and ordinal as it states its amount.
+    """
+
+    from app.core.clearing.service import ClearingOccurrence
+
+    ids = tuple(uuid.UUID(str(item["debt_id"] if isinstance(item, dict) else item)) for item in debt_ids)
+    atoms = Decimal(str(amount)) * ATOMS_PER_UNIT
+    if atoms != atoms.to_integral_value():
+        raise ValueError(f"the declared amount {amount!r} is not a whole number of atoms")
+    return ClearingOccurrence(
+        plan_id=plan_id,
+        equivalent_id=uuid.UUID(str(equivalent_id)),
+        ordinal=ordinal,
+        debt_ids=ids,
+        amount_atoms=int(atoms),
+    )
+
+
+#: The v1 execution namespace, COPIED (not imported) from `app/core/clearing/service.py`
+#: (`_CLEARING_REPLAY_NAMESPACE`): a v1 clearing's tx id is the uuid5 of its sorted debt-id set. Copied so the
+#: historical rows stay buildable after programme 024 `T2417` removes the execution without an occurrence.
+_V1_CLEARING_NAMESPACE = uuid.UUID("7438b16f-c629-4aeb-8b97-4bf113704c93")
+
+
+def v1_clearing_tx_id(debt_ids) -> str:
+    """The tx id a v1 (set-hash) clearing of these debts carried: order-insensitive by construction."""
+
+    ids = {str(item["debt_id"] if isinstance(item, dict) else item) for item in debt_ids}
+    return str(uuid.uuid5(_V1_CLEARING_NAMESPACE, ":".join(sorted(ids))))
+
+
+async def historical_v1_clearing(factory, occurrence) -> str:
+    """Turn the COMMITTED clearing of `occurrence` into the record a v1 clearing left; return its v1 tx id.
+
+    Programme 025 `T2508.1` (spec `T2500`, P2-4): the tests that READ historical v1 clearings - criterion (b)'s
+    `("CLEARING", 1)` rule - keep that reading without keeping the production writer of v1 alive for a fixture.
+    A v1 clearing cleared the cycle MINIMUM, so the occurrence must have declared it (refused otherwise); its
+    money, journal entries and recorded pre-amounts are then what the v1 writer wrote (the two paths share one
+    writer), and only the identity differs. This rewrites the identity the way the v1 writer spelled it: the
+    envelope's `tx_id`, `identity` and intent (the same intent without the `occurrence` descriptor, re-digested,
+    `intent_encoding_version = 1`), the transaction row's `tx_id`, `idempotency_key` and payload (no descriptor),
+    and the audit row's `tx_id`.
+
+    WHAT THIS DOES NOT REBUILD (the record is the occurrence's, relabelled - not a v1 execution replayed):
+    `transactions.id` stays the occurrence uuid while `transactions.tx_id` becomes the v1 set-hash (v1 wrote
+    `id = uuid(tx_id)`, `app/core/clearing/service.py` ~:2214-2262); the intent's `cycle`, the journal entries'
+    order and `initiator_id` follow the DECLARED occurrence order, whereas v1 followed the order its
+    `SELECT ... FOR UPDATE` returned the rows (~:2067-2079 only reorders in the occurrence branch). A reader that
+    depended on any of these would see a record no v1 writer produced; criterion (b) reads none of them.
+
+    It writes with the journal's triggers off through THE named corruption helper (`tests/ledger_corruption.py`),
+    so it runs only on a disposable clone (`tier_on_a_clone` / `tier_sessions_on_a_clone`) and needs that
+    helper's privilege; anything else is the helper's refusal, not a skip.
+    """
+
+    import hashlib
+    import json
+
+    from sqlalchemy import select
+
+    from app.core.auth.canonical import canonical_json
+    from app.db.journal_tables import debt_operations
+    from app.db.models.transaction import Transaction
+    from tests.ledger_corruption import corrupt
+
+    old = occurrence.occurrence_id
+    new = v1_clearing_tx_id(occurrence.debt_ids)
+    ops = debt_operations.c
+    async with factory() as session:
+        envelope = (
+            await session.execute(
+                select(ops.id, ops.intent, ops.state).where(ops.kind == "CLEARING", ops.tx_id == old)
+            )
+        ).one()
+        transaction = (
+            await session.execute(select(Transaction.state, Transaction.payload).where(Transaction.tx_id == old))
+        ).one()
+        await session.rollback()
+    assert (envelope.state, transaction.state) == ("COMPLETED", "COMMITTED"), (
+        f"stand: occurrence {old} is not a committed clearing ({envelope.state}, {transaction.state})"
+    )
+    intent = json.loads(envelope.intent) if isinstance(envelope.intent, (str, bytes)) else dict(envelope.intent)
+    assert intent.pop("occurrence") == occurrence.descriptor(), "stand: the envelope is not this occurrence's"
+    minimum = min(Decimal(edge["amount"]) for edge in intent["cycle"])
+    assert Decimal(intent["clear_amount"]) == minimum, (
+        f"stand: a v1 clearing cleared the cycle minimum {minimum}; the occurrence declared {intent['clear_amount']}"
+    )
+    intent["tx_id"] = new
+    canonical = canonical_json(intent)
+    payload = {key: value for key, value in dict(transaction.payload).items() if key != "occurrence"}
+    body, payload_body = canonical.decode("utf-8"), json.dumps(payload, sort_keys=True)
+    assert "'" not in body + payload_body, "stand: the literals below do not escape quotes"
+    await corrupt(
+        factory.kw["bind"].url.render_as_string(hide_password=False),
+        [
+            f"UPDATE transactions SET tx_id = '{new}', idempotency_key = 'clearing:{new}', "
+            f"payload = '{payload_body}' WHERE tx_id = '{old}'",
+            f"UPDATE debt_operations SET tx_id = '{new}', identity = '{new}', intent = '{body}', "
+            f"intent_digest = '{hashlib.sha256(canonical).hexdigest()}', intent_encoding_version = 1 "
+            f"WHERE id = '{envelope.id}'",
+            f"UPDATE integrity_audit_log SET tx_id = '{new}' WHERE tx_id = '{old}'",
+        ],
+    )
+    return new

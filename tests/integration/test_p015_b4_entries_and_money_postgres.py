@@ -99,6 +99,7 @@ from tests.p015_b4_support import (
     stored_operations,
     stored_rows,
 )
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 #: Every refusal of the book before SQL (018): a caller error or money the column cannot hold.
 BOOK_REFUSALS = (BookError,)
@@ -1594,7 +1595,7 @@ def _flows_of(intent) -> list[dict]:
 async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cleared(
     serializable_factory,
 ):
-    """C14, clearing half, API-SHAPED. `ClearingService.execute_clearing_with_amount`, for real.
+    """C14, clearing half, API-SHAPED. `ClearingService.execute_occurrence`, for real (025 `T2508.1`).
 
     WHAT IS REAL HERE. A genuine three-edge cycle with genuine auto-clearing trustlines, cleared by
     the service's own entry point - which on PostgreSQL rolls the caller's session back, checks out
@@ -1668,12 +1669,15 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
             ).all()
         }
 
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    # 025 `T2508.1`: the plan occurrence of the cycle, declared (30, the minimum).
+    occurrence = occurrence_of(
+        debt_ids, equivalent_id=world.equivalent.id, amount="30.00000000", plan_id=TEST_PLAN_ID, ordinal=0
+    )
     async with serializable_factory() as clearing_session:
         service = ClearingService(clearing_session)
-        execution_tx_id = service._execution_tx_id(debt_ids)
+        execution_tx_id = occurrence.occurrence_id
         cleared = await asyncio.wait_for(
-            service.execute_clearing_with_amount(cycle), timeout=60
+            service.execute_occurrence(occurrence), timeout=60
         )
 
     envelopes = await _envelopes_with_intent(serializable_factory, tx_id=execution_tx_id)
@@ -1682,15 +1686,17 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
     # NON-VACUITY, FIRST.
     assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-    # NON-VACUITY: a real clearing really ran and really moved the exact amount it should have.
+    # NON-VACUITY: a real clearing really ran (v2 returns the DECLARED amount, so this is not a minimum check).
     assert cleared is not None and _atoms(cleared) == 3000000000, (
-        f"stand: the clearing returned {cleared!r} instead of the cycle minimum 30.00000000, so "
-        f"it was skipped and this test observes nothing"
+        f"stand: the occurrence returned {cleared!r} instead of its declared amount 30.00000000, so "
+        f"it was skipped and this test observes nothing (the declared amount is not proof of the cycle minimum; "
+        f"non-vacuity of the money effect is the stored-debts assertion below, and of the intent the pre-amounts "
+        f"captured independently before the run)"
     )
     assert {key: _atoms(value) for key, value in after.items()} == {
         ("debtor", "creditor", "eq"): 7000000000,
         ("extra0", "debtor", "eq"): 1000000000,
-    }, f"stand: the cycle was not reduced by exactly 30.00000000 on every edge: {after}"
+    }, f"stand: the cycle was not reduced by exactly the declared 30.00000000 on every edge: {after}"
 
     # VERDICT.
     assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (

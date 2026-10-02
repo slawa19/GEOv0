@@ -57,6 +57,7 @@ from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import ConflictException, GeoException
 from tests.integration.p019_interlock_support import _seed_interlock_case
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -494,9 +495,15 @@ async def test_a_clearing_that_waited_for_a_payment_sees_its_commit_in_its_first
         amount="80.00", signature="__internal__",
     )
 
+    # 025 `T2508.1`: the occurrence a plan made on the state the payment leaves declares 20 (A->B 100 - 80);
+    # the snapshot is held by the locked amounts, the attempts and the conflicts below, not by the amount.
+    after_the_payment = occurrence_of(
+        seed["debt_ids"], equivalent_id=seed["equivalent_id"], amount="20.00", plan_id=TEST_PLAN_ID, ordinal=0
+    )
+
     async def clear():
         async with stand.sessions() as session:
-            return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
+            return await ClearingService(session).execute_occurrence(after_the_payment)
 
     payment_task = clearing_task = None
     try:
@@ -594,7 +601,7 @@ async def test_no_advisory_lock_of_the_key_outlives_the_clearing(stand, monkeypa
 
     async def clear():
         async with stand.sessions() as session:
-            return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
+            return await ClearingService(session).execute_occurrence(seed["occurrence"])
 
     task = asyncio.create_task(clear())
     try:
@@ -655,7 +662,7 @@ async def test_an_unconfirmed_unlock_invalidates_the_clearing_connection(stand, 
         with caplog.at_level(logging.WARNING, logger="app.core.clearing.service"):
             async with stand.sessions() as session:
                 cleared = await asyncio.wait_for(
-                    ClearingService(session).execute_clearing_with_amount(seed["cycle"]), timeout=30
+                    ClearingService(session).execute_occurrence(seed["occurrence"]), timeout=30
                 )
     finally:
         PaymentRouter.invalidate_cache(seed["equivalent_code"])
