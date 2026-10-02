@@ -74,6 +74,8 @@ describe('useInteractMode', () => {
     return {
       ok: true,
       trustline_id: 'trustline-close-1',
+      status: 'closed',
+      close_requested_at: '2026-10-02T08:00:00Z',
     }
   }
 
@@ -486,6 +488,16 @@ describe('useInteractMode', () => {
 
     close.resolve(trustlineCloseSuccess())
     await pendingClose
+  })
+
+  it('026 S4: a close answered as still live says the close is requested, never that the line closed', async () => {
+    const actions = mkActions()
+    actions.closeTrustline.mockImplementationOnce(async () => ({ ...trustlineCloseSuccess(), status: 'active' }))
+    const im = useInteractMode({ actions, runId: computed(() => 'run_test'), equivalent: computed(() => 'UAH'),
+      snapshot: ref<GraphSnapshot | null>(null) })
+    im.selectEdge('alice→bob')
+    await im.confirmTrustlineClose()
+    expect(im.successMessage.value).toBe('Close requested: alice → bob (closes when the debt is repaid)')
   })
 
   it('successMessage is retriggered when the same toast text repeats (microtask reset)', async () => {

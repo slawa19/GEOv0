@@ -129,6 +129,15 @@ describe('normalizeSimulatorEvent', () => {
     })
   })
 
+  it('026 S4: an edge patch keeps the close request; a malformed one is refused', () => {
+    const patch = { source: 'A', target: 'B', trust_limit: '0.00', close_requested_at: '2026-10-02T08:00:00Z' }
+    const raw = { event_id: 'e', ts: '2026-01-01T00:00:01Z', type: 'clearing.done', equivalent: 'UAH', plan_id: 'p' }
+    const evt = requireEventType(normalizeSimulatorEvent({ ...raw, edge_patch: [patch] }), 'clearing.done')
+    expect(evt.edge_patch).toEqual([patch])
+    const bad = normalizeSimulatorEvent({ ...raw, edge_patch: [{ ...patch, close_requested_at: 7 }] })
+    expect(bad.status).toBe('ignored')
+  })
+
   it('normalizeSimulatorEvent: run_status parses totals + stall ticks', () => {
     const raw = {
       event_id: 'evt_rs_1',

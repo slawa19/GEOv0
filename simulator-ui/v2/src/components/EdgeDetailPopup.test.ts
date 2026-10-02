@@ -72,46 +72,28 @@ describe('EdgeDetailPopup', () => {
     host.remove()
   })
 
-  it('ED-1: used>0 blocks Close line (disabled) and shows warning', async () => {
-    const { app, host } = mountPopup({ used: '0.01' })
-    await nextTick()
-
-    const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
-    expect(btn).toBeTruthy()
-    expect(btn?.disabled).toBe(true)
-
-    const warn = host.querySelector('[data-testid="edge-close-blocked"]') as HTMLElement | null
-    expect(warn).toBeTruthy()
-    expect((warn?.textContent ?? '').trim()).toContain('Cannot close: trustline has outstanding debt')
-    expect((warn?.textContent ?? '').trim()).toContain('0.01')
-    expect((warn?.textContent ?? '').trim()).toContain('UAH')
-
-    // Safety: even if a click is attempted, the text should not switch to confirmation.
-    btn?.click()
-    await nextTick()
-    expect((btn?.textContent || '').includes('Confirm close')).toBe(false)
-
-    app.unmount()
-    host.remove()
+  // INTENTIONAL, 026 `T2603.2` (owner В1 2026-09-29): ED-1 and AC-ED-5 asserted that a debt either way disabled
+  // Close with "Reduce debt to 0 first". The supported debt (`used`) now makes the close a request and says so; the
+  // reverse debt is the other line's. A requested close is shown and not offered again.
+  it('ED-1 (026): used>0 allows Close line and announces a request; reverse debt is silent', async () => {
+    for (const [used, reverseUsed, note] of [['0.01', '0.00', true], ['0.00', '0.01', false]] as const) {
+      const { app, host } = mountPopup({ used, reverseUsed })
+      await nextTick()
+      const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+      expect(host.querySelector('[data-testid="edge-close-blocked"]')).toBeNull()
+      const el = host.querySelector('[data-testid="edge-close-request-note"]')
+      expect(el ? (el.textContent ?? '') : null).toEqual(note ? expect.stringContaining('0.01 UAH') : null)
+      app.unmount()
+      host.remove()
+    }
   })
 
-  it('AC-ED-5: reverse_used > 0, used = 0 => Close line disabled + inline warning', async () => {
-    const { app, host } = mountPopup({ used: '0.00', reverseUsed: '0.01' })
+  it('ED-6 (026): a requested close is shown and Close line is not offered again', async () => {
+    const { app, host } = mountPopup({ used: '7.00', limit: '0.00', closeRequestedAt: '2026-10-02T08:00:00Z' })
     await nextTick()
-
-    const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
-    expect(btn).toBeTruthy()
-    expect(btn?.disabled).toBe(true)
-
-    const warn = host.querySelector('[data-testid="edge-close-blocked"]') as HTMLElement | null
-    expect(warn).toBeTruthy()
-    expect((warn?.textContent ?? '').trim()).toContain('Cannot close: trustline has outstanding debt')
-    expect((warn?.textContent ?? '').trim()).toContain('0.01')
-
-    btn?.click()
-    await nextTick()
-    expect((btn?.textContent || '').includes('Confirm close')).toBe(false)
-
+    expect(host.querySelector('[data-testid="edge-close-requested"]')?.textContent ?? '').toContain('Close requested')
+    expect((host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement).disabled).toBe(true)
     app.unmount()
     host.remove()
   })

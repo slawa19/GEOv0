@@ -222,7 +222,8 @@ const uncheckedActionCases = [
   },
   {
     label: 'trustline-close',
-    payload: { ok: true, trustline_id: 'tl-1', client_action_id: null },
+    // 026 `T2603.2`: the answer says whether the line closed or the close is only requested.
+    payload: { ok: true, trustline_id: 'tl-1', status: 'active', close_requested_at: '2026-10-02T08:00:00Z', client_action_id: null },
     call: () =>
       actionTrustlineClose(cfg, 'run-1', {
         from_pid: 'alice',
@@ -270,6 +271,7 @@ const uncheckedActionCases = [
           reverse_used: '0',
           available: '95.00000000',
           status: 'active',
+          close_requested_at: '2026-10-02T08:00:00Z',
         },
       ],
     },
@@ -319,6 +321,13 @@ describe('Simulator critical REST response contracts', () => {
     expect(result.intensity_percent).toBeNull()
     expect(result.ops_sec).toBeNull()
     expect(result.queue_depth).toBeNull()
+  })
+
+  it('026 S4: a snapshot link keeps the close request', async () => {
+    const asked = '2026-10-02T08:00:00Z'
+    respondWith({ ...snapshot, links: [{ ...snapshot.links[0], trust_limit: '0.00', close_requested_at: asked }] })
+    const result = await getSnapshot(cfg, 'run-1', 'UAH')
+    expect(result.links[0]?.close_requested_at).toBe(asked)
   })
 
   it('accepts source/target aliases for run snapshot and scenario preview', async () => {
