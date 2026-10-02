@@ -5,6 +5,7 @@ import {
   type AcceptedSimulatorEvent,
   type SimulatorEventNormalization,
 } from './normalizeSimulatorEvent'
+import { createPatchApplier } from '../demo/patches'
 
 function requireEventType<TType extends AcceptedSimulatorEvent['type']>(
   result: SimulatorEventNormalization,
@@ -136,6 +137,27 @@ describe('normalizeSimulatorEvent', () => {
     expect(evt.edge_patch).toEqual([patch])
     const bad = normalizeSimulatorEvent({ ...raw, edge_patch: [{ ...patch, close_requested_at: 7 }] })
     expect(bad.status).toBe('ignored')
+  })
+
+  it('026 S4 fix-delta: a null close request in an edge patch clears the earlier one on the held edge', () => {
+    // A pair re-created after a requested close: the browser still holds the old edge (added_edges skips a known
+    // pair), so only the explicit null of the new incarnation's patch can clear the old request.
+    const raw = { event_id: 'e', ts: '2026-01-01T00:00:01Z', type: 'clearing.done', equivalent: 'UAH', plan_id: 'p' }
+    const patch = { source: 'A', target: 'B', trust_limit: '30.00', close_requested_at: null }
+    const evt = requireEventType(normalizeSimulatorEvent({ ...raw, edge_patch: [patch] }), 'clearing.done')
+    expect(evt.edge_patch).toEqual([patch])
+
+    const held = { source: 'A', target: 'B', trust_limit: '0.00', close_requested_at: '2026-10-02T08:00:00Z' }
+    const snapshot = { equivalent: 'UAH', generated_at: '2026-10-02T08:00:00Z', nodes: [], links: [{ ...held }] }
+    const layoutLinks = [{ ...held, __key: 'A→B' }]
+    createPatchApplier({
+      getSnapshot: () => snapshot,
+      getLayoutNodes: () => [],
+      getLayoutLinks: () => layoutLinks,
+      keyEdge: (a, b) => `${a}→${b}`,
+    }).applyEdgePatches(evt.edge_patch)
+    expect([snapshot.links[0].close_requested_at, layoutLinks[0].close_requested_at]).toEqual([null, null])
+    expect(snapshot.links[0].trust_limit).toBe('30.00')
   })
 
   it('normalizeSimulatorEvent: run_status parses totals + stall ticks', () => {

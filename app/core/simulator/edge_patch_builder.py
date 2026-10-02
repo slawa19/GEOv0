@@ -168,8 +168,9 @@ class EdgePatchBuilder:
             }
             if include_width_keys:
                 p["viz_width_key"] = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
-            if r.close_requested_at is not None:  # 026 `T2603.2`: a requested close is a patch, not a removal
-                p["close_requested_at"] = r.close_requested_at.isoformat()
+            # 026 `T2603.2`: a requested close is a patch, not a removal. Always carried - null clears an earlier
+            # incarnation's request when the pair was re-created (fix-delta P3).
+            p["close_requested_at"] = r.close_requested_at.isoformat() if r.close_requested_at is not None else None
 
             patches.append(p)
 
@@ -284,7 +285,7 @@ class EdgePatchBuilder:
                     "used": to_money_str(used_amt, helper.precision),
                     "available": to_money_str(available_amt, helper.precision),
                     **edge_viz,
-                    **({"close_requested_at": requested.isoformat()} if requested is not None else {}),
+                    "close_requested_at": requested.isoformat() if requested is not None else None,  # null clears
                 }
             )
 

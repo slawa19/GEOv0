@@ -135,15 +135,18 @@ async def test_edge_patch_builder_equivalent_and_pairs_shapes(db_session: AsyncS
     assert len(edge_patches) == 1
     ep = edge_patches[0]
 
-    # Shape must match what frontend normalizers expect.
+    # Shape must match what frontend normalizers expect. 026 `T2603.2` fix-delta P3: `close_requested_at` is always
+    # carried (null here: no request), so a re-created pair clears an earlier incarnation's request in the browser.
     assert set(ep.keys()) == {
         "source",
         "target",
         "used",
         "available",
+        "close_requested_at",
         "viz_alpha_key",
         "viz_width_key",
     }
+    assert ep["close_requested_at"] is None
     assert ep["source"] == creditor.pid
     assert ep["target"] == debtor.pid
     assert Decimal(str(ep["used"])) == Decimal("30")

@@ -6732,7 +6732,8 @@ components:
           nullable: true
           description: >-
             Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
-            patch carries it only when set. A closed line is not patched: it is removed (`removed_edges`).
+            patch always carries it, null when no close is requested (a re-created line clears an earlier
+            request). A closed line is not patched: it is removed (`removed_edges`).
         viz_color_key:
           type: string
           nullable: true
@@ -6886,7 +6887,8 @@ components:
           nullable: true
           description: >-
             Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
-            patch carries it only when set. A closed line is not patched: it is removed (`removed_edges`).
+            patch always carries it, null when no close is requested (a re-created line clears an earlier
+            request). A closed line is not patched: it is removed (`removed_edges`).
         viz_color_key:
           type: string
           nullable: true
