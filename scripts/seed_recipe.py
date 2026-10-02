@@ -75,7 +75,8 @@ from app.api.v1.admin import admin_create_equivalent, freeze_participant  # noqa
 from app.config import Settings, settings  # noqa: E402
 from app.core.auth.canonical import canonical_json  # noqa: E402
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key  # noqa: E402
-from app.core.clearing.service import ClearingService  # noqa: E402
+from app.core.clearing.flow_planner import atoms_of  # noqa: E402
+from app.core.clearing.service import ClearingOccurrence, ClearingService  # noqa: E402
 from app.core.ledger.reconciliation import (  # noqa: E402
     FULL_RECOMPUTATION,
     PASSED,
@@ -701,16 +702,34 @@ class _Run:
 
     async def _clearing(self, command: dict) -> None:
         expected = self._expected_cycle_edges(command)
+        declared = Decimal(command["amount"])
+        # 024 `T2417`: an executed clearing is ONE plan occurrence of the recipe's declared amount. Its identity is
+        # made once, here; the first attempt that matches the cycle keeps the descriptor and every retry replays
+        # it, so a retry after a durable commit is answered by that commit rather than by a detection of a cycle
+        # the commit consumed - and never by a second occurrence.
+        plan_id, occurrence = uuid.uuid4(), None
 
         async def body(session):
+            nonlocal occurrence
             service = ClearingService(session)
-            cycles = await service.find_cycles(command["equivalent"], max_depth=_CYCLE_MAX_DEPTH)
-            match = _match_cycle(cycles, expected)
-            if match is None:
-                return None, cycles
-            if command["mode"] == "assert_clearable":
-                return ("asserted", match)
-            return ("executed", await service.execute_clearing_with_amount(match))
+            if occurrence is None:
+                cycles = await service.find_cycles(command["equivalent"], max_depth=_CYCLE_MAX_DEPTH)
+                match = _match_cycle(cycles, expected)
+                if match is None:
+                    return None, cycles
+                smallest = min(Decimal(edge["amount"]) for edge in match)
+                if command["mode"] == "assert_clearable" or smallest != declared:
+                    return ("detected", smallest)
+                debt_of = {(str(edge["debtor"]), str(edge["creditor"])): edge["debt_id"] for edge in match}
+                pids = [self.identities[ref].pid for ref in command["cycle"]]
+                occurrence = ClearingOccurrence(
+                    plan_id=plan_id,
+                    equivalent_id=self.equivalent_ids[command["equivalent"]],
+                    ordinal=0,
+                    debt_ids=tuple(uuid.UUID(str(debt_of[edge])) for edge in zip(pids, pids[1:] + pids[:1])),
+                    amount_atoms=atoms_of(declared),
+                )
+            return ("executed", await service.execute_occurrence(occurrence))
 
         outcome = await self._attempt(f"clearing {command['id']}", body)
         if outcome[0] is None:
@@ -720,21 +739,21 @@ class _Run:
                 f"detection found. What detection DID find: {self._render_cycles(outcome[1])}. "
                 f"The recipe expected: {command['expect']}"
             )
-        if command["mode"] == "assert_clearable":
-            smallest = min(Decimal(edge["amount"]) for edge in outcome[1])
-            if smallest != Decimal(command["amount"]):
+        if outcome[0] == "detected":
+            # Before any execution: a cycle whose smallest edge is not the declared amount is refused, not cleared.
+            if outcome[1] != declared:
                 raise SeedRefusal(
-                    f"clearing {command['id']} asserts a surviving cycle of {command['amount']}, "
-                    f"but its smallest edge is {smallest}"
+                    f"clearing {command['id']} ({command['mode']}) declares a cycle of {command['amount']}, "
+                    f"but its smallest edge is {outcome[1]}"
                 )
             return
         cleared = outcome[1]
         if cleared is None:
             raise SeedRefusal(
                 f"clearing {command['id']} was detected but not executed; "
-                f"execute_clearing_with_amount returned None"
+                f"execute_occurrence returned None"
             )
-        if Decimal(cleared) != Decimal(command["amount"]):
+        if Decimal(cleared) != declared:
             raise SeedRefusal(
                 f"clearing {command['id']} cleared {cleared}, the recipe says {command['amount']}"
             )
