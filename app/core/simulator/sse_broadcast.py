@@ -8,12 +8,14 @@ from typing import Any, Callable, Optional
 
 from app.config import settings
 from app.core.simulator.models import RunRecord, _Subscription
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
     SimulatorAuditDriftEvent,
     SimulatorClearingDoneEvent,
     SimulatorTopologyChangedEvent,
     SimulatorTxFailedEvent,
     SimulatorTxUpdatedEvent,
+    TopologyChangedEdgeRef,
     TopologyChangedPayload,
 )
 from app.utils.exceptions import TooManyRequestsException
@@ -722,3 +724,119 @@ class SseEventEmitter:
                 exc_info=True,
             )
             return None
+
+
+async def _live_pairs(eq: str, pairs: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """The pairs (creditor, debtor PIDs) of `eq` that have a live (not `closed`) trust line NOW - one SELECT.
+
+    A fresh session (`app.db.session.AsyncSessionLocal`, looked up at call time): under SERIALIZABLE a caller's
+    open transaction would answer from its own, older snapshot.
+    """
+
+    from sqlalchemy import select, tuple_
+    from sqlalchemy.orm import aliased
+
+    from app.db import session as db_session
+    from app.db.models.equivalent import Equivalent
+    from app.db.models.participant import Participant
+    from app.db.models.trustline import TrustLine
+
+    src, dst = aliased(Participant), aliased(Participant)
+    async with db_session.AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(src.pid, dst.pid).select_from(TrustLine)
+            .join(src, src.id == TrustLine.from_participant_id).join(dst, dst.id == TrustLine.to_participant_id)
+            .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+            .where(Equivalent.code == eq, TrustLine.status != "closed", tuple_(src.pid, dst.pid).in_(sorted(pairs)))
+        )).all()
+    return {(str(a), str(b)) for a, b in rows}
+
+
+async def publish_closed_trustlines(
+    *, emitter: Any, lock: Any, run_id: str, run: Any, equivalent: str, pairs: Any
+) -> list[tuple[str, str]]:
+    """026 `T2603.2`: trust lines found closed leave the run's topology, once.
+
+    Called ONLY after the commit of the operation that found them closed is confirmed. `pairs` (creditor, debtor
+    PIDs) are candidates seen earlier; before removing, one SELECT re-reads which still have NO live row (a line
+    re-created after the close is a new live incarnation and stays). Those are removed from the run's scenario and
+    edge cache, and those the run still held are published as one `topology.changed.removed_edges`; a pair the run
+    no longer holds is not published again. A pair with no live row is closed whoever closed it, so the removal
+    says the line IS closed, not that this operation closed it. The re-read is NOT atomic with the removal (leaving
+    its session can suspend), so a create that commits after the SELECT could otherwise be removed: each pair's
+    topology epoch (`bump_topology_epoch`) is recorded under the lock before the SELECT, and a pair whose epoch
+    moved by the removal - re-created meanwhile - stays. Never raises; a failed re-read publishes nothing and logs
+    why (the delivered operation stands, §12).
+    """
+
+    eq = str(equivalent or "").strip().upper()
+    gone = {(str(a).strip(), str(b).strip()) for a, b in (pairs or ())}
+    if not eq or not gone:
+        return []
+
+    def _epochs() -> dict[tuple[str, str], int]:
+        held = getattr(run, "_topology_epoch", None) or {}
+        return {pair: held.get((eq, *pair), 0) for pair in gone}
+
+    try:
+        with lock:
+            before = _epochs()
+        gone -= await _live_pairs(eq, gone)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "simulator.sse.trustline_closed_recheck_failed eq=%s pairs=%s", eq, len(gone), exc_info=True)
+        return []
+    if not gone:
+        return []
+    try:
+        with lock:
+            now = _epochs()
+            gone = {pair for pair in gone if now[pair] == before[pair]}
+            held = set()
+            cache = getattr(run, "_edges_by_equivalent", None)
+            if isinstance(cache, dict) and eq in cache:
+                held |= {tuple(e) for e in cache[eq] or () if tuple(e) in gone}
+                cache[eq] = [e for e in cache[eq] or () if tuple(e) not in gone]
+            scenario = getattr(run, "_scenario_raw", None)
+            lines = scenario.get("trustlines") if isinstance(scenario, dict) else None
+            if isinstance(lines, list):
+                def _closed(tl: Any) -> tuple[str, str] | None:
+                    pair = (str(tl.get("from") or "").strip(), str(tl.get("to") or "").strip())
+                    same_eq = str(effective_equivalent(scenario, tl) or "").strip().upper() == eq
+                    return pair if same_eq and pair in gone else None
+
+                held |= {_closed(tl) for tl in lines if isinstance(tl, dict)} - {None}
+                scenario["trustlines"] = [tl for tl in lines if not (isinstance(tl, dict) and _closed(tl))]
+        removed = sorted(held)
+        if removed:
+            emitter.emit_topology_changed(
+                run_id=run_id, run=run, equivalent=eq, reason="trustline_closed",
+                payload=TopologyChangedPayload(removed_edges=[
+                    TopologyChangedEdgeRef(from_pid=a, to_pid=b, equivalent_code=eq) for a, b in removed]),
+            )
+        return removed
+    except Exception:
+        logging.getLogger(__name__).warning("simulator.sse.trustline_closed_publish_failed eq=%s", eq, exc_info=True)
+        return []
+
+
+_PENDING_PUBLICATIONS: set[asyncio.Task] = set()
+
+
+def schedule_closed_trustlines_publication(**kwargs: Any) -> asyncio.Task | None:
+    """`publish_closed_trustlines` from a synchronous post-commit callback: a task on the running loop.
+
+    The tick's payment observations resolve inside the commit callback, where nothing may be awaited; the task holds
+    the re-read and runs at the loop's next turn, outside the run lock. Kept referenced until done. Never raises.
+    """
+
+    if not kwargs.get("pairs"):
+        return None
+    try:
+        task = asyncio.get_running_loop().create_task(publish_closed_trustlines(**kwargs))
+    except RuntimeError:
+        logging.getLogger(__name__).warning("simulator.sse.trustline_closed_no_loop run_id=%s", kwargs.get("run_id"))
+        return None
+    _PENDING_PUBLICATIONS.add(task)
+    task.add_done_callback(_PENDING_PUBLICATIONS.discard)
+    return task

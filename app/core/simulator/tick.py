@@ -70,7 +70,7 @@ from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
-from app.core.simulator.sse_broadcast import SseEventEmitter
+from app.core.simulator.sse_broadcast import SseEventEmitter, publish_closed_trustlines
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -947,8 +947,9 @@ class RealTick:
                         await self._grow_trust_after_clearing(
                             run_id, run, eq, clearing_session, touched_edges, cleared_amount_per_edge
                         )
+                    closed: set[tuple[str, str]] = set()
                     node_patch, edge_patch = await self._clearing_patches(
-                        run, eq, clearing_session, touched_nodes, touched_edges, cleared_cycles
+                        run, eq, clearing_session, touched_nodes, touched_edges, cleared_cycles, closed
                     )
                     with rr._lock:
                         run.last_event_type = "clearing.done"
@@ -966,6 +967,9 @@ class RealTick:
                         edge_patch=edge_patch,
                     )
                     done_emitted = True
+                    # 026 `T2603.2`: the patches were read after the occurrences committed (`on_committed`).
+                    await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run,
+                                                    equivalent=eq, pairs=closed)
                     rr._logger.warning(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
                         str(run.run_id),
@@ -1093,6 +1097,7 @@ class RealTick:
         touched_nodes: set[str],
         touched_edges: set[tuple[str, str]],
         cleared_cycles: int,
+        closed: set[tuple[str, str]] | None = None,
     ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
         """The node and edge patches of `clearing.done` for what clearing touched; `(None, None)` on any failure."""
         rr = self._runner
@@ -1138,6 +1143,7 @@ class RealTick:
                     helper=helper,
                     edges_pairs=sorted(touched_edges),
                     pid_to_participant=pid_to_participant,
+                    closed=closed,
                 ) or None
         except Exception:
             if self._should_warn(run, f"clearing_done_patch_failed:{eq}"):

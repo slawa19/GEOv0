@@ -135,105 +135,51 @@ describe('TrustlineManagementPanel', () => {
     host.remove()
   })
 
-  it('TL-2 (Phase 1): when effectiveUsed > 0, disables Close and shows warning', async () => {
+  // INTENTIONAL, 026 `T2603.2` (owner В1 2026-09-29): TL-2 and AC-TL-10 asserted that a debt either way disabled
+  // Close with "Reduce debt to 0 first". A close with the debt the line supports (`used`) is now a REQUEST (limit
+  // 0, the line closes when that debt is repaid) and says so; the reverse debt is the other line's and is silent.
+  function mountEdit(used: string, extra: Record<string, unknown> = {}) {
     const host = document.createElement('div')
     document.body.appendChild(host)
-
-    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
-
+    const trustline = { from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'EQ',
+      limit: '10.00', used, reverse_used: '0.01', available: '9.00', status: 'active', ...extra }
     const app = createApp({
       render: () =>
         h(trustlineManagementPanelComponent, {
-          phase: 'editing-trustline',
-          state,
-          unit: 'EQ',
-          used: '1',
-          currentLimit: '10',
-          available: '9',
-          participants: [],
-          // Внешнее ревью 013 (P2): панель ПРАВИТ существующую линию, значит основание для её
-          // чисел — `row` (источник ответил, и строка для пары есть). Прежнее `no-row` описывало
-          // здесь состояние «линии у этой пары нет» — то есть тест правил несуществующую линию.
-          figuresSource: { kind: 'row' } as const,
-          trustlines: [],
-          busy: false,
-          confirmTrustlineCreate: vi.fn(),
-          confirmTrustlineUpdate: vi.fn(),
-          confirmTrustlineClose: vi.fn(),
-          cancel: vi.fn(),
+          phase: 'editing-trustline', state: baseState({ fromPid: 'alice', toPid: 'bob' }), unit: 'EQ',
+          used, currentLimit: '10', available: '9', participants: [], figuresSource: { kind: 'row' } as const,
+          trustlines: [trustline], busy: false, confirmTrustlineCreate: vi.fn(), confirmTrustlineUpdate: vi.fn(),
+          confirmTrustlineClose: vi.fn(), cancel: vi.fn(),
         }),
     })
-
     app.mount(host)
+    const btn = () => host.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement
+    return { host, btn, done: () => { app.unmount(); host.remove() } }
+  }
+
+  it('TL-2 (026): a close with the supported debt is allowed and announced as a request', async () => {
+    const { host, btn, done } = mountEdit('1.00')
     await nextTick()
-
-    const btn = host.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement | null
-    expect(btn).toBeTruthy()
-    expect(btn!.disabled).toBe(true)
-
-    const warn = host.querySelector('[data-testid="tl-close-blocked"]') as HTMLElement | null
-    expect(warn).toBeTruthy()
-    expect((warn!.textContent ?? '').trim()).toContain('used: 1 EQ')
-
-    app.unmount()
-    host.remove()
+    expect(btn().disabled).toBe(false)
+    expect(host.querySelector('[data-testid="tl-close-blocked"]')).toBeNull()
+    expect(host.querySelector('[data-testid="tl-close-request-note"]')?.textContent ?? '').toContain('used: 1.00 EQ')
+    done()
   })
 
-  it('AC-TL-10: reverse_used > 0, used = 0 => Close TL disabled + inline warning', async () => {
-    const host = document.createElement('div')
-    document.body.appendChild(host)
-
-    const state = baseState({ fromPid: 'alice', toPid: 'bob' })
-
-    const app = createApp({
-      render: () =>
-        h(trustlineManagementPanelComponent, {
-          phase: 'editing-trustline',
-          state,
-          unit: 'EQ',
-          // used must be 0, but reverse debt exists
-          used: '0',
-          currentLimit: '10',
-          available: '10',
-          participants: [],
-          // `F-013-7`: основание для чисел — обязательный проп; здесь источник ответил.
-          figuresSource: { kind: 'row' } as const,
-          trustlines: [
-            {
-              from_pid: 'alice',
-              from_name: 'Alice',
-              to_pid: 'bob',
-              to_name: 'Bob',
-              equivalent: 'EQ',
-              limit: '10.00',
-              used: '0.00',
-              reverse_used: '0.01',
-              available: '10.00',
-              status: 'active',
-            },
-          ],
-          busy: false,
-          confirmTrustlineCreate: vi.fn(),
-          confirmTrustlineUpdate: vi.fn(),
-          confirmTrustlineClose: vi.fn(),
-          cancel: vi.fn(),
-        }),
-    })
-
-    app.mount(host)
+  it('AC-TL-10 (026): the reverse debt neither blocks Close nor is announced', async () => {
+    const { host, btn, done } = mountEdit('0.00')
     await nextTick()
+    expect(btn().disabled).toBe(false)
+    expect(host.querySelector('[data-testid="tl-close-request-note"]')).toBeNull()
+    done()
+  })
 
-    const btn = host.querySelector('[data-testid="trustline-close-btn"]') as HTMLButtonElement | null
-    expect(btn).toBeTruthy()
-    expect(btn!.disabled).toBe(true)
-
-    const warn = host.querySelector('[data-testid="tl-close-blocked"]') as HTMLElement | null
-    expect(warn).toBeTruthy()
-    expect((warn!.textContent ?? '').toLowerCase()).toContain('reverse')
-    expect(warn!.textContent ?? '').toContain('0.01')
-
-    app.unmount()
-    host.remove()
+  it('TL-5 (026): a requested close is shown as such and is not requested again', async () => {
+    const { host, btn, done } = mountEdit('1.00', { limit: '0.00', close_requested_at: '2026-10-02T08:00:00Z' })
+    await nextTick()
+    expect(host.querySelector('[data-testid="tl-close-requested"]')?.textContent ?? '').toContain('Close requested')
+    expect(btn().disabled).toBe(true)
+    done()
   })
 
   it("TL-1/TL-1a: normalizes amount before sending ('1,5' -> '1.5')", async () => {

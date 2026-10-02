@@ -20,11 +20,13 @@ type Props = {
 
   unit: string
   used?: string | number | null
-  /** Debt in reverse direction (debtor=from_pid, creditor=to_pid). */
+  /** Debt in reverse direction (debtor=from_pid, creditor=to_pid); the other line's - it does not hold a close (026). */
   reverseUsed?: string | number | null
   limit?: string | number | null
   available?: string | number | null
   status?: string | null
+  /** 026: the creditor asked to close; limit 0 until the debt this line supports is repaid. */
+  closeRequestedAt?: string | null
 
   /** Disable action buttons while interact-mode is busy. */
   busy?: boolean
@@ -80,11 +82,10 @@ const noExistingLine = computed(() => !canActOnTrustlineFigures(props.figuresSou
  */
 const figures = computed(() => {
   if (noExistingLine.value) {
-    return { used: null, reverseUsed: null, limit: null, available: null, status: null }
+    return { used: null, limit: null, available: null, status: null }
   }
   return {
     used: props.used ?? null,
-    reverseUsed: props.reverseUsed ?? null,
     limit: props.limit ?? null,
     available: props.available ?? null,
     status: props.status ?? null,
@@ -148,25 +149,12 @@ const sendPaymentFromLabel = computed(() => {
   return pid || 'sender'
 })
 
-const closeBlocked = computed(() => {
+// 026 (owner В1): a close with the supported debt (`used`) is a request; the reverse debt is the other line's.
+const closeIsRequest = computed(() => {
   const u = parseAmountNumber(figures.value.used)
-  const ru = parseAmountNumber(figures.value.reverseUsed)
-  const usedDebt = Number.isFinite(u) && u > 0
-  const reverseDebt = Number.isFinite(ru) && ru > 0
-  return usedDebt || reverseDebt
+  return Number.isFinite(u) && u > 0
 })
-
-const closeDebtDisplay = computed(() => {
-  const u = parseAmountNumber(figures.value.used)
-  const ru = parseAmountNumber(figures.value.reverseUsed)
-  const usedDebt = Number.isFinite(u) && u > 0
-  const reverseDebt = Number.isFinite(ru) && ru > 0
-
-  if (usedDebt && reverseDebt) return `used: ${renderOrDash(figures.value.used)} ${props.unit}, reverse: ${renderOrDash(figures.value.reverseUsed)} ${props.unit}`
-  if (usedDebt) return `used: ${renderOrDash(figures.value.used)} ${props.unit}`
-  if (reverseDebt) return `reverse: ${renderOrDash(figures.value.reverseUsed)} ${props.unit}`
-  return `used: ${renderOrDash(figures.value.used)} ${props.unit}`
-})
+const closeRequested = computed(() => !noExistingLine.value && !!props.closeRequestedAt)
 
 const utilizationPct = computed<number | null>(() => {
   // Полоса — то же утверждение в графическом виде: «занято 12 из 100» у линии, которой нет.
@@ -208,8 +196,6 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
     // When the UI becomes busy, cancel the confirmation state.
     { source: () => props.busy, when: (b) => !!b },
-    // ED-1: when Close is blocked (used > 0), disarm any destructive confirmation.
-    { source: closeBlocked, when: (b) => !!b },
     // `F-013-7`: если основание для действия пропало, взведённое закрытие не должно его пережить.
     { source: noExistingLine, when: (b) => !!b },
   ],
@@ -217,11 +203,9 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
 
 function onCloseLine() {
   if (props.busy) return
-  // ОТДЕЛЬНАЯ ПРОВЕРКА, а не расчёт на `closeBlocked`, и это не перестраховка (`F-013-7`).
-  // `closeBlocked` означает «есть долг», и вычисляется из чисел; когда чисел нет, оно ложно —
-  // то есть каскад разрешил бы закрытие ровно в тот момент, когда мы не знаем, есть ли долг.
+  // ОТДЕЛЬНАЯ ПРОВЕРКА (`F-013-7`): без чисел линии закрывать нечего — мы не знаем, есть ли она.
   if (noExistingLine.value) return
-  if (closeBlocked.value) return
+  if (closeRequested.value) return
   void confirmCloseOrArm(() => emit('closeLine'))
 }
 </script>
@@ -286,8 +270,11 @@ function onCloseLine() {
       >
         {{ frozenText }}
       </div>
-      <div v-if="closeBlocked" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-blocked">
-        Cannot close: trustline has outstanding debt ({{ closeDebtDisplay }}). Reduce debt to 0 first.
+      <div v-if="closeRequested" class="popup__inline-warn ds-label ds-mono" data-testid="edge-close-requested">
+        Close requested: limit stays 0; the line closes when its debt is repaid.
+      </div>
+      <div v-else-if="closeIsRequest" class="ds-label ds-mono" data-testid="edge-close-request-note">
+        Closing with debt (used: {{ renderOrDash(figures.used) }} {{ unit }}) is a request: limit becomes 0 until repaid.
       </div>
 
       <button
@@ -305,7 +292,7 @@ function onCloseLine() {
       <button
         class="ds-btn ds-btn--danger ds-btn--sm"
         type="button"
-        :disabled="!!busy || closeBlocked || noExistingLine"
+        :disabled="!!busy || closeRequested || noExistingLine"
         data-testid="edge-close-line-btn"
         @click="onCloseLine"
       >

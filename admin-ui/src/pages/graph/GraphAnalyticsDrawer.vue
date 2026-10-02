@@ -1487,6 +1487,13 @@ const adviceItems = computed(() => {
           </el-descriptions-item>
           <el-descriptions-item :label="t('common.status')">
             {{ labelTrustlineStatus(selected.status) }}
+            <el-tag
+              v-if="selected.close_requested_at"
+              type="warning"
+              size="small"
+            >
+              {{ t('trustlines.closeRequested') }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.limit')">
             {{ money(selected.limit, selected.equivalent) }}

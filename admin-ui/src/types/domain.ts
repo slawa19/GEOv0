@@ -27,6 +27,8 @@ export type Trustline = {
   status: string
   created_at: string
   policy?: Record<string, unknown>
+  /** 026: the creditor asked to close; limit 0, the line stays live until the debt it supports is repaid. */
+  close_requested_at?: string | null
 }
 
 export type Incident = {

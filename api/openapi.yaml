@@ -3279,8 +3279,10 @@ paths:
         '200':
           description: >-
             Close accepted (026 `T2603.1`, protocol §5.3): the trust line is closed when the debt it supports
-            is 0; otherwise the close is requested - limit 0, the line stays live until that debt is 0. The
-            same body either way: it does not say which (state in the response is 026 S4, `T2603.2`).
+            is 0; otherwise the close is requested - limit 0, the line stays live until that debt is 0. `status`
+            and `close_requested_at` say which. A request is published as an edge patch (limit 0,
+            `close_requested_at`); the edge is removed (`topology.changed.removed_edges`) only once the line is
+            closed - here, or after the commit of the payment or clearing that brings that debt to 0.
           content:
             application/json:
               schema:
@@ -3819,13 +3821,22 @@ components:
     SimulatorActionTrustlineCloseResponse:
       type: object
       additionalProperties: false
-      required: [trustline_id]
+      required: [trustline_id, status]
       properties:
         ok:
           type: boolean
           default: true
         trustline_id:
           type: string
+        status:
+          type: string
+          description: >-
+            The line's actual state after the action (026 `T2603.2`): `closed`, or still live (`active`/`frozen`)
+            with `close_requested_at` set - limit 0 until the debt it supports is 0.
+        close_requested_at:
+          type: string
+          format: date-time
+          nullable: true
         client_action_id:
           type: string
           nullable: true
@@ -3967,6 +3978,11 @@ components:
           description: Signed `limit - used`, as on TrustLine; negative when the limit is below the debt.
         status:
           type: string
+        close_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set while the creditor's close request waits for the supported debt to reach 0 (026).
 
     SimulatorActionTrustlinesListResponse:
       type: object
@@ -6710,6 +6726,14 @@ components:
         status:
           type: string
           nullable: true
+        close_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
+            patch always carries it, null when no close is requested (a re-created line clears an earlier
+            request). A closed line is not patched: it is removed (`removed_edges`).
         viz_color_key:
           type: string
           nullable: true
@@ -6857,6 +6881,14 @@ components:
         status:
           type: string
           nullable: true
+        close_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Set while the creditor's close request waits for the supported debt to reach 0 (026, limit 0); a
+            patch always carries it, null when no close is requested (a re-created line clears an earlier
+            request). A closed line is not patched: it is removed (`removed_edges`).
         viz_color_key:
           type: string
           nullable: true

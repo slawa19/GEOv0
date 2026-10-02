@@ -227,7 +227,10 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
   },
   'trustlines.status': {
     title: 'status',
-    body: ['Trustline lifecycle state (e.g., active, frozen, closed).'],
+    body: [
+      'Trustline lifecycle state (e.g., active, frozen, closed).',
+      '"close requested": the creditor asked to close; the limit is 0 and the line stays active until the debt it supports is repaid, then it is closed.',
+    ],
   },
   'trustlines.createdAt': {
     title: 'created_at',
@@ -514,7 +517,10 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   },
   'trustlines.status': {
     title: 'status',
-    body: ['Состояние трастлайна (например, active, frozen, closed).'],
+    body: [
+      'Состояние трастлайна (например, active, frozen, closed).',
+      '«закрытие запрошено»: кредитор попросил закрыть линию; лимит 0, линия остаётся активной, пока поддерживаемый ею долг не погашен, затем закрывается.',
+    ],
   },
   'trustlines.createdAt': {
     title: 'created_at',

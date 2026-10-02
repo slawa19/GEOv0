@@ -116,6 +116,7 @@ const TrustlineSchema = z
     status: z.string(),
     created_at: z.string(),
     policy: z.record(z.string(), z.unknown()).nullable().optional(),
+    close_requested_at: z.string().nullable().optional(),
   })
   .passthrough()
 

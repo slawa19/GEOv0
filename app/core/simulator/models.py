@@ -179,6 +179,12 @@ class RunRecord:
 
     _rng: random.Random | None = None
     _edges_by_equivalent: dict[str, list[tuple[str, str]]] | None = None
+    # 026 `T2603.2`: (equivalent, creditor PID, debtor PID) -> a counter bumped by Interact create/update and by
+    # inject adding pairs (`bump_topology_epoch`; trust drift does not bump). A closure publication skips a pair whose
+    # counter moved after it began (`sse_broadcast.publish_closed_trustlines`). A STOPGAP, not a guarantee: it is
+    # per run (another run re-creating the pair does not move it) and a moved counter does not prove a live line
+    # (a delayed close-request update moves it too) - `specs/BACKLOG.md`, class 2 of the S4 review.
+    _topology_epoch: dict[tuple[str, str, str], int] = field(default_factory=dict)
     _next_tx_at_ms: int = 0
     _next_clearing_at_ms: int = 0
     _clearing_pending_done_at_ms: int | None = None
@@ -256,3 +262,14 @@ class RunRecord:
         default_factory=dict
     )
     _trust_drift_config: TrustDriftConfig | None = None
+
+
+def bump_topology_epoch(run: Any, equivalent: Any, creditor_pid: Any, debtor_pid: Any) -> None:
+    """026 `T2603.2`: the run's pair was (re)added or updated in its topology - a closure publication that began
+    before this must not remove it. The caller holds the run lock where it has one."""
+
+    epochs = getattr(run, "_topology_epoch", None)
+    if not isinstance(epochs, dict):
+        return
+    key = (str(equivalent or "").strip().upper(), str(creditor_pid or "").strip(), str(debtor_pid or "").strip())
+    epochs[key] = epochs.get(key, 0) + 1

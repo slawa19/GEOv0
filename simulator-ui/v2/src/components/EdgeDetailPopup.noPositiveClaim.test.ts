@@ -95,8 +95,10 @@ function utilization(host: HTMLElement) {
   }
 }
 
+// INTENTIONAL, 026 `T2603.2`: the debt phrase was the close block (`edge-close-blocked`); a close with debt is now a
+// request and the phrase is its note - the same positive claim about the line's debt, judged the same way.
 function debtSentence(host: HTMLElement): string | null {
-  const el = host.querySelector('[data-testid="edge-close-blocked"]') as HTMLElement | null
+  const el = host.querySelector('[data-testid="edge-close-request-note"]') as HTMLElement | null
   return el ? (el.textContent ?? '').trim() : null
 }
 

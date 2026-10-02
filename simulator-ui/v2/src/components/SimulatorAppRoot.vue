@@ -649,6 +649,7 @@ const interactSelectedLink = computed<GraphLink | null>(() => {
         reverse_used: tl.reverse_used,
         available: tl.available,
         status: tl.status ?? undefined,
+        close_requested_at: tl.close_requested_at ?? null,
       }
     }
   }
@@ -1399,6 +1400,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :limit="emptyToNull(wmEdgeDetailEffectiveLink?.trust_limit)"
           :available="emptyToNull(wmEdgeDetailEffectiveLink?.available)"
           :status="emptyToNullString(wmEdgeDetailEffectiveLink?.status)"
+          :close-requested-at="wmEdgeDetailEffectiveLink?.close_requested_at ?? null"
           :busy="wmEdgeDetailEffectiveBusy"
           :figures-source="wmEdgeDetailFiguresSource"
           :force-hidden="false"

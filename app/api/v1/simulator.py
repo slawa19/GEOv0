@@ -39,11 +39,12 @@ from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, SimulatorPidTakenError
 from app.core.simulator.scenario_equivalent import effective_equivalent
-from app.core.simulator.models import _Subscription
+from app.core.simulator.models import _Subscription, bump_topology_epoch
 from app.core.simulator.sse_broadcast import (
     SSE_SUBSCRIPTION_CLOSED_TYPE,
     SseEventEmitter,
     SseReplayUnavailable,
+    publish_closed_trustlines,
 )
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
@@ -206,6 +207,7 @@ async def _emit_interact_clearing_done_best_effort(
     if cleared_count <= 0:
         return
 
+    closed: set[tuple[str, str]] = set()
     try:
         emitter = SseEventEmitter(
             sse=runtime._sse,  # type: ignore[attr-defined]
@@ -226,6 +228,7 @@ async def _emit_interact_clearing_done_best_effort(
             run=run,
             equivalent_code=equivalent_code,
             edges_pairs=edges_pairs,
+            closed=closed,
         )
 
         emitter.emit_clearing_done(
@@ -245,6 +248,14 @@ async def _emit_interact_clearing_done_best_effort(
             run_id,
             exc_info=True,
         )
+    # 026 `T2603.2`: every occurrence above is committed (`on_committed`); the lines it closed leave the run.
+    await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=equivalent_code, pairs=closed)
+
+
+async def _publish_closed_best_effort(*, run_id: str, run, equivalent: str, pairs) -> None:
+    emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+    await publish_closed_trustlines(emitter=emitter, lock=runtime._lock, run_id=run_id, run=run,  # type: ignore[attr-defined]
+                                    equivalent=equivalent, pairs=pairs)
 
 
 def _emit_interact_clearing_done_without_patches_best_effort(
@@ -292,6 +303,7 @@ async def _compute_viz_patches_best_effort(
     run,
     equivalent_code: str,
     edges_pairs: list[tuple[str, str]],
+    closed: set[tuple[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
     """Compute (edge_patch, node_patch) for a set of touched edges.
 
@@ -366,6 +378,7 @@ async def _compute_viz_patches_best_effort(
             helper=helper,
             edges_pairs=edges_pairs,
             pid_to_participant=pid_to_participant,
+            closed=closed,
         )
         if edge_patch == []:
             edge_patch = None
@@ -873,6 +886,8 @@ def _mutate_runtime_trustline_topology_best_effort(
             tp = _norm_pid(to_pid)
             if not (eq and fp and tp):
                 return
+            if op in ("create", "update"):  # 026 `T2603.2`: a closure publication begun before this skips the pair.
+                bump_topology_epoch(run, eq, fp, tp)
 
             # Invalidate per-equivalent viz cache so subsequent node/edge patches are consistent.
             try:
@@ -885,18 +900,9 @@ def _mutate_runtime_trustline_topology_best_effort(
             if isinstance(scenario, dict):
                 tls = scenario.get("trustlines")
                 if isinstance(tls, list):
-                    if op == "create":
-                        tls.append(
-                            {
-                                "equivalent": eq,
-                                "from": fp,
-                                "to": tp,
-                                "limit": str(limit or "0"),
-                                "status": "active",
-                            }
-                        )
-                    elif op == "update":
-                        # Update the first matching trustline; if not found (legacy drift), append.
+                    if op in ("create", "update"):
+                        # Update the first matching trustline; if not found (legacy drift), append. A create over a
+                        # stale entry of a line closed outside the run replaces it (026 `T2603.2`), not duplicates.
                         found = False
                         for tl in tls:
                             if not isinstance(tl, dict):
@@ -910,6 +916,8 @@ def _mutate_runtime_trustline_topology_best_effort(
                                 and _norm_pid(tl.get("to")) == tp
                             ):
                                 tl["limit"] = str(limit or "0")
+                                if op == "create":
+                                    tl["status"] = "active"
                                 found = True
                                 break
                         if not found:
@@ -1532,8 +1540,9 @@ async def action_trustline_close(
         await db.rollback()
         raise
 
-    # A pending request is NOT a removal: publish it as the limit change it is. The lifecycle of the run's
-    # topology after a later completion (scenario, cache, SSE) is 026 S4 (`T2603.2`).
+    # A pending request is NOT a removal: publish it as the limit change it is (its edge patch carries
+    # `close_requested_at`). The later completion leaves the run after its commit (026 `T2603.2`,
+    # `publish_closed_trustlines`).
     if str(tl.status) == "closed":
         await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="close", parties=parties)
     else:
@@ -1541,6 +1550,8 @@ async def action_trustline_close(
 
     return SimulatorActionTrustlineCloseResponse(
         trustline_id=str(tl.id),
+        status=str(tl.status),
+        close_requested_at=tl.close_requested_at,
         client_action_id=req.client_action_id,
     )
 
@@ -1674,6 +1685,7 @@ async def action_payment_real(
         )
 
     # Success: emit best-effort tx.updated SSE. `run` already fetched by _get_run_checked above.
+    closed: set[tuple[str, str]] = set()
     try:
         emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
 
@@ -1700,6 +1712,7 @@ async def action_payment_real(
             run=run,
             equivalent_code=eq.code,
             edges_pairs=edges_pairs,
+            closed=closed,
         )
 
         emitter.emit_tx_updated(
@@ -1723,6 +1736,8 @@ async def action_payment_real(
             run_id,
             exc_info=True,
         )
+    # 026 `T2603.2`: the payment is committed (`create_payment_internal`); a line its book operation closed leaves.
+    await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=eq.code, pairs=closed)
 
     return SimulatorActionPaymentRealResponse(
         payment_id=str(res.tx_id),
@@ -2075,7 +2090,7 @@ async def action_trustlines_list(
         pid_to_name[pid] = str(getattr(n, "name", None) or pid)
 
     # NOTE: `reverse_used` is the debt the other way: debtor = from_pid, creditor = to_pid. It no longer gates
-    # a close (026 `T2603.1`: the other line supports it); the UI close guard that still reads it is S4's.
+    # a close (026 `T2603.1`: the other line supports it).
     # For this read-only list we can compute it from DB using the participants referenced
     # in the snapshot links.
 
@@ -2171,6 +2186,7 @@ async def action_trustlines_list(
                 reverse_used=reverse_used_s,
                 available=avail_s,
                 status="active",
+                close_requested_at=getattr(link, "close_requested_at", None),
             )
         )
 

@@ -144,7 +144,10 @@ async def test_create_update_close_answer_and_publish_as_before(client, stand) -
     _Recorder.events.clear()
     closed = await _post(client, "trustline-close", {**TRIPLE, "client_action_id": "c3"})
     assert closed.status_code == 200, closed.text
-    assert closed.json() == {"ok": True, "trustline_id": trustline_id, "client_action_id": "c3"}
+    # INTENTIONAL, 026 `T2603.2`: the answer carries the line's state - closed at once (no debt), timestamp set.
+    answer = closed.json()
+    assert answer.pop("close_requested_at") and answer == {
+        "ok": True, "trustline_id": trustline_id, "status": "closed", "client_action_id": "c3"}
     [event] = _Recorder.events
     assert (event["equivalent"], event["reason"]) == ("UAH", "interact.trustline_close")
     assert event["payload"]["removed_edges"] == [{"from_pid": "alice", "to_pid": "bob", "equivalent_code": "UAH", "limit": None}]

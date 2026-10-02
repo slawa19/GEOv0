@@ -81,6 +81,7 @@ class EdgePatchBuilder:
                     TrustLine.to_participant_id,
                     TrustLine.limit,
                     TrustLine.status,
+                    TrustLine.close_requested_at,
                 ).where(
                     TrustLine.equivalent_id == eq_id,
                     # LIVE rows only — see snapshot_builder for the same reason
@@ -167,6 +168,9 @@ class EdgePatchBuilder:
             }
             if include_width_keys:
                 p["viz_width_key"] = viz_rules.link_width_key(limit_num, q33=q33, q66=q66)
+            # 026 `T2603.2`: a requested close is a patch, not a removal. Always carried - null clears an earlier
+            # incarnation's request when the pair was re-created (fix-delta P3).
+            p["close_requested_at"] = r.close_requested_at.isoformat() if r.close_requested_at is not None else None
 
             patches.append(p)
 
@@ -179,11 +183,15 @@ class EdgePatchBuilder:
         helper: VizPatchHelper,
         edges_pairs: list[tuple[str, str]],
         pid_to_participant: dict[str, Participant],
+        closed: set[tuple[str, str]] | None = None,
     ) -> list[dict[str, Any]]:
         """Compute a minimal edge_patch for specific edges using VizPatchHelper.
 
         This is used by per-tx and clearing.done patch codepaths and intentionally
         mirrors the existing RealRunner inline logic (used/available + viz_* keys).
+
+        026 `T2603.2`: a pair whose rows are all `closed` gets no patch and is added to `closed` - the caller
+        removes it from the run once the transaction that closed it has committed (same SELECT, no extra query).
         """
 
         if not edges_pairs:
@@ -198,7 +206,7 @@ class EdgePatchBuilder:
             id_pairs.append((src_part.id, dst_part.id))
 
         debt_by_pair: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
-        tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {}
+        tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]] = {}
 
         if id_pairs:
             debt_cond = or_(
@@ -238,23 +246,18 @@ class EdgePatchBuilder:
                         TrustLine.to_participant_id,
                         TrustLine.limit,
                         TrustLine.status,
-                    ).where(
-                        TrustLine.equivalent_id == helper.equivalent_id,
-                        tl_cond,
-                        # LIVE rows only: migration 019 allows a closed incarnation
-                        # alongside the live one, and this dict is keyed by pair, so a
-                        # closed row could overwrite the current line.
-                        TrustLine.status != "closed",
-                    )
+                        TrustLine.close_requested_at,
+                    ).where(TrustLine.equivalent_id == helper.equivalent_id, tl_cond)
                 )
             ).all()
-            tl_by_pair = {
-                (r.from_participant_id, r.to_participant_id): (
+            # Migration 019 allows a closed incarnation alongside the live one, and this dict is keyed by
+            # pair: the LIVE row wins, a closed one only marks the pair (026 `T2603.2`).
+            for r in sorted(tl_rows, key=lambda r: str(r.status) != "closed"):
+                tl_by_pair[(r.from_participant_id, r.to_participant_id)] = (
                     (r.limit or Decimal("0")),
                     (str(r.status) if r.status is not None else None),
+                    r.close_requested_at,
                 )
-                for r in tl_rows
-            }
 
         edge_patch_list: list[dict[str, Any]] = []
         for src_pid, dst_pid in edges_pairs:
@@ -264,7 +267,11 @@ class EdgePatchBuilder:
                 continue
 
             used_amt = debt_by_pair.get((src_part.id, dst_part.id), Decimal("0"))
-            limit_amt, tl_status = tl_by_pair.get((src_part.id, dst_part.id), (Decimal("0"), None))
+            limit_amt, tl_status, requested = tl_by_pair.get((src_part.id, dst_part.id), (Decimal("0"), None, None))
+            if tl_status == "closed":
+                if closed is not None:
+                    closed.add((src_pid, dst_pid))
+                continue
             available_amt = limit_amt - used_amt  # 026 `T2602`: signed, never clamped
 
             edge_viz = helper.edge_viz(status=tl_status, used=used_amt, limit=limit_amt)
@@ -278,6 +285,7 @@ class EdgePatchBuilder:
                     "used": to_money_str(used_amt, helper.precision),
                     "available": to_money_str(available_amt, helper.precision),
                     **edge_viz,
+                    "close_requested_at": requested.isoformat() if requested is not None else None,  # null clears
                 }
             )
 

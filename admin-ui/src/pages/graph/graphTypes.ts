@@ -28,6 +28,7 @@ export type Trustline = {
   available: string
   status: string
   created_at: string
+  close_requested_at?: string | null
 }
 
 export type Debt = {

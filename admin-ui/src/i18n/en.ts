@@ -237,6 +237,7 @@ export const EN: Record<string, string> = {
 
   'trustlines.available': 'Available',
   'trustlines.bottleneck': 'Bottleneck',
+  'trustlines.closeRequested': 'close requested',
   'trustlines.createdAt': 'Created at',
   'trustlines.debtorTo': 'Debtor PID (to)',
   'trustlines.detailsTitle': 'Trustline details',

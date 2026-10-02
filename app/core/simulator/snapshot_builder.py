@@ -102,7 +102,7 @@ class SnapshotBuilder:
             dict[str, Participant],
             dict[str, uuid.UUID],
             dict[tuple[uuid.UUID, uuid.UUID], Decimal],
-            dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]],
+            dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]],
         ] | None:
             eq = (await session.execute(select(Equivalent).where(Equivalent.code == eq_code))).scalar_one_or_none()
             if eq is None:
@@ -152,21 +152,21 @@ class SnapshotBuilder:
                         TrustLine.to_participant_id,
                         TrustLine.limit,
                         TrustLine.status,
+                        TrustLine.close_requested_at,
                     ).where(
                         TrustLine.equivalent_id == eq.id,
                         TrustLine.from_participant_id.in_(participant_ids),
                         TrustLine.to_participant_id.in_(participant_ids),
-                        # LIVE rows only.  Since migration 019 a closed incarnation may
-                        # coexist with the live one; folding both into a dict keyed by
-                        # pair would let history overwrite the current line in whatever
-                        # order the rows arrive.
-                        TrustLine.status != "closed",
                     )
                 )
             ).all()
-            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None]] = {
-                (r.from_participant_id, r.to_participant_id): (r.limit or Decimal("0"), r.status) for r in tl_rows
-            }
+            # Since migration 019 a closed incarnation may coexist with the live one: the LIVE row wins whatever
+            # order the rows arrive in. A pair with only closed rows is closed (026 `T2603.2`): its scenario
+            # link must not come back with the scenario's limit and status.
+            tl_by_pair: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, str | None, Any]] = {}
+            for r in sorted(tl_rows, key=lambda r: str(r.status) != "closed"):
+                tl_by_pair[(r.from_participant_id, r.to_participant_id)] = (
+                    r.limit or Decimal("0"), r.status, r.close_requested_at)
 
             return eq, pid_to_rec, pid_to_id, debt_by_pair, tl_by_pair
 
@@ -218,6 +218,15 @@ class SnapshotBuilder:
             debit_sum[debtor_id] = debit_sum.get(debtor_id, Decimal("0")) + amt
 
         # Links
+        live = [
+            link for link in snap.links
+            if str(tl_by_pair.get((pid_to_id.get(str(link.source or "").strip()),
+                                   pid_to_id.get(str(link.target or "").strip())), (0, None, None))[1]) != "closed"
+        ]
+        if len(live) != len(snap.links):
+            snap.links = live
+            for node in snap.nodes:
+                node.links_count = sum(node.id in (link.source, link.target) for link in live) or None
         link_stats: list[tuple[SimulatorGraphLink, float | None, float | None]] = []
         for link in snap.links:
             src_pid = str(link.source or "").strip()
@@ -234,7 +243,7 @@ class SnapshotBuilder:
             limit_amt: Decimal
             status: str | None
             if (src_id, dst_id) in tl_by_pair:
-                limit_amt, status = tl_by_pair[(src_id, dst_id)]
+                limit_amt, status, link.close_requested_at = tl_by_pair[(src_id, dst_id)]
             else:
                 status = link.status
                 try:
