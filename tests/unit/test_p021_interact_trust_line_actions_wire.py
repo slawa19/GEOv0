@@ -218,8 +218,19 @@ async def test_refusal_bodies_of_the_trust_line_actions(client, stand) -> None:
     r = await _post(client, "trustline-close", dict(TRIPLE))
     assert r.status_code == 200, r.text
     assert _Recorder.events[-1]["reason"] == "interact.trustline_update", "a pending close was published as a removal"
+    # The refusal is the action's flat body (026 `T2603.1` §15 P2-1: it leaked as the nested GEO envelope).
+    line_id = r.json()["trustline_id"]
     r = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "6"})
-    assert r.status_code == 409, r.text
+    assert (r.status_code, r.json()) == (
+        409,
+        _error(
+            "TRUSTLINE_CLOSE_REQUESTED",
+            "Trustline close is requested; its limit stays 0 until it closes",
+            {**triple_details, "trustline_id": line_id},
+        ),
+    )
+    # Not cancelled: a zero limit is still accepted.
+    assert (await _post(client, "trustline-update", {**TRIPLE, "new_limit": "0"})).status_code == 200
 
 
 @pytest.mark.asyncio
