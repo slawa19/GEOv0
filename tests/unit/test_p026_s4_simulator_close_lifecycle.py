@@ -144,9 +144,14 @@ async def test_the_run_snapshot_does_not_resurrect_a_line_closed_outside_the_run
         f", list {listed.json()['items']}",
     )
     # Reopened: the new live incarnation wins over the closed one, whatever order the rows come in.
+    _Recorder.events.clear()
     assert (await _post(client, "trustline-create", {**TRIPLE, "limit": "5"})).status_code == 200
     snap = await simulator_module.runtime.build_graph_snapshot(run_id="wire-run", equivalent="UAH", session=db)
     assert [(x.source, x.target, x.status, x.trust_limit) for x in snap.links] == [("alice", "bob", "active", "5.00")]
+    # §15 fix-delta P3: the new incarnation's patch says "no request" explicitly - null, not omitted - so a browser
+    # that still holds the old edge (`added_edges` skips a known pair) clears the earlier request.
+    [patch] = [p for e in _Recorder.events for p in e["payload"].get("edge_patch") or ()]
+    assert "close_requested_at" in patch and patch["close_requested_at"] is None, patch
 
 
 @pytest.mark.asyncio
@@ -181,7 +186,8 @@ async def test_the_pair_patch_reports_a_closed_line_from_its_one_query(client, s
     finally:
         event.remove(connection, "before_cursor_execute", _count)
     assert closed == {("bob", "alice")}
-    assert [(p["source"], p["target"], p["available"]) for p in patches] == [("alice", "bob", "5.00")]
+    assert [(p["source"], p["target"], p["available"], p.get("close_requested_at", "omitted")) for p in patches] == [
+        ("alice", "bob", "5.00", None)], patches  # §15 fix-delta P3: null clears the closed incarnation's request
     assert len(statements) == 2, statements
 
 
