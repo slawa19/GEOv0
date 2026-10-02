@@ -97,7 +97,7 @@ export const RU: Record<string, string> = {
   'liquidity.kpi.totalAvailable': 'Суммарно доступно',
   'liquidity.watchlist.topBottleneckEdges': 'Топ bottleneck-рёбер (snapshot)',
   'liquidity.watchlist.topNetPositions': 'Топ net position (snapshot)',
-  'liquidity.help.topBottleneckEdges': 'Рёбра с минимальной оставшейся доступной ёмкостью в текущем snapshot (Available = Limit − Used).',
+  'liquidity.help.topBottleneckEdges': 'Рёбра с минимальным неиспользованным доверием в текущем snapshot (Available = Limit − Used; отрицательно, когда долг выше сниженного лимита). Это не платёжная ёмкость.',
   'liquidity.help.topNetPositions': 'Участники с наибольшей абсолютной net-позицией в текущем snapshot. Плюс = чистый кредитор, минус = чистый должник.',
   'liquidity.actions.openTrustlines': 'Открыть Trustlines',
   'liquidity.actions.openGraph': 'Открыть Graph',
