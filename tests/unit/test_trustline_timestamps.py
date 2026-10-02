@@ -18,7 +18,9 @@ def test_trustline_wire_timestamp_preserves_explicit_offset() -> None:
         status="active",
         created_at=aware,
         updated_at=aware,
+        close_requested_at=aware,  # 026 `T2603.1`: required, no default - every projection must say it
     )
 
     assert model.created_at == aware
     assert model.updated_at == aware
+    assert model.close_requested_at == aware

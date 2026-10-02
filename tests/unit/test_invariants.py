@@ -415,7 +415,8 @@ async def test_payment_commit_writes_integrity_audit_log_on_success(
     # 024 `T2413.2`: the row is the operation's record, and says that no full-equivalent check ran.
     assert (log.verification_passed, log.state_checksum_before, log.state_checksum_after) == (None, "", "")
     assert (log.invariants_checked, log.error_details) == ({}, None)
-    assert log.affected_participants == {
+    # INTENTIONAL, 026 `T2603.1` (S1 §15 P3): the row also carries the growth its check passed (`debt_growth`).
+    assert {k: v for k, v in log.affected_participants.items() if k != "debt_growth"} == {
         "participants": expected_audit_participants,
     }
 

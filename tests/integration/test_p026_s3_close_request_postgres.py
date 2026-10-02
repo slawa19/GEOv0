@@ -1,0 +1,253 @@
+"""026 S3 (`T2603.1`): closing a line with debt is a REQUEST; the book completes it at zero (R-026-2, R-026-3).
+
+THE RULE (owner В1/В2, 2026-09-29; spec 026, forks 2 and 6): a close sets the limit to 0 and `close_requested_at`.
+It checks only the debt the line SUPPORTS (debtor = `to`, creditor = `from`); a debt the other way belongs to the
+other line and does not hold the close (protocol §5.3). Zero supported debt - closed at once. Otherwise the line
+stays `active`, and `Book.operation` closes it in the transaction that brings that debt to exactly 0 - a payment
+or a clearing alike. Repeating the request changes nothing; a positive PATCH is a conflict; reopening after the
+close is a new line.
+
+HOW THE STATE IS REACHED. Debts only by real payments and the production clearing pass; the close only by the
+signed `DELETE /trustlines/{id}`. No row of `debts` or `trust_lines` is written by hand (Verification plan §4).
+"""
+
+from __future__ import annotations
+
+import base64
+import uuid
+from decimal import Decimal
+
+import pytest
+from nacl.signing import SigningKey
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session as OrmSession
+
+import app.core.ledger.book as book_module
+from app.core.clearing.runner import run_clearing_pass
+from app.db.models.audit_log import IntegrityAuditLog
+from app.db.models.trustline import TrustLine
+from tests.conftest import MODE_B
+from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _patch_limit, _world
+from tests.integration.test_scenarios import (
+    _sign_trustline_close_request,
+    _sign_trustline_create_request,
+    _sign_trustline_update_request,
+)
+from tests.p019_support import require_target
+
+
+async def _close(client, creditor, line_id: str):
+    key = SigningKey(base64.b64decode(creditor["priv"]))
+    return await client.request("DELETE", f"/api/v1/trustlines/{line_id}", headers=creditor["headers"], json={
+        "signature": _sign_trustline_close_request(signing_key=key, trustline_id=line_id)})
+
+
+async def _line(client, creditor, line_id: str) -> dict:
+    r = await client.get(f"/api/v1/trustlines/{line_id}", headers=creditor["headers"])
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def _audit(factory, line_id: str) -> list[tuple[str, dict]]:
+    async with factory() as s:
+        rows = (await s.execute(select(IntegrityAuditLog.operation_type, IntegrityAuditLog.tx_id,
+                                       IntegrityAuditLog.affected_participants))).all()
+    return sorted((op, {**(a or {}), "tx_id": tx}) for op, tx, a in rows
+                  if isinstance(a, dict) and a.get("trustline_id") == line_id and "CLOSE" in op)
+
+
+async def _create(client, creditor, debtor, code: str, limit: str = "100") -> str:
+    key = SigningKey(base64.b64decode(creditor["priv"]))
+    r = await client.post("/api/v1/trustlines", headers=creditor["headers"], json={
+        "to": debtor["pid"], "equivalent": code, "limit": limit, "signature": _sign_trustline_create_request(
+            signing_key=key, to_pid=debtor["pid"], equivalent=code, limit=limit)})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def _request_close_with_debt(client, factory, p, lines, code: str) -> dict:
+    """B owes A 50 (a real payment); A asks to close A -> B. The target: accepted, still active, limit 0."""
+
+    a, b = p["A"], p["B"]
+    assert await _pay(factory, b, a, code, "50")
+    r = await _close(client, a, lines["AB"])
+    require_target(r.status_code == 200, f"close of A -> B with B's debt 50 was refused: {r.status_code} {r.text}")
+    return r.json()
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(client, db_session) -> None:
+    code, p, lines, factory = await _world(client, db_session)
+    a, b = p["A"], p["B"]
+    body = await _request_close_with_debt(client, factory, p, lines, code)
+    view = body["trustline"]
+    assert (view["status"], Decimal(view["limit"]), Decimal(view["available"])) == ("active", 0, -50), body
+    asked = view["close_requested_at"]
+    assert asked and body["message"] == "Trustline close requested", body
+    assert [op for op, _ in await _audit(factory, lines["AB"])] == ["TRUST_LINE_CLOSE_REQUEST"]
+
+    # Repeating the request: the same state, the original timestamp, no second request row.
+    again = await _close(client, a, lines["AB"])
+    assert again.status_code == 200 and again.json()["trustline"]["close_requested_at"] == asked, again.text
+    assert [op for op, _ in await _audit(factory, lines["AB"])] == ["TRUST_LINE_CLOSE_REQUEST"]
+
+    # Trust is 0: no borrowing; a positive limit is a conflict and keeps the request; policy alone is allowed.
+    assert not await _pay(factory, b, a, code, "0.01")
+    r = await _patch_limit(client, a, lines["AB"], "10")
+    assert r.status_code == 409 and r.json()["error"]["details"]["reason"] == "TRUSTLINE_CLOSE_REQUESTED", r.text
+    key = SigningKey(base64.b64decode(a["priv"]))
+    policy = {"auto_clearing": False}
+    r = await client.patch(f"/api/v1/trustlines/{lines['AB']}", headers=a["headers"], json={
+        "policy": policy, "signature": _sign_trustline_update_request(
+            signing_key=key, trustline_id=lines["AB"], policy=policy)})
+    assert r.status_code == 200 and r.json()["close_requested_at"] == asked, r.text
+
+    # Partial repayment keeps the request pending; the exact zero closes in the same transaction.
+    assert await _pay(factory, a, b, code, "20")
+    assert (await _line(client, a, lines["AB"]))["status"] == "active"
+    assert await _pay(factory, a, b, code, "30")
+    assert await _debts(factory, code) == {}
+    closed = await _line(client, a, lines["AB"])
+    assert (closed["status"], closed["close_requested_at"]) == ("closed", asked), closed
+    audit = await _audit(factory, lines["AB"])
+    assert [op for op, _ in audit] == ["TRUST_LINE_CLOSE", "TRUST_LINE_CLOSE_REQUEST"], audit
+    assert audit[0][1]["completed_by"] == "PAYMENT" and audit[0][1]["tx_id"], audit
+
+    # Reopening is a new incarnation without a request.
+    new_id = await _create(client, a, b, code, "10")
+    fresh = await _line(client, a, new_id)
+    assert new_id != lines["AB"] and fresh["close_requested_at"] is None and fresh["status"] == "active"
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_clearing_completes_a_requested_close(client, db_session) -> None:
+    code, p, lines, factory = await _world(client, db_session)
+    a, b, c = p["A"], p["B"], p["C"]
+    await _request_close_with_debt(client, factory, p, lines, code)
+    assert await _pay(factory, a, c, code, "50") and await _pay(factory, c, b, code, "50")
+    result = await run_clearing_pass(factory, code)
+    assert len(result.committed) == 1 and result.status == "complete", result
+    assert await _debts(factory, code) == {}
+    line = await _line(client, a, lines["AB"])
+    assert line["status"] == "closed" and line["policy"].get("auto_clearing", True) is not False, line
+    audit = await _audit(factory, lines["AB"])
+    assert [(op, x.get("completed_by")) for op, x in audit] == [
+        ("TRUST_LINE_CLOSE", "CLEARING"), ("TRUST_LINE_CLOSE_REQUEST", None)], audit
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_reverse_debt_does_not_hold_the_close(client, db_session) -> None:
+    code, p, lines, factory = await _world(client, db_session)
+    a, b = p["A"], p["B"]
+    await _create(client, b, a, code)  # B trusts A: A's debt to B lives on THIS line
+    assert await _pay(factory, a, b, code, "40")
+    ab = (a["id"], b["id"])
+    r = await _close(client, a, lines["AB"])
+    require_target(r.status_code == 200, f"close of A -> B with only A's own debt 40 to B: {r.status_code} {r.text}")
+    view = r.json()["trustline"]
+    assert (view["status"], r.json()["message"]) == ("closed", "Trustline closed"), r.text
+    assert await _debts(factory, code) == {ab: Decimal("40")}
+    audit = await _audit(factory, lines["AB"])
+    assert [(op, x.get("completed_by")) for op, x in audit] == [("TRUST_LINE_CLOSE", "request")], audit
+
+
+@MODE_B
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["PAYMENT", "CLEARING"])
+async def test_a_rolled_back_completion_leaves_no_close(client, db_session, monkeypatch, kind) -> None:
+    """The completion lives and dies with the transaction that brought the debt to 0 (В1).
+
+    THE FAILURE IS PLACED AFTER THE COMPLETION (026 `T2603.1` §15 P2-2: the stand before injected it inside the
+    operation body, before `Book._complete`, so the hook never ran and the absence of a completion proved
+    nothing). The real hook runs, and in ITS transaction the line is read back `closed` with its completion row;
+    the next `before_commit` of that session is refused (armed only by its own completion). SQLAlchemy dispatches
+    `before_commit` for nested transactions too, so the refusal lands on the book's savepoint release
+    (`nested.commit()` in `Book.operation`), not on the outer COMMIT: the stand pins rollback of a written
+    completion, not outer-commit handling (§15 fix-delta P3, 2026-10-02). After the rollback: the line is still active with its request, the debt is
+    untouched, the audit holds only the request.
+    """
+
+    code, p, lines, factory = await _world(client, db_session)
+    a, b, c = p["A"], p["B"], p["C"]
+    await _request_close_with_debt(client, factory, p, lines, code)
+    if kind == "CLEARING":
+        assert await _pay(factory, a, c, code, "50") and await _pay(factory, c, b, code, "50")
+    debts_before = await _debts(factory, code)
+    line_id = uuid.UUID(lines["AB"])
+    seen: list[tuple[str, int, str]] = []
+    fired: list[int] = []
+    settle = book_module._settle_requested_closes
+
+    async def settle_and_observe(session, op, rows):
+        await settle(session, op, rows)
+        status = (await session.execute(select(TrustLine.status).where(TrustLine.id == line_id))).scalar_one()
+        completions = (await session.execute(select(IntegrityAuditLog.affected_participants).where(
+            IntegrityAuditLog.operation_type == "TRUST_LINE_CLOSE", IntegrityAuditLog.tx_id == op.tx_id))).scalars()
+        mine = [x for x in completions if (x or {}).get("trustline_id") == lines["AB"]]
+        seen.append((status, len(mine), op.kind))
+        if status == "closed":
+            session.sync_session.info["p026_refuse_commit"] = True
+
+    def refuse_commit(sync_session) -> None:
+        if sync_session.info.pop("p026_refuse_commit", False):
+            fired.append(1)
+            raise RuntimeError("injected failure at the next commit (the savepoint release), after the book completed the close")
+
+    monkeypatch.setattr(book_module, "_settle_requested_closes", settle_and_observe)
+    event.listen(OrmSession, "before_commit", refuse_commit)
+    try:
+        if kind == "PAYMENT":
+            try:
+                done = await _pay(factory, a, b, code, "50")
+            except Exception:  # noqa: BLE001 - either shape of the failure is the same outcome here
+                done = False
+        else:
+            try:
+                result = await run_clearing_pass(factory, code)
+                done = bool(result.committed)
+            except Exception:  # noqa: BLE001
+                done = False
+    finally:
+        event.remove(OrmSession, "before_commit", refuse_commit)
+        monkeypatch.undo()
+    assert not done
+
+    # The mechanism: the completion WAS written in the failing transaction, and the commit WAS refused.
+    assert ("closed", 1, kind) in seen and fired, (seen, fired)
+    # The outcome: nothing of it survived.
+    assert await _debts(factory, code) == debts_before
+    line = await _line(client, a, lines["AB"])
+    assert (line["status"], Decimal(line["limit"])) == ("active", 0) and line["close_requested_at"], line
+    assert [op for op, _ in await _audit(factory, lines["AB"])] == ["TRUST_LINE_CLOSE_REQUEST"]
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_zero_limit_without_a_request_never_closes(client, db_session) -> None:
+    # Counter-check (green before and after): a plain active line lowered to 0 is not a close request.
+    code, p, lines, factory = await _world(client, db_session)
+    a, b = p["A"], p["B"]
+    assert await _pay(factory, b, a, code, "50")
+    assert (await _patch_limit(client, a, lines["AB"], "0")).status_code == 200
+    assert await _pay(factory, a, b, code, "50")
+    assert await _debts(factory, code) == {}
+    async with factory() as s:
+        status = (await s.execute(select(TrustLine.status).where(TrustLine.id == uuid.UUID(lines["AB"])))).scalar_one()
+    assert status == "active"
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_payment_records_the_growth_it_checked(client, db_session) -> None:
+    # S1 §15 P3, delivered here: the payment's audit row carries the transition and the limit its check passed.
+    code, p, lines, factory = await _world(client, db_session)
+    assert await _pay(factory, p["B"], p["A"], code, "50")
+    async with factory() as s:
+        rows = (await s.execute(select(IntegrityAuditLog.affected_participants).where(
+            IntegrityAuditLog.operation_type == "PAYMENT", IntegrityAuditLog.equivalent_code == code))).scalars().all()
+    [grown] = [g for a in rows for g in (a or {}).get("debt_growth", [])]
+    assert [Decimal(grown[k]) for k in ("debt_before", "debt_amount", "trust_limit")] == [0, 50, 100], grown
+    assert (grown["debtor_id"], grown["creditor_id"]) == (str(p["B"]["id"]), str(p["A"]["id"])), grown

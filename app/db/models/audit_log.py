@@ -25,6 +25,19 @@ class AuditLog(Base):
     # Note: Alembic migration creates idx_audit_log_object on (object_type, object_id)
 
 
+#: 026 `T2603.1`: the two audit records of a close. A REQUEST leaves the line live with limit 0 (debt it supports
+#: still owed); the CLOSE is the completion - by the request itself at zero debt, or by the money operation that
+#: brought that debt to 0 (`completed_by` = `request` or the operation kind, `app/core/ledger/book.py`).
+TRUST_LINE_CLOSE_REQUEST = "TRUST_LINE_CLOSE_REQUEST"
+TRUST_LINE_CLOSE = "TRUST_LINE_CLOSE"
+
+
+def trust_line_close_completed(from_pid: str, to_pid: str, trustline_id: str, completed_by: str) -> dict:
+    """The `affected_participants` of a close completion: one shape for both completing writers."""
+
+    return {"from": from_pid, "to": to_pid, "trustline_id": trustline_id, "completed_by": completed_by}
+
+
 class IntegrityAuditLog(Base):
     """Integrity audit trail (spec section 11.4.2)."""
 

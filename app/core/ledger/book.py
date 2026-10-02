@@ -90,7 +90,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, AsyncIterator, Iterable, Sequence
 
-from sqlalchemy import and_, func, insert, select, update
+from sqlalchemy import and_, func, insert, select, tuple_, update
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.auth.canonical import canonical_json
@@ -106,8 +107,13 @@ from app.db.journal_tables import (
     intent_encoding_version_for,
 )
 from app.db.journal_triggers import GUC_OPERATION_ID
+from app.db.models.audit_log import TRUST_LINE_CLOSE, IntegrityAuditLog, trust_line_close_completed
 from app.db.models.debt import Debt
+from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from app.db.reconciliation_tables import debt_reconciliation_baselines
+from app.utils.exceptions import IntegrityViolationException
 from app.utils.validation import money_storability_violation
 
 logger = logging.getLogger(__name__)
@@ -731,6 +737,70 @@ def _refuse_unless_the_driver_is_in_a_transaction(async_conn: Any) -> None:
     )
 
 
+async def _settle_requested_closes(session: Any, op: Operation, rows: Sequence[Any]) -> None:
+    """026 `T2603.1` (owner В1/В2): the pairs this operation touched that hold a requested close.
+
+    ONE SELECT of the live lines with `close_requested_at` among the touched pairs (both orientations), then:
+
+    * В2 - the pair's debt `D = debt[A->B] + debt[B->A]` must end the operation strictly lower than it began,
+      from the journal's first `amount_before` and final `amount_after` of each directed debt (an untouched
+      direction is the same before and after, so it drops out). Clearing only decreases; a payment over the
+      pair - transit or direct - is refused otherwise (`PENDING_CLOSE_PAIR_NOT_REDUCED`). The directed growth
+      limits (`check_debt_growth`, above) still apply on top.
+    * В1 - a requested line whose SUPPORTED debt (debtor `to`, creditor `from`) ends the operation at exactly 0
+      is closed here, in this transaction, with its completion row (`completed_by` = the operation kind). The
+      FINAL state only: a debt that passes through zero and ends above it keeps the request. A debt the other
+      way is the other line's and does not hold it. A zero-limit line without a request never closes here.
+
+    The UPDATE touches only the lines it closes: on a payment it upgrades the `FOR SHARE` the core holds on
+    them (024 `T2415.3`); a real 40P01/40001 propagates to the owner's existing whole-transaction retry, and
+    the book's savepoint rollback takes the status and the row with it.
+    """
+
+    first: dict[tuple[Any, Any, Any], Decimal] = {}
+    last: dict[tuple[Any, Any, Any], Decimal] = {}
+    for row in rows:
+        edge = (row.equivalent_id, row.debtor_id, row.creditor_id)
+        first.setdefault(edge, Decimal(row.amount_before or 0))
+        last[edge] = Decimal(row.amount_after or 0)
+    keys = {(e, d, c) for e, d, c in first} | {(e, c, d) for e, d, c in first}
+    creditor, debtor = aliased(Participant), aliased(Participant)
+    lines = (await session.execute(
+        select(TrustLine.id, TrustLine.equivalent_id, TrustLine.from_participant_id, TrustLine.to_participant_id,
+               creditor.pid.label("from_pid"), debtor.pid.label("to_pid"), Equivalent.code)
+        .join(creditor, creditor.id == TrustLine.from_participant_id)
+        .join(debtor, debtor.id == TrustLine.to_participant_id)
+        .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+        .where(tuple_(TrustLine.equivalent_id, TrustLine.from_participant_id, TrustLine.to_participant_id).in_(
+            sorted(keys, key=str)), TrustLine.close_requested_at.is_not(None), TrustLine.status != "closed")
+    )).all()
+    closing = []
+    for line in lines:
+        supported = (line.equivalent_id, line.to_participant_id, line.from_participant_id)
+        pair = (supported, (line.equivalent_id, line.from_participant_id, line.to_participant_id))
+        change = sum((last[e] - first[e] for e in pair if e in first), Decimal("0"))
+        if change >= 0:
+            raise IntegrityViolationException(
+                f"a pair with a requested close may only shrink its debt; {op.kind} {op.identity} changed it by "
+                f"{change}",
+                details={"invariant": "PENDING_CLOSE_PAIR_NOT_REDUCED", "trustline_id": str(line.id),
+                         "pair_debt_change": str(change)},
+            )
+        if supported in last and last[supported] == 0:
+            closing.append(line)
+    if not closing:
+        return
+    await session.execute(update(TrustLine).where(TrustLine.id.in_([line.id for line in closing]))
+                          .values(status="closed"))
+    for line in closing:
+        session.add(IntegrityAuditLog(
+            operation_type=TRUST_LINE_CLOSE, tx_id=op.tx_id, equivalent_code=line.code, state_checksum_before="",
+            state_checksum_after="", affected_participants=trust_line_close_completed(
+                line.from_pid, line.to_pid, str(line.id), op.kind),
+            invariants_checked={}, verification_passed=None, error_details=None))
+    await session.flush()
+
+
 async def _complete(
     session: Any, async_conn: Any, op: Operation, operation_id: uuid.UUID
 ) -> None:
@@ -796,6 +866,8 @@ async def _complete(
         grown = {edge: was for edge, was in before.items() if after[edge] > was}
         if grown:
             await InvariantChecker(session).check_debt_growth(grown)
+        if rows:
+            await _settle_requested_closes(session, op, rows)
 
     # T1501: A SEED OR TEST_FIXTURE WRITE AFTER THE BASELINE IS REFUSED, never recorded. Read from the
     # stored entries, so it covers every statement of the operation. Under PostgreSQL SERIALIZABLE a

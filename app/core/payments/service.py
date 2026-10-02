@@ -17,7 +17,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
-from app.core.payments.capacity import pair_capacity, pair_rules, route_breaks_policy
+from app.core.payments.capacity import pair_capacity, pair_rules, pending_pair_capacity, route_breaks_policy
 from app.core.payments.router import PaymentRouter
 from app.config import settings
 from app.db.models.audit_log import IntegrityAuditLog
@@ -1727,7 +1727,7 @@ class PaymentService:
                 receiver_id = participants[receiver_pid]
                 available, lines = await self._segment(sender_id, receiver_id, equivalent_id)
                 hop_rules[(sender_pid, receiver_pid)] = pair_rules(
-                    (pid_of[owner_id], policy) for owner_id, _limit, policy in lines
+                    (pid_of[owner_id], policy) for owner_id, _limit, policy, *_ in lines
                 )
                 reserved = local_reserved.get((sender_id, receiver_id), Decimal("0"))
                 if available < (route_amount + reserved):
@@ -1773,22 +1773,44 @@ class PaymentService:
         return (await self._segment(sender_id, receiver_id, equivalent_id))[0]
 
     async def _segment(self, sender_id, receiver_id, equivalent_id) -> "tuple[Decimal, list]":
-        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy)`: the core's FINAL check.
+        """Capacity of one hop and its pair's active lines `(owner_id, limit, policy, ...)`: the core's FINAL check.
 
         Both active lines are read `FOR SHARE` and held to the end of the money transaction (owner decision A,
         024 `T2415.3`): a line change committed after this snapshot fails the lock with 40001 and the retry
-        re-checks on a fresh snapshot (refused only if capacity or policy now fails); a later change waits for this payment. Not the router's nor `/balance`'s."""
+        re-checks on a fresh snapshot (refused only if capacity or policy now fails); a later change waits for this payment. Not the router's nor `/balance`'s.
+
+        A pair holding a requested close (026 `T2603.1`, В2) carries only what shrinks its debt
+        (`pending_pair_capacity`), and its lines are locked `FOR UPDATE` before any debt is written: this
+        payment may close one (`Book`'s completion UPDATEs it). Measured on the `T2603.1` stand
+        (`test_p026_s3_close_races_postgres.py`): upgrading only at that UPDATE, after the debt row locks, and
+        also upgrading `FOR SHARE -> FOR UPDATE` here, deadlocked two payments over the pair on every retry until
+        both spent their budget. So the router's hint (`pending_pairs`, read in this attempt's snapshot) takes
+        `FOR UPDATE` at once and a second payment WAITS for the first; a pair the hint missed (a stale cached
+        graph) is still upgraded here - correct, at worst one deadlock and a retry. Order: equivalent lock
+        (shared) -> pair lines -> equivalent row `FOR SHARE` -> debts."""
 
         tl = TrustLine
         pair = {sender_id, receiver_id}
-        lines = (await self.session.execute(select(tl.from_participant_id, tl.limit, tl.policy).where(
+        shared = frozenset(pair) not in getattr(self.router, "pending_pairs", ())
+        rows = (await self.session.execute(select(  # + a frozen requested line: pending and locked, no capacity
+            tl.from_participant_id, tl.limit, tl.policy, tl.close_requested_at, tl.id, tl.status).where(
             tl.from_participant_id.in_(pair), tl.to_participant_id.in_(pair), tl.from_participant_id != tl.to_participant_id,
-            tl.equivalent_id == equivalent_id, tl.status == "active").with_for_update(read=True))).all()
+            tl.equivalent_id == equivalent_id, or_(tl.status == "active", and_(
+                tl.status == "frozen", tl.close_requested_at.is_not(None)))).with_for_update(read=shared))).all()
+        lines = [row for row in rows if row.status == "active"]
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
-        limit = next((limit for owner, limit, _ in lines if owner == receiver_id), None)
-        return pair_capacity(line_limit=limit, payer_owes=sender_owes, payee_owes=receiver_owes,
-                             pair_has_active_line=bool(lines)), list(lines)
+        limit = next((limit for owner, limit, *_ in lines if owner == receiver_id), None)
+        capacity = pair_capacity(line_limit=limit, payer_owes=sender_owes, payee_owes=receiver_owes,
+                                 pair_has_active_line=bool(lines))
+        if requested := [row.id for row in rows if row.close_requested_at is not None]:
+            capacity = pending_pair_capacity(capacity, payee_owes=receiver_owes)
+            if shared:
+                await self._lock_requested_lines(requested)
+        return capacity, list(lines)
+
+    async def _lock_requested_lines(self, line_ids: list) -> None:
+        await self.session.execute(select(TrustLine.id).where(TrustLine.id.in_(line_ids)).with_for_update())
 
     async def _debt_amount(
         self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID
@@ -1890,11 +1912,12 @@ class PaymentService:
                 for row in prestate
             }
             checker = InvariantChecker(session)
+            growth: dict[uuid.UUID, list[dict]] = {}
             for eq_id, pairs in pairs_by_equivalent.items():
                 edges = {(eq_id, debtor_id, creditor_id) for debtor_id, creditor_id in pairs}
                 if missing := edges - before.keys():
                     raise RuntimeError(f"payment {tx_id}: no prestate for {len(missing)} directed debt(s)")
-                await checker.check_debt_growth({edge: before[edge] for edge in edges})
+                growth[eq_id] = await checker.check_debt_growth({edge: before[edge] for edge in edges})
                 await checker.check_debt_symmetry(equivalent_id=eq_id, participant_pairs=list(pairs))
                 await self._boundary.check_payment_delta(
                     equivalent_id=eq_id,
@@ -1906,6 +1929,7 @@ class PaymentService:
                 tx_id,
                 payload=payload,
                 equivalent_ids=list(pairs_by_equivalent),
+                growth=growth,
             )
 
     async def _write_integrity_audit(
@@ -1914,6 +1938,7 @@ class PaymentService:
         *,
         payload: dict,
         equivalent_ids: "list[uuid.UUID]",
+        growth: "dict[uuid.UUID, list[dict]] | None" = None,
     ) -> None:
         """FIX-014: one `IntegrityAuditLog` row per equivalent, in THIS transaction - the operation's record.
 
@@ -1948,7 +1973,9 @@ class PaymentService:
                         equivalent_code=str(eq_code or eq_id),
                         state_checksum_before="",
                         state_checksum_after="",
-                        affected_participants={"participants": sorted(participant_pids)},
+                        # 026 `T2603.1`: the growth this payment's check passed - before, after, limit.
+                        affected_participants={"participants": sorted(participant_pids),
+                                               **({"debt_growth": growth[eq_id]} if (growth or {}).get(eq_id) else {})},
                         invariants_checked={},
                         verification_passed=None,
                         error_details=None,

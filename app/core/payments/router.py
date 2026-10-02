@@ -8,10 +8,10 @@ from uuid import UUID
 
 from app.utils.observability import log_duration
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.payments.capacity import pair_capacity, pair_rules, route_breaks_policy
+from app.core.payments.capacity import pair_capacity, pair_rules, pending_pair_capacity, route_breaks_policy
 from app.db.models.trustline import TrustLine
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -59,6 +59,8 @@ class PaymentRouter:
         self.edge_blocked_participants: Dict[str, Dict[str, Set[str]]] = {}
         # Owners (pids) whose active line on the pair forbids them to mediate over the hop u -> v.
         self.edge_no_transit: Dict[str, Dict[str, frozenset]] = {}
+        # 026 В2: pairs (participant UUIDs) holding a requested close - the core's lock-mode hint, not a rule.
+        self.pending_pairs: Set[frozenset] = set()
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
 
@@ -174,6 +176,7 @@ class PaymentRouter:
                         self.pids = dict(pids)
                         self.uuids = dict(uuids)
                         self.edge_no_transit = {u: dict(v) for u, v in (no_transit or [{}])[0].items()}
+                        self.pending_pairs = set(no_transit[1]) if len(no_transit) > 1 else set()
                         return
 
             await self._build_graph_impl(
@@ -198,14 +201,20 @@ class PaymentRouter:
 
         # 2. Load all TrustLines for this equivalent
         # We need to join with Participant to get PIDs
+        # 026 `T2603.1`: plus the frozen lines with a requested close - they mark their pair pending (В2) and
+        # carry no capacity or policy (024 `T2415.2`).
         stmt = select(TrustLine).where(
             and_(
                 TrustLine.equivalent_id == equivalent.id,
-                TrustLine.status == 'active'
+                or_(TrustLine.status == 'active',
+                    and_(TrustLine.status == 'frozen', TrustLine.close_requested_at.is_not(None))),
             )
         )
         result = await self.session.execute(stmt)
-        trustlines = result.scalars().all()
+        loaded = result.scalars().all()
+        requested = {frozenset((tl.from_participant_id, tl.to_participant_id))
+                     for tl in loaded if tl.close_requested_at is not None}
+        trustlines = [tl for tl in loaded if tl.status == 'active']
 
         # 3. Load all Debts for this equivalent
         stmt = select(Debt).where(Debt.equivalent_id == equivalent.id)
@@ -246,6 +255,7 @@ class PaymentRouter:
         self.edge_can_be_intermediate = {pid: {} for pid in self.pids.values()}
         self.edge_blocked_participants = {pid: {} for pid in self.pids.values()}
         self.edge_no_transit = {}
+        self.pending_pairs = set()
 
         # 4. Process Debts into a lookup: (debtor_id, creditor_id) -> amount
         debt_map = {} # (debtor_uuid, creditor_uuid) -> amount
@@ -259,14 +269,20 @@ class PaymentRouter:
         for x, y in {frozenset(k) for k in lines if k[0] != k[1]}:
             pair = [lines[k] for k in ((x, y), (y, x)) if k in lines]
             forbid, blocked = pair_rules((self.pids.get(tl.from_participant_id), tl.policy) for tl in pair)
+            pending = frozenset((x, y)) in requested  # 026 В2, `capacity.py` addendum
+            if pending:
+                self.pending_pairs.add(frozenset((x, y)))
             for payer, payee in ((x, y), (y, x)):
                 payer_pid, payee_pid = self.pids.get(payer), self.pids.get(payee)
+                payee_owes = debt_map.get((payee, payer), Decimal('0'))
                 cap = pair_capacity(
                     line_limit=getattr(lines.get((payee, payer)), "limit", None),
                     payer_owes=debt_map.get((payer, payee), Decimal('0')),
-                    payee_owes=debt_map.get((payee, payer), Decimal('0')),
+                    payee_owes=payee_owes,
                     pair_has_active_line=True,
                 )
+                if pending:
+                    cap = pending_pair_capacity(cap, payee_owes=payee_owes)
                 if payer_pid and payee_pid and cap > 0:
                     self._add_capacity(payer_pid, payee_pid, cap)
                     self._set_edge_policy(payer_pid, payee_pid, payee_pid not in forbid)
@@ -283,6 +299,7 @@ class PaymentRouter:
                 dict(self.pids),
                 dict(self.uuids),
                 {u: dict(v) for u, v in self.edge_no_transit.items()},
+                set(self.pending_pairs),
             )
 
     def _add_capacity(self, u: str, v: str, amount: Decimal):

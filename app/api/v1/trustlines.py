@@ -8,6 +8,7 @@ from app.core.trustlines.service import TrustLineService
 from app.schemas.trustline import (
     TrustLine,
     TrustLineCloseRequest,
+    TrustLineCloseResult,
     TrustLineCreateRequest,
     TrustLineUpdateRequest,
     TrustLinesList,
@@ -76,7 +77,7 @@ async def update_trustline(
     service = TrustLineService(db)
     return await service.update(id, current_participant.id, data)
 
-@router.delete("/{id}", status_code=status.HTTP_200_OK)
+@router.delete("/{id}", status_code=status.HTTP_200_OK, response_model=TrustLineCloseResult)
 async def close_trustline(
     id: UUID,
     data: TrustLineCloseRequest,
@@ -84,5 +85,7 @@ async def close_trustline(
     db: AsyncSession = Depends(deps.get_db)
 ):
     service = TrustLineService(db)
-    await service.close(id, current_participant.id, data)
-    return {"status": "success", "message": "Trustline closed"}
+    line = await service.close(id, current_participant.id, data)
+    closed = str(line.status) == "closed"
+    return TrustLineCloseResult(message="Trustline closed" if closed else "Trustline close requested",
+                                trustline=TrustLine.model_validate(line))

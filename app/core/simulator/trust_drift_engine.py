@@ -375,6 +375,8 @@ class TrustDriftEngine:
                         TrustLine.to_participant_id == debtor_uuid,
                         TrustLine.equivalent_id == eq_id,
                         TrustLine.status == "active",
+                        # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
+                        TrustLine.close_requested_at.is_(None),
                     )
                 )
             ).one_or_none()
@@ -602,6 +604,8 @@ class TrustDriftEngine:
                         TrustLine.to_participant_id == debtor_uuid,
                         TrustLine.equivalent_id == eq_id,
                         TrustLine.status == "active",
+                        # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
+                        TrustLine.close_requested_at.is_(None),
                     )
                 )
             ).scalar_one_or_none()
