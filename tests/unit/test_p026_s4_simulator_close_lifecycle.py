@@ -15,6 +15,7 @@ the stand are the fixture's within the limit; the request comes only from the In
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -27,7 +28,7 @@ from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.core.trustlines.service import TrustLineService
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.unit.test_p021_interact_trust_line_actions_wire import (  # noqa: F401 - `stand` is a fixture
     HEADERS,
     TRIPLE,
@@ -37,7 +38,6 @@ from tests.unit.test_p021_interact_trust_line_actions_wire import (  # noqa: F40
     stand,
 )
 
-_XFAIL = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="026 target, delivered by T2603.2")
 
 
 class _AllEvents(_Recorder):
@@ -71,7 +71,6 @@ async def _requested(client, stand) -> tuple[TrustLine, dict]:
     return line, r.json()
 
 
-@_XFAIL
 @pytest.mark.asyncio
 async def test_a_close_with_debt_is_a_request_on_every_projection(client, stand) -> None:
     line, answer = await _requested(client, stand)
@@ -95,7 +94,6 @@ async def test_a_close_with_debt_is_a_request_on_every_projection(client, stand)
     )
 
 
-@_XFAIL
 @pytest.mark.asyncio
 async def test_a_payment_that_completes_the_close_removes_the_edge_after_its_commit(client, stand, monkeypatch) -> None:
     monkeypatch.setattr(simulator_module, "SseEventEmitter", _AllEvents)
@@ -119,7 +117,6 @@ async def test_a_payment_that_completes_the_close_removes_the_edge_after_its_com
     )
 
 
-@_XFAIL
 @pytest.mark.asyncio
 async def test_the_run_snapshot_does_not_resurrect_a_line_closed_outside_the_run(client, stand) -> None:
     db, alice, bob, run = stand["db"], stand["alice"], stand["bob"], stand["run"]
@@ -146,9 +143,48 @@ async def test_the_run_snapshot_does_not_resurrect_a_line_closed_outside_the_run
         f"a closed line came back from the scenario: {[(x.source, x.target, x.status, x.trust_limit) for x in snap.links]}"
         f", list {listed.json()['items']}",
     )
+    # Reopened: the new live incarnation wins over the closed one, whatever order the rows come in.
+    assert (await _post(client, "trustline-create", {**TRIPLE, "limit": "5"})).status_code == 200
+    snap = await simulator_module.runtime.build_graph_snapshot(run_id="wire-run", equivalent="UAH", session=db)
+    assert [(x.source, x.target, x.status, x.trust_limit) for x in snap.links] == [("alice", "bob", "active", "5.00")]
 
 
-@_XFAIL
+@pytest.mark.asyncio
+async def test_the_pair_patch_reports_a_closed_line_from_its_one_query(client, stand) -> None:
+    """No N+1: closure is read from the patch's own SELECT of the pairs (debts + trust lines = 2 statements)."""
+
+    from sqlalchemy import event
+
+    from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+    from app.core.simulator.viz_patch_helper import VizPatchHelper
+
+    db, alice, bob = stand["db"], stand["alice"], stand["bob"]
+    back = {**TRIPLE, "from_pid": "bob", "to_pid": "alice"}
+    for triple in (TRIPLE, back):  # both closed at zero debt; alice -> bob is then reopened
+        assert (await _post(client, "trustline-create", {**triple, "limit": "10"})).status_code == 200
+        assert (await _post(client, "trustline-close", triple)).json()["status"] == "closed"
+    assert (await _post(client, "trustline-create", {**TRIPLE, "limit": "5"})).status_code == 200
+    helper = await VizPatchHelper.create(db, equivalent_code="UAH", refresh_every_ticks=1)
+
+    statements: list[str] = []
+    connection = (await db.connection()).sync_connection
+
+    def _count(_conn, _cursor, statement, *_args) -> None:
+        statements.append(statement)
+
+    event.listen(connection, "before_cursor_execute", _count)
+    closed: set[tuple[str, str]] = set()
+    try:
+        patches = await EdgePatchBuilder(logger=logging.getLogger(__name__)).build_edge_patch_for_pairs(
+            session=db, helper=helper, edges_pairs=[("alice", "bob"), ("bob", "alice")],
+            pid_to_participant={"alice": alice, "bob": bob}, closed=closed)
+    finally:
+        event.remove(connection, "before_cursor_execute", _count)
+    assert closed == {("bob", "alice")}
+    assert [(p["source"], p["target"], p["available"]) for p in patches] == [("alice", "bob", "5.00")]
+    assert len(statements) == 2, statements
+
+
 @pytest.mark.asyncio
 async def test_the_tick_clearing_removes_what_its_commits_closed_once(monkeypatch) -> None:
     from app.core.clearing.runner import ClearingPassResult, CommittedEdge, CommittedOccurrence

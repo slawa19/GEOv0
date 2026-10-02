@@ -348,6 +348,8 @@ function decodeGraphLink(value: unknown, path: string): GraphLink {
   }
   const status = optionalString(raw, 'status', path)
   if (typeof status === 'string') link.status = status
+  const closeRequestedAt = optionalDateTime(raw, 'close_requested_at', path)
+  if (closeRequestedAt !== undefined) link.close_requested_at = closeRequestedAt
   for (const key of ['viz_color_key', 'viz_width_key', 'viz_alpha_key'] as const) {
     const item = optionalString(raw, key, path)
     if (item !== undefined) link[key] = item
@@ -471,11 +473,13 @@ function decodeTrustlineUpdate(value: unknown, path: string): SimulatorActionTru
 
 function decodeTrustlineClose(value: unknown, path: string): SimulatorActionTrustlineCloseResponse {
   const raw = objectAt(value, path)
-  onlyKeys(raw, path, ['ok', 'trustline_id', 'client_action_id'])
+  onlyKeys(raw, path, ['ok', 'trustline_id', 'status', 'close_requested_at', 'client_action_id'])
   requireOk(raw, path)
   return {
     ok: true,
     trustline_id: stringAt(raw.trustline_id, `${path}.trustline_id`),
+    status: stringAt(raw.status, `${path}.status`),
+    close_requested_at: optionalDateTime(raw, 'close_requested_at', path),
     ...clientActionId(raw, path),
   }
 }
@@ -541,6 +545,7 @@ function decodeTrustlinesList(value: unknown, path: string): SimulatorActionTrus
         'reverse_used',
         'available',
         'status',
+        'close_requested_at',
       ])
       return {
         from_pid: stringAt(trustline.from_pid, `${itemPath}.from_pid`),
@@ -553,6 +558,7 @@ function decodeTrustlinesList(value: unknown, path: string): SimulatorActionTrus
         reverse_used: decimalStringAt(trustline.reverse_used, `${itemPath}.reverse_used`),
         available: decimalStringAt(trustline.available, `${itemPath}.available`),
         status: stringAt(trustline.status, `${itemPath}.status`),
+        close_requested_at: optionalDateTime(trustline, 'close_requested_at', itemPath),
       }
     }),
   }

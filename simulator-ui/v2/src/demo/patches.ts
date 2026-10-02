@@ -66,6 +66,7 @@ export function createPatchApplier(opts: {
     if (p.trust_limit !== undefined) target.trust_limit = p.trust_limit
     if (p.used !== undefined) target.used = p.used
     if (p.available !== undefined) target.available = p.available
+    if (p.close_requested_at !== undefined) target.close_requested_at = p.close_requested_at
     if (p.viz_color_key !== undefined) target.viz_color_key = p.viz_color_key
     if (p.viz_width_key !== undefined) target.viz_width_key = p.viz_width_key
     if (p.viz_alpha_key !== undefined) target.viz_alpha_key = p.viz_alpha_key

@@ -100,18 +100,16 @@ const noTrustlineText = computed<string | null>(() => trustlineNoRowNotice(props
 const effectiveData = computed(() => {
   // Fail closed: show nothing rather than presenting the snapshot's numbers as this trustline's.
   if (noExistingLineFigures.value) {
-    return { used: null, reverseUsed: null, limit: null, available: null }
+    return { used: null, limit: null, available: null }
   }
   return {
     used: selectedTl.value?.used ?? props.used,
-    reverseUsed: selectedTl.value?.reverse_used,
     limit: selectedTl.value?.limit ?? props.currentLimit,
     available: selectedTl.value?.available ?? props.available,
   }
 })
 
 const effectiveUsed = computed(() => effectiveData.value.used)
-const effectiveReverseUsed = computed(() => effectiveData.value.reverseUsed)
 const effectiveLimit = computed(() => effectiveData.value.limit)
 const effectiveAvailable = computed(() => effectiveData.value.available)
 
@@ -149,29 +147,13 @@ const createLimitNum = computed(() => parseAmountNumber(createLimitNormalized.va
 const updateLimitNormalized = computed(() => parseAmountStringOrNull(newLimit.value))
 const newLimitNum = computed(() => parseAmountNumber(updateLimitNormalized.value))
 
-const closeBlocked = computed(() => {
+// 026 (owner В1): a close with the debt this line supports (`used`) is a REQUEST - limit 0, the line closes when
+// that debt is repaid. The reverse debt belongs to the other line and does not hold the close.
+const closeIsRequest = computed(() => {
   const u = parseAmountNumber(effectiveUsed.value)
-  const ru = parseAmountNumber(effectiveReverseUsed.value)
-  const usedDebt = Number.isFinite(u) && u > 0
-  const reverseDebt = Number.isFinite(ru) && ru > 0
-  return usedDebt || reverseDebt
+  return Number.isFinite(u) && u > 0
 })
-
-const closeDebtText = computed(() => {
-  const used = parseAmountStringOrNull(effectiveUsed.value)
-  const reverse = parseAmountStringOrNull(effectiveReverseUsed.value)
-
-  const usedNum = parseAmountNumber(used)
-  const reverseNum = parseAmountNumber(reverse)
-
-  const usedDebt = Number.isFinite(usedNum) && usedNum > 0
-  const reverseDebt = Number.isFinite(reverseNum) && reverseNum > 0
-
-  if (usedDebt && reverseDebt) return `used: ${used ?? '—'} ${props.unit}, reverse: ${reverse ?? '—'} ${props.unit}`
-  if (usedDebt) return `used: ${used ?? '—'} ${props.unit}`
-  if (reverseDebt) return `reverse: ${reverse ?? '—'} ${props.unit}`
-  return `used: ${used ?? '—'} ${props.unit}`
-})
+const closeRequested = computed(() => !noExistingLineFigures.value && !!selectedTl.value?.close_requested_at)
 
 const createValid = computed(() => {
   // Require From/To selection in create flow.
@@ -212,7 +194,7 @@ async function onClose() {
   // `F-013-7`: `closeBlocked` is computed from `effectiveUsed`, which is null while the source is
   // unavailable -- i.e. it reads as "no outstanding debt" precisely when we do not know.
   if (noExistingLineFigures.value) return
-  if (closeBlocked.value) return
+  if (closeRequested.value) return
 
   void confirmCloseOrArm(async () => {
     await props.confirmTrustlineClose()
@@ -225,8 +207,6 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
     { source: () => props.phase },
     // When switching selected trustline, cancel the confirmation state.
     { source: () => `${props.state.fromPid ?? ''}→${props.state.toPid ?? ''}` },
-    // If Close becomes blocked (used > 0), cancel the confirmation state.
-    { source: () => closeBlocked.value, when: (b) => !!b },
     // `F-013-7`: if the ground for the mutation goes away, an armed close must not survive it.
     { source: () => noExistingLineFigures.value, when: (b) => !!b },
     // When the UI becomes busy, cancel the confirmation state.
@@ -492,8 +472,11 @@ defineExpose({
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="trustline-error">{{ state.error }}</div>
 
-      <div v-if="isEdit && closeBlocked" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-blocked">
-        Cannot close: trustline has outstanding debt ({{ closeDebtText }}). Reduce debt to 0 first.
+      <div v-if="isEdit && closeRequested" class="ds-alert ds-alert--warn ds-mono" data-testid="tl-close-requested">
+        Close requested: limit stays 0; the line closes when its debt (used: {{ renderOrDash(effectiveUsed) }} {{ unit }}) is repaid.
+      </div>
+      <div v-else-if="isEdit && closeIsRequest" class="ds-help ds-mono" data-testid="tl-close-request-note">
+        Closing with debt (used: {{ renderOrDash(effectiveUsed) }} {{ unit }}) is a request: limit becomes 0, the line closes when the debt is repaid.
       </div>
 
       <div class="ds-row ds-row--actions tl-actions">
@@ -507,7 +490,7 @@ defineExpose({
           <button
             class="ds-btn"
             type="button"
-            :disabled="busy || closeBlocked || noExistingLineFigures"
+            :disabled="busy || closeRequested || noExistingLineFigures"
             data-testid="trustline-close-btn"
             @click="onClose"
           >

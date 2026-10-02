@@ -587,13 +587,18 @@ export function useInteractMode(opts: {
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select trustline first')
-      await opts.actions.closeTrustline(from, to, opts.equivalent.value, { signal })
+      const res = await opts.actions.closeTrustline(from, to, opts.equivalent.value, { signal })
       if (!isCurrent()) return
 
-      setSuccessToastMessage(`Trustline closed: ${from} → ${to}`)
+      // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
+      const msg = res.status === 'closed'
+        ? `Trustline closed: ${from} → ${to}`
+        : `Close requested: ${from} → ${to} (closes when the debt is repaid)`
+      setSuccessToastMessage(msg)
 
       // BUG-5: log to history
-      pushHistory('🗑️', `Trustline closed: ${from} → ${to}`)
+      pushHistory('🗑️', msg)
+      if (res.status !== 'closed') dataCache.patchTrustlineLimitLocal(from, to, '0', opts.equivalent.value)
       invalidateTrustlinesCache(opts.equivalent.value)
       void refreshTrustlines({ force: true })
       resetToIdle()

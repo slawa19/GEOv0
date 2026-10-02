@@ -66,6 +66,7 @@ function trustlineCloseSuccess(): SimulatorActionTrustlineCloseResponse {
   return {
     ok: true,
     trustline_id: 'tl_close_1',
+    status: 'closed',
   }
 }
 

@@ -45,7 +45,7 @@ function mkActions(): InteractActions {
     sendPayment: vi.fn<InteractActions['sendPayment']>(async () => paymentSuccess()),
     createTrustline: vi.fn<InteractActions['createTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1', from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', limit: '10.00' })),
     updateTrustline: vi.fn<InteractActions['updateTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1', old_limit: '10.00', new_limit: '10.00' })),
-    closeTrustline: vi.fn<InteractActions['closeTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1' })),
+    closeTrustline: vi.fn<InteractActions['closeTrustline']>(async () => ({ ok: true, trustline_id: 'tl_1', status: 'closed' })),
     runClearing: vi.fn<InteractActions['runClearing']>(async () => clearingSuccess()),
     fetchParticipants: vi.fn<InteractActions['fetchParticipants']>(async () => [] as ParticipantsResult),
     fetchTrustlines: vi.fn<InteractActions['fetchTrustlines']>(async () => [] as TrustlinesResult),

@@ -52,6 +52,8 @@ class SimulatorGraphLink(BaseModel):
     available: Optional[NumberOrString] = None
 
     status: Optional[str] = None
+    # 026 `T2603.2`: set while the creditor's close request waits for the supported debt to reach 0 (limit 0).
+    close_requested_at: Optional[datetime] = None
 
     viz_color_key: Optional[str] = None
     viz_width_key: Optional[str] = None
@@ -653,6 +655,9 @@ class SimulatorActionTrustlineCloseRequest(BaseModel):
 class SimulatorActionTrustlineCloseResponse(BaseModel):
     ok: bool = True
     trustline_id: str
+    # 026 `T2603.2`: the line's actual state - `closed`, or still live (`active`/`frozen`) with the request.
+    status: str
+    close_requested_at: Optional[datetime] = None
     client_action_id: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
@@ -760,11 +765,12 @@ class SimulatorActionTrustlineListItem(BaseModel):
     equivalent: str
     limit: str
     used: str
-    # Debt in reverse direction (debtor = from_pid, creditor = to_pid).
-    # Used by UI to avoid offering impossible Close when reverse debt exists.
+    # Debt in reverse direction (debtor = from_pid, creditor = to_pid). Since 026 `T2603.1` it belongs to the other
+    # line and does not hold a close.
     reverse_used: str
     available: str
     status: str
+    close_requested_at: Optional[datetime] = None
 
     model_config = ConfigDict(extra="forbid")
 

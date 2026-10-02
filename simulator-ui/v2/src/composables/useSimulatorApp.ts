@@ -933,6 +933,7 @@ export function useSimulatorApp(opts?: {
         existing.used = src.used
         existing.available = src.available
         existing.status = src.status
+        existing.close_requested_at = src.close_requested_at
         existing.viz_color_key = src.viz_color_key
         existing.viz_width_key = src.viz_width_key
         existing.viz_alpha_key = src.viz_alpha_key

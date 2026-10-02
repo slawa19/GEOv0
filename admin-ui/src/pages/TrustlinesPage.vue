@@ -439,13 +439,25 @@ const trustlinesAdviceItems = computed(() =>
         </el-table-column>
         <el-table-column
           prop="status"
-          width="95"
+          width="150"
         >
           <template #header>
             <TooltipLabel
               :label="t('common.status')"
               tooltip-key="trustlines.status"
             />
+          </template>
+          <template #default="scope">
+            {{ scope.row.status }}
+            <el-tag
+              v-if="scope.row.close_requested_at"
+              type="warning"
+              size="small"
+              data-testid="tl-close-requested"
+              :title="fmtTs(scope.row.close_requested_at)"
+            >
+              {{ t('trustlines.closeRequested') }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column
@@ -562,6 +574,14 @@ const trustlinesAdviceItems = computed(() =>
             size="small"
           >
             {{ labelTrustlineStatus(selected.status) }}
+          </el-tag>
+          <el-tag
+            v-if="selected.close_requested_at"
+            type="warning"
+            size="small"
+            style="margin-left: 8px"
+          >
+            {{ t('trustlines.closeRequested') }} · {{ fmtTs(selected.close_requested_at) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.createdAt')">

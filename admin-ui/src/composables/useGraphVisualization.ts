@@ -35,6 +35,7 @@ export type SelectedInfo =
       used: string
       available: string
       created_at: string
+      close_requested_at?: string | null
     }
 
 export type DrawerTab = 'summary' | 'connections' | 'balance' | 'counterparties' | 'risk' | 'cycles'
@@ -562,6 +563,7 @@ export function useGraphVisualization(options: {
             used: t.used,
             available: t.available,
             created_at: t.created_at,
+            close_requested_at: t.close_requested_at ?? null,
             bottleneck: bottleneck ? 1 : 0,
           },
           classes,
@@ -641,6 +643,7 @@ export function useGraphVisualization(options: {
       used: String(edge.data?.used || ''),
       available: String(edge.data?.available || ''),
       created_at: String(edge.data?.created_at || ''),
+      close_requested_at: edge.data?.close_requested_at ?? null,
     }
     options.drawerOpen.value = true
     return true
@@ -1471,6 +1474,7 @@ export function useGraphVisualization(options: {
         used: String(e.data('used') || ''),
         available: String(e.data('available') || ''),
         created_at: String(e.data('created_at') || ''),
+        close_requested_at: e.data('close_requested_at') ?? null,
       }
       options.drawerOpen.value = true
     })

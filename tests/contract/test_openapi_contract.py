@@ -338,8 +338,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # Same day, S3 adversarial pass (F2): count HOLDS at 62, digest moves. ONE entry changes content: the canon's
 # `GET /integrity/audit-log` `action` enum gains `integrity.trust_line_close_request`, which the handler emits for
 # the request rows. Measured with the per-entry dump on `beb7795` and on this tree: error ledger identical, 62 / 51.
+# 2026-10-02 / programme 026 `T2603.2`: count HOLDS at 62, digest moves. FOUR entries change content, none enters or
+# leaves: `SimulatorGraphLink` gains the nullable `close_requested_at` on both sides, inside the four graph reads that
+# were already in the ledger (`GET /simulator/graph/ego`, `/simulator/graph/snapshot`, the run snapshot and the
+# scenario preview). The Interact close answer and `trustlines-list` gain fields on both sides and stay out of the
+# ledger. Measured with a per-entry dump of every ledger on `9faa6b3` and on this tree: error and security ledgers
+# identical; counts 62 / 51 / 66 on both.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "06a07516a005fd4621574fd8f82d33a8d241a9aa9b2306cb7039f3de291f814f"
+    "b582467c679d9d2c185d06a5ced0bf4c3b6e8e81b65c3298f9c1af15a6660864"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

@@ -130,7 +130,7 @@ function normalizeEdgePatchArray(v: unknown): ParseResult<EdgePatch[] | undefine
       if (typeof value !== 'string' && (typeof value !== 'number' || !Number.isFinite(value))) return PARSE_FAILED
       p[key] = value
     }
-    for (const key of ['viz_color_key', 'viz_width_key', 'viz_alpha_key'] as const) {
+    for (const key of ['close_requested_at', 'viz_color_key', 'viz_width_key', 'viz_alpha_key'] as const) {
       const value = raw[key]
       if (value === undefined) continue
       if (typeof value !== 'string' && value !== null) return PARSE_FAILED

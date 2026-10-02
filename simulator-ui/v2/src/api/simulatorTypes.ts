@@ -128,6 +128,9 @@ export type SimulatorActionTrustlineCloseRequest = {
 export type SimulatorActionTrustlineCloseResponse = {
   ok: true
   trustline_id: string
+  /** 026: `closed`, or still live (`active`/`frozen`) with the close requested. */
+  status: string
+  close_requested_at?: string | null
   client_action_id?: string | null
 }
 
@@ -198,6 +201,7 @@ export type TrustlineInfo = {
   reverse_used?: string
   available: string
   status: string
+  close_requested_at?: string | null
 }
 
 export type SimulatorActionTrustlinesListResponse = {

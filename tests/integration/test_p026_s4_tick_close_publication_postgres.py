@@ -29,10 +29,9 @@ from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from tests.conftest import MODE_B
 from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _world
 from tests.integration.test_p026_s3_close_request_postgres import _close, _line
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import RecordingSse
 
-_XFAIL = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="026 target, delivered by T2603.2")
 _LOG = logging.getLogger(__name__)
 
 
@@ -74,7 +73,7 @@ def _removals(events: list[dict]) -> list:
 
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["rollback", "unknown", "discard", pytest.param("commit", marks=_XFAIL)])
+@pytest.mark.parametrize("outcome", ["rollback", "unknown", "discard", "commit"])
 async def test_the_tick_removes_a_closed_line_only_after_a_confirmed_commit(client, db_session, outcome) -> None:
     code, p, lines, factory = await _requested(client, db_session)
     a, b = p["A"]["pid"], p["B"]["pid"]
@@ -120,7 +119,6 @@ async def test_the_tick_removes_a_closed_line_only_after_a_confirmed_commit(clie
     )
 
 
-@_XFAIL
 @MODE_B
 @pytest.mark.asyncio
 async def test_an_interact_clearing_that_completes_a_close_removes_the_edge_once(client, db_session, monkeypatch) -> None:

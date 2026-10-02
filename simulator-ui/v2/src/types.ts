@@ -50,6 +50,8 @@ export type GraphLink = {
   reverse_used?: string | number
   available?: string | number
   status?: string
+  /** 026: the creditor asked to close; limit 0 until the debt the line supports is repaid. */
+  close_requested_at?: string | null
   viz_color_key?: string | null
   viz_width_key?: string | null
   viz_alpha_key?: string | null
@@ -71,6 +73,7 @@ export type EdgePatch = {
   trust_limit?: string | number
   used?: string | number
   available?: string | number
+  close_requested_at?: string | null
   viz_color_key?: string | null
   viz_width_key?: string | null
   viz_alpha_key?: string | null

@@ -8,12 +8,14 @@ from typing import Any, Callable, Optional
 
 from app.config import settings
 from app.core.simulator.models import RunRecord, _Subscription
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
     SimulatorAuditDriftEvent,
     SimulatorClearingDoneEvent,
     SimulatorTopologyChangedEvent,
     SimulatorTxFailedEvent,
     SimulatorTxUpdatedEvent,
+    TopologyChangedEdgeRef,
     TopologyChangedPayload,
 )
 from app.utils.exceptions import TooManyRequestsException
@@ -722,3 +724,47 @@ class SseEventEmitter:
                 exc_info=True,
             )
             return None
+
+
+def publish_closed_trustlines(
+    *, emitter: Any, lock: Any, run_id: str, run: Any, equivalent: str, pairs: Any
+) -> list[tuple[str, str]]:
+    """026 `T2603.2`: trust lines a money operation closed leave the run's topology, once.
+
+    Called ONLY after the commit of the operation that closed them is confirmed. The pairs (creditor, debtor PIDs)
+    are removed from the run's scenario and edge cache, and those the run still held are published as one
+    `topology.changed.removed_edges`; a pair the run no longer holds is not published again. Never raises.
+    """
+
+    eq = str(equivalent or "").strip().upper()
+    gone = {(str(a).strip(), str(b).strip()) for a, b in (pairs or ())}
+    if not eq or not gone:
+        return []
+    try:
+        with lock:
+            held = set()
+            cache = getattr(run, "_edges_by_equivalent", None)
+            if isinstance(cache, dict) and eq in cache:
+                held |= {tuple(e) for e in cache[eq] or () if tuple(e) in gone}
+                cache[eq] = [e for e in cache[eq] or () if tuple(e) not in gone]
+            scenario = getattr(run, "_scenario_raw", None)
+            lines = scenario.get("trustlines") if isinstance(scenario, dict) else None
+            if isinstance(lines, list):
+                def _closed(tl: Any) -> tuple[str, str] | None:
+                    pair = (str(tl.get("from") or "").strip(), str(tl.get("to") or "").strip())
+                    same_eq = str(effective_equivalent(scenario, tl) or "").strip().upper() == eq
+                    return pair if same_eq and pair in gone else None
+
+                held |= {_closed(tl) for tl in lines if isinstance(tl, dict)} - {None}
+                scenario["trustlines"] = [tl for tl in lines if not (isinstance(tl, dict) and _closed(tl))]
+        removed = sorted(held)
+        if removed:
+            emitter.emit_topology_changed(
+                run_id=run_id, run=run, equivalent=eq, reason="trustline_closed",
+                payload=TopologyChangedPayload(removed_edges=[
+                    TopologyChangedEdgeRef(from_pid=a, to_pid=b, equivalent_code=eq) for a, b in removed]),
+            )
+        return removed
+    except Exception:
+        logging.getLogger(__name__).warning("simulator.sse.trustline_closed_publish_failed eq=%s", eq, exc_info=True)
+        return []

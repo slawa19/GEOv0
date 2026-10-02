@@ -17,7 +17,7 @@ from app.core.payments.service import (
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.rejection_codes import map_rejection_code
-from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, publish_closed_trustlines
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.core.simulator.run_perimeter import run_perimeter_pids
@@ -43,6 +43,8 @@ class _PaymentObservation:
     node_patch: list[dict[str, Any]] | None = None
     error_code: str | None = None
     error_details: dict[str, Any] | None = None
+    # 026 `T2603.2`: trust lines this payment's book operation closed (creditor, debtor PIDs).
+    closed_edges: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -173,6 +175,9 @@ class DeferredRealPaymentEffects:
                     item.receiver_pid,
                     exc_info=True,
                 )
+            # Only here, on a confirmed commit: a rollback, an unknown outcome or a discarded attempt never removes.
+            publish_closed_trustlines(emitter=self.emitter, lock=self.lock, run_id=self.run_id, run=self.run,
+                                      equivalent=item.equivalent, pairs=item.closed_edges)
             with self.lock:
                 self.run.last_event_type = "tx.updated"
                 self.run.attempts_total += 1
@@ -677,6 +682,7 @@ class RealPaymentsExecutor:
                                 ],
                                 edge_patch=edge_patch,
                                 node_patch=node_patch,
+                                closed_edges=tuple(sorted(closed_by_seq.pop(next_seq, ()))),
                             )
                         )
                     else:
@@ -720,6 +726,7 @@ class RealPaymentsExecutor:
 
         stop_requested = False
         timeout_stop_triggered = False
+        closed_by_seq: dict[int, set[tuple[str, str]]] = {}
 
         try:
             if tasks:
@@ -824,6 +831,7 @@ class RealPaymentsExecutor:
                                     helper=helper,
                                     edges_pairs=edges_pairs,
                                     pid_to_participant=pid_to_participant,
+                                    closed=closed_by_seq.setdefault(int(seq), set()),
                                 )
                         except Exception:
                             if self._should_warn_this_tick(run, key=f"edge_patch_failed:{eq}"):
