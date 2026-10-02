@@ -255,7 +255,7 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
 
     async def clear():
         async with stand() as session:
-            return await ClearingService(session).execute_clearing_with_amount(seed["cycle"])
+            return await ClearingService(session).execute_occurrence(seed["occurrence"])
 
     first, second = (clear, pay) if parked == "clearing" else (pay, clear)
     first_task = second_task = None

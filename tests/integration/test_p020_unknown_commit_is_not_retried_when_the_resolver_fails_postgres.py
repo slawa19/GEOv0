@@ -125,7 +125,7 @@ def _stand(
             return amount
 
         @staticmethod
-        async def _read_committed_execution_amount(session, tx_id, *, allowed_participant_pids=None):
+        async def _read_committed_execution_amount(session, tx_id, *, allowed_participant_pids=None, occurrence=None):
             if state["armed"]:
                 state["reads_after_commit"] += 1
                 if fail_the_earlier_reads and state["reads_after_commit"] < _RESOLVER_READ_THAT_DEADLOCKS:
@@ -139,7 +139,7 @@ def _stand(
                         state["resolver_errors"].append(exc)
                         raise
             return await ClearingService._read_committed_execution_amount(
-                session, tx_id, allowed_participant_pids=allowed_participant_pids
+                session, tx_id, allowed_participant_pids=allowed_participant_pids, occurrence=occurrence
             )
 
         async def _commit_to_terminal(self):
@@ -182,7 +182,7 @@ async def _evidence(seed: dict) -> tuple[list[tuple[str, Decimal]], dict]:
     from app.db.models.transaction import Transaction
     from tests.conftest import TestingSessionLocal
 
-    execution_tx_id = ClearingService._execution_tx_id(seed["debt_ids"])
+    execution_tx_id = seed["occurrence"].occurrence_id
     async with TestingSessionLocal() as verify:
         transactions = [
             (row.state, Decimal(str(row.payload["amount"])))
@@ -210,7 +210,7 @@ async def _run(stand_cls, seed: dict):
     try:
         await _use_serializable(owner)
         try:
-            return await asyncio.wait_for(stand_cls(owner).execute_clearing_with_amount(seed["cycle"]), 60)
+            return await asyncio.wait_for(stand_cls(owner).execute_occurrence(seed["occurrence"]), 60)
         except Exception as exc:  # noqa: BLE001 - compared by the caller
             return exc
     finally:
@@ -481,7 +481,7 @@ async def _cancel_while_the_second_resolution_runs(commit_mode: str):
     clearing_task = None
     try:
         await _use_serializable(owner)
-        clearing_task = asyncio.create_task(stand_cls(owner).execute_clearing_with_amount(seed["cycle"]))
+        clearing_task = asyncio.create_task(stand_cls(owner).execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(script["second_started"].wait(), timeout=30)
         assert not clearing_task.done(), "premise: the caller is still waiting on resolution 2"
         clearing_task.cancel()

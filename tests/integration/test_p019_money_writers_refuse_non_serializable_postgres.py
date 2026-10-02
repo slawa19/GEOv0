@@ -141,7 +141,7 @@ async def _run_writer(name: str, session, seed, committed_database):
     if name == "clearing":
         from app.core.clearing.service import ClearingService
 
-        return await _call(ClearingService(session).execute_clearing_with_amount(seed["cycle"]))
+        return await _call(ClearingService(session).execute_occurrence(seed["occurrence"]))
     if name == "inject":
         from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (
             _Artifacts,
