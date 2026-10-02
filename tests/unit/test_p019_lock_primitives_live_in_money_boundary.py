@@ -27,7 +27,8 @@ WHAT IT DOES NOT SEE - its silence is not proof of these: `importlib.import_modu
 the module name as a string (a patch STRING of a moved name is still seen by rule 2); access through an
 object held in a variable; `getattr` with a computed name; a namespace tag computed rather than written;
 raw SQL that takes an advisory lock with its own numbers; prose in comments and docstrings. What decides whether a move changed behaviour is the
-statement-sequence probe `tests/p019_t1903_statement_sequence_probe.py` and the tier, not this file.
+tier, not this file (the statement-sequence probe that compared 019's moves was retired by 025 `T2504.1`; source at
+`7eb3b859:tests/p019_t1903_statement_sequence_probe.py`).
 """
 
 from __future__ import annotations
@@ -240,8 +241,7 @@ def test_no_lock_primitive_has_a_second_home_or_is_reached_through_the_engine() 
         "and patch `MoneyBoundary`; the engine was deleted by 019 stage 4 - a payment runs through "
         "`PaymentService` (`pay()`, `create_payment_internal[_staged]`, the phases `_bind_payment` / "
         "`_apply_payment`). This guard checks FORM only - see the module "
-        "docstring for what it cannot see; whether a move changed behaviour is decided by "
-        "`tests/p019_t1903_statement_sequence_probe.py` and the tier."
+        "docstring for what it cannot see; whether a move changed behaviour is decided by the tier."
     )
 
 
