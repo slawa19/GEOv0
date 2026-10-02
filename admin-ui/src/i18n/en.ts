@@ -97,7 +97,7 @@ export const EN: Record<string, string> = {
   'liquidity.kpi.totalAvailable': 'Total available',
   'liquidity.watchlist.topBottleneckEdges': 'Top bottleneck edges (snapshot)',
   'liquidity.watchlist.topNetPositions': 'Top net positions (snapshot)',
-  'liquidity.help.topBottleneckEdges': 'Edges with the lowest remaining available capacity (Available = Limit − Used) for the current snapshot.',
+  'liquidity.help.topBottleneckEdges': 'Edges with the lowest unused trust (Available = Limit − Used; negative when the debt exceeds a lowered limit) for the current snapshot. This is not payment capacity.',
   'liquidity.help.topNetPositions': 'Participants with the largest absolute net balance in the current snapshot. Positive = net creditor, negative = net debtor.',
   'liquidity.actions.openTrustlines': 'Open Trustlines',
   'liquidity.actions.openGraph': 'Open Graph',
