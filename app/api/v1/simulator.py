@@ -39,7 +39,7 @@ from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, SimulatorPidTakenError
 from app.core.simulator.scenario_equivalent import effective_equivalent
-from app.core.simulator.models import _Subscription
+from app.core.simulator.models import _Subscription, bump_topology_epoch
 from app.core.simulator.sse_broadcast import (
     SSE_SUBSCRIPTION_CLOSED_TYPE,
     SseEventEmitter,
@@ -886,6 +886,8 @@ def _mutate_runtime_trustline_topology_best_effort(
             tp = _norm_pid(to_pid)
             if not (eq and fp and tp):
                 return
+            if op in ("create", "update"):  # 026 `T2603.2`: a closure publication begun before this skips the pair.
+                bump_topology_epoch(run, eq, fp, tp)
 
             # Invalidate per-equivalent viz cache so subsequent node/edge patches are consistent.
             try:

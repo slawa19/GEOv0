@@ -762,16 +762,25 @@ async def publish_closed_trustlines(
     re-created after the close is a new live incarnation and stays). Those are removed from the run's scenario and
     edge cache, and those the run still held are published as one `topology.changed.removed_edges`; a pair the run
     no longer holds is not published again. A pair with no live row is closed whoever closed it, so the removal
-    says the line IS closed, not that this operation closed it. No await between the re-read and the removal:
-    a create that commits after the re-read mutates the run after this. Never raises; a failed re-read publishes
-    nothing and logs why (the delivered operation stands, §12).
+    says the line IS closed, not that this operation closed it. The re-read is NOT atomic with the removal (leaving
+    its session can suspend), so a create that commits after the SELECT could otherwise be removed: each pair's
+    topology epoch (`bump_topology_epoch`) is recorded under the lock before the SELECT, and a pair whose epoch
+    moved by the removal - re-created meanwhile - stays. Never raises; a failed re-read publishes nothing and logs
+    why (the delivered operation stands, §12).
     """
 
     eq = str(equivalent or "").strip().upper()
     gone = {(str(a).strip(), str(b).strip()) for a, b in (pairs or ())}
     if not eq or not gone:
         return []
+
+    def _epochs() -> dict[tuple[str, str], int]:
+        held = getattr(run, "_topology_epoch", None) or {}
+        return {pair: held.get((eq, *pair), 0) for pair in gone}
+
     try:
+        with lock:
+            before = _epochs()
         gone -= await _live_pairs(eq, gone)
     except Exception:
         logging.getLogger(__name__).warning(
@@ -781,6 +790,8 @@ async def publish_closed_trustlines(
         return []
     try:
         with lock:
+            now = _epochs()
+            gone = {pair for pair in gone if now[pair] == before[pair]}
             held = set()
             cache = getattr(run, "_edges_by_equivalent", None)
             if isinstance(cache, dict) and eq in cache:
