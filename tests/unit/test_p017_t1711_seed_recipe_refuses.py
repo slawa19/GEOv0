@@ -327,7 +327,7 @@ async def test_a_retried_clearing_replays_the_occurrence_its_first_attempt_built
     run = _run_with_fake_sessions()
     run.identities = {ref: types.SimpleNamespace(pid=ref.upper()) for ref in "abc"}
     run.equivalent_ids = {"UAH": uuid.uuid4()}
-    await run._clearing({"id": "c", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "1.00", "mode": "execute"})
+    await run._clearing({"id": "c", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "1.00", "mode": "execute", "expect": "-"})
     assert (len(detections), len(executed), run.report.retries) == (1, 2, 1)
     assert executed[0] == executed[1] and executed[0].amount_atoms == 10**8
     assert [str(debt_id) for debt_id in executed[0].debt_ids] == [detected[k]["debt_id"] for k in (2, 0, 1)]
