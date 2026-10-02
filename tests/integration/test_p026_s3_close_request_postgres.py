@@ -163,8 +163,10 @@ async def test_a_rolled_back_completion_leaves_no_close(client, db_session, monk
     THE FAILURE IS PLACED AFTER THE COMPLETION (026 `T2603.1` §15 P2-2: the stand before injected it inside the
     operation body, before `Book._complete`, so the hook never ran and the absence of a completion proved
     nothing). The real hook runs, and in ITS transaction the line is read back `closed` with its completion row;
-    the book then releases its savepoint, and the commit itself is refused (`before_commit`, armed only by that
-    session's own completion). After the rollback: the line is still active with its request, the debt is
+    the next `before_commit` of that session is refused (armed only by its own completion). SQLAlchemy dispatches
+    `before_commit` for nested transactions too, so the refusal lands on the book's savepoint release
+    (`nested.commit()` in `Book.operation`), not on the outer COMMIT: the stand pins rollback of a written
+    completion, not outer-commit handling (§15 fix-delta P3, 2026-10-02). After the rollback: the line is still active with its request, the debt is
     untouched, the audit holds only the request.
     """
 
@@ -192,7 +194,7 @@ async def test_a_rolled_back_completion_leaves_no_close(client, db_session, monk
     def refuse_commit(sync_session) -> None:
         if sync_session.info.pop("p026_refuse_commit", False):
             fired.append(1)
-            raise RuntimeError("injected failure at the commit, after the book completed the close")
+            raise RuntimeError("injected failure at the next commit (the savepoint release), after the book completed the close")
 
     monkeypatch.setattr(book_module, "_settle_requested_closes", settle_and_observe)
     event.listen(OrmSession, "before_commit", refuse_commit)
