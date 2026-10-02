@@ -174,6 +174,18 @@ def test_the_scan_reads_the_tick_the_runner_the_tests_and_the_scripts() -> None:
         assert carrier in modules, f"the scan does not read {carrier}"
 
 
+def test_the_scan_reports_a_planted_driver_in_every_scanned_directory(tmp_path) -> None:
+    # End to end through `_scan`: rules 2-3 reach each directory. Restores the counter-check the retired
+    # exemption test also made (025 `T2504.1`, internal adversarial F1).
+    driver = "\ndef f():\n    from app.core.simulator.real_clearing_engine import RealClearingEngine\n"
+    for directory in SCANNED_DIRS:
+        (tmp_path / directory).mkdir(parents=True, exist_ok=True)
+        (tmp_path / directory / "planted.py").write_text(driver, encoding="utf-8")
+    found = _scan(tmp_path)
+    for directory in SCANNED_DIRS:
+        assert any(f.startswith(f"{directory}/planted.py:") for f in found), (directory, found)
+
+
 def test_each_refused_shape_is_seen() -> None:
     planted = {
         "from-import": "from app.core.simulator.real_clearing_engine import RealClearingEngine\n",
