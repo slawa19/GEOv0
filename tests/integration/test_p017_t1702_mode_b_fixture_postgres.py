@@ -37,6 +37,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 from tests.conftest import TEST_DATABASE_URL, _committed_database_context, engine
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.migrated_schema import (
     REPO_ROOT,
     MigratedSchemaError,
@@ -248,7 +249,7 @@ async def test_mode_b_clone_is_dropped_and_its_commits_do_not_reach_the_next_clo
         assert not await _visible_from_another_connection(second.engine, marker)
 
 
-async def _seed_triangle(session) -> str:
+async def _seed_triangle(session) -> tuple[str, uuid.UUID]:
     """A->B->C->A, 10 each, consented by every creditor: the smallest cycle clearing will execute."""
 
     nonce = uuid.uuid4().hex[:10]
@@ -273,6 +274,7 @@ async def _seed_triangle(session) -> str:
     )
     session.add_all([eq, a, b, c])
     await session.flush()
+    eq_id = eq.id
     async with debt_fixture_setup(session, label="setup"):
         session.add_all(
             [
@@ -295,25 +297,31 @@ async def _seed_triangle(session) -> str:
             ]
         )
     await session.commit()
-    return eq.code
+    return eq.code, eq_id
+
+
+def _occurrence_of(cycle, equivalent_id):
+    """025 `T2508.1`: the plan occurrence of the detected triangle (in the order detection walked it), declared 10."""
+
+    return occurrence_of(cycle, equivalent_id=equivalent_id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0)
 
 
 async def test_mode_b_session_is_accepted_by_clearing(committed_session):
-    code = await _seed_triangle(committed_session)
+    code, eq_id = await _seed_triangle(committed_session)
     service = ClearingService(committed_session)
     cycles = await service.find_cycles(code, max_depth=3)
     assert cycles, "the seeded triangle was not detected; the clearing half below would be vacuous"
-    cleared = await service.execute_clearing_with_amount(cycles[0])
+    cleared = await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
     assert cleared == Decimal("10")
 
 
 async def test_mode_a_session_is_refused_by_clearing(db_session):
     """COUNTER-CHECK: the same cycle on the savepoint session is refused before any data is read."""
 
-    code = await _seed_triangle(db_session)
+    code, eq_id = await _seed_triangle(db_session)
     service = ClearingService(db_session)
     cycles = await service.find_cycles(code, max_depth=3)
     assert cycles
     with pytest.raises(GeoException) as raised:
-        await service.execute_clearing_with_amount(cycles[0])
+        await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
     assert _CLEARING_REFUSAL in str(raised.value.__cause__)

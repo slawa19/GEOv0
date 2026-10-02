@@ -99,6 +99,7 @@ from tests.p015_b4_support import (
     stored_operations,
     stored_rows,
 )
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 #: Every refusal of the book before SQL (018): a caller error or money the column cannot hold.
 BOOK_REFUSALS = (BookError,)
@@ -1594,7 +1595,7 @@ def _flows_of(intent) -> list[dict]:
 async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cleared(
     serializable_factory,
 ):
-    """C14, clearing half, API-SHAPED. `ClearingService.execute_clearing_with_amount`, for real.
+    """C14, clearing half, API-SHAPED. `ClearingService.execute_occurrence`, for real (025 `T2508.1`).
 
     WHAT IS REAL HERE. A genuine three-edge cycle with genuine auto-clearing trustlines, cleared by
     the service's own entry point - which on PostgreSQL rolls the caller's session back, checks out
@@ -1668,12 +1669,15 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
             ).all()
         }
 
-    cycle = [{"debt_id": str(debt_id)} for debt_id in debt_ids]
+    # 025 `T2508.1`: the plan occurrence of the cycle, declared (30, the minimum).
+    occurrence = occurrence_of(
+        debt_ids, equivalent_id=world.equivalent.id, amount="30.00000000", plan_id=TEST_PLAN_ID, ordinal=0
+    )
     async with serializable_factory() as clearing_session:
         service = ClearingService(clearing_session)
-        execution_tx_id = service._execution_tx_id(debt_ids)
+        execution_tx_id = occurrence.occurrence_id
         cleared = await asyncio.wait_for(
-            service.execute_clearing_with_amount(cycle), timeout=60
+            service.execute_occurrence(occurrence), timeout=60
         )
 
     envelopes = await _envelopes_with_intent(serializable_factory, tx_id=execution_tx_id)

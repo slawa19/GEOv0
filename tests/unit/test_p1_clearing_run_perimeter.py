@@ -33,7 +33,7 @@ import pytest
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.clearing.service import ClearingService
+from app.core.clearing.service import ClearingOccurrenceRefused, ClearingService
 from app.utils.exceptions import GeoException
 from app.core.simulator.models import RunRecord
 from app.db.models.debt import Debt
@@ -43,6 +43,7 @@ from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
 from tests.conftest import MODE_B
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 _EQ = "RPX"
 
@@ -125,6 +126,12 @@ async def _seed_two_runs(db_session):
             )
     await db_session.commit()
     return eq, people
+
+
+def _occurrence_of(cycle, eq_id):
+    """025 `T2508.1`: the plan occurrence of the detected run-B cycle (in detection's order), declared 100."""
+
+    return occurrence_of(cycle, equivalent_id=eq_id, amount="100", plan_id=TEST_PLAN_ID, ordinal=0)
 
 
 async def _debt_amounts(db_session, eq_id) -> list[Decimal]:
@@ -283,10 +290,12 @@ async def test_execution_layer_refuses_a_cycle_outside_the_perimeter(db_session)
 
     cycle = (await service.find_cycles(_EQ, max_depth=6))[0]
 
-    with pytest.raises(GeoException):
-        await service.execute_clearing_with_amount(
-            cycle, allowed_participant_pids={"a1", "a2", "a3"}
+    with pytest.raises(GeoException) as refused:
+        await service.execute_occurrence(
+            _occurrence_of(cycle, eq_id), allowed_participant_pids={"a1", "a2", "a3"}
         )
+    # 025 `T2508.1`: the perimeter refused it, not the occurrence's own descriptor check.
+    assert not isinstance(refused.value, ClearingOccurrenceRefused), refused.value
 
     after = await _debt_amounts(db_session, eq_id)
     assert after == [Decimal("100")] * 3, (
@@ -355,20 +364,22 @@ async def test_a_committed_replay_is_not_returned_to_a_foreign_scope(db_session)
     """
 
     eq, _people = await _seed_two_runs(db_session)
+    eq_id = eq.id
     service = ClearingService(db_session)
     cycle = (await service.find_cycles(_EQ, max_depth=6))[0]
 
     # Clear it legitimately first, so a committed CLEARING transaction exists for this cycle.
-    cleared = await service.execute_clearing_with_amount(
-        cycle, allowed_participant_pids={"b1", "b2", "b3"}
+    cleared = await service.execute_occurrence(
+        _occurrence_of(cycle, eq_id), allowed_participant_pids={"b1", "b2", "b3"}
     )
     assert cleared == Decimal("100"), cleared
 
-    # Now a foreign run replays the same cycle.
-    with pytest.raises(GeoException):
-        await service.execute_clearing_with_amount(
-            cycle, allowed_participant_pids={"a1", "a2", "a3"}
+    # Now a foreign run replays the same occurrence.
+    with pytest.raises(GeoException) as refused:
+        await service.execute_occurrence(
+            _occurrence_of(cycle, eq_id), allowed_participant_pids={"a1", "a2", "a3"}
         )
+    assert not isinstance(refused.value, ClearingOccurrenceRefused), refused.value
 
 
 @pytest.mark.asyncio

@@ -87,6 +87,7 @@ from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import RetryablePaymentConflictException
 from tests.debt_setup import debt_fixture_setup
 from tests.p019_locks_off import switch_money_boundary_locks_off
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 pytestmark = [pytest.mark.slow]
 
@@ -159,7 +160,11 @@ async def _seed(stand):
             s.add_all(debts)
         await s.commit()
     PaymentRouter.invalidate_cache(eq.code)
-    return eq, (a, b, c), [{"debt_id": str(d.id)} for d in debts]
+    # 025 `T2508.1`: the plan occurrence of the cycle, declared 100 - the no-load amount. The stream only GROWS the
+    # cycle debts (each payment adds to its payer's edge), so the declaration never goes stale under load.
+    return eq, (a, b, c), occurrence_of(
+        [d.id for d in debts], equivalent_id=eq.id, amount="100.00", plan_id=TEST_PLAN_ID, ordinal=0
+    )
 
 
 def _instrument(monkeypatch, *, gap_s: float):
@@ -222,7 +227,7 @@ def _describe(exc: BaseException) -> str:
 async def _one_run(stand, counts, *, with_stream: bool) -> Run:
     for key in counts:
         counts[key] = 0
-    eq, (a, b, c), cycle = await _seed(stand)
+    eq, (a, b, c), occurrence = await _seed(stand)
     run = Run()
     stop = asyncio.Event()
     edges = [(a, b), (b, c), (c, a)]  # payer -> payee: each payment grows the payer's cycle debt
@@ -254,7 +259,7 @@ async def _one_run(stand, counts, *, with_stream: bool) -> Run:
         clearing_started = time.monotonic()
         async with stand() as session:
             try:
-                run.cleared = await ClearingService(session).execute_clearing_with_amount(cycle)
+                run.cleared = await ClearingService(session).execute_occurrence(occurrence)
                 run.outcome = "cleared" if run.cleared else "skipped"
             except RetryableClearingConflictException:
                 run.outcome = "exhausted"

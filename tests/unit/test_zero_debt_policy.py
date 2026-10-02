@@ -13,6 +13,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.conftest import MODE_B
 
 
@@ -59,8 +60,11 @@ async def test_clearing_deletes_zero_debts(db_session):
     cycles = await service.find_cycles(eq_code, max_depth=3)
     assert cycles
 
-    ok = await service.execute_clearing(cycles[0])
-    assert ok is True
+    # 025 `T2508.1`: the plan occurrence of the detected cycle (in detection's order), declared 10.
+    cleared = await service.execute_occurrence(
+        occurrence_of(cycles[0], equivalent_id=eq_id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0)
+    )
+    assert cleared == Decimal("10")
 
     tx = (
         await db_session.execute(

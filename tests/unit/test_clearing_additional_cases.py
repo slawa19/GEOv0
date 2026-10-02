@@ -18,6 +18,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.conftest import MODE_B, sessionmaker_of
 
 
@@ -70,6 +71,12 @@ async def _add_controlling_trustlines(
                 status=status,
             )
         )
+
+
+def _occurrence_of(cycle, eq_id):
+    """025 `T2508.1`: the plan occurrence of a detected 10/10/10 triangle (in detection's order), declared 10."""
+
+    return occurrence_of(cycle, equivalent_id=eq_id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0)
 
 
 async def _setup_committed_triangle(
@@ -553,7 +560,7 @@ async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanit
 
     try:
         with pytest.raises(GeoException) as exc_info:
-            await service.execute_clearing_with_amount(cycles[0])
+            await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
 
         assert exc_info.value.status_code == 500
         assert exc_info.value.code == "E010"
@@ -622,7 +629,7 @@ async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects
 
     try:
         with pytest.raises(GeoException) as exc_info:
-            await service.execute_clearing_with_amount(cycles[0])
+            await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
 
         assert rollback_calls == 1
         assert exc_info.value.status_code == 500
@@ -699,11 +706,11 @@ async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
     )
     await db_session.commit()
 
-    cycle = [
-        {"debt_id": str(debt.id)}
-        for debt in debts
-    ]
-    result = await ClearingService(db_session).execute_clearing_with_amount(cycle)
+    eq_id = eq.id
+    occurrence = occurrence_of(
+        [debt.id for debt in debts], equivalent_id=eq_id, amount="4", plan_id=TEST_PLAN_ID, ordinal=0
+    )
+    result = await ClearingService(db_session).execute_occurrence(occurrence)
 
     assert result is None
 
@@ -711,6 +718,9 @@ async def test_execute_clearing_policy_skip_remains_non_exceptional(db_session):
 @MODE_B
 @pytest.mark.asyncio
 async def test_execute_clearing_nonpositive_defensive_skip_rolls_back(db_session, monkeypatch):
+    # 025 `T2508.1`: LEFT ON THE EXECUTION WITHOUT AN OCCURRENCE ON PURPOSE. The branch it reaches - a computed
+    # cycle minimum <= 0 - exists only there: an occurrence declares a positive amount, and a row below it is the
+    # stale-plan skip. The test goes with that mode (024 `T2417`).
     eq, _ = await _setup_committed_triangle(db_session, code_prefix="N")
     service = ClearingService(db_session)
     cycles = await service.find_cycles(eq.code, max_depth=3)
@@ -757,6 +767,7 @@ async def test_execute_clearing_commit_failure_rolls_back_without_visible_effect
     cycles = await service.find_cycles(eq.code, max_depth=3)
     assert cycles
     eq_id = eq.id
+    occurrence = _occurrence_of(cycles[0], eq_id)
 
     # THE COMMIT OF THE SESSION THAT EXECUTES, which is not always the caller's (017 stage 2b). On
     # SQLite clearing commits `db_session`; on PostgreSQL it commits its own interlock session, so
@@ -777,7 +788,7 @@ async def test_execute_clearing_commit_failure_rolls_back_without_visible_effect
     monkeypatch.setattr(AsyncSession, "commit", _fail_first_commit)
 
     with pytest.raises(GeoException) as exc_info:
-        await service.execute_clearing_with_amount(cycles[0])
+        await service.execute_occurrence(occurrence)
 
     assert len(failed_commits) == 1, "non-vacuity: the clearing's commit was never attempted"
 
@@ -811,6 +822,7 @@ async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
     service = ClearingService(db_session)
     cycles = await service.find_cycles(eq.code, max_depth=3)
     assert cycles
+    occurrence = _occurrence_of(cycles[0], eq.id)
     original_rollback = db_session.rollback
     neutrality_calls: list[object] = []
 
@@ -843,7 +855,7 @@ async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
 
     try:
         with pytest.raises(GeoException) as exc_info:
-            await service.execute_clearing_with_amount(cycles[0])
+            await service.execute_occurrence(occurrence)
 
         assert len(neutrality_calls) == 1, (
             "non-vacuity: the execution never reached the neutrality check, so the rollback that "

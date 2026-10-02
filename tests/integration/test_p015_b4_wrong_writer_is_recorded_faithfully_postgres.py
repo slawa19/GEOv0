@@ -67,6 +67,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import ENTRIES_TABLE, OPERATIONS_TABLE, missing_journal_tables, stored_rows
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _routed_over
 
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
@@ -884,11 +885,13 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
     """C6 (ii), PostgreSQL, the mandatory counterexample. DEFECT-SHAPED in (b), API-SHAPED in (a).
 
     THE WRITER. A cycle `A -> B -> C -> A` of `999999999999.99999999` on every edge is cleared. The
-    service computes `clear_amount = min(amounts)` and subtracts it from every edge, which should
+    plan occurrence declares `c` = that amount (the cycle minimum; 025 `T2508.1`) and the service subtracts it from
+    every edge, which should
     delete all three. A listener adds one atom back to each subtraction, so every edge is left
     holding `0.00000001` and none is deleted.
 
-    WHAT THIS TIER ADDS. `execute_clearing_with_amount` takes its one-connection interlock before
+    WHAT THIS TIER ADDS. `execute_occurrence` (through `execute_clearing_with_amount`) takes its one-connection
+    interlock before
     delegating (`app/core/clearing/service.py:1487-1500`), and the cycle's debts are read
     `SELECT ... FOR UPDATE` (`:1750-1759`). On SQLite neither exists. So this is the under-clearing
     surviving the real concurrency machinery, not a version of it with the locks removed.
@@ -941,8 +944,10 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
     armed, remove_listener = _under_clear_by_one_atom(monkeypatch)
     try:
         async with serializable_factory() as session:
-            cleared = await ClearingService(session).execute_clearing_with_amount(
-                [{"debt_id": debt_id} for debt_id in debt_ids]
+            cleared = await ClearingService(session).execute_occurrence(
+                occurrence_of(
+                    debt_ids, equivalent_id=triangle.equivalent_id, amount=FULL_SIZE, plan_id=TEST_PLAN_ID, ordinal=0
+                )
             )
     finally:
         remove_listener()
@@ -1092,8 +1097,10 @@ async def test_c6_p_control_the_same_cycle_without_the_listener_satisfies_criter
 
     before = await _edges(serializable_factory, triangle)
     async with serializable_factory() as session:
-        cleared = await ClearingService(session).execute_clearing_with_amount(
-            [{"debt_id": debt_id} for debt_id in debt_ids]
+        cleared = await ClearingService(session).execute_occurrence(
+            occurrence_of(
+                debt_ids, equivalent_id=triangle.equivalent_id, amount=FULL_SIZE, plan_id=TEST_PLAN_ID, ordinal=0
+            )
         )
 
     after = await _edges(serializable_factory, triangle)

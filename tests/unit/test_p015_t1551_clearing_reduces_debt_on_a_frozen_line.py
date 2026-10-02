@@ -44,6 +44,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
 from tests.conftest import MODE_B, sessionmaker_of
 
@@ -243,9 +244,10 @@ async def test_a_frozen_line_without_consent_is_still_not_cleared(db_session):
     service = ClearingService(db_session)
 
     assert await service.find_cycles(ring.eq_code, max_depth=3) == []
-    # Execution re-checks consent on its own; a caller may hand it a cycle detection never produced.
-    cycle = [{"debt_id": str(debt_id)} for debt_id in ring.debt_ids]
-    assert await service.execute_clearing_with_amount(cycle) is None
+    # Execution re-checks consent on its own; a caller may hand it a cycle detection never produced - here the plan
+    # occurrence of the ring, declared (10, the minimum; 025 `T2508.1`).
+    occurrence = occurrence_of(ring.debt_ids, equivalent_id=ring.eq_id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0)
+    assert await service.execute_occurrence(occurrence) is None
     assert [await _debt_amount(db_session, i) for i in ring.debt_ids] == [Decimal("10")] * 3
 
 

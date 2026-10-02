@@ -37,6 +37,7 @@ names in its docstring the mutation that must turn it red again.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import uuid
 from decimal import Decimal
@@ -52,6 +53,7 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # Every test here commits through several sessions and runs on a disposable clone of the migrated
 # template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
@@ -796,11 +798,14 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
             session.add_all(cycle_debts)
         await session.commit()
 
-    cycle = [{"debt_id": debt_id} for debt_id in debt_ids]
+    # 025 `T2508.1`: one plan occurrence (declared 10), executed and then replayed - the same descriptor again.
+    occurrence = occurrence_of(
+        debt_ids, equivalent_id=triangle.equivalent.id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0
+    )
     async with factory() as session:
-        first = await ClearingService(session).execute_clearing_with_amount(cycle)
+        first = await ClearingService(session).execute_occurrence(occurrence)
     async with factory() as session:
-        replayed = await ClearingService(session).execute_clearing_with_amount(cycle)
+        replayed = await ClearingService(session).execute_occurrence(dataclasses.replace(occurrence))
 
     after = await _edges(factory, triangle)
 
@@ -1184,8 +1189,8 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
 ) -> None:
     """C6 (ii), the mandatory counterexample, clearing half. DEFECT-SHAPED in (b), API-SHAPED in (a).
 
-    THE WRITER. A 10/10/10 cycle `A -> B -> C -> A` is cleared. The service computes
-    `clear_amount = min(amounts) = 10` and subtracts it from every edge, which should delete all
+    THE WRITER. A 10/10/10 cycle `A -> B -> C -> A` is cleared. The plan occurrence declares
+    `c = 10` (the cycle minimum; 025 `T2508.1`) and the service subtracts it from every edge, which should delete all
     three. A listener adds one atom back to each subtraction, so every edge is left holding
     `0.00000001` and none is deleted.
 
@@ -1251,8 +1256,10 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
     armed, remove_listener = _under_clear_by_one_atom(monkeypatch)
     try:
         async with factory() as session:
-            cleared = await ClearingService(session).execute_clearing_with_amount(
-                [{"debt_id": debt_id} for debt_id in debt_ids]
+            cleared = await ClearingService(session).execute_occurrence(
+                occurrence_of(
+                    debt_ids, equivalent_id=triangle.equivalent.id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0
+                )
             )
     finally:
         remove_listener()
@@ -1407,8 +1414,10 @@ async def test_c6_control_the_same_cycle_without_the_listener_satisfies_criterio
 
     before = await _edges(factory, triangle)
     async with factory() as session:
-        cleared = await ClearingService(session).execute_clearing_with_amount(
-            [{"debt_id": debt_id} for debt_id in debt_ids]
+        cleared = await ClearingService(session).execute_occurrence(
+            occurrence_of(
+                debt_ids, equivalent_id=triangle.equivalent.id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0
+            )
         )
 
     after = await _edges(factory, triangle)

@@ -106,6 +106,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # Only `test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays` commits (clearing refuses a
 # connection-bound session), so only it runs on a disposable clone of the migrated template and leaves
@@ -655,7 +656,7 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
 
     THE VALUE: the payload is re-parsed on replay (`_read_committed_execution_amount`), so a
     changed string form is only safe if it parses back to the same `Decimal`.  It is compared
-    here against the amount `execute_clearing_with_amount` actually applied, not against a
+    here against the amount `execute_occurrence` actually applied, not against a
     literal, so the two cannot be wrong together.
     """
 
@@ -721,7 +722,12 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
         service = ClearingService(worker)
         cycles = await service.find_cycles(code, max_depth=API_DEFAULT_MAX_DEPTH)
         assert cycles, "precondition: the triangle must be detected before it is cleared"
-        applied = await service.execute_clearing_with_amount(cycles[0])
+        # 025 `T2508.1`: the plan occurrence of the ring, declared (one atom, the whole debt), not the detected list.
+        applied = await service.execute_occurrence(
+            occurrence_of(
+                debt_ids, equivalent_id=equivalent_id, amount=_SMALLEST_STORABLE, plan_id=TEST_PLAN_ID, ordinal=0
+            )
+        )
 
     assert applied == _SMALLEST_STORABLE, (
         f"precondition: the whole debt must have cleared, got {applied!r}"

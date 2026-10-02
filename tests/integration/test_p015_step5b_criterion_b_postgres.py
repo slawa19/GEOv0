@@ -42,6 +42,7 @@ from app.core.payments import service as payment_service
 from app.db.base import Base
 from app.db.models.debt import Debt
 from tests.p019_support import allow_below_serializable_for_a_diagnostic
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_step5a_reconciliation_postgres import _sqlstates
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import _advisory_waiter_exists
@@ -415,11 +416,15 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         async def _commit() -> None:
             paid.append(await _prepare_payment(factory, triangle, ["b", "a"], Decimal("3")))
 
+        # 025 `T2508.1`: the occurrence a plan made on the state the payment leaves (A -> B 10 - 3) declares 7. That
+        # the clearing ran on that state is read from what it recorded (below), not from the declared amount.
+        occurrence = occurrence_of(
+            [debt.id for debt in debts], equivalent_id=triangle.equivalent.id, amount="7", plan_id=TEST_PLAN_ID, ordinal=0
+        )
+
         async def _clear():
             async with factory() as session:
-                return await ClearingService(session).execute_clearing_with_amount(
-                    [{"debt_id": str(debt.id)} for debt in debts]
-                )
+                return await ClearingService(session).execute_occurrence(occurrence)
 
         payment = asyncio.create_task(_commit())
         clearing = None
@@ -437,6 +442,13 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         assert reads == [1], f"premise: the payment did not pause exactly once at its pre-state read: {reads}"
         assert await _tx_state(factory, paid[0]) == "COMMITTED"
         assert cleared == Decimal("7"), f"the clearing did not run on the state the payment left: {cleared!r}"
+        envelope = await unit._operation(factory, equivalent_id=triangle.equivalent.id, kind="CLEARING")
+        locked = {
+            (item["debtor_id"], item["creditor_id"]): Decimal(item["amount"]) for item in envelope.intent["cycle"]
+        }
+        assert locked[(str(triangle.a.id), str(triangle.b.id))] == Decimal("7"), (
+            f"the clearing did not lock A -> B as the payment left it (10 - 3): {locked}"
+        )
         assert await _edges(factory, triangle) == {
             ("b", "c"): Decimal("3.00000000"),
             ("c", "a"): Decimal("3.00000000"),

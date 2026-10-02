@@ -18,6 +18,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
 
 from tests.debt_setup import debt_fixture_setup, writer_operation
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.conftest import MODE_B, sessionmaker_of
 
 
@@ -503,8 +504,11 @@ async def test_clearing_writes_integrity_audit_log_on_success(db_session):
     eq_id = eq.id
 
     svc = ClearingService(db_session)
-    cleared = await svc.execute_clearing_with_amount(
-        [{"debt_id": str(d_ab.id)}, {"debt_id": str(d_bc.id)}, {"debt_id": str(d_ca.id)}]
+    # 025 `T2508.1`: the plan occurrence of the cycle, declared 10.
+    cleared = await svc.execute_occurrence(
+        occurrence_of(
+            [d_ab.id, d_bc.id, d_ca.id], equivalent_id=eq_id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0
+        )
     )
     assert cleared == Decimal("10")
 

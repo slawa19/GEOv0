@@ -66,6 +66,7 @@ from tests.conftest import MODE_B, sessionmaker_of
 # opts into by name - never both in one test, since both clone under one name.
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     _edges,
     _seed_triangle,
@@ -797,6 +798,14 @@ async def _seed_cycle(factory, tag: str):
     return SimpleNamespace(equivalent=equivalent, people=people, debts=debts)
 
 
+def _occurrence_of(cycle):
+    """025 `T2508.1`: the plan occurrence of a `_seed_cycle` ring, declared (10 on every edge, the minimum)."""
+
+    return occurrence_of(
+        [debt.id for debt in cycle.debts], equivalent_id=cycle.equivalent.id, amount="10", plan_id=TEST_PLAN_ID, ordinal=0
+    )
+
+
 async def _cycle_amounts(factory, cycle) -> list[Decimal]:
     async with factory() as session:
         return sorted(
@@ -828,16 +837,12 @@ async def test_step5c_a_held_equivalent_refuses_clearing_and_another_equivalent_
 
     async with factory() as session:
         with pytest.raises(ConflictException) as refused:
-            await ClearingService(session).execute_clearing_with_amount(
-                [{"debt_id": str(d.id)} for d in held.debts]
-            )
+            await ClearingService(session).execute_occurrence(_occurrence_of(held))
     _assert_hold_refusal(refused.value, held.equivalent.code)
     assert await _cycle_amounts(factory, held) == [Decimal("10"), Decimal("10"), Decimal("10.00000001")]
 
     async with factory() as session:
-        cleared = await ClearingService(session).execute_clearing_with_amount(
-            [{"debt_id": str(d.id)} for d in free.debts]
-        )
+        cleared = await ClearingService(session).execute_occurrence(_occurrence_of(free))
     assert cleared == Decimal("10"), cleared
     assert await _cycle_amounts(factory, free) == []
 
