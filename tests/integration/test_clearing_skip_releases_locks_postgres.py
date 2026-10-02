@@ -24,11 +24,12 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 # DROPPED by 019 stage 4 (manifest `t1901-manifest.md` 5.3, rows :119-148, :171-173, :201): it seeded a
 # `PREPARED` `PAYMENT` with a `PrepareLock`, which CHECK `030` refuses, and after stage 4 no payment path
 # produces a reservation for clearing to skip on - the contract is removed, not moved. What the branch
-# also proved, that a skip ends the service-owned transaction, is proved below by the four remaining
-# branches (`result is None`, `not session.in_transaction()`), with the `policy` branch's witness.
+# also proved, that a skip ends the service-owned transaction, is proved below by the remaining branches
+# (`result is None`, `not session.in_transaction()`), with the `policy` branch's witness. `empty` and `malformed`
+# - inputs only the execution without an occurrence accepted - went with that mode (024 `T2417`).
 @pytest.mark.parametrize(
     "skip_branch",
-    ["empty", "malformed", "missing", "policy"],
+    ["missing", "policy"],
 )
 @pytest.mark.asyncio
 async def test_skip_ends_service_owned_transaction_postgres(
@@ -123,17 +124,9 @@ async def test_skip_ends_service_owned_transaction_postgres(
     await session.commit()
 
     try:
-        # 025 `T2508.1`: "missing" and "policy" execute the plan occurrence of the cycle (declared 30). "empty" and
-        # "malformed" are inputs only the execution WITHOUT an occurrence accepts (an occurrence of no debts or of a
-        # non-UUID is refused at construction): they test that mode and go with it (024 `T2417`).
+        # 025 `T2508.1`: both branches execute the plan occurrence of the cycle (declared 30).
         cycle_ids = list(debt_ids)
-        if skip_branch in {"empty", "malformed"}:
-            # Prove that even a pre-SQL rejection closes a transaction already
-            # opened by the caller's candidate lookup.
-            await session.execute(select(Debt.id).limit(1))
-            assert session.in_transaction()
-            cycle = [] if skip_branch == "empty" else [{"debt_id": "not-a-uuid"}]
-        elif skip_branch == "missing":
+        if skip_branch == "missing":
             cycle_ids[-1] = uuid.uuid4()
 
         service = ClearingService(session)
@@ -154,12 +147,9 @@ async def test_skip_ends_service_owned_transaction_postgres(
                 _witness_policy,
             )
 
-        if skip_branch in {"empty", "malformed"}:
-            result = await service.execute_clearing_with_amount(cycle)
-        else:
-            result = await service.execute_occurrence(
-                occurrence_of(cycle_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
-            )
+        result = await service.execute_occurrence(
+            occurrence_of(cycle_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
+        )
 
         assert result is None
         assert not session.in_transaction(), f"skip_branch={skip_branch}"

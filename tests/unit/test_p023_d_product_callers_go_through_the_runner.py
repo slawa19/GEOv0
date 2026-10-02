@@ -11,16 +11,17 @@ What it checks, statically (AST - a comment or a docstring does not count):
   the tick (`app/core/simulator/tick.py::RealTick._run_clearing`; until 021 `T2109` the driver
   `real_clearing_engine.py::RealClearingEngine.tick_real_mode_clearing`) `run_clearing_pass` - and none of them calls an executor or a detector itself (`execute_clearing_with_amount`,
   `execute_clearing`, `execute_occurrence`, `find_cycles`, `auto_clear`);
-* under `app/`, only `app/core/clearing/service.py` calls the shared executor `execute_clearing_with_amount` /
-  `execute_clearing`, only `service.py` and `runner.py` call `execute_occurrence`, and nothing calls
-  `auto_clear` - which is gone from `ClearingService` (R4: safe delete);
+* under `app/`, only `app/core/clearing/service.py` calls the shared executor `execute_clearing_with_amount`, only
+  `service.py` and `runner.py` call `execute_occurrence`, and nothing calls `auto_clear` or the compatibility
+  wrapper `execute_clearing` - both gone from `ClearingService` (R4: safe delete; the wrapper: 024 `T2417`);
 * `find_cycles` (the diagnostic) is called only by the two diagnostic routes (`clearing.py::list_cycles`,
   `admin.py`) - not by any simulator module.
 
 Anti-vacuum: the walker sees each form it looks for in a synthetic snippet.
 
 What it does not see: a call through `getattr` with a computed string, or a copy of an executor pasted elsewhere;
-`scripts/` (the seed tool's executing call, `scripts/seed_recipe.py`, is a recorded R4 keep, not a product caller).
+`scripts/` (the seed tool's executing call, `scripts/seed_recipe.py` - `execute_occurrence` since 024 `T2417` - is a
+recorded R4 keep, not a product caller).
 """
 
 from __future__ import annotations
@@ -99,17 +100,18 @@ def test_only_the_service_and_the_runner_reach_the_executors_and_auto_clear_is_g
         called = _called(_parse(path))
         allowed = set()
         if relative == "app/core/clearing/service.py":
-            allowed = {"execute_clearing_with_amount", "execute_clearing", "execute_occurrence", "find_cycles"}
+            allowed = {"execute_clearing_with_amount", "execute_occurrence", "find_cycles"}
         elif relative == "app/core/clearing/runner.py":
             allowed = {"execute_occurrence"}
         elif relative in ("app/api/v1/clearing.py", "app/api/v1/admin.py"):
             allowed = {"find_cycles"}
         if bad := sorted((called & _EXECUTORS) - allowed):
             offenders[relative] = bad
+    gone = ("auto_clear", "execute_clearing")
     require_target(
-        offenders == {} and not hasattr(ClearingService, "auto_clear"),
-        f"executor calls outside their owners: {offenders}; ClearingService.auto_clear present: "
-        f"{hasattr(ClearingService, 'auto_clear')}",
+        offenders == {} and not any(hasattr(ClearingService, name) for name in gone),
+        f"executor calls outside their owners: {offenders}; present on ClearingService: "
+        f"{[name for name in gone if hasattr(ClearingService, name)]}",
     )
 
 

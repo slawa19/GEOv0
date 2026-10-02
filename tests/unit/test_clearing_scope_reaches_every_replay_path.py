@@ -62,6 +62,7 @@ def test_every_replay_resolver_call_passes_the_perimeter() -> None:
         if not any(kw.arg == "allowed_participant_pids" for kw in call.keywords):
             missing.append(f"{name} at line {call.lineno}")
 
+    # Recounted 2026-10-02 (024 `T2417`): 10 calls before, 8 after - the v1/v2 branches of the two resolvers merged.
     assert total >= 5, (
         f"only {total} replay resolver calls found - the set of names this test guards is "
         "out of date with the code, which makes it worthless"
