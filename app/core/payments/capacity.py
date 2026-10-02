@@ -6,6 +6,10 @@ A hop payer -> payee exists only while the pair has an ACTIVE line in either dir
 Its policy is the conjunction of every active line of the pair: `can_be_intermediate = false` or
 `max_hop_usage = 0` forbids the line's OWNER to mediate over this pair, entering or leaving; every
 line's `blocked_participants` applies to the whole route. Clearing is a different operation.
+
+DATED ADDENDUM 2026-10-02 (026 `T2603.1`, owner В2): over a pair holding a requested close a hop may only shrink
+the pair's debt `debt[A->B] + debt[B->A]` - `pending_pair_capacity`. The book checks the same for the whole
+operation (`app/core/ledger/book.py`, `_settle_requested_closes`). Other pairs keep the formula above.
 """
 
 from __future__ import annotations
@@ -22,6 +26,21 @@ def pair_capacity(
     if not pair_has_active_line:
         return Decimal("0")
     return (line_limit if line_limit is not None else Decimal("0")) - payer_owes + payee_owes
+
+
+#: The ledger's grain: "strictly less" over money that has at most eight fraction digits.
+_GRAIN = Decimal("1E-8")
+
+
+def pending_pair_capacity(capacity: Decimal, *, payee_owes: Decimal) -> Decimal:
+    """A hop over a pair with a requested close: the pair's debt must end strictly lower (В2).
+
+    Only the payee's debt to the payer can shrink by this hop: paying `t` turns it into `payee_owes - t`, whose
+    size is below `payee_owes` exactly while `t < 2 * payee_owes` (repay, or cross zero into a smaller reverse
+    debt the other line must still allow - `capacity`). Without such a debt the hop can only grow the pair.
+    """
+
+    return min(capacity, 2 * payee_owes - _GRAIN) if payee_owes > 0 else Decimal("0")
 
 
 def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str], frozenset[str]]:

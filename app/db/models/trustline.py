@@ -28,6 +28,10 @@ class TrustLine(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default='active', index=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # 026 `T2603.1` (owner В1, 2026-09-29): when the creditor asked to close. The line stays live with limit 0
+    # until the debt it supports is 0, then `Book` closes it (migration 033). NULL: no request - a zero limit
+    # alone is not one.
+    close_requested_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     from_participant = relationship("Participant", foreign_keys=[from_participant_id])
     to_participant = relationship("Participant", foreign_keys=[to_participant_id])
@@ -57,4 +61,7 @@ class TrustLine(Base):
             name='chk_trust_line_limit_positive',
         ),
         Index('ix_trust_lines_from_status', 'from_participant_id', 'status'),
+        CheckConstraint(
+            f'close_requested_at IS NULL OR {_LIMIT_SQL} = 0', name='chk_trust_line_close_request_zero_limit'
+        ),
     )

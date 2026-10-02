@@ -2623,6 +2623,9 @@ paths:
       description: >-
         Changes the limit and/or policy. A limit below the current debt is accepted: it changes trust, not
         debt - nothing is written off or moved, `available` becomes negative, new debt growth is refused.
+        While a close is requested (`close_requested_at` set) the limit stays 0: a positive limit is 409
+        (`details.reason` = `TRUSTLINE_CLOSE_REQUESTED`) and does not cancel the request; a policy change is
+        accepted.
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
       requestBody:
@@ -2638,6 +2641,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TrustLine'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2654,6 +2659,13 @@ paths:
     delete:
       tags: [TrustLines]
       summary: Close trustline
+      description: >-
+        Closing is the creditor's trust going to 0 (026, owner 2026-09-29; protocol §5.3). The limit becomes 0
+        and `close_requested_at` is set. Only the debt the line supports (`to` owes `from`) counts: at 0 the
+        line is closed now; otherwise it stays `active` (or `frozen`) until a payment or a clearing brings that
+        debt to exactly 0, and closes in that transaction. A debt the other way belongs to the other line and
+        does not hold the close. Repeating the request while it is pending changes nothing. The answer is the
+        line's factual state.
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
       requestBody:
@@ -2664,16 +2676,20 @@ paths:
               $ref: '#/components/schemas/TrustLineCloseRequest'
       responses:
         '200':
-          description: Closed
+          description: Closed, or close requested
           content:
             application/json:
               schema:
                 type: object
+                required: [status, message, trustline]
                 properties:
                   status:
                     type: string
                   message:
                     type: string
+                    description: '`Trustline closed` or `Trustline close requested`.'
+                  trustline:
+                    $ref: '#/components/schemas/TrustLine'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5233,12 +5249,19 @@ components:
       # API-created line. The two display names are non-null wherever the query joins the
       # participant rows, and null only on the metrics capacity path, exactly as
       # AdminParticipantCapacityBottleneck says of itself.
-      required: [id, from, to, equivalent, limit, used, available, status, created_at, updated_at]
+      required: [id, from, to, equivalent, limit, used, available, status, created_at, updated_at, close_requested_at]
       properties:
         id:
           type: string
           format: uuid
           description: TrustLine UUID
+        close_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the creditor asked to close the line (026); null - no request. A requested line keeps limit 0
+            and stays live until the debt it supports is 0, then it is `closed`.
         from:
           type: string
           description: PID of trustline creator (creditor)
@@ -6154,18 +6177,20 @@ components:
         - error_details
       properties:
         operation_type:
-          # The seven writers. This value selects the shape of the three open objects below.
+          # The eight operation types. This value selects the shape of the three open objects below.
           type: string
           enum:
             - TRUST_LINE_CREATE
             - TRUST_LINE_UPDATE
             - TRUST_LINE_CLOSE
+            - TRUST_LINE_CLOSE_REQUEST
             - INTEGRITY_VERIFY
             - PAYMENT
             - CLEARING
             - SIMULATOR_AUDIT_DRIFT
         tx_id:
-          # Only PAYMENT and CLEARING run inside a transaction; the other five write null.
+          # PAYMENT and CLEARING carry their transaction, and so does a TRUST_LINE_CLOSE completed by one of
+          # them (026); the rest write null.
           type: string
           nullable: true
         equivalent:
@@ -8309,8 +8334,9 @@ components:
       # an equivalent, not a set of participants.
       #
       #   TRUST_LINE_CREATE         {from, to}
-      #   TRUST_LINE_UPDATE/CLOSE   {from, to, trustline_id}
-      #   PAYMENT                   {participants}
+      #   TRUST_LINE_UPDATE/CLOSE   {from, to, trustline_id}; CLOSE (the completion) adds completed_by
+      #   TRUST_LINE_CLOSE_REQUEST  {from, to, trustline_id}
+      #   PAYMENT                   {participants, debt_growth?}
       #   CLEARING                  {participants, edges}
       #   SIMULATOR_AUDIT_DRIFT     {drifts, tick_index, source}
       #   INTEGRITY_VERIFY          {}
@@ -8325,7 +8351,26 @@ components:
         to:
           type: string
         trustline_id:
-          # str(uuid). TRUST_LINE_UPDATE and TRUST_LINE_CLOSE only - CREATE does not write it.
+          # str(uuid). TRUST_LINE_UPDATE, TRUST_LINE_CLOSE(_REQUEST) only - CREATE does not write it.
+          type: string
+        debt_growth:
+          # PAYMENT since 026 `T2603.1`: every directed debt the payment grew, as its growth check saw it -
+          # debt_before, debt_amount (after), trust_limit as decimal strings. A diagnostic of that payment; absent
+          # when nothing grew and on older rows.
+          type: array
+          items:
+            type: object
+            properties:
+              debtor_id: {type: string}
+              creditor_id: {type: string}
+              equivalent_id: {type: string}
+              debt_before: {type: string}
+              debt_amount: {type: string}
+              trust_limit: {type: string}
+        completed_by:
+          # TRUST_LINE_CLOSE since 026 `T2603.1`: `request` (closed at the request, no supported debt) or the
+          # money operation kind that brought the supported debt to 0 (`PAYMENT`, `CLEARING`); `tx_id` is then
+          # that operation's. Older CLOSE rows do not carry it.
           type: string
         participants:
           # PAYMENT: `sorted(participant_pids)`, the pids collected off the routed paths.

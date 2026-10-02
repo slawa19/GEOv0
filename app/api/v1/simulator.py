@@ -1491,25 +1491,8 @@ async def action_trustline_close(
             details={"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code},
         )
 
-    used, reverse_used, err = await _pair_debts_or_error(
-        run_id=run_id, action="trustline-close", db=db, parties=parties, with_reverse=True
-    )
-    if err is not None:
-        return err
-    if used > 0 or reverse_used > 0:
-        return _action_error(
-            status_code=409,
-            code="TRUSTLINE_HAS_DEBT",
-            message="Cannot close trustline with non-zero debt",
-            details={
-                "equivalent": parties.eq.code,
-                "from_pid": parties.from_p.pid,
-                "to_pid": parties.to_p.pid,
-                "used": _fmt_decimal_for_api(used),
-                "reverse_used": _fmt_decimal_for_api(reverse_used),
-            },
-        )
-
+    # 026 `T2603.1` (owner В1): no debt refusal here - the service closes at once when the debt the line supports
+    # is 0 and otherwise records the request (limit 0, the line stays live until `Book` closes it).
     # Programme 021, stage 2: as in `action_trustline_update`.
     trust_lines = TrustLineService(db)
     batch = trust_lines.begin_internal_batch()
@@ -1528,7 +1511,12 @@ async def action_trustline_close(
         await db.rollback()
         raise
 
-    await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="close", parties=parties)
+    # A pending request is NOT a removal: publish it as the limit change it is. The lifecycle of the run's
+    # topology after a later completion (scenario, cache, SSE) is 026 S4 (`T2603.2`).
+    if str(tl.status) == "closed":
+        await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="close", parties=parties)
+    else:
+        await _publish_trustline_change_best_effort(run_id=run_id, db=db, op="update", parties=parties, limit_raw="0")
 
     return SimulatorActionTrustlineCloseResponse(
         trustline_id=str(tl.id),
@@ -2065,8 +2053,8 @@ async def action_trustlines_list(
             continue
         pid_to_name[pid] = str(getattr(n, "name", None) or pid)
 
-    # NOTE: `reverse_used` must match the same reverse-debt check used by trustline close.
-    # That check is based on `Debt` table: debtor = from_pid, creditor = to_pid.
+    # NOTE: `reverse_used` is the debt the other way: debtor = from_pid, creditor = to_pid. It no longer gates
+    # a close (026 `T2603.1`: the other line supports it); the UI close guard that still reads it is S4's.
     # For this read-only list we can compute it from DB using the participants referenced
     # in the snapshot links.
 

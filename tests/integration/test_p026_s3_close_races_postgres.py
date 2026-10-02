@@ -2,8 +2,9 @@
 
 Owner В1: the line closes in the transaction that brings the debt it supports to 0 - never stays requested over a
 zero debt, never closes over a non-zero one, and a rolled-back attempt leaves no completion row. The close takes
-the line `FOR UPDATE` and reads the debt; the payment holds the pair's lines `FOR SHARE` (024 `T2415.3`); the
-book's completion reads the requested lines and UPDATEs only the ones it closes (the lock upgrade). Every
+the line `FOR UPDATE` and reads the debt; the payment holds the pair's lines `FOR SHARE` (024 `T2415.3`) and
+upgrades a requested line to `FOR UPDATE` before it writes any debt (the lock upgrade); the book's completion
+UPDATEs only the lines it closes. Every
 schedule is forced by patching a step of the real code (no sleep, no mock of the database); SERIALIZABLE and the
 owners' existing retries (`40001`/`40P01`) decide - the stands assert the outcome AND the mechanism.
 
@@ -13,8 +14,10 @@ WHAT THIS DOES NOT SEE: the simulator's tick (S4), a three-party deadlock, a ret
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import uuid
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
@@ -32,9 +35,6 @@ from tests.conftest import MODE_B
 from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _world
 from tests.integration.test_p026_s3_close_request_postgres import _audit
 from tests.p019_support import TargetMismatch, require_target
-
-_XFAIL = pytest.mark.xfail(raises=TargetMismatch, strict=True,
-                           reason="026 target, delivered by T2603.1: a close request racing money")
 
 
 async def _close(session, line_id, creditor_id) -> str:
@@ -76,7 +76,6 @@ def _retries(caplog, event: str) -> list[str]:
     return [r.getMessage() for r in caplog.records if event in r.getMessage()]
 
 
-@_XFAIL
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_close_committed_between_routing_and_binding_is_completed_by_the_retry(
@@ -102,7 +101,6 @@ async def test_a_close_committed_between_routing_and_binding_is_completed_by_the
     assert [m for m in _retries(caplog, "payment.attempt_retry") if "pgcode=40001" in m], "no 40001 retry"
 
 
-@_XFAIL
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_repayment_committed_after_the_close_snapshot_refuses_the_stale_close(client, db_session) -> None:
@@ -126,7 +124,6 @@ async def test_a_repayment_committed_after_the_close_snapshot_refuses_the_stale_
                    f"stale close -> {stale}; a fresh close -> {again}")
 
 
-@_XFAIL
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_close_committed_inside_a_clearing_is_completed_by_its_retry(
@@ -151,35 +148,38 @@ async def test_a_close_committed_inside_a_clearing_is_completed_by_its_retry(
     assert [m for m in _retries(caplog, "clearing.attempt_retry") if "40001" in m], "no 40001 retry"
 
 
-@_XFAIL
 @MODE_B
 @pytest.mark.asyncio
-async def test_the_lock_upgrade_against_a_payment_holding_the_line_resolves_by_retry(
+async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_result(
         client, db_session, monkeypatch, caplog) -> None:
-    # P2 binds (FOR SHARE on A -> B) and waits; P1 repays to zero and its completion UPDATEs A -> B (the
-    # upgrade) while P2 then writes the same debt: a deadlock PostgreSQL breaks, one side retries and is refused.
+    # Two payments repay the requested line's debt to zero. P2 binds - the router's hint makes it lock A -> B
+    # `FOR UPDATE` at once - and waits; P1 routes and reaches the same lock while P2 completes. P1 must WAIT
+    # (not deadlock), fail 40001 on the line P2 closed, and its retry routes around it (A -> C -> B). Measured before this
+    # shape: a `FOR SHARE -> FOR UPDATE` upgrade deadlocked both payments on every retry until both spent
+    # their budget (`refused RetryablePaymentConflictException` twice, 40P01 and pivot 40001 alternating).
     caplog.set_level(logging.INFO)
     code, p, line_id, line_key, factory = await _stand(client, db_session)
     async with factory() as s:
         assert await _close(s, line_id, p["A"]["id"]) == "active"
-    apply, settle = PaymentService._apply_payment, book_module._settle_requested_closes
-    p2_bound, release = asyncio.Event(), asyncio.Event()
+    apply, segment, who = PaymentService._apply_payment, PaymentService._segment, contextvars.ContextVar("payment")
+    p2_locked, release = asyncio.Event(), asyncio.Event()
 
     async def apply_payment(self, declaration, **kwargs):
-        if declaration.tx_id == "p2" and not p2_bound.is_set():
-            p2_bound.set()
+        if who.get(None) == "p2" and not p2_locked.is_set():
+            p2_locked.set()  # P2 holds A -> B FOR UPDATE (bind is done) and has not written money yet
             await release.wait()
         return await apply(self, declaration, **kwargs)
 
-    async def settle_requested(session, op, rows):
-        if op.tx_id == "p1":
-            release.set()  # P1 is about to read and UPDATE the requested line P2 holds FOR SHARE
-        return await settle(session, op, rows)
+    async def segment_of(self, *args):
+        if who.get(None) == "p1":
+            release.set()  # P1 has routed (its snapshot is taken) and now locks A -> B, held by P2
+        return await segment(self, *args)
 
     monkeypatch.setattr(PaymentService, "_apply_payment", apply_payment)
-    monkeypatch.setattr(book_module, "_settle_requested_closes", settle_requested)
+    monkeypatch.setattr(PaymentService, "_segment", segment_of)
 
     async def pay(tx_id: str) -> str:
+        who.set(tx_id)  # the payment's phases run in tasks of their own (`wait_for`): a context var follows
         async with factory() as s:
             try:
                 return (await PaymentService(s).create_payment_internal(
@@ -188,13 +188,14 @@ async def test_the_lock_upgrade_against_a_payment_holding_the_line_resolves_by_r
                 return f"refused {type(exc).__name__}"
 
     p2 = asyncio.create_task(pay("p2"))
-    await asyncio.wait_for(p2_bound.wait(), timeout=30)
-    outcomes = sorted(await asyncio.wait_for(asyncio.gather(pay("p1"), p2), timeout=60))
+    await asyncio.wait_for(p2_locked.wait(), timeout=30)
+    outcomes = await asyncio.wait_for(asyncio.gather(pay("p1"), p2), timeout=60)
     conflicts = [m for m in _retries(caplog, "payment.attempt_retry") if "40P01" in m or "40001" in m]
     audit = [op for op, _ in await _audit(factory, line_key)]
-    assert outcomes[0] == "COMMITTED" and outcomes[1].startswith("refused"), outcomes
-    assert conflicts, "no deadlock or serialization retry: the schedule did not race"
-    require_target(await _status(factory, line_id) == "closed" and await _debts(factory, code) == {}
+    assert release.is_set() and conflicts, f"the schedule did not race: {conflicts}"
+    a, b, c = (p[n]["id"] for n in "ABC")
+    require_target(outcomes == ["COMMITTED", "COMMITTED"] and not [m for m in conflicts if "40P01" in m]
+                   and await _status(factory, line_id) == "closed"
+                   and await _debts(factory, code) == {(a, c): Decimal("50"), (c, b): Decimal("50")}
                    and audit == ["TRUST_LINE_CLOSE", "TRUST_LINE_CLOSE_REQUEST"],
-                   f"outcomes {outcomes}, audit {audit}, retries {conflicts}")
-
+                   f"p1, p2 -> {outcomes}, audit {audit}, retries {conflicts}")

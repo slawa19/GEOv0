@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID
 from decimal import Decimal
 from typing import List, Literal, Sequence
@@ -19,7 +20,12 @@ from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 from app.db.models.debt import Debt
-from app.db.models.audit_log import IntegrityAuditLog
+from app.db.models.audit_log import (
+    TRUST_LINE_CLOSE,
+    TRUST_LINE_CLOSE_REQUEST,
+    IntegrityAuditLog,
+    trust_line_close_completed,
+)
 from app.db.sqlstate import deliberate_chain, sqlstate
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
@@ -126,8 +132,8 @@ class TrustLineWriteBatch:
     still gets its own `IntegrityAuditLog` row - the record of the operation - staged in `finish()`, after every
     mutation is flushed and before the caller commits. The row says that no check ran in this transaction:
     `verification_passed = null`, empty checksums, `invariants_checked = {}`. What guards a trust-line
-    operation are its own refusals, which raise (`execute_update`: a limit below the used amount;
-    `execute_close`: a debt in either direction); the whole equivalent is checked by the periodic checkpoint,
+    operation are its own refusals, which raise (`execute_update`: a positive limit on a line whose close is
+    requested); the whole equivalent is checked by the periodic checkpoint,
     by `POST /integrity/verify` and by the reconciliation.
 
     A batch of an internal caller labels its rows (`affected_participants.checkpoint_scope =
@@ -339,7 +345,10 @@ class TrustLineService:
         PaymentRouter.invalidate_cache(equivalent_code)
         return response
 
-    async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> None:
+    async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> TrustLine:
+        """Close, or request the close of, a line; returns its FACTUAL state (026 `T2603.1`): `closed`, or still
+        `active`/`frozen` with limit 0 and `close_requested_at` while the debt it supports is owed."""
+
         batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
         trustline = await self.execute_close(batch, trustline_id, user_id, data, require_signature=True)
         await batch.finish()
@@ -349,8 +358,12 @@ class TrustLineService:
                 select(Equivalent.code).where(Equivalent.id == trustline.equivalent_id)
             )
         ).scalar_one()
+        # See the note in `create`: readback before commit, no mandatory read after it.
+        await self.session.refresh(trustline)
+        response = await self._hydrate_trustline(trustline)
         await self.session.commit()
         PaymentRouter.invalidate_cache(equivalent_code)
+        return response
 
     # ------------------------------------------------------------------ execution in the caller's transaction
 
@@ -589,7 +602,13 @@ class TrustLineService:
                 raise InvalidSignatureException("Invalid signature")
 
         # Every refusal BEFORE the first mutation and before the batch is touched. There is no debt floor
-        # any more (026 `T2602`): a limit below `used` is a trust change, see the docstring.
+        # any more (026 `T2602`): a limit below `used` is a trust change, see the docstring. A requested close
+        # keeps the limit at 0 (026 `T2603.1`, fork 6): a positive limit is a conflict and does not cancel it.
+        if trustline.close_requested_at is not None and new_limit is not None and new_limit > 0:
+            raise ConflictException(
+                "Trustline close is requested; its limit stays 0 until it closes",
+                details={"reason": "TRUSTLINE_CLOSE_REQUESTED", "trustline_id": str(trustline_id)},
+            )
         if data.policy is not None:
             validate_trustline_policy(data.policy)
 
@@ -626,9 +645,22 @@ class TrustLineService:
         *,
         require_signature: bool,
     ) -> TrustLine:
-        """Close a live line with no debt either way, in the caller's transaction, recorded on `batch`."""
+        """Request the close of a live line, in the caller's transaction, recorded on `batch` (026 `T2603.1`).
 
-        stmt = select(TrustLine).where(TrustLine.id == trustline_id)
+        THE RULE (owner В1/В2, 2026-09-29; protocol §5.3): the limit becomes 0 and `close_requested_at` is set.
+        Only the debt the line SUPPORTS counts - the debtor (`to`) owing the creditor (`from`); a debt the other
+        way belongs to the other line. Zero: the line is `closed` now (completion row `TRUST_LINE_CLOSE`,
+        `completed_by = request`). Otherwise it stays `active`/`frozen` (a freeze is kept) with a
+        `TRUST_LINE_CLOSE_REQUEST` row, and the money operation that brings that debt to exactly 0 closes it
+        (`app/core/ledger/book.py`, `_settle_requested_closes`). Repeating the request while it is pending
+        changes nothing and writes no row.
+
+        LOCKS, as `execute_update`: the line `FOR UPDATE` before any decision, the only lock taken; the debt is a
+        plain read in this snapshot. A payment that repaid after this snapshot makes SERIALIZABLE fail one side
+        with 40001 (not retried here: the caller rolls back, nothing is applied).
+        """
+
+        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update()
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
 
@@ -666,27 +698,25 @@ class TrustLineService:
             except Exception:
                 raise InvalidSignatureException("Invalid signature")
 
-        # Check debt
-        used = await self._get_used_amount(trustline)
-        reverse_used = await self._get_reverse_used_amount(trustline)
-        if used > 0 or reverse_used > 0:
-            raise BadRequestException("Cannot close trustline with non-zero debt")
+        supported = await self._get_used_amount(trustline)
+        requested_now = trustline.close_requested_at is None
+        if not requested_now and supported > 0:
+            return trustline  # the request stands: same state, original timestamp, no second row
 
         equivalent_code = await self._equivalent_code(trustline.equivalent_id)
         await batch._touch(trustline.equivalent_id, equivalent_code)
-
-        trustline.status = 'closed'
-
+        if requested_now:
+            trustline.limit = Decimal("0")
+            trustline.close_requested_at = datetime.now(timezone.utc)
         from_pid, to_pid = await self._pids(trustline)
-        batch._record(
-            "TRUST_LINE_CLOSE",
-            trustline.equivalent_id,
-            {
-                "from": str(from_pid or trustline.from_participant_id),
-                "to": str(to_pid or trustline.to_participant_id),
-                "trustline_id": str(trustline_id),
-            },
-        )
+        parties = (str(from_pid or trustline.from_participant_id), str(to_pid or trustline.to_participant_id))
+        if supported > 0:
+            batch._record(TRUST_LINE_CLOSE_REQUEST, trustline.equivalent_id,
+                          {"from": parties[0], "to": parties[1], "trustline_id": str(trustline_id)})
+            return trustline
+        trustline.status = "closed"
+        batch._record(TRUST_LINE_CLOSE, trustline.equivalent_id,
+                      trust_line_close_completed(*parties, str(trustline_id), "request"))
         return trustline
 
     async def import_initial_trustlines(
@@ -1011,8 +1041,9 @@ class TrustLineService:
         # A CLOSED line is history: the debt on this pair belongs to whatever incarnation is
         # live now, not to it.  Reporting the successor's debt as a closed line's `used`
         # would show an operator a foreign amount -- and, with `available = limit - used`,
-        # a negative capacity on a line that no longer exists.  Closing requires zero debt
-        # (protocol §5.3), so a closed line's own `used` is zero by construction.
+        # a negative capacity on a line that no longer exists.  A line closes only when the debt it
+        # supports is zero (protocol §5.3; 026 `T2603.1`: at the request, or in the money operation that
+        # repaid it), so a closed line's own `used` is zero by construction.
         if str(getattr(trustline, "status", "")) == "closed":
             return Decimal("0")
 
@@ -1022,24 +1053,6 @@ class TrustLineService:
                 Debt.debtor_id == trustline.to_participant_id,
                 Debt.creditor_id == trustline.from_participant_id,
                 Debt.equivalent_id == trustline.equivalent_id
-            )
-        )
-        result = await self.session.execute(stmt)
-        amount = result.scalar_one_or_none()
-        return amount if amount is not None else Decimal('0')
-
-    async def _get_reverse_used_amount(self, trustline: TrustLine) -> Decimal:
-        # Same reasoning as `_get_used_amount`: a closed incarnation must not display the
-        # live successor's debt.
-        if str(getattr(trustline, "status", "")) == "closed":
-            return Decimal("0")
-
-        # Reverse debt: debtor is 'from' and creditor is 'to'
-        stmt = select(Debt.amount).where(
-            and_(
-                Debt.debtor_id == trustline.from_participant_id,
-                Debt.creditor_id == trustline.to_participant_id,
-                Debt.equivalent_id == trustline.equivalent_id,
             )
         )
         result = await self.session.execute(stmt)

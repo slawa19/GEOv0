@@ -21,6 +21,8 @@ class TrustLine(TrustLineBase):
     status: str
     created_at: datetime
     updated_at: datetime
+    # 026 `T2603.1`: when the creditor asked to close; NULL = no request. No default: every projection says it.
+    close_requested_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -48,6 +50,14 @@ class TrustLineUpdateRequest(BaseModel):
 
 class TrustLineCloseRequest(BaseModel):
     signature: str
+
+
+class TrustLineCloseResult(BaseModel):
+    """`DELETE /trustlines/{id}` (026 `T2603.1`): the line's factual state - `closed`, or still live with a request."""
+
+    status: str = "success"
+    message: str
+    trustline: TrustLine
 
 class TrustLinesList(BaseModel):
     items: List[TrustLine]

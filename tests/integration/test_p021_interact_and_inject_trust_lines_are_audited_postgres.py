@@ -168,8 +168,11 @@ async def test_interact_actions_write_one_audit_row_and_one_checkpoint_pair_each
     assert r3.status_code == 200, r3.text
     assert r3.json() == {"ok": True, "trustline_id": p1["trustline_id"], "client_action_id": "c3"}, r3.json()
     line = await _live_line(db_session, rows)
+    # INTENTIONAL, 026 `T2603.1` (owner В1): a close is the creditor's trust going to 0 - the closed row keeps limit 0
+    # (was the last limit, 150) and the request time.
     assert (str(line.id), Decimal(str(line.limit)), line.status, dict(line.policy or {})) == (
-        p1["trustline_id"], Decimal("150"), "closed", DEFAULT_POLICY)
+        p1["trustline_id"], Decimal("0"), "closed", DEFAULT_POLICY)
+    assert line.close_requested_at is not None
 
     audit = await trust_line_audit_rows(db_session, equivalent_codes=[w.eq])
     audit.sort(key=lambda r: ["TRUST_LINE_CREATE", "TRUST_LINE_UPDATE", "TRUST_LINE_CLOSE"].index(r.operation_type))

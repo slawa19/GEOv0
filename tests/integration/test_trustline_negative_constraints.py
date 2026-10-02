@@ -99,7 +99,7 @@ async def test_trustline_update_accepts_limit_below_used(client: AsyncClient, db
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_trustline_close_rejects_non_zero_debt(client: AsyncClient, db_session):
+async def test_trustline_close_with_debt_is_a_request(client: AsyncClient, db_session):
     await _seed_equivalent(db_session, "USD")
 
     alice = await register_and_login(client, "Alice_TS09")
@@ -147,17 +147,14 @@ async def test_trustline_close_rejects_non_zero_debt(client: AsyncClient, db_ses
     assert pay.status_code == 200, pay.text
     assert pay.json()["status"] == "COMMITTED"
 
-    # Cannot close while there is outstanding debt in either direction.
-    close = await client.request(
-        "DELETE",
-        f"/api/v1/trustlines/{tl_id}",
-        headers=bob["headers"],
-        json={
-            "signature": _sign_trustline_close_request(
-                signing_key=bob_sk,
-                trustline_id=tl_id,
-            )
-        },
-    )
-    assert close.status_code == 400, close.text
-    assert close.json()["error"]["code"] == "E009"
+    # INTENTIONAL, 026 `T2603.1` (owner В1 2026-09-29): a close with outstanding debt was refused (400 E009); it is
+    # now a REQUEST - limit 0, the line stays active until Alice's debt is repaid. The auth counter-check stays: only
+    # the creditor may ask, and a stranger's request changes nothing.
+    close_body = {"signature": _sign_trustline_close_request(signing_key=bob_sk, trustline_id=tl_id)}
+    foreign = await client.request("DELETE", f"/api/v1/trustlines/{tl_id}", headers=alice["headers"], json=close_body)
+    assert foreign.status_code == 403, foreign.text
+    close = await client.request("DELETE", f"/api/v1/trustlines/{tl_id}", headers=bob["headers"], json=close_body)
+    assert close.status_code == 200, close.text
+    line = close.json()["trustline"]
+    assert (line["status"], Decimal(line["limit"]), Decimal(line["used"])) == ("active", 0, 10), line
+    assert line["close_requested_at"], line

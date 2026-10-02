@@ -447,7 +447,8 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
         )
     await db_session.commit()
 
-    # Act 2: error close (used>0)
+    # Act 2: close with debt. INTENTIONAL, 026 `T2603.1` (owner В1 2026-09-29): was 409 TRUSTLINE_HAS_DEBT; it is
+    # now a close REQUEST through the same service - limit 0, the line stays active until the debt is repaid.
     r2 = await client.post(
         "/api/v1/simulator/runs/test-run/actions/trustline-close",
         headers=headers,
@@ -458,9 +459,10 @@ async def test_action_trustline_close_happy_and_has_debt(client, db_session, int
             "client_action_id": "c_tl_close_2",
         },
     )
-    assert r2.status_code == 409
-    p2 = r2.json()
-    assert p2.get("code") == "TRUSTLINE_HAS_DEBT"
+    assert r2.status_code == 200, r2.text
+    line = (await db_session.execute(select(TrustLine).where(TrustLine.id == uuid.UUID(r2.json()["trustline_id"]))
+                                     .execution_options(populate_existing=True))).scalar_one()
+    assert (line.status, line.limit, line.close_requested_at is not None) == ("active", 0, True)
 
 
 @pytest.mark.asyncio

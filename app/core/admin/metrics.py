@@ -516,6 +516,7 @@ async def _compute_capacity(
                 "status": trustline.status,
                 "created_at": trustline.created_at,
                 "updated_at": trustline.updated_at,
+                "close_requested_at": trustline.close_requested_at,
                 "policy": trustline.policy,
             }
         )

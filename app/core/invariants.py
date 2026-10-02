@@ -48,7 +48,7 @@ def _limit_item(row, before: Optional[Decimal] = None) -> dict:
         "violation_amount": str(row.debt_amount - limit),
     }
     if before is not None:
-        item["debt_before"] = str(before)
+        item["debt_before"] = format(before, "f")  # a decimal string: `str` spells a zero of scale 8 `0E-8`
     return item
 
 
@@ -64,7 +64,7 @@ class InvariantChecker:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def check_debt_growth(self, before: Mapping[DebtEdge, Decimal]) -> None:
+    async def check_debt_growth(self, before: Mapping[DebtEdge, Decimal]) -> List[dict]:
         """THE growth rule (026 В3, `T2601`): no directed debt grows above its creditor's limit.
 
         For every directed debt in `before` - its amount before the operation - the current amount
@@ -74,24 +74,32 @@ class InvariantChecker:
         growth of the reverse debt. ONE SELECT over the named debts. The two write-path callers:
         `PaymentService._apply_payment` (`before` = the payment's prestate) and `Book`'s completion
         (`before` = the journal's first `amount_before`), which also covers direct `Book` calls.
+
+        Returns the checked growth transitions (`debt_before`, `debt_amount`, `trust_limit` of every debt that
+        grew) for the operation's audit metadata (026 `T2603.1`, the S1 §15 P3) - a diagnostic of THIS
+        operation, not a proof about older ones.
         """
 
         if not before:
-            return
+            return []
         named = [and_(Debt.equivalent_id == e, Debt.debtor_id == d, Debt.creditor_id == c) for e, d, c in before]
         query = select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id, Debt.amount.label("debt_amount"),
                        TrustLine.limit.label("trust_limit"))
         rows = (await self.session.execute(
             query.select_from(Debt).outerjoin(TrustLine, _supporting_line()).where(or_(*named)))).all()
-        violations = []
+        grown, violations = [], []
         for row in rows:
             was = before[(row.equivalent_id, row.debtor_id, row.creditor_id)]
-            if row.debt_amount > was and row.debt_amount > (row.trust_limit or Decimal("0")):
-                violations.append(_limit_item(row, was))
+            if row.debt_amount > was:
+                item = _limit_item(row, was)
+                if row.debt_amount > (row.trust_limit or Decimal("0")):
+                    violations.append(item)
+                grown.append({k: v for k, v in item.items() if k != "violation_amount"})
         if violations:
             raise _trust_limit_violation(
                 f"Trust limit exceeded: {len(violations)} debt(s) grew above the limit", violations
             )
+        return grown
 
     async def check_trust_limits(
         self,

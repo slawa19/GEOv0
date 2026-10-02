@@ -675,6 +675,7 @@ async def _load_admin_trustline_bottlenecks(
             p_to.display_name.label("to_display_name"),
             used_expr.label("used"),
             available_expr.label("available"),
+            TrustLine.close_requested_at,
         )
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
@@ -715,6 +716,7 @@ async def _load_admin_trustline_bottlenecks(
         to_display_name,
         used,
         available,
+        close_requested_at,
     ) in rows:
         if not is_ratio_below_threshold(
             numerator=available,
@@ -740,6 +742,7 @@ async def _load_admin_trustline_bottlenecks(
                     "status": status,
                     "created_at": created_at,
                     "updated_at": updated_at,
+                    "close_requested_at": close_requested_at,
                     "policy": policy,
                 }
             )
@@ -1795,6 +1798,7 @@ async def admin_graph_snapshot(
             p_to.pid.label("to_pid"),
             p_to.display_name.label("to_display_name"),
             func.coalesce(Debt.amount, 0).label("used"),
+            TrustLine.close_requested_at,
         )
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
@@ -1837,6 +1841,7 @@ async def admin_graph_snapshot(
         to_pid,
         to_display_name,
         used,
+        close_requested_at,
     ) in tl_rows:
         used_dec = used
         available = limit - used_dec
@@ -1855,6 +1860,7 @@ async def admin_graph_snapshot(
                     "status": status,
                     "created_at": created_at,
                     "updated_at": updated_at,
+                    "close_requested_at": close_requested_at,
                     "policy": policy,
                 }
             )
@@ -2157,6 +2163,7 @@ async def admin_graph_ego(
             p_to.pid.label("to_pid"),
             p_to.display_name.label("to_display_name"),
             func.coalesce(Debt.amount, 0).label("used"),
+            TrustLine.close_requested_at,
         )
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
@@ -2202,6 +2209,7 @@ async def admin_graph_ego(
         to_pid,
         to_display_name,
         used,
+        close_requested_at,
     ) in tl_rows:
         available = limit - used
         trustlines.append(
@@ -2219,6 +2227,7 @@ async def admin_graph_ego(
                     "status": tl_status,
                     "created_at": created_at,
                     "updated_at": updated_at,
+                    "close_requested_at": close_requested_at,
                     "policy": policy,
                 }
             )

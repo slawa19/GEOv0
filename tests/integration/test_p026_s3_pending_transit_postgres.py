@@ -31,9 +31,6 @@ from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import writer_operation
 from tests.p019_support import TargetMismatch, require_target
 
-_XFAIL = pytest.mark.xfail(raises=TargetMismatch, strict=True,
-                           reason="026 target, delivered by T2603.1: a pending pair only shrinks (В2)")
-
 
 async def _stand(db_session, *, ab_policy=None):
     code = f"V{uuid.uuid4().hex[:6].upper()}"
@@ -85,7 +82,6 @@ _CASES = {
 }
 
 
-@_XFAIL
 @pytest.mark.parametrize("case", list(_CASES))
 @MODE_B
 @pytest.mark.asyncio
@@ -111,21 +107,20 @@ async def test_a_pending_pair_carries_only_what_shrinks_its_debt(db_session, cas
                    f"{case}: {payer} pays {payee} {amount} -> {outcome}; state {after}, expected {want}")
 
 
-@_XFAIL
-@pytest.mark.parametrize("side", ["closing_line_forbids_mediation", "other_line_blocks_payer"])
+@pytest.mark.parametrize("side", ["closing_line_forbids_mediation", "other_line_blocks_the_mediator"])
 @MODE_B
 @pytest.mark.asyncio
 async def test_both_lines_policies_still_apply_on_a_pending_pair(db_session, side) -> None:
     eq, p, factory, line_id = await _stand(
         db_session, ab_policy={"can_be_intermediate": False} if side.startswith("closing") else None)
-    if side.startswith("other"):  # B's own line B -> A names the payer C, through the service (unsigned path)
+    if side.startswith("other"):  # B's own line B -> A blocks A as a mediator, through the service (unsigned)
         async with factory() as s:
             service = TrustLineService(s)
             ba = (await s.execute(select(TrustLine.id).where(TrustLine.from_participant_id == p["B"].id,
                                                              TrustLine.to_participant_id == p["A"].id))).scalar_one()
             batch = service.begin_internal_batch()
             await service.execute_update(batch, ba, p["B"].id, TrustLineUpdateRequest(
-                policy={"blocked_participants": [p["C"].pid]}, signature="-"), require_signature=False)
+                policy={"blocked_participants": [p["A"].pid]}, signature="-"), require_signature=False)
             await batch.finish()
             await s.commit()
     async with factory() as s:
@@ -154,7 +149,6 @@ async def _book_flows(factory, eq, p, flows):
             return exc.details.get("invariant")
 
 
-@_XFAIL
 @MODE_B
 @pytest.mark.asyncio
 async def test_the_book_judges_the_whole_operation_not_each_flow(db_session) -> None:

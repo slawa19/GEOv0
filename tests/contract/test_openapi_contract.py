@@ -330,8 +330,13 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # which `PaymentError.details` carries into `GET /payments`, `GET /payments/{tx_id}` and `POST /payments`. All
 # seven were already in the ledger. Measured with a per-entry dump of every ledger on `d05a763` and on this tree:
 # error and security ledgers identical, counts 62 / 51 / 66 on both.
+# 2026-10-02 / programme 026 `T2603.1`: count HOLDS at 62, digest moves. TWELVE entries change content, none enters
+# or leaves: `TrustLine` gains `close_requested_at` (`POST`, `PATCH`, both `GET` of `/trustlines`; the Admin trustline,
+# bottleneck, liquidity, metrics and graph reads), `DELETE /trustlines/{id}` answers `{status, message, trustline}`,
+# and `GET /integrity/audit-log` gains `TRUST_LINE_CLOSE_REQUEST`, `completed_by` and `debt_growth`. Measured with a per-entry dump of
+# every ledger on `d9cce2d` and on this tree: security ledger identical; counts 62 / 51 / 66 on both.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "211991343c1097c486bbf5de4b95b6296a2e2e4a023a54c21829202aaca2ec02"
+    "90079224e204aa2d77661ac9e084111f963b0d7c57296426ea7e499c81653c88"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -454,8 +459,11 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # carries it on both halves; `GET /admin/health/db` declared its 403/422 as an inline copy of the envelope
 # and now refers to `ErrorEnvelope`, so it does not enter. Measured on both trees: the same 51 keys, and the
 # ledger with every `request_id` key removed equals the previous ledger (`90c5cbff...3614`).
+# 2026-10-02 / programme 026 `T2603.1`: count HOLDS at 51, digest moves. ONE entry changes content: the canon's
+# `PATCH /trustlines/{id}` declares 409 (a positive limit while a close is requested); FastAPI declares no 409 there.
+# Measured with the same per-entry dump on `d9cce2d` and on this tree.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "6e1aca426f561a70a0800c683d5a7c0e18aa12831c8210070211f8747d532345"
+    "ce80eccb2729aeea4faa4a18249112a47800a9e22b9d8410f1cfd2235cd95c7b"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

@@ -32,11 +32,7 @@ from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
     _sign_trustline_update_request,
 )
-from tests.p019_support import TargetMismatch, require_target
-
-
-def target_xfail_026(what: str):
-    return pytest.mark.xfail(raises=TargetMismatch, strict=True, reason=f"026 target, delivered by T2603.1: {what}")
+from tests.p019_support import require_target
 
 
 async def _close(client, creditor, line_id: str):
@@ -78,7 +74,6 @@ async def _request_close_with_debt(client, factory, p, lines, code: str) -> dict
     return r.json()
 
 
-@target_xfail_026("a close with debt is a request; the payment that brings the supported debt to 0 completes it")
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(client, db_session) -> None:
@@ -99,7 +94,7 @@ async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(clien
     # Trust is 0: no borrowing; a positive limit is a conflict and keeps the request; policy alone is allowed.
     assert not await _pay(factory, b, a, code, "0.01")
     r = await _patch_limit(client, a, lines["AB"], "10")
-    assert r.status_code == 409 and r.json()["details"]["reason"] == "TRUSTLINE_CLOSE_REQUESTED", r.text
+    assert r.status_code == 409 and r.json()["error"]["details"]["reason"] == "TRUSTLINE_CLOSE_REQUESTED", r.text
     key = SigningKey(base64.b64decode(a["priv"]))
     policy = {"auto_clearing": False}
     r = await client.patch(f"/api/v1/trustlines/{lines['AB']}", headers=a["headers"], json={
@@ -124,7 +119,6 @@ async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(clien
     assert new_id != lines["AB"] and fresh["close_requested_at"] is None and fresh["status"] == "active"
 
 
-@target_xfail_026("the clearing that brings the supported debt to 0 completes the requested close")
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_clearing_completes_a_requested_close(client, db_session) -> None:
@@ -142,7 +136,6 @@ async def test_a_clearing_completes_a_requested_close(client, db_session) -> Non
         ("TRUST_LINE_CLOSE", "CLEARING"), ("TRUST_LINE_CLOSE_REQUEST", None)], audit
 
 
-@target_xfail_026("a debt the other way is the other line's: it does not hold the close (protocol §5.3)")
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_reverse_debt_does_not_hold_the_close(client, db_session) -> None:
@@ -160,7 +153,6 @@ async def test_a_reverse_debt_does_not_hold_the_close(client, db_session) -> Non
     assert [(op, x.get("completed_by")) for op, x in audit] == [("TRUST_LINE_CLOSE", "request")], audit
 
 
-@target_xfail_026("a payment that fails after zeroing the debt leaves the request pending and no completion row")
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_rolled_back_repayment_leaves_no_completion(client, db_session, monkeypatch) -> None:
@@ -196,3 +188,17 @@ async def test_a_zero_limit_without_a_request_never_closes(client, db_session) -
     async with factory() as s:
         status = (await s.execute(select(TrustLine.status).where(TrustLine.id == uuid.UUID(lines["AB"])))).scalar_one()
     assert status == "active"
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_payment_records_the_growth_it_checked(client, db_session) -> None:
+    # S1 §15 P3, delivered here: the payment's audit row carries the transition and the limit its check passed.
+    code, p, lines, factory = await _world(client, db_session)
+    assert await _pay(factory, p["B"], p["A"], code, "50")
+    async with factory() as s:
+        rows = (await s.execute(select(IntegrityAuditLog.affected_participants).where(
+            IntegrityAuditLog.operation_type == "PAYMENT", IntegrityAuditLog.equivalent_code == code))).scalars().all()
+    [grown] = [g for a in rows for g in (a or {}).get("debt_growth", [])]
+    assert [Decimal(grown[k]) for k in ("debt_before", "debt_amount", "trust_limit")] == [0, 50, 100], grown
+    assert (grown["debtor_id"], grown["creditor_id"]) == (str(p["B"]["id"]), str(p["A"]["id"])), grown

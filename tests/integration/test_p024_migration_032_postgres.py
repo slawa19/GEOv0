@@ -39,7 +39,10 @@ async def _not_null(url: str) -> bool:
 async def test_032_lets_a_row_say_no_check_ran_and_goes_back_only_without_such_rows(committed_database) -> None:
     url = committed_database.url
     await committed_database.engine.dispose()
-    assert repository_head() == _AFTER, "this module pins migration 032 as the head it tests"
+    assert await _version(url) == [(repository_head(),)]
+    if repository_head() != _AFTER:  # a later head (033, 026 `T2603.1`): step down to the revision under test
+        stepped = _alembic(url, "downgrade", _AFTER)
+        assert stepped.returncode == 0, stepped.stderr
     assert await _version(url) == [(_AFTER,)]
     assert not await _not_null(url)
 
