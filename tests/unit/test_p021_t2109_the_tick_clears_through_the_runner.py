@@ -179,7 +179,7 @@ def test_the_scan_reads_the_tick_the_runner_the_tests_and_the_scripts() -> None:
         TICK_MODULE,
         "app/core/simulator/real_runner_impl.py",
         "tests/simulator_tick_stand.py",
-        "scripts/measure_p020_dfs_acceptance.py",
+        "scripts/seed_recipe.py",
     ):
         assert carrier in modules, f"the scan does not read {carrier}"
 
