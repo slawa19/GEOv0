@@ -968,8 +968,8 @@ class RealTick:
                     )
                     done_emitted = True
                     # 026 `T2603.2`: the patches were read after the occurrences committed (`on_committed`).
-                    publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run,
-                                              equivalent=eq, pairs=closed)
+                    await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run,
+                                                    equivalent=eq, pairs=closed)
                     rr._logger.warning(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
                         str(run.run_id),

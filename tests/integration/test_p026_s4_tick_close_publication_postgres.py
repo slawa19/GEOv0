@@ -33,7 +33,7 @@ from tests.conftest import MODE_B
 from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _world
 from tests.integration.test_p026_s3_close_request_postgres import _close, _line
 from tests.integration.test_scenarios import _sign_trustline_create_request
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import RecordingSse
 
 _LOG = logging.getLogger(__name__)
@@ -98,6 +98,7 @@ async def test_the_tick_removes_a_closed_line_only_after_a_confirmed_commit(clie
         if outcome == "commit":
             await session.commit()
             assert effects.apply_after_commit()
+            await asyncio.gather(*effects.closed_publications)
         else:
             await session.rollback()
             resolve = {"rollback": effects.apply_after_rollback, "discard": effects.discard,
@@ -149,7 +150,6 @@ async def test_an_interact_clearing_that_completes_a_close_removes_the_edge_once
 
 
 @MODE_B
-@pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="026 S4 adversarial cause B, fixed next")
 @pytest.mark.asyncio
 async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_close(client, db_session, monkeypatch) -> None:
     """Internal adversarial S4, cause B: the publication trusts a closure seen before it ran.
@@ -187,7 +187,7 @@ async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_clos
 
     effects = result.deferred_effects
     assert effects.apply_after_commit()
-    await asyncio.gather(*getattr(effects, "closed_publications", ()))
+    await asyncio.gather(*effects.closed_publications)  # the re-read runs off the commit callback
     assert sse.published("tx.updated") == 1
     require_target(
         _removals(sse.events) == [] and (a, b) in run._edges_by_equivalent[code]

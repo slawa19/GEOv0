@@ -17,7 +17,7 @@ from app.core.payments.service import (
 )
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.rejection_codes import map_rejection_code
-from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, publish_closed_trustlines
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, schedule_closed_trustlines_publication
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.core.simulator.models import RunRecord
 from app.core.simulator.run_perimeter import run_perimeter_pids
@@ -58,6 +58,8 @@ class DeferredRealPaymentEffects:
     run_id: str
     run: RunRecord
     items: list[_PaymentObservation] = field(default_factory=list)
+    # 026 `T2603.2`: the closure publications this buffer's commit scheduled (re-read outside the commit callback).
+    closed_publications: list[asyncio.Task] = field(default_factory=list)
     _resolution: Literal["commit", "rollback", "unknown", "discarded"] | None = field(
         default=None,
         init=False,
@@ -176,8 +178,11 @@ class DeferredRealPaymentEffects:
                     exc_info=True,
                 )
             # Only here, on a confirmed commit: a rollback, an unknown outcome or a discarded attempt never removes.
-            publish_closed_trustlines(emitter=self.emitter, lock=self.lock, run_id=self.run_id, run=self.run,
-                                      equivalent=item.equivalent, pairs=item.closed_edges)
+            task = schedule_closed_trustlines_publication(emitter=self.emitter, lock=self.lock, run_id=self.run_id,
+                                                          run=self.run, equivalent=item.equivalent,
+                                                          pairs=item.closed_edges)
+            if task is not None:
+                self.closed_publications.append(task)
             with self.lock:
                 self.run.last_event_type = "tx.updated"
                 self.run.attempts_total += 1

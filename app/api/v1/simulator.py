@@ -249,13 +249,13 @@ async def _emit_interact_clearing_done_best_effort(
             exc_info=True,
         )
     # 026 `T2603.2`: every occurrence above is committed (`on_committed`); the lines it closed leave the run.
-    _publish_closed_best_effort(run_id=run_id, run=run, equivalent=equivalent_code, pairs=closed)
+    await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=equivalent_code, pairs=closed)
 
 
-def _publish_closed_best_effort(*, run_id: str, run, equivalent: str, pairs) -> None:
+async def _publish_closed_best_effort(*, run_id: str, run, equivalent: str, pairs) -> None:
     emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-    publish_closed_trustlines(emitter=emitter, lock=runtime._lock, run_id=run_id, run=run,  # type: ignore[attr-defined]
-                              equivalent=equivalent, pairs=pairs)
+    await publish_closed_trustlines(emitter=emitter, lock=runtime._lock, run_id=run_id, run=run,  # type: ignore[attr-defined]
+                                    equivalent=equivalent, pairs=pairs)
 
 
 def _emit_interact_clearing_done_without_patches_best_effort(
@@ -1735,7 +1735,7 @@ async def action_payment_real(
             exc_info=True,
         )
     # 026 `T2603.2`: the payment is committed (`create_payment_internal`); a line its book operation closed leaves.
-    _publish_closed_best_effort(run_id=run_id, run=run, equivalent=eq.code, pairs=closed)
+    await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=eq.code, pairs=closed)
 
     return SimulatorActionPaymentRealResponse(
         payment_id=str(res.tx_id),
