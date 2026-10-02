@@ -441,7 +441,10 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
 
         assert reads == [1], f"premise: the payment did not pause exactly once at its pre-state read: {reads}"
         assert await _tx_state(factory, paid[0]) == "COMMITTED"
-        assert cleared == Decimal("7"), f"the clearing did not run on the state the payment left: {cleared!r}"
+        # Under v2 `execute_occurrence` returns the DECLARED amount (7, the occurrence's), whatever the rows hold: this
+        # only confirms the occurrence executed with it. That the clearing ran on the state the payment left is
+        # proved by the intent check below (`locked[(a, b)] == 7`, the pre-amount locked at 10 - 3).
+        assert cleared == Decimal("7"), f"the occurrence did not execute with its declared amount 7: {cleared!r}"
         envelope = await unit._operation(factory, equivalent_id=triangle.equivalent.id, kind="CLEARING")
         locked = {
             (item["debtor_id"], item["creditor_id"]): Decimal(item["amount"]) for item in envelope.intent["cycle"]

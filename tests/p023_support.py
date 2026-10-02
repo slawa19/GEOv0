@@ -351,6 +351,13 @@ async def historical_v1_clearing(factory, occurrence) -> str:
     `intent_encoding_version = 1`), the transaction row's `tx_id`, `idempotency_key` and payload (no descriptor),
     and the audit row's `tx_id`.
 
+    WHAT THIS DOES NOT REBUILD (the record is the occurrence's, relabelled - not a v1 execution replayed):
+    `transactions.id` stays the occurrence uuid while `transactions.tx_id` becomes the v1 set-hash (v1 wrote
+    `id = uuid(tx_id)`, `app/core/clearing/service.py` ~:2214-2262); the intent's `cycle`, the journal entries'
+    order and `initiator_id` follow the DECLARED occurrence order, whereas v1 followed the order its
+    `SELECT ... FOR UPDATE` returned the rows (~:2067-2079 only reorders in the occurrence branch). A reader that
+    depended on any of these would see a record no v1 writer produced; criterion (b) reads none of them.
+
     It writes with the journal's triggers off through THE named corruption helper (`tests/ledger_corruption.py`),
     so it runs only on a disposable clone (`tier_on_a_clone` / `tier_sessions_on_a_clone`) and needs that
     helper's privilege; anything else is the helper's refusal, not a skip.

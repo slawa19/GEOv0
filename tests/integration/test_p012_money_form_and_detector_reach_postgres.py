@@ -656,8 +656,9 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
 
     THE VALUE: the payload is re-parsed on replay (`_read_committed_execution_amount`), so a
     changed string form is only safe if it parses back to the same `Decimal`.  It is compared
-    here against the amount `execute_occurrence` actually applied, not against a
-    literal, so the two cannot be wrong together.
+    here against the value `execute_occurrence` returned. Under v2 that is the occurrence's DECLARED amount (one
+    atom, the whole debt), so this is a round-trip check of the stored string form, not an independent measure of
+    what was applied; what was applied is the declared amount the precondition above asserts.
     """
 
     from tests.conftest import TestingSessionLocal
@@ -768,6 +769,6 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
         "scale >= 9, and a text-shaped audit reads no fraction digits at all in '1E-8'."
     )
     assert {Decimal(a) for a in stored} == {applied}, (
-        f"the payload must replay to the amount that was actually applied ({applied}): "
+        f"the payload must round-trip to the amount `execute_occurrence` returned ({applied}): "
         f"{stored}"
     )

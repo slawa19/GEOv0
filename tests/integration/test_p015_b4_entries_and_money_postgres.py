@@ -1686,15 +1686,17 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
     # NON-VACUITY, FIRST.
     assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
 
-    # NON-VACUITY: a real clearing really ran and really moved the exact amount it should have.
+    # NON-VACUITY: a real clearing really ran (v2 returns the DECLARED amount, so this is not a minimum check).
     assert cleared is not None and _atoms(cleared) == 3000000000, (
-        f"stand: the clearing returned {cleared!r} instead of the cycle minimum 30.00000000, so "
-        f"it was skipped and this test observes nothing"
+        f"stand: the occurrence returned {cleared!r} instead of its declared amount 30.00000000, so "
+        f"it was skipped and this test observes nothing (the declared amount is not proof of the cycle minimum; "
+        f"non-vacuity of the money effect is the stored-debts assertion below, and of the intent the pre-amounts "
+        f"captured independently before the run)"
     )
     assert {key: _atoms(value) for key, value in after.items()} == {
         ("debtor", "creditor", "eq"): 7000000000,
         ("extra0", "debtor", "eq"): 1000000000,
-    }, f"stand: the cycle was not reduced by exactly 30.00000000 on every edge: {after}"
+    }, f"stand: the cycle was not reduced by exactly the declared 30.00000000 on every edge: {after}"
 
     # VERDICT.
     assert len(envelopes) == 1 and envelopes[0]["state"] == "COMPLETED", (

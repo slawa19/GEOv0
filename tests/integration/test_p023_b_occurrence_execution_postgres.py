@@ -199,14 +199,17 @@ async def test_v2_an_exact_occurrence_deletes_at_zero_and_is_recomputed_passed()
 
 
 @pytest.mark.asyncio
-async def test_v2_writes_intent_version_two_and_the_payload_descriptor_while_v1_still_writes_one() -> None:
+async def test_v2_writes_intent_version_two_and_the_payload_descriptor_and_a_historical_v1_record_still_reconciles() -> None:
     """The v2 record next to a HISTORICAL v1 one on the same rows, and both read back.
 
     025 `T2508.1` (spec `T2500`, P2-4): the v1 clearing is history, not a fresh execution without an occurrence. A
-    later occurrence clears the locked minimum (3) - what the v1 writer cleared - and its record is turned into the
-    one the v1 writer left (`historical_v1_clearing`). What stays tested: the v2 envelope says intent 2 and its
-    payload carries the descriptor, the v1 one says 1 and carries none, and criterion (b) recomputes both. That the
-    execution WITHOUT an occurrence writes intent 1 was a property of that mode, which 024 `T2417` removes.
+    later occurrence clears the locked minimum (3) - what the v1 writer cleared - and its record is FORGED into the
+    one the v1 writer left (`historical_v1_clearing`). What is tested in the APPLICATION: v2 writes intent version
+    2 and the descriptor in the payload (the `api.version` pair and the `occurrence` payload key of the v2 tx), and
+    the verifier reads the v1-encoded record next to it (criterion (b) PASSED, `full_recomputation` `{"CLEARING":
+    2}`). The two assertions on the v1 side - `(v1_tx, 1)` in the envelopes and no `occurrence` key in its payload -
+    only confirm the forged record (the stand), not that any application code path writes v1: that execution
+    WITHOUT an occurrence is the mode which 024 `T2417` removes.
     """
     api = slice_b_surface()
     triangle, debts = await _triangle(("5", "5", "5"))
