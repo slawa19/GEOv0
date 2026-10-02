@@ -19,10 +19,11 @@ from decimal import Decimal
 
 import pytest
 from nacl.signing import SigningKey
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.orm import Session as OrmSession
 
+import app.core.ledger.book as book_module
 from app.core.clearing.runner import run_clearing_pass
-from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.trustline import TrustLine
 from tests.conftest import MODE_B
@@ -155,23 +156,69 @@ async def test_a_reverse_debt_does_not_hold_the_close(client, db_session) -> Non
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_a_rolled_back_repayment_leaves_no_completion(client, db_session, monkeypatch) -> None:
+@pytest.mark.parametrize("kind", ["PAYMENT", "CLEARING"])
+async def test_a_rolled_back_completion_leaves_no_close(client, db_session, monkeypatch, kind) -> None:
+    """The completion lives and dies with the transaction that brought the debt to 0 (В1).
+
+    THE FAILURE IS PLACED AFTER THE COMPLETION (026 `T2603.1` §15 P2-2: the stand before injected it inside the
+    operation body, before `Book._complete`, so the hook never ran and the absence of a completion proved
+    nothing). The real hook runs, and in ITS transaction the line is read back `closed` with its completion row;
+    the book then releases its savepoint, and the commit itself is refused (`before_commit`, armed only by that
+    session's own completion). After the rollback: the line is still active with its request, the debt is
+    untouched, the audit holds only the request.
+    """
+
     code, p, lines, factory = await _world(client, db_session)
-    a, b = p["A"], p["B"]
+    a, b, c = p["A"], p["B"], p["C"]
     await _request_close_with_debt(client, factory, p, lines, code)
+    if kind == "CLEARING":
+        assert await _pay(factory, a, c, code, "50") and await _pay(factory, c, b, code, "50")
+    debts_before = await _debts(factory, code)
+    line_id = uuid.UUID(lines["AB"])
+    seen: list[tuple[str, int, str]] = []
+    fired: list[int] = []
+    settle = book_module._settle_requested_closes
 
-    async def fail(*_a, **_k):
-        raise RuntimeError("injected failure after the book completed")
+    async def settle_and_observe(session, op, rows):
+        await settle(session, op, rows)
+        status = (await session.execute(select(TrustLine.status).where(TrustLine.id == line_id))).scalar_one()
+        completions = (await session.execute(select(IntegrityAuditLog.affected_participants).where(
+            IntegrityAuditLog.operation_type == "TRUST_LINE_CLOSE", IntegrityAuditLog.tx_id == op.tx_id))).scalars()
+        mine = [x for x in completions if (x or {}).get("trustline_id") == lines["AB"]]
+        seen.append((status, len(mine), op.kind))
+        if status == "closed":
+            session.sync_session.info["p026_refuse_commit"] = True
 
-    monkeypatch.setattr(PaymentService, "_write_integrity_audit", fail)
+    def refuse_commit(sync_session) -> None:
+        if sync_session.info.pop("p026_refuse_commit", False):
+            fired.append(1)
+            raise RuntimeError("injected failure at the commit, after the book completed the close")
+
+    monkeypatch.setattr(book_module, "_settle_requested_closes", settle_and_observe)
+    event.listen(OrmSession, "before_commit", refuse_commit)
     try:
-        repaid = await _pay(factory, a, b, code, "50")
-    except Exception:  # noqa: BLE001 - either shape of the failure is the same outcome here
-        repaid = False
-    assert not repaid
-    monkeypatch.undo()
-    assert await _debts(factory, code) == {(b["id"], a["id"]): Decimal("50")}
-    assert (await _line(client, a, lines["AB"]))["status"] == "active"
+        if kind == "PAYMENT":
+            try:
+                done = await _pay(factory, a, b, code, "50")
+            except Exception:  # noqa: BLE001 - either shape of the failure is the same outcome here
+                done = False
+        else:
+            try:
+                result = await run_clearing_pass(factory, code)
+                done = bool(result.committed)
+            except Exception:  # noqa: BLE001
+                done = False
+    finally:
+        event.remove(OrmSession, "before_commit", refuse_commit)
+        monkeypatch.undo()
+    assert not done
+
+    # The mechanism: the completion WAS written in the failing transaction, and the commit WAS refused.
+    assert ("closed", 1, kind) in seen and fired, (seen, fired)
+    # The outcome: nothing of it survived.
+    assert await _debts(factory, code) == debts_before
+    line = await _line(client, a, lines["AB"])
+    assert (line["status"], Decimal(line["limit"])) == ("active", 0) and line["close_requested_at"], line
     assert [op for op, _ in await _audit(factory, lines["AB"])] == ["TRUST_LINE_CLOSE_REQUEST"]
 
 
