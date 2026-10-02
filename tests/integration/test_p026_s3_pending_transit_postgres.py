@@ -200,15 +200,19 @@ async def test_a_frozen_requested_line_still_bounds_and_locks_its_pair(db_sessio
 
     monkeypatch.setattr(PaymentService, "_segment", segment_then_probe)
     async with factory() as s:
+        service = PaymentService(s)
         try:
-            outcome = (await PaymentService(s).create_payment_internal(
+            outcome = (await service.create_payment_internal(
                 p["A"].id, to_pid=p["B"].pid, equivalent=eq.code, amount=amount)).status
         except GeoException as exc:
             outcome = f"refused {type(exc).__name__}"
     state = await _state(factory, eq, p, line_id)
+    # The router itself sees the pair pending - the core's bound and lock fallback must not be what saves it.
+    hinted = frozenset((p["A"].id, p["B"].id)) in service.router.pending_pairs
+    outcome += "" if hinted else " (router: pair not pending)"
     if amount == "120":
-        ok = (outcome.startswith("refused") and "IntegrityViolation" not in outcome
+        ok = (hinted and outcome.startswith("refused") and "IntegrityViolation" not in outcome
               and state == ({("B", "A"): Decimal("50")}, "frozen"))
     else:
-        ok = outcome.startswith("COMMITTED") and state == ({}, "closed") and probes and set(probes) == {"55P03"}
+        ok = hinted and outcome.startswith("COMMITTED") and state == ({}, "closed") and probes and set(probes) == {"55P03"}
     require_target(ok, f"A pays B {amount} over a frozen requested A -> B: {outcome}; {state}; probes {probes}")
