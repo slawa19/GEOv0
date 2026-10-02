@@ -417,8 +417,8 @@ def _routed_over(triangle: _Triangle, path: list[str]):
     loads the equivalent, runs the stop/hold pre-check, builds its graph and, under its locks,
     validates the capacity of every segment of this route: only the choice of route is the test's.
 
-    A context manager and not `monkeypatch`, because its callers - five modules and an out-of-tier
-    probe - call `_prepare_payment` without one. It restores the router on the way out, raise or not.
+    A context manager and not `monkeypatch`, because its callers - five test modules - call
+    `_prepare_payment` without one (the out-of-tier probes were retired by 025 `T2504.1`). It restores the router on the way out, raise or not.
     Yields the list of routes actually handed out: EMPTY means the service never asked the router
     (answered from idempotency, refused before routing), and callers assert on it.
     """
@@ -450,8 +450,8 @@ async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount
     `PaymentEngine.prepare`, leaving a durable `PREPARED` payment and its `prepare_locks` for the caller
     to commit. Neither exists any more: CHECK `030` refuses any non-terminal `PAYMENT` row and the
     payment executes in one transaction (`PaymentService._run_payment_operation`). The name is kept
-    because five test modules and two out-of-tier probes import it (manifest `T1901`, section 3,
-    "Стадия 4 обязана также"); what it does now is the whole payment, committed.
+    because five test modules import it (manifest `T1901`, section 3, "Стадия 4 обязана также"; the two
+    out-of-tier probes it also named were retired by 025 `T2504.1`); what it does now is the whole payment, committed.
 
     Nothing is hand-written: the envelope's intent, the entries and the audit row are the
     application's. A caller that used to act BETWEEN prepare and commit - a wrong writer

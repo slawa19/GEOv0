@@ -448,9 +448,8 @@ async def _prepare_payment(factory, triangle: _Triangle, path: list[str], amount
     """ONE WHOLE PAYMENT over `path`, committed; returns its tx id. THE NAME IS HISTORICAL.
 
     Until 019 stage 4 this left a durable `PREPARED` payment from a real `PaymentEngine.prepare` for the
-    caller to commit. No such state exists any more (CHECK `030`); the name is kept for the out-of-tier
-    probes that import it (`tests/p018_t1809_operation_cost_probe.py`,
-    `tests/p019_t1903_statement_sequence_probe.py`).
+    caller to commit. No such state exists any more (CHECK `030`); the name was kept for the out-of-tier
+    probes that imported it (retired by 025 `T2504.1`; sources at `3932737b` and `7eb3b859`).
     """
 
     tx_id, _declared = await _pay_over(factory, triangle, path, amount)

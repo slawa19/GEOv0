@@ -11,7 +11,7 @@ plateau, distinct), fewer cycles than the limit, limits 1 / 5 / 17 / 100, depths
 cycles that all share the SAME minimum debt id (the root rule 3 has to separate them by later ids).
 
 This is a correctness diagnostic, not acceptance: the acceptance of the refinement is the frozen 160-cell
-matrix (`scripts/measure_p020_dfs_acceptance.py`) and the PostgreSQL oracle module
+matrix (runner retired by 025 `T2504.1`, source at `dcd50a9c`; results in spec 020) and the PostgreSQL oracle module
 `tests/integration/test_p020_experimental_detectors_postgres.py`.
 """
 

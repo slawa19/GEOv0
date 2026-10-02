@@ -347,7 +347,7 @@ TC-01 — отдельный обязательный тир инструмен�
 | B10 | `utils/validation.py:253` («default `max_scale` of 18») (F-024-17) | исправить | `DEFAULT_MAX_AMOUNT_SCALE = 8` (`:136`) |
 | B11 | `check_zero_sum` в настоящем времени после A6: `core/integrity.py:81`, `api/v1/integrity.py:81,185`, `schemas/integrity.py:27` | прошедшее время + «удалён» | следствие A6 |
 | B12 | `money_boundary.py:23,304-316` — докстринг `row_lock` | следствие A2 | — |
-| B13 | докстринг `app/core/clearing/flow_planner.py:1-4` | **keep** | заморожен хешем приёмки v3 (`scripts/measure_p023_planner_acceptance_v3.py`, `FROZEN_SOURCES`) |
+| B13 | докстринг `app/core/clearing/flow_planner.py:1-4` | **keep** | заморожен хешем приёмки v3 (`scripts/measure_p023_planner_acceptance_v3.py`, `FROZEN_SOURCES`); *2026-10-02: пин снят вместе с раннером, 025 `T2504.1`* |
 | B14 | комментарий канона `api/openapi.yaml:4594` (`_ACTIVE_PAYMENT_TX_STATES`, DC-17) | keep в Ш1 | правка канона — только `Contract: yes`-срезом; носитель — следующий срез, трогающий `openapi.yaml` (`T2412.3`) |
 
 **Класс C — документация.**
