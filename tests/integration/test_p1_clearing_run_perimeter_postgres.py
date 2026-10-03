@@ -16,6 +16,11 @@ which is exactly what the shared fixture provides on this tier.
 
 Because the commits here are real, the test removes its own rows afterwards instead of
 leaving them in a shared database.
+
+025 `T2504.2` (2026-10-03): the refusal half (`test_interlock_path_refuses_a_cycle_outside_the_perimeter`)
+was removed as a proven duplicate - since 017 the whole tier runs on PostgreSQL, so
+`tests/unit/test_p1_clearing_run_perimeter.py::test_execution_layer_refuses_a_cycle_outside_the_perimeter`
+(mode B: an engine-bound session, the same PostgreSQL route) holds it; "exactly one cycle" is held by that module's detection test.
 """
 
 from __future__ import annotations
@@ -28,12 +33,11 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.core.clearing.service import ClearingOccurrenceRefused, ClearingService
+from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
@@ -120,39 +124,10 @@ async def _amounts(sessionmaker, eq_id) -> list[Decimal]:
 
 
 @pytest.mark.asyncio
-async def test_interlock_path_refuses_a_cycle_outside_the_perimeter(
-    engine_bound_sessions,
-) -> None:
-    sessionmaker = engine_bound_sessions
-    eq_code, eq_id, ids = await _seed(sessionmaker)
-    foreign_scope = {ids["pid:a1"], ids["pid:a2"], ids["pid:a3"]}  # type: ignore[index]
-
-    async with sessionmaker() as session:
-        service = ClearingService(session)
-
-        # Detection without a perimeter, so the cycle really exists and the guard is
-        # what refuses it - not an empty candidate list.
-        cycles = await service.find_cycles(eq_code, max_depth=6)
-        assert len(cycles) == 1, f"the stand must hold exactly one cycle: {cycles}"
-
-        with pytest.raises(GeoException) as refused:
-            await service.execute_occurrence(
-                _occurrence_of(cycles[0], eq_id), allowed_participant_pids=foreign_scope
-            )
-        # 025 `T2508.1`: the perimeter refused it, not the occurrence's own descriptor check.
-        assert not isinstance(refused.value, ClearingOccurrenceRefused), refused.value
-
-    after = await _amounts(sessionmaker, eq_id)
-    assert after == [Decimal("100")] * 3, (
-        f"the refused clearing still changed another run's debts: {after}"
-    )
-
-
-@pytest.mark.asyncio
 async def test_interlock_path_still_clears_for_the_owning_run(
     engine_bound_sessions,
 ) -> None:
-    """Anti-vacuum on the same path: the guard must refuse strangers, not everyone."""
+    """Anti-vacuum: the guard must refuse strangers (unit module, mode B), not everyone."""
 
     sessionmaker = engine_bound_sessions
     eq_code, eq_id, ids = await _seed(sessionmaker)

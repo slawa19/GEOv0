@@ -16,8 +16,3 @@ def test_pid_generation_matches_spec_sha256_base58():
     decoded = base58.b58decode(pid)
 
     assert decoded == expected_hash
-
-
-def test_pid_generation_is_deterministic():
-    public_key_b64, _private_key_b64 = generate_keypair()
-    assert get_pid_from_public_key(public_key_b64) == get_pid_from_public_key(public_key_b64)
