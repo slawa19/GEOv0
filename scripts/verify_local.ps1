@@ -233,7 +233,10 @@ try {
             Invoke-RequiredStep -Name "Tooling tests (pytest, partition $ToolingPartition)" -Command {
                 # The session itself refuses a count that differs from `tooling-tests/conftest.py`,
                 # any deselection, skip or missing PowerShell host; nothing here filters it.
+                # pytest creates `--basetemp` but not its parent: on a fresh slug the session died with
+                # FileNotFoundError in every tmp_path test (measured 2026-10-03, first run per slug).
                 $toolingRoot = Join-Path $taskRoot 'tooling'
+                New-Item -ItemType Directory -Path $toolingRoot -Force | Out-Null
                 $toolingArgs = @(
                     '-m', 'pytest',
                     '--basetemp', (Join-Path $toolingRoot 'pytest'),
