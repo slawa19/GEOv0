@@ -251,7 +251,12 @@ try {
                 else {
                     $toolingArgs += "tooling-tests/$ToolingPartition"
                 }
-                & $pythonExe @toolingArgs
+                # The session's arguments are these and nothing else: an inherited PYTEST_ADDOPTS
+                # (`--collect-only`, `--version`) could end it without running a case (§15, 2026-10-03).
+                $previousAddopts = $env:PYTEST_ADDOPTS
+                $env:PYTEST_ADDOPTS = $null
+                try { & $pythonExe @toolingArgs }
+                finally { $env:PYTEST_ADDOPTS = $previousAddopts }
             }
         }
         if ($runUi) {
