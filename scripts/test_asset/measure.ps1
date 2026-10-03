@@ -15,10 +15,9 @@ opt-in only for the derived name) and checked by scripts/validate_test_database_
 measured too, ONLY as a sentinel: every test that ran has its own body lines recorded, so a test with
 no run context is a lost measurement and analyze.py can tell it from a test with zero app coverage.
 
-WHAT IT DOES NOT SEE (AGENTS.md section 12): code run in subprocesses (no subprocess coverage is
-configured: a test that drives app code through a child Python process looks like zero coverage of
-those lines); SQL, triggers and the database's own behaviour; timing and race schedules. Tracing slows
-the tier, so its durations are NOT T0 (spec 025, section on time: T0 is measured without tracing). The exit
+WHAT IT DOES NOT SEE (AGENTS.md section 12): which test ran code in a Python subprocess (pytest-cov's
+subprocess hook measures it, without a test context); SQL, triggers and the database's own behaviour;
+timing and race schedules. Tracing slows the tier, so its durations are NOT T0 (spec 025, section on time: T0 is measured without tracing). The exit
 code of pytest is recorded, not judged: a red test is a fact of the measurement, not of this tool.
 #>
 [CmdletBinding()]

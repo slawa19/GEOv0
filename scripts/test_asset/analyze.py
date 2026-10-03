@@ -29,7 +29,9 @@ WHAT IT DOES NOT SEE (AGENTS.md section 12) - its silence is not evidence of any
     what a test checks, its arrange, isolation or failure paths;
   * arcs are reduced to lines and parameter suffixes are stripped when verdicts are matched, so
     parameter identities, branches taken, SQL, database triggers and race schedules are invisible;
-  * code run in a subprocess is not measured (looks like zero coverage);
+  * a Python subprocess is measured through pytest-cov's subprocess hook, but its lines carry no
+    test context: they count as covered in app_files and never in a test's run set, so a test
+    that drives app code through a child process looks like zero app coverage;
   * module- and session-scoped fixtures run in the setup phase of the FIRST test that requests
     them; setup lines are reported separately and never credited to a test's run set;
   * twin files are paired by the `_postgres` suffix only (the two files that still carry the
