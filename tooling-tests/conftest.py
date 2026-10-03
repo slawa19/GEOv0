@@ -55,12 +55,14 @@ _HERE = Path(__file__).resolve().parent
 
 #: THE EXPECTED NUMBER OF SELECTED CASES PER PARTITION (parametrised cases count one each).
 #:
-#: 2026-10-03, T2502.2: first values - the database-free tooling modules moved out of `tests/`.
+#: 2026-10-03, T2502.2: first values. 417 cases moved out of `tests/` unchanged (portable 195,
+#: powershell 222), plus the CI-binding check in each partition and its counter-check (portable +2,
+#: powershell +1) and the bootstrap guard's new scanned directory `tooling-tests` (portable +1).
 #: The `powershell` value assumes both PowerShell hosts (`_missing_powershell_hosts`): the launcher
 #: module runs most of its cases once per host it finds.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 195,
-    "powershell": 222,
+    "portable": 198,
+    "powershell": 223,
 }
 
 _PARTITIONS = tuple(EXPECTED_CASES)

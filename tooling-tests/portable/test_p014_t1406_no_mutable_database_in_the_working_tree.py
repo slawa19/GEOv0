@@ -250,7 +250,10 @@ def _unsanctioned_sqlite_urls(source: str) -> list[str]:
 def test_no_test_module_builds_a_sqlite_url_outside_the_scratch_tree() -> None:
     findings: list[str] = []
     scanned = 0
-    for path in sorted((_ROOT / "tests").rglob("*.py")):
+    # `tooling-tests` too since 2026-10-03 (025 T2502.2): the modules that moved there were scanned
+    # here before, and moving them must not take them out of the scan.
+    test_trees = (_ROOT / "tests", _ROOT / "tooling-tests")
+    for path in sorted(p for tree in test_trees for p in tree.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
         # This module and the guardrail modules quote such URLs as DATA - they assert what the

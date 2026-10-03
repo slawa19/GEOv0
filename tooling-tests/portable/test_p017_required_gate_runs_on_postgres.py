@@ -31,7 +31,9 @@ PostgreSQL. Measured 2026-09-21: placed as the spec wrote it, the taxonomy guard
 refuted: the taxonomy reads the SUFFIX, not every filename mentioning PostgreSQL, so
 `tests/integration/test_p017_required_postgres_gate.py` would be unmarked and visible in the default
 tier. The location stands on what the file IS - it reads one YAML file, opens no database and needs
-no session - and not on there being no alternative.
+no session - and not on there being no alternative. MOVED 2026-10-03 (025 T2502.2) to
+`tooling-tests/portable/`, unchanged: for the same reason it now runs in the tooling tier's portable
+partition (a blocking step of `static-diagnostics`), not inside the job whose form it checks.
 
 AND WHAT IT READS GREW ON 2026-09-22. Until then every check here read the JOB and none read its
 STEPS, so a schedule-only `if:` or a `continue-on-error: true` on the PostgreSQL steps left the job's
