@@ -1,9 +1,11 @@
 """Per-test coverage analysis of the backend tier (programme 025, T2501). DEBUG PATH, NOT A GATE.
 
 Usage: python scripts/test_asset/analyze.py <run_dir> [--out DIR] [--verdicts DIR] [--repo DIR]
+                                            [--allow-stale-input] [--allow-unmeasured]
   <run_dir>  output of scripts/test_asset/measure.ps1: `.coverage` (--cov=app --cov=tests --cov-branch
-             --cov-context=test), `junit.xml`, `pytest.log`. Writes JSON + tables.md to --out
-             (default <run_dir>/analysis) and prints summary.json.
+             --cov-context=test), `junit.xml`, `pytest.log`, `exit.txt`. Writes JSON + tables.md to --out
+             (default <run_dir>/analysis; this tool's own output files there are removed first) and
+             prints summary.json.
   --verdicts a directory of zone verdict files (`zone-*.json`, format of
              specs/025-test-asset-consolidation/evidence-2026-09-28/verdicts/); adds crosscheck.json.
 
@@ -15,27 +17,49 @@ EXIT CODES - a missing measurement is never reported as zero coverage (spec 025,
   3  MISSING INPUT: `.coverage`, `junit.xml` or the verdict files do not exist;
   4  MISSING CONTEXT: the data has no per-test contexts, no `tests/` sentinel (so a test without a
      context cannot be told from a test that touched no app line), or a test that ran has no run
-     context / a run context has no junit row. Outputs are still written; the names are in
-     reconcile.json. A test is "zero app coverage" only when its run context exists and holds no
-     app body line.
+     context / a run context has no junit row. Outputs are still written, marked "valid": false;
+     the names are in reconcile.json;
+  5  UNMEASURED VERDICT: a DELETE-* or MOVE-OUT verdict unit (a listed test, or a test function of
+     a file-level verdict) has no measured test: file absent, not found (renamed / class path
+     differs), deselected (e.g. `slow`; a full deletion acceptance needs measure.ps1
+     -IncludeExpensive) or skipped. crosscheck.json is written marked "valid": false.
+     --allow-unmeasured proceeds and labels every lost-lines figure a LOWER BOUND;
+  6  STALE INPUT: `exit.txt` is missing, records a pytest exit other than 0, or records a HEAD other
+     than the current one. --allow-stale-input proceeds; the reasons go into summary.json "input".
 
-Line sets are "body lines" of app/: lines executed in a test's `run` phase, MINUS lines of
-statements that are not inside a function body (module/class-level defs, imports, constants).
-Those execute at import time; a module first imported lazily inside a test would otherwise
-attribute its whole definition skeleton to that one test. Raw counts are kept too.
+LINE SETS. A test's lines are those executed in its contexts `<nodeid>|setup`, `|run` and `|teardown`
+(its own function-scoped fixtures run in setup/teardown). by_test, zero_app_coverage, identical_sets,
+subsets and unique_lines use "body lines" of app/: those lines MINUS lines of statements that are not
+inside a function body (module/class-level defs, imports, constants) - these execute at import time,
+and a module first imported lazily inside a test would otherwise attribute its whole definition
+skeleton to that test. crosscheck.json uses RAW lines (import-level included), as crosscheck.py did.
+
+VERDICT MATCHING. A verdict is keyed by file::[Class::]function (parameter suffixes dropped only between
+ids of the same function); a class-less verdict name is resolved only when exactly one definition in
+that file carries it, else it is reported. A DELETE-DUP "stronger" must hold exactly one
+tests/...py::name reference to a collected test; several references or none are reported as
+ambiguous / unresolvable and not judged (no union of candidates).
 
 WHAT IT DOES NOT SEE (AGENTS.md section 12) - its silence is not evidence of any of these:
   * equal executed lines are not equal assertions: identical or subset sets prove nothing about
     what a test checks, its arrange, isolation or failure paths;
-  * arcs are reduced to lines and parameter suffixes are stripped when verdicts are matched, so
-    parameter identities, branches taken, SQL, database triggers and race schedules are invisible;
-  * a Python subprocess is measured through pytest-cov's subprocess hook, but its lines carry no
-    test context: they count as covered in app_files and never in a test's run set, so a test
-    that drives app code through a child process looks like zero app coverage;
+  * arcs are reduced to lines and parameter suffixes are stripped when verdicts are matched (only
+    between parametrised ids of the same function), so parameter identities, branches taken, SQL,
+    database triggers and race schedules are invisible;
+  * Python subprocesses: pytest-cov 4.1.0 passes the active context to a child through
+    COV_CORE_CONTEXT (pytest_cov/plugin.py:387-390, embed.py:32, :59-60), so a child started in a
+    test's run phase IS credited to that test. Not measured at all: a child whose environment lacks
+    the COV_CORE_* variables (e.g. started with a fresh env=). A child started during a fixture is
+    credited to the `|setup` context, i.e. to the test that triggered the fixture;
   * module- and session-scoped fixtures run in the setup phase of the FIRST test that requests
-    them; setup lines are reported separately and never credited to a test's run set;
+    them, so their lines are credited to that one test (overstates its unique lines, understates
+    zero-coverage counts for it);
+  * lines executed by a thread or task that outlives its test are credited to whichever context is
+    active when they run (hypothesis from the context switch mechanism; not measured);
   * twin files are paired by the `_postgres` suffix only (the two files that still carry the
-    former second dialect's suffix are not paired).
+    former second dialect's suffix are not paired);
+  * "deselected" is inferred from a `slow` marker found by AST in the source (module pytestmark,
+    class or function decorator), not from pytest's own collection.
 """
 
 import argparse
@@ -46,6 +70,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
@@ -56,16 +81,24 @@ ap.add_argument("run_dir")
 ap.add_argument("--out")
 ap.add_argument("--verdicts")
 ap.add_argument("--repo", default=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+ap.add_argument("--allow-stale-input", action="store_true", help="proceed past exit 6, reasons recorded")
+ap.add_argument("--allow-unmeasured", action="store_true", help="proceed past exit 5, lost lines = LOWER BOUND")
 args = ap.parse_args()
 run_dir, WT = args.run_dir, args.repo
 out_dir = args.out or os.path.join(run_dir, "analysis")
+EXIT_NAMES = {3: "MISSING INPUT", 4: "MISSING CONTEXT", 5: "UNMEASURED VERDICT", 6: "STALE INPUT"}
+OUTPUTS = ("by_test.json", "zero_app_coverage.json", "identical_sets.json", "subsets.json", "unique_lines.json",
+           "by_test_file.json", "summary.json", "reconcile.json", "tables.md", "crosscheck.json")
 
 
 def fail(code, msg):
-    print(f"analyze.py: {'MISSING INPUT' if code == 3 else 'MISSING CONTEXT'}: {msg}", file=sys.stderr)
+    print(f"analyze.py: {EXIT_NAMES[code]}: {msg}", file=sys.stderr)
     sys.exit(code)
 
 
+for name in OUTPUTS:  # an earlier run's outputs must not survive a refused or failing one
+    if os.path.isfile(os.path.join(out_dir, name)):
+        os.remove(os.path.join(out_dir, name))
 cov_path, junit_path = os.path.join(run_dir, ".coverage"), os.path.join(run_dir, "junit.xml")
 for p in (cov_path, junit_path):
     if not os.path.isfile(p):
@@ -73,8 +106,32 @@ for p in (cov_path, junit_path):
 zone_files = sorted(glob.glob(os.path.join(args.verdicts, "zone-*.json"))) if args.verdicts else []
 if args.verdicts and not zone_files:
     fail(3, f"no zone-*.json verdict files in {args.verdicts}")
-os.makedirs(out_dir, exist_ok=True)
 
+
+def git(*a):
+    try:
+        return subprocess.run(["git", "-C", WT, *a], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+exit_path, head_now = os.path.join(run_dir, "exit.txt"), (git("rev-parse", "HEAD") or "").strip() or None
+input_info = {"exit_txt": None, "current_head": head_now, "problems": []}
+if not os.path.isfile(exit_path):
+    input_info["problems"].append("exit.txt missing - the run did not finish, or was not made by measure.ps1")
+else:
+    raw_exit = open(exit_path, "rb").read()
+    input_info["exit_txt"] = raw_exit.decode("utf-16" if raw_exit[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig").strip()
+    rec = dict(re.findall(r"(\w+)=(\S+)", input_info["exit_txt"]))
+    if rec.get("exit") != "0":
+        input_info["problems"].append(f"recorded pytest exit {rec.get('exit')!r} is not 0")
+    if rec.get("head") != head_now:
+        input_info["problems"].append(f"recorded HEAD {rec.get('head')} differs from current HEAD {head_now}")
+        changed = git("diff", "--name-only", rec.get("head", ""), "HEAD", "--", "app", "tests")
+        input_info["app_tests_files_changed_since_recorded_head"] = None if changed is None else len(changed.split())
+if input_info["problems"] and not args.allow_stale_input:
+    fail(6, "; ".join(input_info["problems"]) + " (--allow-stale-input to proceed with the reasons recorded)")
+os.makedirs(out_dir, exist_ok=True)
 
 def norm(p):
     p = p.replace("\\", "/")
@@ -186,14 +243,13 @@ if os.path.exists(logp):
         phase_dur[m.group(3)][m.group(2)] = float(m.group(1))
 
 # ---------- assemble per test ----------
-tests = {}
-setup_td = collections.defaultdict(lambda: {"setup": set(), "teardown": set()})
+tests, phase_ctx = {}, collections.defaultdict(dict)
 for c in contexts:
     nid, ph = split_ctx(c)
+    if ph in ("setup", "run", "teardown"):
+        phase_ctx[nid][ph] = c
     if ph == "run":
         tests.setdefault(nid, c)
-    elif ph in ("setup", "teardown"):
-        setup_td[nid][ph] |= body_lines[c]
 all_ids = set(outcome) | set(tests)
 
 
@@ -202,11 +258,13 @@ def sha(s):
     return hashlib.sha1("\n".join(f"{p}:{n}" for p, n in items).encode()).hexdigest()
 
 
-by_test, test_sets = {}, {}
+by_test, test_sets, raw_sets = {}, {}, {}
 for nid in sorted(all_ids):
-    cid = tests.get(nid)
-    s = body_lines[cid] if cid is not None else set()
+    cid, ph = tests.get(nid), phase_ctx.get(nid, {})
+    # the test's own lines: run + its setup/teardown (function-scoped fixtures); see LINE SETS
+    s = set().union(*(body_lines[c] for c in ph.values())) if cid is not None else set()
     test_sets[nid] = s
+    raw_sets[nid] = set().union(*(raw_lines[c] for c in ph.values())) if cid is not None else set()
     per_file = collections.Counter(norm(files[f]) for f, _ in s)
     by_test[nid] = {
         "test_file": nid.split("::")[0],
@@ -215,11 +273,12 @@ for nid in sorted(all_ids):
         "duration_total_s": jdur.get(nid),
         "duration_phases_s": phase_dur.get(nid, {}),
         "app_lines": len(s) if cid is not None else None,
-        "app_lines_raw_incl_import_level": len(raw_lines[cid]) if cid is not None else None,
+        "app_lines_run_phase_only": len(body_lines[cid]) if cid is not None else None,
+        "app_lines_raw_incl_import_level": len(raw_sets[nid]) if cid is not None else None,
         "lines_sha1": sha(s) if s else None,
         "app_files": dict(sorted(per_file.items())),
-        "setup_app_lines": len(setup_td[nid]["setup"]),
-        "teardown_app_lines": len(setup_td[nid]["teardown"]),
+        "setup_app_lines": len(body_lines[ph["setup"]]) if "setup" in ph else 0,
+        "teardown_app_lines": len(body_lines[ph["teardown"]]) if "teardown" in ph else 0,
     }
 
 
@@ -235,7 +294,7 @@ ran = [n for n in by_test if by_test[n]["outcome"] in RAN]
 zero = sorted(n for n in ran if by_test[n]["app_lines"] == 0)
 zero_set = set(zero)
 zero_obj = {
-    "note": "run phase, body lines of app/; outcome passed/failed/error/xfailed (skipped excluded); "
+    "note": "setup+run+teardown of the test, body lines of app/; outcome passed/failed/error/xfailed (skipped excluded); "
             "only tests WITH a run context (a ran test without one is in reconcile.json, not here)",
     "count": len(zero),
     "by_file": collections.Counter(by_test[n]["test_file"] for n in zero).most_common(),
@@ -291,7 +350,7 @@ for tf, ns in tfile_tests.items():
 for k, tfs in twin_groups.items():
     scan([n for tf in tfs for n in tfile_tests[tf]], "twin_files:" + k)
 subsets = {
-    "note": "A strict-subset-of B on run-phase app body lines; scanned within one test file and within twin files "
+    "note": "A strict-subset-of B on app body lines (setup+run+teardown of the test); scanned within one test file and within twin files "
             "(same basename after stripping _postgres, any directory). For each A: a smallest strict superset "
             "(ties broken by scan order). Tests with identical sets are in identical_sets.json, not here.",
     "twin_groups": twin_groups, "count": len(subset_rows),
@@ -328,13 +387,13 @@ for fid, path in files.items():
         "body_statements": len(body_stmts),
         "not_covered_by_anything": len(missing),
         "body_not_covered_by_anything": len([ln for ln in missing if ln not in import_lines[fid]]),
-        "body_covered_only_outside_run_phase": len([ln for ln in body_stmts if ln in all_covered[fid] and ln not in owned_by_file[fid]]),
+        "body_covered_outside_any_test_context": len([ln for ln in body_stmts if ln in all_covered[fid] and ln not in owned_by_file[fid]]),
     }
 unique_obj = {
-    "note": "run phase, body lines of app/. per_test: lines covered by exactly one test. per_test_file: lines covered "
+    "note": "setup+run+teardown of the test, body lines of app/. per_test: lines covered by exactly one test. per_test_file: lines covered "
             "only by tests of that file. app_files.not_covered_by_anything: statements missed by every context incl. "
-            "import time and fixtures (coverage analysis2); body_covered_only_outside_run_phase: executed only at "
-            "import/setup/teardown, by no test's run phase. Only files imported during the run are listed.",
+            "import time and fixtures (coverage analysis2); body_covered_outside_any_test_context: executed only "
+            "outside every test's setup/run/teardown (import time, collection). Only files imported during the run are listed.",
     "per_test": {n: uniq.get(n, 0) for n in sorted(ran)},
     "per_test_file": {tf: len(file_owner_sets.get(tf, ())) for tf in sorted(tfile_tests)},
     "app_files": dict(sorted(app_files.items())),
@@ -362,7 +421,15 @@ btf = dict(sorted(btf.items(), key=lambda kv: -kv[1]["duration_s"]))
 
 orphan = sorted(set(tests) - set(outcome))
 missing_ctx = sorted(n for n in ran if n not in tests)
+invalid = ([f"MISSING CONTEXT: {len(missing_ctx)} ran tests without run context, {len(orphan)} run contexts "
+            "without junit row (reconcile.json)"] if orphan or missing_ctx else [])
+tracked = {ln for ln in (git("ls-files", "app") or "").split() if ln.endswith(".py")}
+stmts_all = sum(v["statements"] for v in app_files.values())
+miss_all = sum(v["not_covered_by_anything"] for v in app_files.values())
 summary = {
+    "valid": not invalid,
+    "invalid_reasons": invalid,
+    "input": input_info,
     "junit_tests": len(outcome),
     "outcomes": dict(collections.Counter(outcome.values())),
     "run_contexts": len(tests),
@@ -382,6 +449,11 @@ summary = {
     "app_files_measured": len(files),
     "app_body_statements": sum(v["body_statements"] for v in app_files.values()),
     "app_body_not_covered": sum(v["body_not_covered_by_anything"] for v in app_files.values()),
+    "app_statements": stmts_all,
+    "app_statements_not_covered": miss_all,
+    "app_statement_coverage_pct": round(100 * (stmts_all - miss_all) / stmts_all, 2) if stmts_all else None,
+    "app_py_files_git_tracked": len(tracked),
+    "app_py_files_tracked_not_imported": sorted(tracked - set(app_files)),
     "run_contexts_not_in_junit": len(orphan),
     "ran_tests_without_run_context": len(missing_ctx),
 }
@@ -398,6 +470,8 @@ dump("reconcile.json", {"run_contexts_not_in_junit": orphan, "ran_tests_without_
 d, b, s, u, idc = by_test, btf, summary, unique_obj, {"size_hist": dict(sorted(size_hist.items())), "clusters": clusters}
 out = []
 p = out.append
+if invalid:
+    p("**INVALID: " + "; ".join(invalid) + "**\n")
 p("### Top-30 test files by time (sum of junit total per test)\n")
 p("| # | file | tests | time, s | share | app lines | unique lines | zero-app tests |")
 p("|---|---|---|---|---|---|---|---|")
@@ -413,7 +487,7 @@ hist = collections.Counter()
 for n in ranc:
     x = d[n]["app_lines"]
     hist["0" if x == 0 else "1-50" if x <= 50 else "51-500" if x <= 500 else "501-2000" if x <= 2000 else ">2000"] += 1
-p("\n### Distribution of per-test run-phase app body lines\n")
+p("\n### Distribution of per-test app body lines (setup+run+teardown)\n")
 p("| app lines | tests |")
 p("|---|---|")
 for k in ["0", "1-50", "51-500", "501-2000", ">2000"]:
@@ -426,54 +500,148 @@ for f, v in sorted(u["app_files"].items(), key=lambda kv: -kv[1]["body_not_cover
 open(os.path.join(out_dir, "tables.md"), "w", encoding="utf-8").write("\n".join(out) + "\n")
 print(json.dumps(summary, indent=1))
 
+xcode = 0
 if zone_files:
     # ---------- crosscheck of the zone verdicts (was crosscheck.py) ----------
     verdict_rows = [r for zf in zone_files for r in json.load(open(zf, encoding="utf-8"))]
     tests_all = list(by_test.keys())
-    sets = {t: raw_lines[tests[t]] if t in tests else set() for t in tests_all}
+    sets = {t: raw_sets[t] for t in tests_all}
+    DELETE = {"DELETE-DUP", "DELETE-EMPTY", "DELETE-REMOVED"}
+    REMOVING = DELETE | {"MOVE-OUT"}
 
-    def func_of(nodeid):
-        file, _, rest = nodeid.partition("::")
-        name = rest.split("::")[-1]
-        name = re.sub(r"\[.*\]$", "", name)
-        return file, name
+    def key_of(nodeid):  # file::Class::func - only the parameter suffix of one function is dropped
+        return nodeid.split("[", 1)[0]
 
-    file_verdict, func_verdict, func_meta = {}, {}, {}
+    def source_units(f):
+        """{file::[Class::]func: has a slow marker} for the test functions defined in f (AST)."""
+        if not os.path.basename(f).startswith("test_"):  # pytest.ini python_files = test_*.py
+            return {}
+        try:
+            tree = ast.parse(open(os.path.join(WT, f), encoding="utf-8").read())
+        except (OSError, SyntaxError):
+            return {}
+
+        def slow(nodes):
+            return any(isinstance(x, ast.Attribute) and x.attr == "slow" for n in nodes for x in ast.walk(n))
+
+        mod_slow = slow([n for n in tree.body if isinstance(n, ast.Assign)
+                         and any(getattr(tg, "id", "") == "pytestmark" for tg in n.targets)])
+        out = {}
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_"):
+                out[f"{f}::{n.name}"] = mod_slow or slow(n.decorator_list)
+            elif isinstance(n, ast.ClassDef) and n.name.startswith("Test"):
+                for m in n.body:
+                    if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name.startswith("test_"):
+                        out[f"{f}::{n.name}::{m.name}"] = mod_slow or slow(n.decorator_list) or slow(m.decorator_list)
+        return out
+
+    src = {}
+
+    def src_of(f):
+        if f not in src:
+            src[f] = source_units(f)
+        return src[f]
+
+    by_name, ambiguous = [], {}
+
+    def vkey(f, name):
+        """Exact file::[Class::]func; a class-less name is resolved only if ONE class/function in f defines it."""
+        name = str(name).strip()
+        name = (name[len(f) + 2:] if name.startswith(f + "::") else name).split("[", 1)[0]
+        k, units_f = f + "::" + name, src_of(f)
+        if k in units_f or "::" in name:
+            return k
+        hits = [u for u in units_f if u.endswith("::" + name)]
+        if len(hits) == 1:
+            by_name.append(k)
+            return hits[0]
+        if hits:
+            ambiguous[k] = hits
+        return k
+
+    file_verdict, func_verdict, func_meta, conflicts = {}, {}, {}, set()
     for row in verdict_rows:
         f = row["file"].replace("\\", "/")
         file_verdict[f] = row.get("verdict")
         for t in row.get("tests") or []:
-            n = re.sub(r"\[.*\]$", "", str(t.get("name", "")).split("::")[-1])
-            func_verdict[(f, n)] = t.get("verdict")
-            func_meta[(f, n)] = t
+            k = vkey(f, t.get("name", ""))
+            if k in func_verdict and func_verdict[k] != t.get("verdict"):
+                conflicts.add(k)
+            func_verdict[k], func_meta[k] = t.get("verdict"), t
 
     def verdict_of(nodeid):
-        f, n = func_of(nodeid)
-        v = func_verdict.get((f, n))
+        v = func_verdict.get(key_of(nodeid))
         if v:
             return v
-        fv = file_verdict.get(f, "UNKNOWN")
+        fv = file_verdict.get(nodeid.split("::")[0], "UNKNOWN")
         return "KEEP(unlisted-in-MIXED)" if fv == "MIXED" else fv
 
     v_of = {t: verdict_of(t) for t in tests_all}
-    DELETE = {"DELETE-DUP", "DELETE-EMPTY", "DELETE-REMOVED"}
-    summary = collections.OrderedDict()
+    by_key = collections.defaultdict(list)
+    for t in tests_all:
+        by_key[key_of(t)].append(t)
+
+    # every verdict unit: a listed test, or each test function of a file whose verdict is file-level
+    units = dict(func_verdict)
+    for f, fv in file_verdict.items():
+        if not os.path.isfile(os.path.join(WT, f)):
+            if not any(k.startswith(f + "::") for k in func_verdict):
+                units[f + "::*"] = fv
+            continue
+        for k in src_of(f):
+            units.setdefault(k, "KEEP(unlisted-in-MIXED)" if fv == "MIXED" else fv)
+    unmeasured = []
+    for k, v in sorted(units.items()):
+        f, nodes = k.split("::")[0], by_key.get(k, [])
+        if nodes and all(n in ranc for n in nodes):
+            continue
+        if not os.path.isfile(os.path.join(WT, f)):
+            reason = "file absent (removed or renamed)"
+        elif nodes:
+            reason = "collected, not run (" + ",".join(sorted({by_test[n]["outcome"] for n in nodes if n not in ranc})) + ")"
+        elif k in ambiguous:
+            reason = f"ambiguous (class-less name defined {len(ambiguous[k])} times in the file)"
+        elif k in src_of(f):
+            reason = "deselected (slow marker)" if src_of(f)[k] else "defined, not collected"
+        else:
+            reason = "not found (renamed, removed, or class path differs)"
+        unmeasured.append({"unit": k, "verdict": v, "reason": reason})
+    unm_removing = [u for u in unmeasured if u["verdict"] in REMOVING]
+    unm_surviving = [u for u in unmeasured if u["verdict"] not in REMOVING]
+    if not unmeasured:
+        bound = "exact for the measured tier"
+    else:
+        bound = (f"LOWER BOUND: {len(unm_removing)} DELETE-*/MOVE-OUT verdict units were not measured, their lines "
+                 "are missing from the removed set" + (f"; {len(unm_surviving)} surviving units were not measured "
+                 "either, their lines are missing from the survivor set, which can OVERSTATE the figure - it is a "
+                 "bound only with respect to the removed units" if unm_surviving else ""))
+    xinvalid = list(invalid)
+    if unm_removing and not args.allow_unmeasured:
+        xinvalid.append(f"UNMEASURED VERDICT: {len(unm_removing)} DELETE-*/MOVE-OUT units without a measured test")
+        xcode = 5
+    xs = collections.OrderedDict(valid=not xinvalid, invalid_reasons=xinvalid, input=input_info)
+    xs["line_set"] = "RAW app lines (import-level included) of each test's setup+run+teardown"
     cnt = collections.Counter(v_of.values())
-    dur, zero, not_ran = collections.Counter(), collections.Counter(), collections.Counter()
+    dur, zero_v, not_ran = collections.Counter(), collections.Counter(), collections.Counter()
     for t in tests_all:
         dur[v_of[t]] += by_test[t].get("duration_total_s") or 0
         if t not in ranc:
             not_ran[v_of[t]] += 1
         elif by_test[t]["app_lines"] == 0:
-            zero[v_of[t]] += 1
-    summary["collected_tests_by_verdict"] = dict(cnt)
-    summary["seconds_by_verdict"] = {k: round(v, 1) for k, v in dur.items()}
-    summary["zero_app_coverage_by_verdict"] = dict(zero)
-    summary["not_ran_or_no_context_by_verdict"] = dict(not_ran)
-    live_files = {by_test[t]["test_file"] for t in tests_all}
-    vfiles = {r["file"].replace("\\", "/") for r in verdict_rows}
-    summary["verdict_test_files_not_collected_now"] = sorted(
-        f for f in vfiles - live_files if os.path.basename(f).startswith("test_"))
+            zero_v[v_of[t]] += 1
+    xs["collected_tests_by_verdict"] = dict(cnt)
+    xs["seconds_by_verdict"] = {k: round(v, 1) for k, v in dur.items()}
+    xs["zero_app_coverage_by_verdict"] = dict(zero_v)
+    xs["not_ran_or_no_context_by_verdict"] = dict(not_ran)
+    xs["verdict_keys_with_conflicting_verdicts"] = sorted(conflicts)
+    xs["class_less_names_resolved_to_the_only_definition_in_file"] = len(by_name)
+    xs["unmeasured_verdict_tests"] = {
+        "count": len(unmeasured), "removing_DELETE_or_MOVE_OUT": len(unm_removing),
+        "by_reason": dict(collections.Counter(u["reason"].split(" (")[0] for u in unmeasured)),
+        "by_verdict": dict(collections.Counter(u["verdict"] for u in unmeasured)),
+        "units": unmeasured,
+    }
 
     def app_file(fid):
         return norm(files[fid]).split("app/", 1)[-1]
@@ -484,11 +652,12 @@ if zone_files:
     surv_lines = set().union(*(sets[t] for t in survive)) if survive else set()
     del_lines = set().union(*(sets[t] for t in deleted)) if deleted else set()
     lost = del_lines - surv_lines
-    summary["deleted_tests"] = len(deleted)
-    summary["lines_lost_if_all_DELETE_applied"] = len(lost)
-    summary["lines_lost_by_app_file"] = dict(collections.Counter(app_file(fid) for fid, _ in lost).most_common(25))
+    xs["deleted_tests"] = len(deleted)
+    xs["lines_lost_if_all_DELETE_applied"] = len(lost)
+    xs["lines_lost_if_all_DELETE_applied_is"] = bound
+    xs["lines_lost_by_app_file"] = dict(collections.Counter(app_file(fid) for fid, _ in lost).most_common(25))
     culprits = collections.Counter({t: len(sets[t] & lost) for t in deleted if sets[t] & lost})
-    summary["deleted_tests_touching_lost_lines"] = [
+    xs["deleted_tests_touching_lost_lines"] = [
         {"test": t, "lost_lines_touched": k, "verdict": v_of[t]} for t, k in culprits.most_common(60)
     ]
 
@@ -496,52 +665,67 @@ if zone_files:
     s2 = set().union(*(sets[t] for t in surv2)) if surv2 else set()
     mv = set().union(*(sets[t] for t in moved)) if moved else set()
     lost_mv = mv - s2
-    summary["moved_out_tests"] = len(moved)
-    summary["extra_lines_lost_from_backend_tier_by_MOVE_OUT"] = len(lost_mv)
-    summary["move_out_lost_by_app_file"] = dict(collections.Counter(app_file(fid) for fid, _ in lost_mv).most_common(15))
-    summary["move_out_sole_coverers"] = [
+    xs["moved_out_tests"] = len(moved)
+    xs["extra_lines_lost_from_backend_tier_by_MOVE_OUT"] = len(lost_mv)
+    xs["extra_lines_lost_from_backend_tier_by_MOVE_OUT_is"] = bound
+    xs["move_out_lost_by_app_file"] = dict(collections.Counter(app_file(fid) for fid, _ in lost_mv).most_common(15))
+    xs["move_out_sole_coverers"] = [
         {"test": t, "lines": sorted(f"{app_file(fid)}:{n}" for fid, n in sets[t] & lost_mv)}
         for t in sorted(moved, key=lambda t: -len(sets[t] & lost_mv)) if sets[t] & lost_mv
     ]
+    xs["move_out_sole_coverers_are"] = "complete only if the figure is exact: " + bound
 
-    index = collections.defaultdict(list)
-    for t in tests_all:
-        index[func_of(t)[1]].append(t)
+    REF = re.compile(r"(tests/[\w./-]+\.py)::([\w:]+)(\[[^\]]*\])?")
     dup_report = []
-    for (f, n), meta in func_meta.items():
+    for k, meta in func_meta.items():
         if meta.get("verdict") != "DELETE-DUP":
             continue
         strong = str(meta.get("stronger") or "")
-        mine = [t for t in index.get(n, []) if t.startswith(f)]
-        sname = re.sub(r"\[.*\]$", "", strong.split("::")[-1]) if "::" in strong else ""
-        sfile = strong.split("::")[0].split("/")[-1] if "::" in strong else ""
-        cand = [t for t in index.get(sname, []) if (not sfile) or sfile in t]
+        mine, refs, cand = by_key.get(k, []), REF.findall(strong), []
+        if len(refs) != 1:
+            status = f"ambiguous: {len(refs)} file::test references" if refs else "unresolvable: no file::test reference"
+        elif not os.path.isfile(os.path.join(WT, refs[0][0])):
+            status = "unresolvable: file absent"
+        else:
+            sk = vkey(refs[0][0], refs[0][1].rstrip(":"))
+            cand = [t for t in by_key.get(sk, []) if not refs[0][2] or t == sk + refs[0][2]]
+            status = "resolved" if cand else "unresolvable: no collected test with that exact path"
+        ok = bool(cand) and bool(mine) and all(t in ranc for t in cand + mine)
         a = set().union(*(sets[t] for t in mine)) if mine else set()
         bb = set().union(*(sets[t] for t in cand)) if cand else set()
         diff = a - bb
         dup_report.append({
-            "test": f"{f}::{n}", "stronger": strong, "own_found": len(mine), "stronger_found": len(cand),
-            "own_lines": len(a), "stronger_lines": len(bb),
-            "not_in_stronger": len(diff) if cand and mine else None,
+            "test": k, "stronger": strong, "stronger_status": status, "own_found": len(mine),
+            "stronger_found": len(cand), "own_lines": len(a), "stronger_lines": len(bb),
+            "not_in_stronger": len(diff) if ok else None,
             "not_in_stronger_by_file": dict(collections.Counter(app_file(fid) for fid, _ in diff).most_common(5))
-            if cand and mine else None,
+            if ok else None,
         })
-    summary["delete_dup_checked"] = len(dup_report)
-    summary["delete_dup_own_not_found"] = sum(1 for r in dup_report if not r["own_found"])
-    summary["delete_dup_stronger_not_found"] = sum(1 for r in dup_report if not r["stronger_found"])
-    summary["delete_dup_subset_ok"] = sum(1 for r in dup_report if r["not_in_stronger"] == 0)
-    summary["delete_dup_not_subset"] = sum(1 for r in dup_report if r["not_in_stronger"])
+    xs["delete_dup_checked"] = len(dup_report)
+    xs["delete_dup_own_not_found"] = sum(1 for r in dup_report if not r["own_found"])
+    xs["delete_dup_stronger_status"] = dict(collections.Counter(r["stronger_status"] for r in dup_report))
+    xs["delete_dup_subset_ok"] = sum(1 for r in dup_report if r["not_in_stronger"] == 0)
+    xs["delete_dup_not_subset"] = sum(1 for r in dup_report if r["not_in_stronger"])
+    xs["delete_dup_not_judged"] = sum(1 for r in dup_report if r["not_in_stronger"] is None)
 
     merge = [t for t in tests_all if v_of[t] == "MERGE" and t in ranc]
-    summary["merge_tests_ran"] = len(merge)
-    summary["merge_tests_with_unique_lines"] = sum(1 for t in merge if unique_obj["per_test"][t] > 0)
-    summary["merge_unique_lines_total"] = sum(unique_obj["per_test"][t] for t in merge)
-    kz = collections.Counter(func_of(t)[0] for t in ranc if v_of[t].startswith("KEEP") and by_test[t]["app_lines"] == 0)
-    summary["keep_with_zero_app_coverage_top_files"] = dict(kz.most_common(25))
-    summary["unknown_verdict_tests"] = cnt.get("UNKNOWN", 0)
-    dump("crosscheck.json", {"summary": summary, "delete_dup": dup_report})
-    print(json.dumps(summary, ensure_ascii=True, indent=1))
+    xs["merge_tests_ran"] = len(merge)
+    xs["merge_tests_with_unique_lines"] = sum(1 for t in merge if unique_obj["per_test"][t] > 0)
+    xs["merge_unique_lines_total"] = sum(unique_obj["per_test"][t] for t in merge)
+    kz = collections.Counter(t.split("::")[0] for t in ranc if v_of[t].startswith("KEEP") and by_test[t]["app_lines"] == 0)
+    xs["keep_with_zero_app_coverage_top_files"] = dict(kz.most_common(25))
+    xs["unknown_verdict_tests"] = cnt.get("UNKNOWN", 0)
+    dump("crosscheck.json", {"summary": xs, "delete_dup": dup_report})
+    print(json.dumps({k: v for k, v in xs.items() if k not in ("move_out_sole_coverers", "unmeasured_verdict_tests")},
+                     ensure_ascii=True, indent=1))
+    if unm_removing:
+        print(f"analyze.py: {len(unm_removing)} DELETE-*/MOVE-OUT verdict units NOT MEASURED - lost lines are a "
+              "LOWER BOUND:\n  " + "\n  ".join(f"{u['verdict']}  {u['unit']}  [{u['reason']}]" for u in unm_removing),
+              file=sys.stderr)
 
 if orphan or missing_ctx:
     fail(4, f"{len(missing_ctx)} ran tests have no run context, {len(orphan)} run contexts have no junit row "
             f"- names in {os.path.join(out_dir, 'reconcile.json')}; they are NOT counted as zero coverage")
+if xcode:
+    fail(5, f"{len(unm_removing)} DELETE-*/MOVE-OUT verdict units have no measured test (crosscheck.json "
+            "unmeasured_verdict_tests); measure with -IncludeExpensive, or --allow-unmeasured for a LOWER BOUND")
