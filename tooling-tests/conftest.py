@@ -71,6 +71,16 @@ _DATABASE_VARIABLES = ("DATABASE_URL", "TEST_DATABASE_URL", "GEO_TEST_ALLOW_DB_R
 
 _STATE = pytest.StashKey[dict[str, Any]]()
 
+#: pytest options that end the session without running a test body.
+_NO_RUN_OPTIONS = (
+    ("collectonly", "--collect-only"),
+    ("setuponly", "--setup-only"),
+    ("setupplan", "--setup-plan"),
+    ("showfixtures", "--fixtures"),
+    ("show_fixtures_per_test", "--fixtures-per-test"),
+    ("markers", "--markers"),
+)
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -116,6 +126,14 @@ def pytest_configure(config: pytest.Config) -> None:
             "count is checked against. A one-file debug run is `--noconftest` and checks nothing."
         )
     requested = _PARTITIONS if value == "all" else (value,)
+    # §15 2026-10-03 (P1): `--collect-only` matched the count and ran nothing, and the runner said
+    # passed. Every option that collects without executing the test bodies is refused.
+    no_run = [flag for option, flag in _NO_RUN_OPTIONS if getattr(config.option, option, False)]
+    if no_run:
+        raise pytest.UsageError(
+            f"the tooling tier executes every case; {', '.join(no_run)} would count cases and run "
+            "none of them (check PYTEST_ADDOPTS)"
+        )
     outside = sorted(
         str(path.relative_to(_HERE))
         for path in _HERE.rglob("test_*.py")
@@ -203,7 +221,7 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     state = session.config.stash.get(_STATE, None)
-    if state is None or "selected" not in state or session.config.getoption("collectonly"):
+    if state is None or "selected" not in state:
         return
     reports = _OUTCOMES
     unexpected = sorted(
@@ -245,9 +263,12 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
         if not isinstance(job, dict):
             violations.append(f"job {job_id!r} is missing; it runs the {partition} partition")
             continue
-        for attribute in ("if", "continue-on-error"):
-            if job.get(attribute) not in (None, False, "false"):
-                violations.append(f"job {job_id!r} carries {attribute}: {job.get(attribute)!r}")
+        # §15 2026-10-03 (P1): `if: false` passed an allowlist shared with continue-on-error. Any
+        # `if` - false, always(), a condition - is a violation; only its absence is accepted.
+        if "if" in job:
+            violations.append(f"job {job_id!r} carries if: {job['if']!r}")
+        if job.get("continue-on-error") not in (None, False, "false"):
+            violations.append(f"job {job_id!r} carries continue-on-error")
         steps = [
             step
             for step in job.get("steps", [])
@@ -262,8 +283,11 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
             )
             continue
         step = steps[0]
-        if step.get("if") is not None:
+        if "if" in step:
             violations.append(f"the {partition} step carries if: {step['if']!r}")
+        for scope, holder in (("workflow", workflow), (f"job {job_id!r}", job), ("step", step)):
+            if "PYTEST_ADDOPTS" in (holder.get("env") or {}):
+                violations.append(f"{scope} env sets PYTEST_ADDOPTS for the {partition} partition")
         if step.get("continue-on-error") not in (None, False, "false"):
             violations.append(f"the {partition} step carries continue-on-error")
     block = re.search(r"\n {8}if \(\$runTooling\) \{\r?\n(.*?)\n {8}\}\r?\n", runner, re.DOTALL)

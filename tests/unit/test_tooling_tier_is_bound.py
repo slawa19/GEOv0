@@ -12,6 +12,7 @@ The counter-check of the function lives in `tooling-tests/portable/test_static_d
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 from pathlib import Path
 
@@ -33,3 +34,9 @@ def test_both_tooling_partitions_are_blocking_ci_steps_seen_from_the_backend_tie
     )
     runner = (_ROOT / "scripts" / "verify_local.ps1").read_text(encoding="utf-8")
     assert module.tooling_ci_binding_violations(workflow, runner) == []
+
+    # §15 2026-10-03 (P1): `if: false` on a job was accepted. The witness itself must see it.
+    for job_id, value in (("static-diagnostics", False), ("required-ui", "always()")):
+        mutated = copy.deepcopy(workflow)
+        mutated["jobs"][job_id]["if"] = value
+        assert module.tooling_ci_binding_violations(mutated, runner), (job_id, value)

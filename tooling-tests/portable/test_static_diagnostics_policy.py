@@ -77,6 +77,15 @@ def test_the_binding_check_notices_each_way_around_it(tooling_ci_binding) -> Non
         "whole job allowed to fail": lambda w: w["jobs"]["static-diagnostics"].__setitem__(
             "continue-on-error", True
         ),
+        "job if: false": lambda w: w["jobs"]["static-diagnostics"].__setitem__("if", False),
+        "job if: always()": lambda w: w["jobs"]["required-ui"].__setitem__("if", "always()"),
+        "step if: false": lambda w: _tooling_step(w, "static-diagnostics").__setitem__("if", False),
+        "PYTEST_ADDOPTS on the step": lambda w: _tooling_step(w, "required-ui").__setitem__(
+            "env", {"PYTEST_ADDOPTS": "--collect-only"}
+        ),
+        "PYTEST_ADDOPTS on the workflow": lambda w: w.__setitem__(
+            "env", {"PYTEST_ADDOPTS": "--collect-only"}
+        ),
         "partition renamed away": lambda w: _tooling_step(w, "static-diagnostics").__setitem__(
             "run", _tooling_step(w, "static-diagnostics")["run"].replace("portable", "all")
         ),
