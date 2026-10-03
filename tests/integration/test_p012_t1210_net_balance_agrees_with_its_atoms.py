@@ -88,6 +88,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.core.simulator.models import RunRecord
 from app.core.simulator.net_balance_utils import net_decimal_to_atoms, to_money_str
+from app.core.simulator import viz_rules
 from app.core.simulator.snapshot_builder import SnapshotBuilder
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
@@ -572,3 +573,30 @@ def test_every_net_whose_atoms_moved_was_one_the_precision_could_not_express(
         f"precision {precision}: no probe in the population exercised the erasure this change "
         f"exists to stop, so a green result here would mean nothing"
     )
+
+
+def test_the_debt_colour_ranks_debtors_on_the_declared_scale() -> None:
+    """Property 5 says WHETHER a node gets a debt colour; this pins WHICH one, among several debtors.
+
+    The snapshot calls `viz_rules.node_color_key` (`snapshot_builder.py`), and the key it may answer
+    is declared: `debt-0` ... `debt-8` (`api/openapi.yaml`, `viz_color_key`), a scale binned by the
+    backend (`docs/ru/simulator/frontend/docs/api.md`, 3.1). The expectations are what that scale
+    means, not a recomputation of the binning: every key is on it, a bigger debt is never a lighter
+    bin, and with several distinct debts the scale is spanned from its first key to its last.
+    """
+
+    declared = {f"debt-{b}" for b in range(9)}
+    debts = [1, 2, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
+    debt_mags_sorted = sorted(debts)
+
+    def colour(mag: int) -> str:
+        return viz_rules.node_color_key(
+            atoms=-mag, status_key="active", type_key="person", debt_mags_sorted=debt_mags_sorted
+        )
+
+    keys = {mag: colour(mag) for mag in debts}
+    assert set(keys.values()) <= declared, keys
+    bins = [int(keys[mag].removeprefix("debt-")) for mag in debt_mags_sorted]
+    assert bins == sorted(bins), f"a bigger debt got a lighter bin: {keys}"
+    assert (keys[min(debts)], keys[max(debts)]) == ("debt-0", "debt-8"), keys
+    assert len(set(bins)) > 2, f"the debtors were not spread over the scale: {keys}"
