@@ -17,9 +17,7 @@ WHAT THIS TIER ADDS over `tests/unit/test_p015_step5b_criterion_b.py`:
     - an APPLICATION writer (a clearing over the same edge): it waits on the owner lock until the payment
       commits.
 * THE PLACEMENT against the advisory locks, which SQLite does not have.
-* (Removed by 025 `T2504.2`, 2026-10-03: the wrappers that re-ran the unit module's criterion (b)
-  controls here. Since 017 the unit module itself runs on PostgreSQL through asyncpg, on a clone
-  (`tier_on_a_clone`), so they were proven duplicates of its own tests.)
+* ASYNCPG spellings for every SQLite control of criterion (b) that does not need the inject stand.
 
 Every test that commits does so on a disposable clone of the migrated template (`committed_database`),
 and the clone's drop is the only disposal of what it wrote (018 B0b; until then each test deleted its
@@ -463,6 +461,50 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         assert unit._coverage(outcome)["full_recomputation"] == {"CLEARING": 1, "PAYMENT": 1}, outcome.detail()
     finally:
         monkeypatch.undo()
+
+
+# =================================================================================================
+# The SQLite controls of criterion (b), on asyncpg
+# =================================================================================================
+
+
+_ASYNCPG_CONTROLS = [
+    ("test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full", {}),
+    ("test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind", {}),
+    ("test_step5b_a_corrupted_payment_record_is_failed", {"corruption": "recorded_delta"}),
+    ("test_step5b_a_corrupted_payment_record_is_failed", {"corruption": "intent_flow"}),
+    ("test_step5b_a_corrupted_payment_record_is_failed", {"corruption": "prestate"}),
+    ("test_step5b_net_neutral_cycle_inflation_on_a_payment_is_failed", {}),
+    ("test_step5b_a_v1_payment_is_structural_only_and_never_a_full_recomputation", {}),
+    ("test_step5b_a_v1_payment_with_an_edge_outside_its_flow_pairs_is_failed", {}),
+    ("test_step5b_an_honest_clearing_is_recomputed_in_full_and_passed", {}),
+    ("test_step5b_the_c6_under_clearing_is_failed_by_b_while_a_stays_blind", {}),
+    ("test_step5b_a_corrupted_clearing_record_is_failed", {"corruption": "recorded_delta"}),
+    ("test_step5b_a_corrupted_clearing_record_is_failed", {"corruption": "clear_amount"}),
+    ("test_step5b_a_corrupted_clearing_record_is_failed", {"corruption": "prestate"}),
+    ("test_step5b_a_corrupted_clearing_record_is_failed", {"corruption": "cycle_not_closed"}),
+    ("test_step5b_a_corrupted_clearing_record_is_failed", {"corruption": "cycle_inflation"}),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name, kwargs",
+    _ASYNCPG_CONTROLS,
+    ids=[f"{name.removeprefix('test_step5b_')}{'-' + next(iter(k.values())) if k else ''}" for name, k in _ASYNCPG_CONTROLS],
+)
+async def test_step5b_p_the_criterion_b_controls_hold_on_asyncpg(factory, name, kwargs) -> None:
+    """The same stands and assertions as the SQLite module, through asyncpg: native uuids, `Decimal`
+    untouched, JSON intents, and `pg_get_constraintdef`-checked arithmetic on every coordinated rewrite."""
+
+    await getattr(unit, name)(None, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_step5b_p_a_b_finding_is_stored_in_the_same_row_on_asyncpg(factory, monkeypatch) -> None:
+    await unit.test_step5b_a_b_finding_is_stored_in_the_same_row_and_fingerprint_and_never_in_a_checkpoint(
+        None, monkeypatch
+    )
 
 
 # =================================================================================================
