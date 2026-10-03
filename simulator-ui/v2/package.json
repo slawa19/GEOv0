@@ -27,7 +27,7 @@
     "vue": "^3.5.26"
   },
   "devDependencies": {
-    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/parser": "^8.71.0",
     "@types/d3-quadtree": "^3.0.6",
     "@types/d3-force": "^3.0.10",
     "@types/node": "^24.10.1",
