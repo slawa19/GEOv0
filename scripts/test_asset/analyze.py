@@ -1,5 +1,18 @@
 """Per-test coverage analysis of the backend tier (programme 025, T2501). DEBUG PATH, NOT A GATE.
 
+ADVISORY ONLY - NEVER ACCEPTANCE EVIDENCE (025, AGENTS.md §19.4 decision 2026-10-03). This tool is an inventory
+aid. Moving or deleting a test is accepted only by assertion/setup/isolation equivalence and a targeted mutation
+per removed obligation (spec 025, T2500 P2-3) - never by a number this tool prints. Known ways it UNDER-REPORTS a
+test's lines, left unfixed by that decision (spec 025 «Результаты T2501», §15 review 2026-10-03):
+  * partial parameter sets: if only some parametrised cases of a function were measured (a selector run), the
+    function counts as measured and the unmeasured cases' unique lines vanish;
+  * provenance is HEAD only: uncommitted edits to tests or app after the run are not detected;
+  * deferred lambda bodies inside module/class-level assignments (e.g. default_factory) are dropped from body
+    line sets as import-level (raw crosscheck sets keep them);
+  * with --allow-stale-input / --allow-unmeasured the outputs are qualified only partly (summary.input,
+    *_is labels); the DELETE-only lower-bound label may point the wrong way when an unmeasured MOVE-OUT test
+    covers the same line.
+
 Usage: python scripts/test_asset/analyze.py <run_dir> [--out DIR] [--verdicts DIR] [--repo DIR]
                                             [--allow-stale-input] [--allow-unmeasured]
   <run_dir>  output of scripts/test_asset/measure.ps1: `.coverage` (--cov=app --cov=tests --cov-branch
@@ -427,6 +440,7 @@ tracked = {ln for ln in (git("ls-files", "app") or "").split() if ln.endswith(".
 stmts_all = sum(v["statements"] for v in app_files.values())
 miss_all = sum(v["not_covered_by_anything"] for v in app_files.values())
 summary = {
+    "advisory_only": "never acceptance evidence for moving or deleting a test (spec 025, §19.4 2026-10-03)",
     "valid": not invalid,
     "invalid_reasons": invalid,
     "input": input_info,
@@ -470,6 +484,7 @@ dump("reconcile.json", {"run_contexts_not_in_junit": orphan, "ran_tests_without_
 d, b, s, u, idc = by_test, btf, summary, unique_obj, {"size_hist": dict(sorted(size_hist.items())), "clusters": clusters}
 out = []
 p = out.append
+p("**ADVISORY ONLY - never acceptance evidence for moving or deleting a test (spec 025, §19.4 2026-10-03).**\n")
 if invalid:
     p("**INVALID: " + "; ".join(invalid) + "**\n")
 p("### Top-30 test files by time (sum of junit total per test)\n")
