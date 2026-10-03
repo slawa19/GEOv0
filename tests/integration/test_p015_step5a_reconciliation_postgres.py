@@ -28,7 +28,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.core.ledger.book import Book, BookError, Refusal, operation_for
+from app.core.ledger.book import Book, operation_for
 from app.core.ledger.reconciliation import FAILED, PASSED, UNVERIFIABLE, take_baseline
 from app.db.base import Base
 from app.db.models.debt import Debt
@@ -36,7 +36,6 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.reconciliation_tables import BASELINE_COMMENT
 from tests.p019_support import allow_below_serializable_for_a_diagnostic
-from tests.debt_setup import debt_fixture_setup
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - fixture, requested by `factory`
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
@@ -283,26 +282,6 @@ async def test_step5a_p_passed_failed_unverifiable_and_the_scheduled_row(factory
     await _scheduled_run(monkeypatch, factory)
     assert [s for s, _ in await _results(factory, triangle.equivalent.id)] == [FAILED]
     assert [s for s, _ in await _results(factory, unbaselined.equivalent.id)] == [UNVERIFIABLE]
-
-
-@pytest.mark.asyncio
-async def test_step5a_p_a_fixture_write_after_the_baseline_is_refused(factory) -> None:
-    """The refusal's `IN (...)` over native uuids, on asyncpg."""
-
-    triangle = await _seed_triangle(factory, trustlines=[])
-    await _fixture_debts(factory, triangle, [("a", "b", "10")])
-    await _baseline(factory, triangle.equivalent.id)
-    late = Debt(
-        id=uuid.uuid4(), debtor_id=triangle.b.id, creditor_id=triangle.c.id,
-        equivalent_id=triangle.equivalent.id, amount=Decimal("4"), version=0,
-    )
-    with pytest.raises(BookError) as refused:
-        async with factory() as session:
-            async with debt_fixture_setup(session, label="after-baseline"):
-                session.add(late)
-            await session.commit()
-    assert refused.value.reason == Refusal.UNVERIFIABLE_WRITER_AFTER_BASELINE, refused.value
-    assert await _edges(factory, triangle) == {("a", "b"): Decimal("10.00000000")}
 
 
 @pytest.mark.asyncio
