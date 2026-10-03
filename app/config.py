@@ -197,7 +197,9 @@ class Settings(BaseSettings):
     ROUTING_MAX_PATHS: int = 3
     # Spec-aligned timeouts
     ROUTING_PATH_FINDING_TIMEOUT_MS: int = 500
-    ROUTING_GRAPH_CACHE_TTL_SECONDS: int = 0
+    # 027 stage 1: the route graph is a hint cached per equivalent; money commits no longer drop it, so this bounds
+    # how stale a cached capacity can be (the core's final check re-reads the pair). 0 disables the cache.
+    ROUTING_GRAPH_CACHE_TTL_SECONDS: int = 2
 
     # Payment execution timeouts (spec section 6.9)
     PREPARE_TIMEOUT_SECONDS: int = 3

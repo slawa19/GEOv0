@@ -216,12 +216,12 @@ async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, m
     # The router may route over a cached graph; the core decides on the lines as they are in its transaction.
     monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
     eq, p = await _chain(db_session, [("W", "X", {}), ("X", "Y", {})], ["XW", "YX"])
-    await PaymentRouter(db_session).build_graph(eq.code)
+    await PaymentRouter(db_session).build_graph(eq.code, use_shared_cache=True)
     line = (await db_session.execute(select(TrustLine).where(TrustLine.from_participant_id == p["X"].id))).scalar_one()
     line.status, line.policy = ("frozen", {}) if change == "freeze" else ("active", {"can_be_intermediate": False})
     await db_session.commit()
     stale = PaymentRouter(db_session)
-    await stale.build_graph(eq.code)
+    await stale.build_graph(eq.code, use_shared_cache=True)
     assert stale.find_flow_routes(p["W"].pid, p["Y"].pid, Decimal("30")), "control: the cached graph still routes"
     with pytest.raises(RoutingException):
         await PaymentService(db_session).create_payment_internal(

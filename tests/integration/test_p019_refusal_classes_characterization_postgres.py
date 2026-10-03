@@ -199,6 +199,7 @@ async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  #
 
 @pytest.mark.asyncio
 async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> None:  # noqa: F811
+    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0)  # 027: a fresh route per request, as designed
     people = await build_api_world(api, factory)
     observed: dict[str, dict[str, Any]] = {}
     premises: dict[str, Any] = {}

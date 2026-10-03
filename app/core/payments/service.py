@@ -161,6 +161,19 @@ def _payment_deadline(deadline: float | None, total_timeout_s: float):
     return asyncio.timeout(total_timeout_s)
 
 
+def _log_routing_timeout(stage: str, equivalent: str) -> None:
+    """027 stage 1: a routing timeout by stage - the graph build (bounded by the payment's deadline) or the path
+    search (the routing budget) - counted and logged apart."""
+
+    logger.warning("event=payment.routing_timeout stage=%s equivalent=%s", stage, equivalent)
+    try:
+        from app.utils.metrics import ROUTING_FAILURES_TOTAL
+
+        ROUTING_FAILURES_TOTAL.labels(reason=f"timeout_{stage}").inc()
+    except Exception:
+        pass
+
+
 def _refusal_error_payload(reason: str | None, code: str | None, details: dict | None) -> dict:
     """The stored `error` of a refused payment, normalized as the removed `PaymentEngine.abort` did."""
 
@@ -287,6 +300,9 @@ class _PaymentAttempt:
     identity_collision: bool = False
     refusal: tuple[str, str, dict[str, Any], str] | None = None
     operation_left_unrolled: bool = False
+    #: 027 stage 1: refused for capacity on a graph that may be stale - the core's final check (bind) refused,
+    #: or the search over a CACHED graph found nothing. `pay()` re-routes such a request once on a fresh graph.
+    reroutable: bool = False
 
 
 @dataclass(frozen=True)
@@ -473,6 +489,7 @@ class _RetryAttempt:
 
     delay_seconds: float
     admission: "_Admission | None" = None
+    reroute: bool = False  # 027 stage 1: the request's one re-route - a fresh graph, not a conflict retry
 
 
 @dataclass
@@ -1029,9 +1046,10 @@ class PaymentService:
         require_signature: bool,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
         deadline: float | None = None,
-        use_shared_routing_cache: bool = False,
+        use_shared_routing_cache: bool = True,
         record_refusal: bool = True,
         emit_start: bool = True,
+        release_before_routing: bool = False,
     ) -> StagedPaymentResult:
         """Execute a payment INSIDE THE CALLER'S TRANSACTION; never commit or roll it back.
 
@@ -1058,6 +1076,11 @@ class PaymentService:
         `T1905`, `T1912`). `pay()` turns it off: every failure is raised with `self._attempt` describing
         it, and `pay()` settles it after rolling the attempt back.
         `deadline` (an event-loop time) bounds the call instead of `PAYMENT_TOTAL_TIMEOUT_SECONDS`.
+
+        ROUTING (027 stage 1): the route is a HINT, from the shared cache (`use_shared_routing_cache`) or built in
+        a read transaction of its own, closed before the payment operation begins (`_build_route_graph`); this
+        transaction never reads the whole equivalent. The replay answer above comes first: a stored `tx_id` is
+        answered without routing.
 
         Returns the result and the post-commit effects, which only the caller may apply, once, after
         its commit.
@@ -1291,23 +1314,20 @@ class PaymentService:
             settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10
         )
 
+        routing_stage: str | None = None
         try:
             async with _payment_deadline(deadline, total_timeout_s):
-                # Build routing graph + compute routes under spec-aligned timeout budget.
-                try:
-                    if use_shared_routing_cache:
-                        build_graph = self.router.build_graph(equivalent_code)
-                    else:
-                        build_graph = self.router.build_graph(
-                            equivalent_code,
-                            use_shared_cache=False,
-                        )
-                    await asyncio.wait_for(
-                        build_graph,
-                        timeout=routing_timeout_s,
-                    )
-                except asyncio.TimeoutError:
-                    raise TimeoutException("Routing timed out")
+                # 027 stage 1 (F-027-4): the graph build is bounded by the payment's deadline, not by the routing
+                # budget, which bounds only the path search below; a timeout of either is logged by its stage.
+                # §15 review of stage 1, #1: `pay()` owns this transaction and its reads above wrote nothing - end it
+                # and free its pooled connection before the route reader takes one (else attempts waiting for a
+                # leader's build hold the pool it needs); the money attempt below is a fresh, re-guarded transaction.
+                released = release_before_routing and isinstance(self.session.bind, AsyncEngine)
+                if released:
+                    await self.session.rollback()
+                routing_stage = "build"
+                await self._build_route_graph(equivalent_code, cached=use_shared_routing_cache)
+                routing_stage = "search"
 
                 # The route is chosen from the graph, so the perimeter has to be applied
                 # here -- after the graph is built (and possibly served from the shared
@@ -1341,9 +1361,17 @@ class PaymentService:
                         timeout=routing_timeout_s,
                     )
                 except asyncio.TimeoutError:
+                    _log_routing_timeout("search", equivalent_code)
                     raise TimeoutException("Routing timed out")
+                except TimeoutException:  # the search's own deadline, inside the router
+                    _log_routing_timeout("search", equivalent_code)
+                    raise
+                routing_stage = None
 
                 if not routes_found:
+                    # A cached graph may understate a capacity freed since (no money commit drops it): one
+                    # re-route on a fresh graph is `pay()`'s to take (027 stage 1); a fresh "no route" is final.
+                    attempt.reroutable = self.router.from_cache
                     try:
                         from app.utils.metrics import (
                             PAYMENT_EVENTS_TOTAL,
@@ -1388,6 +1416,8 @@ class PaymentService:
                     {"path": path, "amount": str(route_amount)}
                     for path, route_amount in routes_found
                 ]
+                if released:
+                    await MoneyBoundary.require_serializable(self.session, writer="payment")
 
                 # 3-5. THE PAYMENT OPERATION (019 stages 3-4). The `Transaction` insert (`COMMITTED`),
                 # the locks, the capacity, the envelope, the book and the checks run inside ONE
@@ -1435,6 +1465,8 @@ class PaymentService:
                     await self._abandon_operation(operation, exc)
                     raise
         except BaseException as exc:
+            if routing_stage == "build" and isinstance(exc, asyncio.TimeoutError):
+                _log_routing_timeout("build", equivalent_code)
             if record_refusal:
                 # Staged: the caller owns the transaction, and the outcome goes back through its
                 # savepoint as a RESULT (`_settle_staged_failure`).
@@ -1492,10 +1524,38 @@ class PaymentService:
                 "equivalent": equivalent_code,
                 "amount": str(amount),
             },
-            invalidate_routing_cache=True,
+            # 027 stage 1: a money commit leaves the route cache in place (it ages out by its TTL; the core's
+            # final check re-reads every pair) - only topology edits drop it.
+            invalidate_routing_cache=False,
             include_engine_success_metrics=True,
         )
         return StagedPaymentResult(result=result, post_commit_effects=effects, written_here=True)
+
+    async def _build_route_graph(self, equivalent_code: str, *, cached: bool) -> None:
+        """The route graph: from the shared cache, or built in a short `READ COMMITTED READ ONLY` transaction on a
+        connection of its own, opened only to build and closed before the payment operation (027 stage 1,
+        F-027-1). The route is a hint - the core's final check re-reads each pair - so it needs no snapshot, and a
+        SERIALIZABLE reader of every line and debt of the equivalent made every two payments conflict. Not a money
+        writer: `require_serializable` does not apply. A fresh build (`cached=False`, the one re-route) refreshes the
+        shared cache. A session bound to one connection (a test's outer transaction) has no other connection: it
+        routes on itself and never refreshes the cache."""
+
+        bind = self.session.bind
+        if not isinstance(bind, AsyncEngine):
+            if cached:
+                await self.router.build_graph(equivalent_code, use_shared_cache=True)
+            else:
+                await self.router.build_graph(equivalent_code, use_shared_cache=False)
+            return
+
+        @asynccontextmanager
+        async def reader():
+            async with bind.connect() as connection:
+                await connection.execution_options(isolation_level="READ COMMITTED", postgresql_readonly=True)
+                async with AsyncSession(bind=connection, autoflush=False, expire_on_commit=False) as session:
+                    yield session
+
+        await self.router.build_graph(equivalent_code, use_shared_cache=cached, refresh=not cached, reader=reader)
 
     async def _open_operation_savepoint(self):
         """The payment operation's savepoint, opened for real before anything of it is added.
@@ -1634,6 +1694,8 @@ class PaymentService:
             except asyncio.TimeoutError:
                 raise
             except Exception as e:
+                # 027 stage 1: the final check refused a capacity the (possibly stale) graph offered.
+                attempt.reroutable = isinstance(e, RoutingException) and e.code == ErrorCode.E002.value
                 logger.error(
                     "event=payment.prepare_failed tx_id=%s error_type=%s",
                     tx_id_str,
@@ -2206,6 +2268,8 @@ class PaymentService:
         attempts = max(1, int(settings.COMMIT_RETRY_ATTEMPTS or 1))
         attempt_no = 0
         admission: _Admission | None = None
+        reroutes_left, fresh_graph = 1, False  # 027 stage 1: ONE re-route per request, not per attempt
+        owns_sessions = _service_for is None  # a borrowed session's transaction is its caller's: never rolled back
         while True:
             attempt_no += 1
             async with sessions() as session:
@@ -2220,9 +2284,16 @@ class PaymentService:
                     attempt_no=attempt_no,
                     attempts=attempts,
                     admission=admission,
+                    fresh_graph=fresh_graph,
+                    may_reroute=reroutes_left > 0,
+                    release_before_routing=owns_sessions,
                 )
             if isinstance(outcome, _RetryAttempt):
                 admission = outcome.admission or admission
+                fresh_graph = outcome.reroute
+                if outcome.reroute:  # not a conflict retry: it spends no attempt of the conflict budget
+                    reroutes_left -= 1
+                    attempt_no -= 1
                 await asyncio.sleep(outcome.delay_seconds)
                 continue
             return outcome
@@ -2239,6 +2310,9 @@ class PaymentService:
         attempt_no: int,
         attempts: int,
         admission: "_Admission | None" = None,
+        fresh_graph: bool = False,
+        may_reroute: bool = False,
+        release_before_routing: bool = False,
     ) -> "PaymentResult | _RetryAttempt":
         try:
             staged = await self.execute(
@@ -2247,9 +2321,10 @@ class PaymentService:
                 require_signature=require_signature,
                 allowed_participant_pids=allowed_participant_pids,
                 deadline=deadline,
-                # The first attempt keeps the API's shared route cache; a retry follows a conflict,
-                # so it reads the graph afresh.
-                use_shared_routing_cache=attempt_no == 1,
+                # 027 stage 1: every attempt routes on the shared cache - a conflict retry does not rebuild
+                # the graph - except the request's one re-route, which builds it afresh.
+                use_shared_routing_cache=not fresh_graph,
+                release_before_routing=release_before_routing,
                 record_refusal=False,
                 emit_start=False,
             )
@@ -2262,6 +2337,7 @@ class PaymentService:
                 attempt_no=attempt_no,
                 attempts=attempts,
                 admission=admission,
+                may_reroute=may_reroute,
             )
 
         # THE ONE COMMIT of the payment.
@@ -2359,6 +2435,7 @@ class PaymentService:
         attempt_no: int,
         attempts: int,
         admission: "_Admission | None" = None,
+        may_reroute: bool = False,
     ) -> "PaymentResult | _RetryAttempt":
         attempt: _PaymentAttempt = getattr(self, "_attempt", None) or _PaymentAttempt()
         await self._end_failed_attempt()
@@ -2399,6 +2476,12 @@ class PaymentService:
                 raise exc
             raise public_error from exc
 
+        if attempt.reroutable and may_reroute and asyncio.get_running_loop().time() < deadline:
+            # 027 stage 1 (GEO's `buildPathsAgain`): the capacity refusal came from a graph that may be stale.
+            # Nothing is recorded yet - the refusal is final only after the one re-route, in a fresh
+            # transaction within the same deadline (019's "final after admission" now holds after it).
+            logger.info("event=payment.reroute tx_id=%s", attempt.tx_id)
+            return _RetryAttempt(0.0, admission, reroute=True)
         refusal = _definitive_refusal(attempt, exc, admission)
         if refusal is not None:
             stored = await self._record_refusal(sessions, refusal, deadline=deadline)

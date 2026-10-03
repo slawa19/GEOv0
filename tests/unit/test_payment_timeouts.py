@@ -72,7 +72,7 @@ async def test_payment_prepare_timeout_aborts_transaction(db_session, monkeypatc
 
     service = PaymentService(db_session)
 
-    async def _build_graph(_code: str) -> None:
+    async def _build_graph(_code: str, **_kwargs) -> None:
         return None
 
     def _find_flow_routes(
@@ -165,7 +165,7 @@ async def test_payment_commit_timeout_returns_committed_when_tx_already_committe
 
     service = PaymentService(db_session)
 
-    async def _build_graph(_code: str) -> None:
+    async def _build_graph(_code: str, **_kwargs) -> None:
         return None
 
     def _find_flow_routes(

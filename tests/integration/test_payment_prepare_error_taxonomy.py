@@ -464,9 +464,11 @@ async def test_prepare_preserves_typed_client_error_in_http_and_transaction(
         "message": expected_error.message,
         "details": expected_error.details,
     }
+    # 027 stage 1: a capacity refusal at binding is final only after the request's ONE re-route.
+    expected_calls = ["single" if route_count == 1 else "multipath"] * (2 if expected_code == "E002" else 1)
     assert response.status_code == expected_status, response.text
     assert _envelope_error(response) == expected_payload
-    assert calls == ["single" if route_count == 1 else "multipath"]
+    assert calls == expected_calls
 
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
@@ -487,7 +489,7 @@ async def test_prepare_preserves_typed_client_error_in_http_and_transaction(
     assert retry_response.status_code == 200, retry_response.text
     assert get_response.json()["error"] == expected_payload
     assert retry_response.json()["error"] == expected_payload
-    assert calls == ["single" if route_count == 1 else "multipath"]
+    assert calls == expected_calls
 
 
 @MODE_B
@@ -687,7 +689,7 @@ async def test_direct_prepare_reraises_same_typed_error_after_durable_abort(
         details={"state": "PREPARED"},
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -1008,7 +1010,7 @@ async def test_prepare_cancellation_preserves_cancel_and_durably_aborts(
         suffix="cancelled",
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from collections import deque
@@ -40,6 +41,10 @@ class PaymentRouter:
     # Keyed by equivalent_code; invalidated via invalidate_cache() on trustline CRUD.
     _topology_cache: Dict[str, Dict[str, Set[str]]] = {}
 
+    # 027 stage 1: the one graph build in flight per equivalent in this process (single-flight); its waiters read
+    # the cache it stores. A future of another event loop is ignored.
+    _inflight: Dict[str, "asyncio.Future[None]"] = {}
+
     @classmethod
     def invalidate_cache(cls, equivalent_code: str | None = None) -> None:
         if equivalent_code:
@@ -61,6 +66,7 @@ class PaymentRouter:
         self.edge_no_transit: Dict[str, Dict[str, frozenset]] = {}
         # 026 В2: pairs (participant UUIDs) holding a requested close - the core's lock-mode hint, not a rule.
         self.pending_pairs: Set[frozenset] = set()
+        self.from_cache = False  # the last build_graph() was served by the shared cache (027: may be stale)
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
 
@@ -152,37 +158,81 @@ class PaymentRouter:
 
         return False
 
-    async def build_graph(self, equivalent_code: str, *, use_shared_cache: bool = True):
-        """Loads all trustlines and debts for the given equivalent and builds the capacity graph."""
+    async def build_graph(self, equivalent_code: str, *, use_shared_cache: bool = False, refresh: bool = False,
+                          reader=None):
+        """Load the active lines and debts of the equivalent and build the capacity graph - a HINT, not a proof.
+
+        027 stage 1. `use_shared_cache`: a cached graph younger than `ROUTING_GRAPH_CACHE_TTL_SECONDS`, else ONE
+        build per equivalent in this process that concurrent callers wait for (single-flight), stored. `refresh`:
+        build afresh and store (the payment's one re-route). Neither: build afresh for this instance only. Topology
+        edits drop the cache; money commits do not - a cached capacity may be stale up to the rest of a build in
+        flight when the edit committed plus the TTL (the stamp is the publish time), and the core's final check
+        re-reads the pair (`PaymentService._segment`). The default reads afresh in this router's
+        session: `/payments/capacity`, `/payments/max-flow` and the simulator's targets answer from the state as
+        it is, never from a cache a payment did not drop. `reader`: a factory of the async context the
+        build reads in (the payment's own read transaction), entered only when a build actually runs.
+        """
         validate_equivalent_code(equivalent_code)
+        self.from_cache = False
         with log_duration(logger, "router.build_graph", equivalent=equivalent_code):
             ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
-            if use_shared_cache and ttl > 0:
-                cached = self._graph_cache.get(equivalent_code)
-                if cached is not None:
-                    # Backward-compatible cache unpacking.
-                    if len(cached) == 5:
-                        cached_at, graph, edge_policy, pids, uuids = cached  # type: ignore[misc]
-                        edge_blocked, no_transit = {}, []
-                    else:
-                        cached_at, graph, edge_policy, edge_blocked, pids, uuids, *no_transit = cached
-                    if (time.time() - cached_at) <= ttl:
-                        # Shallow copies are enough because nested values are Decimals/bools.
-                        self.graph = {u: dict(v) for u, v in graph.items()}
-                        self.edge_can_be_intermediate = {u: dict(v) for u, v in edge_policy.items()}
-                        self.edge_blocked_participants = {
-                            u: {v: set(s) for v, s in m.items()} for u, m in (edge_blocked or {}).items()
-                        }
-                        self.pids = dict(pids)
-                        self.uuids = dict(uuids)
-                        self.edge_no_transit = {u: dict(v) for u, v in (no_transit or [{}])[0].items()}
-                        self.pending_pairs = set(no_transit[1]) if len(no_transit) > 1 else set()
-                        return
+            shared = (use_shared_cache or refresh) and ttl > 0
+            # Follow the build in flight - a re-route (`refresh`) joins it too: its read began at most one build ago -
+            # and when it stored nothing (failed, cancelled), follow the next leader or become it.
+            while shared:
+                if not refresh and self._load_cached(equivalent_code, ttl):
+                    return
+                pending = self._inflight.get(equivalent_code)
+                if pending is None or pending.get_loop() is not asyncio.get_running_loop():
+                    break
+                await asyncio.shield(pending)
+                refresh = False
+            if not shared:
+                await self._build_in(reader, equivalent_code, write_shared_cache=False)
+                return
+            done = asyncio.get_running_loop().create_future()
+            self._inflight[equivalent_code] = done
+            try:
+                await self._build_in(reader, equivalent_code, write_shared_cache=True)
+            finally:
+                done.set_result(None)
+                if self._inflight.get(equivalent_code) is done:
+                    del self._inflight[equivalent_code]
 
-            await self._build_graph_impl(
-                equivalent_code,
-                write_shared_cache=use_shared_cache,
-            )
+    async def _build_in(self, reader, equivalent_code: str, *, write_shared_cache: bool) -> None:
+        if reader is None:
+            return await self._build_graph_impl(equivalent_code, write_shared_cache=write_shared_cache)
+        own = self.session
+        async with reader() as self.session:
+            try:
+                await self._build_graph_impl(equivalent_code, write_shared_cache=write_shared_cache)
+            finally:
+                self.session = own
+
+    def _load_cached(self, equivalent_code: str, ttl: int) -> bool:
+        cached = self._graph_cache.get(equivalent_code)
+        if cached is None:
+            return False
+        # Backward-compatible cache unpacking.
+        if len(cached) == 5:
+            cached_at, graph, edge_policy, pids, uuids = cached  # type: ignore[misc]
+            edge_blocked, no_transit = {}, []
+        else:
+            cached_at, graph, edge_policy, edge_blocked, pids, uuids, *no_transit = cached
+        if (time.time() - cached_at) > ttl:
+            return False
+        # Shallow copies are enough because nested values are Decimals/bools.
+        self.graph = {u: dict(v) for u, v in graph.items()}
+        self.edge_can_be_intermediate = {u: dict(v) for u, v in edge_policy.items()}
+        self.edge_blocked_participants = {
+            u: {v: set(s) for v, s in m.items()} for u, m in (edge_blocked or {}).items()
+        }
+        self.pids = dict(pids)
+        self.uuids = dict(uuids)
+        self.edge_no_transit = {u: dict(v) for u, v in (no_transit or [{}])[0].items()}
+        self.pending_pairs = set(no_transit[1]) if len(no_transit) > 1 else set()
+        self.from_cache = True
+        return True
 
     async def _build_graph_impl(
         self,
@@ -190,11 +240,10 @@ class PaymentRouter:
         *,
         write_shared_cache: bool = True,
     ) -> None:
-        # 1. Get Equivalent ID
-        stmt = select(Equivalent).where(Equivalent.code == equivalent_code)
-        result = await self.session.execute(stmt)
-        equivalent = result.scalar_one_or_none()
-        if not equivalent:
+        # 1. Get Equivalent ID. 027 stage 1: columns, not ORM objects, throughout (F-027-4).
+        stmt = select(Equivalent.id).where(Equivalent.code == equivalent_code)
+        equivalent_id = (await self.session.execute(stmt)).scalar_one_or_none()
+        if equivalent_id is None:
             logger.warning(f"Equivalent {equivalent_code} not found")
             self.graph = {}
             return
@@ -203,23 +252,22 @@ class PaymentRouter:
         # We need to join with Participant to get PIDs
         # 026 `T2603.1`: plus the frozen lines with a requested close - they mark their pair pending (В2) and
         # carry no capacity or policy (024 `T2415.2`).
-        stmt = select(TrustLine).where(
+        stmt = select(TrustLine.from_participant_id, TrustLine.to_participant_id, TrustLine.limit, TrustLine.policy,
+                      TrustLine.status, TrustLine.close_requested_at).where(
             and_(
-                TrustLine.equivalent_id == equivalent.id,
+                TrustLine.equivalent_id == equivalent_id,
                 or_(TrustLine.status == 'active',
                     and_(TrustLine.status == 'frozen', TrustLine.close_requested_at.is_not(None))),
             )
         )
-        result = await self.session.execute(stmt)
-        loaded = result.scalars().all()
+        loaded = (await self.session.execute(stmt)).all()
         requested = {frozenset((tl.from_participant_id, tl.to_participant_id))
                      for tl in loaded if tl.close_requested_at is not None}
         trustlines = [tl for tl in loaded if tl.status == 'active']
 
         # 3. Load all Debts for this equivalent
-        stmt = select(Debt).where(Debt.equivalent_id == equivalent.id)
-        result = await self.session.execute(stmt)
-        debts = result.scalars().all()
+        stmt = select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(Debt.equivalent_id == equivalent_id)
+        debts = (await self.session.execute(stmt)).all()
 
         # Helper to map UUID -> PID
         # We can't easily join efficiently without loading participants.

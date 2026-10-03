@@ -585,7 +585,7 @@ def split_payment(amount, paths):
 - `routing.multipath_mode`: `limited` | `full` (по умолчанию `limited`)
 - `routing.max_paths_per_payment`: 1..N (по умолчанию 3) — *нужно уметь менять для перф‑проверок*
 - `routing.max_path_length`: 1..N (по умолчанию 6)
-- `routing.path_finding_timeout_ms`: общий таймаут на routing (по умолчанию 500)
+- `routing.path_finding_timeout_ms`: таймаут поиска пути (по умолчанию 500); сборку графа ограничивает общий таймаут платежа (027, стадия 1)
 - `routing.full_multipath_budget_ms`: дополнительный budget времени/стоимости для `full` (по умолчанию 1000)
 - `routing.full_multipath_max_iterations`: ограничение итераций (по умолчанию 100)
 - Observability: метрики по времени/стоимости (см. ниже)
@@ -998,7 +998,7 @@ def apply_commit(participant, tx_id):
 
 | Этап | Таймаут | Действие при истечении |
 |------|---------|------------------------|
-| Routing | 500 мс | ABORT (no routes) |
+| Routing (поиск пути) | 500 мс | ABORT (no routes); сборка графа — в пределах общего таймаута (027, стадия 1) |
 | PREPARE | 3 сек | ABORT (timeout) |
 | COMMIT | 5 сек | Retry, затем ABORT |
 | Общий | 10 сек | ABORT |
