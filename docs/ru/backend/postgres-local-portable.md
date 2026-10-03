@@ -210,7 +210,7 @@ $env:DATABASE_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_dev_<сл
    ~300 МБ на задачу.
 2. **Данные кластера не должны попадать в дерево.** `pgdata` — изменяемая база; `AGENTS.md` §12
    держит runtime под `.local-run/`, а гард
-   `tests/unit/test_p014_t1406_no_mutable_database_in_the_working_tree.py` существует именно потому,
+   `tooling-tests/portable/test_p014_t1406_no_mutable_database_in_the_working_tree.py` существует именно потому,
    что база в рабочем дереве уже однажды туда попала.
 3. **Снос worktree не должен сносить кластер.** Удаление задачи — обычная операция; потеря кластера
    вместе с ней превращала бы её в переустановку.

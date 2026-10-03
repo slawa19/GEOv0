@@ -130,7 +130,7 @@ def pytest_collection_modifyitems(session, config, items) -> None:
 # "can a test that needs PostgreSQL run without it?" - is now answered for the whole tier, earlier, by
 # `_require_a_postgres_tier_url` above: nothing is collected on another backend, so a check after
 # collection would be a check that can never fire. The refusal and its control are
-# `tests/unit/test_the_tier_refuses_a_database_that_is_not_postgres.py`.
+# `tooling-tests/powershell/test_the_tier_refuses_a_database_that_is_not_postgres.py`.
 
 
 _use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"

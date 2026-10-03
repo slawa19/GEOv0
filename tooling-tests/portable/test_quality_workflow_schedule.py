@@ -123,8 +123,12 @@ def test_both_halves_of_the_required_gate_run_on_every_pull_request() -> None:
         for command in _step_commands(backend)
         if "verify_local.ps1" in command
     ]
+    # The UI job also runs the PowerShell partition of the tooling tier (025 T2502.2) as its own
+    # `-ToolingOnly` step; that step is neither half and is pinned by `tooling-tests/conftest.py`.
     ui_commands = [
-        command for command in _step_commands(ui) if "verify_local.ps1" in command
+        command
+        for command in _step_commands(ui)
+        if "verify_local.ps1" in command and "-ToolingOnly" not in command
     ]
 
     assert backend_commands
@@ -146,8 +150,9 @@ def test_the_required_backend_job_owns_the_postgres_service_and_the_alembic_head
     # The head check runs through the backend half of the runner script, which is the whole point
     # of moving it out of the UI block; the job also keeps the production migration entrypoint.
     verifier = (_ROOT / "scripts" / "verify_local.ps1").read_text(encoding="utf-8")
-    backend_half = verifier.split("if (-not $UiOnly) {", 1)[1].split(
-        "if (-not $BackendOnly) {", 1
+    # Since 025 T2502.2 the halves are named `$runBackend` / `$runUi` (the tooling mode is neither).
+    backend_half = verifier.split("if ($runBackend) {", 1)[1].split(
+        "if ($runUi) {", 1
     )[0]
     assert "scripts/check_alembic_heads.py" in backend_half
     assert "scripts/check_alembic_heads.py" in "\n".join(_step_commands(backend))
