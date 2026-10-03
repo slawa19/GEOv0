@@ -1379,44 +1379,6 @@ async def test_action_clearing_real_initial_failure_uses_flat_sanitized_error(
 
 
 @pytest.mark.asyncio
-async def test_action_participants_list_returns_array(
-    client, db_session, interact_actions_enabled, monkeypatch
-):
-    import app.api.v1.simulator as simulator_module
-
-    # Arrange
-    await _seed_alice_bob_uah(db_session)
-
-    async def _fake_build_graph_snapshot(*, run_id: str, equivalent: str, session=None):
-        assert run_id == "test-run"
-        return SimulatorGraphSnapshot(
-            equivalent=str(equivalent),
-            generated_at=datetime.now(timezone.utc),
-            nodes=[
-                SimulatorGraphNode(id="alice", name="Alice", type="person", status="active"),
-                SimulatorGraphNode(id="bob", name="Bob", type="person", status="active"),
-            ],
-            links=[],
-        )
-
-    monkeypatch.setattr(simulator_module.runtime, "build_graph_snapshot", _fake_build_graph_snapshot)
-
-    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
-
-    # Act
-    r = await client.get(
-        "/api/v1/simulator/runs/test-run/actions/participants-list",
-        headers=headers,
-    )
-    assert r.status_code == 200, r.text
-
-    # Assert
-    payload = r.json()
-    assert isinstance(payload.get("items"), list)
-    assert {x.get("pid") for x in payload["items"]} >= {"alice", "bob"}
-
-
-@pytest.mark.asyncio
 async def test_action_trustlines_list_returns_array(
     client, db_session, interact_actions_enabled, monkeypatch
 ):

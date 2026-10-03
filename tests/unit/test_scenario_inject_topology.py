@@ -1,9 +1,13 @@
 """Unit-tests for inject-operations in _apply_due_scenario_events().
 
 Covers:
-  - add_participant (create, idempotent skip, cache invalidation)
-  - create_trustline (create, idempotent skip, cache invalidation, unknown eq)
-  - freeze_participant (suspend, freeze TLs, freeze_trustlines=false, idempotent)
+  - add_participant (idempotent skip, cache invalidation)
+  - create_trustline (idempotent skip, cache invalidation, unknown eq)
+  - freeze_participant (suspend, freeze_trustlines=false, idempotent)
+
+The create / freeze-incident-trustlines cases live in
+``tests/integration/test_simulator_network_growth.py`` (025 ``T2504.2``: the copies here were
+proven duplicates and removed).
   - General: env-disabled inject, malformed effects
 
 Uses real SQLite ``db_session`` fixture for DB-touching tests and lightweight
@@ -186,93 +190,6 @@ class _MockSession:
 
 
 @pytest.mark.asyncio
-async def test_add_participant_creates_db_rows(db_session) -> None:
-    """Inject event with op=add_participant creates Participant + initial TrustLines."""
-    n = _nonce()
-
-    # Seed: equivalent + sponsor participant.
-    eq = Equivalent(code=f"T{n}".upper()[:16], precision=2, is_active=True)
-    sponsor = Participant(
-        pid=f"SPONSOR_{n}",
-        display_name="Sponsor",
-        public_key=f"pk_sponsor_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    db_session.add_all([eq, sponsor])
-    await db_session.flush()
-
-    eq_code = eq.code
-    sponsor_pid = sponsor.pid
-    new_pid = f"NEW_{n}"
-
-    run = _make_run(
-        participants=[(sponsor.id, sponsor_pid)],
-        equivalents=[eq_code],
-    )
-
-    scenario: dict[str, Any] = {
-        "participants": [{"id": sponsor_pid, "name": "Sponsor"}],
-        "trustlines": [],
-        "events": [
-            {
-                "type": "inject",
-                "time": 500,
-                "effects": [
-                    {
-                        "op": "add_participant",
-                        "participant": {
-                            "id": new_pid,
-                            "name": "New Participant",
-                            "type": "person",
-                            "groupId": "g1",
-                            "behaviorProfileId": "bp1",
-                        },
-                        "initial_trustlines": [
-                            {
-                                "sponsor": sponsor_pid,
-                                "equivalent": eq_code,
-                                "limit": "500",
-                                "direction": "sponsor_credits_new",
-                            },
-                        ],
-                    },
-                ],
-            },
-        ],
-    }
-
-    runner, arts = _make_runner(inject_enabled=True)
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=scenario
-    )
-
-    # Verify: new participant exists in DB.
-    new_p = (
-        await db_session.execute(
-            select(Participant).where(Participant.pid == new_pid)
-        )
-    ).scalar_one_or_none()
-    assert new_p is not None, "Participant should be created"
-    assert new_p.status == "active"
-    assert new_p.type == "person"
-
-    # Verify: trustline created (sponsor → new).
-    tl = (
-        await db_session.execute(
-            select(TrustLine).where(
-                TrustLine.from_participant_id == sponsor.id,
-                TrustLine.to_participant_id == new_p.id,
-                TrustLine.equivalent_id == eq.id,
-            )
-        )
-    ).scalar_one_or_none()
-    assert tl is not None, "TrustLine should be created"
-    assert tl.status == "active"
-    assert tl.limit == Decimal("500")
-
-
-@pytest.mark.asyncio
 async def test_add_participant_idempotent_skip(db_session) -> None:
     """If participant with same PID already exists → skip, no error."""
     n = _nonce()
@@ -428,75 +345,6 @@ async def test_add_participant_updates_caches(db_session) -> None:
 # ===================================================================
 # create_trustline tests
 # ===================================================================
-
-
-@pytest.mark.asyncio
-async def test_create_trustline_creates_db_row(db_session) -> None:
-    """create_trustline creates TrustLine in DB with correct attributes."""
-    n = _nonce()
-
-    eq = Equivalent(code=f"C{n}".upper()[:16], precision=2, is_active=True)
-    p_from = Participant(
-        pid=f"FROM_{n}",
-        display_name="From",
-        public_key=f"pk_from_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    p_to = Participant(
-        pid=f"TO_{n}",
-        display_name="To",
-        public_key=f"pk_to_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    db_session.add_all([eq, p_from, p_to])
-    await db_session.flush()
-
-    eq_code = eq.code
-
-    run = _make_run(
-        participants=[(p_from.id, p_from.pid), (p_to.id, p_to.pid)],
-        equivalents=[eq_code],
-    )
-
-    scenario: dict[str, Any] = {
-        "participants": [],
-        "trustlines": [],
-        "events": [
-            {
-                "type": "inject",
-                "time": 500,
-                "effects": [
-                    {
-                        "op": "create_trustline",
-                        "from": p_from.pid,
-                        "to": p_to.pid,
-                        "equivalent": eq_code,
-                        "limit": "1000.50",
-                    },
-                ],
-            },
-        ],
-    }
-
-    runner, _arts = _make_runner()
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=scenario
-    )
-
-    tl = (
-        await db_session.execute(
-            select(TrustLine).where(
-                TrustLine.from_participant_id == p_from.id,
-                TrustLine.to_participant_id == p_to.id,
-                TrustLine.equivalent_id == eq.id,
-            )
-        )
-    ).scalar_one_or_none()
-    assert tl is not None, "TrustLine should be created"
-    assert tl.status == "active"
-    assert tl.limit == Decimal("1000.50")
 
 
 @pytest.mark.asyncio
@@ -1051,90 +899,6 @@ async def test_freeze_sets_participant_suspended(db_session) -> None:
 
     await db_session.refresh(target)
     assert target.status == "suspended"
-
-
-@pytest.mark.asyncio
-async def test_freeze_freezes_incident_trustlines(db_session) -> None:
-    """All trustlines from/to frozen participant → status='frozen'."""
-    n = _nonce()
-
-    eq = Equivalent(code=f"G{n}".upper()[:16], precision=2, is_active=True)
-    target = Participant(
-        pid=f"FT_{n}",
-        display_name="Target",
-        public_key=f"pk_ft_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    other = Participant(
-        pid=f"OT_{n}",
-        display_name="Other",
-        public_key=f"pk_ot_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    db_session.add_all([eq, target, other])
-    await db_session.flush()
-
-    eq_code = eq.code
-
-    # TrustLines in both directions.
-    tl_out = TrustLine(
-        from_participant_id=target.id,
-        to_participant_id=other.id,
-        equivalent_id=eq.id,
-        limit=Decimal("100"),
-        status="active",
-    )
-    tl_in = TrustLine(
-        from_participant_id=other.id,
-        to_participant_id=target.id,
-        equivalent_id=eq.id,
-        limit=Decimal("200"),
-        status="active",
-    )
-    db_session.add_all([tl_out, tl_in])
-    await db_session.commit()
-
-    run = _make_run(
-        participants=[(target.id, target.pid), (other.id, other.pid)],
-        equivalents=[eq_code],
-        edges_by_equivalent={eq_code: [(target.pid, other.pid), (other.pid, target.pid)]},
-    )
-
-    scenario: dict[str, Any] = {
-        "participants": [
-            {"id": target.pid, "status": "active"},
-            {"id": other.pid, "status": "active"},
-        ],
-        "trustlines": [
-            {"from": target.pid, "to": other.pid, "status": "active"},
-            {"from": other.pid, "to": target.pid, "status": "active"},
-        ],
-        "events": [
-            {
-                "type": "inject",
-                "time": 500,
-                "effects": [
-                    {
-                        "op": "freeze_participant",
-                        "participant_id": target.pid,
-                        "freeze_trustlines": True,
-                    },
-                ],
-            },
-        ],
-    }
-
-    runner, _arts = _make_runner()
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=scenario
-    )
-
-    await db_session.refresh(tl_out)
-    await db_session.refresh(tl_in)
-    assert tl_out.status == "frozen"
-    assert tl_in.status == "frozen"
 
 
 @pytest.mark.asyncio

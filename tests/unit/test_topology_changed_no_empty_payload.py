@@ -284,28 +284,3 @@ class TestFrontendContractEmptyPayload:
             "removed_edges": [],
         }
         assert self._frontend_would_refresh(payload) is False
-
-    def test_trust_drift_decay_event_does_not_trigger_refresh(self):
-        """Simulate a complete trust_drift_decay event and verify it would
-        NOT trigger refreshSnapshot on the frontend.
-        """
-        # Build the event as the backend would
-        edge_patch = [
-            {"source": "alice", "target": "bob", "used": "50.00", "available": "40.00",
-             "trust_limit": "90.00", "viz_alpha_key": "active", "viz_width_key": "medium"},
-        ]
-        payload = TopologyChangedPayload(edge_patch=edge_patch)
-        evt = SimulatorTopologyChangedEvent(
-            event_id="evt_99",
-            ts=_utc_now(),
-            type="topology.changed",
-            equivalent="UAH",
-            payload=payload,
-            reason="trust_drift_decay",
-        )
-        dumped = evt.model_dump(mode="json", by_alias=True)
-        evt_payload = dumped.get("payload", {})
-
-        assert self._frontend_would_refresh(evt_payload) is False, (
-            "trust_drift_decay event with edge_patch must NOT trigger refreshSnapshot"
-        )

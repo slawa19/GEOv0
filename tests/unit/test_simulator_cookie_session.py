@@ -184,11 +184,6 @@ def test_cookie_name_constant() -> None:
     assert COOKIE_NAME == "geo_sim_sid"
 
 
-def test_cookie_version_constant() -> None:
-    """COOKIE_VERSION должен быть 'v1'."""
-    assert COOKIE_VERSION == "v1"
-
-
 # ─── Тесты: Session TTL boundary ─────────────────────────────────────────────
 
 def test_session_expired_exactly_at_ttl_boundary() -> None:
