@@ -10,13 +10,13 @@ every number, so the positivity check admits it:
 WHY IT IS WORSE THAN A WRONG NUMBER. A debt of the wrong size makes the book wrong by an amount
 someone can find and correct. A debt of `NaN` makes every aggregate that includes it `NaN`, so
 "the sum of all debts is zero" - the property programme 015 exists to establish - stops being
-REACHABLE AT ALL. The second test measures exactly that: one `NaN` row and `SUM(amount)` over the
-equivalent is no longer a number.
+REACHABLE AT ALL. A `test_b` measured exactly that (one `NaN` row and `SUM(amount)` over the
+equivalent is no longer a number); 025 `T2504.2` removed it as a proven duplicate of `test_a`, whose
+read-back of the stored amounts goes red under every mutation that turned the sum `NaN`.
 
-THREE TESTS, THREE DOORS, and they are not redundant - each closes a different way in:
+THE DOORS, and they are not redundant - each closes a different way in:
 
 * `test_a` writes through the ORM, the path every application writer uses.
-* `test_b` measures the consequence in the database: the sum of the book.
 * `test_c` writes with RAW SQL, going around every Python-side guard. Only the CHECK CONSTRAINT
   can refuse that one, which is why `test_c` is the test that the MIGRATION has to satisfy: a
   type-level guard in `app/db/types.py` would leave `test_c` red. `AGENTS.md` §16 calls this
@@ -46,9 +46,13 @@ are therefore:
 
 * `test_c` (the database's own guarantee): restore `CHECK (amount > 0)` as the whole predicate,
   i.e. drop BOTH added clauses. Dropping one is measured to keep it green.
-* `test_a` and `test_b` (the guarantee for writers that go through SQLAlchemy): remove
+* `test_a` (the guarantee for writers that go through SQLAlchemy): remove
   `MoneyNumeric` from `Debt.amount` in `app/db/models/debt.py` AND restore the bare predicate -
   either guard alone still refuses the ORM write, which is exactly why there are two of them.
+  Measured 2026-10-03 (025 `T2504.2`): those two are not enough on this tier - the journal's own
+  money CHECKs (migration 022, `chk_debt_journal_entries_after` / `_delta`) refuse the `NaN` entry
+  the trigger writes, so the write is also refused there; the stored-amount assertion goes red only
+  with those relaxed as well.
 
 THE DATABASE IS SHARED. `geov0_test_ci` is used by several sessions working in this tree at once,
 so every cleanup below is scoped to the ids THIS PROCESS created; a check written against the
@@ -62,7 +66,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -229,56 +233,6 @@ async def test_a_an_orm_write_of_nan_must_not_reach_the_money_column(factory):
     assert "non-finite" in message.lower(), (
         f"the refusal does not say what is wrong with the value: {message!r}. It must name the "
         f"value's own defect - that it is not a finite number."
-    )
-
-
-@pytest.mark.asyncio
-async def test_b_one_nan_debt_makes_the_sum_of_the_book_stop_being_a_number(factory):
-    """THE CONSEQUENCE, in the database, in the units programme 015 is about.
-
-    This is the test that says why `NaN` is not just another out-of-domain value. The programme's
-    goal is an auditable "the sum of all debts is zero". With one `NaN` row that sum is `NaN` - not
-    wrong by some amount, but not a number at all, and no reconciliation can ever close it.
-    """
-    world = await _seed(factory)
-    async with factory() as session:
-        before = (
-            await session.execute(
-                select(func.sum(Debt.amount)).where(Debt.equivalent_id == world.equivalent_id)
-            )
-        ).scalar_one()
-    # NON-VACUITY: the sum is a real number before the NaN attempt.
-    assert str(before) == "5.00000000", f"the seeded book does not sum to 5: {before!r}"
-
-    # No stand-down since 018 B1, for the reason given in `test_a`; the refusal surfaces at the book's
-    # block exit, so the `try` spans the block.
-    async with factory() as session:
-        try:
-            async with debt_fixture_setup(session, label="setup"):
-                session.add(
-                    Debt(
-                        debtor_id=world.creditor_id,
-                        creditor_id=world.debtor_id,
-                        equivalent_id=world.equivalent_id,
-                        amount=Decimal("NaN"),
-                    )
-                )
-            await session.commit()
-        except (StatementError, DBAPIError, ValueError):
-            await session.rollback()
-
-    async with factory() as fresh:
-        after = (
-            await fresh.execute(
-                select(func.sum(Debt.amount)).where(Debt.equivalent_id == world.equivalent_id)
-            )
-        ).scalar_one()
-
-    assert str(after) == "5.00000000", (
-        f"the sum of this equivalent's debts is {after!r}. One row that is not a number makes "
-        f"every aggregate over the book not a number, so 'the sum of all debts is zero' is not "
-        f"reachable at all - the whole goal of programme 015 - and no audit can name the "
-        f"amount by which the book is wrong."
     )
 
 

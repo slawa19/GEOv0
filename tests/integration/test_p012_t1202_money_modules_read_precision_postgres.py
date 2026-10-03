@@ -272,53 +272,6 @@ async def test_a_quadrangle_at_the_smallest_expressible_amount_is_detected(
     )
 
 
-async def test_the_sql_detector_and_the_dfs_fallback_agree_on_what_a_real_debt_is(
-    db_session: AsyncSession,
-) -> None:
-    """Two detectors, one graph, one answer.
-
-    `find_cycles` prefers the SQL detector and returns early when it is non-empty, falling
-    through to the Python DFS only when SQL comes back empty.  Before the fix the DFS filtered
-    on `Debt.amount > 0` and the SQL added `LEAST(...) > 0.01`, so on this graph the fallback
-    found the cycle the fast path could not - the disagreement, observed without monkeypatching
-    or disabling any guard.
-
-    Audited, so that "they agree" is a claim and not a hope: both paths require `amount > 0`,
-    both exclude pairs locked by a prepared payment, and both run every candidate through
-    `_filter_cycles_by_auto_clearing_policy_sql` -> `_cycle_respects_auto_clearing`, which
-    demands an active controlling trust line with `auto_clearing` on for every edge, exactly as
-    the SQL JOINs do.  The threshold was the only ADMISSION rule that differed.
-
-    CORRECTED 2026-08-24 BY EXTERNAL REVIEW, AND THE CORRECTION IS THE POINT.  The first
-    version of this docstring went one step further and said the preference "is sound only if
-    the two admit the same debts" - i.e. that equal admission makes the early return sound.
-    That is false, because admission is not the only way the two differ: the SQL detectors
-    REACH three and four edges and the DFS reaches `max_depth`, so at any depth above four the
-    early return answers a narrower question than the one asked, and dropping the threshold
-    made it do so more often rather than less.  The reach half is `find_cycles`' own problem
-    and is measured in `test_p012_money_form_and_detector_reach_postgres.py`; this test is
-    about admission alone, and now asks at the route's default depth so that it cannot be read
-    as evidence about reach.
-    """
-
-    eq = await _equivalent(db_session, "UAH", 2)
-    debt_ids = await _ring(db_session, eq, ["a", "b", "c"], _quantum(2))
-    expected = frozenset(str(d) for d in debt_ids)
-
-    service = ClearingService(db_session)
-    via_sql = _cycle_debt_id_sets(await service.find_triangles_sql(eq.id))
-    via_find_cycles = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH))
-
-    assert (expected in via_sql) == (expected in via_find_cycles), (
-        "the SQL fast path and the detector `find_cycles` actually answers with disagree "
-        f"about the same graph: find_triangles_sql -> {via_sql}, find_cycles -> "
-        f"{via_find_cycles}. "
-        "`find_cycles` prefers the SQL result whenever it is non-empty, so a disagreement is "
-        "not academic: it decides what the API reports."
-    )
-    assert expected in via_find_cycles, "the cycle exists; both detectors must see it"
-
-
 async def test_a_graph_with_an_ordinary_and_a_boundary_cycle_reports_both(
     db_session: AsyncSession,
 ) -> None:

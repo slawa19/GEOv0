@@ -518,10 +518,12 @@ async def test_step5c_the_evidence_of_a_hold_cannot_be_deleted_while_held(db_ses
     """Deleting the FAILED row a hold points at is refused by the database, and the hold remains.
 
     A delete of the evidence - accidental or maintenance - must not release containment without a later
-    PASSED, a reason and an audit. The PostgreSQL twin is in the races module.
+    PASSED, a reason and an audit. (Its PostgreSQL twin in the races module was removed by 025
+    `T2504.2` as a proven duplicate: this test runs on the migrated schema too.)
 
-    MUTATION: `ondelete="SET NULL"` on `Equivalent.integrity_hold_result_id` - the delete succeeds and
-    the hold is released, red.
+    MUTATION, executed 2026-10-03: `ondelete="SET NULL"` in migration 028 - the delete succeeds and the
+    hold is released, red. The same change on the model (`Equivalent.integrity_hold_result_id`) would
+    NOT turn this red: the tier builds its schema from the migrations, not from `create_all`.
     """
     from sqlalchemy.exc import IntegrityError
 

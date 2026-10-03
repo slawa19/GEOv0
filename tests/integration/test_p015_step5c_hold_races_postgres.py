@@ -680,34 +680,6 @@ async def test_step5c_p_the_admin_clear_waits_for_a_holder_of_the_row(factory, a
         _forget_the_route_cache(world)
 
 
-# ── the evidence of a hold is RESTRICT ─────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_step5c_p_the_evidence_of_a_hold_cannot_be_deleted_while_held(factory) -> None:
-    """On the migrated schema: deleting the FAILED row a hold points at fails with 23503; the hold remains.
-
-    MUTATION: `ondelete="SET NULL"` in migration 028 - the delete succeeds and releases the hold, red.
-    """
-    from sqlalchemy.exc import IntegrityError
-
-    world = await _seed(factory)
-    try:
-        hold_id = await hold_directly(factory, world.equivalent.id)
-        with pytest.raises(IntegrityError) as refused:
-            async with factory() as session:
-                connection = await session.connection()
-                await connection.exec_driver_sql(
-                    f"DELETE FROM debt_reconciliation_results WHERE id = '{uuid.UUID(str(hold_id))}'"
-                )
-                await session.commit()
-        orig = refused.value.orig
-        assert (getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)) == "23503", repr(orig)
-        assert await _hold_of(factory, world.equivalent.id) == hold_id
-    finally:
-        _forget_the_route_cache(world)
-
-
 # ── both construction paths, and the downgrade refusal ───────────────────────────────────────────
 
 
