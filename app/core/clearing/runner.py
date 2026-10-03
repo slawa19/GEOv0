@@ -9,7 +9,7 @@ by a separate hub deployment, never by default (decision R1). No product caller 
 ONE PASS (`run_clearing_pass`), for one equivalent:
 
 1. SNAPSHOT: one read transaction - the caller's `snapshot_guard` (the periodic isolation rule reads here, in the same
-   SERIALIZABLE snapshot), the equivalent id, `flow_planner.load_snapshot` - then the transaction is rolled back and the
+   read transaction), the equivalent id, `flow_planner.load_snapshot` (its edges are one statement) - then the transaction is rolled back and the
    session closed. The read transaction is released BEFORE any CPU work is handed over.
 2. PLAN: `flow_planner.plan_clearing` runs in a separate PROCESS (a one-worker `spawn` pool by default), never on the
    event loop. Not a thread: measured 2026-09-28 on this stand, a thread running the planner starved the loop through
@@ -18,8 +18,8 @@ ONE PASS (`run_clearing_pass`), for one equivalent:
    Cancelling the await does NOT stop the worker, so a cancellation during planning reports `planner_abandoned`
    instead of pretending; the late result is discarded, it starts nothing.
 3. EXECUTE: each planned cycle, in plan order, as one `ClearingOccurrence` (fresh plan UUID, ordinal, debt ids in cycle
-   order, `c` in atoms) through `ClearingService.execute_occurrence` - the 019 boundary unchanged (exclusive equivalent
-   lock, retry owner, stop/hold `FOR SHARE`, authoritative consent and perimeter, commit resolver,
+   order, `c` in atoms) through `ClearingService.execute_occurrence` - the 019 boundary (since 027 stage 2: the
+   cycle's line locks instead of the exclusive equivalent lock), retry owner, stop/hold `FOR SHARE`, authoritative consent and perimeter, commit resolver,
    `ClearingCommittedAfterCancellation`). Before EVERY cycle start: the lease (`lease.lost`) and the caller's budget
    (`deadline` on `deadline_clock`); after a loss or past the budget no new cycle starts, and the occurrence in flight is always
    finished by the boundary, never abandoned. The budget is checked BETWEEN occurrences: the first cycle of a pass

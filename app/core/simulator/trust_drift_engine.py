@@ -414,8 +414,8 @@ class TrustDriftEngine:
             # cannot move a limit below any debt.
             if new_limit > current_limit:
                 if not isolation_checked:
-                    # 019 stage 5 (`T1907`, `FORK-2`): before the first write of this unit of work.
-                    await MoneyBoundary.require_serializable(clearing_session, writer="trust_growth")
+                    # Before the first write of this unit of work (019 `T1907`; READ COMMITTED since 027 stage 2).
+                    await MoneyBoundary.require_read_committed(clearing_session, writer="trust_growth")
                     isolation_checked = True
                 # The ACTIVE row selected above: migration 019 lets a closed incarnation coexist,
                 # and drift must never rewrite history.
@@ -546,16 +546,32 @@ class TrustDriftEngine:
             if not eq_id:
                 continue
 
-            # 019 stage-3 review (P1, class 1): THE FLOOR IS THE DEBT IN THIS TRANSACTION, not the
-            # tick's Python snapshot. The snapshot was read by the money phase's transaction, which has
-            # committed; a payment in flight since then (the API path is one SERIALIZABLE transaction,
-            # 019 stage 3) routed against the old limit and has not written its debt yet. Lowering the
-            # limit from the snapshot alone committed debt above the new limit: nothing tied the two
-            # transactions together, because this one never read the debt row. Reading it here makes
-            # the dependency visible - the same device as the creditor's own PATCH
-            # (`TrustLineService.update`, used amount read in its transaction): SERIALIZABLE sees the
-            # read-write cycle with such a payment and refuses one side (`40001`; the API retries on a
-            # fresh snapshot), and a payment committed before this snapshot raises the floor.
+            # Drift applies to the ACTIVE line only: a closed incarnation is history and a frozen one is
+            # quarantined (migration 019 lets both coexist with the active row). Before 021 the `UPDATE ...
+            # WHERE status = 'active'` matched no row here and the edge was still counted and published as
+            # decayed; now there is nothing to write, and the edge is not reported.
+            #
+            # 027 stage 2: the line `FOR UPDATE` BEFORE the floor is read. A payment over the pair holds this line
+            # (it locks every non-closed line of the pair): one in flight makes the decay wait and is then read;
+            # one that starts later waits for the decay and reads the lowered limit.
+            tl_id = (
+                await session.execute(
+                    select(TrustLine.id).where(
+                        TrustLine.from_participant_id == creditor_uuid,
+                        TrustLine.to_participant_id == debtor_uuid,
+                        TrustLine.equivalent_id == eq_id,
+                        TrustLine.status == "active",
+                        # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
+                        TrustLine.close_requested_at.is_(None),
+                    ).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if tl_id is None:
+                continue
+
+            # 019 stage-3 review (P1, class 1): THE FLOOR IS THE DEBT IN THIS TRANSACTION, read after the line lock,
+            # not the tick's Python snapshot (read by a money phase that has committed; a payment since then
+            # raised the debt). A payment committed before the lock raises the floor.
             current_debt = (
                 await session.execute(
                     select(Debt.amount).where(
@@ -593,30 +609,10 @@ class TrustDriftEngine:
             if new_limit == current_limit:
                 continue
 
-            # Drift applies to the ACTIVE line only: a closed incarnation is history and a frozen one is
-            # quarantined (migration 019 lets both coexist with the active row). Before 021 the `UPDATE ...
-            # WHERE status = 'active'` matched no row here and the edge was still counted and published as
-            # decayed; now there is nothing to write, and the edge is not reported.
-            tl_id = (
-                await session.execute(
-                    select(TrustLine.id).where(
-                        TrustLine.from_participant_id == creditor_uuid,
-                        TrustLine.to_participant_id == debtor_uuid,
-                        TrustLine.equivalent_id == eq_id,
-                        TrustLine.status == "active",
-                        # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
-                        TrustLine.close_requested_at.is_(None),
-                    )
-                )
-            ).scalar_one_or_none()
-            if tl_id is None:
-                continue
-
             if not isolation_checked:
-                # 019 stage 5 (`T1907`, `FORK-2`): the floor above is a read of the debt row that
-                # holds against a concurrent payment only at SERIALIZABLE (the read-write cycle
-                # below); refused before the first write of this call.
-                await MoneyBoundary.require_serializable(session, writer="trust_decay")
+                # The floor above holds against a concurrent payment only at READ COMMITTED behind the line lock
+                # (027 stage 2; 019 `T1907` required SERIALIZABLE); refused before the first write of this call.
+                await MoneyBoundary.require_read_committed(session, writer="trust_decay")
                 isolation_checked = True
             await _set_limit_internally(
                 service, batch, trustline_id=tl_id, creditor_id=creditor_uuid, new_limit=new_limit

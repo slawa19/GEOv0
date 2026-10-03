@@ -14,6 +14,7 @@ from app.core.simulator.cache_invalidator import (
     invalidate_caches_after_inject as _invalidate_caches_after_inject,
 )
 from app.core.ledger.book import APPLIED, REFUSED_OPPOSING_DEBT, Book, InjectIncrease
+from app.core.money_boundary import MoneyBoundary
 from app.core.trustlines.service import TrustLineService
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
@@ -152,6 +153,20 @@ def inject_event_equivalent_codes(
                 if eq:
                     codes.add(eq)
     return codes
+
+
+def inject_event_debt_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
+    """Participants an `inject_debt` effect of the event names (creditor and debtor, staging's own keys): the owner
+    locks the lines among them before staging (027 stage 2)."""
+
+    effects = (event or {}).get("effects")
+    return {
+        pid
+        for eff in (effects if isinstance(effects, list) else [])[:_MAX_INJECT_EFFECTS]
+        if isinstance(eff, dict) and str(eff.get("op") or "").strip() == "inject_debt"
+        for pid in (str(eff.get(a) or eff.get(b) or "").strip() for a, b in (("creditor", "from"), ("debtor", "to")))
+        if pid
+    }
 
 
 def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
@@ -558,18 +573,19 @@ class InjectExecutor:
             # Programme 015, phase B step 3: the debt below belongs to this equivalent.
             require_owner_locks({eq_id})
 
+            # 027 stage 2: BOTH non-closed lines of the pair `FOR UPDATE` before the book reads either debt (the
+            # owner locked the event's set already; a pair it could not name - a participant this event adds -
+            # is locked here). Then the line is read: live row only (migration 019: a closed incarnation may
+            # coexist); a lowering committed before the lock is read, a later one waits for this inject.
+            await MoneyBoundary(session).lock_pair_lines([(eq_id, creditor_id, debtor_id)])
             tl = (
                 await session.execute(
-                    # Live row only (migration 019): a closed incarnation may coexist.
-                    # `FOR SHARE` to the end of the transaction (026 `T2602` fix-delta, as the payment's
-                    # `_segment`, 024 `T2415.3`): a lowering committed after this snapshot fails the read with
-                    # 40001 and the runner's retry sees the new limit; a later lowering waits for this inject.
                     select(TrustLine.limit, TrustLine.status).where(
                         TrustLine.from_participant_id == creditor_id,
                         TrustLine.to_participant_id == debtor_id,
                         TrustLine.equivalent_id == eq_id,
                         TrustLine.status != "closed",
-                    ).with_for_update(read=True)
+                    )
                 )
             ).one_or_none()
             if tl is None:
@@ -997,7 +1013,7 @@ class InjectExecutor:
                                         TrustLine.to_participant_id == p_row.id,
                                     ),
                                     TrustLine.status == "active",
-                                )
+                                ).order_by(TrustLine.id).with_for_update()  # 027 stage 2
                             )
                         ).scalars().all()
                     )

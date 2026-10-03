@@ -369,18 +369,8 @@ class RealPaymentsExecutor:
             run=run,
         )
 
-        planned_equivalents = sorted(
-            {
-                str(action.equivalent).strip().upper()
-                for action in (planned or [])
-                if str(action.equivalent).strip()
-            }
-        )
-        if planned_equivalents:
-            await PaymentService(session).acquire_shared_equivalent_locks(
-                planned_equivalents
-            )
-
+        # 027 stage 2: the caller owns the transaction AND its line locks - the tick's money phase takes its complete
+        # set (`PaymentService.lock_staged_lines`) as its first statement, before planning; no lock is taken here.
         sem = asyncio.Semaphore(max(1, int(max_in_flight)))
         action_db_lock = asyncio.Lock()
 

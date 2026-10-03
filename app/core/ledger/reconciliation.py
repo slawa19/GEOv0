@@ -1122,12 +1122,18 @@ async def take_baseline(session: Any, equivalent_id: uuid.UUID) -> BaselineTaken
     (`scripts/take_reconciliation_baseline.py`). It adopts whatever the journal does not explain and
     certifies none of it.
 
-    ONE SNAPSHOT, NO LOCK (019 stage 5, `T1909`: the equivalent owner lock this took until then is gone).
-    The journal sums and the current debts are read in one snapshot, and every money operation changes
-    `debts` and writes the matching entries in the same commit, so an operation is either wholly in that
-    snapshot or wholly outside it: its edges keep `debt - sum(delta)` unchanged either way. Taking the
-    baseline on a live system is still not the documented procedure - the cutover is on a quiet system.
+    THE EQUIVALENT ROW `FOR UPDATE` FIRST (027 stage 2; until then one SERIALIZABLE snapshot, and before 019
+    `T1909` the equivalent owner lock). Every writer of this equivalent's debts holds the row `FOR SHARE` through
+    its commit - money writers via `refuse_inactive_equivalents`, a SEED or test fixture in `Book`'s completion -
+    so the lock waits for each in flight and keeps new ones out until this commits: the journal sums and the
+    debts below, read at READ COMMITTED after the lock, see every operation wholly or not at all, and a SEED
+    either precedes the baseline (and is in it) or reads it and is refused. Taking the baseline on a live system
+    is still not the documented procedure - the cutover is on a quiet system.
     """
+
+    # `FOR NO KEY UPDATE`: it conflicts with the writers' `FOR SHARE`, not with the `FOR KEY SHARE` a debt
+    # INSERT's foreign key takes - a SEED still flushing is not waited for, and refused at its completion.
+    await session.execute(select(Equivalent.id).where(Equivalent.id == equivalent_id).with_for_update(key_share=True))
 
     if await _has_baseline(session, equivalent_id):
         raise BaselineAlreadyTaken(

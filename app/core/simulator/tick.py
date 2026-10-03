@@ -498,9 +498,11 @@ class RealTick:
             already-used debt, and a competitor's commit is exactly what invalidates that picture.
             """
             owner_service = PaymentService(session)
-            # The owner set is this transaction's first statement. A SERIALIZABLE waiter can still receive 40001
-            # here, and `money_replay.py` restarts the phase at this outer owner.
-            await owner_service.acquire_shared_equivalent_locks(equivalents)
+            # 027 stage 2: the phase's COMPLETE line set - every non-closed line among the run's participants (its
+            # routes are confined to them) in its equivalents, `FOR UPDATE` in `trust_lines.id` order - is this
+            # transaction's first statement, before the debt snapshot and the first payment. A deadlock (40P01)
+            # with a later, out-of-order line lock restarts the phase at this outer owner (`money_replay.py`).
+            await owner_service.lock_staged_lines(equivalents, {participant_id for participant_id, _pid in participants})
 
             return await self.run_payments_phase(
                 session=session,

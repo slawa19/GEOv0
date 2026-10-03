@@ -734,9 +734,8 @@ def _refuse_attempt(attempt: "_PaymentAttempt", error: Exception, prefix: str) -
 class PaymentService:
     def __init__(self, session: AsyncSession):
         self.session = session
-        # ONE money boundary for the service's lifetime: the advisory-lock deadline starts at the first
-        # lock this service takes and is shared by every later staged acquisition (019 stage 2 review,
-        # P2). Since stage 4 the payment itself executes here, through `Book` - no engine.
+        # ONE money boundary for the service's lifetime (the line locks, the stop/hold guard, the delta check).
+        # Since 019 stage 4 the payment itself executes here, through `Book` - no engine.
         self._boundary: MoneyBoundary = MoneyBoundary(session)
         self.router = PaymentRouter(session)
 
@@ -998,44 +997,21 @@ class PaymentService:
             allowed_participant_pids=allowed_participant_pids,
         )
 
-    async def acquire_shared_equivalent_locks(
+    async def lock_staged_lines(
         self,
         equivalent_codes: list[str] | tuple[str, ...] | set[str],
+        participant_ids: "AbstractSet[uuid.UUID]",
     ) -> None:
-        """Pre-acquire a caller-owned staged batch's complete equivalent set, SHARED, in one global order."""
-        codes = sorted(
-            {
-                str(code).strip().upper()
-                for code in equivalent_codes
-                if str(code).strip()
-            }
-        )
-        if not codes:
+        """A caller-owned staged batch's COMPLETE line set, before its first payment (027 stage 2): every non-closed
+        line among `participant_ids` (the run perimeter its routes are confined to) in these equivalents, `FOR UPDATE`
+        in one global order (`MoneyBoundary.lock_lines_among`). Unknown codes are left to per-action validation."""
+        codes = sorted({str(code).strip().upper() for code in equivalent_codes if str(code).strip()})
+        if not codes or not participant_ids:
             return
-
-        rows = (
-            await self.session.execute(
-                select(Equivalent.id, Equivalent.code).where(Equivalent.code.in_(codes))
-            )
-        ).all()
-        equivalent_ids_by_code = {str(code): equivalent_id for equivalent_id, code in rows}
-        # Preserve per-action validation for unknown codes; only persisted
-        # equivalents can own monetary resources or an advisory lock.
-        resolved_ids = [
-            equivalent_ids_by_code[code]
-            for code in codes
-            if code in equivalent_ids_by_code
-        ]
-        if not resolved_ids:
-            return
-
+        ids = (await self.session.execute(select(Equivalent.id).where(Equivalent.code.in_(codes)))).scalars().all()
         try:
-            await self._boundary.acquire_shared_equivalent_locks(resolved_ids)
+            await self._boundary.lock_lines_among(ids, participant_ids)
         except DBAPIError as exc:
-            if _payment_db_sqlstate(exc) == "55P03":
-                raise asyncio.TimeoutError(
-                    "Payment equivalent lock timed out"
-                ) from exc
             raise _classify_payment_db_error(exc) from exc
 
     async def execute(
@@ -1057,16 +1033,16 @@ class PaymentService:
         Steps: validation and idempotency (a stored row answers with its stored result or a 409),
         the best-effort stop/hold pre-check, routing, ADMISSION, and then THE PAYMENT OPERATION - one
         savepoint opened before the `Transaction` is added, around DIRECT EXECUTION (stage 4,
-        `_run_payment_operation`): the row inserted `COMMITTED`, the equivalent lock (shared), the
-        capacity of every segment, the stop/hold `FOR SHARE`, the pre-state, the envelope with the
+        `_run_payment_operation`): the row inserted `COMMITTED`, the line locks of every pair
+        (027 stage 2), the capacity of every segment, the stop/hold `FOR SHARE`, the pre-state, the envelope with the
         declared intent, the book with its own savepoint, `check_payment_delta`, the trust-limit and
         symmetry checks, the integrity audit row. No intermediate payment state is written. Nothing of
         it is visible to another transaction before the caller commits, and a failure inside it rolls
         ALL of it back.
 
         Nesting: caller's transaction -> payment operation savepoint -> the book's savepoint. A transaction-level conflict (40001, 40P01, the book's
-        `DebtVersionConflict`) is PROPAGATED as `RetryablePaymentConflictException`: a savepoint
-        rollback does not refresh a SERIALIZABLE snapshot, so only the owner of the whole transaction
+        `DebtVersionConflict`) is PROPAGATED as `RetryablePaymentConflictException`: a deadlock aborts the
+        whole transaction and its line locks belong to it, so only the owner of the whole transaction
         can retry it - `pay()` for the API, the money-phase replay for the simulator.
 
         `record_refusal` (the staged default): a failure is settled here, for a caller that owns the
@@ -1114,11 +1090,11 @@ class PaymentService:
         # Mandatory idempotency key (client-generated).
         tx_id_str = validate_tx_id(request.tx_id)
 
-        # 019 stage 5 (`T1907`, `FORK-2`): the capacity read and the one-direction rule of the flows
-        # below hold under concurrency only at SERIALIZABLE. The FIRST statement of the payment in this
-        # transaction, so a refusal comes before admission and before any write (no row, nothing to
-        # record) and the caller's transaction is left as it was.
-        await MoneyBoundary.require_serializable(self.session, writer="payment")
+        # The capacity read and the one-direction rule of the flows below hold under concurrency only at
+        # READ COMMITTED behind the line locks (027 stage 2; 019 `T1907` required SERIALIZABLE). The FIRST
+        # statement of the payment in this transaction, so a refusal comes before admission and before any
+        # write (no row, nothing to record) and the caller's transaction is left as it was.
+        await MoneyBoundary.require_read_committed(self.session, writer="payment")
 
         # 1. Validation
         sender = await self.session.get(Participant, sender_id)
@@ -1244,8 +1220,8 @@ class PaymentService:
 
         # T1544: a deactivated equivalent takes no new payment. Best effort, on the row loaded above
         # and AFTER the idempotency decision, so a replay of an already-accepted tx_id still answers
-        # with its stored result. It is not the binding check - that one is at commit, under the
-        # shared equivalent lock and `FOR SHARE` (`MoneyBoundary.refuse_inactive_equivalents`) - and it
+        # with its stored result. It is not the binding check - that one is at commit, behind the
+        # line locks and `FOR SHARE` (`MoneyBoundary.refuse_inactive_equivalents`) - and it
         # deliberately does not lock: forbidding an admitted payment to proceed after the PATCH returns
         # would be a stronger rule than this task's.
         if not equivalent.is_active:
@@ -1417,7 +1393,7 @@ class PaymentService:
                     for path, route_amount in routes_found
                 ]
                 if released:
-                    await MoneyBoundary.require_serializable(self.session, writer="payment")
+                    await MoneyBoundary.require_read_committed(self.session, writer="payment")
 
                 # 3-5. THE PAYMENT OPERATION (019 stages 3-4). The `Transaction` insert (`COMMITTED`),
                 # the locks, the capacity, the envelope, the book and the checks run inside ONE
@@ -1635,8 +1611,8 @@ class PaymentService:
         below rolls it back together with the money, so a `COMMITTED` row without its money never reaches
         the caller's commit. Then, in this order:
 
-        1. THE BINDING PHASE (`_bind_payment`, log/metric phase name `prepare`): the equivalent lock
-           (shared), the capacity of every segment - yielding the
+        1. THE BINDING PHASE (`_bind_payment`, log/metric phase name `prepare`): the line locks
+           of every pair (027 stage 2), the capacity of every segment - yielding the
            DECLARATION, the immutable intent (validated ordered route segments and amounts).
         2. THE MONEY (`_apply_payment`, phase name `commit`): the operator stop/hold `FOR SHARE`, the
            authoritative pre-state of both directions of every pair (`_read_payment_prestate`), the v2
@@ -1674,66 +1650,54 @@ class PaymentService:
         else:
             routes = [(list(path), route_amount) for path, route_amount in routes_found]
 
-        # The advisory-lock waits inside the operation are bounded by the payment's own deadline, not by
-        # `SET LOCAL lock_timeout`, which would outlive this savepoint and become the timeout policy of
-        # the caller's later statements (the engine's `commit=False` units of work did the same).
-        boundary = self._boundary
-        previous_timeout = (
-            boundary._advisory_lock_timeout_enabled,
-            boundary._advisory_lock_deadline,
-        )
-        boundary._advisory_lock_timeout_enabled = False
-        boundary._advisory_lock_deadline = None
+        # The row-lock waits inside the operation are bounded by the payment's own deadlines (`wait_for` below),
+        # not by `SET LOCAL lock_timeout`, which would outlive this savepoint and become the timeout policy of the
+        # caller's later statements.
+        # 1. The binding phase.
         try:
-            # 1. The binding phase.
-            try:
-                declaration = await asyncio.wait_for(
-                    self._bind_payment(tx_id_str, routes, equivalent_id),
-                    timeout=prepare_timeout_s,
-                )
-            except asyncio.TimeoutError:
-                raise
-            except Exception as e:
-                # 027 stage 1: the final check refused a capacity the (possibly stale) graph offered.
-                attempt.reroutable = isinstance(e, RoutingException) and e.code == ErrorCode.E002.value
-                logger.error(
-                    "event=payment.prepare_failed tx_id=%s error_type=%s",
-                    tx_id_str,
-                    type(e).__name__,
-                )
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
-                except Exception:
-                    pass
-                _refuse_attempt(attempt, e, "prepare_nested_abort")
-
-            # 2. The money.
-            try:
-                await asyncio.wait_for(
-                    self._apply_payment(declaration, payload=dict(attempt.row["payload"])),
-                    timeout=commit_timeout_s,
-                )
-            except asyncio.TimeoutError:
-                raise
-            except Exception as e:
-                logger.error(
-                    "event=payment.commit_failed tx_id=%s error_type=%s",
-                    tx_id_str,
-                    type(e).__name__,
-                )
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
-                except Exception:
-                    pass
-                _refuse_attempt(attempt, e, "commit_nested_abort")
-        finally:
-            boundary._advisory_lock_timeout_enabled, boundary._advisory_lock_deadline = (
-                previous_timeout
+            declaration = await asyncio.wait_for(
+                self._bind_payment(tx_id_str, routes, equivalent_id),
+                timeout=prepare_timeout_s,
             )
+        except asyncio.TimeoutError:
+            raise
+        except Exception as e:
+            # 027 stage 1: the final check refused a capacity the (possibly stale) graph offered.
+            attempt.reroutable = isinstance(e, RoutingException) and e.code == ErrorCode.E002.value
+            logger.error(
+                "event=payment.prepare_failed tx_id=%s error_type=%s",
+                tx_id_str,
+                type(e).__name__,
+            )
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
+            except Exception:
+                pass
+            _refuse_attempt(attempt, e, "prepare_nested_abort")
+
+        # 2. The money.
+        try:
+            await asyncio.wait_for(
+                self._apply_payment(declaration, payload=dict(attempt.row["payload"])),
+                timeout=commit_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            raise
+        except Exception as e:
+            logger.error(
+                "event=payment.commit_failed tx_id=%s error_type=%s",
+                tx_id_str,
+                type(e).__name__,
+            )
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
+            except Exception:
+                pass
+            _refuse_attempt(attempt, e, "commit_nested_abort")
 
     async def _bind_payment(
         self,
@@ -1741,22 +1705,18 @@ class PaymentService:
         routes: "list[tuple[list[str], Decimal]]",
         equivalent_id: uuid.UUID,
     ) -> "PaymentDeclaration":
-        """The binding phase: the equivalent lock, then the capacity of every segment; returns the declaration.
+        """The binding phase: the line locks of every pair of every route, then the capacity of every segment.
 
-        Lock order (`app/core/money_boundary.py`): the equivalent lock in SHARED mode - it keeps the
-        clearing's exclusive hold out and lets other payments in (019 stage 5, `T1909`; no transaction or
-        pair lock) - and only then the rows. The capacity of each segment is read here, in this attempt's
-        snapshot: the limit of the receiver's active line to the sender and both directions of the pair's
-        debt. A concurrent payment over the same pair is resolved by SERIALIZABLE and the owner's
-        whole-transaction retry (40001, or the `23505` of a concurrent insert of the same new debt row),
-        never by a reservation. Several routes of THIS payment over one segment are summed
-        (`local_reserved`).
+        027 stage 2 (`app/core/money_boundary.py`): every non-closed line of every pair the routes cross, both
+        directions, `FOR UPDATE` in one statement in `trust_lines.id` order - BEFORE the first debt read - and
+        only then the capacity of each segment, read after the locks: the limit of the receiver's active line
+        to the sender and both directions of the pair's debt. A concurrent payment over a shared pair waits for
+        this one and then reads what it committed; disjoint pairs do not meet. Several routes of THIS payment
+        over one segment are summed (`local_reserved`).
 
         Refused with `RoutingException` (`E002`, `details` with `available`, `needed`, `reserved`) when a
         segment cannot carry its amount - after admission, so a definitive refusal (spec, "Допуск").
         """
-
-        await self._boundary._acquire_shared_equivalent_locks_in_order([equivalent_id])
 
         pids: set[str] = set()
         for path, route_amount in routes:
@@ -1775,6 +1735,9 @@ class PaymentService:
         }
         if len(participants) != len(pids):
             raise GeoException(f"Participants not found: {pids - set(participants)}")
+        await self._boundary.lock_pair_lines(
+            {(equivalent_id, participants[u], participants[v]) for path, _ in routes for u, v in zip(path, path[1:])}
+        )
 
         # `reserved` is what EARLIER ROUTES OF THIS PAYMENT already claim on a segment (multipath over one
         # edge); no other transaction reserves anything (019 stage 5, `T1909`).
@@ -1837,42 +1800,29 @@ class PaymentService:
     async def _segment(self, sender_id, receiver_id, equivalent_id) -> "tuple[Decimal, list]":
         """Capacity of one hop and its pair's active lines `(owner_id, limit, policy, ...)`: the core's FINAL check.
 
-        Both active lines are read `FOR SHARE` and held to the end of the money transaction (owner decision A,
-        024 `T2415.3`): a line change committed after this snapshot fails the lock with 40001 and the retry
-        re-checks on a fresh snapshot (refused only if capacity or policy now fails); a later change waits for this payment. Not the router's nor `/balance`'s.
-
-        A pair holding a requested close (026 `T2603.1`, В2) carries only what shrinks its debt
-        (`pending_pair_capacity`), and its lines are locked `FOR UPDATE` before any debt is written: this
-        payment may close one (`Book`'s completion UPDATEs it). Measured on the `T2603.1` stand
-        (`test_p026_s3_close_races_postgres.py`): upgrading only at that UPDATE, after the debt row locks, and
-        also upgrading `FOR SHARE -> FOR UPDATE` here, deadlocked two payments over the pair on every retry until
-        both spent their budget. So the router's hint (`pending_pairs`, read in this attempt's snapshot) takes
-        `FOR UPDATE` at once and a second payment WAITS for the first; a pair the hint missed (a stale cached
-        graph) is still upgraded here - correct, at worst one deadlock and a retry. Order: equivalent lock
-        (shared) -> pair lines -> equivalent row `FOR SHARE` -> debts."""
+        Read AFTER `_bind_payment` locked every non-closed line of the pair `FOR UPDATE` (027 stage 2; until then
+        `FOR SHARE` here, 024 `T2415.3`, and SERIALIZABLE): a line change committed before the lock is read, a
+        later one waits for this payment - which may also close a line (`Book`'s completion UPDATEs a requested
+        one). A pair holding a requested close (026 `T2603.1`, В2) carries only what shrinks its debt
+        (`pending_pair_capacity`). Not the router's nor `/balance`'s. Order: pair lines -> equivalent row
+        `FOR SHARE` -> debts."""
 
         tl = TrustLine
         pair = {sender_id, receiver_id}
-        shared = frozenset(pair) not in getattr(self.router, "pending_pairs", ())
-        rows = (await self.session.execute(select(  # + a frozen requested line: pending and locked, no capacity
+        rows = (await self.session.execute(select(  # + a frozen requested line: pending, no capacity
             tl.from_participant_id, tl.limit, tl.policy, tl.close_requested_at, tl.id, tl.status).where(
             tl.from_participant_id.in_(pair), tl.to_participant_id.in_(pair), tl.from_participant_id != tl.to_participant_id,
             tl.equivalent_id == equivalent_id, or_(tl.status == "active", and_(
-                tl.status == "frozen", tl.close_requested_at.is_not(None)))).with_for_update(read=shared))).all()
+                tl.status == "frozen", tl.close_requested_at.is_not(None)))))).all()
         lines = [row for row in rows if row.status == "active"]
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
         limit = next((limit for owner, limit, *_ in lines if owner == receiver_id), None)
         capacity = pair_capacity(line_limit=limit, payer_owes=sender_owes, payee_owes=receiver_owes,
                                  pair_has_active_line=bool(lines))
-        if requested := [row.id for row in rows if row.close_requested_at is not None]:
+        if any(row.close_requested_at is not None for row in rows):
             capacity = pending_pair_capacity(capacity, payee_owes=receiver_owes)
-            if shared:
-                await self._lock_requested_lines(requested)
         return capacity, list(lines)
-
-    async def _lock_requested_lines(self, line_ids: list) -> None:
-        await self.session.execute(select(TrustLine.id).where(TrustLine.id.in_(line_ids)).with_for_update())
 
     async def _debt_amount(
         self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID
@@ -1944,9 +1894,11 @@ class PaymentService:
                     (flow.from_id, flow.to_id, flow.amount)
                 )
 
+            # 027 stage 2: over the payment's own pairs - its locked rows - never every debt of a participant, which
+            # a neighbour's commit on another pair changes under READ COMMITTED (a false `PAYMENT_DELTA_DRIFT`).
             net_positions_before = {
                 eq_id: await self._boundary._snapshot_net_positions(
-                    equivalent_id=eq_id, participant_ids=participant_ids
+                    equivalent_id=eq_id, participant_ids=participant_ids, pairs=pairs_by_equivalent[eq_id]
                 )
                 for eq_id, participant_ids in participants_by_equivalent.items()
             }
@@ -1985,6 +1937,7 @@ class PaymentService:
                     equivalent_id=eq_id,
                     flows=flows_by_equivalent.get(eq_id, []),
                     net_positions_before=net_positions_before.get(eq_id, {}),
+                    pairs=pairs,
                 )
 
             await self._write_integrity_audit(
@@ -2065,7 +2018,7 @@ class PaymentService:
 
         * refused before admission - raised, no row (the executor counts a rejection);
         * a transaction-level conflict - raised as `RetryablePaymentConflictException` for the owner's
-          whole-phase replay (a savepoint rollback does not refresh a SERIALIZABLE snapshot);
+          whole-phase replay (a deadlock aborts the whole transaction, not a savepoint);
         * an identity collision on `transactions_tx_id_key` - the identity resolver (`_resolve_identity`):
           the winner's stored result, a `409`, or - no winner to read - a retryable conflict;
         * a definitive refusal after admission, transaction usable - the `ABORTED` row is written into
@@ -2115,8 +2068,8 @@ class PaymentService:
                 failure if isinstance(failure, GeoException) else _classify_payment_db_error(failure)
             )
             if isinstance(classified, RetryablePaymentConflictException):
-                # SERIALIZABLE refused the write (a concurrent row of this `tx_id` behind the snapshot):
-                # a conflict of the whole transaction, for its owner to replay.
+                # The database refused the write as a transaction-level conflict: a conflict of the whole
+                # transaction, for its owner to replay.
                 raise classified from failure
             raise PaymentTransactionUnusable(refusal, failure) from exc
         if row is None:
@@ -2235,8 +2188,8 @@ class PaymentService:
         and commits it once. `pay()` owns the retries of the API path: a retryable conflict (40001,
         40P01, the book's `DebtVersionConflict`, a changed owner set) discards the whole attempt and
         the next one starts on a fresh session and snapshot, within `COMMIT_RETRY_ATTEMPTS` attempts
-        and the `PAYMENT_TOTAL_TIMEOUT_SECONDS` deadline. A savepoint rollback is never a retry: it
-        does not refresh a SERIALIZABLE snapshot.
+        and the `PAYMENT_TOTAL_TIMEOUT_SECONDS` deadline. A savepoint rollback is never a retry: a
+        deadlock or a version conflict belongs to the whole transaction.
 
         OUTCOMES BY CAUSE (spec, "Окончательный отказ…", the seven-row table; `T1905`):
 

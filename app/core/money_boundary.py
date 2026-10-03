@@ -1,60 +1,45 @@
-"""The money boundary: the stop/hold guard, the payment delta check and THE ONE equivalent lock.
+"""The money boundary: the stop/hold guard, the payment delta check and THE LINE LOCKS of the money writers.
 
-Programme 019 stage 2 (`T1903`, `FORK-2`) moved every lock primitive here from the payment engine without
-a change of semantics. Stage 5 (`T1909`, decision `KEEP-EQUIVALENT-LOCK` of the fourth consultation,
-2026-09-25) reduced them to ONE advisory identity per equivalent (`_EQUIVALENT_OWNER_LOCK_NAMESPACE`, key
-`_equivalent_owner_lock_key`) in TWO MODES:
+027 stage 2 (`T2704`, 2026-10-03) replaced 019's protocol (`FORK-2` SERIALIZABLE for every money writer, `T1909`
+`KEEP-EQUIVALENT-LOCK` - one advisory lock per equivalent, shared for payments, exclusive for the clearing on a
+pinned connection) with READ COMMITTED and row locks: "lock what you check, read after the lock". History - the
+019 and 024 specs, which keep their decisions as written.
 
-* **shared** - `acquire_shared_equivalent_locks` / `_acquire_shared_equivalent_locks_in_order`
-  (`pg_advisory_xact_lock_shared`): a payment, a staged money phase of the tick, an inject. Shared holders
-  do not wait for one another; SERIALIZABLE and the whole-transaction retry of each owner keep their
-  concurrent debt writes correct (`T1908`: lost update, opposite directions and the bottleneck reach the
-  serial result through 40001 and a retry; a concurrent insert of one new debt row is the `23505` the
-  owners retry, `is_debt_pair_collision`);
-* **exclusive** - `acquire_exclusive_equivalent_session_lock` (`pg_advisory_lock`, session level): the
-  clearing only, on a PINNED connection, taken BEFORE its authoritative snapshot and held through its
-  commit resolution and every permitted retry. It waits for the shared holders in flight and keeps new
-  ones out, which is what gives the clearing liveness under continuous payment load (`T1908` (d): without
-  it three of four predeclared batches missed the 90 % criterion).
+* **Lines of pairs** (`lock_pair_lines`): every money writer locks `FOR UPDATE` every non-closed (`active` or
+  `frozen`) line of EVERY pair whose debt it reads or writes, both directions, in ONE global order (`ORDER BY
+  trust_lines.id`) over its whole set, and only then reads a debt, a limit, a policy or a close request of those
+  pairs. A debt of a pair exists only beside a live line of that pair (spec 027, "Долг на паре без незакрытой
+  линии"), so two writers of one pair always meet on a line row, and disjoint pairs never meet at all. A staged
+  phase that does not know its routes in advance locks the lines among its run's participants
+  (`lock_lines_among`) before its first payment. Decrease-only writers (the clearing) also lock their debt rows
+  `FOR UPDATE`, after the lines.
+* **The equivalent row** `FOR SHARE` (`refuse_inactive_equivalents`) after the lines and before the debts: the
+  operator stop, the integrity hold and the equivalent `DELETE` update it, and the reconciliation baseline takes it
+  `FOR UPDATE`, so each waits for the writers in flight and keeps new ones out.
+* **The isolation** of a writer's transaction is READ COMMITTED (`require_read_committed`): every statement after a
+  lock wait reads what the lock holder committed. REPEATABLE READ and SERIALIZABLE take their snapshot BEFORE the
+  wait, and a snapshot older than the lock reads a debt the holder has since changed.
 
-There are no transaction or pair advisory locks and no reservations any more (`prepare_locks` is dropped by
-migration `031`). Admin stop/hold and the equivalent `DELETE` take NO advisory lock: they `UPDATE`/`DELETE`
-the equivalent row, which every money writer reads `FOR SHARE` through its commit
-(`refuse_inactive_equivalents`); reconciliation reads at its chosen isolation and sets a hold
-the same way.
-
-THE ONE LOCK ORDER: the equivalent lock (a staged caller takes its COMPLETE set, sorted by key, before any
-protected write) -> the equivalent row `FOR SHARE` -> the debt rows. The reverse order is a reachable
-deadlock, and a deadlock retry does not replace it.
-
-TWO LIFETIMES, deliberately different:
-
-* **transaction-level** - the shared lock is released by the end of the transaction that took it,
-  whatever ends it;
-* **session-level** - the clearing's exclusive lock survives the rollback that gives it a fresh snapshot
-  and every attempt's transaction on that connection, and lives until the explicit
-  `release_exclusive_equivalent_session_lock`; a connection whose release is not confirmed is invalidated,
-  never returned to the pool (`ClearingService._release_interlock_session`).
-
-KEY SPACE. PostgreSQL's two-int key space with a stable domain tag as the first int. A one-argument
-`pg_advisory_*` is a different key space and never the same lock.
+There are no advisory locks, no reservations (`prepare_locks` is dropped by migration `031`) and no pinned clearing
+connection. The ONE ORDER: lines (sorted by id) -> the equivalent row -> the debt rows. A writer that adds a line
+lock later in its transaction (a stale route, an inject effect on a pair it did not name) may meet a deadlock
+(`40P01`); its owner retries the whole transaction.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import time
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, false, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from app.utils.exceptions import ConflictException, GeoException
 
 logger = logging.getLogger(__name__)
@@ -69,11 +54,10 @@ logger = logging.getLogger(__name__)
 # rounded underneath it. What the old constant admitted was therefore the SMALLEST corruption that
 # can exist: the ledger moving one atom more, or less, than the payment declared, unreported.
 #
-# Nor was it a concurrency mitigation, though it looks like one: both reads of the net positions are
-# made in ONE SERIALIZABLE transaction, whose snapshot is fixed at its first statement, so no foreign
-# write lands between them (until 019 stage 5 an exclusive advisory lock over the whole equivalent
-# said the same; payments now hold it shared, and the snapshot is what holds). And a race would produce a drift the size of the
-# other payment, not one atom - a mitigation shaped like this absorbs the smallest case and nothing
+# Nor was it a concurrency mitigation, though it looks like one: since 027 stage 2 both reads of the net
+# positions cover only the operation's pairs, whose lines this transaction holds `FOR UPDATE`, so no foreign
+# write lands between them (until then one SERIALIZABLE snapshot said the same). And a race would produce a
+# drift the size of the other payment, not one atom - a mitigation shaped like this absorbs the smallest case and nothing
 # larger, which is a threshold, not a safeguard.
 #
 # It is a module constant rather than a local so that it can be named in a test: the 012
@@ -81,17 +65,13 @@ logger = logging.getLogger(__name__)
 # barrier catches the 1e-9 drift a widened door produces.
 _DELTA_DRIFT_TOLERANCE = Decimal("0")
 
-# PostgreSQL's two-int advisory-lock key space; the first int is a stable domain tag. The name keeps its
-# historical "owner" (019 stage 5 retained this ONE identity; the transaction-lock domain 0x475458 and the
-# one-BIGINT pair-lock space are gone).
-_EQUIVALENT_OWNER_LOCK_NAMESPACE = 0x474551
-
-#: `details.reason` of the isolation refusal (019 stage 5, `T1907`, `FORK-2`).
-ISOLATION_NOT_SERIALIZABLE_REASON = "isolation_not_serializable"
+#: `details.reason` of the isolation refusal (027 stage 2, `T2704`; until then 019 `T1907`'s
+#: `isolation_not_serializable`).
+ISOLATION_NOT_READ_COMMITTED_REASON = "isolation_not_read_committed"
 
 
-class IsolationNotSerializable(GeoException):
-    """A money writer was handed a transaction that does not run SERIALIZABLE; nothing was written.
+class IsolationNotReadCommitted(GeoException):
+    """A money writer was handed a transaction that does not run READ COMMITTED; nothing was written.
 
     An internal error (`E010`, 500) and deliberately not a conflict: no retry of the same request on the
     same kind of session can succeed, and the caller that supplied the session is the defect.
@@ -100,7 +80,7 @@ class IsolationNotSerializable(GeoException):
     def __init__(self, *, writer: str, isolation: str):
         super().__init__(
             details={
-                "reason": ISOLATION_NOT_SERIALIZABLE_REASON,
+                "reason": ISOLATION_NOT_READ_COMMITTED_REASON,
                 "writer": writer,
                 "isolation": isolation,
             }
@@ -108,153 +88,69 @@ class IsolationNotSerializable(GeoException):
 
 
 class MoneyBoundary:
-    """The equivalent lock, the stop/hold guard and the delta check over one session.
-
-    One instance carries one advisory-lock deadline: the budget starts at the first lock this instance
-    takes and is shared by every later lock it takes (`_set_local_advisory_lock_timeout`). A caller
-    that wants a fresh budget per unit of work takes a fresh instance.
-    """
+    """The line locks, the isolation check, the stop/hold guard and the delta check over one session."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        from app.config import settings
 
-        total_timeout_s = float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10)
-        commit_timeout_s = float(settings.COMMIT_TIMEOUT_SECONDS or 5)
-        self._advisory_lock_budget_s = max(
-            0.001,
-            min(total_timeout_s, commit_timeout_s),
-        )
-        self._advisory_lock_timeout_enabled = True
-        self._advisory_lock_deadline: float | None = None
+    async def lock_pair_lines(self, pairs: Iterable[tuple[UUID, UUID, UUID]]) -> None:
+        """Lock every non-closed line of each pair `(equivalent_id, a, b)`, both directions, `FOR UPDATE`, in
+        `trust_lines.id` order, in ONE statement - before any debt of these pairs is read (027 stage 2).
 
-    @staticmethod
-    def _equivalent_owner_lock_key(equivalent_id: UUID) -> int:
-        """Compute a stable signed INT key inside the equivalent-lock domain."""
-        digest = hashlib.sha256(equivalent_id.bytes).digest()
-        return int.from_bytes(digest[:4], byteorder="big", signed=True)
+        PostgreSQL locks the rows of `ORDER BY ... FOR UPDATE` in the sorted order, so two writers taking
+        overlapping sets this way cannot deadlock each other. Under READ COMMITTED a row that another writer
+        closed while this one waited is re-checked and left out (`status != 'closed'`)."""
 
-    async def _acquire_shared_equivalent_locks_in_order(
-        self,
-        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
-    ) -> None:
-        """The equivalent lock in SHARED mode for the complete set, in one global (sorted-key) order."""
-        keys = sorted(
-            {
-                self._equivalent_owner_lock_key(equivalent_id)
-                for equivalent_id in equivalent_ids
-            }
-        )
-        for key in keys:
-            await self._set_local_advisory_lock_timeout()
+        keys = sorted({(e, x, y) for e, a, b in pairs for x, y in ((a, b), (b, a))}, key=str)
+        if keys:
             await self.session.execute(
-                text("SELECT pg_advisory_xact_lock_shared(:namespace, :key)"),
-                {
-                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                    "key": key,
-                },
+                select(TrustLine.id)
+                .where(tuple_(TrustLine.equivalent_id, TrustLine.from_participant_id,
+                              TrustLine.to_participant_id).in_(keys), TrustLine.status != "closed")
+                .order_by(TrustLine.id)
+                .with_for_update()
             )
 
-    async def acquire_shared_equivalent_locks(
-        self,
-        equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
+    async def lock_lines_among(
+        self, equivalent_ids: Iterable[UUID], participant_ids: Iterable[UUID]
     ) -> None:
-        """A caller-owned staged batch's (the tick's money phase, an inject) complete equivalent set, shared."""
-        previous_lock_timeout = await self.session.scalar(text("SHOW lock_timeout"))
-        acquired = False
-        try:
-            await self._acquire_shared_equivalent_locks_in_order(equivalent_ids)
-            acquired = True
-        finally:
-            # Staged callers own a larger outer transaction. The lock deadline must
-            # not become the timeout policy for later statements in that
-            # transaction. If acquisition itself fails/cancels, the outer owner
-            # rolls back the unusable UoW.
-            if acquired:
-                await self.session.execute(
-                    text(
-                        "SELECT set_config('lock_timeout', :lock_timeout, true)"
-                    ),
-                    {"lock_timeout": str(previous_lock_timeout)},
-                )
+        """A staged money phase's COMPLETE set, taken before its first payment (027 stage 2): every non-closed line
+        between two of `participant_ids` (the run's perimeter, which confines its routes) in `equivalent_ids`,
+        `FOR UPDATE`, in `trust_lines.id` order. A line created after it (none in a money phase) is locked by the
+        payment that routes over it, later and out of order - at worst a deadlock the phase's owner replays."""
 
-    async def acquire_exclusive_equivalent_session_lock(
-        self,
-        equivalent_id: UUID,
-    ) -> None:
-        """The clearing's EXCLUSIVE equivalent lock, at SESSION level, beyond a transaction rollback.
-
-        The clearing pins the physical connection, takes this lock (it waits for every shared holder in
-        flight), rolls the acquisition transaction back to obtain a snapshot newer than whatever it waited
-        for, and explicitly releases the lock before returning the connection.
-        """
-        await self._set_local_advisory_lock_timeout()
-        await self.session.execute(
-            text("SELECT pg_advisory_lock(:namespace, :key)"),
-            {
-                "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                "key": self._equivalent_owner_lock_key(equivalent_id),
-            },
-        )
-
-    async def release_exclusive_equivalent_session_lock(
-        self,
-        equivalent_id: UUID,
-    ) -> bool:
-        """Release the clearing's session-level exclusive lock; True only when PostgreSQL confirms it."""
-        return bool(
-            await self.session.scalar(
-                text("SELECT pg_advisory_unlock(:namespace, :key)"),
-                {
-                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                    "key": self._equivalent_owner_lock_key(equivalent_id),
-                },
+        equivalents, participants = sorted(set(equivalent_ids), key=str), sorted(set(participant_ids), key=str)
+        if equivalents and participants:
+            await self.session.execute(
+                select(TrustLine.id)
+                .where(TrustLine.equivalent_id.in_(equivalents), TrustLine.from_participant_id.in_(participants),
+                       TrustLine.to_participant_id.in_(participants), TrustLine.status != "closed")
+                .order_by(TrustLine.id)
+                .with_for_update()
             )
-        )
-
-    async def _set_local_advisory_lock_timeout(self) -> None:
-        if not self._advisory_lock_timeout_enabled:
-            return
-        now = time.monotonic()
-        if self._advisory_lock_deadline is None:
-            self._advisory_lock_deadline = now + self._advisory_lock_budget_s
-        timeout_ms = max(
-            1,
-            int((self._advisory_lock_deadline - now) * 1000),
-        )
-        await self.session.execute(
-            text(f"SET LOCAL lock_timeout = '{timeout_ms}ms'")
-        )
 
     @staticmethod
-    async def require_serializable(session: AsyncSession, *, writer: str) -> None:
-        """Refuse, before the first write, a work transaction that does not run SERIALIZABLE.
+    async def require_read_committed(session: AsyncSession, *, writer: str) -> None:
+        """Refuse, before the first write, a work transaction that does not run READ COMMITTED (027 stage 2).
 
-        019 stage 5 (`T1907`, `FORK-2`): the invariants that stage 5 stops protecting with advisory
-        locks - the capacity read of a payment, the one-direction-per-pair check of the inject, the
-        clearing's re-read of its cycle, the floor of the trust decay - hold under concurrency only
-        when EVERY writer taking part runs SERIALIZABLE; SSI in one participant does not make a mixed
-        load serializable. The application's own engine is fenced to SERIALIZABLE (`app/config.py`,
-        2026-09-25), so this guards a session HANDED IN by a caller at another level.
+        The line locks hold only if every statement after a lock wait reads what the holder committed. A
+        REPEATABLE READ or SERIALIZABLE transaction took its snapshot before the wait: it reads the debt as it was
+        before the holder's commit (both directions of a fresh pair end up written, `T2703` stand 1), and SSI
+        does not see a READ COMMITTED partner. The application engine is fenced to READ COMMITTED (`app/config.py`),
+        so this guards a session HANDED IN by a caller at another level.
 
-        It reads the ACTUAL level of the transaction the writer is about to write in (`SHOW
-        transaction_isolation`, which opens that transaction if it has not begun - at the level it
-        will run at), so it must be called on the session that writes, in the transaction that writes.
-        It never commits, rolls back or re-levels the caller's transaction: a transaction that has
-        already read cannot be upgraded honestly (`SET TRANSACTION` after a read is refused, and a
-        rollback would discard the caller's work) - the only safe answer is to refuse.
-
-        Blind spot, named: a writer that is not routed through a caller of this function is not
-        covered by it; the callers are listed in `specs/019-payment-one-transaction/spec.md`
-        (`T1907`, per-boundary table).
+        It reads the ACTUAL level (`SHOW transaction_isolation`, which opens the transaction at the level it will
+        run at) on the session that writes, and never commits, rolls back or re-levels it: the only safe answer
+        is to refuse. Blind spot, named: a writer not routed through a caller of this function is not covered
+        (callers: spec 027, "Писатели").
         """
 
         level = str(await session.scalar(text("SHOW transaction_isolation")) or "").strip().lower()
-        if level != "serializable":
+        if level != "read committed":
             logger.error(
                 "event=money.isolation_refused writer=%s isolation=%s", writer, level
             )
-            raise IsolationNotSerializable(writer=writer, isolation=level)
+            raise IsolationNotReadCommitted(writer=writer, isolation=level)
 
     #: `details.reason` of the operator-stop refusal (T1544). A state conflict, and deliberately NOT
     #: retryable: `details.retryable=true` belongs to the serialization-conflict variant of `E008`,
@@ -299,15 +195,12 @@ class MoneyBoundary:
         The flag is read as columns, never through an `Equivalent` instance: the payment service
         loads one before routing, and its cached `is_active` can still say True.
 
-        The read is always `FOR SHARE`, and IT is what binds a money writer to the
-        stop: SERIALIZABLE takes its snapshot before any lock wait, and a plain read after the wait
-        still returns the value from before the PATCH committed (measured 2026-09-13, `FOR KEY SHARE`
-        equally stale). `FOR SHARE` instead waits for an uncommitted PATCH and then fails with 40001,
-        which the owner's retry turns into a fresh snapshot that sees the stop; and a PATCH arriving
-        after this read waits for the writer's commit. Since 019 stage 5 (`T1909`) the PATCH, the hold
-        clear, the reaction and the equivalent `DELETE` take no advisory lock at all - this row lock is
-        the whole protocol. Order: the equivalent advisory lock the writer holds (shared, or the
-        clearing's exclusive) first, this row second, the debt rows after.
+        The read is always `FOR SHARE`, and IT is what binds a money writer to the stop: it waits for an
+        uncommitted PATCH (READ COMMITTED then reads the committed row, 027 stage 2; under 019's SERIALIZABLE it
+        failed with 40001 and the retry read it), and a PATCH arriving after this read waits for the writer's
+        commit. The PATCH, the hold clear, the reaction, the baseline and the equivalent `DELETE` take no other
+        lock - this row lock is the whole protocol. A row that is GONE (deleted while this read waited) is refused
+        as inactive. Order: the writer's line locks first, this row second, the debt rows after.
 
         Since 019 stage 5 (`T1907`, `FORK-7`) the clearing reads it too, in every attempt, and holds the
         row lock through its commit (`ClearingService._refuse_if_equivalent_inactive`). A `row_lock=False`
@@ -318,13 +211,14 @@ class MoneyBoundary:
         if not ids:
             return
         stmt = select(
-            Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id
+            Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id, Equivalent.id
         ).where(Equivalent.id.in_(ids)).with_for_update(read=True)
         rows = (await self.session.execute(stmt)).all()
-        inactive = sorted(str(code) for code, is_active, _hold in rows if not is_active)
+        gone = sorted(str(i) for i in set(ids) - {row.id for row in rows})
+        inactive = sorted(str(code) for code, is_active, _hold, _id in rows if not is_active) + gone
         if inactive:
             raise self.inactive_equivalent_conflict(inactive)
-        held = sorted(str(code) for code, _is_active, hold in rows if hold is not None)
+        held = sorted(str(code) for code, _is_active, hold, _id in rows if hold is not None)
         if held:
             raise self.integrity_hold_conflict(held)
 
@@ -333,10 +227,15 @@ class MoneyBoundary:
         *,
         equivalent_id: UUID,
         participant_ids: set[UUID],
+        pairs: "Iterable[tuple[UUID, UUID]] | None" = None,
     ) -> dict[UUID, Decimal]:
-        """Read net positions for participants (credits - debts) in an equivalent."""
+        """Net positions (credits - debts) of participants in an equivalent - over the directed debts `pairs`
+        (`(debtor, creditor)`) only, when given: the operation's own rows, whose lines its transaction holds (027
+        stage 2). `None` reads every debt of the participants: correct only with no concurrent writer, since under
+        READ COMMITTED a neighbour's commit on another pair of a shared participant lands between two reads."""
         if not participant_ids:
             return {}
+        scope = [] if pairs is None else [or_(false(), *(and_(Debt.debtor_id == d, Debt.creditor_id == c) for d, c in pairs))]
 
         credits_rows = (
             await self.session.execute(
@@ -344,6 +243,7 @@ class MoneyBoundary:
                 .where(
                     Debt.equivalent_id == equivalent_id,
                     Debt.creditor_id.in_(participant_ids),
+                    *scope,
                 )
                 .group_by(Debt.creditor_id)
             )
@@ -354,6 +254,7 @@ class MoneyBoundary:
                 .where(
                     Debt.equivalent_id == equivalent_id,
                     Debt.debtor_id.in_(participant_ids),
+                    *scope,
                 )
                 .group_by(Debt.debtor_id)
             )
@@ -375,8 +276,10 @@ class MoneyBoundary:
         equivalent_id: UUID,
         flows: list[tuple[UUID, UUID, Decimal]],
         net_positions_before: dict[UUID, Decimal],
+        pairs: "Iterable[tuple[UUID, UUID]] | None" = None,
     ) -> None:
-        """Verify per-participant net position deltas match applied flows."""
+        """Verify per-participant net position deltas match applied flows - over `pairs`, the operation's directed
+        debts, as `net_positions_before` was read (`_snapshot_net_positions`)."""
         if not flows:
             return
 
@@ -392,6 +295,7 @@ class MoneyBoundary:
         positions_after = await self._snapshot_net_positions(
             equivalent_id=equivalent_id,
             participant_ids=set(expected_delta.keys()),
+            pairs=pairs,
         )
 
         tolerance = _DELTA_DRIFT_TOLERANCE

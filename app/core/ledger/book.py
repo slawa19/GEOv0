@@ -468,14 +468,11 @@ async def _apply_inject_increase(session: Any, effect: InjectIncrease) -> str:
     effect of this same event would be invisible to the read below. A flush error propagates
     (`SQLAlchemyError`), as the inject executor's contract requires.
 
-    A reverse debt committed concurrently is not missed either: this read and the write below run in
-    the owner's SERIALIZABLE transaction, and every other writer that can create a direction reads
-    the opposite edge too (`_apply_payment_flow`, and this very check), so the pair of transactions
-    is a read-write cycle that PostgreSQL breaks with 40001. The owner retries once on a fresh
-    snapshot (which then sees the reverse debt and refuses); if the retry conflicts again, the owner
-    rolls back and leaves the event pending - fail-closed, never both directions
-    (`real_runner_impl.py`, the inject retry loop). Reasoned from SSI, not measured by a concurrent
-    stand.
+    A reverse debt committed concurrently is not missed either (027 stage 2): the owner holds both
+    non-closed lines of the pair `FOR UPDATE` before this read (`inject_executor.py`, `op_inject_debt`), and
+    every other writer of the pair's debt holds them too, so it has committed before this read at READ
+    COMMITTED or waits until this commits. Measured by `test_p027_t2703_stage2_counterexamples_postgres.py`
+    (opposing inject/inject and payment/inject).
     """
 
     debtor_id, creditor_id, eq_id = effect.debtor_id, effect.creditor_id, effect.equivalent_id
@@ -871,10 +868,12 @@ async def _complete(
             await _settle_requested_closes(session, op, rows)
 
     # T1501: A SEED OR TEST_FIXTURE WRITE AFTER THE BASELINE IS REFUSED, never recorded. Read from the
-    # stored entries, so it covers every statement of the operation. Under PostgreSQL SERIALIZABLE a
-    # baseline taken concurrently cannot commit alongside it: each transaction reads what the other
-    # writes (`tests/integration/test_p015_step5a_reconciliation_postgres.py`).
+    # stored entries, so it covers every statement of the operation. A baseline taken concurrently cannot
+    # commit alongside it: the baseline takes the equivalent row `FOR UPDATE`, this holds it `FOR SHARE`
+    # through the commit and reads the baselines after (027 stage 2; until then SERIALIZABLE) - one waits
+    # for the other (`tests/integration/test_p015_step5a_reconciliation_postgres.py`).
     if op.kind in _PRE_BASELINE_ONLY_KINDS and touched:
+        await async_conn.execute(select(Equivalent.id).where(Equivalent.id.in_(touched)).with_for_update(read=True))
         column = debt_reconciliation_baselines.c.equivalent_id
         baselined = (
             (await async_conn.execute(select(column).where(column.in_(touched)))).scalars().all()

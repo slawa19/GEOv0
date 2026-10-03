@@ -21,6 +21,7 @@ from app.core.simulator.inject_executor import (
     InjectOwnerLockSetTooNarrow,
     StagedInjectEvent,
     inject_event_equivalent_codes,
+    inject_event_debt_participant_pids,
     inject_event_freeze_participant_pids,
     invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
 )
@@ -472,18 +473,22 @@ class RealRunnerImpl:
                     lock_ids = await self._resolve_inject_owner_lock_ids(
                         session, run=run, scenario=scenario, event=event
                     )
-                # 019 stage 5 (`T1907`, `FORK-2`): the one-direction-per-pair check of
-                # `inject_debt` (`book.py`, `_apply_inject_increase`) holds against a concurrent
-                # writer only at SERIALIZABLE. Read on the unit of work's transaction before its
-                # owner locks and its first write (on the first attempt the lock-set resolution
-                # above has already read in it); the refusal is neither transient nor a stop, so it
-                # propagates and the event stays pending.
-                await MoneyBoundary.require_serializable(session, writer="inject")
-                # The owner locks open the transaction the event is staged and committed in. A
-                # fresh boundary per attempt: its advisory-lock deadline is per unit of work.
-                await MoneyBoundary(session).acquire_shared_equivalent_locks(lock_ids)
+                # 027 stage 2 (`T2704`): the one-direction-per-pair check of `inject_debt` (`book.py`,
+                # `_apply_inject_increase`) holds against a concurrent writer only at READ COMMITTED behind
+                # the line locks. Read on the unit of work's transaction before its first write; the
+                # refusal is neither transient nor a stop, so it propagates and the event stays pending.
+                await MoneyBoundary.require_read_committed(session, writer="inject")
                 intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
                     session, scenario=scenario, event=event
+                )
+                # 027 stage 2: the event's COMPLETE line set before its first debt read - every non-closed
+                # line among the participants its `inject_debt` effects name, in their equivalents,
+                # `FOR UPDATE` in `trust_lines.id` order. `lock_ids` stays the event's declared scope; it
+                # is no lock any more (019 `T1909`'s shared equivalent lock is gone).
+                await MoneyBoundary(session).lock_lines_among(
+                    intent_equivalent_ids,
+                    {pid_to_participant_id[pid] for pid in inject_event_debt_participant_pids(event=event)
+                     if pid in pid_to_participant_id},
                 )
                 # T1544: no money in an equivalent the operator has deactivated (protocol §11.5.1
                 # blocks OPERATIONS in it, and `inject_debt` writes the shared `debts`). The order is
@@ -589,9 +594,7 @@ class RealRunnerImpl:
                         raise
                     transient_retries_left -= 1
                     # No sleep: the conflict is reported once the other writer has committed (or
-                    # rolled back), so the retry's fresh snapshot already sees its outcome. Since 019
-                    # stage 5 the equivalent lock is SHARED here and does not order the inject behind
-                    # a payment; a clearing still holds it exclusively and is waited for.
+                    # rolled back), so the retry's fresh transaction already sees its outcome.
                     self._logger.warning(
                         "simulator.real.inject.transient_retry event_index=%s stage=staging",
                         event_index,

@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import logging
 import time
 from collections import deque
@@ -44,6 +45,10 @@ class PaymentRouter:
     # 027 stage 1: the one graph build in flight per equivalent in this process (single-flight); its waiters read
     # the cache it stores. A future of another event loop is ignored.
     _inflight: Dict[str, "asyncio.Future[None]"] = {}
+    # 027 `T2704` (a): when the read of each equivalent's cached graph BEGAN, on one process-wide tick
+    # (`itertools.count`, not a clock: two events in one coarse clock tick would be unordered).
+    _read_started: Dict[str, int] = {}
+    _ticks = itertools.count(1)
 
     @classmethod
     def invalidate_cache(cls, equivalent_code: str | None = None) -> None:
@@ -164,7 +169,8 @@ class PaymentRouter:
 
         027 stage 1. `use_shared_cache`: a cached graph younger than `ROUTING_GRAPH_CACHE_TTL_SECONDS`, else ONE
         build per equivalent in this process that concurrent callers wait for (single-flight), stored. `refresh`:
-        build afresh and store (the payment's one re-route). Neither: build afresh for this instance only. Topology
+        build afresh and store (the payment's one re-route); it accepts only a graph whose read began
+        AFTER the refresh was asked - never the read in flight before it, nor the old cache when that build failed. Neither: build afresh for this instance only. Topology
         edits drop the cache; money commits do not - a cached capacity may be stale up to the rest of a build in
         flight when the edit committed plus the TTL (the stamp is the publish time), and the core's final check
         re-reads the pair (`PaymentService._segment`). The default reads afresh in this router's
@@ -177,16 +183,16 @@ class PaymentRouter:
         with log_duration(logger, "router.build_graph", equivalent=equivalent_code):
             ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
             shared = (use_shared_cache or refresh) and ttl > 0
-            # Follow the build in flight - a re-route (`refresh`) joins it too: its read began at most one build ago -
-            # and when it stored nothing (failed, cancelled), follow the next leader or become it.
+            # Follow the build in flight; when it stored nothing (failed, cancelled), follow the next leader or become
+            # it. A re-route (`refresh`) waits too, but accepts only a read that began after it asked (027 `T2704` (a)).
+            asked = next(self._ticks) if refresh else 0
             while shared:
-                if not refresh and self._load_cached(equivalent_code, ttl):
+                if self._load_cached(equivalent_code, ttl, read_after=asked):
                     return
                 pending = self._inflight.get(equivalent_code)
                 if pending is None or pending.get_loop() is not asyncio.get_running_loop():
                     break
                 await asyncio.shield(pending)
-                refresh = False
             if not shared:
                 await self._build_in(reader, equivalent_code, write_shared_cache=False)
                 return
@@ -209,9 +215,9 @@ class PaymentRouter:
             finally:
                 self.session = own
 
-    def _load_cached(self, equivalent_code: str, ttl: int) -> bool:
+    def _load_cached(self, equivalent_code: str, ttl: int, *, read_after: int = 0) -> bool:
         cached = self._graph_cache.get(equivalent_code)
-        if cached is None:
+        if cached is None or self._read_started.get(equivalent_code, 0) < read_after:
             return False
         # Backward-compatible cache unpacking.
         if len(cached) == 5:
@@ -240,6 +246,7 @@ class PaymentRouter:
         *,
         write_shared_cache: bool = True,
     ) -> None:
+        read_started = next(self._ticks)
         # 1. Get Equivalent ID. 027 stage 1: columns, not ORM objects, throughout (F-027-4).
         stmt = select(Equivalent.id).where(Equivalent.code == equivalent_code)
         equivalent_id = (await self.session.execute(stmt)).scalar_one_or_none()
@@ -339,6 +346,7 @@ class PaymentRouter:
 
         ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
         if write_shared_cache and ttl > 0:
+            self._read_started[equivalent_code] = read_started
             self._graph_cache[equivalent_code] = (
                 time.time(),
                 {u: dict(v) for u, v in self.graph.items()},

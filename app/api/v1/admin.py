@@ -69,7 +69,6 @@ from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
-from app.core.money_boundary import MoneyBoundary
 from app.core.ledger.reconciliation import take_baseline
 from app.db.reconciliation_tables import debt_reconciliation_baselines
 from sqlalchemy.exc import IntegrityError
@@ -1191,11 +1190,11 @@ async def admin_update_equivalent(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> EquivalentSchema:
-    # 019 stage 5 (`T1907`, `FORK-2`): the operator stop is a money boundary; refused before the first
-    # write on a transaction that does not run SERIALIZABLE.
-    await MoneyBoundary.require_serializable(db, writer="admin.equivalents.patch")
+    # The operator stop is a money boundary: the equivalent row `FOR UPDATE` before any decision - it waits for
+    # every money writer holding it `FOR SHARE` and keeps new ones out until this commits (027 stage 2; 019
+    # `T1907` checked for SERIALIZABLE here instead).
     eq = (
-        await db.execute(select(EquivalentModel).where(EquivalentModel.code == code))
+        await db.execute(select(EquivalentModel).where(EquivalentModel.code == code).with_for_update(key_share=True))
     ).scalar_one_or_none()
     if eq is None:
         raise NotFoundException(f"Equivalent {code} not found")
@@ -1325,11 +1324,9 @@ async def admin_clear_equivalent_integrity_hold(
     result is not the one the hold points at. Result transitions give the causal order: the reaction makes
     the FAILED row latest, and any later transition demotes it before inserting the new latest.
 
-    UNDER THE OWNER LOCK THROUGH COMMIT, like the deactivating PATCH, so a scheduled reaction confirming a
-    new FAILED is serialised with this clear. The two predicate reads take row locks (`FOR UPDATE` on the
-    equivalent, `FOR SHARE` on the latest result): under SERIALIZABLE this transaction's snapshot predates
-    its wait on the owner lock, and a row changed after that snapshot then fails with 40001 instead of
-    being read stale - the T1544 recipe.
+    The two predicate reads take row locks (`FOR UPDATE` on the equivalent, `FOR SHARE` on the latest
+    result) held through commit, like the deactivating PATCH, so a scheduled reaction confirming a new FAILED
+    is serialised with this clear; at READ COMMITTED (027 stage 2) a read after the wait sees the committed row.
     """
 
     from sqlalchemy import update as sql_update
@@ -1337,8 +1334,6 @@ async def admin_clear_equivalent_integrity_hold(
     from app.core.ledger.reconciliation import PASSED
     from app.db.reconciliation_tables import debt_reconciliation_results
 
-    # 019 stage 5 (`T1907`, `FORK-2`): see `admin_update_equivalent`.
-    await MoneyBoundary.require_serializable(db, writer="admin.equivalents.integrity_hold.clear")
     eq = (
         await db.execute(select(EquivalentModel).where(EquivalentModel.code == code))
     ).scalar_one_or_none()
@@ -1452,19 +1447,18 @@ async def admin_delete_equivalent(
     normalized = str(code or "").strip().upper()
     validate_equivalent_code(normalized)
 
-    # 019 stage 5 (`T1907`, `FORK-2`): see `admin_update_equivalent`.
-    await MoneyBoundary.require_serializable(db, writer="admin.equivalents.delete")
+    # The row `FOR UPDATE` before the usage counts below (027 stage 2): it waits for every money writer holding it
+    # `FOR SHARE`, and the counts are read after them.
     eq = (
-        await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized))
+        await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized).with_for_update())
     ).scalar_one_or_none()
     if eq is None:
         raise NotFoundException(f"Equivalent {normalized} not found")
 
-    # T1524: the RESTRICT foreign key is the guarantee that no debt outlives its equivalent. Since 019
-    # stage 5 (`T1909`) no advisory lock narrows the window: the `DELETE` of the row waits for every money
-    # writer holding it `FOR SHARE`, and a writer that reads it afterwards meets 40001 and, on its retry,
-    # an equivalent that no longer exists. (A deletable equivalent is already inactive, so writers refuse
-    # it anyway.)
+    # T1524: the RESTRICT foreign key is the guarantee that no debt outlives its equivalent. No advisory lock
+    # narrows the window: the row lock above waits for every money writer holding it `FOR SHARE`, and a writer
+    # that reads it afterwards finds it gone and refuses (`refuse_inactive_equivalents`). (A deletable
+    # equivalent is already inactive, so writers refuse it anyway.)
 
     if eq.is_active:
         raise ConflictException("Deactivate equivalent before delete")
