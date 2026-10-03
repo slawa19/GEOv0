@@ -187,7 +187,6 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
         task1 = asyncio.create_task(_pay(id_by_pid[a_pid], tx_ids[0]))
         await asyncio.wait_for(both_parked.wait(), timeout=10.0)
         task2 = asyncio.create_task(_pay(id_by_pid[b_pid], tx_ids[1]))
-        # MECHANISM 1 (027 stage 2): the second payment queues on the parked first's line rows.
         async with TestingSessionLocal() as observer:
             for _ in range(250):
                 if await blocked_by(observer, parked_pids[0]):
@@ -203,7 +202,6 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
             timeout=30.0,
         )
 
-        # MECHANISM 2 (027 stage 2): the queue decided the race, not a retried conflict.
         assert retried_causes == [], retried_causes
 
         results = [result1, result2]

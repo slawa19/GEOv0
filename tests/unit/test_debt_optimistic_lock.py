@@ -99,7 +99,6 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
                 await s2.commit()
             await s2.rollback()
 
-    # 027 stage 2: at READ COMMITTED the ORM's version check refuses the stale writer, as the docstring foresaw.
     assert isinstance(refusal.value, StaleDataError), refusal.value
 
     # The invariant, read back on a third session: the committed update stands, the stale one is

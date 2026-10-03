@@ -6,6 +6,7 @@ from typing import List, Literal, Sequence
 from sqlalchemy import event, func, select, and_, or_, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.money_boundary import MoneyBoundary
 from app.utils.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -456,6 +457,10 @@ class TrustLineService:
         equivalent = result.scalar_one_or_none()
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
+
+        # 027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` first, so a creation waits for a money writer in
+        # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
+        await MoneyBoundary(self.session).lock_pair_lines([(equivalent.id, from_participant_id, to_participant.id)])
 
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»

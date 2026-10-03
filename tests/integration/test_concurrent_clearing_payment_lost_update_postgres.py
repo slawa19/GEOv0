@@ -24,6 +24,7 @@ from sqlalchemy import select, text
 
 from app.config import settings
 from tests.debt_setup import debt_fixture_setup
+from tests.p019_support import wait_until_blocked as _wait_until_blocked
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 # Every test here commits through several sessions and runs on a disposable clone of the migrated
@@ -31,18 +32,6 @@ from tests.p023_support import TEST_PLAN_ID, occurrence_of
 # `tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-
-
-async def _wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
-    """027 stage 2: `waiter_pid` queues on a lock `holder_pid` holds (row locks now; an advisory lock until then)."""
-    for _ in range(250):
-        blocked = await observer.scalar(text("SELECT CAST(:h AS int) = ANY(pg_blocking_pids(:w))"),
-                                        {"h": holder_pid, "w": waiter_pid})
-        await observer.rollback()
-        if blocked:
-            return True
-        await asyncio.sleep(0.02)
-    return False
 
 
 @pytest.mark.asyncio
@@ -234,12 +223,12 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             _park_inside_the_money_transaction,
         )
 
-        async def _observe_payment_shared_lock(boundary, equivalent_ids):  # the payment's line locks
+        async def _observe_payment_shared_lock(boundary, equivalent_ids, **kw):  # the payment's line locks
             nonlocal payment_owner_pid
             if boundary.session is payment_session:  # 027 stage 2: the clearing calls it too
                 payment_owner_pid = int(await boundary.session.scalar(text("SELECT pg_backend_pid()")))
                 payment_owner_attempted.set()
-            return await original_payment_shared(boundary, equivalent_ids)
+            return await original_payment_shared(boundary, equivalent_ids, **kw)
 
         monkeypatch.setattr(
             MoneyBoundary,

@@ -23,7 +23,6 @@ from app.config import settings
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
-from app.db.models.trustline import TrustLine
 from app.db.models.participant import Participant
 from app.db.models.equivalent import Equivalent
 # The deliberate chain and the SQLSTATE on it (`orig`/`__cause__`, never `__context__`; rule 2026-09-12). The
@@ -737,6 +736,7 @@ class PaymentService:
         # ONE money boundary for the service's lifetime (the line locks, the stop/hold guard, the delta check).
         # Since 019 stage 4 the payment itself executes here, through `Book` - no engine.
         self._boundary: MoneyBoundary = MoneyBoundary(session)
+        self._locked_lines: list | None = None  # the rows `_bind_payment` locked; `_segment` decides from them only
         self.router = PaymentRouter(session)
 
     @staticmethod
@@ -1010,8 +1010,10 @@ class PaymentService:
             return
         ids = (await self.session.execute(select(Equivalent.id).where(Equivalent.code.in_(codes)))).scalars().all()
         try:
-            await self._boundary.lock_lines_among(ids, participant_ids)
+            await self._boundary.lock_lines_among(ids, participant_ids, timeout_ms=MoneyBoundary.lock_budget_ms())
         except DBAPIError as exc:
+            if _payment_db_sqlstate(exc) == "55P03":  # the bounded wait (019's advisory budget, restored)
+                raise asyncio.TimeoutError("Payment staged line lock timed out") from exc
             raise _classify_payment_db_error(exc) from exc
 
     async def execute(
@@ -1735,7 +1737,7 @@ class PaymentService:
         }
         if len(participants) != len(pids):
             raise GeoException(f"Participants not found: {pids - set(participants)}")
-        await self._boundary.lock_pair_lines(
+        self._locked_lines = await self._boundary.lock_pair_lines(
             {(equivalent_id, participants[u], participants[v]) for path, _ in routes for u, v in zip(path, path[1:])}
         )
 
@@ -1807,13 +1809,13 @@ class PaymentService:
         (`pending_pair_capacity`). Not the router's nor `/balance`'s. Order: pair lines -> equivalent row
         `FOR SHARE` -> debts."""
 
-        tl = TrustLine
         pair = {sender_id, receiver_id}
-        rows = (await self.session.execute(select(  # + a frozen requested line: pending, no capacity
-            tl.from_participant_id, tl.limit, tl.policy, tl.close_requested_at, tl.id, tl.status).where(
-            tl.from_participant_id.in_(pair), tl.to_participant_id.in_(pair), tl.from_participant_id != tl.to_participant_id,
-            tl.equivalent_id == equivalent_id, or_(tl.status == "active", and_(
-                tl.status == "frozen", tl.close_requested_at.is_not(None)))))).all()
+        # ONLY the rows this payment locked (027 stage 2, §15 P1): a line created after the lock does not exist here.
+        locked = self._locked_lines
+        if locked is None:  # a direct call outside the binding phase locks the pair itself
+            locked = await self._boundary.lock_pair_lines([(equivalent_id, sender_id, receiver_id)])
+        rows = [row for row in locked if row.equivalent_id == equivalent_id and {row.from_participant_id, row.to_participant_id}
+                == pair and (row.status == "active" or (row.status == "frozen" and row.close_requested_at is not None))]
         lines = [row for row in rows if row.status == "active"]
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)

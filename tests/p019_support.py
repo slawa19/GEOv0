@@ -81,3 +81,17 @@ async def deadlock_after_the_wait(session, holding, second_lock) -> None:
                                         "ANY(pg_blocking_pids(a.pid))"), {"me": me}):
         await asyncio.sleep(0.02)
     await session.execute(second_lock)
+
+
+async def wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
+    import asyncio
+
+    from sqlalchemy import text
+
+    for _ in range(250):
+        blocked = await observer.scalar(text("SELECT CAST(:h AS int) = ANY(pg_blocking_pids(:w))"), {"h": holder_pid, "w": waiter_pid})
+        await observer.rollback()
+        if blocked:
+            return True
+        await asyncio.sleep(0.02)
+    return False

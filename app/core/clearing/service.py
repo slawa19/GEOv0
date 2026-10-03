@@ -15,7 +15,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.audit_log import IntegrityAuditLog
-from app.utils.exceptions import ConflictException, GeoException
+from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
 from app.core.money_boundary import IsolationNotReadCommitted, MoneyBoundary
@@ -178,6 +178,8 @@ class ClearingService:
     #: purpose: every replay resolver reads it, so no path of the
     #: boundary can drop the descriptor the way a forgotten keyword would.
     _occurrence: ClearingOccurrence | None = None
+    #: The cycle's lines this attempt locked; its consent is read from them only (027 stage 2, §15 P1).
+    _locked_lines: list | None = None
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -963,6 +965,11 @@ class ClearingService:
 
         from_ids = {p[0] for p in required_pairs}
         to_ids = {p[1] for p in required_pairs}
+        if self._locked_lines is not None:  # inside an attempt: ONLY the locked rows (027 stage 2, §15 P1)
+            tl_by_pair = {(r.from_participant_id, r.to_participant_id): r for r in self._locked_lines
+                          if r.equivalent_id == equivalent_id and r.status in _CLEARABLE_TRUSTLINE_STATUSES}
+            return all(pair in tl_by_pair and self._policy_flag(tl_by_pair[pair].policy, "auto_clearing", default=True)
+                       for pair in required_pairs)
 
         trustlines = (
             (
@@ -1633,6 +1640,7 @@ class ClearingService:
 
         debt_ids = list(occurrence.debt_ids)
         execution_tx_id = occurrence.occurrence_id
+        self._locked_lines = None
         try:
             replay_amount = await self._committed_execution_amount(
                 execution_tx_id, allowed_participant_pids=allowed_participant_pids
@@ -1669,8 +1677,12 @@ class ClearingService:
                     select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id).where(Debt.id.in_(debt_ids))
                 )
             ).all()
-            await MoneyBoundary(self.session).lock_pair_lines(edges)
+            self._locked_lines = await MoneyBoundary(self.session).lock_pair_lines(
+                edges, timeout_ms=MoneyBoundary.lock_budget_ms())
         except Exception as exc:
+            if "55P03" in self._postgres_error_codes(exc):  # the bounded wait (019's interlock budget, restored)
+                await self._rollback_skipped_execution()
+                raise TimeoutException("Clearing lock timed out") from exc
             return await self._end_attempt_on_error(
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
