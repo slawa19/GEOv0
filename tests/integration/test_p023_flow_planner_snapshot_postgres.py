@@ -2,8 +2,13 @@
 
 Spec decision 1 and Verification plan §2 ("балансы только по допустимому подграфу"):
 
-* ELIGIBILITY PARITY - consent is `ClearingService._policy_flag` exactly (the 020 whitespace stand: every
-  whitespace-wrapped "false" refused, "true"/"yes" admitted), statuses active/frozen only, `amount > 0`.
+* ELIGIBILITY PARITY - consent is `ClearingService._policy_flag(policy, "auto_clearing", default=True)`
+  exactly, over every encoding the JSON column can hold (the catalogue moved here from the 020 detector stand,
+  025 gap 4): default `true` when there is no policy, no key or a JSON null (`docs/ru/02-protocol-spec.md`
+  policy table, `docs/ru/09-decisions-and-defaults.md`); a boolean is itself; a number is non-zero; a string is
+  trimmed and lower-cased, {false,0,no,off} refuse, {true,1,yes,on} admit, anything else falls back to the
+  default; any other JSON value (array, object) is its truthiness. The expected outcome of each encoding is
+  WRITTEN DOWN from that rule, not computed by the parser the snapshot calls. Statuses active/frozen only.
 * BALANCES ON THE ELIGIBLE SUBGRAPH - a triangle and, attached to its vertices, excluded debts (closed line,
   refused consent, an endpoint outside the perimeter) that change every whole-equivalent balance. The plan
   clears exactly the triangle and names no excluded debt. Counter-check: were the excluded debts admitted,
@@ -17,33 +22,42 @@ from __future__ import annotations
 import pytest
 
 from app.core.clearing.flow_planner import PlanEdge, load_snapshot, plan_clearing, plan_for_equivalent
-from app.core.clearing.service import ClearingService
 from app.utils.exceptions import GeoException
-from tests.p020_support import Edge, debt_uuid, participant_uuid, ring, seed_graph
+from tests.p020_support import MISSING_KEY, NULL_POLICY, Edge, debt_uuid, participant_uuid, ring, seed_graph
 
 _SQL_TRIM = " \t\n\r\f\v"
 _PY_ONLY_WHITESPACE = [c for c in map(chr, range(0x110000)) if c.isspace() and c not in _SQL_TRIM]
 
 
-def _consents(value) -> bool:
-    return ClearingService._policy_flag({"auto_clearing": value}, "auto_clearing", default=True)
+# (stored `policy.auto_clearing`, admitted?) - the expectation is the documented rule read by hand (header).
+_CONSENT_CATALOGUE = [
+    (True, True), (False, False),
+    ("false", False), (" False ", False), ("0", False), ("no", False), ("OFF", False), ("off", False),
+    ("yes", True), ("on", True), ("1", True), (" true ", True), ("　yes", True),
+    ("maybe", True), ("", True),  # an unknown string, the empty string: the default
+    (0, False), (1, True), (0.0, False), (2.5, True),
+    (None, True),  # JSON null under the key: the default
+    ([], False), ([1], True), ({}, False), ({"a": 1}, True),
+    (MISSING_KEY, True), (NULL_POLICY, True),  # a policy without the key, no policy at all: the default
+]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scoped", [False, True])
 async def test_the_snapshot_admits_consent_exactly_as_production(db_session, scoped) -> None:
     edges, refused, admitted = [], set(), set()
-    values = [f"{c}false{c}" for c in _PY_ONLY_WHITESPACE] + [" true ", "　yes", False, "false", True, 0, 1, "off"]
-    for n, value in enumerate(values):
+    # Every whitespace-wrapped "false" is refused: Python's `strip` trims more than SQL's (the 020 stand).
+    catalogue = [(f"{c}false{c}", False) for c in _PY_ONLY_WHITESPACE] + _CONSENT_CATALOGUE
+    for n, (value, expected) in enumerate(catalogue):
         e = Edge(debt_uuid(0x2340, n), f"p023w{n:03d}a", f"p023w{n:03d}b", "5", consent=value)
         edges.append(e)
-        (admitted if _consents(value) else refused).add(e.debt_id)
+        (admitted if expected else refused).add(e.debt_id)
     for n, status in enumerate(("frozen", "closed")):
         e = Edge(debt_uuid(0x2341, n), f"p023s{n}a", f"p023s{n}b", "5", status=status)
         edges.append(e)
         (admitted if status == "frozen" else refused).add(e.debt_id)
     # Controls: the stand holds both classes in quantity.
-    assert len(refused) == len(_PY_ONLY_WHITESPACE) + 5 and len(admitted) == 5
+    assert len(refused) == len(_PY_ONLY_WHITESPACE) + 12 and len(admitted) == 16
     await seed_graph(db_session, "PQW", edges)
 
     perimeter = {p for e in edges for p in (e.debtor, e.creditor)} if scoped else None
