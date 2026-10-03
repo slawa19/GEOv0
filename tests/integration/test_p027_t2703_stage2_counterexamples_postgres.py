@@ -2,23 +2,21 @@
 
 Each stand is a real schedule (barriers in the writers' own code, no injected SQLSTATE) and runs in cells:
 
-* `serializable` - the code as it ships: the money writers' transactions SERIALIZABLE, guard on. MUST PASS.
-* `naive_rc` - the spec's "наивный RC": the writers' sessions READ COMMITTED and `require_serializable`
-  bypassed INSIDE THIS STAND ONLY; every other line of code untouched (the equivalent lock stays).
-  MUST BREAK the invariant: `xfail(raises=TargetMismatch, strict=True)`.
-* `naive_rc_unlocked` (clearing only) - naive RC with the equivalent lock switched off
-  (`tests/p019_locks_off.py`), because stage 2 removes that lock and the spec's naive RC keeps it.
-* `naive_rr` (opposite payments only) - REPEATABLE READ, which the spec forbids: it must stay broken.
+* `rc` - the code as it ships since `T2704` (027 stage 2): READ COMMITTED, the line locks, guard on. MUST
+  PASS. Until `T2704` this cell was `naive_rc` - the same sessions with the guard bypassed and the code of
+  019 (SERIALIZABLE guard, equivalent lock) - and failed every stand with `TargetMismatch` (Changelog
+  `T2703`); the `serializable` cell (the 019 code as it shipped) left with that code.
+* `naive_rr` (opposite payments only) - REPEATABLE READ with the guard bypassed, which the spec forbids: the
+  snapshot predates the lock wait, so even with the line locks it must stay broken
+  (`xfail(raises=TargetMismatch, strict=True)`). That is why the guard refuses it.
 
 THE EXPECTED FAILURE IS NARROW. Mechanism checks are plain `assert`s (a broken stand goes red, never
 xfail): the transaction level each writer actually ran at (`SHOW transaction_isolation`, read by the
 guard), and that the two writers overlapped - both met at the barrier, or one parked while the other
 committed. Only the final comparison raises `TargetMismatch` (`require_target`).
 
-FOR `T2704`. The cell is a parameter, not a code change: under the real protocol (RC + line `FOR UPDATE`)
-the `naive_rc*` cells pass, `strict` turns that into a failure, and `T2704` takes the marker off. A
-writer that waits on a line lock never reaches the barrier: the barrier then times out (2 s) and the
-overlap check accepts it (`barrier.timed_out`). `naive_rr` keeps its marker.
+THE POSITIVE CONTROL of the `rc` cell: writers of ONE pair never meet - the second waits on a line lock, the
+barrier times out (2 s) or the parked side finds the other still waiting - and no 40001 is counted.
 
 Not built, with the reason recorded in the spec (`T2703`, Changelog): close / hold / idempotency stands
 that do not break on naive RC (measured by probes on the same harness, not committed).
@@ -59,17 +57,15 @@ from tests.integration.test_p019_t1908_lock_removal_experiments_postgres import 
     count_conflicts,
 )
 from tests.integration.test_p019_trust_decay_respects_concurrent_debt_postgres import _decaying_run, _world
-from tests.p019_locks_off import switch_money_boundary_locks_off
 from tests.p019_support import TargetMismatch, require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-NAIVE = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="naive RC must break this invariant (027 T2703)")
-CELLS = [pytest.param("serializable"), pytest.param("naive_rc", marks=NAIVE)]
-LEVEL = {"serializable": "SERIALIZABLE", "naive_rc": "READ COMMITTED", "naive_rc_unlocked": "READ COMMITTED",
-         "naive_rr": "REPEATABLE READ"}
-PARK_S = 3.0
+NAIVE = pytest.mark.xfail(raises=TargetMismatch, strict=True, reason="REPEATABLE READ must break this invariant (027)")
+CELLS = [pytest.param("rc")]
+LEVEL = {"rc": "READ COMMITTED", "naive_rr": "REPEATABLE READ"}
+PARK_S = 1.5  # < PREPARE_TIMEOUT_SECONDS (3): at `rc` the other side waits on a line lock for the parked one
 
 
 @dataclass
@@ -91,16 +87,14 @@ async def rig(request, committed_database, monkeypatch):
     cell = request.param
     engine = create_async_engine(committed_database.url, pool_size=10, max_overflow=0, isolation_level=LEVEL[cell])
     levels: list = []
-    original = MoneyBoundary.require_serializable
+    original = MoneyBoundary.require_read_committed
 
     async def guard(session, *, writer: str) -> None:
         levels.append((writer, str(await session.scalar(text("SHOW transaction_isolation")))))
-        if cell == "serializable":
+        if cell == "rc":
             await original(session, writer=writer)
 
-    monkeypatch.setattr(MoneyBoundary, "require_serializable", staticmethod(guard))
-    if cell == "naive_rc_unlocked":
-        switch_money_boundary_locks_off(monkeypatch)
+    monkeypatch.setattr(MoneyBoundary, "require_read_committed", staticmethod(guard))
     try:
         yield Rig(cell, async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False, autoflush=False),
                   levels, count_conflicts(monkeypatch))
@@ -130,11 +124,10 @@ def _meet_before_commit(monkeypatch, barrier: _Barrier) -> None:
 
 
 def _overlapped(rig: Rig, barrier: _Barrier) -> None:
-    """Both writers met before either committed (and SSI had to intervene at SERIALIZABLE), or one was
-    held up (a row lock of the real protocol: the barrier timed out)."""
-    assert barrier.met.is_set() or barrier.timed_out, "the writers never overlapped: the stand is vacuous"
-    if rig.cell == "serializable" and barrier.met.is_set():
-        assert rig.conflicts.serialization_failures > 0, f"no 40001 counted: {rig.conflicts}"
+    """The first writer reached the barrier and timed out there: the other was held up on a line lock until the
+    first committed (it arrives only afterwards). No 40001 was counted - the same pair waits, it does not conflict."""
+    assert barrier.timed_out, "the writers met: no line lock held the second one up"
+    assert rig.conflicts.serialization_failures == 0, rig.conflicts
 
 
 async def _criterion_b(rig: Rig, equivalent_id) -> tuple:
@@ -265,8 +258,8 @@ async def test_delta_check_ignores_a_neighbour_commit_on_a_shared_participant(ri
     parked: list[bool] = []
     original = MoneyBoundary._snapshot_net_positions
 
-    async def park_after_before(self, *, equivalent_id, participant_ids):
-        result = await original(self, equivalent_id=equivalent_id, participant_ids=participant_ids)
+    async def park_after_before(self, *, equivalent_id, participant_ids, **kw):
+        result = await original(self, equivalent_id=equivalent_id, participant_ids=participant_ids, **kw)
         if b_id in participant_ids and not parked:
             parked.append(True)
             neighbour.append(asyncio.create_task(_pay(rig, c_id, a_pid, code, "10.00")))
@@ -291,13 +284,13 @@ async def test_delta_check_ignores_a_neighbour_commit_on_a_shared_participant(ri
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("rig", [pytest.param("serializable"), pytest.param("naive_rc"),
-                                 pytest.param("naive_rc_unlocked", marks=NAIVE)], indirect=True)
+@pytest.mark.parametrize("rig", CELLS, indirect=True)
 async def test_clearing_and_payment_on_a_shared_edge(rig: Rig, monkeypatch) -> None:
     """A pays B 50 while the cycle A->B 100, B->C 30, C->A 40 is cleared (30); the payment parks after its
     pre-state until the clearing is done or `PARK_S` passed. Serially: A->B 120, C->A 10, and criterion (b)
-    of the verifier finds nothing. `naive_rc` PASSES - the exclusive equivalent lock still serialises the
-    two (the spec's naive RC keeps it); `naive_rc_unlocked` is the counterexample stage 2 must answer."""
+    of the verifier finds nothing. Until `T2704` the counterexample was `naive_rc_unlocked` (naive RC with the
+    equivalent lock off): the prestate was read before the clearing's commit. At `rc` the clearing waits on the
+    payment's line lock of A-B."""
     seed = await _seed_interlock_case()
     a_id, b_id, c_id = seed["participant_ids"]
     clearing: list[asyncio.Task] = []
@@ -328,8 +321,7 @@ async def test_clearing_and_payment_on_a_shared_edge(rig: Rig, monkeypatch) -> N
     findings = await _criterion_b(rig, seed["equivalent_id"])
     rig.ran_at_the_cell_level()
     assert len(parked) == 2, parked
-    if rig.cell == "naive_rc_unlocked":
-        assert parked[1], "the clearing did not commit while the payment was parked: no race"
+    assert not parked[1], "the clearing committed while the payment held the A-B lines"
     assert getattr(paid, "status", None) == "COMMITTED" and cleared == Decimal("30.00000000"), (paid, cleared)
     serial = {(a_id, b_id): Decimal("120.00000000"), (c_id, a_id): Decimal("10.00000000")}
     require_target(debts == serial and not findings, f"debts {debts}, criterion (b) findings {findings}")
@@ -370,7 +362,7 @@ async def test_seed_never_commits_after_a_baseline_that_missed_it(rig: Rig) -> N
     taken = await asyncio.wait_for(baseline, timeout=60)
     debts = (await _ledger_invariants(rig.sessions, eq.id))["debts"]
     rig.ran_at_the_cell_level()
-    assert baseline_first or rig.cell != "naive_rc", "the baseline did not commit while the SEED was open"
+    assert not baseline_first, "the baseline committed while the SEED held the equivalent row"
     seed_committed = seed_error is None
     assert seed_committed == bool(debts), (seed_error, debts)
     require_target(not seed_committed or taken.edges_seen >= 1,
@@ -424,6 +416,5 @@ async def test_trust_decay_during_a_payment_never_floors_below_its_debt(rig: Rig
         debt = await s.scalar(select(Debt.amount).where(Debt.equivalent_id == eq.id))
     rig.ran_at_the_cell_level()
     assert len(parked) == 2 and getattr(paid, "status", None) == "COMMITTED", (parked, paid)
-    if rig.cell != "serializable":
-        assert getattr(decayed, "updated_count", 0) == 1, f"the decay did not lower the limit: {decayed!r}"
+    assert not parked[1] and getattr(decayed, "updated_count", None) == 0, (parked, decayed)  # waited, read 100
     require_target(Decimal(str(debt)) <= Decimal(str(limit)), f"debt {debt} above the decayed limit {limit}")

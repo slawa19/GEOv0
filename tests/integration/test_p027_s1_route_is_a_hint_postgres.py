@@ -31,7 +31,8 @@ from app.schemas.payment import PaymentCreateRequest
 
 @pytest_asyncio.fixture
 async def stand(committed_database, monkeypatch):
-    engine = create_async_engine(committed_database.url, pool_size=8, max_overflow=0, isolation_level="SERIALIZABLE")
+    engine = create_async_engine(committed_database.url, pool_size=8, max_overflow=0,
+                                 isolation_level=settings.DB_POSTGRES_ISOLATION_LEVEL)
     f = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
     monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
     st = {"f": f, "url": committed_database.url, "builds": [], "attempts": 0, "build_delay": 0.0, "fail_next": False}
@@ -189,7 +190,7 @@ async def test_cold_concurrent_payments_do_not_wait_on_their_own_pool(stand) -> 
     """§15 review of stage 1, #1: a `pay()` attempt holding a pooled connection while its route reader asks the same
     pool for another starves a small pool (attempts hold, the leader's reader waits). Pool 1 + 1, three payers."""
     engine = create_async_engine(stand["url"], pool_size=1, max_overflow=1, pool_timeout=2,
-                                 isolation_level="SERIALIZABLE")
+                                 isolation_level=settings.DB_POSTGRES_ISOLATION_LEVEL)
     small = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
     p, code = stand["people"], stand["eq"].code
     flows = [("S", "R"), ("M", "R"), ("S", "M")]
@@ -199,6 +200,53 @@ async def test_cold_concurrent_payments_do_not_wait_on_their_own_pool(stand) -> 
             require_signature=False) for a, b in flows), return_exceptions=True)
     finally:
         await engine.dispose()
-    failed = [o for o in outcomes if getattr(o, "status", None) != "COMMITTED"
-              and getattr(getattr(o, "code", None), "value", getattr(o, "code", None)) != "E008"]
-    assert not failed, outcomes  # a pool timeout surfaces as E010/E007; a real conflict (E008) is not this defect
+    # 027 `T2704` (b): a witness of progress - at least one COMMITTED and a graph build - and the only allowed
+    # failure is the retryable database conflict (`E008` with `details.retryable`), not any `E008`. A pool
+    # timeout surfaces as E010/E007.
+    committed = [o for o in outcomes if getattr(o, "status", None) == "COMMITTED"]
+    failed = [o for o in outcomes if o not in committed and (getattr(o, "details", None) or {}).get("retryable") is not True]
+    assert committed and stand["builds"] and not failed, (outcomes, stand["builds"])
+
+
+@pytest.mark.asyncio
+async def test_a_reroute_never_takes_a_graph_read_before_its_refusal(stand, monkeypatch) -> None:
+    """027 `T2704` (a): the cache offers the direct S->R; a leader's build READ before the direct line is exhausted
+    is still in flight when the next payment's bind refuses; the re-route must not take that graph (it would offer
+    S->R again and end E002) but build anew and find the detour S->M->R."""
+    st, original, held = stand, PaymentRouter._build_graph_impl, asyncio.Event()
+
+    async def read_then_hold(self, *a, **k):  # the leader: its read is done, it publishes only later
+        result = await original(self, *a, **k)
+        if not held.is_set():
+            held.set()
+            await asyncio.sleep(1.5)
+        return result
+
+    monkeypatch.setattr(PaymentRouter, "_build_graph_impl", read_then_hold)
+    lead = PaymentRouter(st["f"]())
+    leader = asyncio.create_task(lead.build_graph(st["eq"].code, refresh=True))
+    await held.wait()
+    exhaust = await PaymentService.pay(st["f"], st["people"]["S"].id, PaymentCreateRequest(
+        tx_id=str(uuid.uuid4()), to=st["people"]["R"].pid, equivalent=st["eq"].code, amount="100.00",
+        signature="__internal__"), require_signature=False)
+    paid = await _pay(st, _request(st))
+    await leader
+    await lead.session.close()
+    assert exhaust.status == "COMMITTED", exhaust
+    assert getattr(paid, "status", None) == "COMMITTED", paid
+    assert [st["people"][x].pid for x in "SMR"] in [r.path for r in paid.routes], paid.routes
+
+
+@pytest.mark.asyncio
+async def test_a_reroute_after_a_failed_leader_builds_anew_over_a_warm_cache(stand) -> None:
+    """027 `T2704` (a): the leader a re-route waits for fails; the warm cache predates the re-route - build anew."""
+    st = stand
+    await _warm(st)
+    st["builds"].clear()
+    st["build_delay"], st["fail_next"] = 0.2, True
+    routers = [PaymentRouter(st["f"]()) for _ in range(2)]
+    outcomes = await asyncio.gather(*(r.build_graph(st["eq"].code, refresh=True) for r in routers),
+                                    return_exceptions=True)
+    for r in routers:
+        await r.session.close()
+    assert isinstance(outcomes[0], RuntimeError) and outcomes[1] is None and len(st["builds"]) == 2, (outcomes, st)
