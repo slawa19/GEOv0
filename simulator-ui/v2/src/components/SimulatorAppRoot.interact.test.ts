@@ -1,5 +1,5 @@
 import { computed, createApp, h, nextTick, reactive, ref, type Component, type Ref } from 'vue'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import type {
   BottlenecksResponse,
@@ -79,15 +79,19 @@ const __GEO_TEST_SIM_STORAGE = {
   clearDevtoolsOpenRealSnapshot: vi.fn(),
 } as const
 
+// Vitest 4 widened the bare `vi.fn()` type to `Mock<Procedure | Constructable>`, which is not
+// callable; this alias is the Vitest 3 `ReturnType<typeof vi.fn>` (`Mock<Procedure>`).
+type TestFnMock = Mock<(...args: any[]) => any>
+
 type GeoTestGlobals = {
   __GEO_TEST_SIM_STORAGE?: typeof __GEO_TEST_SIM_STORAGE
-  __GEO_TEST_WM_OPEN?: ReturnType<typeof vi.fn>
-  __GEO_TEST_WM_HANDLE_ESC?: ReturnType<typeof vi.fn>
-  __GEO_TEST_WM_GET_TOPMOST_IN_GROUP?: ReturnType<typeof vi.fn>
-  __GEO_TEST_WM_SET_GEOMETRY?: ReturnType<typeof vi.fn>
-  __GEO_TEST_WM_RECLAMP_ALL?: ReturnType<typeof vi.fn>
-  __GEO_TEST_CANVAS_POINTER_DOWN?: ReturnType<typeof vi.fn>
-  __GEO_TEST_CANVAS_WHEEL?: ReturnType<typeof vi.fn>
+  __GEO_TEST_WM_OPEN?: TestFnMock
+  __GEO_TEST_WM_HANDLE_ESC?: TestFnMock
+  __GEO_TEST_WM_GET_TOPMOST_IN_GROUP?: TestFnMock
+  __GEO_TEST_WM_SET_GEOMETRY?: TestFnMock
+  __GEO_TEST_WM_RECLAMP_ALL?: TestFnMock
+  __GEO_TEST_CANVAS_POINTER_DOWN?: TestFnMock
+  __GEO_TEST_CANVAS_WHEEL?: TestFnMock
   __GEO_TEST_INTERACT_PHASE?: string
   __GEO_TEST_PHASE_REF?: Ref<string>
   __GEO_TEST_SELECTED_NODE?: TestSelectedNode
@@ -96,16 +100,16 @@ type GeoTestGlobals = {
   __GEO_TEST_UI_OPEN_OR_UPDATE_EDGE_DETAIL?: MockUseSimulatorAppOpts['uiOpenOrUpdateEdgeDetail']
   __GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD?: MockUseSimulatorAppOpts['uiOpenOrUpdateNodeCard']
   __GEO_TEST_NODE_CARD_OPEN?: boolean
-  __GEO_TEST_INTERACT_CANCEL?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_START_PAYMENT_FLOW?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_START_CLEARING_FLOW?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_SET_PAYMENT_TO_PID?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE?: ReturnType<typeof vi.fn>
-  __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE?: ReturnType<typeof vi.fn>
+  __GEO_TEST_INTERACT_CANCEL?: TestFnMock
+  __GEO_TEST_INTERACT_START_PAYMENT_FLOW?: TestFnMock
+  __GEO_TEST_INTERACT_START_PAYMENT_FLOW_WITH_FROM?: TestFnMock
+  __GEO_TEST_INTERACT_START_CLEARING_FLOW?: TestFnMock
+  __GEO_TEST_INTERACT_SET_PAYMENT_FROM_PID?: TestFnMock
+  __GEO_TEST_INTERACT_SET_PAYMENT_TO_PID?: TestFnMock
+  __GEO_TEST_INTERACT_SET_TRUSTLINE_FROM_PID?: TestFnMock
+  __GEO_TEST_INTERACT_SET_TRUSTLINE_TO_PID?: TestFnMock
+  __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE?: TestFnMock
+  __GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CREATE?: TestFnMock
   __GEO_TEST_INTERACT_SUCCESS_MESSAGE?: Ref<string | null>
   __GEO_TEST_INTERACT_HISTORY?: Array<Record<string, unknown>>
   __GEO_TEST_INTERACT_BUSY_REF?: Ref<boolean>
@@ -137,7 +141,7 @@ type GeoTestGlobals = {
   __GEO_TEST_ANALYTICS_METRICS_REASON_REF?: Ref<string>
   __GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF?: Ref<string>
   __GEO_TEST_ANALYTICS_IS_VISIBLE?: () => boolean
-  __GEO_TEST_FOCUS_ON_EDGE?: ReturnType<typeof vi.fn>
+  __GEO_TEST_FOCUS_ON_EDGE?: TestFnMock
 
   // Camera + highlight, wired to the real composables rather than to spies, so a test can ask
   // what the graph is showing instead of asking which functions ran (spec 007, §4.2 item 4).

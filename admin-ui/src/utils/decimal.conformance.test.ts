@@ -1,3 +1,5 @@
+/// <reference types="node" />
+// Reads repository files via node:fs; Vitest 2 typings pulled @types/node in implicitly, Vitest 4 does not.
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

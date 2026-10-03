@@ -8,7 +8,7 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
       await navigator.clipboard.writeText(value)
       return { ok: true }
     }
-  } catch (e: unknown) {
+  } catch {
     // Fall back to execCommand below.
   }
 
