@@ -15,7 +15,7 @@ pinned connection) with READ COMMITTED and row locks: "lock what you check, read
   `FOR UPDATE`, after the lines.
 * **The equivalent row** `FOR SHARE` (`refuse_inactive_equivalents`) after the lines and before the debts: the
   operator stop, the integrity hold and the equivalent `DELETE` update it, and the reconciliation baseline takes it
-  `FOR UPDATE`, so each waits for the writers in flight and keeps new ones out.
+  `FOR NO KEY UPDATE`, so each waits for the writers in flight and keeps new ones out.
 * **The isolation** of a writer's transaction is READ COMMITTED (`require_read_committed`): every statement after a
   lock wait reads what the lock holder committed. REPEATABLE READ and SERIALIZABLE take their snapshot BEFORE the
   wait, and a snapshot older than the lock reads a debt the holder has since changed.
