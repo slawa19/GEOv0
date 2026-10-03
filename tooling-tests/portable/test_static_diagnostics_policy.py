@@ -88,4 +88,9 @@ def test_the_binding_check_notices_each_way_around_it(tooling_ci_binding) -> Non
 
     assert tooling_ci_binding(workflow, runner.replace("'--tooling-partition', ", ""))
     assert tooling_ci_binding(workflow, runner.replace("if ($runTooling) {", "if ($false) {"))
+    demoted = runner.replace(
+        'Invoke-RequiredStep -Name "Tooling tests', 'Invoke-DiagnosticStep -Name "Tooling tests'
+    )
+    assert demoted != runner
+    assert tooling_ci_binding(workflow, demoted), "not noticed: tooling step made diagnostic"
     assert tooling_ci_binding(workflow, runner.replace("'-q',", "'-q', '--noconftest',", 1))

@@ -68,8 +68,6 @@ EXPECTED_CASES: dict[str, int] = {
 _PARTITIONS = tuple(EXPECTED_CASES)
 
 _DATABASE_VARIABLES = ("DATABASE_URL", "TEST_DATABASE_URL", "GEO_TEST_ALLOW_DB_RESET")
-for _name in _DATABASE_VARIABLES:
-    os.environ.pop(_name, None)
 
 _STATE = pytest.StashKey[dict[str, Any]]()
 
@@ -106,6 +104,10 @@ def _missing_powershell_hosts() -> list[str]:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # Here and not at import, so `tests/unit/test_tooling_tier_is_bound.py` can load this module for
+    # `tooling_ci_binding_violations` without stripping the backend tier's database environment.
+    for name in _DATABASE_VARIABLES:
+        os.environ.pop(name, None)
     value = config.getoption("--tooling-partition")
     if value is None:
         raise pytest.UsageError(
@@ -114,6 +116,16 @@ def pytest_configure(config: pytest.Config) -> None:
             "count is checked against. A one-file debug run is `--noconftest` and checks nothing."
         )
     requested = _PARTITIONS if value == "all" else (value,)
+    outside = sorted(
+        str(path.relative_to(_HERE))
+        for path in _HERE.rglob("test_*.py")
+        if path.relative_to(_HERE).parts[0] not in _PARTITIONS
+    )
+    if outside:
+        raise pytest.UsageError(
+            f"test modules outside portable/ and powershell/ belong to no partition and would run "
+            f"nowhere: {outside}. Move each into the partition whose CI step runs it."
+        )
     if "powershell" in requested:
         missing = _missing_powershell_hosts()
         if missing:
@@ -218,8 +230,9 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
     Each partition must be exactly one `verify_local.ps1 -ToolingOnly -ToolingPartition <name>` step
     of its job, and neither the job nor the step may carry `if:` or `continue-on-error`: the Black
     step's `continue-on-error` in the same job is a step attribute and must stay off this one. The
-    runner's tooling session must run under `$runTooling` and pass `--tooling-partition`, and must
-    not pass `--noconftest`, which would run the tests without the count.
+    runner's tooling session must run under `$runTooling` as an `Invoke-RequiredStep` (a diagnostic
+    step turns a failure into a warning and exit 0) and pass `--tooling-partition`, and must not
+    pass `--noconftest`, which would run the tests without the count.
 
     Form only: whether the steps really ran is in the job log (`gh run view <id> --log`).
     """
@@ -256,6 +269,8 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
     block = re.search(r"\n {8}if \(\$runTooling\) \{\r?\n(.*?)\n {8}\}\r?\n", runner, re.DOTALL)
     if "$runTooling = $ToolingOnly -or" not in runner or block is None or (
         "'--tooling-partition'" not in block.group(1)
+        or "Invoke-RequiredStep" not in block.group(1)
+        or "Invoke-DiagnosticStep" in block.group(1)
     ):
         violations.append("verify_local.ps1 does not run the counted session (--tooling-partition)")
     if "--noconftest" in runner:
