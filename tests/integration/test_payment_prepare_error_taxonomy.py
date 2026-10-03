@@ -689,7 +689,7 @@ async def test_direct_prepare_reraises_same_typed_error_after_durable_abort(
         details={"state": "PREPARED"},
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):
@@ -1010,7 +1010,7 @@ async def test_prepare_cancellation_preserves_cancel_and_durably_aborts(
         suffix="cancelled",
     )
 
-    async def build_graph(equivalent_code: str) -> None:
+    async def build_graph(equivalent_code: str, **kwargs) -> None:
         return None
 
     def find_flow_routes(from_pid: str, to_pid: str, payment_amount: Decimal, **kwargs):

@@ -206,7 +206,7 @@ class PaymentRouter:
             finally:
                 self.session = own
 
-    def _load_cached(self, equivalent_code: str, ttl: float) -> bool:
+    def _load_cached(self, equivalent_code: str, ttl: int) -> bool:
         cached = self._graph_cache.get(equivalent_code)
         if cached is None:
             return False

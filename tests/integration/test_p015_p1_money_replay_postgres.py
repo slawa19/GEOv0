@@ -65,6 +65,7 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.config import settings
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
@@ -308,6 +309,11 @@ def _competitor_after_snapshot(
         snapshot = await original(session, participants, equivalents)
         if not (only_first and commits):
             commits.append(1)
+            # 027 stage 1 routes outside the tick's transaction: pin the pre-competitor route, so the plan
+            # reaches the staged write (the conflict this stand exists for) rather than a routing refusal.
+            monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
+            async with session_factory() as warm:
+                await PaymentRouter(warm).build_graph(world.equivalent.code, use_shared_cache=True)
             async with session_factory() as other:
                 # A predicate read over the same region the tick read and is about to write.
                 await other.execute(

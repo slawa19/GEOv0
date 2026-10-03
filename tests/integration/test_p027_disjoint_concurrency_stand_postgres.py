@@ -610,7 +610,8 @@ async def _run_payers(f, world, probe: _Probe, n: int, *, clearing=None) -> dict
         "lat_p50_ms": _pct(lat_ok, 0.5), "lat_p95_ms": _pct(lat_ok, 0.95), "lat_max_ms": _pct(lat_ok, 1.0),
         "shared_lock_wait_p50_ms": _pct(payer_waits, 0.5), "shared_lock_wait_p95_ms": _pct(payer_waits, 0.95),
         "shared_lock_wait_max_ms": _pct(payer_waits, 1.0), "shared_lock_wait_n": len(payer_waits),
-        "payer_classified_causes": {c: k for (w, c), k in probe.causes.items() if (w or "").startswith("payer")},
+        "payer_classified_causes": dict(sum((Counter({c: k}) for (w, c), k in probe.causes.items()
+                                             if (w or "").startswith("payer")), Counter())),
         "E007": sum(v for k, v in outcomes.items() if "E007" in k),
         "reconcile": await _reconcile(f, world, before, pairwise=not clearing),
     }

@@ -16,7 +16,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select, text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -101,16 +101,12 @@ async def _rows(st, tx_id: str) -> list[str]:
 @pytest.mark.parametrize("case", ["over_found", "over_not_found", "under_found", "never_twice"])
 async def test_one_reroute_per_request_on_a_fresh_graph(stand, monkeypatch, case) -> None:
     st = stand
-    if case == "under_found":
-        await _set_limit(st, "R", "S", "1")
-        await _set_limit(st, "M", "S", "1")
-    await _warm(st)  # the cache now holds the capacities as they are
-    if case in ("over_found", "over_not_found"):
-        await _set_limit(st, "R", "S", "1")
-    if case == "over_not_found":
-        await _set_limit(st, "M", "S", "1")
-    if case == "under_found":
-        await _set_limit(st, "R", "S", "100")
+    for creditor, debtor, limit in {"under_found": [("R", "S", "1"), ("M", "S", "1")]}.get(case, []):
+        await _set_limit(st, creditor, debtor, limit)
+    await _warm(st)  # the cache now holds the capacities as they are; then they change behind it
+    for creditor, debtor, limit in {"over_found": [("R", "S", "1")], "over_not_found": [("R", "S", "1"), ("M", "S", "1")],
+                                    "under_found": [("R", "S", "100")]}.get(case, []):
+        await _set_limit(st, creditor, debtor, limit)
     if case == "never_twice":
         original = PaymentService._segment
 
@@ -148,13 +144,10 @@ async def test_one_reroute_per_request_on_a_fresh_graph(stand, monkeypatch, case
 async def test_concurrent_cold_builds_of_one_equivalent_are_one_build(stand) -> None:
     st = stand
     st["build_delay"] = 0.2
-    sessions = [st["f"]() for _ in range(5)]
-    try:
-        routers = [PaymentRouter(s) for s in sessions]
-        await asyncio.gather(*(r.build_graph(st["eq"].code, use_shared_cache=True) for r in routers))
-    finally:
-        for s in sessions:
-            await s.close()
+    routers = [PaymentRouter(st["f"]()) for _ in range(5)]
+    await asyncio.gather(*(r.build_graph(st["eq"].code, use_shared_cache=True) for r in routers))
+    for r in routers:
+        await r.session.close()
     assert len(st["builds"]) == 1, st["builds"]
     assert all(r.graph == routers[0].graph and r.graph for r in routers), [r.graph for r in routers]
 
@@ -167,6 +160,4 @@ async def test_the_routing_budget_bounds_the_search_not_the_graph_build(stand, m
     request = _request(st)
     result = await _pay(st, request)
     assert result.status == "COMMITTED" and len(st["builds"]) == 1, (result, st["builds"])
-    async with st["f"]() as s:
-        assert await s.scalar(select(func.count()).select_from(Transaction).where(
-            Transaction.tx_id == request.tx_id)) == 1
+    assert await _rows(st, request.tx_id) == ["COMMITTED"]
