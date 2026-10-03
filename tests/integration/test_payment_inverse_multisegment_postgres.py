@@ -113,8 +113,6 @@ async def _seed_inverse_multisegment_world() -> dict:
 
 
 async def _blocked_on(observer, holder_pid: int) -> bool:
-    """A backend of this server waits on a lock `holder_pid` holds (027 stage 2: the line rows)."""
-
     count = await observer.scalar(
         text("SELECT count(*) FROM pg_stat_activity WHERE CAST(:h AS int) = ANY(pg_blocking_pids(pid))"),
         {"h": holder_pid},
@@ -208,7 +206,6 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
 
             waiter_task = asyncio.create_task(_pay(waiter_session, waiter_direction))
             release_waiter.set()
-            # Premise 1 (027 stage 2): the waiter queues on the holder's line locks - named by PostgreSQL.
             for _ in range(400):
                 if await _blocked_on(observer_session, prestate_reads[holder_direction][0]):
                     break
@@ -229,7 +226,6 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Premise 2 (027 stage 2): the line lock, not SSI, decided the race - no conflict, one pre-state read each.
     assert conflicts == [], conflicts
     assert len(prestate_reads[holder_direction]) == len(prestate_reads[waiter_direction]) == 1, prestate_reads
 

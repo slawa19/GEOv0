@@ -324,9 +324,10 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
         line_locks: list[int] = []  # 027 stage 2: the cycle's line locks, not the exclusive equivalent lock
         original_lines = MoneyBoundary.lock_pair_lines
 
-        async def _count_lines(self, pairs):
-            await original_lines(self, pairs)
+        async def _count_lines(self, pairs, **kw):
+            rows = await original_lines(self, pairs, **kw)
             line_locks.append(1)
+            return rows
 
         monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", _count_lines)
         skipped_amount = await ClearingService(
@@ -334,7 +335,6 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
         ).execute_occurrence(occurrence)
         monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", original_lines)
         assert skipped_amount is None
-        # The skip happened UNDER the cycle's line locks, and left no advisory lock behind.
         assert line_locks == [1]
         async with TestingSessionLocal() as observer:
             assert await advisory_locks_held(observer) == 0

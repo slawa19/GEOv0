@@ -281,7 +281,6 @@ async def test_the_tick_commits_its_parent_session_before_clearing(
     original_maybe_run_clearing = coordinator.maybe_run_clearing
 
     async def _parent_holds_the_owner_lock_then_clears(**kwargs):
-        # 027 stage 2: the parent holds what a money writer now holds - the equivalent's lines, `FOR UPDATE`.
         await kwargs["session"].execute(_select(TrustLine.id).where(TrustLine.equivalent_id == equivalent_id).with_for_update())
         parent_held_the_owner_lock.append(1)
         return await original_maybe_run_clearing(**kwargs)

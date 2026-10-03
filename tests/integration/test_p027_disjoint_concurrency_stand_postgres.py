@@ -154,13 +154,13 @@ async def stand(committed_database, monkeypatch):
     monkeypatch.setattr(PaymentService, "_retry_or_none", classified_retry)
     original_lines = MoneyBoundary.lock_pair_lines
 
-    async def timed_lines(self, pairs):
+    async def timed_lines(self, pairs, **kw):
         """027 `T2704`: the wait at the row-lock statement (R-027-4); the "prelock" hold point is just before it."""
         pairs = list(pairs)
         await hold_here(self.session, "prelock")
         t = time.perf_counter()
         try:
-            return await original_lines(self, pairs)
+            return await original_lines(self, pairs, **kw)
         finally:
             probe.lock_wait[_who.get() or "?"].append(time.perf_counter() - t)
 
@@ -480,7 +480,6 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
                 "seq_scanned": Counter(), "latency_ms": [], "failures": [], "snap_ms": [], "shared_pages": Counter(),
                 "reps_with_classified_40001": 0, "classified_causes": Counter(), "reconciled_committed": 0,
                 "reconcile_mismatches": [], "builds": [], "ttl_seen": Counter(), "reps_waited": 0})
-            # 027 stage 2: one of the two waited >= 2 ms at its line-lock statement (the same pair queues there).
             row["reps_waited"] += max((w for k, v in probe.lock_wait.items() if k.startswith("p") for w in v), default=0) >= 0.002
             recon = await _reconcile(f, world, before)
             row["reconciled_committed"] += recon["committed"]
@@ -732,7 +731,6 @@ async def test_q3_clearing_against_payments(stand, monkeypatch) -> None:
         report["cells"][name] = row
     waits = {k: (r["row_lock_wait_p95_ms"], r["row_lock_wait_n"]) for k, r in report["cells"].items()
              if "clearing_" in k and "DIAG" not in k and "CMP" not in k}
-    # Timed at the line-lock statement (stage 2). Under 20 observations "не измерено", never a pass.
     verdict = {k: "не измерено" if n < 20 or p95 is None else "pass" if p95 <= 50 else "fail"
                for k, (p95, n) in waits.items()}
     report["acceptance"] = {"R-027-4": {"p95_ms_and_n": waits, "verdict": verdict,

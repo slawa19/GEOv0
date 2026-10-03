@@ -200,7 +200,6 @@ async def test_cold_concurrent_payments_do_not_wait_on_their_own_pool(stand) -> 
             require_signature=False) for a, b in flows), return_exceptions=True)
     finally:
         await engine.dispose()
-    # 027 `T2704` (b): progress (a COMMITTED, a graph build); the only allowed failure is a retryable E008.
     committed = [o for o in outcomes if getattr(o, "status", None) == "COMMITTED"]
     failed = [o for o in outcomes if o not in committed and (getattr(o, "details", None) or {}).get("retryable") is not True]
     assert committed and stand["builds"] and not failed, (outcomes, stand["builds"])

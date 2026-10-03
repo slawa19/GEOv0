@@ -11,9 +11,6 @@ xfail): the transaction level each writer actually ran at (`SHOW transaction_iso
 guard), and that the two writers overlapped - both met at the barrier, or one parked while the other
 committed. Only the final comparison raises `TargetMismatch` (`require_target`).
 
-THE POSITIVE CONTROL of the `rc` cell: writers of ONE pair never meet - the second waits on a line lock, the
-barrier times out (2 s) or the parked side finds the other still waiting - and no 40001 is counted.
-
 Not built, with the reason recorded in the spec (`T2703`, Changelog): close / hold / idempotency stands
 that do not break on naive RC (measured by probes on the same harness, not committed).
 """

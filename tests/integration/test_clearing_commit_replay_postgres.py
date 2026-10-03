@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p019_support import wait_until_blocked as _wait_until_blocked
 from tests.p019_support import require_target
 from tests.p023_support import LATER_PLAN_ID, TEST_PLAN_ID, occurrence_of
 
@@ -21,18 +22,6 @@ from tests.p023_support import LATER_PLAN_ID, TEST_PLAN_ID, occurrence_of
 # `tests/tier_on_a_clone.py`). The SERIALIZABLE engines are built over `committed_database.engine`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-
-
-async def _wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
-    """027 stage 2: `waiter_pid` queues on a lock `holder_pid` holds (row locks now; an advisory lock until then)."""
-    for _ in range(250):
-        blocked = await observer.scalar(text("SELECT CAST(:h AS int) = ANY(pg_blocking_pids(:w))"),
-                                        {"h": holder_pid, "w": waiter_pid})
-        await observer.rollback()
-        if blocked:
-            return True
-        await asyncio.sleep(0.02)
-    return False
 
 
 @pytest.mark.asyncio
@@ -144,7 +133,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
         acquisition_pids: dict[int, int] = {}
         original_acquire = MoneyBoundary.lock_pair_lines  # 027 stage 2: the cycle's line locks
 
-        async def _coordinate_owner_acquisition(engine, equivalent_id):
+        async def _coordinate_owner_acquisition(engine, equivalent_id, **kw):
             nonlocal acquisition_count
             acquisition_count += 1
             call_number = acquisition_count
@@ -153,7 +142,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             )
             if call_number == 2:
                 second_owner_attempted.set()
-            result = await original_acquire(engine, equivalent_id)
+            result = await original_acquire(engine, equivalent_id, **kw)
             if call_number == 1:
                 first_owner_acquired.set()
                 await release_first_owner.wait()

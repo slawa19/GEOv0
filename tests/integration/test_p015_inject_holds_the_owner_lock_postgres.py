@@ -64,7 +64,6 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# 027 stage 2: (lines of the equivalent [and pair] row-locked by this transaction, all its non-closed lines).
 _HOLDS_LINES_SQL = """
     SELECT count(*) FILTER (WHERE xmax = pg_current_xact_id()::xid), count(*) FROM trust_lines
     WHERE equivalent_id = :eq AND status <> 'closed'"""

@@ -84,8 +84,6 @@ class _Stand:
 
 
 def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
-    """A real deadlock per money-phase attempt of the subject (see the docstring, 027 stage 2)."""
-
     original_commit = PaymentService._apply_payment  # the money phase (019 stage 4)
     original_guard = MoneyBoundary.refuse_inactive_equivalents
     pair = (world.ids[world.alice["pid"]], world.ids[world.bob["pid"]])

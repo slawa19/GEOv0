@@ -1,5 +1,7 @@
 """A REAL `40001` inside the payment's audit write reaches the owner of the retries as `40001`.
 
+027 `T2706` (§15 P2): restored on a real deadlock (`40P01`, `deadlock_after_the_wait`); the text is history.
+
 T401 (programme 004; AGENTS §9 "проглоченный 40001 отравляет транзакцию"): a serialization failure raised
 while the payment writes its integrity audit must not be swallowed - PostgreSQL has aborted the
 transaction, and a swallowed `40001` shows up only later as a misleading `25P02` that no retry predicate
@@ -38,7 +40,9 @@ from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
+from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
+from tests.p019_support import deadlock_after_the_wait
 from tests.integration.test_p015_p1_money_replay_postgres import (
     _OPENING,
     _debts,
@@ -54,7 +58,7 @@ _COMPETITOR_TIMEOUT_S = 10.0
 @pytest_asyncio.fixture
 async def factory(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=5, max_overflow=0, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
     )
     try:
         yield async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
@@ -69,28 +73,24 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
     world = await _seed(factory)
     sender_id = world.sender.id
     audit_calls = 0
-    competitor_timed_out = False
 
-    async def _competitor_updates_the_contended_row() -> None:
+    async def _competitor_updates_the_contended_row(holding) -> None:
         async with factory() as competitor:
+            await competitor.execute(select(Participant.id).where(Participant.id == sender_id).with_for_update(key_share=True))
+            await deadlock_after_the_wait(competitor, holding, select(TrustLine.id).where(
+                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
             await competitor.execute(
                 update(Participant).where(Participant.id == sender_id).values(display_name="competitor")
             )
             await competitor.commit()
 
     async def _conflict(session) -> None:
-        nonlocal competitor_timed_out
-        await session.execute(select(Participant.display_name).where(Participant.id == sender_id))
-        competitor_task = asyncio.create_task(_competitor_updates_the_contended_row())
-        done, _pending = await asyncio.wait({competitor_task}, timeout=_COMPETITOR_TIMEOUT_S)
-        if not done:
-            competitor_timed_out = True
-            competitor_task.cancel()
-            await asyncio.wait({competitor_task}, timeout=5.0)
-            raise AssertionError("the competitor waited on a lock the payment holds")
-        competitor_task.result()
+        holding = asyncio.Event()
+        competitors.append(asyncio.create_task(_competitor_updates_the_contended_row(holding)))
+        await asyncio.wait_for(holding.wait(), _COMPETITOR_TIMEOUT_S)
         await session.execute(update(Participant).where(Participant.id == sender_id).values(display_name="payment"))
 
+    competitors: list[asyncio.Task] = []
     original_audit = PaymentService._write_integrity_audit
 
     async def audit_with_a_conflict(self, tx_id, **kwargs):
@@ -129,13 +129,10 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
     finally:
         _forget_the_route_cache(world)
 
-    assert not competitor_timed_out, (
-        f"the competitor could not update its row within {_COMPETITOR_TIMEOUT_S} s: it is queued behind "
-        "a lock the payment holds, so no serialization failure was produced and this test measured nothing"
-    )
     # PREMISE: the retry was a genuine 40001 met in the payment's money phase, not a pass with no conflict.
     retries = [r.getMessage() for r in caplog.records if "event=payment.attempt_retry" in r.getMessage()]
-    assert any("pgcode=40001" in message for message in retries), retries
+    await asyncio.gather(*competitors)
+    assert any("pgcode=40P01" in message for message in retries), retries
     assert audit_calls == 2, audit_calls
     assert any("event=payment.audit_log_failed" in r.getMessage() for r in caplog.records), "countercheck not reached"
 

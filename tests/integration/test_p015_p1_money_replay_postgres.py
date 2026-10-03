@@ -331,7 +331,6 @@ def _competitor_after_snapshot(
             monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
             async with session_factory() as warm:
                 await PaymentRouter(warm).build_graph(world.equivalent.code, use_shared_cache=True)
-            # 027 stage 2: a real DEADLOCK (40P01) replaces the SSI 40001 (`p019_support.deadlock_after_the_wait`).
             holding = asyncio.Event()
             competitors.append(asyncio.create_task(_compete(holding)))
             await holding.wait()

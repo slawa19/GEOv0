@@ -1,5 +1,7 @@
 """The payment retry after a REAL `40001` whose attempt lost its connection: the re-run is on a FRESH session.
 
+027 `T2706` (§15 P2): restored on the real conflict READ COMMITTED has - a deadlock (`40P01`); the text is history.
+
 017 stage 3, slice S2a, pinned the engine's unit-of-work retry: `PaymentEngine._run_uow_with_retry`
 rolled the SAME session back before re-running, and when that rollback failed it re-raised instead of
 re-running - a second attempt on a session nobody rolled back would build on whatever the first one left
@@ -26,6 +28,7 @@ MUTATION that must redden the first test: make `pay()` reuse the failed attempt'
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 
@@ -38,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.transaction import Transaction
 from app.schemas.payment import PaymentCreateRequest
+from tests.p019_support import deadlock_after_the_wait
 from tests.integration.test_p015_p1_money_replay_postgres import (
     _OPENING,
     _debts,
@@ -49,11 +53,11 @@ from tests.integration.test_p015_p1_money_replay_postgres import (
 @pytest_asyncio.fixture
 async def factory(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=5, max_overflow=0, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
     )
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE p017_retry_probe (id INTEGER PRIMARY KEY, v TEXT)"))
-        await conn.execute(text("INSERT INTO p017_retry_probe (id, v) VALUES (1, 'seed')"))
+        await conn.execute(text("INSERT INTO p017_retry_probe (id, v) VALUES (1, 'seed'), (2, 'seed')"))
     try:
         yield async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
     finally:
@@ -61,14 +65,17 @@ async def factory(committed_database):
 
 
 async def _provoke_a_serialization_failure(factory) -> DBAPIError:
-    """A REAL `40001`: the reader's snapshot predates a committed update of the row it then updates."""
-    async with factory() as reader, factory() as writer:
-        await reader.execute(text("SELECT v FROM p017_retry_probe WHERE id = 1"))
-        await writer.execute(text("UPDATE p017_retry_probe SET v = 'writer' WHERE id = 1"))
-        await writer.commit()
+    row = "SELECT v FROM p017_retry_probe WHERE id = {} FOR UPDATE"
+    async with factory() as victim, factory() as other:
+        await victim.execute(text(row.format(1)))
+        await other.execute(text(row.format(2)))
+        holding = asyncio.Event()
+        competitor = asyncio.create_task(deadlock_after_the_wait(other, holding, text(row.format(1))))
+        await holding.wait()
         with pytest.raises(DBAPIError) as conflict:
-            await reader.execute(text("UPDATE p017_retry_probe SET v = 'reader' WHERE id = 1"))
-        await reader.rollback()
+            await victim.execute(text(row.format(2)))
+        await victim.rollback()
+        await competitor
     return conflict.value
 
 
@@ -96,7 +103,7 @@ async def test_a_real_40001_is_retried_on_a_fresh_session_and_the_payment_lands_
 ) -> None:
     conflict = await _provoke_a_serialization_failure(factory)
     # PREMISE, on the error itself: a genuine serialization failure.
-    assert _payment_db_sqlstate(conflict) == "40001", conflict
+    assert _payment_db_sqlstate(conflict) == "40P01", conflict
 
     world = await _seed(factory)
     original = PaymentService._bind_payment

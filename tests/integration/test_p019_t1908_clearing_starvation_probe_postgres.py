@@ -180,13 +180,13 @@ def _instrument(monkeypatch, *, gap_s: float, inverted: bool = False):
         self.session.info["p027_inverted"] = inverted
         return await original_attempt(self, cycle, **kwargs)
 
-    async def lines(self, pairs):  # the positive control: the clearing's debt rows first, then its lines
+    async def lines(self, pairs, **kw):  # the positive control: the clearing's debt rows first, then its lines
         pairs = list(pairs)
         if self.session.info.get("p027_inverted"):
             counts["inverted"] += 1
             await self.session.execute(select(Debt.id).where(tuple_(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id)
                                                              .in_(pairs)).order_by(Debt.id).with_for_update())
-        return await original_lines(self, pairs)
+        return await original_lines(self, pairs, **kw)
 
     monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", lines)
 

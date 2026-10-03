@@ -117,7 +117,6 @@ async def test_a_repayment_committed_after_the_close_snapshot_refuses_the_stale_
             await closer.rollback()
             outcome = str(exc)
     stale = (outcome, await _status(factory, line_id), [op for op, _ in await _audit(factory, line_key)])
-    # 027 stage 2: the debt is read after the line lock - it is 0, so the line closes at once (until then 40001).
     require_target(stale == ("closed", "closed", ["TRUST_LINE_CLOSE"]), f"close after the repayment -> {stale}")
 
 
@@ -130,10 +129,10 @@ async def test_a_close_committed_inside_a_clearing_is_completed_by_its_retry(
     assert await _pay(factory, p["A"], p["C"], code, "50") and await _pay(factory, p["C"], p["B"], code, "50")
     lock, injected = MoneyBoundary.lock_pair_lines, []
 
-    async def close_then_lock(self, pairs):  # 027 stage 2: the request commits just before the clearing's lines
+    async def close_then_lock(self, pairs, **kw):  # 027 stage 2: the request commits just before the clearing's lines
         if not injected:
             injected.append(await _close_inside(factory, line_id, p["A"]["id"]))
-        return await lock(self, pairs)
+        return await lock(self, pairs, **kw)
 
     monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", close_then_lock)
     result = await run_clearing_pass(factory, code)
@@ -168,10 +167,10 @@ async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_r
             await release.wait()
         return await debt_amount(self, *args)
 
-    async def segment_of(self, pairs):  # 027 stage 2: P1 asks for the lines P2 holds
+    async def segment_of(self, pairs, **kw):  # 027 stage 2: P1 asks for the lines P2 holds
         if who.get(None) == "p1":
             release.set()
-        return await segment(self, pairs)
+        return await segment(self, pairs, **kw)
 
     monkeypatch.setattr(PaymentService, "_debt_amount", debt_amount_of)
     monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", segment_of)

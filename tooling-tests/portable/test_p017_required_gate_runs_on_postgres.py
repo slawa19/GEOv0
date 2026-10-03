@@ -74,7 +74,6 @@ _CONCURRENCY_SELECTORS = (
     "::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres",
     "tests/integration/test_payment_idempotency_postgres.py"
     "::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres",
-    # 027 stage 2 (`T2704`): the line locks of one pair against each writer kind (was 019's lock modes).
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
     "::test_opposite_payments_on_a_fresh_pair_keep_one_direction",
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
