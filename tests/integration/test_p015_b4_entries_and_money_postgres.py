@@ -23,8 +23,9 @@ anywhere. Everything here is something SQLite cannot answer at all:
   connection and an engine-bound session; none of that exists on SQLite.
 * `C17-P` and design v2 §10.1 - the equivalent-deletion race, with the owner lock that is a no-op off
   PostgreSQL (`app/core/payments/engine.py:152`).
-* `C18-P` - the `40001` variant of the concurrent version bump. The sibling runs the `StaleDataError`
-  variant on one shared connection, because two independent SQLite writers cannot coexist.
+* `C18-P` - the `40001` variant of the concurrent version bump. Its own test was removed by 025
+  `T2504.2` as a proven duplicate: `C8` below makes the same race and asserts the same `amount_before`
+  and `delta` of the retry's entry.
 * `C19-P` - the same forged-row inventory against the PORTABLE CHECK constraints, plus the
   shape-valid lie that must be accepted and is therefore a step-6 verifier item.
 
@@ -2238,112 +2239,6 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
     assert survivor is not None, "the equivalent is gone despite the refusal"
     assert len(await stored_entries(serializable_factory, identity) or []) == 2, (
         "the journal entries did not survive the refused delete"
-    )
-
-
-# ==============================================================================================
-# C18-P - the 40001 variant of the concurrent version bump
-# ==============================================================================================
-
-
-@pytest.mark.asyncio
-async def test_c18_p_entries_come_from_the_retry_and_carry_the_concurrent_value(
-    serializable_factory,
-):
-    """C18-P, API-SHAPED. The same property as the sibling's, through the failure mode SQLite lacks.
-
-    WHAT IS DIFFERENT FROM THE SQLITE SIBLING. There, a concurrent version bump surfaces as
-    `StaleDataError` - SQLAlchemy noticing that its `UPDATE ... WHERE version = n` matched no row -
-    and both sessions share one connection, because since T1525 two independent SQLite writers cannot
-    coexist. Here they are two real backends under SERIALIZABLE, and the loser does not get a
-    rowcount of zero: PostgreSQL refuses its write outright with a `40001` before the optimistic lock
-    is ever consulted. The journal's obligation is identical in both worlds and the paths into it are
-    not, which is why design v2 §9 lists `C18` on both tiers.
-
-    THE OBLIGATION. The attempt that was refused wrote no row, so it must contribute no entry; and
-    the retry's entry must carry the CONCURRENT value as `amount_before`, not the value this session
-    had loaded before losing the race. A journal that captured `amount_before` when the attribute was
-    first loaded would record a continuity that never existed, and step 6 would reconstruct the edge
-    from a number no database ever held.
-
-    THE `40001` IS GENUINE. Two transactions read the same row, one commits, the other writes. The
-    SQLSTATE actually received is asserted, so a stand that stopped conflicting fails as a stand.
-
-    RED TODAY BECAUSE: `debt_journal_entries` does not exist; the non-vacuity assertion placed FIRST
-    says so.
-    MUTATION once step 4 exists: capture `amount_before` in `before_flush` from the attribute's
-    originally loaded value instead of re-reading after the retry's `expire_all()`, or write entries
-    in `before_flush` rather than `after_flush` so the refused attempt leaves one behind.
-    """
-    seeded = await _seed(serializable_factory)
-    world = seeded.world
-    identity = _identity("40001-version-bump")
-    sqlstates: list[str | None] = []
-    starting_edge = _debt_row(world, Decimal("10.00000000"))
-    async with serializable_factory() as setup:
-        async with debt_fixture_setup(setup, label="starting-edge"):
-            setup.add(starting_edge)
-        await setup.commit()
-
-    mine = select(Debt).where(Debt.equivalent_id == world.equivalent.id)
-
-    async with serializable_factory() as loser, serializable_factory() as winner:
-        losing = (await loser.execute(mine)).scalar_one()
-        competing = (await winner.execute(mine)).scalar_one()
-
-        # The competitor bumps the row through the ORM, so `version` really moves - and it
-        # declares itself, because the journal asks every movement of money to name the
-        # operation that made it, a competitor's included.
-        async with debt_fixture_setup(winner, label="the-competitor"):
-            competing.amount = Decimal("31.00000000")
-        await winner.commit()
-
-        try:
-            async with _open(loser, world, "40001-version-bump", identity=identity):
-                losing.amount = Decimal("44.00000000")
-                await loser.flush()
-            await loser.commit()
-        except DBAPIError as exc:
-            sqlstates.append(getattr(exc.orig, "sqlstate", None))
-        await loser.rollback()
-
-    async with serializable_factory() as retry:
-        debt = (await retry.execute(mine)).scalar_one()
-        async with _open(retry, world, "40001-version-bump", identity=identity):
-            debt.amount = Decimal("44.00000000")
-            await retry.flush()
-        await retry.commit()
-
-    entries = await stored_entries(serializable_factory, identity)
-    envelopes = await stored_operations(serializable_factory, identity)
-    after = await stored_debts(serializable_factory, world)
-
-    # NON-VACUITY, FIRST.
-    assert entries is not None, missing_journal_tables(entries, ENTRIES_TABLE)
-
-    # NON-VACUITY: the race produced a genuine serialization failure, exactly once.
-    assert sqlstates == ["40001"], (
-        f"stand: the concurrent version bump produced SQLSTATE(s) {sqlstates} instead of exactly "
-        f"one 40001; without it this test measures nothing about a losing attempt"
-    )
-    assert after == {("debtor", "creditor", "eq"): Decimal("44.00000000")}, (
-        f"stand: the retry did not win the edge: {after}"
-    )
-
-    # VERDICT.
-    assert len(entries) == 1 and entries[0]["effect"] == "U", (
-        f"the losing attempt left a trace in the journal: {entries}. Only the flush that reached "
-        f"the database may produce an entry."
-    )
-    assert _atom_column(entries, "amount_before") == [3100000000], (
-        f"the retry's entry records `amount_before` as the value this session had loaded before "
-        f"losing the race, not the value the database actually held: {entries}"
-    )
-    assert _atom_column(entries, "delta") == [1300000000], (
-        f"the delta was computed against a state that never existed: {entries}"
-    )
-    assert envelopes is not None and len(envelopes) == 1, (
-        f"the refused attempt and the retry left {envelopes} instead of one envelope"
     )
 
 
