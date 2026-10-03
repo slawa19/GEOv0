@@ -306,16 +306,16 @@ async def test_narrowing_does_not_poison_the_shared_graph_cache(db_session, monk
     PaymentRouter.invalidate_cache()
 
     warm = PaymentRouter(db_session)
-    await warm.build_graph(_EQ)
+    await warm.build_graph(_EQ, use_shared_cache=True)
     assert _EQ in PaymentRouter._graph_cache
 
     scoped = PaymentRouter(db_session)
-    await scoped.build_graph(_EQ)
+    await scoped.build_graph(_EQ, use_shared_cache=True)
     PaymentService._confine_router_to_perimeter(scoped, {"a1", "a2"})
     assert "b1" not in scoped.graph
 
     fresh = PaymentRouter(db_session)
-    await fresh.build_graph(_EQ)
+    await fresh.build_graph(_EQ, use_shared_cache=True)
     assert "b1" in fresh.graph, (
         "a scoped call poisoned the shared cache: the next unscoped caller lost a "
         "participant that has nothing to do with that run"

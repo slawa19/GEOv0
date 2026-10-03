@@ -24,7 +24,6 @@ from app.utils.exceptions import ConflictException, GeoException, TimeoutExcepti
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
 from app.core.money_boundary import IsolationNotSerializable, MoneyBoundary
-from app.core.payments.router import PaymentRouter
 from app.core.invariants import InvariantChecker
 from app.core.ledger.book import Book, ClearingReduction, operation_for
 from app.db.journal_tables import CLEARING_INTENT_ENCODING_VERSION
@@ -2339,13 +2338,8 @@ class ClearingService:
                     raise commit_error
                 clear_amount = reconciled_amount
 
-            # Debts changed: invalidate any TTL routing graph cache.
-            try:
-                eq_code = str(equivalent.code if equivalent else "")
-                if eq_code:
-                    PaymentRouter.invalidate_cache(eq_code)
-            except Exception:
-                pass
+            # 027 stage 1: a money commit leaves the route cache in place (it ages out by its TTL; a payment's final
+            # check re-reads every pair) - only topology edits drop it.
 
             logger.info("event=clearing.committed tx_id=%s", tx_id_str)
             try:

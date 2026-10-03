@@ -265,7 +265,7 @@ async def test_r024_11_checkpoint_cost_and_ssi_conflicts(factory, monkeypatch) -
                 PaymentRouter.invalidate_cache(world["code"])
                 if ttl:
                     async with factory() as warm:
-                        await PaymentRouter(warm).build_graph(world["code"])
+                        await PaymentRouter(warm).build_graph(world["code"], use_shared_cache=True)
                         await warm.rollback()
                 probe.reset()
                 outcomes = await _pair(factory, world, probe, flows)

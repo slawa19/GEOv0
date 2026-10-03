@@ -344,7 +344,8 @@ async def _pay(factory, world, sender: str, receiver: str, amount: str = "1.00")
 async def _nets(factory, world) -> Counter:
     """(a, b) -> what a owes b net, from the debts table of the world's equivalent."""
     pid = {p.id: p.pid for p in world["people"].values()}
-    async with factory() as s:
+    async with factory() as s:  # READ COMMITTED: a SERIALIZABLE full read here exhausts the predicate-lock table
+        await s.connection(execution_options={"isolation_level": "READ COMMITTED"})
         rows = (await s.execute(text("SELECT debtor_id, creditor_id, amount FROM debts WHERE equivalent_id = :e"),
                                 {"e": world["eq_id"]})).all()
         await s.rollback()
@@ -380,7 +381,7 @@ async def _reconcile(factory, world, before: Counter, *, pairwise: bool = True) 
 async def _warm(factory, world) -> None:
     PaymentRouter.invalidate_cache(world["code"])
     async with factory() as s:
-        await PaymentRouter(s).build_graph(world["code"])
+        await PaymentRouter(s).build_graph(world["code"], use_shared_cache=True)
         await s.rollback()
 
 

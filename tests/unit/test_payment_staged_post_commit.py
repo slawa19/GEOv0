@@ -66,7 +66,9 @@ async def _seed_direct_route(db_session, suffix: str):
 
 
 @pytest.mark.asyncio
-async def test_staged_payment_rollback_has_no_rows_or_effects(db_session):
+async def test_staged_payment_rollback_has_no_rows_or_effects(db_session, monkeypatch):
+    # 027 stage 1: a staged payment reads the route cache when its TTL is on; off, the sentinel below is untouched.
+    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0)
     suffix = uuid.uuid4().hex[:8]
     sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)
     tx_id = f"staged-rollback-{suffix}"
@@ -116,7 +118,8 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
         pid=receiver.pid,
         events=["payment.received"],
     )
-    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 60)
+    # 027 stage 1: TTL off, so the staged payment routes afresh and the entry below only witnesses the cache.
+    monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0)
     metric_recorder = _MetricRecorder()
     monkeypatch.setattr(
         "app.utils.metrics.PAYMENT_EVENTS_TOTAL",
@@ -161,8 +164,9 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
         await asyncio.sleep(0)
 
         assert subscription.queue.qsize() == 1
-        assert equivalent.code not in PaymentRouter._graph_cache
-        assert invalidations == [equivalent.code]
+        # 027 stage 1: a money commit leaves the route cache in place - only topology edits drop it.
+        assert PaymentRouter._graph_cache[equivalent.code] is stale_cache_entry
+        assert invalidations == []
         assert [
             record for record in metric_recorder.records if record.get("result") == "success"
         ] == [
@@ -188,7 +192,7 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
         assert retry.post_commit_effects is None
         await asyncio.sleep(0)
         assert subscription.queue.qsize() == 1
-        assert invalidations == [equivalent.code]
+        assert invalidations == []
     finally:
         PaymentRouter.invalidate_cache(equivalent.code)
         await event_bus.unsubscribe(subscription)

@@ -1,16 +1,11 @@
 """027 stage 1 (`T2701`): the route is a hint built outside the money transaction; ONE re-route per request.
 
-Real commits on a mode-B clone; the route cache is made stale by writing `trust_lines` behind the router's back
-(an ORM UPDATE, which invalidates nothing), so the cached graph over- or under-states a capacity for real:
-
-* over-states, a fresh graph finds another route -> COMMITTED over it, two attempts, one fresh build;
-* over-states, a fresh graph finds nothing -> `E002`, the refusal recorded `ABORTED` exactly once;
-* under-states (the cached search says "no route") -> one fresh build finds it -> COMMITTED, nothing recorded;
-* the core refuses every bind -> exactly one re-route, then `E002` (never a second one).
-
-Plus: every route build of `pay()` runs in a `READ COMMITTED READ ONLY` transaction of its own, a money commit
-leaves the cache in place, a replay answers without routing, concurrent cold builds of one equivalent are one
-build (single-flight), and the 500 ms budget bounds the path search, not the graph build.
+Real commits on a mode-B clone. The route cache is made stale by an ORM UPDATE of `trust_lines` (no invalidation),
+so the cached graph over- or under-states a capacity for real: over-states and a fresh graph finds another route or
+nothing (`E002`, `ABORTED` once); under-states ("no route" from the cache) and the fresh graph finds it; the core
+refuses every bind and there is exactly one re-route. Plus: route builds run `READ COMMITTED READ ONLY`, a money
+commit keeps the cache, a replay answers without routing, cold builds are single-flight, the 500 ms budget bounds
+the search and not the build.
 """
 
 from __future__ import annotations
@@ -135,8 +130,8 @@ async def test_one_reroute_per_request_on_a_fresh_graph(stand, monkeypatch, case
     assert set(st["builds"]) == {("read committed", "on")}, st["builds"]
     if case in ("over_found", "under_found"):
         assert getattr(result, "status", None) == "COMMITTED", (case, result)
-        expected_path = ["S", "M", "R"] if case == "over_found" else ["S", "R"]
-        assert [r.path for r in result.routes] == [[st["people"][x].pid for x in expected_path]], result.routes
+        paths = [r.path for r in result.routes]  # over_found: the fresh graph sends the remainder over M
+        assert [st["people"][x].pid for x in ("SMR" if case == "over_found" else "SR")] in paths, result.routes
         assert await _rows(st, request.tx_id) == ["COMMITTED"]
         assert PaymentRouter._graph_cache.get(st["eq"].code) is not None, "a money commit dropped the route cache"
         st["builds"].clear()
@@ -144,7 +139,8 @@ async def test_one_reroute_per_request_on_a_fresh_graph(stand, monkeypatch, case
         replay = await _pay(st, _request(st, request.tx_id))
         assert replay.status == "COMMITTED" and st["builds"] == [], ("a replay must answer without routing", st)
     else:
-        assert getattr(result, "status", None) == "ABORTED" and result.error.code == "E002", (case, result)
+        code = getattr(result, "code", None)
+        assert getattr(code, "value", code) == "E002", (case, result)  # raised after the refusal is recorded
         assert await _rows(st, request.tx_id) == ["ABORTED"]
 
 
