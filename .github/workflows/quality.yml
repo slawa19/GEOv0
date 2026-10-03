@@ -72,7 +72,7 @@ jobs:
       # on PostgreSQL, and then the default tier on SQLite with no database environment at all.
       # Stage 2 moved the default tier to PostgreSQL and 2c removed the marker, so the three sessions
       # became one. Nothing is selected by file: the matrix's three tests are collected by the tier
-      # like every other test, and `tests/unit/test_p017_required_gate_runs_on_postgres.py` names
+      # like every other test, and `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py` names
       # them one by one and fails if the session could stop collecting any of them. The environment
       # is on the step, not the job, so the migration preflight above keeps its own.
       - name: Run the backend tier on PostgreSQL and the single Alembic head check
@@ -121,11 +121,25 @@ jobs:
       # Both files, as the undivided job installed them. Measured 2026-09-21, requirements.txt alone
       # was not enough: the generator then died on aiosqlite (requirements-dev.txt). Answered since:
       # the generator opens no database (017 stage 1, pinned by
-      # tests/unit/test_p017_s1_demo_fixture_generator_needs_no_database.py), and aiosqlite left
+      # tooling-tests/portable/test_p017_s1_demo_fixture_generator_needs_no_database.py), and aiosqlite left
       # requirements-dev.txt in 017 stage 3 (slice S7).
       - name: Install backend dependencies for the fixture generator
         shell: pwsh
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      # THE POWERSHELL PARTITION OF THE TOOLING TIER (025 T2502.2, 2026-10-03). The launcher checks
+      # run once per PowerShell host they find, and this runner has both pwsh and Windows PowerShell;
+      # they need no database, so they left the backend tier for the job that has the hosts. The
+      # session counts its cases against tooling-tests/conftest.py. Blocking: no if, no
+      # continue-on-error (tooling-tests/conftest.py, tooling_ci_binding_violations).
+      - name: Run the tooling tier, PowerShell partition
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-tooling-powershell
+          -ToolingOnly
+          -ToolingPartition powershell
 
       - name: Install Admin UI dependencies
         shell: pwsh
@@ -165,6 +179,19 @@ jobs:
 
       - name: Ruff diagnostics
         run: python -m ruff check app migrations --no-cache
+
+      # THE PORTABLE PARTITION OF THE TOOLING TIER (025 T2502.2, 2026-10-03): the CI-form, document,
+      # recipe and generator checks that need no database, moved out of the backend tier. It is a
+      # BLOCKING step - the continue-on-error below belongs to the Black step alone and must never
+      # be copied here (tooling-tests/conftest.py, tooling_ci_binding_violations).
+      - name: Run the tooling tier, portable partition
+        shell: pwsh
+        run: >-
+          ./scripts/verify_local.ps1
+          -Python ((Get-Command python).Source)
+          -TaskSlug ci-tooling-portable
+          -ToolingOnly
+          -ToolingPartition portable
 
       - name: Black diagnostics
         continue-on-error: true
@@ -237,7 +264,7 @@ jobs:
   # above on 2026-09-21, and on 2026-09-23 (017 stage 2c) they and the default tier became ONE
   # session of the whole tier on PostgreSQL, with the same migration preflight through the
   # production entrypoint. Nothing of it was dropped; see
-  # `tests/unit/test_p017_required_gate_runs_on_postgres.py`, which names the concurrency matrix's
+  # `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`, which names the concurrency matrix's
   # three tests and fails if the tier goes back to a schedule-only job.
   container-smoke:
     name: Production-like container and schema smoke (scheduled/manual)

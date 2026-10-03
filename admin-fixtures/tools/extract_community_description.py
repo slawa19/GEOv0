@@ -21,7 +21,7 @@ Run:
   ./.venv/Scripts/python.exe admin-fixtures/tools/extract_community_description.py
 
 The script is idempotent: re-running it on an unchanged tree rewrites the same
-bytes. ``tests/unit/test_p017_t1712_community_descriptions.py`` asserts that the
+bytes. ``tooling-tests/portable/test_p017_t1712_community_descriptions.py`` asserts that the
 committed descriptions still equal what the generators produce, so a drift in
 either direction is a red test and not a silent divergence.
 """

@@ -12,7 +12,7 @@ not in `_ACTIVE_DOCS` (the EN/PL trees are frozen translations, `docs/README.md`
 and the runner share one fence; an unterminated fence flips what is read after it. Dropped with the
 former parser (025 `T2502.3`): the venv create/install/tool ORDER and the createdb name <-> URL name
 match (a mismatch cannot reset a foreign database: the URL must be `geov0_test_*`). The shape of the
-`required-backend` job is owned by `tests/unit/test_p017_required_gate_runs_on_postgres.py`.
+`required-backend` job is owned by `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`.
 Every rule below has a planted-fragment counter-check, so a rule that stops matching goes red.
 """
 

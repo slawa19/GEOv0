@@ -176,7 +176,7 @@ def test_entrypoint_preserves_custom_command_after_migrations(tmp_path: Path) ->
     # entrypoint runs the migrations and nothing before them. What this test is for is unchanged: the
     # migrations run BEFORE the image's own command, and the command survives with its arguments
     # intact. That the preflight still happens is held by
-    # `tests/unit/test_p017_t1701_the_alembic_version_bootstrap_has_one_owner.py` and measured by the
+    # `tooling-tests/portable/test_p017_t1701_the_alembic_version_bootstrap_has_one_owner.py` and measured by the
     # provisioning tests, which build a database from empty through this same entry.
     assert trace.read_text(encoding="utf-8").splitlines() == [
         "alembic:-c migrations/alembic.ini upgrade head",

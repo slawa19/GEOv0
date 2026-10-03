@@ -7,7 +7,10 @@ param(
     [string[]]$BackendSelector = @(),
     [switch]$IncludeExpensive,
     [switch]$BackendOnly,
-    [switch]$UiOnly
+    [switch]$UiOnly,
+    [switch]$ToolingOnly,
+    [ValidateSet('portable', 'powershell', 'all')]
+    [string]$ToolingPartition = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +37,31 @@ if ($UiOnly) {
         throw "-UiOnly runs no backend step, so $($ignoredBackendArguments -join ', ') would be accepted and ignored. Drop the switch, or drop -UiOnly and let the backend half run."
     }
 }
+
+# `-ToolingOnly` IS THE TOOLING TIER, ADDED 2026-10-03 (programme 025, T2502.2). The tests of this
+# repository's own tools - CI form, document guards, seed recipes, generators, the PowerShell
+# launchers - need no database and live under `tooling-tests/`, outside the backend tier's
+# discovery (`pytest.ini` collects `tests` only). `-ToolingPartition` picks `portable` (plain
+# Python; CI's `static-diagnostics` job), `powershell` (the launchers; CI's Windows `required-ui`
+# job) or `all`. The session counts what it selected against `tooling-tests/conftest.py` and
+# refuses a drift either way. A run with no switch takes every partition after the backend tier;
+# `-BackendOnly` and `-UiOnly` take none, because CI runs the partitions as their own steps.
+if ($ToolingOnly) {
+    $ignoredToolingArguments = @()
+    if ($BackendOnly) { $ignoredToolingArguments += '-BackendOnly' }
+    if ($UiOnly) { $ignoredToolingArguments += '-UiOnly' }
+    if ($BackendSelector.Count -gt 0) { $ignoredToolingArguments += '-BackendSelector' }
+    if ($IncludeExpensive) { $ignoredToolingArguments += '-IncludeExpensive' }
+    if ($ignoredToolingArguments.Count -gt 0) {
+        throw "-ToolingOnly runs only the tooling tier, so $($ignoredToolingArguments -join ', ') would be accepted and ignored. Drop -ToolingOnly or drop the switch."
+    }
+}
+elseif ($PSBoundParameters.ContainsKey('ToolingPartition')) {
+    throw '-ToolingPartition selects a partition for -ToolingOnly. Without it a full run takes every partition, and -BackendOnly or -UiOnly take none.'
+}
+$runBackend = (-not $UiOnly) -and (-not $ToolingOnly)
+$runUi = (-not $BackendOnly) -and (-not $ToolingOnly)
+$runTooling = $ToolingOnly -or ((-not $BackendOnly) -and (-not $UiOnly))
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
@@ -103,7 +131,7 @@ $pythonExe = $null
 if ((-not $UiOnly) -or $StaticDiagnostics) {
     $pythonExe = Resolve-PythonExecutable
 }
-if (-not $BackendOnly) {
+if ($runUi) {
     Assert-CommandAvailable -Name 'npm'
 }
 
@@ -141,7 +169,7 @@ $previousTestArtifactRoot = $env:GEO_TEST_ARTIFACT_ROOT
 New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
 
 try {
-    if (-not $UiOnly) {
+    if ($runBackend) {
         if (-not $env:TEST_DATABASE_URL) {
             $env:TEST_DATABASE_URL = $derivedTestDb
             $env:GEO_TEST_ALLOW_DB_RESET = '1'
@@ -157,7 +185,7 @@ try {
 
     Push-Location $repoRoot
     try {
-        if (-not $UiOnly) {
+        if ($runBackend) {
             if ($BackendSelector.Count -gt 0) {
                 Invoke-RequiredStep -Name 'Backend selector safety guard' -Command {
                     & $pythonExe scripts/validate_pytest_selectors.py --repo-root $repoRoot -- @BackendSelector
@@ -201,7 +229,37 @@ try {
                 & $pythonExe scripts/check_alembic_heads.py
             }
         }
-        if (-not $BackendOnly) {
+        if ($runTooling) {
+            Invoke-RequiredStep -Name "Tooling tests (pytest, partition $ToolingPartition)" -Command {
+                # The session itself refuses a count that differs from `tooling-tests/conftest.py`,
+                # any deselection, skip or missing PowerShell host; nothing here filters it.
+                # pytest creates `--basetemp` but not its parent: on a fresh slug the session died with
+                # FileNotFoundError in every tmp_path test (measured 2026-10-03, first run per slug).
+                $toolingRoot = Join-Path $taskRoot 'tooling'
+                New-Item -ItemType Directory -Path $toolingRoot -Force | Out-Null
+                $toolingArgs = @(
+                    '-m', 'pytest',
+                    '--basetemp', (Join-Path $toolingRoot 'pytest'),
+                    '-o', "cache_dir=$(Join-Path $toolingRoot 'cache')",
+                    '-q',
+                    '--tooling-partition', $ToolingPartition,
+                    '--'
+                )
+                if ($ToolingPartition -eq 'all') {
+                    $toolingArgs += 'tooling-tests'
+                }
+                else {
+                    $toolingArgs += "tooling-tests/$ToolingPartition"
+                }
+                # The session's arguments are these and nothing else: an inherited PYTEST_ADDOPTS
+                # (`--collect-only`, `--version`) could end it without running a case (§15, 2026-10-03).
+                $previousAddopts = $env:PYTEST_ADDOPTS
+                $env:PYTEST_ADDOPTS = $null
+                try { & $pythonExe @toolingArgs }
+                finally { $env:PYTEST_ADDOPTS = $previousAddopts }
+            }
+        }
+        if ($runUi) {
             Invoke-RequiredStep -Name 'Admin UI lint' -Command {
                 & npm --prefix admin-ui run lint
             }
@@ -249,6 +307,9 @@ finally {
 
 if ($BackendOnly) {
     Write-Host "`nRequired backend validation passed." -ForegroundColor Green
+}
+elseif ($ToolingOnly) {
+    Write-Host "`nRequired tooling validation passed (partition $ToolingPartition). Neither the backend tier nor the UI ran here." -ForegroundColor Green
 }
 elseif ($UiOnly) {
     Write-Host "`nRequired UI validation passed. The backend half did not run here." -ForegroundColor Green

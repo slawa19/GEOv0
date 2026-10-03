@@ -407,6 +407,9 @@ npm --prefix simulator-ui/v2 ci
 
 # Required repository gates
 .\scripts\verify_local.ps1
+
+# Only the tooling tier (no database): portable, powershell or all partitions
+.\scripts\verify_local.ps1 -TaskSlug <slug> -ToolingOnly -ToolingPartition all
 ```
 
 The verifier gives pytest a task-specific PostgreSQL database and basetemp by default:
@@ -424,7 +427,9 @@ The launchers' reset action is restricted to their own `geov0_dev_<slug>`
 PostgreSQL database and fails closed for every other name.
 
 GitHub Actions runs the same verifier with Python 3.11 and Node 22.12; its required
-backend job runs the whole tier on a `postgres:16` service on every pull request.
+backend job runs the whole tier on a `postgres:16` service on every pull request;
+the database-free tooling tier (`tooling-tests/`) runs as blocking steps of
+`static-diagnostics` (portable partition) and `required-ui` (PowerShell partition).
 Production container/schema smoke, simulator super-smoke, Admin E2E,
 and Windows Simulator visual E2E jobs run only on the weekly schedule or manual dispatch; see
 `.github/workflows/quality.yml`. The presence of the workflow is not evidence of a

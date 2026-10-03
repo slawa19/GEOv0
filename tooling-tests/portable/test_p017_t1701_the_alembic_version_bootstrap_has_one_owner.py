@@ -46,7 +46,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 _OWNER = _ROOT / "migrations" / "env.py"
 
 #: Trees that are searched for a second copy.
-_SCANNED_DIRECTORIES = ("app", "docker", "migrations", "scripts", "tests", ".github")
+#: `tooling-tests` joined 2026-10-03 (025 T2502.2): test code that left `tests/` is still test code.
+_SCANNED_DIRECTORIES = (
+    "app", "docker", "migrations", "scripts", "tests", "tooling-tests", ".github",
+)
 
 _SCANNED_SUFFIXES = (".py", ".sh", ".ps1", ".sql", ".yml", ".yaml")
 

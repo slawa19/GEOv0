@@ -44,7 +44,7 @@ function Resolve-Python {
 try {
     # The generator needs no application settings and no database: it loads only the
     # stdlib-only visualisation rules (see its _load_viz_rules). So no ENV or DATABASE_URL
-    # is set here; tests/unit/test_p017_s1_demo_fixture_generator_needs_no_database.py
+    # is set here; tooling-tests/portable/test_p017_s1_demo_fixture_generator_needs_no_database.py
     # holds that line.
     $python = Resolve-Python
 

@@ -142,6 +142,7 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 | `-TaskSlug <slug>` | Изолирует basetemp, pytest cache и artifact root под `.local-run/test-runs/<slug>/` и даёт имя тестовой базы: при незаданном `TEST_DATABASE_URL` раннер выводит `postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_test_<slug>` и **только для этого выведенного имени** ставит `GEO_TEST_ALLOW_DB_RESET=1`; переданный извне URL по-прежнему требует опт-ина от того, кто его передал (017, стадия 2c, 2026-09-23). Тир сам создаёт базу, если её нет. Обязателен при параллельной работе. **Двойное подчёркивание в слаге запрещено** (2026-09-22, внешнее ревью `T1701`): провизионирование Postgres строит имена шаблона и клона как `<база тира>__<суффикс>`, и пока `__` не был зарезервирован, задача со слагом `a` дропала базу задачи `a__b` — воспроизведено на живом сервере. Страж отказывает на шаге проверки БД, до старта pytest |
 | `-BackendOnly` | Только backend-тесты и проверка единственного Alembic head; UI-шаги пропускаются. **Head-check переехал сюда из UI-половины 2026-09-21** (017, `T1701`): он про backend, а разделение обязательного гейта на два job'а оставило бы его в UI-половине и потеряло |
 | `-UiOnly` | Только UI-шаги; backend-тесты не запускаются. Взаимно исключающ с `-BackendOnly` и с любым backend-параметром — сочетание отказывает, а не молчит. **Python всё равно нужен в окружении:** production build Simulator UI v2 имеет `prebuild`-шаг `sync:demo-fixtures:strict`, который зовёт генератор фикстур, импортирующий `app.core.simulator` (измерено 2026-09-21 первым прогоном разделённого гейта). Раннер Python для себя не разрешает — генератор берёт его из PATH |
+| `-ToolingOnly`, `-ToolingPartition portable\|powershell\|all` | Только тир инструментов `tooling-tests/` — тесты инструментов без базы (025, `T2502.2`, 2026-10-03). Сессия сама сверяет число выбранных элементов с `tooling-tests/conftest.py` и отказывает при дрейфе, deselect, skip и отсутствии PowerShell. Без переключателей раннер берёт все разделы; `-BackendOnly`/`-UiOnly` — ни одного |
 | `-BackendSelector <paths>` | Позиционные pytest-пути; проходят через `scripts/validate_pytest_selectors.py` |
 | `-IncludeExpensive` | Marker-выражение снимается целиком (slow включается). Дефолт — `not slow` |
 | `-StaticDiagnostics` | Локально выводит Ruff и Black как non-blocking диагностику; в CI Ruff блокирует отдельно |
@@ -160,13 +161,13 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 | Job | Триггеры | Блокирует |
 |---|---|---|
 | `required-backend` (одна сессия всего тира `verify_local.ps1 -BackendOnly` на сервисе `postgres:16`, ubuntu) | PR, push в main, dispatch, schedule | да |
-| `required-ui` (`verify_local.ps1 -UiOnly`, windows) | те же | да |
+| `required-ui` (`verify_local.ps1 -UiOnly` и шаг `-ToolingOnly -ToolingPartition powershell`, windows) | те же | да |
 | `ui-smoke` (Chromium smoke обоих UI) | PR, push в main, dispatch, schedule | да |
-| `static-diagnostics` (Ruff, Black) | те же | Ruff — **да**; Black — **нет** (`continue-on-error`) |
+| `static-diagnostics` (Ruff, тир инструментов `-ToolingPartition portable`, Black) | те же | Ruff и тир инструментов — **да**; Black — **нет** (`continue-on-error`) |
 | `simulator-super-smoke`, `admin-e2e`, `simulator-visual-e2e` | только schedule / workflow_dispatch | — |
 | `container-smoke` | только schedule / workflow_dispatch | — |
 
-Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tests/unit/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` сервиса Postgres не имеет (причина — `specs/BACKLOG.md`) и после снятия SQLite-тира без него не проходит. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
+Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` сервиса Postgres не имеет (причина — `specs/BACKLOG.md`) и после снятия SQLite-тира без него не проходит. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
 
 - не заявляйте «CI green» или «все gates green» — называйте конкретный job, SHA и exit code;
 - не превращайте текущие Black findings в блокер несвязанной задачи (см. храповик, §6);
@@ -197,7 +198,7 @@ npm --prefix simulator-ui/v2 run build
 .\scripts\verify_local.ps1 -TaskSlug premerge_payment_slice
 ```
 
-Покрывает backend-tier на PostgreSQL, единственность Alembic head, а также lint/test/build обоих UI. **Исключает `slow`.** Команда не является утверждением, что baseline уже зелёный: каждый известный baseline failure фиксируйте дословно и отделяйте от регрессий текущего slice.
+Покрывает backend-tier на PostgreSQL, единственность Alembic head, тир инструментов (оба раздела), а также lint/test/build обоих UI. **Исключает `slow`.** Команда не является утверждением, что baseline уже зелёный: каждый известный baseline failure фиксируйте дословно и отделяйте от регрессий текущего slice.
 
 ### Postgres gate
 
