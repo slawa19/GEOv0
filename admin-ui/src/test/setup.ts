@@ -30,6 +30,8 @@ afterEach(() => {
   pendingAnimationFrames.clear()
   document.body.replaceChildren()
   vi.restoreAllMocks()
+  // Vitest 4: restoreAllMocks no longer resets vi.fn() implementations (Vitest 2 did); reset keeps per-test isolation.
+  vi.resetAllMocks()
   vi.clearAllMocks()
 })
 
