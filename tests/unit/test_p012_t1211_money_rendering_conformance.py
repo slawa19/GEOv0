@@ -302,5 +302,9 @@ def test_negative_zero_is_the_one_place_the_three_copies_disagree() -> None:
     with the UIs, this test fails and the divergence gets removed from the record with it.
     """
 
-    assert to_money_str(Decimal("-0.00"), 2) == "-0.00"
+    assert to_money_str(Decimal("-0.00"), 2) == "-0.00", (
+        "The backend no longer renders a negative zero with its sign: the divergence recorded in "
+        "`api/money-rendering-conformance.json` is gone - remove the record, this test and "
+        "`tests/integration/test_p012_t1211_negative_zero_cannot_come_back_from_the_ledger_postgres.py`."
+    )
     assert to_money_str(Decimal("5.00") - Decimal("5.00"), 2) == "0.00"

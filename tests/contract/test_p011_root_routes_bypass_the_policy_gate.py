@@ -45,23 +45,13 @@ def _has_rate_limit(route: APIRoute) -> bool:
     )
 
 
-def test_root_routes_do_not_go_through_the_rate_limit_dependency() -> None:
-    """Current behaviour, pinned deliberately by T1103b rather than left implicit."""
-
-    for path in sorted(ROOT_ROUTES):
-        assert not _has_rate_limit(_route(path)), (
-            f"{path} now goes through rate_limit. That is a behaviour change: this route is a "
-            f"probe or scrape target, and T1103b (2026-08-23) decided it stays outside the "
-            f"limiter. If the decision was revisited, update the decision, not this test."
-        )
-
-
 def test_adding_root_paths_to_the_exempt_list_would_change_nothing() -> None:
-    """The inertness the finding is actually about.
+    """The inertness the finding is actually about, and the current behaviour T1103b pinned.
 
     `_RATE_LIMIT_EXEMPT_PATHS` is read inside `rate_limit`. For a route that never calls
     `rate_limit`, membership in that list is unreachable code, so a fix expressed that way is a
-    fix in appearance only.
+    fix in appearance only. (025 `T2504.2`: the separate pin "root routes do not go through
+    `rate_limit`" was a duplicate of the loop below and was removed; its message is kept there.)
     """
 
     exempt_is_read_inside_rate_limit = "_RATE_LIMIT_EXEMPT_PATHS" in (
@@ -74,7 +64,10 @@ def test_adding_root_paths_to_the_exempt_list_would_change_nothing() -> None:
 
     for path in sorted(ROOT_ROUTES):
         assert not _has_rate_limit(_route(path)), (
-            f"{path} reaches rate_limit, so the exempt list is no longer inert for it"
+            f"{path} reaches rate_limit, so the exempt list is no longer inert for it. That is "
+            f"also a behaviour change: this route is a probe or scrape target, and T1103b "
+            f"(2026-08-23) decided it stays outside the limiter. If the decision was revisited, "
+            f"update the decision, not this test."
         )
 
     assert not (ROOT_ROUTES & set(deps._RATE_LIMIT_EXEMPT_PATHS)), (
@@ -85,7 +78,7 @@ def test_adding_root_paths_to_the_exempt_list_would_change_nothing() -> None:
 
 
 def test_the_limiter_is_still_wired_where_it_should_be() -> None:
-    """Anti-vacuum: without this, the two tests above pass on an application with no limiter."""
+    """Anti-vacuum: without this, the test above passes on an application with no limiter."""
 
     versioned_health = _route("/api/v1/health")
     assert _has_rate_limit(versioned_health), (

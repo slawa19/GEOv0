@@ -57,19 +57,3 @@ async def test_a_negative_zero_cannot_come_back_from_a_numeric_column(db_session
         f"value the ledger actually holds. Revisit "
         f"`api/money-rendering-conformance.json` before touching this test."
     )
-
-
-async def test_the_renderer_disagreement_this_pins_is_still_real(db_session) -> None:
-    """The pin is worth nothing if the divergence it guards has quietly gone away.
-
-    If `to_money_str` ever stops printing `-0.00`, the difference no longer exists, the record in
-    the conformance table is stale, and this whole module should go with it. Asserted rather than
-    assumed, so the record dies with the divergence instead of outliving it.
-    """
-
-    from app.utils.money import to_money_str
-
-    assert to_money_str(Decimal("-0.00"), 2) == "-0.00", (
-        "The backend no longer renders a negative zero with its sign. The divergence recorded in "
-        "`api/money-rendering-conformance.json` is gone - remove the record and this module."
-    )
