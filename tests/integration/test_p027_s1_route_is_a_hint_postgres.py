@@ -34,13 +34,16 @@ async def stand(committed_database, monkeypatch):
     engine = create_async_engine(committed_database.url, pool_size=8, max_overflow=0, isolation_level="SERIALIZABLE")
     f = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
     monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
-    st = {"f": f, "builds": [], "attempts": 0, "build_delay": 0.0}
+    st = {"f": f, "url": committed_database.url, "builds": [], "attempts": 0, "build_delay": 0.0, "fail_next": False}
     original_build, original_attempt = PaymentRouter._build_graph_impl, PaymentService._pay_attempt
 
     async def counted_build(self, *a, **k):
         await asyncio.sleep(st["build_delay"])
         level = await self.session.scalar(text("SHOW transaction_isolation"))
         st["builds"].append((level, await self.session.scalar(text("SHOW transaction_read_only"))))
+        if st["fail_next"]:
+            st["fail_next"] = False
+            raise RuntimeError("the leader's build failed")
         return await original_build(self, *a, **k)
 
     async def counted_attempt(self, *a, **k):
@@ -161,3 +164,41 @@ async def test_the_routing_budget_bounds_the_search_not_the_graph_build(stand, m
     result = await _pay(st, request)
     assert result.status == "COMMITTED" and len(st["builds"]) == 1, (result, st["builds"])
     assert await _rows(st, request.tx_id) == ["COMMITTED"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_leader_and_concurrent_refreshes_stay_single_flight(stand) -> None:
+    """§15 review of stage 1, #2: waiters woken by a FAILED leader follow one new leader (1 + 1 builds, not 1 + 3);
+    concurrent fresh re-route builds (`refresh=True`) join the one in flight."""
+    st = stand
+    st["build_delay"], st["fail_next"] = 0.2, True
+    routers = [PaymentRouter(st["f"]()) for _ in range(4)]
+    outcomes = await asyncio.gather(*(r.build_graph(st["eq"].code, use_shared_cache=True) for r in routers),
+                                    return_exceptions=True)
+    assert isinstance(outcomes[0], RuntimeError) and outcomes[1:] == [None] * 3, outcomes
+    assert len(st["builds"]) == 2 and all(r.graph for r in routers[1:]), st["builds"]
+    st["builds"].clear()
+    await asyncio.gather(*(r.build_graph(st["eq"].code, refresh=True) for r in routers))
+    for r in routers:
+        await r.session.close()
+    assert len(st["builds"]) == 1, st["builds"]
+
+
+@pytest.mark.asyncio
+async def test_cold_concurrent_payments_do_not_wait_on_their_own_pool(stand) -> None:
+    """§15 review of stage 1, #1: a `pay()` attempt holding a pooled connection while its route reader asks the same
+    pool for another starves a small pool (attempts hold, the leader's reader waits). Pool 1 + 1, three payers."""
+    engine = create_async_engine(stand["url"], pool_size=1, max_overflow=1, pool_timeout=2,
+                                 isolation_level="SERIALIZABLE")
+    small = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+    p, code = stand["people"], stand["eq"].code
+    flows = [("S", "R"), ("M", "R"), ("S", "M")]
+    try:
+        outcomes = await asyncio.gather(*(PaymentService.pay(small, p[a].id, PaymentCreateRequest(
+            tx_id=str(uuid.uuid4()), to=p[b].pid, equivalent=code, amount="1.00", signature="__internal__"),
+            require_signature=False) for a, b in flows), return_exceptions=True)
+    finally:
+        await engine.dispose()
+    failed = [o for o in outcomes if getattr(o, "status", None) != "COMMITTED"
+              and getattr(getattr(o, "code", None), "value", getattr(o, "code", None)) != "E008"]
+    assert not failed, outcomes  # a pool timeout surfaces as E010/E007; a real conflict (E008) is not this defect

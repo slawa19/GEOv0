@@ -1049,6 +1049,7 @@ class PaymentService:
         use_shared_routing_cache: bool = True,
         record_refusal: bool = True,
         emit_start: bool = True,
+        release_before_routing: bool = False,
     ) -> StagedPaymentResult:
         """Execute a payment INSIDE THE CALLER'S TRANSACTION; never commit or roll it back.
 
@@ -1318,6 +1319,12 @@ class PaymentService:
             async with _payment_deadline(deadline, total_timeout_s):
                 # 027 stage 1 (F-027-4): the graph build is bounded by the payment's deadline, not by the routing
                 # budget, which bounds only the path search below; a timeout of either is logged by its stage.
+                # §15 review of stage 1, #1: `pay()` owns this transaction and its reads above wrote nothing - end it
+                # and free its pooled connection before the route reader takes one (else attempts waiting for a
+                # leader's build hold the pool it needs); the money attempt below is a fresh, re-guarded transaction.
+                released = release_before_routing and isinstance(self.session.bind, AsyncEngine)
+                if released:
+                    await self.session.rollback()
                 routing_stage = "build"
                 await self._build_route_graph(equivalent_code, cached=use_shared_routing_cache)
                 routing_stage = "search"
@@ -1356,6 +1363,9 @@ class PaymentService:
                 except asyncio.TimeoutError:
                     _log_routing_timeout("search", equivalent_code)
                     raise TimeoutException("Routing timed out")
+                except TimeoutException:  # the search's own deadline, inside the router
+                    _log_routing_timeout("search", equivalent_code)
+                    raise
                 routing_stage = None
 
                 if not routes_found:
@@ -1406,6 +1416,8 @@ class PaymentService:
                     {"path": path, "amount": str(route_amount)}
                     for path, route_amount in routes_found
                 ]
+                if released:
+                    await MoneyBoundary.require_serializable(self.session, writer="payment")
 
                 # 3-5. THE PAYMENT OPERATION (019 stages 3-4). The `Transaction` insert (`COMMITTED`),
                 # the locks, the capacity, the envelope, the book and the checks run inside ONE
@@ -2257,6 +2269,7 @@ class PaymentService:
         attempt_no = 0
         admission: _Admission | None = None
         reroutes_left, fresh_graph = 1, False  # 027 stage 1: ONE re-route per request, not per attempt
+        owns_sessions = _service_for is None  # a borrowed session's transaction is its caller's: never rolled back
         while True:
             attempt_no += 1
             async with sessions() as session:
@@ -2273,6 +2286,7 @@ class PaymentService:
                     admission=admission,
                     fresh_graph=fresh_graph,
                     may_reroute=reroutes_left > 0,
+                    release_before_routing=owns_sessions,
                 )
             if isinstance(outcome, _RetryAttempt):
                 admission = outcome.admission or admission
@@ -2298,6 +2312,7 @@ class PaymentService:
         admission: "_Admission | None" = None,
         fresh_graph: bool = False,
         may_reroute: bool = False,
+        release_before_routing: bool = False,
     ) -> "PaymentResult | _RetryAttempt":
         try:
             staged = await self.execute(
@@ -2309,6 +2324,7 @@ class PaymentService:
                 # 027 stage 1: every attempt routes on the shared cache - a conflict retry does not rebuild
                 # the graph - except the request's one re-route, which builds it afresh.
                 use_shared_routing_cache=not fresh_graph,
+                release_before_routing=release_before_routing,
                 record_refusal=False,
                 emit_start=False,
             )

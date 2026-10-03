@@ -165,8 +165,9 @@ class PaymentRouter:
         027 stage 1. `use_shared_cache`: a cached graph younger than `ROUTING_GRAPH_CACHE_TTL_SECONDS`, else ONE
         build per equivalent in this process that concurrent callers wait for (single-flight), stored. `refresh`:
         build afresh and store (the payment's one re-route). Neither: build afresh for this instance only. Topology
-        edits drop the cache; money commits do not - a cached capacity may be stale up to the TTL, and the core's
-        final check re-reads the pair (`PaymentService._segment`). The default reads afresh in this router's
+        edits drop the cache; money commits do not - a cached capacity may be stale up to the rest of a build in
+        flight when the edit committed plus the TTL (the stamp is the publish time), and the core's final check
+        re-reads the pair (`PaymentService._segment`). The default reads afresh in this router's
         session: `/payments/capacity`, `/payments/max-flow` and the simulator's targets answer from the state as
         it is, never from a cache a payment did not drop. `reader`: a factory of the async context the
         build reads in (the payment's own read transaction), entered only when a build actually runs.
@@ -176,14 +177,16 @@ class PaymentRouter:
         with log_duration(logger, "router.build_graph", equivalent=equivalent_code):
             ttl = settings.ROUTING_GRAPH_CACHE_TTL_SECONDS
             shared = (use_shared_cache or refresh) and ttl > 0
-            if shared and not refresh:
-                if self._load_cached(equivalent_code, ttl):
+            # Follow the build in flight - a re-route (`refresh`) joins it too: its read began at most one build ago -
+            # and when it stored nothing (failed, cancelled), follow the next leader or become it.
+            while shared:
+                if not refresh and self._load_cached(equivalent_code, ttl):
                     return
                 pending = self._inflight.get(equivalent_code)
-                if pending is not None and pending.get_loop() is asyncio.get_running_loop():
-                    await asyncio.shield(pending)
-                    if self._load_cached(equivalent_code, ttl):
-                        return
+                if pending is None or pending.get_loop() is not asyncio.get_running_loop():
+                    break
+                await asyncio.shield(pending)
+                refresh = False
             if not shared:
                 await self._build_in(reader, equivalent_code, write_shared_cache=False)
                 return
