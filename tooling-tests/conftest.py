@@ -37,6 +37,23 @@ replaced by a weaker one under the same number passes. Whether CI runs the steps
 other one. A debug run of one file is possible with `--noconftest`; it is a debug path and checks
 none of the above.
 
+WHAT THIS DOES NOT DEFEND AGAINST (narrowed 2026-10-03 after the §15 fix-delta round, AGENTS.md §19.4).
+The guarantee is the FORM of the CI steps and the count/outcome inside a session that really runs.
+It does not defend against deliberate reconfiguration of the mechanism that runs it:
+
+* `pytest.ini` `addopts` (for example `--help` or `--version`: pytest exits before any check here,
+  and the runner accepts exit 0);
+* the workflow's job `needs:` (a dependency on a job skipped on pull requests, such as
+  `container-smoke`, skips the tooling job), step `shell:` (a custom shell such as `echo {0}`
+  succeeds without running the step), `defaults`, `strategy` and `timeout-minutes`;
+* `PYTEST_PLUGINS`, and arbitrary plugin code in the same process.
+
+WHY NOT BUILT. Such an edit changes the verification mechanism itself, which is a §15 external-review
+trigger: it is caught by review, not by this file, and chasing it here is the loop §19.5 names (four
+findings in a row about the binding mechanism). The cheapest general fix, if ever authorised - a
+completion marker the enforcing session writes at `sessionfinish` and the runner requires - is in
+`specs/BACKLOG.md` ("Пределы тира инструментов").
+
 CHANGING THE NUMBERS. Move, add or delete a case - then change `EXPECTED_CASES` in the same commit,
 with a dated line below saying why. That is the only way to make the session green again.
 """
@@ -253,6 +270,13 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
     pass `--noconftest`, which would run the tests without the count.
 
     Form only: whether the steps really ran is in the job log (`gh run view <id> --log`).
+
+    WHAT THIS DOES NOT DEFEND AGAINST (narrowed 2026-10-03, AGENTS.md §19.4): deliberate
+    reconfiguration. Job `needs:` (a dependency on a job skipped on pull requests, e.g.
+    `container-smoke`, skips this one), step `shell:` (`echo {0}` succeeds without running), and
+    `defaults`, `strategy`, `timeout-minutes`, `PYTEST_PLUGINS`, `pytest.ini` `addopts` (`--help`,
+    `--version`) are not examined. Such edits change the verification mechanism and are themselves
+    §15 review triggers; see the module docstring and `specs/BACKLOG.md`.
     """
 
     owners = {"portable": "static-diagnostics", "powershell": "required-ui"}
