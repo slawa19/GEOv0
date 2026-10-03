@@ -14,7 +14,10 @@ WHAT THIS MODULE MEASURES, each half against its own counter-check (`AGENTS.md` 
    mode-B test commits survives into the next clone.
 
 The counter-checks in mode A are what keep the mode-B assertions from being vacuous: if the three
-properties held in mode A as well, mode B would be proving nothing about itself.
+properties held in mode A as well, mode B would be proving nothing about itself. The mode-A
+counter-check of the first property lives in
+`test_p017_mode_a_isolation_survives_an_application_commit_postgres.py` (its local copy here was
+removed by 025 `T2504.2` as a proven duplicate).
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
-from tests.conftest import TEST_DATABASE_URL, _committed_database_context, engine
+from tests.conftest import TEST_DATABASE_URL, _committed_database_context
 from tests.debt_setup import debt_fixture_setup
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.migrated_schema import (
@@ -226,14 +229,6 @@ async def test_mode_b_commit_is_visible_to_another_connection(committed_session)
     database = committed_session.info["geo_committed_database"]
     # A NEW connection (the engine is NullPool): the session that wrote is not asked.
     assert await _visible_from_another_connection(database.engine, marker)
-
-
-async def test_mode_a_commit_is_not_visible_to_another_connection(db_session):
-    """COUNTER-CHECK: the same write in mode A never leaves the outer transaction."""
-
-    marker = uuid.uuid4().hex[:12]
-    await _insert_marker(db_session, marker)
-    assert not await _visible_from_another_connection(engine, marker)
 
 
 async def test_mode_b_clone_is_dropped_and_its_commits_do_not_reach_the_next_clone():
