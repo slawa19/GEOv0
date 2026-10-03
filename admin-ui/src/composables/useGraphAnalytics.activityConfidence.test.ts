@@ -1,3 +1,5 @@
+/// <reference types="node" />
+// Reads repository files via node:fs; Vitest 2 typings pulled @types/node in implicitly, Vitest 4 does not.
 /**
  * Internal adversarial review of programme 013 - the three admin-ui graph-analytics findings.
  *

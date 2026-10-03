@@ -1,3 +1,5 @@
+/// <reference types="node" />
+// Reads repository files via node:fs; Vitest 2 typings pulled @types/node in implicitly, Vitest 4 does not.
 import { describe, expect, it } from 'vitest'
 
 import fs from 'node:fs'
