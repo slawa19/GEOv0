@@ -87,4 +87,5 @@ def test_the_binding_check_notices_each_way_around_it(tooling_ci_binding) -> Non
         assert tooling_ci_binding(mutated, runner), f"not noticed: {name}"
 
     assert tooling_ci_binding(workflow, runner.replace("'--tooling-partition', ", ""))
+    assert tooling_ci_binding(workflow, runner.replace("if ($runTooling) {", "if ($false) {"))
     assert tooling_ci_binding(workflow, runner.replace("'-q',", "'-q', '--noconftest',", 1))

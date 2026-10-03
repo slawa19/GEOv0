@@ -218,8 +218,8 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
     Each partition must be exactly one `verify_local.ps1 -ToolingOnly -ToolingPartition <name>` step
     of its job, and neither the job nor the step may carry `if:` or `continue-on-error`: the Black
     step's `continue-on-error` in the same job is a step attribute and must stay off this one. The
-    runner's tooling session must pass `--tooling-partition`, and must not pass `--noconftest`, which
-    would run the tests without the count.
+    runner's tooling session must run under `$runTooling` and pass `--tooling-partition`, and must
+    not pass `--noconftest`, which would run the tests without the count.
 
     Form only: whether the steps really ran is in the job log (`gh run view <id> --log`).
     """
@@ -253,8 +253,11 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
             violations.append(f"the {partition} step carries if: {step['if']!r}")
         if step.get("continue-on-error") not in (None, False, "false"):
             violations.append(f"the {partition} step carries continue-on-error")
-    if "'--tooling-partition'" not in runner:
-        violations.append("scripts/verify_local.ps1 does not pass --tooling-partition")
+    block = re.search(r"\n {8}if \(\$runTooling\) \{\r?\n(.*?)\n {8}\}\r?\n", runner, re.DOTALL)
+    if "$runTooling = $ToolingOnly -or" not in runner or block is None or (
+        "'--tooling-partition'" not in block.group(1)
+    ):
+        violations.append("verify_local.ps1 does not run the counted session (--tooling-partition)")
     if "--noconftest" in runner:
         violations.append("scripts/verify_local.ps1 passes --noconftest, which drops the count")
     return violations
