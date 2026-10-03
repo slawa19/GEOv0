@@ -61,7 +61,7 @@ SITES = ["policy", "metadata", "net_positions"]
 @pytest_asyncio.fixture
 async def stand(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=6, max_overflow=0, pool_timeout=20, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=6, max_overflow=0, pool_timeout=20, isolation_level="READ COMMITTED"
     )
     try:
         factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)

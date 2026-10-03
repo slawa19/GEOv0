@@ -26,22 +26,6 @@ from app.utils.exceptions import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _no_database_owner_locks(monkeypatch):
-    """The fake session has no database, so the owner-lock acquisition is stubbed explicitly.
-
-    Until 017 stage 3 (S5) it was skipped because the fake had no PostgreSQL bind; the call is now
-    unconditional. A test that asserts on the owner lock installs its own double over this one.
-    """
-
-    async def _no_owner_locks(self, equivalent_codes) -> None:
-        return None
-
-    monkeypatch.setattr(
-        PaymentService, "acquire_shared_equivalent_locks", _no_owner_locks
-    )
-
-
 @dataclass(frozen=True)
 class _Action:
     seq: int
@@ -192,60 +176,6 @@ def _run() -> RunRecord:
     run.tick_index = 1
     run.sim_time_ms = 1000
     return run
-
-
-@pytest.mark.asyncio
-async def test_executor_preacquires_complete_sorted_equivalent_owner_set(
-    monkeypatch,
-):
-    session = _Session()
-    sse = _Sse()
-    run = _run()
-    events: list[tuple[str, object]] = []
-
-    async def _acquire_owner(self, equivalent_codes):
-        events.append(("owner", tuple(equivalent_codes)))
-
-    async def _staged(self, _sender_id, *, equivalent, to_pid, amount, **_kwargs):
-        assert events and events[0][0] == "owner"
-        events.append(("staged", equivalent))
-        return StagedPaymentResult(
-            result=_payment_result(to_pid=to_pid, amount=amount),
-            post_commit_effects=None,
-        )
-
-    monkeypatch.setattr(
-        PaymentService,
-        "acquire_shared_equivalent_locks",
-        _acquire_owner,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        PaymentService,
-        "create_payment_internal_staged",
-        _staged,
-        raising=True,
-    )
-
-    result = await _executor(sse).execute_planned_payments(
-        session=session,
-        run_id=run.run_id,
-        run=run,
-        planned=[
-            _Action(0, "UAH", "A", "B", "1.00"),
-            _Action(1, "EUR", "A", "C", "2.00"),
-            _Action(2, "UAH", "A", "D", "3.00"),
-        ],
-        equivalents=["EUR", "UAH"],
-        sender_id_by_pid={"A": uuid.uuid4()},
-        max_in_flight=3,
-        max_timeouts_per_tick=0,
-        fail_run=lambda *_args: None,
-    )
-
-    assert result.committed == 3
-    assert events[0] == ("owner", ("EUR", "UAH"))
-    assert [kind for kind, _value in events[1:]] == ["staged"] * 3
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,12 @@
 """Programme 019 stage 5, `T1908` (d): CLEARING STARVATION under a continuous stream of successful payments.
 
+027 STAGE 2 (`T2704`, 2026-10-03): no equivalent lock and no SERIALIZABLE any more, so `locks_on`/`locks_off`
+collapse into `rc` (the code that ships, the same predeclared criterion: >= 90 % cleared in EVERY batch), and
+the positive control is ADAPTED: the switch it stood on is gone, and a snapshot gap starves nothing at READ
+COMMITTED. It now inverts the clearing's lock order - the cycle's debt rows `FOR UPDATE` BEFORE its lines, the
+order the `T2703` inventory removed - so a payment holding a line and writing its debt closes a deadlock the
+clearing (waiting first) loses; it must be SEEN to starve. The text below is the 019 history.
+
 A PROBE, NOT A GATE: marked `slow`, never in the default tier. Re-run with
 
     .\\scripts\\verify_local.ps1 -TaskSlug <slug> -BackendOnly -IncludeExpensive `
@@ -74,6 +81,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.clearing.service import ClearingService, RetryableClearingConflictException
@@ -86,7 +94,7 @@ from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import RetryablePaymentConflictException
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_locks_off import switch_money_boundary_locks_off
+from app.core.money_boundary import MoneyBoundary
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 pytestmark = [pytest.mark.slow]
@@ -108,7 +116,7 @@ CONTROL_BATCHES = ACCEPTANCE_BATCHES
 async def stand(committed_database):
     engine = create_async_engine(
         committed_database.url, pool_size=WORKERS + 6, max_overflow=0, pool_timeout=30,
-        isolation_level="SERIALIZABLE",
+        isolation_level="READ COMMITTED",
     )
     try:
         yield async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
@@ -167,13 +175,25 @@ async def _seed(stand):
     )
 
 
-def _instrument(monkeypatch, *, gap_s: float):
-    counts = {"attempts": 0, "clearing_conflicts": 0, "payment_retries": 0}
+def _instrument(monkeypatch, *, gap_s: float, inverted: bool = False):
+    counts = {"attempts": 0, "clearing_conflicts": 0, "payment_retries": 0, "inverted": 0}
     original_attempt = ClearingService._execute_clearing_with_amount
+    original_lines = MoneyBoundary.lock_pair_lines
 
     async def attempt(self, cycle, **kwargs):
         counts["attempts"] += 1
+        self.session.info["p027_inverted"] = inverted
         return await original_attempt(self, cycle, **kwargs)
+
+    async def lines(self, pairs):  # the positive control: the clearing's debt rows first, then its lines
+        pairs = list(pairs)
+        if self.session.info.get("p027_inverted"):
+            counts["inverted"] += 1
+            await self.session.execute(select(Debt.id).where(tuple_(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id)
+                                                             .in_(pairs)).order_by(Debt.id).with_for_update())
+        return await original_lines(self, pairs)
+
+    monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", lines)
 
     monkeypatch.setattr(ClearingService, "_execute_clearing_with_amount", attempt)
 
@@ -345,23 +365,21 @@ async def test_d_clearing_starvation_probe(stand, monkeypatch) -> None:
 
     results: dict[str, list[dict]] = {}
     all_runs: dict[str, list[Run]] = {}
-    switch_calls: dict[str, int] = {}
+    inverted_calls: dict[str, int] = {}
     configurations = [
-        ("positive_control_locks_off_gap", True, GAP_S, CONTROL_RUNS, CONTROL_BATCHES),
-        ("locks_on", False, 0.0, RUNS, ACCEPTANCE_BATCHES),
-        ("locks_off", True, 0.0, RUNS, ACCEPTANCE_BATCHES),
+        ("positive_control_inverted_order", True, CONTROL_RUNS, CONTROL_BATCHES),
+        ("rc", False, RUNS, ACCEPTANCE_BATCHES),
     ]
-    for name, locks_off, gap_s, runs_n, batches in configurations:
+    for name, inverted, runs_n, batches in configurations:
         results[name] = []
         all_runs[name] = []
         for batch in range(batches):
             with monkeypatch.context() as patch:
-                if locks_off:
-                    switch = switch_money_boundary_locks_off(patch)
-                counts = _instrument(patch, gap_s=gap_s)
-                runs = [await _one_run(stand, counts, with_stream=True) for _ in range(runs_n)]
-                if locks_off:
-                    switch_calls[name] = switch_calls.get(name, 0) + switch.total
+                counts = _instrument(patch, gap_s=0.0, inverted=inverted)
+                runs = []
+                for _ in range(runs_n):
+                    runs.append(await _one_run(stand, counts, with_stream=True))
+                    inverted_calls[name] = inverted_calls.get(name, 0) + counts["inverted"]
             results[name].append(_summary(f"{name}#batch{batch + 1}", runs))
             all_runs[name].extend(runs)
 
@@ -379,12 +397,11 @@ async def test_d_clearing_starvation_probe(stand, monkeypatch) -> None:
     )
 
     # Now the assertions. The stand first: the switch on its path, producer progress, the positive control.
-    for name in ("positive_control_locks_off_gap", "locks_off"):
-        assert switch_calls.get(name, 0) > 0, f"the lock switch was never on the measured path of {name}"
+    assert inverted_calls.get("positive_control_inverted_order", 0) > 0 and not inverted_calls.get("rc"), inverted_calls
 
     for runs in all_runs.values():
         _assert_the_producer_progressed(runs)
-    control = results["positive_control_locks_off_gap"]
+    control = results["positive_control_inverted_order"]
     control_cleared = sum(one["cleared"] for one in control)
     control_runs = sum(one["runs"] for one in control)
     control_exhausted = sum(one["exhausted"] for one in control)
@@ -392,13 +409,12 @@ async def test_d_clearing_starvation_probe(stand, monkeypatch) -> None:
         f"POSITIVE CONTROL FAILED: the deliberately starving configuration was not seen to starve - the "
         f"stand cannot detect starvation, and the acceptance below means nothing: {control}"
     )
-    for r in all_runs["locks_on"]:
+    for r in all_runs["rc"]:
         assert r.clearing_attempts >= 1, f"no clearing attempt was observed: {r}"
-    for name in ("locks_on", "locks_off"):
-        for one in results[name]:
-            assert one["other_outcomes"] == [], one
+    for one in results["rc"]:
+        assert one["other_outcomes"] == [], one
     # THE ACCEPTANCE (`T1909`, precondition 2): EVERY batch of the retained variant, never pooled.
-    verdicts = [batch_verdict(one) for one in results["locks_on"]]
+    verdicts = [batch_verdict(one) for one in results["rc"]]
     assert all(v.endswith("PASS") for v in verdicts), (
         f"THE RETAINED-LOCK VARIANT FAILED ITS PREDECLARED CRITERION (>= 90 % cleared in every batch): "
         f"{verdicts}. Stop: do not relax or pool the criterion."

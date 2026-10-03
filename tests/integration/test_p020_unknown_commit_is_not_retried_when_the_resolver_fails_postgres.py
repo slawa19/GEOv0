@@ -48,7 +48,7 @@ from sqlalchemy import select, text
 
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
-from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
+from tests.integration.p019_interlock_support import _seed_interlock_case, _use_read_committed
 from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
@@ -156,7 +156,7 @@ def _stand(
             elif commit_mode == "real_rollback":
                 a_id = seed["participant_ids"][0]
                 async with TestingSessionLocal() as other:
-                    await _use_serializable(other)
+                    await _use_read_committed(other)
                     # Reads the debts this clearing has written (uncommitted): other -> clearing.
                     await other.execute(text("SELECT id, amount FROM debts WHERE id = ANY(:ids)"),
                                         {"ids": list(seed["debt_ids"])})
@@ -208,7 +208,7 @@ async def _run(stand_cls, seed: dict):
 
     owner = TestingSessionLocal()
     try:
-        await _use_serializable(owner)
+        await _use_read_committed(owner)
         try:
             return await asyncio.wait_for(stand_cls(owner).execute_occurrence(seed["occurrence"]), 60)
         except Exception as exc:  # noqa: BLE001 - compared by the caller
@@ -480,7 +480,7 @@ async def _cancel_while_the_second_resolution_runs(commit_mode: str):
     owner = TestingSessionLocal()
     clearing_task = None
     try:
-        await _use_serializable(owner)
+        await _use_read_committed(owner)
         clearing_task = asyncio.create_task(stand_cls(owner).execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(script["second_started"].wait(), timeout=30)
         assert not clearing_task.done(), "premise: the caller is still waiting on resolution 2"

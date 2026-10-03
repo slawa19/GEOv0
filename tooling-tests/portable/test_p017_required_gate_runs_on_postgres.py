@@ -74,21 +74,16 @@ _CONCURRENCY_SELECTORS = (
     "::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres",
     "tests/integration/test_payment_idempotency_postgres.py"
     "::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres",
-    # 019 stage 5 (`T1909`, 2026-09-25): the ONE equivalent lock in its two modes and the clearing's
-    # retry owner - the concurrency the retained coordination rests on, named one by one for the same
-    # reason as the three above.
-    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
-    "::test_two_shared_holders_of_one_equivalent_are_granted_together",
-    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
-    "::test_two_api_payments_over_different_pairs_of_one_equivalent_overlap_and_both_commit",
-    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
-    "::test_a_shared_holder_holds_off_the_exclusive_session_lock_and_an_exclusive_holder_holds_off_a_shared_one",
-    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
-    "::test_a_clearing_that_waited_for_a_payment_sees_its_commit_in_its_first_attempt",
-    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
-    "::test_no_advisory_lock_of_the_key_outlives_the_clearing",
-    "tests/integration/test_p019_equivalent_lock_modes_postgres.py"
-    "::test_an_unconfirmed_unlock_invalidates_the_clearing_connection",
+    # 027 stage 2 (`T2704`, 2026-10-03; until then 019 `T1909`'s equivalent-lock modes): the line locks of one
+    # pair against each writer kind, and the clearing's retry owner - named one by one for the same reason.
+    "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
+    "::test_opposite_payments_on_a_fresh_pair_keep_one_direction",
+    "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
+    "::test_opposing_injects_and_payments_keep_one_direction",
+    "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
+    "::test_clearing_and_payment_on_a_shared_edge",
+    "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
+    "::test_seed_never_commits_after_a_baseline_that_missed_it",
     "tests/integration/test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py"
     "::test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner",
     "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"

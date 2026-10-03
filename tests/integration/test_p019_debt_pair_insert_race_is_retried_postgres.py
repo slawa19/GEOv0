@@ -63,7 +63,7 @@ COMPETITOR = Decimal("5.00")
 @pytest_asyncio.fixture
 async def stand(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=8, max_overflow=0, pool_timeout=20, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=8, max_overflow=0, pool_timeout=20, isolation_level="READ COMMITTED"
     )
     # The COMPETITOR's engine, READ COMMITTED on purpose - see `_blind_insert`.
     competitor_engine = create_async_engine(committed_database.url, pool_size=2, max_overflow=0, isolation_level="READ COMMITTED")

@@ -77,7 +77,7 @@ async def factory(tier_on_a_clone):
 
 
 def _serializable_sessions(url: str):
-    engine = create_async_engine(url, isolation_level="SERIALIZABLE", poolclass=NullPool)
+    engine = create_async_engine(url, isolation_level="READ COMMITTED", poolclass=NullPool)
     return engine, async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
 
 

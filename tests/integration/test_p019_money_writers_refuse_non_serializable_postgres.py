@@ -1,6 +1,12 @@
 """Programme 019 stage 5 (`T1907`, `FORK-2`; spec, Verification plan §1 №7): every writer whose invariant
 leans on SERIALIZABLE refuses a transaction that is not, BEFORE its first write.
 
+REVERSED BY 027 STAGE 2 (`T2704`, 2026-10-03; spec 027, "Намеренная замена ожиданий"): the money writers run
+READ COMMITTED behind their line locks and refuse a transaction whose snapshot predates its lock waits -
+REPEATABLE READ and SERIALIZABLE (`require_read_committed`, reason `isolation_not_read_committed`). The admin
+endpoints are no longer guarded (they take the equivalent row `FOR UPDATE`), so they left the writer list. The
+text below is the 019 history; "READ COMMITTED" in it reads as "the refused level".
+
 WHY. Stage 5 may remove the advisory coordination only if every invariant-relevant money writer runs at
 SERIALIZABLE (spec, "Изоляция, писатели и клиринг", item 2): the inject's one-direction-per-pair check
 (`book.py`, `_apply_inject_increase`), the payment's capacity read, the clearing's cycle re-read and the
@@ -48,13 +54,13 @@ from tests.p019_support import require_target
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
-_REASON = "isolation_not_serializable"
+_REASON = "isolation_not_read_committed"
 
 
-@pytest.fixture
-async def read_committed(committed_database):
+@pytest.fixture(params=["REPEATABLE READ", "SERIALIZABLE"])
+async def unsuitable(request, committed_database):
     engine = create_async_engine(
-        committed_database.url, isolation_level="READ COMMITTED", poolclass=NullPool
+        committed_database.url, isolation_level=request.param, poolclass=NullPool
     )
     try:
         yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
@@ -62,11 +68,11 @@ async def read_committed(committed_database):
         await engine.dispose()
 
 
-async def _at_read_committed(session) -> int:
-    """Control: the session's transaction really runs READ COMMITTED; returns its transaction id."""
+async def _at_unsuitable(session) -> int:
+    """Control: the session's transaction really runs a snapshot level; returns its transaction id."""
 
     level = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
-    assert str(level).lower() == "read committed", f"stand: not at READ COMMITTED: {level}"
+    assert str(level).lower() in {"repeatable read", "serializable"}, f"stand: not a snapshot level: {level}"
     return int(await session.scalar(text("SELECT txid_current()")))
 
 
@@ -210,36 +216,11 @@ async def _run_writer(name: str, session, seed, committed_database):
         return await _call(
             engine.apply_trust_growth(run, session, {(b_pid, a_pid)}, code, 7, {(b_pid, a_pid): 30.0})
         )
-    if name == "admin_patch":
-        from app.api.v1.admin import admin_update_equivalent
-        from app.schemas.admin import AdminEquivalentUpdateRequest
-
-        return await _call(
-            admin_update_equivalent(
-                code, AdminEquivalentUpdateRequest(is_active=False, reason="p019 iso"), _request(), db=session
-            )
-        )
-    if name == "admin_hold_clear":
-        from app.api.v1.admin import admin_clear_equivalent_integrity_hold
-        from app.schemas.admin import AdminEquivalentIntegrityHoldClearRequest
-
-        return await _call(
-            admin_clear_equivalent_integrity_hold(
-                code, AdminEquivalentIntegrityHoldClearRequest(reason="p019 iso"), _request(), db=session
-            )
-        )
-    if name == "admin_delete":
-        from app.api.v1.admin import admin_delete_equivalent
-        from app.schemas.admin import AdminEquivalentDeleteRequest
-
-        return await _call(
-            admin_delete_equivalent(code, AdminEquivalentDeleteRequest(reason="p019 iso"), _request(), db=session)
-        )
     raise AssertionError(f"unknown writer {name}")
 
 
 # Writers that run INSIDE the caller's transaction: the caller's transaction id must survive the call.
-_INSIDE_CALLER = {"payment_staged", "trust_decay", "admin_patch", "admin_hold_clear", "admin_delete"}
+_INSIDE_CALLER = {"payment_staged", "trust_decay"}
 
 _WRITERS = [
     "payment_staged",
@@ -247,22 +228,19 @@ _WRITERS = [
     "inject",
     "trust_decay",
     "trust_growth",
-    "admin_patch",
-    "admin_hold_clear",
-    "admin_delete",
 ]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("writer", _WRITERS)
-async def test_a_money_writer_refuses_a_read_committed_transaction(
-    writer, read_committed, committed_database
+async def test_a_money_writer_refuses_a_snapshot_transaction(
+    writer, unsuitable, committed_database
 ) -> None:
     seed = await _seed_interlock_case()
     before = await _state(committed_database, seed)
     try:
-        async with read_committed() as session:
-            txid = await _at_read_committed(session)
+        async with unsuitable() as session:
+            txid = await _at_unsuitable(session)
             outcome = await _run_writer(writer, session, seed, committed_database)
             same_transaction = None
             if writer in _INSIDE_CALLER and session.in_transaction():
@@ -275,7 +253,7 @@ async def test_a_money_writer_refuses_a_read_committed_transaction(
     # The refusal must be the ISOLATION refusal, before any write, with the caller untouched.
     require_target(
         _refused(outcome),
-        f"{writer} ran on a READ COMMITTED transaction: outcome {outcome!r}",
+        f"{writer} ran on a snapshot transaction: outcome {outcome!r}",
     )
     assert after == before, f"{writer} refused but changed committed state: {before} -> {after}"
     if writer in _INSIDE_CALLER:
@@ -285,42 +263,42 @@ async def test_a_money_writer_refuses_a_read_committed_transaction(
 
 
 @pytest.mark.asyncio
-async def test_the_api_pay_refuses_a_read_committed_session_factory(read_committed, committed_database) -> None:
-    """`pay()` opens its own sessions; handed a READ COMMITTED factory it refuses and records nothing."""
+async def test_the_api_pay_refuses_a_snapshot_session_factory(unsuitable, committed_database) -> None:
+    """`pay()` opens its own sessions; handed a snapshot-level factory it refuses and records nothing."""
 
     from app.core.payments.service import PaymentService
     from app.schemas.payment import PaymentCreateRequest
 
     seed = await _seed_interlock_case()
     before = await _state(committed_database, seed)
-    async with read_committed() as probe:
-        await _at_read_committed(probe)
+    async with unsuitable() as probe:
+        await _at_unsuitable(probe)
     request = PaymentCreateRequest(
         tx_id=str(uuid.uuid4()), to=seed["participant_pids"][1], equivalent=seed["equivalent_code"],
         amount="10.00", signature="__internal__",
     )
     try:
         outcome = await _call(
-            PaymentService.pay(read_committed, seed["participant_ids"][0], request, require_signature=False)
+            PaymentService.pay(unsuitable, seed["participant_ids"][0], request, require_signature=False)
         )
     finally:
         PaymentRouter.invalidate_cache(seed["equivalent_code"])
     after = await _state(committed_database, seed)
-    require_target(_refused(outcome), f"pay() ran at READ COMMITTED: {outcome!r}")
+    require_target(_refused(outcome), f"pay() ran at a snapshot level: {outcome!r}")
     assert after == before
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("writer", ["payment_staged", "clearing", "trust_decay"])
-async def test_the_same_writer_runs_at_serializable(writer, committed_database) -> None:
-    """COUNTER-CHECK (anti-vacuum): the refusal is about the level, not the writer - on a SERIALIZABLE
+async def test_the_same_writer_runs_at_read_committed(writer, committed_database) -> None:
+    """COUNTER-CHECK (anti-vacuum): the refusal is about the level, not the writer - on a READ COMMITTED
     transaction the same call does its work (a payment staged, 30 cleared, a limit decayed)."""
 
     seed = await _seed_interlock_case()
     try:
         async with committed_database.sessionmaker() as session:
             level = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
-            assert str(level).lower() == "serializable", level
+            assert str(level).lower() == "read committed", level
             outcome = await _run_writer(writer, session, seed, committed_database)
             if session.in_transaction():
                 await session.commit()

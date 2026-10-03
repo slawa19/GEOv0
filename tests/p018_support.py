@@ -90,7 +90,7 @@ def serializable_engine(url: str, **pool: Any):
 
     if not pool:
         pool = {"poolclass": NullPool}
-    return create_async_engine(url, isolation_level="SERIALIZABLE", **pool)
+    return create_async_engine(url, isolation_level="READ COMMITTED", **pool)
 
 
 @asynccontextmanager

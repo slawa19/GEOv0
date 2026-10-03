@@ -1,5 +1,10 @@
 """Two payments over one 10-capacity bottleneck: one commits, the other is refused `E002`.
 
+027 stage 2 (`T2704`, 2026-10-03): no equivalent lock, no SERIALIZABLE - the two payments share the bottleneck's
+pair, so the second QUEUES on the first's line rows again (named by `pg_blocking_pids`) while the first is parked
+after its pre-state, and reads the first's debt after its commit: no retry, one `E002`. The text below is the
+019 history; the result assertions are unchanged.
+
 019 stage 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`). Until then the two payments were serialised by the
 equivalent owner lock, and this test held the first inside it while the second queued. Payments now take
 that lock SHARED, so they no longer queue on each other: the mechanism is SERIALIZABLE and the retry owner
@@ -44,7 +49,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
 
     from sqlalchemy import text
 
-    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+    from tests.p019_locks_off import blocked_by
     from app.core.payments import service as payment_service_module
     from app.core.payments.service import PaymentService
     from app.config import settings
@@ -100,13 +105,12 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
         nonlocal prestate_calls
         result = await original_prestate(session, declared_flows)
         prestate_calls += 1
-        if prestate_calls <= 2:
+        if prestate_calls <= 1:  # 027 stage 2: only the first parks; the second queues on its lines
             parked_pids.append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
             # Set on the second RECORDED pid, not the second call: the counter moves before the pid
             # read awaits, so the second call could otherwise signal before the first recorded its
             # pid (CI, PR #56: `parked_pids == [471]`).
-            if len(parked_pids) == 2:
-                both_parked.set()
+            both_parked.set()
             await release_both.wait()
         return result
 
@@ -133,12 +137,12 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     async def _pay(sender_id, tx_id: str):
         async with TestingSessionLocal() as session:
             await session.connection(
-                execution_options={"isolation_level": "SERIALIZABLE"}
+                execution_options={"isolation_level": "READ COMMITTED"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
+            assert str(isolation).lower() == "read committed"  # 027 stage 2 (T2704): the only supported level
             try:
                 return await PaymentService(session).create_payment_internal(
                     sender_id,
@@ -184,32 +188,17 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
             await setup.commit()
 
         task1 = asyncio.create_task(_pay(id_by_pid[a_pid], tx_ids[0]))
-        task2 = asyncio.create_task(_pay(id_by_pid[b_pid], tx_ids[1]))
-        # MECHANISM 1: both payments are inside their transactions at once - the shared lock let the
-        # second in while the first holds it.
         await asyncio.wait_for(both_parked.wait(), timeout=10.0)
-        assert not task1.done()
-        assert not task2.done()
-        assert len(set(parked_pids)) == 2, parked_pids
+        task2 = asyncio.create_task(_pay(id_by_pid[b_pid], tx_ids[1]))
+        # MECHANISM 1 (027 stage 2): the second payment queues on the parked first's line rows.
         async with TestingSessionLocal() as observer:
-            shared_holders = (
-                await observer.execute(
-                    text(
-                        "SELECT pid, mode FROM pg_locks WHERE locktype = 'advisory' AND granted "
-                        "AND classid = CAST(:namespace AS oid) AND objid = CAST(:key AS oid) "
-                        "AND database = (SELECT oid FROM pg_database "
-                        "WHERE datname = current_database())"
-                    ),
-                    {
-                        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                        "key": MoneyBoundary._equivalent_owner_lock_key(equivalent_id)
-                        & 0xFFFFFFFF,
-                    },
-                )
-            ).all()
-        assert sorted(shared_holders) == sorted(
-            (pid, "ShareLock") for pid in parked_pids
-        ), shared_holders
+            for _ in range(250):
+                if await blocked_by(observer, parked_pids[0]):
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                pytest.fail("the second payment never queued on the first's line locks")
+        assert not task1.done() and not task2.done()
 
         release_both.set()
         result1, result2 = await asyncio.wait_for(
@@ -217,11 +206,8 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
             timeout=30.0,
         )
 
-        # MECHANISM 2: the race was resolved by a retry of a real conflict, not by a queue. Two
-        # concurrent inserts of the one new C -> D debt row: SERIALIZABLE reports 40001 (or the 23505
-        # the owners retry as the same collision, `is_debt_pair_collision`).
-        assert retried_causes, "no retry was counted: the two payments did not race"
-        assert set(retried_causes) <= {"40001", "23505"}, retried_causes
+        # MECHANISM 2 (027 stage 2): the queue decided the race, not a retried conflict.
+        assert retried_causes == [], retried_causes
 
         results = [result1, result2]
         successes = [result for result in results if not isinstance(result, Exception)]

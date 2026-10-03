@@ -11,6 +11,9 @@ committed" as clearing-before-PATCH, which is serializable and still breaks the 
 told about. A row lock gives it: `FOR SHARE` on the equivalent row makes the PATCH's (or the hold's)
 `UPDATE` of that row wait for the clearing's commit.
 
+027 STAGE 2 (`T2704`): there is no equivalent lock to switch off any more - the code as it ships is the row
+lock alone; the switch and its control left with it.
+
 THE STAND MEASURES THE ROW LOCK ALONE. The money-boundary locks are switched off for the test
 (`tests/p019_locks_off.py`), and the stand shows it: the switch counted the clearing's session-owner
 acquisition, and no advisory lock is held on this database while the clearing is parked. The clearing is
@@ -36,13 +39,13 @@ from sqlalchemy import select, text
 
 from app.core.clearing.service import ClearingService
 from app.db.models.equivalent import Equivalent
-from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
+from tests.integration.p019_interlock_support import _seed_interlock_case, _use_read_committed
 from tests.integration.test_p015_p1_money_replay_postgres import factory  # noqa: F401 - fixture
 from tests.integration.test_p015_t1544_operator_stop_races_postgres import (  # noqa: F401 - fixture
     _deactivate,
     admin_api,
 )
-from tests.p019_locks_off import advisory_locks_held, blocked_by, switch_money_boundary_locks_off
+from tests.p019_locks_off import advisory_locks_held, blocked_by
 from tests.p019_support import require_target
 from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 
@@ -69,7 +72,6 @@ async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag
     from tests.conftest import TestingSessionLocal
 
     client, _gate = admin_api
-    switch = switch_money_boundary_locks_off(monkeypatch)
     seed = await _seed_interlock_case()
     clearing_session = TestingSessionLocal()
     observer = TestingSessionLocal()
@@ -79,7 +81,7 @@ async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag
     clearing_pid: list[int] = []
     clearing = stopper = None
     try:
-        await _use_serializable(clearing_session)
+        await _use_read_committed(clearing_session)
         service = ClearingService(clearing_session)
         original_refuse = service._refuse_if_equivalent_inactive
 
@@ -130,7 +132,6 @@ async def test_a_stopping_writer_waits_for_a_clearing_that_already_read_the_flag
 
     # Controls: the switch was on the clearing's path, the clearing was parked after its stop read and
     # then ran to its commit, and the writer itself succeeded.
-    assert switch.calls["exclusive_session"] >= 1, switch.calls
     assert len(clearing_pid) == 1
     assert amount == Decimal("30.00000000"), "premise: the clearing did not run to its commit"
     if writer == "patch_deactivate":

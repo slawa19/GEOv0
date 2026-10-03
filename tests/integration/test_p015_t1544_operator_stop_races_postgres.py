@@ -63,7 +63,7 @@ from app.utils.exceptions import ConflictException, RetryablePaymentConflictExce
 from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
     _seed_interlock_case,
-    _use_serializable,
+    _use_read_committed,
 )
 from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401 - `factory` is a fixture
     _OPENING,
@@ -167,8 +167,7 @@ _ROW_WAITS = frozenset({"transactionid", "tuple"})
 
 _ADVISORY_MODES_SQL = text(
     "SELECT mode FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = :pid "
-    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
-    "AND classid = :namespace AND objid = :objid AND objsubid = 2 ORDER BY mode"
+    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) ORDER BY mode"
 )
 
 
@@ -204,16 +203,11 @@ def _assert_row_wait(waiting: list[tuple[int, str]], *, what: str, behind: str) 
 
 
 async def _advisory_modes(pid: int, equivalent_id) -> list[str]:
-    """The modes of the equivalent advisory lock `pid` holds right now: `ShareLock` for the shared holders
-    (payment, tick, inject), `ExclusiveLock` for the clearing, `[]` for everyone else (admin, reaction)."""
-    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE
+    """The advisory locks `pid` holds right now: `[]` for every writer since 027 stage 2 (`T2704`) - the row locks
+    are the whole protocol (until then `ShareLock` for payment, tick and inject, `ExclusiveLock` for the clearing)."""
     from tests.conftest import TestingSessionLocal
 
-    params = {
-        "pid": pid,
-        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-        "objid": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
-    }
+    params = {"pid": pid}
     async with TestingSessionLocal() as observer:
         modes = (await observer.execute(_ADVISORY_MODES_SQL, params)).scalars().all()
         await observer.rollback()
@@ -330,7 +324,7 @@ async def test_a_stop_arriving_between_the_binding_and_the_money_phase_answers_f
             await asyncio.wait_for(prepared.wait(), timeout=20)
             # One transaction: nothing of the payment is visible to anyone else yet.
             assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
-            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == [], (
                 "premise: the parked payment does not hold the equivalent lock shared"
             )
 
@@ -402,7 +396,7 @@ async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_f
     clearing_pid: list[int] = []
     clearing = patch = None
     try:
-        await _use_serializable(clearing_session)
+        await _use_read_committed(clearing_session)
         service = ClearingService(clearing_session)
         original_policy = service._cycle_respects_auto_clearing
 
@@ -424,7 +418,7 @@ async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_f
 
         clearing = asyncio.create_task(service.execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(paused.wait(), timeout=20)
-        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == ["ExclusiveLock"], (
+        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == [], (
             "premise: the parked clearing does not hold its exclusive equivalent lock"
         )
 
@@ -486,7 +480,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
     clearing_session = TestingSessionLocal()
     clearing = patch = None
     try:
-        await _use_serializable(clearing_session)
+        await _use_read_committed(clearing_session)
         with caplog.at_level(logging.WARNING):
             gate.armed = True
             patch = asyncio.create_task(_deactivate(client, seed["equivalent_code"]))
@@ -498,7 +492,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
             clearing_pid = _assert_row_wait(
                 await _waiters_behind(gate.pid), what="the clearing", behind="the PATCH"
             )
-            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == ["ExclusiveLock"], (
+            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == [], (
                 "the backend queued on the PATCH's row does not hold the clearing's exclusive lock"
             )
             assert await _advisory_modes(gate.pid, seed["equivalent_id"]) == [], (
@@ -616,7 +610,7 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
                 what="the tick's money attempt",
                 behind="the PATCH",
             )
-            assert await _advisory_modes(tick_pid, world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(tick_pid, world.equivalent.id) == [], (
                 "the tick's money attempt queued on the row without holding the equivalent lock shared"
             )
             assert not tick.done()
@@ -786,7 +780,7 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
         payment.add_done_callback(lambda _t: completed.append("payment"))
         await asyncio.wait_for(checked.wait(), timeout=20)
 
-        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == [], (
             "premise: the parked payment does not hold the equivalent lock shared"
         )
         patch = asyncio.create_task(_deactivate(client, code))
@@ -886,7 +880,7 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
             inject_pid = _assert_row_wait(
                 await _waiters_behind(gate.pid, timeout=30.0), what="the inject", behind="the PATCH"
             )
-            assert await _advisory_modes(inject_pid, world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(inject_pid, world.equivalent.id) == [], (
                 "the inject queued on the row without holding the equivalent lock shared"
             )
             assert not task.done()

@@ -314,32 +314,28 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
             payment_session,
         ):
             await session.connection(
-                execution_options={"isolation_level": "SERIALIZABLE"}
+                execution_options={"isolation_level": "READ COMMITTED"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
+            assert str(isolation).lower() == "read committed"  # 027 stage 2 (T2704): the only supported level
 
-        exclusive_acquired: list[uuid.UUID] = []
-        original_exclusive = MoneyBoundary.acquire_exclusive_equivalent_session_lock
+        line_locks: list[int] = []  # 027 stage 2: the cycle's line locks, not the exclusive equivalent lock
+        original_lines = MoneyBoundary.lock_pair_lines
 
-        async def _count_exclusive(self, locked_equivalent_id):
-            await original_exclusive(self, locked_equivalent_id)
-            exclusive_acquired.append(locked_equivalent_id)
+        async def _count_lines(self, pairs):
+            await original_lines(self, pairs)
+            line_locks.append(1)
 
-        monkeypatch.setattr(
-            MoneyBoundary, "acquire_exclusive_equivalent_session_lock", _count_exclusive
-        )
+        monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", _count_lines)
         skipped_amount = await ClearingService(
             clearing_session
         ).execute_occurrence(occurrence)
-        monkeypatch.setattr(
-            MoneyBoundary, "acquire_exclusive_equivalent_session_lock", original_exclusive
-        )
+        monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", original_lines)
         assert skipped_amount is None
-        # The skip happened UNDER the clearing's exclusive lock, and left no advisory lock behind.
-        assert exclusive_acquired == [equivalent_id]
+        # The skip happened UNDER the cycle's line locks, and left no advisory lock behind.
+        assert line_locks == [1]
         async with TestingSessionLocal() as observer:
             assert await advisory_locks_held(observer) == 0
 

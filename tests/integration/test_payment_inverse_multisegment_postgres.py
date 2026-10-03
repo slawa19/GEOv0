@@ -18,6 +18,11 @@ evidence that now decides the race (`T1908`):
   refuses it with `40001`, counted by the retry owner (`PaymentService.pay` -> `_retry_or_none`), and the
   holder's whole attempt runs again on a fresh snapshot (its pre-state read twice).
 
+027 STAGE 2 (`T2704`, 2026-10-03): the equivalent lock and SERIALIZABLE are gone; the two payments share both pairs,
+so the waiter QUEUES on the holder's line locks again (PostgreSQL names the holder among its blockers, read from
+`pg_blocking_pids`), never reaches its pre-state while the holder is parked, and reads after the holder's commit:
+no conflict, one pre-state read each. The SSI evidence above is the 019 history.
+
 The result assertions are the stage-4 ones unchanged: both `COMMITTED`, debts 1/1, two `PAYMENT` audit rows,
 all four limits intact. The reservation count (vacuous since stage 4) went with the table (migration `031`).
 """
@@ -30,7 +35,6 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app.config import settings
-from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 from app.core.payments import service as payment_service_module
 from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
@@ -111,24 +115,15 @@ async def _seed_inverse_multisegment_world() -> dict:
     }
 
 
-async def _share_holders(observer, equivalent_id) -> set[int]:
-    """Backends holding THIS equivalent's lock granted in shared mode, on this database."""
+async def _blocked_on(observer, holder_pid: int) -> bool:
+    """A backend of this server waits on a lock `holder_pid` holds (027 stage 2: the line rows)."""
 
-    rows = (
-        await observer.execute(
-            text(
-                "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted AND mode = 'ShareLock' "
-                "AND objsubid = 2 AND classid::bigint = :namespace AND objid::bigint = :key "
-                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
-            ),
-            {
-                "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE & 0xFFFFFFFF,
-                "key": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
-            },
-        )
-    ).all()
+    count = await observer.scalar(
+        text("SELECT count(*) FROM pg_stat_activity WHERE CAST(:h AS int) = ANY(pg_blocking_pids(pid))"),
+        {"h": holder_pid},
+    )
     await observer.rollback()
-    return {int(pid) for (pid,) in rows}
+    return bool(count)
 
 
 @pytest.mark.asyncio
@@ -215,22 +210,21 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
             await asyncio.wait_for(holder_parked.wait(), timeout=20.0)
 
             waiter_task = asyncio.create_task(_pay(waiter_session, waiter_direction))
-            try:
-                await asyncio.wait_for(waiter_read.wait(), timeout=20.0)
-            except asyncio.TimeoutError:
-                pytest.fail("the inverse route did not reach its money phase while the holder was parked in its own")
-            # Premise 1: both are past their equivalent lock at once - shared, nothing queued on the other.
-            holders = await _share_holders(observer_session, seed["equivalent_id"])
-            assert holders == {prestate_reads[holder_direction][0], prestate_reads[waiter_direction][0]}, holders
             release_waiter.set()
-            waiter_result = await asyncio.wait_for(waiter_task, timeout=20.0)
-            assert waiter_result.status == "COMMITTED", waiter_result
-            assert not holder_task.done(), "the holder must still be parked when the waiter commits"
-            assert conflicts == [], f"the waiter met a conflict before the holder wrote anything: {conflicts}"
+            # Premise 1 (027 stage 2): the waiter queues on the holder's line locks - named by PostgreSQL.
+            for _ in range(400):
+                if await _blocked_on(observer_session, prestate_reads[holder_direction][0]):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                pytest.fail("the inverse route never queued on the holder's line locks")
+            assert not waiter_read.is_set() and not waiter_task.done(), "the waiter read past the holder's locks"
 
             release_holder.set()
             holder_result = await asyncio.wait_for(holder_task, timeout=30.0)
             assert holder_result.status == "COMMITTED", holder_result
+            waiter_result = await asyncio.wait_for(waiter_task, timeout=30.0)
+            assert waiter_result.status == "COMMITTED", waiter_result
         finally:
             release_holder.set()
             release_waiter.set()
@@ -238,11 +232,9 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Premise 2: SERIALIZABLE, not a lock, decided the race - the holder's stale attempt was refused with a
-    # real 40001 and the retry owner ran the whole attempt again (its pre-state read on a fresh snapshot).
-    assert conflicts and set(conflicts) == {"40001"}, conflicts
-    assert len(prestate_reads[holder_direction]) == len(conflicts) + 1, (prestate_reads, conflicts)
-    assert len(prestate_reads[waiter_direction]) == 1, prestate_reads
+    # Premise 2 (027 stage 2): the line lock, not SSI, decided the race - no conflict, one pre-state read each.
+    assert conflicts == [], conflicts
+    assert len(prestate_reads[holder_direction]) == len(prestate_reads[waiter_direction]) == 1, prestate_reads
 
     tx_ids = [payments["forward"][3], payments["reverse"][3]]
     async with TestingSessionLocal() as verify:

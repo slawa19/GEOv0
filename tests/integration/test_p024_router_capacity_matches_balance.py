@@ -275,7 +275,7 @@ async def test_a_freeze_committed_between_routing_and_binding(db_session, monkey
             outcome = result.status
         except RoutingException as exc:
             outcome = f"refused {exc}"
-    assert seen and seen[0] == "serializable", seen
+    assert seen and seen[0] == "read committed", seen
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
     retried = [r.getMessage() for r in caplog.records if "payment.attempt_retry" in r.getMessage()]
     require_target(not outcome.startswith("COMMITTED"),

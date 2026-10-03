@@ -521,7 +521,7 @@ async def serializable_factory(committed_database):
         pool_size=2,
         max_overflow=0,
         pool_timeout=10,
-        isolation_level="SERIALIZABLE",
+        isolation_level="READ COMMITTED",
     )
     assert eng.dialect.name == "postgresql", eng.dialect.name
     factory = async_sessionmaker(

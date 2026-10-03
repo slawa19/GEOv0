@@ -168,7 +168,7 @@ async def test_pay_retries_a_debt_version_conflict_on_a_fresh_attempt_and_counts
 @pytest_asyncio.fixture
 async def serializable_factory(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=5, max_overflow=0, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
     )
     try:
         yield async_sessionmaker(

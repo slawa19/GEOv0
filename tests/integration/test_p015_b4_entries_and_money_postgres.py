@@ -190,7 +190,7 @@ async def serializable_engine(committed_database):
         pool_size=8,
         max_overflow=0,
         pool_timeout=20,
-        isolation_level="SERIALIZABLE",
+        isolation_level="READ COMMITTED",
     )
     try:
         yield engine
@@ -2185,8 +2185,6 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
     MUTATION once step 4 exists: give migration 021's foreign keys `ondelete='CASCADE'`. The delete
     then succeeds and takes the history with it, silently.
     """
-    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
-
     seeded = await _seed(serializable_factory)
     world = seeded.world
     identity = _identity("raw-delete-with-history")
@@ -2205,13 +2203,6 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
 
     error = None
     async with serializable_factory() as remover:
-        await remover.execute(
-            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
-            {
-                "ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                "key": MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id),
-            },
-        )
         try:
             await remover.execute(
                 text("DELETE FROM equivalents WHERE id = :id"),

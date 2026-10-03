@@ -407,7 +407,7 @@ async def test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_
     # ── controls ──────────────────────────────────────────────────────────────────────────────
     async with factory() as s:
         level = str((await s.execute(text("SHOW transaction_isolation"))).scalar_one())
-    assert level == "serializable", level
+    assert level == "read committed", level
     assert queued, f"premise: the second payment never waited on the edit's row lock {t.subject.guard}"
     first, second = t.calls
     assert first.get("status") == "COMMITTED" and "raised" not in first, first

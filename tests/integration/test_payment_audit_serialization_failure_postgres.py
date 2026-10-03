@@ -54,7 +54,7 @@ _COMPETITOR_TIMEOUT_S = 10.0
 @pytest_asyncio.fixture
 async def factory(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=5, max_overflow=0, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
     )
     try:
         yield async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)

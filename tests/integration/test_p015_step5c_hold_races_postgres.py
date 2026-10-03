@@ -67,7 +67,7 @@ from app.utils.exceptions import ConflictException, RetryablePaymentConflictExce
 from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
     _seed_interlock_case,
-    _use_serializable,
+    _use_read_committed,
 )
 from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401 - `factory` is a fixture
     _OPENING,
@@ -468,7 +468,7 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
             )
             await asyncio.wait_for(hold_written.wait(), timeout=30)
 
-            await _use_serializable(clearing_session)
+            await _use_read_committed(clearing_session)
             clearing = asyncio.create_task(
                 ClearingService(clearing_session).execute_occurrence(seed["occurrence"])
             )
@@ -544,7 +544,7 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
     clearing = reconcile = None
     try:
         await _baseline_and_one_atom(factory, seed["equivalent_id"], debt_id=seed["debt_ids"][0])
-        await _use_serializable(clearing_session)
+        await _use_read_committed(clearing_session)
         service = ClearingService(clearing_session)
         original_policy = service._cycle_respects_auto_clearing
 

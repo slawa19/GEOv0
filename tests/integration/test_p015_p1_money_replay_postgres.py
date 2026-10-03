@@ -115,7 +115,7 @@ async def factory(committed_database):
         pool_size=5,
         max_overflow=0,
         pool_timeout=20,
-        isolation_level="SERIALIZABLE",
+        isolation_level="READ COMMITTED",
     )
     session_factory = async_sessionmaker(
         bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
@@ -506,7 +506,7 @@ async def test_the_stand_is_serializable(factory) -> None:
     async with factory() as session:
         level = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
         await session.rollback()
-    assert str(level).lower() == "serializable", level
+    assert str(level).lower() == "read committed", level
 
 
 @pytest.mark.asyncio

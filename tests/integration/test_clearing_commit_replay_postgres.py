@@ -23,41 +23,15 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 
 
-async def _wait_for_matching_advisory_wait(
-    observer,
-    *,
-    holder_pid: int,
-    waiter_pid: int,
-) -> bool:
-    try:
-        async with asyncio.timeout(5.0):
-            while True:
-                waiting = await observer.scalar(
-                    text(
-                        "SELECT EXISTS ("
-                        "SELECT 1 FROM pg_locks holder "
-                        "JOIN pg_locks waiter ON "
-                        "waiter.locktype = holder.locktype "
-                        "AND waiter.database IS NOT DISTINCT FROM holder.database "
-                        "AND waiter.classid IS NOT DISTINCT FROM holder.classid "
-                        "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
-                        "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
-                        "WHERE holder.pid = :holder_pid "
-                        "AND holder.locktype = 'advisory' AND holder.granted "
-                        "AND holder.database = (SELECT oid FROM pg_database "
-                        "WHERE datname = current_database()) "
-                        "AND waiter.pid = :waiter_pid AND NOT waiter.granted"
-                        ")"
-                    ),
-                    {
-                        "holder_pid": holder_pid,
-                        "waiter_pid": waiter_pid,
-                    },
-                )
-                if waiting:
-                    return True
-    except asyncio.TimeoutError:
-        return False
+async def _wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
+    """027 stage 2: `waiter_pid` queues on a lock `holder_pid` holds (row locks now; an advisory lock until then)."""
+    from tests.p019_locks_off import blocked_by
+
+    for _ in range(250):
+        if waiter_pid in {pid for pid, _locktype in await blocked_by(observer, holder_pid)}:
+            return True
+        await asyncio.sleep(0.02)
+    return False
 
 
 @pytest.mark.asyncio
@@ -167,7 +141,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
         release_first_owner = asyncio.Event()
         acquisition_count = 0
         acquisition_pids: dict[int, int] = {}
-        original_acquire = MoneyBoundary.acquire_exclusive_equivalent_session_lock
+        original_acquire = MoneyBoundary.lock_pair_lines  # 027 stage 2: the cycle's line locks
 
         async def _coordinate_owner_acquisition(engine, equivalent_id):
             nonlocal acquisition_count
@@ -186,12 +160,12 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 
         monkeypatch.setattr(
             MoneyBoundary,
-            "acquire_exclusive_equivalent_session_lock",
+            "lock_pair_lines",
             _coordinate_owner_acquisition,
         )
 
         serializable_sessions = async_sessionmaker(
-            bind=test_engine.execution_options(isolation_level="SERIALIZABLE"),
+            bind=test_engine.execution_options(isolation_level="READ COMMITTED"),
             class_=AsyncSession,
             expire_on_commit=False,
             autoflush=False,
@@ -200,10 +174,10 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             session = serializable_sessions()
             sessions.append(session)
             await session.connection(
-                execution_options={"isolation_level": "SERIALIZABLE"}
+                execution_options={"isolation_level": "READ COMMITTED"}
             )
             isolation = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
-            assert str(isolation).lower() == "serializable"
+            assert str(isolation).lower() == "read committed"
         observer = TestingSessionLocal()
 
         workers = [
@@ -220,7 +194,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
         ]
         await asyncio.wait_for(first_owner_acquired.wait(), timeout=5.0)
         await asyncio.wait_for(second_owner_attempted.wait(), timeout=5.0)
-        assert await _wait_for_matching_advisory_wait(
+        assert await _wait_until_blocked(
             observer,
             holder_pid=acquisition_pids[1],
             waiter_pid=acquisition_pids[2],
@@ -350,6 +324,12 @@ async def _seed_conflict_cycle(prefix: str):
 def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlstates: list[str]):
     """A `ClearingService` whose first `len(writes)` attempts each meet a concurrent committed write.
 
+    027 STAGE 2 (`T2704`): READ COMMITTED raises no 40001 - a write committed before the attempt's locks is simply
+    read - so the conflict is now a real DEADLOCK (`40P01`): right after the committed-occurrence read a writer
+    locks the debt row, waits until the attempt queues on it (after taking the cycle's lines), then asks for those
+    lines; the attempt waited first, so its deadlock check aborts IT, and the writer commits its amount. The text
+    below is the 019 history.
+
     THE SCHEDULE IS REAL. Each attempt's FIRST statement is the committed-occurrence read
     (`_committed_execution_amount`), which fixes the attempt's SERIALIZABLE snapshot; right after it, a
     writer on its own connection commits the next amount from `writes` to the debt, so the attempt's
@@ -363,6 +343,25 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
     from app.db.models.debt import Debt
     from tests.conftest import TestingSessionLocal
 
+    from app.db.models.trustline import TrustLine
+    from tests.p019_locks_off import blocked_by
+
+    writers: list[asyncio.Task] = []
+
+    async def write(attempt_no: int, holding: asyncio.Event) -> None:
+        async with TestingSessionLocal() as writer, TestingSessionLocal() as observer:
+            debt = await writer.get(Debt, debt_id, with_for_update=True)
+            me = int(await writer.scalar(text("SELECT pg_backend_pid()")))
+            holding.set()
+            while not await blocked_by(observer, me):  # the attempt queues on the debt row first
+                await asyncio.sleep(0.02)
+            await writer.execute(select(TrustLine.id).where(TrustLine.equivalent_id == debt.equivalent_id)
+                                 .with_for_update())
+            # Declared: the journal asks every movement of money to name its operation.
+            async with debt_fixture_setup(writer, label=f"concurrent-writer-{attempt_no}"):
+                debt.amount = writes[attempt_no - 1]
+            await writer.commit()
+
     class _Service(ClearingService):
         attempts = 0
 
@@ -374,16 +373,12 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
             )
             type(self).attempts += 1
             assert amount is None, "premise: no occurrence is committed when an attempt starts"
+            for previous in writers:
+                await previous
             if type(self).attempts <= len(writes):
-                attempt_no = type(self).attempts
-                next_amount = writes[attempt_no - 1]
-                async with TestingSessionLocal() as writer:
-                    debt = await writer.get(Debt, debt_id)
-                    assert debt is not None
-                    # Declared: the journal asks every movement of money to name its operation.
-                    async with debt_fixture_setup(writer, label=f"concurrent-writer-{attempt_no}"):
-                        debt.amount = next_amount
-                    await writer.commit()
+                holding = asyncio.Event()
+                writers.append(asyncio.create_task(write(type(self).attempts, holding)))
+                await holding.wait()
             return amount
 
         @classmethod
@@ -448,9 +443,9 @@ async def _run_owner(service_cls, occurrence):
 
     owner_session = TestingSessionLocal()
     try:
-        await owner_session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+        await owner_session.connection(execution_options={"isolation_level": "READ COMMITTED"})
         isolation = (await owner_session.execute(text("SHOW transaction_isolation"))).scalar_one()
-        assert str(isolation).lower() == "serializable"
+        assert str(isolation).lower() == "read committed"
         try:
             return await asyncio.wait_for(service_cls(owner_session).execute_occurrence(occurrence), 30)
         except Exception as exc:  # noqa: BLE001 - compared by the caller
@@ -489,14 +484,14 @@ async def test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_sna
     outcome = await _run_owner(service_cls, occurrence)
 
     # Controls: the conflict was real and it is PostgreSQL's 40001.
-    assert observed and set(observed) == {"40001"}, observed
+    assert observed and set(observed) == {"40P01"}, observed
 
     require_target(
         outcome == Decimal("30.00000000"),
         f"a clearing that met one real 40001 ended with {outcome!r} instead of retrying",
     )
     assert service_cls.attempts == 2, service_cls.attempts
-    assert observed == ["40001"], observed
+    assert observed == ["40P01"], observed
     transactions, audits, operations, entries, debts = await _clearing_evidence(
         equivalent_code, execution_tx_id, equivalent_id
     )
@@ -545,7 +540,7 @@ async def test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryab
     outcome = await _run_owner(service_cls, occurrence)
 
     # Control: the conflicts were real 40001s.
-    assert observed and set(observed) == {"40001"}, observed
+    assert observed and set(observed) == {"40P01"}, observed
 
     details = getattr(outcome, "details", None) or {}
     require_target(
@@ -555,7 +550,7 @@ async def test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryab
     assert getattr(outcome, "status_code", None) == 409, outcome
     assert details.get("conflict_kind") == "database_concurrency", details
     assert service_cls.attempts == 3, service_cls.attempts
-    assert observed == ["40001"] * 3, observed
+    assert observed == ["40P01"] * 3, observed
     transactions, audits, operations, entries, debts = await _clearing_evidence(
         equivalent_code, execution_tx_id, equivalent_id
     )
@@ -691,7 +686,7 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
 
         service_session = TestingSessionLocal()
         await service_session.connection(
-            execution_options={"isolation_level": "SERIALIZABLE"}
+            execution_options={"isolation_level": "READ COMMITTED"}
         )
         service = ClearingService(service_session)
         real_reconcile = service._reconcile_committed_execution
@@ -761,7 +756,7 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
 
         replay_session = TestingSessionLocal()
         await replay_session.connection(
-            execution_options={"isolation_level": "SERIALIZABLE"}
+            execution_options={"isolation_level": "READ COMMITTED"}
         )
         replay_amount = await ClearingService(
             replay_session

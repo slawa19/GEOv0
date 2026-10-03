@@ -63,5 +63,5 @@ def allow_below_serializable_for_a_diagnostic(monkeypatch) -> list[str]:
     async def skip(session, *, writer: str) -> None:
         skipped.append(writer)
 
-    monkeypatch.setattr(MoneyBoundary, "require_serializable", staticmethod(skip))
+    monkeypatch.setattr(MoneyBoundary, "require_read_committed", staticmethod(skip))  # 027 stage 2: the guard is RC
     return skipped

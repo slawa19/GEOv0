@@ -1,5 +1,9 @@
 """PostgreSQL clearing/payment contention on one trustline.
 
+027 stage 2 (`T2704`, 2026-10-03): no equivalent lock - the parked clearing holds the lines of its cycle's pairs
+`FOR UPDATE`, and the payment's line lock (`MoneyBoundary.lock_pair_lines`) queues behind that exact backend
+(`pg_blocking_pids`). The text below is the 019 history; the effects asserted are unchanged.
+
 019 stage 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`): the clearing holds the ONE equivalent lock EXCLUSIVELY on its
 pinned connection, a payment takes it SHARED. The schedule parks the clearing inside its money transaction
 (`_cycle_respects_auto_clearing`, cycle rows `FOR UPDATE`, nothing mutated - the removed reservation scan
@@ -31,39 +35,15 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 
 
-async def _wait_for_matching_advisory_wait(
-    observer, *, waiter_pid: int, holder_pid: int
-) -> bool:
-    """`waiter_pid` is queued SHARED on the advisory lock `holder_pid` holds EXCLUSIVELY, and blocked by it."""
-    try:
-        async with asyncio.timeout(5.0):
-            while True:
-                waiting = await observer.scalar(
-                    text(
-                        "SELECT EXISTS ("
-                        "SELECT 1 FROM pg_locks holder "
-                        "JOIN pg_locks waiter ON "
-                        "waiter.locktype = holder.locktype "
-                        "AND waiter.database IS NOT DISTINCT FROM holder.database "
-                        "AND waiter.classid IS NOT DISTINCT FROM holder.classid "
-                        "AND waiter.objid IS NOT DISTINCT FROM holder.objid "
-                        "AND waiter.objsubid IS NOT DISTINCT FROM holder.objsubid "
-                        "WHERE holder.locktype = 'advisory' AND holder.granted "
-                        "AND holder.mode = 'ExclusiveLock' AND holder.pid = :holder_pid "
-                        "AND holder.database = (SELECT oid FROM pg_database "
-                        "WHERE datname = current_database()) "
-                        "AND waiter.pid = :waiter_pid AND NOT waiter.granted "
-                        "AND waiter.mode = 'ShareLock' "
-                        "AND :holder_pid = ANY(pg_blocking_pids(waiter.pid))"
-                        ")"
-                    ),
-                    {"waiter_pid": waiter_pid, "holder_pid": holder_pid},
-                )
-                await observer.rollback()
-                if waiting:
-                    return True
-    except asyncio.TimeoutError:
-        return False
+async def _wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
+    """027 stage 2: `waiter_pid` queues on a lock `holder_pid` holds (row locks now; an advisory lock until then)."""
+    from tests.p019_locks_off import blocked_by
+
+    for _ in range(250):
+        if waiter_pid in {pid for pid, _locktype in await blocked_by(observer, holder_pid)}:
+            return True
+        await asyncio.sleep(0.02)
+    return False
 
 
 @pytest.mark.asyncio
@@ -201,12 +181,12 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         observer_session = TestingSessionLocal()
         for session in (clearing_session, payment_session):
             await session.connection(
-                execution_options={"isolation_level": "SERIALIZABLE"}
+                execution_options={"isolation_level": "READ COMMITTED"}
             )
             isolation = (
                 await session.execute(text("SHOW transaction_isolation"))
             ).scalar_one()
-            assert str(isolation).lower() == "serializable"  # 019 stage 5 (T1907): the only supported level
+            assert str(isolation).lower() == "read committed"  # 027 stage 2: the only supported level
         # THE PAYMENT'S OWN TIMEOUTS ARE WIDENED, and the reason is a measurement rather than a
         # convenience. This test deliberately parks the clearing inside its exclusive equivalent lock
         # and asserts that the payment WAITS and then succeeds, so the payment's budget has to cover
@@ -232,7 +212,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         clearing_service = ClearingService(clearing_session)
         payment_service = PaymentService(payment_session)
         original_policy = clearing_service._cycle_respects_auto_clearing
-        original_payment_shared = MoneyBoundary._acquire_shared_equivalent_locks_in_order
+        original_payment_shared = MoneyBoundary.lock_pair_lines
         payment_owner_attempted = asyncio.Event()
         payment_owner_pid: int | None = None
         clearing_work_pid: int | None = None
@@ -255,7 +235,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             _park_inside_the_money_transaction,
         )
 
-        async def _observe_payment_shared_lock(boundary, equivalent_ids):
+        async def _observe_payment_shared_lock(boundary, equivalent_ids):  # the payment's line locks
             nonlocal payment_owner_pid
             payment_owner_pid = int(
                 await boundary.session.scalar(text("SELECT pg_backend_pid()"))
@@ -265,7 +245,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
         monkeypatch.setattr(
             MoneyBoundary,
-            "_acquire_shared_equivalent_locks_in_order",
+            "lock_pair_lines",
             _observe_payment_shared_lock,
         )
 
@@ -286,7 +266,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
         )
         await asyncio.wait_for(payment_owner_attempted.wait(), timeout=5.0)
         assert payment_owner_pid is not None
-        payment_waiting = await _wait_for_matching_advisory_wait(
+        payment_waiting = await _wait_until_blocked(
             observer_session,
             waiter_pid=payment_owner_pid,
             holder_pid=clearing_work_pid,
@@ -297,7 +277,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             else None
         )
         assert payment_waiting, (
-            "payment's shared lock did not wait on the clearing's exclusive lock: "
+            "payment's line lock did not wait on the clearing's line lock: "
             f"done={payment_task.done()} error={payment_error!r}"
         )
         assert not clearing_task.done()

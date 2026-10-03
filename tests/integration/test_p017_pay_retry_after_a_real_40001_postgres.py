@@ -49,7 +49,7 @@ from tests.integration.test_p015_p1_money_replay_postgres import (
 @pytest_asyncio.fixture
 async def factory(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=5, max_overflow=0, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=5, max_overflow=0, isolation_level="READ COMMITTED"
     )
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE p017_retry_probe (id INTEGER PRIMARY KEY, v TEXT)"))

@@ -34,6 +34,13 @@ CONTROLS, asserted normally: the database error behind every attempt's failure c
 `event=payment.uow_retry`); every competitor committed (producer progress); the client got `409 E008`
 with `retryable: true`; a fresh `tx_id` afterwards pays, so the path is not simply broken.
 
+027 STAGE 2 (`T2704`, 2026-10-03): READ COMMITTED raises no `40001`, so the SSI schedules above are history and
+the `prepare` cell left with them. The real conflict is now a DEADLOCK (`40P01`) in the money phase, one per
+attempt: the subject holds its pair's lines and waits for the equivalent row `FOR SHARE`, which a competitor has
+updated; only then does the competitor ask for the subject's lines. The subject waited first, so its own
+deadlock check (`deadlock_timeout`, 1 s) finds the cycle and PostgreSQL aborts the subject; the competitor then
+commits. Same controls, with `40P01`.
+
 THE TARGET (FORK-4), PASSING SINCE `T1905`: no row after the exhausted conflict, and the resubmission
 executes and commits. `TargetMismatch` after the controls. Until `T1905` a characterization pinned the
 hypothesis - the row `ABORTED` with the retryable error, replayed without executing - on prepare AND on
@@ -45,17 +52,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text, update
+from sqlalchemy import select, text, update
 
 from app.config import settings
-from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.equivalent import Equivalent
+from app.db.models.trustline import TrustLine
 from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` are fixtures
     ApiWorld,
     api,
@@ -68,7 +75,7 @@ from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` a
 )
 from tests.p019_support import require_target
 
-PHASES = ["prepare", "commit"]
+PHASES = ["commit"]
 
 
 @dataclass
@@ -81,103 +88,18 @@ class _Stand:
     subject_held_shared: list[bool] = field(default_factory=list)
 
 
-async def backend_holds_shared_equivalent_lock(factory, pid: int, equivalent_id) -> bool:  # noqa: F811
-    """Backend `pid` holds THIS equivalent's lock, granted, in shared mode. Observed on its own connection."""
-
+async def _blocks(factory, blocker: int, waiter: int) -> bool:  # noqa: F811
     async with factory() as observer:
-        return bool(
-            await observer.scalar(
-                text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted "
-                    "AND mode = 'ShareLock' AND pid = :pid AND objsubid = 2 "
-                    "AND classid::bigint = :namespace AND objid::bigint = :key)"
-                ),
-                {
-                    "pid": pid,
-                    "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE & 0xFFFFFFFF,
-                    "key": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
-                },
-            )
-        )
-
-
-def _install_prepare_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
-    """One competing payment Alice -> Carol per attempt of the subject's prepare (see docstring)."""
-
-    # 019 stage 4: the binding phase of the direct execution (the engine's prepare before); the flag
-    # goes on the service's money boundary, whose lock primitive the stand wraps.
-    original_prepare = PaymentService._bind_payment
-    original_shared = MoneyBoundary._acquire_shared_equivalent_locks_in_order
-
-    async def prepare(self, tx_id, *args, **kwargs):
-        if tx_id != stand.subject_tx:
-            return await original_prepare(self, tx_id, *args, **kwargs)
-        self._boundary._p019_subject_prepare = True
-        try:
-            return await original_prepare(self, tx_id, *args, **kwargs)
-        finally:
-            self._boundary._p019_subject_prepare = False
-
-    # Since 019 stage 4 the subject's binding phase writes no reservation, so the read-write cycle no
-    # longer closes over `prepare_locks` inside it: it closes over the DEBTS - the competitor's
-    # committed Alice -> Carol debt against the subject's reads of Alice's positions from its older
-    # snapshot (the net-position snapshot and the integrity checkpoint of its money phase). The
-    # conflict is recorded where it now surfaces: anywhere in the subject's payment operation.
-    original_operation = PaymentService._run_payment_operation
-
-    async def operation(self, attempt, **kwargs):
-        try:
-            return await original_operation(self, attempt, **kwargs)
-        except BaseException as exc:
-            if attempt.tx_id == stand.subject_tx:
-                stand.sqlstates.append(_payment_db_sqlstate(exc))
-            raise
-
-    async def competitor_pays(tx_id: str) -> str:
-        async with factory() as session:
-            result = await PaymentService(session).create_payment_internal(
-                world.ids[world.alice["pid"]],
-                to_pid=world.carol["pid"],
-                equivalent=world.code,
-                amount="1.00",
-                idempotency_key=tx_id,
-            )
-        return result.status
-
-    async def shared_lock(self, equivalent_ids):
-        await original_shared(self, equivalent_ids)
-        if not getattr(self, "_p019_subject_prepare", False):
-            return
-        # 019 stage 5 (`T1909`): the payment's equivalent lock is SHARED, so the competitor no longer
-        # holds the subject off - both are inside it at once. The subject's snapshot was fixed by its first
-        # statement (routing, admission) and is older than anything the competitor writes; the whole
-        # competitor runs to its commit HERE, while the subject holds its shared lock and has read no
-        # position yet. One competitor at a time, each run to its end before the next starts:
-        # competitors that overlap each other conflict AMONG THEMSELVES (measured 2026-09-25: a
-        # competitor's routing transaction was cancelled as an SSI pivot against the previous
-        # competitor's commit phase), which is contention too, but not the one this stand is about.
-        for previous in stand.competitors:
-            await asyncio.wait_for(asyncio.shield(previous), timeout=30)
-        pid = int(await self.session.scalar(text("SELECT pg_backend_pid()")))
-        competitor = asyncio.create_task(competitor_pays(str(uuid.uuid4())))
-        stand.competitors.append(competitor)
-        await asyncio.wait_for(asyncio.shield(competitor), timeout=30)
-        # Premise (it replaces "the subject queued on the competitor's owner lock"): the competitor ran
-        # its whole payment while the subject held the same equivalent lock, shared and granted.
-        stand.subject_held_shared.append(
-            await backend_holds_shared_equivalent_lock(factory, pid, world.equivalent_id)
-        )
-
-    monkeypatch.setattr(PaymentService, "_bind_payment", prepare)
-    monkeypatch.setattr(PaymentService, "_run_payment_operation", operation)
-    monkeypatch.setattr(MoneyBoundary, "_acquire_shared_equivalent_locks_in_order", shared_lock)
+        return bool(await observer.scalar(text("SELECT CAST(:b AS int) = ANY(pg_blocking_pids(:w))"),
+                                          {"b": blocker, "w": waiter}))
 
 
 def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
-    """A concurrent UPDATE of the equivalent row behind each commit attempt's snapshot."""
+    """A real deadlock per money-phase attempt of the subject (see the docstring, 027 stage 2)."""
 
     original_commit = PaymentService._apply_payment  # the money phase (019 stage 4)
     original_guard = MoneyBoundary.refuse_inactive_equivalents
+    pair = (world.ids[world.alice["pid"]], world.ids[world.bob["pid"]])
 
     async def commit(self, declaration, *args, **kwargs):
         if declaration.tx_id != stand.subject_tx:
@@ -191,16 +113,26 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
         finally:
             self._boundary._p019_subject_commit = False
 
+    async def competitor(subject_pid: int, holding: asyncio.Event) -> str:
+        async with factory() as other:
+            stand.touches += 1
+            await other.execute(update(Equivalent).where(Equivalent.id == world.equivalent_id)
+                                .values(description=f"p027-touch-{stand.touches}"))
+            me = int(await other.scalar(text("SELECT pg_backend_pid()")))
+            holding.set()
+            while not await _blocks(factory, me, subject_pid):  # the subject waits on the row first
+                await asyncio.sleep(0.02)
+            await other.execute(select(TrustLine.id).where(TrustLine.from_participant_id.in_(pair),
+                                                           TrustLine.to_participant_id.in_(pair)).with_for_update())
+            await other.commit()
+            return "COMMITTED"
+
     async def guard(self, equivalent_ids):
         if getattr(self, "_p019_subject_commit", False):
-            stand.touches += 1
-            async with factory() as other:
-                await other.execute(
-                    update(Equivalent)
-                    .where(Equivalent.id == world.equivalent_id)
-                    .values(description=f"p019-touch-{stand.touches}")
-                )
-                await other.commit()
+            holding = asyncio.Event()
+            pid = int(await self.session.scalar(text("SELECT pg_backend_pid()")))
+            stand.competitors.append(asyncio.create_task(competitor(pid, holding)))
+            await holding.wait()
         return await original_guard(self, equivalent_ids)
 
     monkeypatch.setattr(PaymentService, "_apply_payment", commit)
@@ -221,10 +153,7 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
     body = payment_body(world, world.alice, world.bob, "10.00")
     stand = _Stand(phase, body["tx_id"])
     with monkeypatch.context() as patched:
-        if phase == "prepare":
-            _install_prepare_conflict(patched, factory, world, stand)
-        else:
-            _install_commit_conflict(patched, factory, world, stand)
+        _install_commit_conflict(patched, factory, world, stand)
         try:
             with caplog.at_level(logging.WARNING, logger="app.core.payments.service"):
                 first = await asyncio.wait_for(
@@ -239,23 +168,16 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
     # ── controls: the conflict was the one this stand builds, and pay() spent its budget on it ──
     budget = int(settings.COMMIT_RETRY_ATTEMPTS)
     assert budget >= 2, f"premise: pay() retries nothing ({budget})"
-    assert stand.sqlstates == ["40001"] * budget, stand.sqlstates
+    assert stand.sqlstates == ["40P01"] * budget, stand.sqlstates
     retries = [
         r.getMessage()
         for r in caplog.records
         if "event=payment.attempt_retry " in r.getMessage()
     ]
     assert len(retries) == budget - 1 and all(
-        "pgcode=40001" in m and "where=execute" in m for m in retries
+        "pgcode=40P01" in m and "where=execute" in m for m in retries
     ), retries
-    if phase == "prepare":
-        assert competitor_results == ["COMMITTED"] * budget, competitor_results
-        assert stand.subject_held_shared == [True] * budget, (
-            "premise: each competitor committed while the subject held the same equivalent lock, shared",
-            stand.subject_held_shared,
-        )
-    else:
-        assert stand.touches == budget, stand.touches
+    assert stand.touches == budget and competitor_results == ["COMMITTED"] * budget, competitor_results
     assert first.status_code == 409, first.text
     error = first.json()["error"]
     assert error["code"] == "E008", error

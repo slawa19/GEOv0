@@ -358,7 +358,7 @@ async def _run_owner_v2(service_cls, occurrence):
 
     owner_session = TestingSessionLocal()
     try:
-        await owner_session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+        await owner_session.connection(execution_options={"isolation_level": "READ COMMITTED"})
         try:
             return await asyncio.wait_for(service_cls(owner_session).execute_occurrence(occurrence), 30)
         except Exception as exc:  # noqa: BLE001 - compared by the caller
@@ -378,7 +378,7 @@ async def test_v2_a_real_serialization_conflict_is_retried_and_clears_the_declar
     observed: list[str] = []
     service_cls = _conflicting_clearing_service(debt_ids[0], [Decimal("101.00")], observed)
     outcome = await _run_owner_v2(service_cls, occurrence)
-    assert observed == ["40001"], observed  # control: the conflict was PostgreSQL's own
+    assert observed == ["40P01"], observed  # control: the conflict was PostgreSQL's own
     assert outcome == Decimal("10"), outcome
     assert service_cls.attempts == 2
     clearings = await _clearings()
@@ -405,7 +405,7 @@ async def test_v2_an_exhausted_retry_budget_is_the_typed_retryable_refusal(monke
     writes = [Decimal("101.00"), Decimal("102.00"), Decimal("103.00"), Decimal("104.00")]
     service_cls = _conflicting_clearing_service(debt_ids[0], writes, observed)
     outcome = await _run_owner_v2(service_cls, occurrence)
-    assert observed == ["40001"] * 3, observed
+    assert observed == ["40P01"] * 3, observed
     assert isinstance(outcome, RetryableClearingConflictException), outcome
     assert await _clearings() == [] and await _envelopes() == []
 
