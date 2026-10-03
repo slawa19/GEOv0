@@ -207,6 +207,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if problems:
         reporter = session.config.pluginmanager.get_plugin("terminalreporter")
         if reporter is not None:
+            reporter.ensure_newline()
             for problem in problems:
                 reporter.write_line(f"tooling tier: {problem}", red=True, bold=True)
 
