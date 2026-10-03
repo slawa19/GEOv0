@@ -166,7 +166,7 @@ def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decim
 
     observed: list[Decimal | None] = []
 
-    async def _delta_check_reports_drift(self, *, equivalent_id, flows, net_positions_before):
+    async def _delta_check_reports_drift(self, *, equivalent_id, flows, net_positions_before, pairs=None):
         # `self` is the money boundary (since 019 stage 4 the service's own, not the engine).
         from app.core.ledger.book import _get_debt
 

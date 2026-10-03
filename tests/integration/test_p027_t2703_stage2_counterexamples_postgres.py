@@ -2,13 +2,9 @@
 
 Each stand is a real schedule (barriers in the writers' own code, no injected SQLSTATE) and runs in cells:
 
-* `rc` - the code as it ships since `T2704` (027 stage 2): READ COMMITTED, the line locks, guard on. MUST
-  PASS. Until `T2704` this cell was `naive_rc` - the same sessions with the guard bypassed and the code of
-  019 (SERIALIZABLE guard, equivalent lock) - and failed every stand with `TargetMismatch` (Changelog
-  `T2703`); the `serializable` cell (the 019 code as it shipped) left with that code.
-* `naive_rr` (opposite payments only) - REPEATABLE READ with the guard bypassed, which the spec forbids: the
-  snapshot predates the lock wait, so even with the line locks it must stay broken
-  (`xfail(raises=TargetMismatch, strict=True)`). That is why the guard refuses it.
+* `rc` - the code as it ships since `T2704`: MUST PASS. Until then `naive_rc` (019 code, guard bypassed) failed
+  every stand with `TargetMismatch` (Changelog `T2703`).
+* `naive_rr` - REPEATABLE READ, guard bypassed: the snapshot predates the lock wait, so it stays broken (xfail).
 
 THE EXPECTED FAILURE IS NARROW. Mechanism checks are plain `assert`s (a broken stand goes red, never
 xfail): the transaction level each writer actually ran at (`SHOW transaction_isolation`, read by the
@@ -124,8 +120,7 @@ def _meet_before_commit(monkeypatch, barrier: _Barrier) -> None:
 
 
 def _overlapped(rig: Rig, barrier: _Barrier) -> None:
-    """The first writer reached the barrier and timed out there: the other was held up on a line lock until the
-    first committed (it arrives only afterwards). No 40001 was counted - the same pair waits, it does not conflict."""
+    """The first writer timed out at the barrier: the other waited on a line lock. No 40001 - the pair waits."""
     assert barrier.timed_out, "the writers met: no line lock held the second one up"
     assert rig.conflicts.serialization_failures == 0, rig.conflicts
 

@@ -1,11 +1,7 @@
 """Programme 019 stage 5 (`T1907`, `FORK-2`; spec, Verification plan §1 №7): every writer whose invariant
 leans on SERIALIZABLE refuses a transaction that is not, BEFORE its first write.
 
-REVERSED BY 027 STAGE 2 (`T2704`, 2026-10-03; spec 027, "Намеренная замена ожиданий"): the money writers run
-READ COMMITTED behind their line locks and refuse a transaction whose snapshot predates its lock waits -
-REPEATABLE READ and SERIALIZABLE (`require_read_committed`, reason `isolation_not_read_committed`). The admin
-endpoints are no longer guarded (they take the equivalent row `FOR UPDATE`), so they left the writer list. The
-text below is the 019 history; "READ COMMITTED" in it reads as "the refused level".
+REVERSED BY 027 STAGE 2 (`T2704`): the refused levels are REPEATABLE READ and SERIALIZABLE; admin is not guarded.
 
 WHY. Stage 5 may remove the advisory coordination only if every invariant-relevant money writer runs at
 SERIALIZABLE (spec, "Изоляция, писатели и клиринг", item 2): the inject's one-direction-per-pair check

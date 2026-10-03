@@ -1,9 +1,6 @@
 """Two payments over one 10-capacity bottleneck: one commits, the other is refused `E002`.
 
-027 stage 2 (`T2704`, 2026-10-03): no equivalent lock, no SERIALIZABLE - the two payments share the bottleneck's
-pair, so the second QUEUES on the first's line rows again (named by `pg_blocking_pids`) while the first is parked
-after its pre-state, and reads the first's debt after its commit: no retry, one `E002`. The text below is the
-019 history; the result assertions are unchanged.
+027 stage 2 (`T2704`): the second payment queues on the first's line rows; no retry. The text below is history.
 
 019 stage 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`). Until then the two payments were serialised by the
 equivalent owner lock, and this test held the first inside it while the second queued. Payments now take

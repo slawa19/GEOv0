@@ -71,7 +71,7 @@ async def serializable_factory(committed_database):
         pool_size=4,
         max_overflow=0,
         pool_timeout=10,
-        isolation_level="READ COMMITTED",
+        isolation_level="SERIALIZABLE",
     )
     factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     try:

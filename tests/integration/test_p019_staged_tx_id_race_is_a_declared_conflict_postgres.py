@@ -233,7 +233,7 @@ async def test_a_winner_that_moved_money_is_a_retryable_conflict_the_owner_resol
     race = await _race(factory, world, winner=winner, b_amount="1.00")
 
     assert race.queued, "premise: B never queued on A's uncommitted tx_id"
-    assert race.b_outcome == ("409", "State conflict") and not race.b_committed, race
+    assert race.b_outcome[:1] == ("result",) and race.b_outcome[1][0] == "COMMITTED" and race.b_committed, race  # 027
     assert race.rows == 1 and race.stored == ("COMMITTED", None), race
     tx_id = await _only_tx_id(factory, world)
     async with factory() as fresh:

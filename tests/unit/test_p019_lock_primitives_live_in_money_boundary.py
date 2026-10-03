@@ -1,9 +1,6 @@
 """019 `T1903`/`T1909`: the one equivalent lock lives in `app/core/money_boundary.py`; the removed ones stay removed.
 
-027 STAGE 2 (`T2704`, 2026-10-03): the equivalent advisory lock in both modes, its namespace, key and timeout,
-`require_serializable` and the clearing's interlock are REMOVED too (they join `REMOVED_NAMES`); the home now
-holds the line locks (`lock_pair_lines`, `lock_lines_among`) and `require_read_committed`, and `app/` spells no
-advisory-lock SQL at all. The text below is the 019 history.
+027 STAGE 2 (`T2704`): the advisory lock, `require_serializable` and the interlock joined `REMOVED_NAMES`.
 
 WHY. Stage 4 of 019 deleted `app/core/payments/engine.py` (`T1906`). The lock primitives (owner, staged owner,
 session owner, transaction and pair locks, their keys and namespaces), the stop/hold guard with its refusal
@@ -71,8 +68,7 @@ MOVED = frozenset(
 )
 MODULE_CONSTANTS = frozenset({"_DELTA_DRIFT_TOLERANCE"})
 KEY_FUNCTIONS: frozenset = frozenset()
-#: The removed namespace tags (equivalent, transaction), never spelled as int literals here - a literal in this
-#: file would be the very finding it looks for. No module, the home included, may spell them (027 stage 2).
+#: The removed namespace tags, never spelled as int literals here; no module may spell them (027 stage 2).
 NAMESPACE_TAGS = frozenset({int("474551", 16), int("475458", 16)})
 
 #: The names stage 5 REMOVED (`T1909`): the transaction and pair locks, their keys and namespace, the old

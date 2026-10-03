@@ -1,10 +1,6 @@
 """Programme 019 stage 5, `T1908`: the EXPERIMENTS that gate the removal of the advisory locks (`T1909`).
 
-027 STAGE 2 (`T2704`, 2026-10-03): the advisory locks are gone and the money writers run READ COMMITTED behind
-the line locks, so the two modes collapse into ONE cell, `rc` - the code that ships - and schedules (a), (b) and
-the bottleneck stay as counterexamples it must pass (the second writer queues on the first's line rows). (c)
-now refuses the snapshot levels (`test_p019_money_writers_refuse_non_serializable_postgres.py`). The text below
-is the 019 history.
+027 STAGE 2 (`T2704`): one cell, `rc` (the code that ships); (c) refuses the snapshot levels.
 
 NOT A GATE OF THE CURRENT CODE - a measurement that decides a fork (spec, Verification plan: "эксперимент").
 Marked `slow`, so the default tier never runs it; re-run it with
@@ -332,7 +328,7 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
     assert invariants["over_limit"] == {} and invariants["both_directions"] == []
     assert len(clearings) == 1 and clearings[0].state == "COMMITTED"
     assert payment_row == "COMMITTED"
-    assert audits == [("CLEARING", True), ("PAYMENT", True)], audits
+    assert audits == [("CLEARING", None), ("PAYMENT", None)], audits  # 024 `T2413.2`: the audit row runs no check
     assert envelopes == [("CLEARING", "COMPLETED"), ("PAYMENT", "COMPLETED")], envelopes
 
 

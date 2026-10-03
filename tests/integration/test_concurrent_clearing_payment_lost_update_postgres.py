@@ -1,8 +1,6 @@
 """PostgreSQL clearing/payment contention on one trustline.
 
-027 stage 2 (`T2704`, 2026-10-03): no equivalent lock - the parked clearing holds the lines of its cycle's pairs
-`FOR UPDATE`, and the payment's line lock (`MoneyBoundary.lock_pair_lines`) queues behind that exact backend
-(`pg_blocking_pids`). The text below is the 019 history; the effects asserted are unchanged.
+027 stage 2 (`T2704`): the payment queues on the parked clearing's line rows. The text below is history.
 
 019 stage 5 (`T1909`, `KEEP-EQUIVALENT-LOCK`): the clearing holds the ONE equivalent lock EXCLUSIVELY on its
 pinned connection, a payment takes it SHARED. The schedule parks the clearing inside its money transaction
@@ -37,10 +35,11 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 async def _wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
     """027 stage 2: `waiter_pid` queues on a lock `holder_pid` holds (row locks now; an advisory lock until then)."""
-    from tests.p019_locks_off import blocked_by
-
     for _ in range(250):
-        if waiter_pid in {pid for pid, _locktype in await blocked_by(observer, holder_pid)}:
+        blocked = await observer.scalar(text("SELECT CAST(:h AS int) = ANY(pg_blocking_pids(:w))"),
+                                        {"h": holder_pid, "w": waiter_pid})
+        await observer.rollback()
+        if blocked:
             return True
         await asyncio.sleep(0.02)
     return False
@@ -237,10 +236,9 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
 
         async def _observe_payment_shared_lock(boundary, equivalent_ids):  # the payment's line locks
             nonlocal payment_owner_pid
-            payment_owner_pid = int(
-                await boundary.session.scalar(text("SELECT pg_backend_pid()"))
-            )
-            payment_owner_attempted.set()
+            if boundary.session is payment_session:  # 027 stage 2: the clearing calls it too
+                payment_owner_pid = int(await boundary.session.scalar(text("SELECT pg_backend_pid()")))
+                payment_owner_attempted.set()
             return await original_payment_shared(boundary, equivalent_ids)
 
         monkeypatch.setattr(

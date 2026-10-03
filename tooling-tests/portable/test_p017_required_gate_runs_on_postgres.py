@@ -74,8 +74,7 @@ _CONCURRENCY_SELECTORS = (
     "::test_concurrent_payment_and_clearing_same_trustline_preserve_effects_postgres",
     "tests/integration/test_payment_idempotency_postgres.py"
     "::test_concurrent_duplicate_payment_request_never_regresses_terminal_state_postgres",
-    # 027 stage 2 (`T2704`, 2026-10-03; until then 019 `T1909`'s equivalent-lock modes): the line locks of one
-    # pair against each writer kind, and the clearing's retry owner - named one by one for the same reason.
+    # 027 stage 2 (`T2704`): the line locks of one pair against each writer kind (was 019's lock modes).
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
     "::test_opposite_payments_on_a_fresh_pair_keep_one_direction",
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
@@ -86,12 +85,8 @@ _CONCURRENCY_SELECTORS = (
     "::test_seed_never_commits_after_a_baseline_that_missed_it",
     "tests/integration/test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py"
     "::test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner",
-    "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"
-    "::test_the_api_payment_retries_a_concurrent_insert_of_its_debt_row",
-    "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"
-    "::test_the_money_phase_replays_a_concurrent_insert_of_a_staged_debt_row",
-    "tests/integration/test_p019_debt_pair_insert_race_is_retried_postgres.py"
-    "::test_the_inject_retries_a_concurrent_insert_of_its_debt_row",
+    "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
+    "::test_first_debt_race_leaves_one_winner_and_a_definitive_refusal",  # 027: the insert race, queued
 )
 
 _SCHEDULED_ONLY = re.compile(

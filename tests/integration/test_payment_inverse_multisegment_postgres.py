@@ -18,10 +18,7 @@ evidence that now decides the race (`T1908`):
   refuses it with `40001`, counted by the retry owner (`PaymentService.pay` -> `_retry_or_none`), and the
   holder's whole attempt runs again on a fresh snapshot (its pre-state read twice).
 
-027 STAGE 2 (`T2704`, 2026-10-03): the equivalent lock and SERIALIZABLE are gone; the two payments share both pairs,
-so the waiter QUEUES on the holder's line locks again (PostgreSQL names the holder among its blockers, read from
-`pg_blocking_pids`), never reaches its pre-state while the holder is parked, and reads after the holder's commit:
-no conflict, one pre-state read each. The SSI evidence above is the 019 history.
+027 STAGE 2 (`T2704`): the waiter queues on the holder's line rows again; no conflict. The SSI text is history.
 
 The result assertions are the stage-4 ones unchanged: both `COMMITTED`, debts 1/1, two `PAYMENT` audit rows,
 all four limits intact. The reservation count (vacuous since stage 4) went with the table (migration `031`).

@@ -45,7 +45,7 @@ from tests.p019_support import allow_below_serializable_for_a_diagnostic
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_step5a_reconciliation_postgres import _sqlstates
-from tests.integration.test_p015_t1544_operator_stop_races_postgres import _advisory_waiter_exists
+from tests.integration.test_p015_t1544_operator_stop_races_postgres import _waiters_behind
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - fixture, requested by `factory`
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
@@ -220,7 +220,7 @@ async def test_step5b_p_the_prestate_read_follows_every_advisory_lock_and_the_fo
         event.remove(engine.sync_engine, "before_cursor_execute", _record)
     assert await _tx_state(factory, tx_id) == "COMMITTED"
 
-    locks = [i for i, s in enumerate(statements) if "PG_ADVISORY_XACT_LOCK" in s]
+    locks = [i for i, s in enumerate(statements) if " FROM TRUST_LINES " in f"{s} " and s.endswith("FOR UPDATE")]  # 027
     stops = [i for i, s in enumerate(statements) if s.startswith("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE")]
     envelopes = [i for i, s in enumerate(statements) if s.startswith("INSERT INTO DEBT_OPERATIONS")]
     assert locks and len(stops) == 1 and len(envelopes) == 1, "\n".join(statements)
@@ -308,34 +308,6 @@ async def _race_a_writer_into_the_prestate_window(factory, monkeypatch, payment_
 
 
 @pytest.mark.asyncio
-async def test_step5b_p_at_serializable_a_writer_outside_the_owner_lock_cannot_make_the_record_disagree(
-    factory, committed_database, monkeypatch
-) -> None:
-    """The application's isolation. The payment read B -> A = 3 and paused; a fixture moved it to 4 and
-    committed. MEASURED: the payment's own update of that row fails with 40001, the retry owner (`pay()`
-    since 019 stage 3, the engine's unit of work before) runs a new attempt, the pre-state is READ AGAIN (4),
-    and what is recorded is what is applied: no criterion (b) finding.
-
-    MUTATION: read the pre-state once, outside the retried unit of work (cache it across attempts) - the
-    retry applies to 4 what the record says was 3, criterion (b) FAILS, red.
-    """
-
-    engine, sessions = _serializable_sessions(committed_database.url)
-    seen = None
-    try:
-        seen = await _race_a_writer_into_the_prestate_window(factory, monkeypatch, sessions)
-        assert seen["error"] is None and seen["tx_state"] == "COMMITTED", seen
-        assert len(seen["reads"]) == 2, (
-            f"premise: the race did not force a retry of the commit, so this measured nothing: {seen['reads']}"
-        )
-        assert seen["reads"][0][("b", "a")] == "3.00000000" and seen["reads"][1][("b", "a")] == "4.00000000", seen
-        assert seen["edges"] == {("a", "b"): Decimal("1.00000000")}, seen["edges"]
-        assert unit._b_findings(seen["outcome"]) == [], seen["outcome"]
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
 async def test_step5b_p_stand_control_at_read_committed_the_same_race_does_make_the_record_disagree(
     factory, committed_database, monkeypatch
 ) -> None:
@@ -405,7 +377,7 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         # whole payment runs in the task.
         async def _read(session, declared_flows):
             result = await original(session, declared_flows)
-            reads.append(1)
+            reads.append(await session.scalar(text("SELECT pg_backend_pid()")))
             paused.set()
             await asyncio.wait_for(resume.wait(), timeout=60)
             return result
@@ -431,7 +403,7 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         try:
             await asyncio.wait_for(paused.wait(), timeout=60)
             clearing = asyncio.create_task(_clear())
-            assert await _advisory_waiter_exists(), "premise: the clearing did not wait on an advisory lock"
+            assert await _waiters_behind(reads[0]), "premise: the clearing did not queue on the payment's line rows"
             assert not clearing.done(), "the clearing finished inside the payment's pre-state window"
         finally:
             resume.set()
@@ -439,7 +411,7 @@ async def test_step5b_p_an_application_writer_waits_on_the_owner_lock_through_th
         cleared = await asyncio.wait_for(clearing, timeout=60)
         monkeypatch.undo()
 
-        assert reads == [1], f"premise: the payment did not pause exactly once at its pre-state read: {reads}"
+        assert len(reads) == 1, f"premise: the payment did not pause exactly once at its pre-state read: {reads}"
         assert await _tx_state(factory, paid[0]) == "COMMITTED"
         # Under v2 `execute_occurrence` returns the DECLARED amount (7, the occurrence's), whatever the rows hold: this
         # only confirms the occurrence executed with it. That the clearing ran on the state the payment left is

@@ -1,10 +1,6 @@
 """The staged payment path: a caller-owned transaction with several payments, and the staged owner lock.
 
-027 STAGE 2 (`T2704`, 2026-10-03): the second and third tests below are DROPPED with the contract they pinned -
-the shared equivalent advisory lock of the staged entry (`acquire_shared_equivalent_locks`) and the caller's
-`lock_timeout` it restored. The staged entry now locks the run's lines (`PaymentService.lock_staged_lines`); two
-phases over shared lines wait for each other by design, measured with the payments in
-`test_p027_t2703_stage2_counterexamples_postgres.py`.
+027 STAGE 2 (`T2704`): the 2nd and 3rd tests (the shared staged lock, its `lock_timeout`) are REMOVED with it.
 
 019 STAGE 4 (`T1906`; manifest `t1901-manifest.md` 5.1). The first test of this module,
 `test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_postgres`, is DROPPED: it seeded four

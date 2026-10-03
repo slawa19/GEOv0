@@ -200,9 +200,7 @@ async def test_cold_concurrent_payments_do_not_wait_on_their_own_pool(stand) -> 
             require_signature=False) for a, b in flows), return_exceptions=True)
     finally:
         await engine.dispose()
-    # 027 `T2704` (b): a witness of progress - at least one COMMITTED and a graph build - and the only allowed
-    # failure is the retryable database conflict (`E008` with `details.retryable`), not any `E008`. A pool
-    # timeout surfaces as E010/E007.
+    # 027 `T2704` (b): progress (a COMMITTED, a graph build); the only allowed failure is a retryable E008.
     committed = [o for o in outcomes if getattr(o, "status", None) == "COMMITTED"]
     failed = [o for o in outcomes if o not in committed and (getattr(o, "details", None) or {}).get("retryable") is not True]
     assert committed and stand["builds"] and not failed, (outcomes, stand["builds"])
@@ -210,9 +208,7 @@ async def test_cold_concurrent_payments_do_not_wait_on_their_own_pool(stand) -> 
 
 @pytest.mark.asyncio
 async def test_a_reroute_never_takes_a_graph_read_before_its_refusal(stand, monkeypatch) -> None:
-    """027 `T2704` (a): the cache offers the direct S->R; a leader's build READ before the direct line is exhausted
-    is still in flight when the next payment's bind refuses; the re-route must not take that graph (it would offer
-    S->R again and end E002) but build anew and find the detour S->M->R."""
+    """027 `T2704` (a): a re-route never takes the graph of a leader that read before the direct S->R was used up."""
     st, original, held = stand, PaymentRouter._build_graph_impl, asyncio.Event()
 
     async def read_then_hold(self, *a, **k):  # the leader: its read is done, it publishes only later

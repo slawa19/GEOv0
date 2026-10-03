@@ -404,9 +404,8 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
         # the deactivating PATCH answered while the payment was in flight (019 stage 5: no owner lock),
         # and its change was met by the payment's `FOR SHARE` as a real 40001 that pay() retried
         "stop_at_commit_patch_answered_in_flight": 200,
-        "stop_at_commit_retried": ["40001"],
-        # the hold behind the snapshot was met as a real 40001, and pay() retried the whole attempt
-        "hold_at_commit_retried": ["40001"],
+        "stop_at_commit_retried": [],  # 027 stage 2: the FOR SHARE waits and reads the change - no 40001, no retry
+        "hold_at_commit_retried": [],
         # the payment really waited on the PATCH's row lock
         "timeout_confirmed_rollback": True,
     }, premises

@@ -1678,7 +1678,7 @@ class ClearingService:
         # T1544, the binding read, `FOR SHARE` through the commit (see the method). After the
         # committed-execution shortcut above (an already-durable clearing stays reported), before
         # the Debt rows are locked and before any new execution work.
-        await self._refuse_if_equivalent_inactive({occurrence.equivalent_id})
+        await self._refuse_if_equivalent_inactive({row.equivalent_id for row in edges} or {occurrence.equivalent_id})
 
         try:
             debts = (

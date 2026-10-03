@@ -149,9 +149,7 @@ def test_a_postgresql_asyncpg_url_is_accepted_verbatim(monkeypatch) -> None:
     assert Settings(_env_file=None, ENV="dev").DATABASE_URL == url
 
 
-# DB_POSTGRES_ISOLATION_LEVEL: READ COMMITTED ONLY since 027 stage 2 (`T2704`, 2026-10-03): the money writers
-# read after their line locks, and a snapshot taken before the wait (REPEATABLE READ, SERIALIZABLE) reads stale
-# debt. Until then SERIALIZABLE ONLY (2026-09-25, programme 019 fix-delta P1-A) - the history below.
+# DB_POSTGRES_ISOLATION_LEVEL: READ COMMITTED ONLY since 027 stage 2 (`T2704`); the text below is the 019 history.
 #
 # Until this fence the setting was free. Trust decay, trust growth against a concurrent raise and the
 # trust-line reductions (simulator update, creditor PATCH) read debt without row locks and are correct
@@ -532,4 +530,3 @@ def test_non_dev_accepts_nonrepeating_secret_at_32_character_boundary(field: str
     configured = Settings(_env_file=None, ENV="prod", **values)
 
     assert getattr(configured, field) == boundary_secret
-

@@ -250,7 +250,7 @@ async def test_step5c_p_a_reaction_arriving_between_the_binding_and_the_money_ph
             payment.add_done_callback(lambda _t: completed.append("payment"))
             await asyncio.wait_for(prepared.wait(), timeout=20)
             assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
-            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == [], (
                 "premise: the parked payment does not hold the equivalent lock shared"
             )
 
@@ -270,9 +270,7 @@ async def test_step5c_p_a_reaction_arriving_between_the_binding_and_the_money_ph
 
         _assert_hold_refusal(refused_first.value, code)
         retries = _retries_on_40001(caplog, "payment.attempt_retry")
-        assert len(retries) == 1, (
-            f"premise: the refusal did not come through the payment's FOR SHARE 40001 and one retry: {retries}"
-        )
+        assert retries == [], f"027 stage 2: the FOR SHARE waits and reads the hold, no 40001: {retries}"
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING + _ATOM}
         assert await _transactions(factory, world) == {tx_id: "ABORTED"}
         assert await _hold_of(factory, world.equivalent.id) is not None
@@ -332,7 +330,7 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
         payment = asyncio.create_task(_pay(tx_id))
         payment.add_done_callback(lambda _t: completed.append("payment"))
         await asyncio.wait_for(checked.wait(), timeout=20)
-        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == [], (
             "premise: the parked payment does not hold the equivalent lock shared"
         )
 
@@ -475,7 +473,7 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
             clearing_pid = _assert_row_wait(
                 await _waiters_behind(reaction_pid[0]), what="the clearing", behind="the reaction's hold"
             )
-            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == ["ExclusiveLock"], (
+            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == [], (
                 "the backend queued on the hold's row does not hold the clearing's exclusive lock"
             )
             assert await _advisory_modes(reaction_pid[0], seed["equivalent_id"]) == [], (
@@ -489,9 +487,7 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
             with pytest.raises(ConflictException) as refused:
                 await asyncio.wait_for(clearing, timeout=30)
         _assert_hold_refusal(refused.value, seed["equivalent_code"])
-        assert _retries_on_40001(caplog, "clearing.attempt_retry"), (
-            "premise: the refusal did not come through the clearing's FOR SHARE 40001 and a fresh attempt"
-        )
+        assert not _retries_on_40001(caplog, "clearing.attempt_retry"), "027 stage 2: no 40001 at READ COMMITTED"
 
         async with factory() as verify:
             debts = {
@@ -564,7 +560,7 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
         )
         clearing = asyncio.create_task(service.execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(paused.wait(), timeout=20)
-        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == ["ExclusiveLock"], (
+        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == [], (
             "premise: the parked clearing does not hold its exclusive equivalent lock"
         )
 

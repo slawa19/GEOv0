@@ -34,12 +34,7 @@ CONTROLS, asserted normally: the database error behind every attempt's failure c
 `event=payment.uow_retry`); every competitor committed (producer progress); the client got `409 E008`
 with `retryable: true`; a fresh `tx_id` afterwards pays, so the path is not simply broken.
 
-027 STAGE 2 (`T2704`, 2026-10-03): READ COMMITTED raises no `40001`, so the SSI schedules above are history and
-the `prepare` cell left with them. The real conflict is now a DEADLOCK (`40P01`) in the money phase, one per
-attempt: the subject holds its pair's lines and waits for the equivalent row `FOR SHARE`, which a competitor has
-updated; only then does the competitor ask for the subject's lines. The subject waited first, so its own
-deadlock check (`deadlock_timeout`, 1 s) finds the cycle and PostgreSQL aborts the subject; the competitor then
-commits. Same controls, with `40P01`.
+027 STAGE 2 (`T2704`): the conflict is a real deadlock (`40P01`) in the money phase (`_install_commit_conflict`).
 
 THE TARGET (FORK-4), PASSING SINCE `T1905`: no row after the exhausted conflict, and the resubmission
 executes and commits. `TargetMismatch` after the controls. Until `T1905` a characterization pinned the
@@ -56,7 +51,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.core.money_boundary import MoneyBoundary
@@ -73,7 +68,7 @@ from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` a
     payment_body,
     tx_row,
 )
-from tests.p019_support import require_target
+from tests.p019_support import deadlock_after_the_wait, require_target
 
 PHASES = ["commit"]
 
@@ -86,12 +81,6 @@ class _Stand:
     competitors: list[asyncio.Task] = field(default_factory=list)
     touches: int = 0
     subject_held_shared: list[bool] = field(default_factory=list)
-
-
-async def _blocks(factory, blocker: int, waiter: int) -> bool:  # noqa: F811
-    async with factory() as observer:
-        return bool(await observer.scalar(text("SELECT CAST(:b AS int) = ANY(pg_blocking_pids(:w))"),
-                                          {"b": blocker, "w": waiter}))
 
 
 def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
@@ -113,25 +102,20 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
         finally:
             self._boundary._p019_subject_commit = False
 
-    async def competitor(subject_pid: int, holding: asyncio.Event) -> str:
+    async def competitor(holding: asyncio.Event) -> str:
         async with factory() as other:
             stand.touches += 1
             await other.execute(update(Equivalent).where(Equivalent.id == world.equivalent_id)
                                 .values(description=f"p027-touch-{stand.touches}"))
-            me = int(await other.scalar(text("SELECT pg_backend_pid()")))
-            holding.set()
-            while not await _blocks(factory, me, subject_pid):  # the subject waits on the row first
-                await asyncio.sleep(0.02)
-            await other.execute(select(TrustLine.id).where(TrustLine.from_participant_id.in_(pair),
-                                                           TrustLine.to_participant_id.in_(pair)).with_for_update())
+            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
+                TrustLine.from_participant_id.in_(pair), TrustLine.to_participant_id.in_(pair)).with_for_update())
             await other.commit()
             return "COMMITTED"
 
     async def guard(self, equivalent_ids):
         if getattr(self, "_p019_subject_commit", False):
             holding = asyncio.Event()
-            pid = int(await self.session.scalar(text("SELECT pg_backend_pid()")))
-            stand.competitors.append(asyncio.create_task(competitor(pid, holding)))
+            stand.competitors.append(asyncio.create_task(competitor(holding)))
             await holding.wait()
         return await original_guard(self, equivalent_ids)
 

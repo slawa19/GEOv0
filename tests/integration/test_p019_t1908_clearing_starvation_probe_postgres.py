@@ -1,11 +1,6 @@
 """Programme 019 stage 5, `T1908` (d): CLEARING STARVATION under a continuous stream of successful payments.
 
-027 STAGE 2 (`T2704`, 2026-10-03): no equivalent lock and no SERIALIZABLE any more, so `locks_on`/`locks_off`
-collapse into `rc` (the code that ships, the same predeclared criterion: >= 90 % cleared in EVERY batch), and
-the positive control is ADAPTED: the switch it stood on is gone, and a snapshot gap starves nothing at READ
-COMMITTED. It now inverts the clearing's lock order - the cycle's debt rows `FOR UPDATE` BEFORE its lines, the
-order the `T2703` inventory removed - so a payment holding a line and writing its debt closes a deadlock the
-clearing (waiting first) loses; it must be SEEN to starve. The text below is the 019 history.
+027 STAGE 2 (`T2704`): one cell, `rc`; the positive control inverts the clearing's order (debts before lines).
 
 A PROBE, NOT A GATE: marked `slow`, never in the default tier. Re-run with
 

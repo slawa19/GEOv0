@@ -1,11 +1,6 @@
 """Programme 015, phase B step 3: every debt the simulator's inject writes is written under the owner lock.
 
-SINCE 027 STAGE 2 (`T2704`, 2026-10-03) THE OWNER LOCK IS THE LINE LOCKS: the equivalent advisory lock is gone,
-and what a debt write must hold is every non-closed line of its pair `FOR UPDATE` (the tick's money phase: every
-line among the run's participants). The listener reads it from `trust_lines.xmax` on the writing connection -
-the row is locked by THIS transaction when `xmax` is its own top-level xid (`pg_current_xact_id()`); a lock
-taken first inside a savepoint carries a subtransaction's xid and is NOT counted, which these writers never do
-(the inject and the tick lock at top level). The text below is the 015/019 history of the advisory form.
+027 STAGE 2 (`T2704`): the "owner lock" is the line locks, read from `trust_lines.xmax` (top-level xid only).
 
 WHAT IS WRONG TODAY. The equivalent owner lock is a transactional `pg_advisory_xact_lock`
 (`app/core/payments/engine.py`). The tick orchestrator takes it for the run's equivalents and then

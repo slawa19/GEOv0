@@ -281,4 +281,4 @@ async def test_a_freeze_committed_between_routing_and_binding(db_session, monkey
     require_target(not outcome.startswith("COMMITTED"),
                    f"after the freeze: {outcome}, attempts {len(seen)}, debts {[str(a) for a in left]}")
     # The mechanism, not only the outcome: the lock failed with 40001, the fresh attempt refused (re-routing).
-    assert [m for m in retried if "pgcode=40001" in m] and left == [Decimal("50")], (outcome, retried, left)
+    assert not retried and left == [Decimal("50")], (outcome, retried, left)  # 027: read after the lock, no 40001

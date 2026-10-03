@@ -1,12 +1,6 @@
 """PostgreSQL schedules for the shared clearing/payment boundary.
 
-027 STAGE 2 (`T2704`, 2026-10-03): the clearing's exclusive lock, its pinned connection and its interlock are
-REMOVED, and with them every schedule here that pinned them (the reverse payment waiting on the exclusive lock,
-the refusal of a connection-bound session, cancellation at checkout, inside the interlocked work, during the
-preflight, during the release, and the interlock timeout). What remains is the helper check and the clearing
-completing on a one-connection pool. A payment and a clearing over one edge now queue on its line rows:
-`test_p027_t2703_stage2_counterexamples_postgres.py::test_clearing_and_payment_on_a_shared_edge`. The text below
-is the 019 history.
+027 STAGE 2 (`T2704`): the interlock and every schedule of it are REMOVED; see spec 027, Changelog `T2704`.
 
 019 STAGE 4 (`T1906`). There is no `PaymentEngine` and no durable `PREPARED` payment any more: a
 payment is one transaction through `PaymentService`. The clearing-first schedule now races a whole

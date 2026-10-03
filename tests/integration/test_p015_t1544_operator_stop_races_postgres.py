@@ -48,7 +48,7 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
 
 from app.api.deps import get_db
 from app.config import settings
@@ -341,9 +341,7 @@ async def test_a_stop_arriving_between_the_binding_and_the_money_phase_answers_f
 
         _assert_stop_refusal(refused_first.value, code)
         retries = _retries_on_40001(caplog, "payment.attempt_retry")
-        assert len(retries) == 1, (
-            f"premise: the refusal did not come through the payment's FOR SHARE 40001 and one retry: {retries}"
-        )
+        assert retries == [], f"027 stage 2: the FOR SHARE waits and reads the stop, no 40001: {retries}"
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         assert await _transactions(factory, world) == {tx_id: "ABORTED"}
         assert await _is_active(factory, world.equivalent.id) is False
@@ -507,9 +505,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
             with pytest.raises(ConflictException) as refused:
                 await asyncio.wait_for(clearing, timeout=20)
         _assert_stop_refusal(refused.value, seed["equivalent_code"])
-        assert _retries_on_40001(caplog, "clearing.attempt_retry"), (
-            "premise: the refusal did not come through the clearing's FOR SHARE 40001 and a fresh attempt"
-        )
+        assert not _retries_on_40001(caplog, "clearing.attempt_retry"), "027 stage 2: no 40001 at READ COMMITTED"
 
         async with factory() as verify:
             debts = {
@@ -625,22 +621,17 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
             for r in caplog.records
             if "simulator.real.money_phase_replay " in r.getMessage()
         ]
-        assert len(replays) == 1, replays
-        assert "conflict=RETRYABLE_PAYMENT_CONFLICT" in replays[0], replays
-        assert len(plans) == 2 and len(plans[0]) >= 1, f"premise: no staged payment to race: {plans}"
-        assert outcomes == [
-            "RetryablePaymentConflictException",
-            f"ConflictException:{MoneyBoundary.EQUIVALENT_INACTIVE_REASON}",
-        ], outcomes
+        assert replays == [] and len(plans) == 1 and len(plans[0]) >= 1, (replays, plans)  # 027: refused, no replay
+        assert outcomes == ["result:ABORTED"], outcomes  # the staged definitive refusal, recorded
 
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-        assert await _transactions(factory, world) == {}
+        assert list((await _transactions(factory, world)).values()) == ["ABORTED"]
         # Nothing of the discarded attempt is published or counted; the replay's refusal is a rejection
         # of load, not an error of the run.
         assert sse.published("tx.updated") == 0
         assert run.committed_total == 0
         assert run.errors_total == 0
-        assert run._real_money_replays_total == 1
+        assert run._real_money_replays_total == 0  # 027 stage 2: no replay
         assert run._real_money_committed_ticks_total == 1
     finally:
         gate.release.set()
@@ -653,69 +644,6 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.wait([task], timeout=5)
-        _forget_the_route_cache(world)
-
-
-@pytest.mark.asyncio
-async def test_a_commit_guard_conflict_on_every_attempt_exhausts_the_budget_without_money(
-    factory, monkeypatch, caplog
-) -> None:
-    """Boundedness: every attempt's staged commit meets `40001` on the `FOR SHARE` row lock.
-
-    After each attempt's debt snapshot, a competitor updates the equivalent row (a column other than
-    `is_active`, so the stop never becomes true). The replay must stop after exactly the configured
-    number of attempts and record a tick without progress. RED if another attempt is allowed.
-    """
-    world = await _seed(factory)
-    try:
-        sse = _Sse()
-        run = _run_record(world, f"t1544-pg-bound-{uuid.uuid4().hex[:8]}")
-        runner = _runner(run, _scenario(world), sse)
-        _install(monkeypatch, factory)
-        _record_plans(monkeypatch, runner)
-        outcomes = _record_staged_outcomes(monkeypatch)
-        attempts_allowed = int(runner._real_money_replay_attempts_limit)
-        assert attempts_allowed >= 2, f"premise: the replay is disabled ({attempts_allowed})"
-
-        touches: list[int] = []
-        original_snapshot = runner._load_debt_snapshot_by_pid
-
-        async def _snapshot_then_touch_the_equivalent(session, participants, equivalents):
-            snapshot = await original_snapshot(session, participants, equivalents)
-            async with factory() as other:
-                await other.execute(
-                    update(Equivalent)
-                    .where(Equivalent.id == world.equivalent.id)
-                    .values(description=f"t1544-touch-{len(touches)}")
-                )
-                await other.commit()
-            touches.append(1)
-            return snapshot
-
-        monkeypatch.setattr(
-            runner, "_load_debt_snapshot_by_pid", _snapshot_then_touch_the_equivalent
-        )
-
-        with caplog.at_level(logging.WARNING):
-            await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
-
-        assert len(touches) == attempts_allowed, (touches, attempts_allowed)
-        assert outcomes == ["RetryablePaymentConflictException"] * attempts_allowed, outcomes
-        exhausted = [
-            r.getMessage()
-            for r in caplog.records
-            if "simulator.real.money_phase_replay_exhausted" in r.getMessage()
-        ]
-        assert len(exhausted) == 1, exhausted
-        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-        assert await _transactions(factory, world) == {}
-        assert sse.published("tx.updated") == 0
-        assert run.errors_total == 0
-        assert run.last_error["code"] == "REAL_MODE_MONEY_CONFLICT_UNRESOLVED"
-        assert run._real_money_replay_exhausted_total == 1
-        assert run._real_consec_money_no_progress_ticks == 1
-        assert await _is_active(factory, world.equivalent.id) is True
-    finally:
         _forget_the_route_cache(world)
 
 
@@ -905,9 +833,7 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
             for r in caplog.records
             if "simulator.real.inject.transient_retry" in r.getMessage()
         ]
-        assert retries, (
-            "premise: the inject did not meet the FOR SHARE serialization failure before refusing"
-        )
+        assert not retries, "027 stage 2: the inject's FOR SHARE waits and reads the stop, no 40001"
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         async with factory() as fresh:
             envelopes = await fresh.scalar(

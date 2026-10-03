@@ -25,10 +25,11 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 async def _wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:
     """027 stage 2: `waiter_pid` queues on a lock `holder_pid` holds (row locks now; an advisory lock until then)."""
-    from tests.p019_locks_off import blocked_by
-
     for _ in range(250):
-        if waiter_pid in {pid for pid, _locktype in await blocked_by(observer, holder_pid)}:
+        blocked = await observer.scalar(text("SELECT CAST(:h AS int) = ANY(pg_blocking_pids(:w))"),
+                                        {"h": holder_pid, "w": waiter_pid})
+        await observer.rollback()
+        if blocked:
             return True
         await asyncio.sleep(0.02)
     return False
@@ -324,11 +325,7 @@ async def _seed_conflict_cycle(prefix: str):
 def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlstates: list[str]):
     """A `ClearingService` whose first `len(writes)` attempts each meet a concurrent committed write.
 
-    027 STAGE 2 (`T2704`): READ COMMITTED raises no 40001 - a write committed before the attempt's locks is simply
-    read - so the conflict is now a real DEADLOCK (`40P01`): right after the committed-occurrence read a writer
-    locks the debt row, waits until the attempt queues on it (after taking the cycle's lines), then asks for those
-    lines; the attempt waited first, so its deadlock check aborts IT, and the writer commits its amount. The text
-    below is the 019 history.
+    027 STAGE 2 (`T2704`): a real deadlock (`40P01`, `deadlock_after_the_wait`); the text below is history.
 
     THE SCHEDULE IS REAL. Each attempt's FIRST statement is the committed-occurrence read
     (`_committed_execution_amount`), which fixes the attempt's SERIALIZABLE snapshot; right after it, a
@@ -344,19 +341,15 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
     from tests.conftest import TestingSessionLocal
 
     from app.db.models.trustline import TrustLine
-    from tests.p019_locks_off import blocked_by
+    from tests.p019_support import deadlock_after_the_wait
 
     writers: list[asyncio.Task] = []
 
     async def write(attempt_no: int, holding: asyncio.Event) -> None:
-        async with TestingSessionLocal() as writer, TestingSessionLocal() as observer:
+        async with TestingSessionLocal() as writer:
             debt = await writer.get(Debt, debt_id, with_for_update=True)
-            me = int(await writer.scalar(text("SELECT pg_backend_pid()")))
-            holding.set()
-            while not await blocked_by(observer, me):  # the attempt queues on the debt row first
-                await asyncio.sleep(0.02)
-            await writer.execute(select(TrustLine.id).where(TrustLine.equivalent_id == debt.equivalent_id)
-                                 .with_for_update())
+            await deadlock_after_the_wait(writer, holding, select(TrustLine.id).where(
+                TrustLine.equivalent_id == debt.equivalent_id).with_for_update())
             # Declared: the journal asks every movement of money to name its operation.
             async with debt_fixture_setup(writer, label=f"concurrent-writer-{attempt_no}"):
                 debt.amount = writes[attempt_no - 1]

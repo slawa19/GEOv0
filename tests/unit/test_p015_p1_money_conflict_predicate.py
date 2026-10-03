@@ -67,6 +67,7 @@ def _sqlstate(error: BaseException) -> str | None:
 async def _real_serialization_failure(factory) -> DBAPIError:
     """A genuine 40001: a SERIALIZABLE reader updates a row another transaction changed and committed."""
     async with factory() as reader, factory() as writer:
+        await reader.connection(execution_options={"isolation_level": "SERIALIZABLE"})  # 027: RC raises no 40001
         # Both take their snapshot by reading the row.
         await reader.execute(text("SELECT v FROM probe WHERE id = 1"))
         await writer.execute(text("SELECT v FROM probe WHERE id = 1"))

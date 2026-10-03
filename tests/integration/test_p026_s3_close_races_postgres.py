@@ -23,8 +23,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
-import app.core.ledger.book as book_module
 from app.core.clearing.runner import run_clearing_pass
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import PaymentService
 from app.core.trustlines.service import TrustLineService
 from app.db.models.trustline import TrustLine
@@ -98,7 +98,7 @@ async def test_a_close_committed_between_routing_and_binding_is_completed_by_the
     require_target(attempts[:1] == ["active"] and repaid and status == "closed" and await _debts(factory, code) == {},
                    f"repaid {repaid}, line {status}, attempts {attempts}")
     assert audit == [("TRUST_LINE_CLOSE", "PAYMENT"), ("TRUST_LINE_CLOSE_REQUEST", None)], audit
-    assert [m for m in _retries(caplog, "payment.attempt_retry") if "pgcode=40001" in m], "no 40001 retry"
+    assert not _retries(caplog, "payment.attempt_retry"), "027 stage 2: the close is read after the line lock"
 
 
 @MODE_B
@@ -116,12 +116,9 @@ async def test_a_repayment_committed_after_the_close_snapshot_refuses_the_stale_
         except TargetMismatch as exc:  # the old code refuses the stale close on its stale debt
             await closer.rollback()
             outcome = str(exc)
-    stale = (outcome, await _status(factory, line_id), await _audit(factory, line_key))
-    async with factory() as fresh:
-        again = await _close(fresh, line_id, p["A"]["id"])
-    # Never a request left pending over a zero debt: the stale close fails 40001 and changes nothing.
-    require_target(stale == ("40001", "active", []) and again == "closed",
-                   f"stale close -> {stale}; a fresh close -> {again}")
+    stale = (outcome, await _status(factory, line_id), [op for op, _ in await _audit(factory, line_key)])
+    # 027 stage 2: the debt is read after the line lock - it is 0, so the line closes at once (until then 40001).
+    require_target(stale == ("closed", "closed", ["TRUST_LINE_CLOSE"]), f"close after the repayment -> {stale}")
 
 
 @MODE_B
@@ -131,21 +128,21 @@ async def test_a_close_committed_inside_a_clearing_is_completed_by_its_retry(
     caplog.set_level(logging.INFO)
     code, p, line_id, line_key, factory = await _stand(client, db_session)
     assert await _pay(factory, p["A"], p["C"], code, "50") and await _pay(factory, p["C"], p["B"], code, "50")
-    complete, injected = book_module._complete, []
+    lock, injected = MoneyBoundary.lock_pair_lines, []
 
-    async def close_then_complete(session, async_conn, op, operation_id):
-        if op.kind == "CLEARING" and not injected:  # the clearing's snapshot predates the request
+    async def close_then_lock(self, pairs):  # 027 stage 2: the request commits just before the clearing's lines
+        if not injected:
             injected.append(await _close_inside(factory, line_id, p["A"]["id"]))
-        return await complete(session, async_conn, op, operation_id)
+        return await lock(self, pairs)
 
-    monkeypatch.setattr(book_module, "_complete", close_then_complete)
+    monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", close_then_lock)
     result = await run_clearing_pass(factory, code)
     status = await _status(factory, line_id)
     audit = [(op, x.get("completed_by")) for op, x in await _audit(factory, line_key)]
     require_target(injected == ["active"] and status == "closed" and await _debts(factory, code) == {},
                    f"injected close {injected}; clearing {result.status} {len(result.committed)}; line {status}")
     assert audit == [("TRUST_LINE_CLOSE", "CLEARING"), ("TRUST_LINE_CLOSE_REQUEST", None)], audit
-    assert [m for m in _retries(caplog, "clearing.attempt_retry") if "40001" in m], "no 40001 retry"
+    assert not _retries(caplog, "clearing.attempt_retry"), "027 stage 2: the request is read after the line lock"
 
 
 @MODE_B
@@ -162,7 +159,7 @@ async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_r
     code, p, line_id, line_key, factory = await _stand(client, db_session)
     async with factory() as s:
         assert await _close(s, line_id, p["A"]["id"]) == "active"
-    debt_amount, segment, who = PaymentService._debt_amount, PaymentService._segment, contextvars.ContextVar("p")
+    debt_amount, segment, who = PaymentService._debt_amount, MoneyBoundary.lock_pair_lines, contextvars.ContextVar("p")
     p2_locked, release = asyncio.Event(), asyncio.Event()
 
     async def debt_amount_of(self, *args):
@@ -171,13 +168,13 @@ async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_r
             await release.wait()
         return await debt_amount(self, *args)
 
-    async def segment_of(self, *args):
+    async def segment_of(self, pairs):  # 027 stage 2: P1 asks for the lines P2 holds
         if who.get(None) == "p1":
-            release.set()  # P1 has routed (its snapshot is taken) and now locks A -> B, held by P2
-        return await segment(self, *args)
+            release.set()
+        return await segment(self, pairs)
 
     monkeypatch.setattr(PaymentService, "_debt_amount", debt_amount_of)
-    monkeypatch.setattr(PaymentService, "_segment", segment_of)
+    monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", segment_of)
 
     async def pay(tx_id: str) -> str:
         who.set(tx_id)  # the payment's phases run in tasks of their own (`wait_for`): a context var follows
@@ -200,7 +197,7 @@ async def test_a_second_repayment_waits_for_the_closing_one_and_retries_on_its_r
     outcomes = await asyncio.wait_for(asyncio.gather(pay("p1"), p2), timeout=60)
     conflicts = [m for m in _retries(caplog, "payment.attempt_retry") if "40P01" in m or "40001" in m]
     audit = [op for op, _ in await _audit(factory, line_key)]
-    assert release.is_set() and conflicts, f"the schedule did not race: {conflicts}"
+    assert release.is_set() and not conflicts, f"027 stage 2: P1 waits on the line, no conflict: {conflicts}"
     a, b, c = (p[n]["id"] for n in "ABC")
     require_target(held == "55P03" and outcomes == ["COMMITTED", "COMMITTED"] and not [m for m in conflicts if "40P01" in m]
                    and await _status(factory, line_id) == "closed"

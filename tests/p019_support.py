@@ -65,3 +65,19 @@ def allow_below_serializable_for_a_diagnostic(monkeypatch) -> list[str]:
 
     monkeypatch.setattr(MoneyBoundary, "require_read_committed", staticmethod(skip))  # 027 stage 2: the guard is RC
     return skipped
+
+
+async def deadlock_after_the_wait(session, holding, second_lock) -> None:
+    """027 stage 2: the competitor of a real `40P01`. It already holds a row; it waits until a backend queues on it,
+    then asks for `second_lock` (rows the waiter holds): the waiter waited first, so ITS deadlock check aborts it."""
+
+    import asyncio
+
+    from sqlalchemy import text
+
+    me = await session.scalar(text("SELECT pg_backend_pid()"))
+    holding.set()
+    while not await session.scalar(text("SELECT count(*) FROM pg_stat_activity a WHERE CAST(:me AS int) = "
+                                        "ANY(pg_blocking_pids(a.pid))"), {"me": me}):
+        await asyncio.sleep(0.02)
+    await session.execute(second_lock)

@@ -78,6 +78,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p019_support import deadlock_after_the_wait
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
@@ -285,6 +286,9 @@ def _record_plans(monkeypatch, runner: RealRunnerImpl) -> list[list[Any]]:
     return plans
 
 
+_PENDING: list[asyncio.Task] = []
+
+
 def _competitor_after_snapshot(
     monkeypatch,
     runner: RealRunnerImpl,
@@ -303,7 +307,20 @@ def _competitor_after_snapshot(
     genuine `40001`.
     """
     commits: list[int] = []
+    competitors = _PENDING  # 027 stage 2: awaited by `_debts` before it reads
     original = runner._load_debt_snapshot_by_pid
+
+    async def _compete(holding: asyncio.Event) -> None:
+        async with session_factory() as other:
+            debt = (await other.execute(select(Debt).where(
+                Debt.equivalent_id == world.equivalent.id, Debt.debtor_id == world.sender.id,
+                Debt.creditor_id == world.receiver.id).with_for_update())).scalar_one()
+            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
+                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
+            raised = Decimal(str(debt.amount)) + amount
+            async with debt_fixture_setup(other, label="the-competitor"):
+                debt.amount = raised
+            await other.commit()
 
     async def _load_then_let_someone_else_commit(session, participants, equivalents):
         snapshot = await original(session, participants, equivalents)
@@ -314,108 +331,15 @@ def _competitor_after_snapshot(
             monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
             async with session_factory() as warm:
                 await PaymentRouter(warm).build_graph(world.equivalent.code, use_shared_cache=True)
-            async with session_factory() as other:
-                # A predicate read over the same region the tick read and is about to write.
-                await other.execute(
-                    select(Debt.id).where(Debt.equivalent_id == world.equivalent.id)
-                )
-                debt = (
-                    await other.execute(
-                        select(Debt).where(
-                            Debt.equivalent_id == world.equivalent.id,
-                            Debt.debtor_id == world.sender.id,
-                            Debt.creditor_id == world.receiver.id,
-                        )
-                    )
-                ).scalar_one()
-                # Declared, because it IS a movement of money: the journal asks every writer to
-                # name the operation that moved it, a competitor's included.
-                raised = Decimal(str(debt.amount)) + amount
-                async with debt_fixture_setup(other, label="the-competitor"):
-                    debt.amount = raised
-                await other.commit()
+            # 027 stage 2: a real DEADLOCK (40P01) replaces the SSI 40001 (`p019_support.deadlock_after_the_wait`).
+            holding = asyncio.Event()
+            competitors.append(asyncio.create_task(_compete(holding)))
+            await holding.wait()
         return snapshot
 
     monkeypatch.setattr(
         runner, "_load_debt_snapshot_by_pid", _load_then_let_someone_else_commit
     )
-    return commits
-
-
-def _run_record_with_outsiders(world: _World, run_id: str) -> RunRecord:
-    """The run's participant set widened so its debt snapshot READS the outsider pair.
-
-    That read is what the write-skew below depends on: PostgreSQL can only find a cycle between
-    two transactions if each has read what the other writes, and the tick only reads debts among
-    `run._real_participants`. The outsiders have no trust line, so widening the set does not give
-    the planner anything new to plan - the plan is unchanged and only the read predicate grows.
-    """
-    run = _run_record(world, run_id)
-    run._real_participants = [
-        (world.sender.id, world.sender.pid),
-        (world.receiver.id, world.receiver.pid),
-        (world.outsider_a.id, world.outsider_a.pid),
-        (world.outsider_b.id, world.outsider_b.pid),
-    ]
-    return run
-
-
-def _write_skew_competitor(
-    monkeypatch,
-    runner: RealRunnerImpl,
-    session_factory,
-    world: _World,
-    *,
-    only_first: bool,
-) -> list[int]:
-    """A competitor that builds a READ-WRITE CYCLE instead of colliding on a row.
-
-    It reads the row the tick is going to write, and writes a row the tick only reads. Neither
-    transaction touches the other's row, so nothing can fail early: PostgreSQL discovers the cycle
-    only when the tick commits, which is precisely the outer-commit conflict this stand needs.
-    """
-    commits: list[int] = []
-    original = runner._load_debt_snapshot_by_pid
-
-    async def _load_then_skew(session, participants, equivalents):
-        snapshot = await original(session, participants, equivalents)
-        if not (only_first and commits):
-            commits.append(1)
-            async with session_factory() as other:
-                # Reads the row the TICK will write.
-                await other.execute(
-                    select(Debt.amount).where(
-                        Debt.equivalent_id == world.equivalent.id,
-                        Debt.debtor_id == world.sender.id,
-                        Debt.creditor_id == world.receiver.id,
-                    )
-                )
-                # Writes a row the tick only READ and never writes.
-                existing = (
-                    await other.execute(
-                        select(Debt).where(
-                            Debt.equivalent_id == world.equivalent.id,
-                            Debt.debtor_id == world.outsider_a.id,
-                            Debt.creditor_id == world.outsider_b.id,
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing is None:
-                    async with debt_fixture_setup(other, label="setup"):
-                        other.add(
-                            Debt(
-                                debtor_id=world.outsider_a.id,
-                                creditor_id=world.outsider_b.id,
-                                equivalent_id=world.equivalent.id,
-                                amount=_SKEW,
-                            )
-                        )
-                else:
-                    existing.amount = Decimal(str(existing.amount)) + _SKEW
-                await other.commit()
-        return snapshot
-
-    monkeypatch.setattr(runner, "_load_debt_snapshot_by_pid", _load_then_skew)
     return commits
 
 
@@ -462,6 +386,8 @@ def _record_conflict_sqlstates(monkeypatch) -> list[str | None]:
 
 
 async def _debts(session_factory, world: _World) -> dict[tuple[str, str], Decimal]:
+    await asyncio.gather(*_PENDING)
+    _PENDING.clear()
     pid_by_id = {
         world.sender.id: world.sender.pid,
         world.receiver.id: world.receiver.pid,
@@ -540,14 +466,14 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
             if "simulator.real.money_phase_replay " in record.getMessage()
         ]
         assert len(replays) == 1, replays
-        assert "conflict=40001" in replays[0] or "conflict=RETRYABLE_PAYMENT_CONFLICT" in replays[0], (
+        assert "conflict=40P01" in replays[0] or "conflict=RETRYABLE_PAYMENT_CONFLICT" in replays[0], (
             f"the replay did not run on a serialization failure: {replays}"
         )
         assert len(commits) == 1, commits
         # ...and the database error behind that typed conflict was a genuine serialization failure,
         # read by its SQLSTATE, not merely something that shares the exception type. Carried over
         # from `test_p015_p1_money_replay_sqlite.py`, which asserted SQLITE_BUSY_SNAPSHOT here.
-        assert sqlstates == ["40001"], sqlstates
+        assert sqlstates == ["40P01"], sqlstates
 
         # ── The plan was recomputed against a snapshot that includes the competitor ───
         assert len(plans) == 2, f"the money phase was not replanned: {plans}"
@@ -592,90 +518,6 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert run._real_money_replay_exhausted_total == 0
         assert run._real_money_committed_ticks_total == 1
         assert run._real_consec_money_no_progress_ticks == 0
-    finally:
-        _forget_the_route_cache(world)
-
-
-@pytest.mark.parametrize("shape", ["same-row", "write-skew"])
-@pytest.mark.asyncio
-async def test_a_genuine_40001_is_raised_by_the_staged_write_on_this_backend(
-    factory, monkeypatch, shape: str
-) -> None:
-    """WHERE a real conflict lands, measured - because the answer decides what a stand can cover.
-
-    Two competitor shapes are put against the same tick. "same-row" updates the very row the tick
-    is about to write, so there is a direct collision. "write-skew" shares NO row with the tick: it
-    reads the row the tick writes and writes a row the tick only reads, which PostgreSQL can refuse
-    only by detecting a read-write cycle. The second shape is the textbook way to obtain a
-    commit-time serialization failure.
-
-    Both are nevertheless refused inside `create_payment_internal_staged`. This test pins that
-    measurement so it cannot rot into an assumption: the docstring at the top of this module
-    explains the mechanism, and this is the evidence for it.
-
-    The consequence is a real limit on this module, stated plainly: the branch of the replay that
-    handles an attempt with a COMPLETE observation buffer cannot be reached from a real conflict
-    here, and lives in the unit stand instead.
-    """
-    world = await _seed(factory)
-    try:
-        sse = _Sse()
-        if shape == "same-row":
-            run = _run_record(world, f"p1-pg-where-{uuid.uuid4().hex[:8]}")
-        else:
-            run = _run_record_with_outsiders(world, f"p1-pg-where-{uuid.uuid4().hex[:8]}")
-        runner = _runner(run, _scenario(world), sse)
-        _install(monkeypatch, factory)
-        plans = _record_plans(monkeypatch, runner)
-        staged_conflicts = _record_staged_conflicts(monkeypatch)
-        if shape == "same-row":
-            commits = _competitor_after_snapshot(
-                monkeypatch, runner, factory, world, amount=_COMPETITOR, only_first=True
-            )
-        else:
-            commits = _write_skew_competitor(
-                monkeypatch, runner, factory, world, only_first=True
-            )
-
-        await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
-
-        # The conflict was real, and it was raised while STAGING - not by the outer commit.
-        assert len(commits) == 1, commits
-        assert len(plans) == 2, f"the money phase was not replayed: {plans}"
-        assert staged_conflicts == ["RetryablePaymentConflictException"], staged_conflicts
-
-        # Whichever shape produced it, the replay leaves exactly one payment behind.
-        transactions = await _transactions(factory, world)
-        assert list(transactions.values()) == ["COMMITTED"], transactions
-        assert len(transactions) == 1, (
-            f"the discarded attempt left a transaction behind: {transactions}"
-        )
-        assert sse.published("tx.updated") == 1
-        assert run.committed_total == 1
-        assert run.errors_total == 0
-        assert run._real_money_replays_total == 1
-
-        # The idempotency key is derived from the amount and `seq`, so a replan that CHANGES the
-        # amount changes the key while a replan that does not keeps it. Either way the tick ends
-        # with one transaction: re-planning regenerates load that was never accepted, and cannot
-        # duplicate a payment.
-        if shape == "write-skew":
-            # THE COMPETITOR'S OWN CHANGE SURVIVES THE REPLAY, on a row the tick never writes.
-            # Carried over from `test_the_competitors_own_change_survives_the_replay` of the SQLite
-            # stand (017 stage 3): a replay whose rollback reached past its own attempt would look
-            # identical in every assertion about the tick's payment and would silently lose someone
-            # else's committed work. (The same-row shape holds the same property on the shared row,
-            # in `test_a_real_serialization_failure_replays_the_money_phase_and_commits_once`.)
-            debts = await _debts(factory, world)
-            assert debts.get((world.outsider_a.pid, world.outsider_b.pid)) == _SKEW, (
-                f"the replay rolled back a change that was not its own: {debts}"
-            )
-
-        replanned_amount_changed = Decimal(plans[0][0].amount) != Decimal(plans[1][0].amount)
-        assert replanned_amount_changed is (shape == "same-row"), (
-            f"{shape}: expected the plan to change only when the competitor consumed capacity on "
-            f"the planned edge; got {plans[0][0].amount} then {plans[1][0].amount}"
-        )
     finally:
         _forget_the_route_cache(world)
 

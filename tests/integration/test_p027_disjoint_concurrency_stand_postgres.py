@@ -155,8 +155,7 @@ async def stand(committed_database, monkeypatch):
     original_lines = MoneyBoundary.lock_pair_lines
 
     async def timed_lines(self, pairs):
-        """027 `T2704`: the wait AT the row-lock statement itself (R-027-4), and the "prelock" hold point - before
-        it, so two payments of one pair can still meet (the second waits on the first's line rows after)."""
+        """027 `T2704`: the wait at the row-lock statement (R-027-4); the "prelock" hold point is just before it."""
         pairs = list(pairs)
         await hold_here(self.session, "prelock")
         t = time.perf_counter()
@@ -441,8 +440,7 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
     (s1, r1), (s2, r2) = world["routes"][0], world["routes"][2]  # two disjoint 1-hop routes
     # Hold point: "late" = after the last money statement (every read AND write done); "early" = after the stop/hold
     # read, before the first write (the R-024-11 position) - the same pair cannot meet "late": its second payment
-    # waits on the first one's debt row lock; since 027 stage 2 not "early" either (it waits on the line rows), so
-    # the same-pair control holds at "prelock", just before the line-lock statement.
+    # waits on the first one's debt row lock; since 027 stage 2 it meets only at "prelock", before the line lock.
     cells = {
         "disjoint/ttl2/seq_on/late": ([(s1, r1), (s2, r2)], PROD_TTL, "seq_on", "late"),  # production
         "disjoint/ttl0/seq_on/late": ([(s1, r1), (s2, r2)], 0, "seq_on", "late"),
@@ -734,8 +732,7 @@ async def test_q3_clearing_against_payments(stand, monkeypatch) -> None:
         report["cells"][name] = row
     waits = {k: (r["row_lock_wait_p95_ms"], r["row_lock_wait_n"]) for k, r in report["cells"].items()
              if "clearing_" in k and "DIAG" not in k and "CMP" not in k}
-    # Timed at the lock call (stage 1: the shared equivalent lock; stage 2: the line-lock statement). Under 20
-    # observations "не измерено", never a pass.
+    # Timed at the line-lock statement (stage 2). Under 20 observations "не измерено", never a pass.
     verdict = {k: "не измерено" if n < 20 or p95 is None else "pass" if p95 <= 50 else "fail"
                for k, (p95, n) in waits.items()}
     report["acceptance"] = {"R-027-4": {"p95_ms_and_n": waits, "verdict": verdict,

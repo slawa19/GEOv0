@@ -392,8 +392,7 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
             f"a SEED committed alongside a concurrently committed baseline (error: {seed_error!r}). "
             f"The post-baseline refusal is racy under SERIALIZABLE."
         )
-        # 027 stage 2: READ COMMITTED - the SEED's completion takes the equivalent row `FOR SHARE` and READS the
-        # committed baseline, so the refusal is the book's own (until then a serialization failure, 40001).
+        # 027 stage 2: the SEED reads the committed baseline and the book refuses it (until then a 40001).
         assert getattr(seed_error, "reason", None) == "unverifiable_writer_after_baseline", (
             f"the SEED did not commit, but not because the book refused it after the baseline: {seed_error!r}"
         )
