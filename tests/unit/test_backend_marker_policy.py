@@ -7,7 +7,11 @@ wrong, and what decides is running the command the document shows, as written.
 
 WHAT IT DOES NOT SEE: prose and inline code outside fenced blocks; fences in other languages;
 variables (`$taskSlug` is not expanded); here-strings, script blocks and control flow; documents
-not in `_ACTIVE_DOCS` (the EN/PL trees are frozen translations, `docs/README.md`). The shape of the
+not in `_ACTIVE_DOCS` (the EN/PL trees are frozen translations, `docs/README.md`); a
+`TEST_DATABASE_URL` that is not a quoted literal; the reset-before-runner rule binds only when the URL
+and the runner share one fence; an unterminated fence flips what is read after it. Dropped with the
+former parser (025 `T2502.3`): the venv create/install/tool ORDER and the createdb name <-> URL name
+match (a mismatch cannot reset a foreign database: the URL must be `geov0_test_*`). The shape of the
 `required-backend` job is owned by `tests/unit/test_p017_required_gate_runs_on_postgres.py`.
 Every rule below has a planted-fragment counter-check, so a rule that stops matching goes red.
 """
@@ -103,7 +107,10 @@ def test_active_docs_show_only_documented_command_forms() -> None:
         text = (_ROOT / name).read_text(encoding="utf-8")
         found = _violations(text, parameters, venv_rule=name in _VENV_RULE_DOCS)
         violations += [f"{name}:{v}" for v in found]
-        commands += [c for block in _shell_blocks(text) for _, c in block]
+        own = [c for block in _shell_blocks(text) for _, c in block]
+        # Anti-vacuum per document: each listed document still shows the runner in a fence it reads.
+        assert any(_RUNNER.search(c) for c in own), f"{name}: no fenced runner command was read"
+        commands += own
     assert violations == []
     # Anti-vacuum: the fences were read, and the URL rule had real examples to judge.
     assert sum(bool(_RUNNER.search(c)) for c in commands) >= len(_ACTIVE_DOCS)
@@ -141,7 +148,8 @@ def test_each_command_form_rule_goes_red_on_a_planted_fragment(body: str, rule: 
 # U-G-1: with `--strict-markers` an unregistered marker cannot be applied (collection fails), so
 # the obligation is: no empty tier is registered or filtered, and strict markers stay on.
 def _empty_tier_violations(ini: str, runner: str, marker: str) -> list[str]:
-    found = [] if "--strict-markers" in ini else ["pytest.ini lost --strict-markers"]
+    # The option line itself (an addopts continuation), not any mention: pytest.ini also names it in a comment.
+    found = [] if re.search(r"(?m)^[ \t]+--strict-markers[ \t]*\r?$", ini) else ["pytest.ini lost --strict-markers"]
     if re.search(rf"(?m)^\s*{marker}(?:\([^)]*\))?\s*:", ini):
         found.append(f"pytest.ini registers {marker}")
     if f"not {marker}" in runner:
@@ -157,8 +165,12 @@ def test_no_empty_backend_tier_is_registered_or_filtered(marker: str) -> None:
     runner = (_ROOT / "scripts" / "verify_local.ps1").read_text(encoding="utf-8")
     assert _empty_tier_violations(ini, runner, marker) == []
     planted_ini = ini.replace("markers =\n", f"markers =\n    {marker}: planted\n", 1)
-    planted_runner = runner.replace("'not slow'", f"'not slow and not {marker}'", 1)
+    # Keeps the `'-m', 'not slow'` anchor, so only the filter rule itself can fire.
+    planted_runner = runner.replace("'-m', 'not slow'", f"'-m', 'not slow', 'and not {marker}'", 1)
     assert planted_ini != ini and planted_runner != runner
     assert _empty_tier_violations(planted_ini, runner, marker) != []
-    assert _empty_tier_violations(ini, planted_runner, marker) != []
-    assert _empty_tier_violations(ini.replace("--strict-markers", ""), runner, marker) != []
+    assert _empty_tier_violations(ini, planted_runner, marker) == [f"verify_local.ps1 filters {marker}"]
+    # Remove only the option line; the comment that mentions the flag stays, as in the real file.
+    no_option = re.sub(r"(?m)^[ \t]+--strict-markers[ \t]*\r?\n", "", ini, count=1)
+    assert no_option != ini and "--strict-markers" in no_option
+    assert _empty_tier_violations(no_option, runner, marker) == ["pytest.ini lost --strict-markers"]
