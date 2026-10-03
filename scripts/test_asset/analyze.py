@@ -34,7 +34,7 @@ EXIT CODES - a missing measurement is never reported as zero coverage (spec 025,
      the names are in reconcile.json;
   5  UNMEASURED VERDICT: a DELETE-* or MOVE-OUT verdict unit (a listed test, or a test function of
      a file-level verdict) has no measured test: file absent, not found (renamed / class path
-     differs), deselected (e.g. `slow`; a full deletion acceptance needs measure.ps1
+     differs), deselected (e.g. `slow`; measure them with measure.ps1
      -IncludeExpensive) or skipped. crosscheck.json is written marked "valid": false.
      --allow-unmeasured proceeds and labels every lost-lines figure a LOWER BOUND;
   6  STALE INPUT: `exit.txt` is missing, records a pytest exit other than 0, or records a HEAD other
@@ -635,7 +635,8 @@ if zone_files:
     if unm_removing and not args.allow_unmeasured:
         xinvalid.append(f"UNMEASURED VERDICT: {len(unm_removing)} DELETE-*/MOVE-OUT units without a measured test")
         xcode = 5
-    xs = collections.OrderedDict(valid=not xinvalid, invalid_reasons=xinvalid, input=input_info)
+    xs = collections.OrderedDict(advisory_only=summary["advisory_only"], valid=not xinvalid,
+                                 invalid_reasons=xinvalid, input=input_info)
     xs["line_set"] = "RAW app lines (import-level included) of each test's setup+run+teardown"
     cnt = collections.Counter(v_of.values())
     dur, zero_v, not_ran = collections.Counter(), collections.Counter(), collections.Counter()
