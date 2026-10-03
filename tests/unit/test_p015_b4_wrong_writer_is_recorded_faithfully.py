@@ -281,12 +281,61 @@ async def _envelope_intents_for_tx(factory, tx_id: str):
     return [dict(row, intent=_decoded_json(row["intent"])) for row in rows]
 
 
+def _recorded_payment_flows(
+    triangle: _Triangle, intent
+) -> list[tuple[str, str, Decimal]]:
+    """Every `{from, to, amount}` flow inside a STORED payment intent, named and sorted.
+
+    Design v2 §7 fixes the CONTENT of a payment intent ("validated flows per lock as exact scale-8
+    strings") and not its nesting, so this walks whatever shape step 4 chose rather than pinning a
+    key path. Amounts are quantized to scale 8 because `"5"` and `"5.00000000"` are the same money
+    and a counterexample that failed on the spelling would be testing a serializer.
+
+    THE UUIDS ARE READ THROUGH `uuid.UUID`, which is what makes this tier-independent: the intent is
+    JSON and carries the dashed canonical form, while the same ids in the journal's own columns are
+    32 hex characters on SQLite and native `uuid` on PostgreSQL. A comparison written against either
+    spelling directly would match nothing on the other tier.
+
+    WHAT THIS DECODER PROJECTS AWAY, stated because round 3 asked what exactly the replay covers:
+    each flow's `equivalent` and `lock_id`, and the grouping of flows into locks
+    (`app/core/payments/engine.py:1319-1336` writes all four). What comes out is `(from, to, amount)`
+    per flow, summed across locks. Every scenario in this module runs inside ONE equivalent, so
+    dropping it loses nothing HERE - and that is exactly the limit: criterion (b) as this module
+    checks it is evidence about single-equivalent routing, not about the whole intent. A payment that
+    moved the right amounts between the right parties in the WRONG equivalent would pass this check.
+    Multi-equivalent intent is not in `C6`'s scope (design v2 §9) and no test in this module claims
+    it; a counterexample for it would have to be written, not inherited from this one.
+    """
+
+    found: list[tuple[str, str, Decimal]] = []
+
+    def _walk(node) -> None:
+        if isinstance(node, dict):
+            if {"from", "to", "amount"} <= set(node):
+                found.append(
+                    (
+                        triangle.name(uuid.UUID(str(node["from"]))),
+                        triangle.name(uuid.UUID(str(node["to"]))),
+                        Decimal(str(node["amount"])).quantize(Decimal("1E-8")),
+                    )
+                )
+                return
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                _walk(value)
+
+    _walk(intent)
+    return sorted(found)
+
+
 def _recorded_clearing_pre_amounts(
     triangle: _Triangle, intent
 ) -> dict[tuple[str, str], Decimal]:
     """The cycle's PRE-AMOUNTS per named edge, as the stored clearing intent recorded them.
 
-    PROJECTS AWAY (as its removed payment counterpart did, 025 `T2504.2`): `debt_id`, `clear_amount` and `equivalent_id`
+    PROJECTS AWAY, like its payment counterpart: `debt_id`, `clear_amount` and `equivalent_id`
     (`app/core/clearing/service.py:2032-2044` writes all of them). `clear_amount` is dropped on
     purpose - replaying the documented rule rather than the writer's own number is what makes
     criterion (b) independent - but `equivalent_id` and `debt_id` are dropped only because every
@@ -793,13 +842,6 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
 # ==============================================================================================
 # C6 (i) - a payment whose route is a lie
 # ==============================================================================================
-#
-# 025 `T2504.2` (2026-10-03): the counterexample and its control were removed from this module as
-# proven duplicates. The wrong writer below is what they used; it is now exercised by
-# `test_p015_step5b_criterion_b.py::test_step5b_the_c6_wrong_route_is_failed_by_b_while_a_stays_blind`,
-# `test_p015_step5a_reconciliation.py::test_step5a_c6_still_commits_verified_and_criterion_a_is_blind_to_it_until_the_book_moves`
-# and the PostgreSQL module's `c6_p` twin; the honest-payment control by
-# `test_step5b_an_honest_payment_records_both_directions_and_is_recomputed_in_full`.
 
 
 def _collapse_the_route(monkeypatch, triangle: _Triangle) -> list[tuple[str, str]]:
@@ -837,6 +879,268 @@ def _collapse_the_route(monkeypatch, triangle: _Triangle) -> list[tuple[str, str
 
     monkeypatch.setattr(book, "_apply_payment_flow", _wrapper)
     return calls
+
+
+@pytest.mark.asyncio
+async def test_c6_a_payment_that_writes_the_wrong_edge_passes_every_barrier_today(
+    db_session, monkeypatch
+) -> None:
+    """C6 (i), the mandatory counterexample. DEFECT-SHAPED in (b), API-SHAPED in (a).
+
+    THE WRITER. A payment is prepared over the route `A -> B -> C` for 5. A wrapper collapses the
+    two segments into a single `A -> C` obligation. `B`, whose capacity was reserved and whose trust
+    was the reason the route was chosen, ends up carrying nothing.
+
+    WHY NOTHING STOPS IT, checked in code and not assumed:
+
+    * `check_payment_delta` (`app/core/payments/engine.py:1596-1633`) compares PER-PARTICIPANT NET
+      POSITIONS against the declared flows. The declared flows imply `A: -5, B: 0, C: +5`; a single
+      `A -> C` of 5 produces exactly `A: -5, B: 0, C: +5`. It passes, with the zero tolerance T1522
+      gave it.
+    * `check_trust_limits` (`app/core/invariants.py:87-153`) is called from the payment path with
+      `participant_pairs` built from the DECLARED flows (`engine.py:1300-1331`), so the pair
+      `(A, C)` is never in the query at all.
+    * the integrity checkpoint (`app/core/integrity.py:93-104`) DOES scan the whole equivalent, so
+      the `C -> A` trustline in this stand is what makes `verification_passed` true - binding
+      condition 5 requires it explicitly, because without it the audit row would be false for the
+      wrong reason and the counterexample would prove something weaker. (Historical since 024 `T2413.2`:
+      the transaction computes no checkpoint and the row is null; the line is kept, it changes nothing.)
+    * `check_debt_symmetry` sees no mutual pair.
+
+    WHAT THE JOURNAL ADDS. Criterion (a) still holds - a faithful journal records `A -> C += 5`,
+    which is what happened. Criterion (b) fails, because the intent said `A -> B` and `B -> C`. The
+    journal does not make the payment wrong; it makes the wrongness DECIDABLE, and that decision is
+    the entire product of step 4.
+
+    WHERE CRITERION (b) IS READ FROM, and it changed on 2026-09-13. It used to be computed from a
+    `PrepareLock.effects` snapshot this test took itself, which never touches the envelope - so a
+    journal that stored the writer's own RESULT as the operation's intent would have left this
+    counterexample green, and the thing step 4 adds was the only thing not being read. (b) is now
+    replayed from `debt_operations.intent`, and the snapshot is kept as the cross-check that makes
+    the stored intent falsifiable: the envelope must record what the payment DECLARED.
+
+    WHERE THE DECLARATION IS TAKEN FROM, since 019 stage 4 (`FORK-8`). No `prepare_locks` row holds
+    it any more: the payment executes directly. The route is handed to the ordinary path as a
+    test-controlled router result, and that result - copied before the service turns it into the
+    intent - is the declaration. It is taken UPSTREAM, never from the envelope this test checks.
+
+    RED BEFORE STEP 4 BECAUSE: there is no envelope and no entries, so neither criterion can be
+    evaluated at all. The refutation that needs no journal - the declared flows disagree with the
+    committed state - is asserted first, so this test cannot pass having measured neither criterion.
+    MUTATIONS, and there are now two that are separable:
+    * journal the operation's INTENT as if it were its effects (write entries from the validated
+      flows rather than from the flush plan) - criterion (a) then passes for a state that never
+      existed;
+    * store the writer's RESULT as the intent (overwrite `debt_operations.intent` with what the
+      flush actually did) - the cross-check against the upstream declaration goes red, and so does
+      (b), because an intent read back from the outcome cannot disagree with it. Measured
+      2026-09-13: with the pre-correction assertions this mutation left the test green.
+    """
+    from tests.conftest import TestingSessionLocal as factory
+
+    triangle = await _seed_triangle(
+        factory,
+        trustlines=[
+            ("b", "a", "100"),  # enables the declared flow A -> B
+            ("c", "b", "100"),  # enables the declared flow B -> C
+            # Binding condition 5: without an ACTIVE C -> A line of at least the amount, the
+            # whole-equivalent checkpoint would find the forged edge over its limit and write
+            # verification_passed=false - and the counterexample would be about a barrier that
+            # caught it, not about one that did not.
+            ("c", "a", "100"),
+        ],
+    )
+    before = await _edges(factory, triangle)
+    # 019 stage 4 (`FORK-8`): the route A -> B -> C is handed to the ordinary execution path as a
+    # test-controlled router result (the natural router would take the direct C -> A line), and the
+    # declaration compared below is THAT result, captured upstream - never the envelope under test.
+    router = _control_the_router(monkeypatch, triangle, forced=["a", "b", "c"])
+    calls = _collapse_the_route(monkeypatch, triangle)
+    tx_id = await _pay(factory, triangle, sender="a", receiver="c", amount=Decimal("5"))
+    flows = router.declared_flows(triangle)
+
+    after = await _edges(factory, triangle)
+    audit = await _audit(factory, tx_id)
+    state = await _tx_state(factory, tx_id)
+
+    # NON-VACUITY: the wrong writer really ran, and `A -> C` was written exactly once.
+    #
+    # SORTED, and measured rather than assumed: `_load_prepare_locks` returns the two segments
+    # in an order this tree does not fix (observed `[('b','c'), ('a','b')]` on 2026-09-12), so
+    # pinning it would make this counterexample fail on an implementation detail it does not
+    # depend on. The wrapper is order-independent by construction - it drops whichever segment
+    # comes first and rewrites the second - so `A -> C` is written exactly once either way,
+    # which is what binding condition 5 requires.
+    assert sorted(calls) == [("a", "b"), ("b", "c")], (
+        f"stand: the engine did not apply the two declared segments exactly once each: {calls}"
+    )
+    assert before == {}, f"stand: the equivalent was not empty before the payment: {before}"
+
+    # THE COMMITTED WRONG STATE, read on a session that is not the writer's.
+    assert after == {("a", "c"): Decimal("5.00000000")}, (
+        f"stand: the collapsed route did not produce a single A -> C obligation: {after}"
+    )
+    assert state == "COMMITTED", f"stand: the wrong payment did not commit: {state}"
+    # 024 `T2413.2`: the audit row runs no check (null) - it is no barrier, it neither passes nor fails C6.
+    assert audit == [None], (
+        f"stand: the integrity audit row is not the no-check record ({audit}), so the counterexample "
+        f"is no longer about a writer that passes every barrier. If this is a real improvement, the "
+        f"barrier that caught it must be named and C6 rewritten around it."
+    )
+
+    # THE STAND, and it needs no journal: what the payment DECLARED - the router's result, captured
+    # upstream of the service - disagrees with what it did. Asserted FIRST
+    # so this test can never pass having measured neither criterion.
+    declared = _payment_implied_by_intent(before, flows)
+    assert sorted(flows) == [
+        ("a", "b", Decimal("5.00000000")),
+        ("b", "c", Decimal("5.00000000")),
+    ], flows
+    assert declared == {
+        ("a", "b"): Decimal("5.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }, declared
+    assert declared != after, (
+        "the declared route and the committed state agree, so this stand cannot tell a wrong "
+        "writer from an honest one and nothing below it means anything"
+    )
+
+    # CRITERION (b), REPLAYED FROM THE INTENT AS THE ENVELOPE STORED IT.
+    envelopes = await _envelope_intents_for_tx(factory, tx_id)
+    assert envelopes is not None, (
+        "a payment routed A -> B -> C committed a single A -> C obligation of 5 and was "
+        "recorded as verified, and there is no envelope to read its declared intent out of. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+        f"the committed payment left {envelopes} instead of exactly one PAYMENT envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+    assert recorded == sorted(flows), (
+        f"the envelope's intent is not what the payment declared. Stored: {recorded}. The "
+        f"route the service was handed, captured upstream: {sorted(flows)}. An intent "
+        f"that is the writer's own result cannot disagree with the result, and being able to "
+        f"disagree is the entire reason it is recorded (design v2 §7)."
+    )
+    implied = _payment_implied_by_intent(before, recorded)
+    assert implied == declared, (
+        f"replaying the STORED intent gives {implied} while the prepared flows give {declared}; "
+        f"criterion (b) is then not a check on the envelope at all"
+    )
+    assert implied != after, (
+        "criterion (b) did not refute the collapsed route: the intent the envelope recorded "
+        "implies exactly the state the wrong writer produced"
+    )
+
+    # CRITERION (a). RED TODAY, and this is the counterexample.
+    entries = await _entries_for_tx(factory, tx_id)
+    assert entries is not None, (
+        f"a payment routed A -> B -> C committed a single A -> C obligation of 5, was audited "
+        f"without a check (verification_passed={audit}), left the transaction {state}, and passed "
+        f"check_payment_delta, check_trust_limits and check_debt_symmetry - because the total "
+        f"is right and only the ROUTE is a lie. The database now holds {after}; the payment "
+        f"declared {implied}. "
+        + missing_journal_tables(entries, ENTRIES_TABLE)
+    )
+    named = _named_totals(triangle, await _journal_totals_per_edge(factory, tx_id))
+    assert named == _observed_change(before, after), (
+        f"criterion (a) fails: the journal must record FAITHFULLY what the writer did, even - "
+        f"especially - when what it did was wrong. Journal says {named}, the database changed "
+        f"by {_observed_change(before, after)}."
+    )
+
+
+@pytest.mark.asyncio
+async def test_c6_control_the_same_payment_without_the_wrapper_satisfies_criterion_b(
+    db_session, monkeypatch
+) -> None:
+    """C6, anti-vacuum control. GREEN today and after step 4.
+
+    Design v2 §9 states it as the non-vacuity of `C6`: "без wrapper/event (b) PASS". Without this,
+    criterion (b) could be failing for a reason that has nothing to do with the collapsed route -
+    a wrong direction convention in this module's algebra, a missed netting rule - and the
+    counterexample above would look conclusive while measuring a bug in its own measuring stick.
+
+    IT NOW RUNS THE MECHANISM IT IS A CONTROL FOR, which round 3 found it did not. Until 2026-09-13
+    this control replayed `_intent_flows` - a read of `PrepareLock.effects` the TEST takes before the
+    commit - while the counterexample above replays `_recorded_payment_flows` over the intent THE
+    ENVELOPE STORED. Those are different paths through different code: a positive control over the
+    snapshot path says nothing about whether the stored-intent path can recognise an honest payment,
+    so "the refutation is not an artefact of the replay" was being claimed from a measurement that
+    never touched the replay. Both paths are now asserted, and the envelope's intent is additionally
+    required to AGREE with the upstream declaration - which is the statement that ties the two.
+    Since 019 stage 4 that declaration is the router's result captured before the service (the
+    `_intent_flows` read of `prepare_locks` has no row to read on the payment path).
+
+    WHAT IT COVERS AND WHAT IT DOES NOT: see `_recorded_payment_flows` - the decoder projects the
+    equivalent and the lock ids away, so this is evidence for a single-equivalent route.
+
+    MUTATION, MEASURED 2026-09-13: store the payment intent with `"flows": []` (then in the engine;
+    since 019 stage 4 `PaymentDeclaration.intent`, `app/core/payments/service.py`). The stored-intent half below goes red - the replay then
+    implies the pre-state instead of the committed one - while the `_intent_flows` half stays green,
+    which is precisely the gap that existed before this was added.
+    """
+    from tests.conftest import TestingSessionLocal as factory
+
+    triangle = await _seed_triangle(
+        factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")]
+    )
+    before = await _edges(factory, triangle)
+    router = _control_the_router(monkeypatch, triangle, forced=["a", "b", "c"])
+    tx_id = await _pay(factory, triangle, sender="a", receiver="c", amount=Decimal("5"))
+    flows = router.declared_flows(triangle)
+
+    after = await _edges(factory, triangle)
+    assert await _tx_state(factory, tx_id) == "COMMITTED"
+
+    # NON-VACUITY, FIRST: the payment really committed the two-hop state, so a criterion that
+    # comes out satisfied below was compared against something.
+    assert after == {
+        ("a", "b"): Decimal("5.00000000"),
+        ("b", "c"): Decimal("5.00000000"),
+    }, after
+
+    # HALF ONE, the snapshot path: this module's algebra is the rule the engine implements.
+    assert _payment_implied_by_intent(before, flows) == after, (
+        f"criterion (b) fails on an honest A -> B -> C payment: intent implies "
+        f"{_payment_implied_by_intent(before, flows)}, database holds {after}. The algebra in "
+        f"this module is not the rule the engine implements, and C6's refutation is worthless."
+    )
+
+    # HALF TWO, THE PATH C6 ACTUALLY REFUTES WITH: the envelope's own stored intent, decoded and
+    # replayed by the same two functions the counterexample uses.
+    envelopes = await _envelope_intents_for_tx(factory, tx_id)
+    assert envelopes is not None, (
+        "an honest A -> B -> C payment committed and left no envelope to read its intent out "
+        "of, so C6's refutation cannot be shown to work on an honest payment. "
+        + missing_journal_tables(envelopes, OPERATIONS_TABLE)
+    )
+    assert len(envelopes) == 1 and envelopes[0]["kind"] == "PAYMENT", (
+        f"the honest payment left {envelopes} instead of exactly one PAYMENT envelope"
+    )
+    assert envelopes[0]["state"] == "COMPLETED", (
+        f"the honest payment committed with its envelope {envelopes[0]['state']}: {envelopes}"
+    )
+    recorded = _recorded_payment_flows(triangle, envelopes[0]["intent"])
+    assert recorded, (
+        f"stand: the envelope's intent decoded to no flows at all, so the replay below would "
+        f"trivially return the pre-state: {envelopes[0]['intent']}"
+    )
+    assert recorded == sorted(flows), (
+        f"the envelope's stored intent {recorded} is not the route the service was handed "
+        f"{sorted(flows)} on an HONEST payment. Then the two criteria are measured against two "
+        f"different declarations and C6's gap between them cannot be attributed to the writer."
+    )
+    assert _payment_implied_by_intent(before, recorded) == after, (
+        f"criterion (b) fails on an honest payment when it is replayed from the intent the "
+        f"ENVELOPE stored: implied {_payment_implied_by_intent(before, recorded)}, database "
+        f"holds {after}. C6's refutation of the collapsed route runs through exactly this path, "
+        f"so a failure here makes that refutation an artefact of the path rather than a finding "
+        f"about the writer."
+    )
 
 
 # ==============================================================================================
