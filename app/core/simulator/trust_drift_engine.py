@@ -377,7 +377,7 @@ class TrustDriftEngine:
                         TrustLine.status == "active",
                         # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
                         TrustLine.close_requested_at.is_(None),
-                    )
+                    ).with_for_update()  # 027 (§15 P2): read and grow under ONE lock - a PATCH waits, never overwritten
                 )
             ).one_or_none()
             if tl_row is None:

@@ -93,26 +93,53 @@ class MoneyBoundary:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def lock_pair_lines(self, pairs: Iterable[tuple[UUID, UUID, UUID]]) -> None:
+    #: The columns a writer decides from, in the order `PaymentService._segment` unpacks them.
+    _LINE = (TrustLine.from_participant_id, TrustLine.limit, TrustLine.policy, TrustLine.close_requested_at,
+             TrustLine.id, TrustLine.status, TrustLine.to_participant_id, TrustLine.equivalent_id)
+
+    @staticmethod
+    def lock_budget_ms() -> int:
+        """The bound of a staged, inject or clearing lock wait (as 019's advisory budget): min(total, commit)."""
+        from app.config import settings
+
+        return max(1, int(min(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10, settings.COMMIT_TIMEOUT_SECONDS or 5) * 1000))
+
+    async def _locking(self, stmt, timeout_ms: int | None) -> list:
+        """Run a locking statement, its wait bounded by `timeout_ms` (`55P03` past it); the caller's own
+        `lock_timeout` is restored afterwards."""
+        if timeout_ms is None:
+            return list((await self.session.execute(stmt)).all())
+        previous = await self.session.scalar(text("SHOW lock_timeout"))
+        set_timeout = text("SELECT set_config('lock_timeout', :t, true)")
+        await self.session.execute(set_timeout, {"t": f"{max(1, timeout_ms)}ms"})
+        rows = list((await self.session.execute(stmt)).all())
+        await self.session.execute(set_timeout, {"t": str(previous)})
+        return rows
+
+    async def lock_pair_lines(self, pairs: Iterable[tuple[UUID, UUID, UUID]], *, timeout_ms: int | None = None) -> list:
         """Lock every non-closed line of each pair `(equivalent_id, a, b)`, both directions, `FOR UPDATE`, in
-        `trust_lines.id` order, in ONE statement - before any debt of these pairs is read (027 stage 2).
+        `trust_lines.id` order, in ONE statement - before any debt of these pairs is read (027 stage 2) - and
+        RETURN the locked rows (`_LINE`). A writer decides ONLY from them: a line not among them does not exist
+        for its transaction (§15 review of stage 2, P1 - a line created after the lock was read unlocked).
 
         PostgreSQL locks the rows of `ORDER BY ... FOR UPDATE` in the sorted order, so two writers taking
         overlapping sets this way cannot deadlock each other. Under READ COMMITTED a row that another writer
         closed while this one waited is re-checked and left out (`status != 'closed'`)."""
 
         keys = sorted({(e, x, y) for e, a, b in pairs for x, y in ((a, b), (b, a))}, key=str)
-        if keys:
-            await self.session.execute(
-                select(TrustLine.id)
-                .where(tuple_(TrustLine.equivalent_id, TrustLine.from_participant_id,
-                              TrustLine.to_participant_id).in_(keys), TrustLine.status != "closed")
-                .order_by(TrustLine.id)
-                .with_for_update()
-            )
+        if not keys:
+            return []
+        return await self._locking(
+            select(*self._LINE)
+            .where(tuple_(TrustLine.equivalent_id, TrustLine.from_participant_id,
+                          TrustLine.to_participant_id).in_(keys), TrustLine.status != "closed")
+            .order_by(TrustLine.id)
+            .with_for_update(),
+            timeout_ms,
+        )
 
     async def lock_lines_among(
-        self, equivalent_ids: Iterable[UUID], participant_ids: Iterable[UUID]
+        self, equivalent_ids: Iterable[UUID], participant_ids: Iterable[UUID], *, timeout_ms: int | None = None
     ) -> None:
         """A staged money phase's COMPLETE set, taken before its first payment (027 stage 2): every non-closed line
         between two of `participant_ids` (the run's perimeter, which confines its routes) in `equivalent_ids`,
@@ -121,12 +148,13 @@ class MoneyBoundary:
 
         equivalents, participants = sorted(set(equivalent_ids), key=str), sorted(set(participant_ids), key=str)
         if equivalents and participants:
-            await self.session.execute(
+            await self._locking(
                 select(TrustLine.id)
                 .where(TrustLine.equivalent_id.in_(equivalents), TrustLine.from_participant_id.in_(participants),
                        TrustLine.to_participant_id.in_(participants), TrustLine.status != "closed")
                 .order_by(TrustLine.id)
-                .with_for_update()
+                .with_for_update(),
+                timeout_ms,
             )
 
     @staticmethod

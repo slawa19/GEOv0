@@ -575,19 +575,12 @@ class InjectExecutor:
 
             # 027 stage 2: BOTH non-closed lines of the pair `FOR UPDATE` before the book reads either debt (the
             # owner locked the event's set already; a pair it could not name - a participant this event adds -
-            # is locked here). Then the line is read: live row only (migration 019: a closed incarnation may
-            # coexist); a lowering committed before the lock is read, a later one waits for this inject.
-            await MoneyBoundary(session).lock_pair_lines([(eq_id, creditor_id, debtor_id)])
-            tl = (
-                await session.execute(
-                    select(TrustLine.limit, TrustLine.status).where(
-                        TrustLine.from_participant_id == creditor_id,
-                        TrustLine.to_participant_id == debtor_id,
-                        TrustLine.equivalent_id == eq_id,
-                        TrustLine.status != "closed",
-                    )
-                )
-            ).one_or_none()
+            # is locked here), and the line is taken ONLY from the rows locked (§15 P1): a line created after
+            # the lock does not exist for this inject. Live rows only (migration 019: a closed one may coexist).
+            locked = await MoneyBoundary(session).lock_pair_lines(
+                [(eq_id, creditor_id, debtor_id)], timeout_ms=MoneyBoundary.lock_budget_ms())
+            tl = next(((row.limit, row.status) for row in locked
+                       if row.from_participant_id == creditor_id and row.to_participant_id == debtor_id), None)
             if tl is None:
                 skipped += 1
                 return False

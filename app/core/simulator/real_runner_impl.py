@@ -489,6 +489,7 @@ class RealRunnerImpl:
                     intent_equivalent_ids,
                     {pid_to_participant_id[pid] for pid in inject_event_debt_participant_pids(event=event)
                      if pid in pid_to_participant_id},
+                    timeout_ms=MoneyBoundary.lock_budget_ms(),  # 55P03 past it: transient, then the event stays pending
                 )
                 # T1544: no money in an equivalent the operator has deactivated (protocol §11.5.1
                 # blocks OPERATIONS in it, and `inject_debt` writes the shared `debts`). The order is
