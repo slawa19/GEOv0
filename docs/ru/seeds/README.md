@@ -265,7 +265,7 @@ Seed‑документ — это замысел. **Описание сообщ
 
 ```powershell
 ./.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py
-./scripts/verify_local.ps1 -TaskSlug <slug> -BackendOnly -BackendSelector tests/unit/test_p017_t1712_community_descriptions.py
+./scripts/verify_local.ps1 -TaskSlug <slug> -ToolingOnly -ToolingPartition portable
 ```
 
 Пока генераторы `admin-fixtures/tools/generate_seed_*_v2.py` ещё в дереве, описание можно и **пересобрать** из них — так оно и появилось:

@@ -26,7 +26,7 @@ def _load_viz_rules() -> ModuleType:
     # touching the `app` package at all. The backend keeps importing the same file normally,
     # so both sides still share one set of rules. If `viz_rules.py` ever grows an import of
     # the application, this load fails loudly and
-    # `tests/unit/test_p017_s1_demo_fixture_generator_needs_no_database.py` goes red.
+    # `tooling-tests/portable/test_p017_s1_demo_fixture_generator_needs_no_database.py` goes red.
     path = REPO_ROOT / "app" / "core" / "simulator" / "viz_rules.py"
     spec = importlib.util.spec_from_file_location("_demo_fixtures_viz_rules", path)
     if spec is None or spec.loader is None:
