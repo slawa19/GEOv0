@@ -371,3 +371,4 @@ Anti-vacuum:
   7. p50/p95 только по `COMMITTED`, сверка долгов как anti-vacuum.
 
   Новых задач нет; спеку перед реализацией стадии 1 ревьюер не перепроверял.
+- **2026-10-03 — §15-ревью fix-delta спеки** `c83f1d50..49ccd323`: Codex `gpt-6-astra` high (запрошенная модель), read-only; промпт и финальный ответ — `.local-run/codex-review/2026-10-03-027-spec-fd/` (не коммитятся). Маркеры: `VERDICT-027-SPEC-FD: SOUND`, `FINDINGS-CLOSED: 7/7`, `GRANULARITY-LINES: HOLDS`, `CLASS-1-COUNT: 0`, `CLASS-2-COUNT: 0`, `READY-TO-IMPLEMENT-STAGE-1: YES`.
