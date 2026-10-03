@@ -26,6 +26,13 @@ router's graph build on first attempts and the cold cell really built it; M5 `en
 the diagnostic cells (SHOW, in the payment session); M6 every payment the stand meant to run was run and every
 40001 the driver reported is attributed to a payer or to the clearing (no untagged error).
 Repetitions describe THIS stand (one PostgreSQL 16 on localhost, one process); they prove nothing elsewhere.
+
+ACCEPTANCE (027 `T2701`, spec "Verification plan" 1): R-027-1/2 (Q2, N=10, production cell: committed >= 95 %, E007 <= 5 %),
+R-027-3 (Q1, disjoint, production cache: no attempt retried for a classified `40001`), R-027-4 (Q3, the payers' wait
+next to a clearing: p95 <= 50 ms over >= 20 observations). Conflicts are counted by their classified cause per attempt
+at `pay()`'s retry point (`_conflict_cause`), never by `handle_error`. Every cell also RECONCILES the final debts with
+the committed payments' routes (pair nets; participant positions where a clearing ran). The verdict goes into the
+artifact before any assert.
 """
 
 from __future__ import annotations
@@ -51,7 +58,7 @@ from app.config import settings
 from app.core.clearing.runner import run_clearing_pass
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService, _payment_db_sqlstate
+from app.core.payments.service import PaymentService, _conflict_cause, _payment_db_sqlstate
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -67,6 +74,7 @@ TRIANGLES = 40
 _who: contextvars.ContextVar[str | None] = contextvars.ContextVar("p027_who", default=None)
 _FAILURES: list[str] = []
 _hold: contextvars.ContextVar[dict | None] = contextvars.ContextVar("p027_hold", default=None)
+_COMMITTED: list = []  # the PaymentResult of every COMMITTED payment since the last reset
 
 
 def _artifact(name: str, report: dict) -> None:
@@ -82,6 +90,7 @@ class _Probe:
         self.builds = 0
         self.attempts: Counter = Counter()  # who -> pay attempts
         self.lock_wait: dict[str, list[float]] = defaultdict(list)  # who -> seconds waiting at the equivalent lock
+        self.causes: Counter = Counter()  # (who, classified conflict cause) -> attempts, at pay()'s retry point
 
     def reset(self) -> None:
         self.__init__()
@@ -121,6 +130,13 @@ async def stand(committed_database, monkeypatch):
         probe.attempts[_who.get()] += 1
         return await original_attempt(self, *a, **k)
 
+    original_retry = PaymentService._retry_or_none
+
+    def classified_retry(self, exc, **k):
+        probe.causes[(_who.get(), _conflict_cause(exc))] += 1
+        return original_retry(self, exc, **k)
+
+    monkeypatch.setattr(PaymentService, "_retry_or_none", classified_retry)
     original_shared = MoneyBoundary._acquire_shared_equivalent_locks_in_order
     original_exclusive = MoneyBoundary.acquire_exclusive_equivalent_session_lock
 
@@ -316,11 +332,49 @@ async def _pay(factory, world, sender: str, receiver: str, amount: str = "1.00")
                                  amount=amount, signature="__internal__"),
             require_signature=False)
         outcome = result.status
+        if outcome == "COMMITTED":
+            _COMMITTED.append(result)
     except Exception as exc:  # recorded, not hidden
         code = getattr(getattr(exc, "code", None), "value", getattr(exc, "code", None))
         outcome = f"{type(exc).__name__}:{code}"
         _FAILURES.append(f"{outcome} {str(exc)[:160]} | cause={type(exc.__cause__).__name__}:{str(exc.__cause__)[:160]}")
     return outcome, time.perf_counter() - started
+
+
+async def _nets(factory, world) -> Counter:
+    """(a, b) -> what a owes b net, from the debts table of the world's equivalent."""
+    pid = {p.id: p.pid for p in world["people"].values()}
+    async with factory() as s:
+        rows = (await s.execute(text("SELECT debtor_id, creditor_id, amount FROM debts WHERE equivalent_id = :e"),
+                                {"e": world["eq_id"]})).all()
+        await s.rollback()
+    net: Counter = Counter()
+    for d, c, a in rows:
+        net[(pid[d], pid[c])] += a
+        net[(pid[c], pid[d])] -= a
+    return net
+
+
+async def _reconcile(factory, world, before: Counter, *, pairwise: bool = True) -> dict:
+    """Final debts vs the committed payments: pair nets move by each hop (pairwise), or - a clearing ran, which keeps
+    positions but not pair nets - each participant's position moves by what it paid and received."""
+    after, expected = await _nets(factory, world), Counter(before)
+    for r in _COMMITTED:
+        for route in r.routes:
+            hops = list(zip(route.path, route.path[1:])) if pairwise else [(route.path[0], route.path[-1])]
+            for u, v in hops:
+                expected[(u, v)] += Decimal(route.amount)
+                expected[(v, u)] -= Decimal(route.amount)
+    if not pairwise:
+        positions = []
+        for m in (after, expected):
+            pos: Counter = Counter()
+            for (x, _), v in m.items():
+                pos[x] += v
+            positions.append(pos)
+        after, expected = positions
+    wrong = {str(k): [str(expected[k]), str(after[k])] for k in set(after) | set(expected) if expected[k] != after[k]}
+    return {"committed": len(_COMMITTED), "pairwise": pairwise, "mismatches": wrong}
 
 
 async def _warm(factory, world) -> None:
@@ -395,6 +449,8 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
             if ttl:
                 await _warm(f, world)
             probe.reset()
+            _COMMITTED.clear()
+            before = await _nets(f, world)
             shared = {"barrier": asyncio.Barrier(2), "members": [], "missed": 0, "siread": None,
                       "snap": asyncio.Event()}
 
@@ -409,7 +465,15 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
                 "reps_with_40001": 0, "errors_40001": 0, "other_sqlstates": Counter(), "outcomes": Counter(),
                 "overlap": 0, "missed": 0, "builds_first_attempts": [], "attempts": 0, "isolation": Counter(),
                 "enable_seqscan": Counter(), "locks": Counter(), "conflict_candidates": Counter(),
-                "seq_scanned": Counter(), "latency_ms": [], "failures": [], "snap_ms": [], "shared_pages": Counter()})
+                "seq_scanned": Counter(), "latency_ms": [], "failures": [], "snap_ms": [], "shared_pages": Counter(),
+                "reps_with_classified_40001": 0, "classified_causes": Counter(), "reconciled_committed": 0,
+                "reconcile_mismatches": []})
+            recon = await _reconcile(f, world, before)
+            row["reconciled_committed"] += recon["committed"]
+            row["reconcile_mismatches"] += [recon["mismatches"]] if recon["mismatches"] else []
+            for (_w, cause), k in probe.causes.items():
+                row["classified_causes"][cause] += k
+            row["reps_with_classified_40001"] += any(c == "40001" for (_w, c) in probe.causes)
             row["latency_ms"] += [round(t * 1000) for _, t in outcomes]
             row["failures"] += list(_FAILURES)
             row["snap_ms"].append(shared.get("snap_ms"))
@@ -453,6 +517,9 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
                 if not report.get("first_snapshot", {}).get(name):
                     report.setdefault("first_snapshot", {})[name] = {"summary": summary,
                                                                      "stats": [m["stats"] for m in members]}
+    prod = report["cells"]["disjoint/ttl0/seq_on/late"]
+    report["acceptance"] = {"R-027-3": {"cell": "disjoint/ttl0/seq_on/late", "reps_with_classified_40001":
+                                        prod["reps_with_classified_40001"], "threshold": 0, "of": Q1_REPS}}
     _artifact(f"p027_q1_filler{filler}_hist{history}.json", report)
 
     for name, row in report["cells"].items():
@@ -465,8 +532,10 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
         firsts = row["builds_first_attempts"]
         assert all(b == (0 if "/warm/" in name else 2) for b in firsts), ("M4", name, firsts)
         assert sum(row["outcomes"].values()) == 2 * Q1_REPS, ("M6", name, row["outcomes"])
+        assert not row["reconcile_mismatches"] and row["reconciled_committed"] > 0, ("reconcile", name, row)
     control = report["cells"]["same_pair/ttl0/seq_on/early"]
     assert control["reps_with_40001"] >= control["overlap"] - 1, ("M2", control)
+    assert prod["reps_with_classified_40001"] == 0, ("R-027-3", report["acceptance"])
 
 
 async def _index_tables(observer) -> dict:
@@ -490,6 +559,8 @@ def _pct(values: list[float], q: float) -> float | None:
 async def _run_payers(f, world, probe: _Probe, n: int, *, clearing=None) -> dict:
     probe.reset()
     _FAILURES.clear()
+    _COMMITTED.clear()
+    before = await _nets(f, world)
     results: dict[int, list] = {}
 
     async def payer(j):
@@ -537,7 +608,10 @@ async def _run_payers(f, world, probe: _Probe, n: int, *, clearing=None) -> dict
         "wall_s": round(wall, 2), "throughput_per_s": round(outcomes.get("COMMITTED", 0) / wall, 1),
         "lat_p50_ms": _pct(lat_ok, 0.5), "lat_p95_ms": _pct(lat_ok, 0.95), "lat_max_ms": _pct(lat_ok, 1.0),
         "shared_lock_wait_p50_ms": _pct(payer_waits, 0.5), "shared_lock_wait_p95_ms": _pct(payer_waits, 0.95),
-        "shared_lock_wait_max_ms": _pct(payer_waits, 1.0),
+        "shared_lock_wait_max_ms": _pct(payer_waits, 1.0), "shared_lock_wait_n": len(payer_waits),
+        "payer_classified_causes": {c: k for (w, c), k in probe.causes.items() if (w or "").startswith("payer")},
+        "E007": sum(v for k, v in outcomes.items() if "E007" in k),
+        "reconcile": await _reconcile(f, world, before, pairwise=not clearing),
     }
     if clearing:
         row["clearing"] = {**clearing_out,
@@ -577,13 +651,21 @@ async def test_q2_disjoint_payers_throughput(stand, monkeypatch) -> None:
             row = await _run_payers(f, world, probe, n)
             monkeypatch.setattr(PaymentRouter, "invalidate_cache", classmethod(original_invalidate))
             report["cells"][f"N={n}/{mode}"] = row
-            assert row["payments"] == n * PER_PAYER, ("M6", row)
-            assert not row["untagged_errors"], ("M6", row)
-            if mode.startswith("ttl0"):
-                assert row["router_builds"] == row["attempts"], ("M4", row)
-            if mode.startswith("pinned_warm"):
-                assert row["router_builds"] == row["retries"], ("M4", row)  # retries read the graph afresh
+    prod = report["cells"]["N=10/ttl0"]
+    report["acceptance"] = {"cell": "N=10/ttl0",
+                            "R-027-1": {"committed": prod["committed"], "of": prod["payments"], "threshold": ">= 95 %"},
+                            "R-027-2": {"E007": prod["E007"], "of": prod["payments"], "threshold": "<= 5 %"}}
     _artifact("p027_q2_throughput.json", report)
+    for name, row in report["cells"].items():
+        assert row["payments"] == int(name.split("/")[0][2:]) * PER_PAYER, ("M6", name, row)
+        assert not row["untagged_errors"], ("M6", name, row)
+        assert not row["reconcile"]["mismatches"] and row["reconcile"]["committed"] == row["committed"], (name, row)
+        if "/ttl0" in name:
+            assert row["router_builds"] == row["attempts"], ("M4", name, row)
+        if "/pinned_warm" in name:
+            assert row["router_builds"] == row["retries"], ("M4", name, row)  # retries read the graph afresh
+    assert prod["E007"] <= 0.05 * prod["payments"], ("R-027-2", report["acceptance"])
+    assert prod["committed"] >= 0.95 * prod["payments"], ("R-027-1", report["acceptance"])
 
 
 @pytest.mark.asyncio
@@ -615,8 +697,14 @@ async def test_q3_clearing_against_payments(stand, monkeypatch) -> None:
                 {"e": world["eq_id"]})).scalar_one()
             await s.rollback()
         report["cells"][name] = row
-        assert row["payments"] == 5 * PER_PAYER, ("M6", row)
-        assert not row["untagged_errors"], ("M6", row)
-        if clearing:
-            assert row["clearing"].get("committed", 0) >= 1, ("anti-vacuum: clearing executed nothing", row)
+    waits = {k: (r["shared_lock_wait_p95_ms"], r["shared_lock_wait_n"]) for k, r in report["cells"].items()
+             if "clearing_" in k and "DIAG" not in k}
+    report["acceptance"] = {"R-027-4": {"p95_ms_and_n": waits, "threshold": "p95 <= 50 ms, n >= 20"}}
     _artifact("p027_q3_clearing.json", report)
+    for name, row in report["cells"].items():
+        assert row["payments"] == 5 * PER_PAYER, ("M6", name, row)
+        assert not row["untagged_errors"], ("M6", name, row)
+        assert not row["reconcile"]["mismatches"] and row["reconcile"]["committed"] == row["committed"], (name, row)
+        if "clearing_" in name:
+            assert row["clearing"].get("committed", 0) >= 1, ("anti-vacuum: clearing executed nothing", name, row)
+    assert all(n >= 20 and p95 is not None and p95 <= 50 for p95, n in waits.values()), ("R-027-4", waits)
