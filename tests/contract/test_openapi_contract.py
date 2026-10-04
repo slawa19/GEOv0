@@ -348,8 +348,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # enters or leaves: the canon's `TrustLine.status` enum loses `frozen` (`POST`, `PATCH`, `DELETE`, both `GET` of
 # `/trustlines`; the Admin trustline, bottleneck, liquidity, metrics and both graph reads); the generated side still
 # says `string`. Measured with a per-entry dump against the canon of `86742876` (its digest is the previous one).
+# 2026-10-04 / programme 028 E5 (`F-028-36`, `F-028-37`, owner В-3): count HOLDS at 62, digest moves. SEVEN entries
+# change content, none enters or leaves: `ParticipantStats` becomes `per_equivalent[]` (`GET /participants/me`),
+# `ParticipantPublicStats.total_incoming_trust` an array per equivalent (inside every read that carries a
+# `Participant`: `GET /participants`, `/participants/search`, `/participants/{pid}`, `PATCH /participants/me`,
+# `POST /participants`), and the liquidity summary's three money totals become nullable. In each of the seven the
+# changed sub-schemas are EQUAL on both sides; the entries stay in the ledger for their older differences. Measured
+# with a per-entry dump of both ledgers on `3fb5acd3` and on this tree: error ledger identical, 62 / 51.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "b1e3e778e9cf2ec150be255a4ff6911c1c8d8abe792dce911afde219cbbbcd88"
+    "5955403c59c9cda49ff3276f8e419835e59fcf6450da07daf4a3e4fb66534151"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

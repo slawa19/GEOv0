@@ -5186,11 +5186,18 @@ components:
           additionalProperties: true
 
     ParticipantPublicStats:
+      # 028 F-028-36 (owner decision В-3, 2026-10-04): equivalents are independent, so incoming
+      # trust is reported per equivalent and never summed across them. The public profile discloses
+      # exactly what it disclosed before - incoming trust and the membership date - and nothing else.
       type: object
       required: [total_incoming_trust, member_since]
       properties:
         total_incoming_trust:
-          type: string
+          # One element per equivalent with at least one ACTIVE incoming trustline, ordered by
+          # equivalent code; empty when there is none.
+          type: array
+          items:
+            $ref: '#/components/schemas/EquivalentAmount'
         member_since:
           type: string
           format: date-time
@@ -5224,19 +5231,53 @@ components:
           items:
             $ref: '#/components/schemas/Participant'
 
-    ParticipantStats:
+    EquivalentAmount:
       type: object
-      required: [total_incoming_trust, total_outgoing_trust, total_debt, total_credit, net_balance]
+      required: [equivalent, amount]
       properties:
+        equivalent:
+          type: string
+        amount:
+          # Money, exact decimal string with at least the equivalent's `precision` digits
+          # (to_money_str: never drops a stored digit).
+          type: string
+
+    ParticipantStats:
+      # 028 F-028-36 (owner decision В-3, 2026-10-04): the caller's OWN figures, one element per
+      # equivalent. The former scalar totals summed different equivalents into one number and were
+      # removed (no consumer in the repository).
+      type: object
+      required: [per_equivalent]
+      properties:
+        per_equivalent:
+          # One element per equivalent in which the participant has an active trustline (either
+          # direction) or a debt (either direction), ordered by equivalent code; empty otherwise.
+          type: array
+          items:
+            $ref: '#/components/schemas/ParticipantEquivalentStats'
+
+    ParticipantEquivalentStats:
+      # All five amounts are money as exact decimal strings rendered with at least the
+      # equivalent's `precision` digits, never fewer than the stored value needs.
+      type: object
+      required: [equivalent, total_incoming_trust, total_outgoing_trust, total_debt, total_credit, net_balance]
+      properties:
+        equivalent:
+          type: string
         total_incoming_trust:
+          # SUM of active trustline limits TO the participant in this equivalent.
           type: string
         total_outgoing_trust:
+          # SUM of active trustline limits FROM the participant in this equivalent.
           type: string
         total_debt:
+          # What the participant owes in this equivalent.
           type: string
         total_credit:
+          # What others owe the participant in this equivalent.
           type: string
         net_balance:
+          # total_credit - total_debt.
           type: string
 
     ParticipantWithStats:
@@ -7849,8 +7890,10 @@ components:
           maximum: 1
         items:
           # Active trustlines with limit > 0 whose available/limit ratio is strictly below
-          # `threshold`, ordered by available ascending then created_at ascending, capped at the
-          # `limit` query parameter. `used` is the matching Debt row (0 when there is none) and
+          # `threshold`, capped at the `limit` query parameter. With `equivalent` the order is
+          # available ascending then created_at ascending; WITHOUT it the rows carry different
+          # units, so the order is the ratio available/limit ascending then created_at ascending
+          # (028 F-028-38, owner decision В-3: no comparison across equivalents). `used` is the matching Debt row (0 when there is none) and
           # `available` is limit - used, both computed in the query, not stored.
           type: array
           items:
@@ -7866,9 +7909,9 @@ components:
         display_name:
           type: string
         net:
-          # Money: total credited minus total debited across the selected equivalent(s), as an
-          # exact decimal string (AGENTS.md section 8). Negative for a net debtor. NOT atoms -
-          # this is the raw Debt.amount sum in major units.
+          # Money: total credited minus total debited in the selected equivalent, as an exact
+          # decimal string (AGENTS.md section 8). Negative for a net debtor. NOT atoms - this is
+          # the raw Debt.amount sum in major units. Rows exist only when `equivalent` is given.
           type: string
 
     AdminLiquiditySummaryResponse:
@@ -7925,26 +7968,34 @@ components:
           type: integer
           minimum: 0
         total_limit:
-          # Money, exact decimal string: SUM of TrustLine.limit over active lines.
+          # Money, exact decimal string: SUM of TrustLine.limit over the active lines of the ONE
+          # selected equivalent. Null when `equivalent` is omitted: money is never summed across
+          # equivalents (028 F-028-37, owner decision В-3, 2026-10-04); the counters above stay.
           type: string
+          nullable: true
         total_used:
-          # Money: SUM of coalesce(Debt.amount, 0) over the same lines.
+          # Money: SUM of coalesce(Debt.amount, 0) over the same lines; null without `equivalent`.
           type: string
+          nullable: true
         total_available:
-          # Money: SUM of (limit - used). Equals total_limit - total_used.
+          # Money: SUM of the signed (limit - used) of the same lines of one equivalent. Equals
+          # total_limit - total_used; null without `equivalent`.
           type: string
+          nullable: true
         top_creditors:
-          # Net > 0, descending, capped at the `limit` query parameter.
+          # Net > 0, descending, capped at the `limit` query parameter. Empty without
+          # `equivalent`: a net position is ranked only within one equivalent (028 F-028-37).
           type: array
           items:
             $ref: '#/components/schemas/AdminLiquidityNetRow'
         top_debtors:
-          # Net < 0, ascending (most negative first), same cap.
+          # Net < 0, ascending (most negative first), same cap; empty without `equivalent`.
           type: array
           items:
             $ref: '#/components/schemas/AdminLiquidityNetRow'
         top_by_abs_net:
-          # Ranked by abs(net) with no sign filter, so its rows overlap the two lists above.
+          # Ranked by abs(net) with no sign filter, so its rows overlap the two lists above; empty
+          # without `equivalent`.
           type: array
           items:
             $ref: '#/components/schemas/AdminLiquidityNetRow'
@@ -8121,10 +8172,11 @@ components:
           # (n - rank) / (n - 1), and exactly 1.0 when n <= 1.
           type: number
         net:
-          # Money, exact decimal string - but it has been through atoms and back
-          # (_decimal_to_atoms truncates toward zero at the equivalent's precision, then
-          # _atoms_to_decimal quantizes), so it can differ from AdminParticipantBalanceRow.net in
-          # the sub-precision digits and it carries exactly `precision` decimal places.
+          # Money, exact decimal string: credits minus debts subtracted exactly in Decimal FIRST,
+          # then truncated toward zero at the equivalent's precision (028 F-028-40; truncating
+          # each side before subtracting could be off by one atom). It can differ from
+          # AdminParticipantBalanceRow.net only in the sub-precision digits and carries exactly
+          # `precision` decimal places. `rank` orders by the exact net.
           type: string
 
     AdminParticipantCapacitySide:

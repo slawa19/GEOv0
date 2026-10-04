@@ -22,8 +22,15 @@ class ParticipantCreateRequest(ParticipantBase):
     profile: Optional[ParticipantProfile] = None
 
 
+class EquivalentAmount(BaseModel):
+    equivalent: str
+    amount: str
+
+
 class ParticipantPublicStats(BaseModel):
-    total_incoming_trust: str
+    # 028 F-028-36 (owner В-3): one amount per equivalent, never a sum across them. Only what the
+    # public profile disclosed before - incoming trust and membership date - is shown.
+    total_incoming_trust: List[EquivalentAmount]
     member_since: datetime
 
 class Participant(ParticipantBase):
@@ -47,12 +54,19 @@ class ParticipantPublic(BaseModel):
     status: str
 
 
-class ParticipantStats(BaseModel):
+class ParticipantEquivalentStats(BaseModel):
+    equivalent: str
     total_incoming_trust: str
     total_outgoing_trust: str
     total_debt: str
     total_credit: str
     net_balance: str
+
+
+class ParticipantStats(BaseModel):
+    # 028 F-028-36 (owner В-3): the participant's own figures per equivalent; the scalar totals
+    # summed hryvnias and hours into one number and are gone.
+    per_equivalent: List[ParticipantEquivalentStats]
 
 
 class ParticipantWithStats(Participant):

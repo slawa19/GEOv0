@@ -1,11 +1,7 @@
-"""028 stage E5 (F-028-36..40): no sum, comparison or ranking across the equivalent boundary.
+"""028 E5 (F-028-36..40, owner В-3): no sum, comparison or ranking across equivalents.
 
-Owner decision В-3 (2026-10-04): "конечно отдельно. Это же бред суммировать разные эквиваленты…
-Эквиваленты должны быть полностью независимы!" Each test below was written first and failed on
-`origin/claude/028-e3` (67d3107c); the failures are quoted in the spec's Changelog.
-
-Sub-quantum amounts (0.004, 0.005 at precision 2) are written through the fixture door on purpose:
-they stand for rows stored before the 028 step rule, which the readers must still show truthfully.
+Written first; red on 67d3107c (quoted in the spec's Changelog). Sub-quantum amounts stand for rows
+stored before the 028 step rule, which readers must still show truthfully.
 """
 
 from __future__ import annotations
@@ -39,23 +35,15 @@ async def _two_equivalents(db_session) -> tuple[Equivalent, Equivalent]:
 
 
 def _line(frm: Participant, to: Participant, eq: Equivalent, limit: str) -> TrustLine:
-    return TrustLine(
-        from_participant_id=frm.id,
-        to_participant_id=to.id,
-        equivalent_id=eq.id,
-        limit=Decimal(limit),
-        policy=_POLICY,
-        status="active",
-    )
+    ids = {"from_participant_id": frm.id, "to_participant_id": to.id, "equivalent_id": eq.id}
+    return TrustLine(**ids, limit=Decimal(limit), policy=_POLICY, status="active")
 
 
 def _debt(debtor: Participant, creditor: Participant, eq: Equivalent, amount: str) -> Debt:
     return Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal(amount))
 
 
-# --------------------------------------------------------------------------------------------
 # F-028-36 - the participant's own figures and the public profile, per equivalent
-# --------------------------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -98,11 +86,8 @@ async def test_me_reports_each_equivalent_separately_and_loses_no_digit(client, 
 
 
 @pytest.mark.asyncio
-async def test_me_with_one_equivalent_has_one_element_and_with_none_has_none(client, db_session, auth_user):
-    r = await client.get("/api/v1/participants/me", headers=auth_user["headers"])
-    assert r.status_code == 200, r.text
-    assert r.json()["stats"] == {"per_equivalent": []}
-
+async def test_me_with_one_equivalent_has_one_element(client, db_session, auth_user):
+    # No equivalent at all gives `[]`: tests/test_participants_me_and_auth_payloads.py.
     me = (await db_session.execute(select(Participant).where(Participant.pid == auth_user["pid"]))).scalar_one()
     peer = _person("peer1", "Q")
     db_session.add(peer)
@@ -135,9 +120,7 @@ async def test_public_profile_shows_incoming_trust_per_equivalent_and_nothing_ne
     ]
 
 
-# --------------------------------------------------------------------------------------------
 # F-028-37 / F-028-38 - liquidity summary and bottlenecks without an equivalent
-# --------------------------------------------------------------------------------------------
 
 
 async def _liquidity_world(db_session) -> None:
@@ -195,21 +178,7 @@ async def test_bottlenecks_without_an_equivalent_are_ordered_by_share_not_by_amo
     ]
 
 
-# --------------------------------------------------------------------------------------------
 # F-028-39 / F-028-40 - graph net sign and the net ranking, within one equivalent
-# --------------------------------------------------------------------------------------------
-
-
-async def _sub_quantum_world(db_session) -> None:
-    alice, bob, carol = _person("alice", "A"), _person("bob", "B"), _person("carol", "C")
-    db_session.add_all([alice, bob, carol])
-    uah, _hour = await _two_equivalents(db_session)
-    db_session.add_all([_line(alice, bob, uah, "100"), _line(carol, alice, uah, "100")])
-    await db_session.flush()
-    async with debt_fixture_setup(db_session, label="sub-quantum"):
-        # alice: credit 0.015, debt 0.006 -> net +0.009; bob -0.015; carol +0.006.
-        db_session.add_all([_debt(bob, alice, uah, "0.015"), _debt(alice, carol, uah, "0.006")])
-    await db_session.commit()
 
 
 @pytest.mark.asyncio
@@ -232,7 +201,15 @@ async def test_graph_net_sign_keeps_a_sub_quantum_net(client, db_session, route)
 
 @pytest.mark.asyncio
 async def test_rank_net_subtracts_before_it_truncates(client, db_session):
-    await _sub_quantum_world(db_session)
+    alice, bob, carol = _person("alice", "A"), _person("bob", "B"), _person("carol", "C")
+    db_session.add_all([alice, bob, carol])
+    uah, _hour = await _two_equivalents(db_session)
+    db_session.add_all([_line(alice, bob, uah, "100"), _line(carol, alice, uah, "100")])
+    await db_session.flush()
+    async with debt_fixture_setup(db_session, label="sub-quantum"):
+        # alice: credit 0.015, debt 0.006 -> net +0.009; bob -0.015; carol +0.006.
+        db_session.add_all([_debt(bob, alice, uah, "0.015"), _debt(alice, carol, uah, "0.006")])
+    await db_session.commit()
 
     r = await client.get("/api/v1/admin/participants/alice/metrics", headers=_ADMIN, params={"equivalent": "UAH"})
     assert r.status_code == 200, r.text

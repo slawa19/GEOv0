@@ -244,14 +244,29 @@ Authorization: Bearer {token}
   "verification_level": 1,
   "created_at": "2025-11-29T12:00:00Z",
   "stats": {
-    "total_incoming_trust": "5000.00",
-    "total_outgoing_trust": "3000.00",
-    "total_debt": "500.00",
-    "total_credit": "800.00",
-    "net_balance": "300.00"
+    "per_equivalent": [
+      {
+        "equivalent": "HOUR",
+        "total_incoming_trust": "40.00",
+        "total_outgoing_trust": "10.00",
+        "total_debt": "0.00",
+        "total_credit": "5.00",
+        "net_balance": "5.00"
+      },
+      {
+        "equivalent": "UAH",
+        "total_incoming_trust": "5000.00",
+        "total_outgoing_trust": "3000.00",
+        "total_debt": "500.00",
+        "total_credit": "800.00",
+        "net_balance": "300.00"
+      }
+    ]
   }
 }
 ```
+
+`stats.per_equivalent` — собственные показатели участника, **по одному элементу на эквивалент**, где у него есть активная линия доверия или долг (в любую сторону); порядок — по коду эквивалента. Сумм через эквиваленты нет: эквиваленты независимы (решение владельца В-3, 2026-10-04, программа 028 F-028-36). Суммы — десятичные строки с не меньшим, чем `precision` эквивалента, числом знаков; хранимая цифра не отбрасывается.
 
 ### 3.2. Обновить профиль
 
@@ -294,11 +309,15 @@ Authorization: Bearer {token}
   "status": "active",
   "verification_level": 2,
   "public_stats": {
-    "total_incoming_trust": "10000.00",
+    "total_incoming_trust": [
+      { "equivalent": "UAH", "amount": "10000.00" }
+    ],
     "member_since": "2025-01-15T00:00:00Z"
   }
 }
 ```
+
+`public_stats` раскрывает только входящее доверие (по эквивалентам, где есть активная входящая линия) и дату вступления; долг, кредит, исходящее доверие и нетто чужого участника публично не показываются (028 F-028-36).
 
 ### 3.4. Поиск участников
 

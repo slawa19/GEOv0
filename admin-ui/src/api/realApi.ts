@@ -312,9 +312,10 @@ const LiquiditySummarySchema = z
     active_trustlines: z.number(),
     bottlenecks: z.number(),
     incidents_over_sla: z.number(),
-    total_limit: DecimalString,
-    total_used: DecimalString,
-    total_available: DecimalString,
+    // 028 F-028-37: без эквивалента сервер не суммирует деньги — `null`, а не сумма разных единиц.
+    total_limit: DecimalString.nullable(),
+    total_used: DecimalString.nullable(),
+    total_available: DecimalString.nullable(),
     top_creditors: z.array(LiquidityNetRowSchema),
     top_debtors: z.array(LiquidityNetRowSchema),
     top_by_abs_net: z.array(LiquidityNetRowSchema),
