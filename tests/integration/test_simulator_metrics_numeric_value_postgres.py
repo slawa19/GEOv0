@@ -33,6 +33,7 @@ from app.config import settings
 from app.core.simulator import storage as simulator_storage
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.db.models.simulator_storage import SimulatorRunMetric
+from tests.p019_support import require_target
 from tests.simulator_tick_stand import unit_tick
 
 
@@ -272,78 +273,44 @@ async def test_static_clearing_volume_reaches_the_column_exactly(
     assert _values(resp, "clearing_volume") == ["12345678901.12345678"]
 
 
-# --- p007_t715: the new overflow class must not damage the caller ------------
+# --- 028 E1 / F-028-7: an unrepresentable value costs its own point, not the tick --------------------------------
+
+# Two debts at the money door's ceiling sum past what Numeric(20, 8) holds (BACKLOG 007 §1).
+_EPISODE = [(1_000, Decimal("999999999999.99999999")), (2_000, Decimal(10) ** 12), (3_000, Decimal("500"))]
+_OTHERS = {"avg_route_length": Decimal("2"), "clearing_volume": Decimal("3"),
+           "active_participants": Decimal("4"), "active_trustlines": Decimal("5")}
 
 
-# Numeric(20, 8) holds 12 integer digits. float8 accepted this yesterday.
-_ABOVE_THE_NUMERIC_CEILING = Decimal("1E+13")
-
-
-async def test_overflow_rolls_back_only_the_metrics_write(
+async def test_unrepresentable_total_debt_is_a_gap_not_a_lost_tick(
     db_session: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """`numeric field overflow` is a failure class this slice introduced.
-
-    The real-mode tick passes its own session with `commit=False`. Before the
-    SAVEPOINT the writer answered any failure with `await session.rollback()`
-    on that session and then swallowed it, so a run above the ceiling silently
-    threw away everything the tick had staged, every tick, while the reader
-    carried the last good measurement forward as a healthy flat line. Sibling of
-    finding B-A2b-001 (registry 008).
-    """
+    """Replaces `test_overflow_rolls_back_only_the_metrics_write` (p007_t715), whose overflow now no longer fails
+    the write: the caller's staged row still survives, and the tick above the ceiling keeps its other six keys
+    while `total_debt` is stored as NULL and read back as `null` - not as a repeat of the previous point. The
+    savepoint for a write the database does reject stays covered by
+    `tests/unit/test_simulator_write_tick_metrics_upsert.py::test_failed_metrics_write_does_not_roll_back_the_caller`."""
 
     monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
-    caplog.set_level(logging.ERROR, logger=simulator_storage.logger.name)
-
-    # Work the caller staged in its own transaction.
-    db_session.add(
-        SimulatorRunMetric(
-            run_id=_RUN_ID,
-            equivalent_code="UAH",
-            key="total_debt",
-            t_ms=100,
-            value=Decimal("1.25"),
-        )
-    )
+    caplog.set_level(logging.WARNING, logger=simulator_storage.logger.name)
+    db_session.add(SimulatorRunMetric(run_id=_RUN_ID, equivalent_code="UAH", key="total_debt", t_ms=100,
+                                      value=Decimal("1.25")))  # work the caller staged in its own transaction
     await db_session.flush()
+    written = [await simulator_storage.write_tick_metrics(
+        run_id=_RUN_ID, t_ms=t_ms, per_equivalent={"UAH": {"committed": 1}},
+        metric_values_by_eq={"UAH": {"total_debt": debt, **_OTHERS}}, session=db_session, commit=False)
+        for t_ms, debt in _EPISODE]
 
-    await simulator_storage.write_tick_metrics(
-        run_id=_RUN_ID,
-        t_ms=200,
-        per_equivalent={
-            "UAH": {"committed": 1, "rejected": 0, "errors": 0, "timeouts": 0}
-        },
-        metric_values_by_eq={"UAH": {"total_debt": _ABOVE_THE_NUMERIC_CEILING}},
-        session=db_session,
-        commit=False,
-    )
+    rows = (await db_session.execute(select(SimulatorRunMetric.t_ms, SimulatorRunMetric.key, SimulatorRunMetric.value)
+                                     .where(SimulatorRunMetric.run_id == _RUN_ID))).all()
+    nulls = sorted((t, k) for t, k, v in rows if v is None)
+    per_tick = {t: sum(1 for row in rows if row[0] == t) for t, _ in _EPISODE}
+    assert (100, "total_debt", Decimal("1.25")) in rows, "the caller's staged row survived"
+    logged = any("unrepresentable" in r.getMessage() for r in caplog.records)  # the dropped point is not silent
 
-    # The overflow really happened and was reported, not swallowed in silence.
-    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
-    assert errors, "the overflow must reach the log"
-    assert any("write_tick_metrics_failed" in r.getMessage() for r in errors)
-
-    # The caller's staged row survived - this is what the old rollback destroyed.
-    survived = (
-        await db_session.execute(
-            select(SimulatorRunMetric.value).where(
-                (SimulatorRunMetric.run_id == _RUN_ID)
-                & (SimulatorRunMetric.t_ms == 100)
-            )
-        )
-    ).scalar_one()
-    assert survived == Decimal("1.25")
-
-    # Nothing from the failed batch leaked in.
-    leaked = (
-        await db_session.execute(
-            select(SimulatorRunMetric.key).where(
-                (SimulatorRunMetric.run_id == _RUN_ID)
-                & (SimulatorRunMetric.t_ms == 200)
-            )
-        )
-    ).all()
-    assert leaked == []
-
-    # And the session is still usable afterwards: the caller can keep working.
-    await db_session.execute(select(SimulatorRunMetric.key).limit(1))
+    monkeypatch.setattr(db_session_module, "AsyncSessionLocal", lambda: _SharedSession(db_session), raising=False)
+    resp = await _reader().build_metrics(run_id=_RUN_ID, equivalent="UAH", from_ms=1_000, to_ms=3_000, step_ms=1_000)
+    assert _values(resp, "avg_route_length") == ["2.00000000"] * 3
+    require_target(
+        written == [True] * 3 and logged and per_tick == {1_000: 7, 2_000: 7, 3_000: 7} and nulls == [(2_000, "total_debt")]
+        and _values(resp, "total_debt") == ["999999999999.99999999", None, "500.00000000"],
+        f"written {written}, logged {logged}, rows per tick {per_tick}, NULLs {nulls}, total_debt read {_values(resp, 'total_debt')}")
