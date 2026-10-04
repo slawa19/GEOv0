@@ -277,8 +277,8 @@ def _record_plans(monkeypatch, runner: RealRunnerImpl) -> list[list[Any]]:
     plans: list[list[Any]] = []
     original = runner._plan_real_payments
 
-    def _recording(run, scenario, *, debt_snapshot=None):
-        planned = original(run, scenario, debt_snapshot=debt_snapshot)
+    def _recording(run, scenario, **kw):  # 028: the planner also takes `precision_by_eq`
+        planned = original(run, scenario, **kw)
         plans.append(list(planned))
         return planned
 

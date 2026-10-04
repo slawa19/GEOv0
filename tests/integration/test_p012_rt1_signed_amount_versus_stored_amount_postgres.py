@@ -139,7 +139,7 @@ async def scenario(pg_client: AsyncClient) -> AsyncGenerator[_Scenario, None]:
     code = f"S9{nonce}".upper()[:16]
 
     async with TestingSessionLocal() as session:
-        equivalent = Equivalent(code=code, description="RT-012-1 scale probe", precision=2)
+        equivalent = Equivalent(code=code, description="RT-012-1 scale probe", precision=8)  # INTENTIONAL, 028 `F-028-23`/В-4: scale-8 money is legal only at precision 8 (precision = the step)
         session.add(equivalent)
         await session.commit()
         equivalent_id = equivalent.id
@@ -379,6 +379,11 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
     # `MONEY_MAX_SCALE` from the module at call time (via `is_storable_money`), so this patch
     # reaches the running application, not a copy of it.
     monkeypatch.setattr(validation, "MONEY_MAX_SCALE", 18)
+    # INTENTIONAL, 028 `F-028-23` (owner В-4): the accounting step is a second, independent door in front of the
+    # storage one; it is opened too, so this counter-check still measures the storage door alone.
+    import app.core.payments.service as payment_service
+
+    monkeypatch.setattr(payment_service, "require_money_step", lambda value, **_kw: value)
 
     amount, measured_storage = UNSTORABLE_AMOUNTS[0]
     assert parse_money_amount(amount, require_positive=True) == Decimal(amount), (

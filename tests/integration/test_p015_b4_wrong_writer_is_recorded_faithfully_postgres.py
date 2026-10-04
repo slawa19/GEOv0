@@ -132,7 +132,7 @@ async def _seed_triangle(factory, *, trustlines: list[tuple[str, str, Decimal]])
     """
     tag = uuid.uuid4().hex[:8].upper()
     async with factory() as session:
-        equivalent = Equivalent(code=f"B4C6{tag}"[:16], precision=2, is_active=True, metadata_={})
+        equivalent = Equivalent(code=f"B4C6{tag}"[:16], precision=8, is_active=True, metadata_={})  # INTENTIONAL, 028 `F-028-23`/В-4: scale-8 money is legal only at precision 8 (precision = the step)
         people = {
             name: Participant(
                 pid=f"B4C6_{name.upper()}_{tag}",

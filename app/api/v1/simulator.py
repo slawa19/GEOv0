@@ -37,7 +37,11 @@ from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
-from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, SimulatorPidTakenError
+from app.core.simulator.real_scenario_seeder import (
+    RealScenarioSeeder,
+    ScenarioTrustLineRefused,
+    SimulatorPidTakenError,
+)
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.core.simulator.models import _Subscription, bump_topology_epoch
 from app.core.simulator.sse_broadcast import (
@@ -111,7 +115,7 @@ from app.schemas.trustline import (
     TrustLineCreateRequest,
     TrustLineUpdateRequest,
 )
-from app.utils.validation import parse_money_amount
+from app.utils.validation import parse_money_amount, require_money_step
 
 router = APIRouter(prefix="/simulator")
 
@@ -659,6 +663,12 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
                     "request_id": request_id,
                 },
             )
+        except ScenarioTrustLineRefused as exc:
+            # 028 `F-028-3`/`F-028-24`: a line of the scenario breaks the trust-line rules - not transient.
+            logger.warning("interact.ensure_seeded: refused run_id=%s line=%s reason=%s", run_id, exc.line,
+                           exc.details["reason"])
+            return _action_error(status_code=409, code=str(exc.details["code"]), message=exc.message,
+                                 details={"run_id": str(run_id), "line": exc.line, "reason": exc.details["reason"]})
         except Exception:
             logger.error(
                 "interact.ensure_seeded: seeding failed for run_id=%s",
@@ -828,6 +838,17 @@ def _fmt_decimal_for_api(v: Decimal) -> str:
 
 def _norm_pid(v: object) -> str:
     return str(v or "").strip()
+
+
+def _step_error_or_none(value: Decimal, eq: Any, *, field: str, raw: object) -> Optional[JSONResponse]:
+    """028 `F-028-23` (owner В-4): an amount or limit finer than the equivalent's step - the action's own 400."""
+
+    try:
+        require_money_step(value, precision=eq.precision, equivalent=eq.code, field=field)
+    except BadRequestException as exc:
+        return _action_error(status_code=400, code="INVALID_AMOUNT", message=exc.message,
+                             details={field: raw, **(exc.details or {})})
+    return None
 
 
 def _guard_no_self_loop_or_error(*, from_pid: object, to_pid: object) -> Optional[JSONResponse]:
@@ -1249,6 +1270,8 @@ async def action_trustline_create(
         return err
     assert parties is not None
     from_p, to_p, eq = parties.from_p, parties.to_p, parties.eq
+    if (err := _step_error_or_none(limit_dec, eq, field="limit", raw=req.limit)) is not None:
+        return err
 
     # If there is already debt, the new limit may not be below it: the action's own check, STRONGER than the
     # service's create (spec, "Решения" item 5).
@@ -1420,6 +1443,8 @@ async def action_trustline_update(
             details={"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code},
         )
 
+    if (err := _step_error_or_none(new_limit_dec, parties.eq, field="new_limit", raw=req.new_limit)) is not None:
+        return err
     old_limit_dec = Decimal(str(getattr(tl, "limit", 0) or 0))
     # 026 `T2602`: no debt floor - a limit below `used` is a trust change, same rule as the public PATCH; the
     # service takes the row lock (`TrustLineService.execute_update`).
@@ -1592,7 +1617,7 @@ async def action_payment_real(
 
     # Amount validation per spec.
     try:
-        _ = parse_money_amount(req.amount, field="amount", require_positive=True)
+        amount_dec = parse_money_amount(req.amount, field="amount", require_positive=True)
     except BadRequestException as exc:
         return _action_error(
             status_code=400,
@@ -1600,6 +1625,8 @@ async def action_payment_real(
             message=str(getattr(exc, "message", None) or "Invalid amount"),
             details={"amount": req.amount},
         )
+    if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
+        return err
 
     # Best-effort pre-check to distinguish NO_ROUTE vs INSUFFICIENT_CAPACITY.
     # Use cached trustline-only topology via PaymentRouter (ignores remaining capacity), so
@@ -2033,7 +2060,7 @@ async def action_participants_list(
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
         403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)"},
+        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },
@@ -2201,7 +2228,7 @@ async def action_trustlines_list(
         401: {"model": ErrorEnvelope, "description": "Missing or invalid simulator identity"},
         403: _ACTION_FORBIDDEN_RESPONSE,
         404: {"model": SimulatorActionError, "description": "Run, participant, equivalent or trustline not found (flat envelope)"},
-        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)"},
+        409: {"model": SimulatorActionError, "description": "The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)"},
         422: {"model": ErrorEnvelope, "description": "Invalid simulator identity transport (for example, X-Simulator-Owner)"},
         503: {"model": SimulatorActionError, "description": "Run perimeter, trustline usage, seeding or engine unavailable (flat envelope)"},
     },

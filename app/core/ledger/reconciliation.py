@@ -43,7 +43,9 @@ CRITERION (b), per operation that touched or named the equivalent, from what the
                            effect wrote cannot be recomputed. What CAN be: every entry is an increase,
                            every delta is whole cents (the writer rounds every amount down to 0.01), no
                            more edges than `inject_debt` effects, and no more debt in total than the
-                           rounded-down positive amounts the intent names.
+                           rounded-down positive amounts the intent names. Since 028 `F-028-30` the writer
+                           applies an amount whole or skips it, so the grain is the finer of a cent and the
+                           equivalent's step and the named amounts are taken whole.
     SEED, TEST_FIXTURE     NOT EXAMINED. Refused after the baseline (5a), adopted by it before.
 
 and for every examined kind: the envelope's version is one a rule above reads. The stored intent digest
@@ -98,7 +100,7 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
 
 from sqlalchemy import and_, insert, or_, select, update
@@ -182,7 +184,9 @@ MAX_STORED_FINDINGS = 50
 
 _ATOM_EXPONENT = 8
 
-#: One cent in atoms: `inject_debt` rounds every amount down to 0.01 before it writes.
+#: One cent in atoms: `inject_debt` rounded every amount down to 0.01 before it wrote, until 028 `F-028-30`; since
+#: then it writes amounts in the equivalent's step whole. The INJECT grain is therefore the finer of the two, so a
+#: historical cent-rounded entry and a new step-grained one both pass (`_inject_subset`).
 _CENT_ATOMS = 10**6
 
 Edge = tuple[uuid.UUID, uuid.UUID]
@@ -843,7 +847,9 @@ def _payment_v1(op: Any, intent: dict[str, Any], entries: list[_Entry], equivale
     ]
 
 
-def _inject_subset(op: Any, intent: dict[str, Any], entries: list[_Entry], _equivalent_id: uuid.UUID) -> list:
+def _inject_subset(
+    op: Any, intent: dict[str, Any], entries: list[_Entry], _equivalent_id: uuid.UUID, grain_atoms: int = _CENT_ATOMS
+) -> list:
     effects = intent.get("effects")
     if not isinstance(effects, list):
         raise _Malformed("inject_intent_shape")
@@ -853,12 +859,12 @@ def _inject_subset(op: Any, intent: dict[str, Any], entries: list[_Entry], _equi
         if not isinstance(effect, dict) or str(effect.get("op") or "").strip() != "inject_debt":
             continue
         inject_debt_effects += 1
-        try:
-            amount = Decimal(str(effect.get("amount"))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        try:  # whole, as the writer applies it since 028 `F-028-30` (an upper bound for the older cent-rounded ones)
+            amount = Decimal(str(effect.get("amount")))
+            if amount.is_finite() and amount > 0:
+                named_atoms += int(amount.scaleb(_ATOM_EXPONENT))
         except (InvalidOperation, ValueError):
             continue
-        if amount > 0:
-            named_atoms += int(amount.scaleb(_ATOM_EXPONENT))
 
     def _rule(rule: str, edge: Edge | None = None) -> dict[str, Any]:
         return _finding(
@@ -875,7 +881,7 @@ def _inject_subset(op: Any, intent: dict[str, Any], entries: list[_Entry], _equi
         edge = (entry.debtor_id, entry.creditor_id)
         if entry.effect not in ("I", "U") or entry.delta <= 0:
             findings.append(_rule("entry_is_not_an_increase", edge))
-        if entry.delta % _CENT_ATOMS != 0:
+        if entry.delta % grain_atoms != 0:  # the name predates 028: at precision > 2 the grain is the step
             findings.append(_rule("delta_is_not_whole_cents", edge))
     if len({(e.debtor_id, e.creditor_id) for e in entries}) > inject_debt_effects:
         findings.append(_rule("more_edges_than_inject_debt_effects"))
@@ -897,6 +903,7 @@ def _criterion_b(
     equivalent_id: uuid.UUID,
     operations: list[Any],
     entries_by_operation: dict[uuid.UUID, list[_Entry]],
+    grain_atoms: int = _CENT_ATOMS,
 ) -> tuple[list[dict[str, Any]], tuple[tuple[str, str, int], ...]]:
     findings: list[dict[str, Any]] = []
     coverage: Counter[tuple[str, str]] = Counter()
@@ -925,7 +932,8 @@ def _criterion_b(
         # is accepted under the threat model: this is detection around the application, and a rewrite
         # of the intent that also moved the ledger remains a coordinated rewrite, outside it.
         try:
-            findings.extend(_RULES[(kind, version)](op, intent, entries_by_operation.get(op.id, []), equivalent_id))
+            rule, args = _RULES[(kind, version)], (op, intent, entries_by_operation.get(op.id, []), equivalent_id)
+            findings.extend(rule(*args, grain_atoms) if rule is _inject_subset else rule(*args))
         except _Malformed as malformed:
             findings.append(_finding("b_intent_malformed", op, reason=malformed.reason))
     return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
@@ -934,14 +942,17 @@ def _criterion_b(
 async def verify_journal_equals_change(
     session: Any, equivalent_id: uuid.UUID
 ) -> ReconciliationOutcome:
-    """Criteria (a) and (b) for one equivalent: five reads, no writes, arithmetic in atoms."""
+    """Criteria (a) and (b) for one equivalent: six reads, no writes, arithmetic in atoms."""
 
     sums, findings, entries_read, entries_by_operation = await _journal_sums(session, equivalent_id)
+    # 028 `F-028-30`: the INJECT grain is the finer of a cent and the equivalent's step.
+    precision = await session.scalar(select(Equivalent.precision).where(Equivalent.id == equivalent_id))
+    grain_atoms = min(_CENT_ATOMS, 10 ** (_ATOM_EXPONENT - min(int(precision if precision is not None else 2), 8)))
 
     # Criterion (b) needs no baseline: a recorded change that contradicts its recorded intent is
     # conclusive on its own, like a row that contradicts its own arithmetic.
     b_findings, coverage = _criterion_b(
-        equivalent_id, await _operations(session, equivalent_id), entries_by_operation
+        equivalent_id, await _operations(session, equivalent_id), entries_by_operation, grain_atoms
     )
     findings.extend(b_findings)
 

@@ -60,9 +60,9 @@ def _drift_engine(run=None) -> TrustDriftEngine:
     )
 
 
-async def _seed(db_session, *, existing_amount: Decimal, limit: Decimal):
+async def _seed(db_session, *, existing_amount: Decimal, limit: Decimal, precision: int = 2):
     n = _nonce()
-    eq = Equivalent(code=f"T{n}".upper()[:16], precision=2, is_active=True)
+    eq = Equivalent(code=f"T{n}".upper()[:16], precision=precision, is_active=True)
     creditor = Participant(
         pid=f"TCRED_{n}", display_name="Creditor", public_key=f"pk_tcred_{n}"[:64],
         type="person", status="active",
@@ -175,11 +175,10 @@ async def test_injecting_into_a_core_created_debt_preserves_its_stored_precision
 
 @pytest.mark.asyncio
 async def test_the_injected_amount_itself_is_still_normalised(db_session) -> None:
-    """Control, and a boundary: the INPUT may be quantised, the STORED value may not.
+    """Control, and a boundary: the INPUT may be refused, the STORED value may not be rewritten.
 
-    The spec withdrew the claim about input quantisation - the simulator is entitled to normalise
-    the amount a scenario hands it. Without this control the fix could be "remove every quantize
-    in the file", which changes what the simulator accepts rather than what it preserves.
+    INTENTIONAL, 028 `F-028-30` (owner В-4, 2026-10-04): the input is no longer truncated to 0.01 - an amount
+    finer than the equivalent's step is skipped with a reason, and one in the step is applied whole.
     """
     eq, creditor, debtor = await _seed(
         db_session, existing_amount=Decimal("1.00"), limit=Decimal("100.00")
@@ -193,15 +192,12 @@ async def test_the_injected_amount_itself_is_still_normalised(db_session) -> Non
             participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
             equivalents=[eq.code],
         ),
-        # Three fraction digits in, and the injector's own input rule truncates to 2.
+        # Three fraction digits in at precision 2: skipped, never truncated to 2.009 -> 2.00.
         scenario=_scenario(eq, creditor, debtor, inject_amount="2.009", limit="100.00"),
     )
 
     stored = await _stored_debt(db_session, eq, creditor, debtor)
-    assert stored == Decimal("3.00"), (
-        f"the injected amount should still be normalised to the simulator's own input scale "
-        f"before it is added; stored {stored}"
-    )
+    assert stored == Decimal("1.00"), f"an amount finer than the step must be skipped, not truncated; stored {stored}"
 
 
 @pytest.mark.asyncio
@@ -310,7 +306,7 @@ async def test_trust_growth_preserves_the_stored_limit_precision(db_session) -> 
     """
     stored_limit = Decimal("100.12345678")
     eq, creditor, debtor = await _seed(
-        db_session, existing_amount=Decimal("1.00000000"), limit=stored_limit
+        db_session, existing_amount=Decimal("1.00000000"), limit=stored_limit, precision=8  # 028 В-4: an 8-digit limit is in the step only at precision 8
     )
     await db_session.commit()
 
@@ -344,7 +340,7 @@ async def test_trust_growth_still_respects_the_max_growth_ceiling(db_session) ->
     """
     stored_limit = Decimal("100.00000000")
     eq, creditor, debtor = await _seed(
-        db_session, existing_amount=Decimal("1.00000000"), limit=stored_limit
+        db_session, existing_amount=Decimal("1.00000000"), limit=stored_limit, precision=8  # 028 В-4: an 8-digit limit is in the step only at precision 8
     )
     await db_session.commit()
 
@@ -379,7 +375,7 @@ async def test_the_scenario_limit_is_not_laundered_through_float(db_session) -> 
     """
     stored_limit = Decimal("100.12345678")
     eq, creditor, debtor = await _seed(
-        db_session, existing_amount=Decimal("1.00000000"), limit=stored_limit
+        db_session, existing_amount=Decimal("1.00000000"), limit=stored_limit, precision=8  # 028 В-4: an 8-digit limit is in the step only at precision 8
     )
     await db_session.commit()
 

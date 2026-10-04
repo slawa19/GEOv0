@@ -125,7 +125,7 @@ async def test_a_mixed_inject_event_is_one_operation_in_source_order(factory) ->
     assert [note["description"] for note in notes] == ["inject applied"], notes
 
     # The counters: 9 effects, 7 applied (3 debts + 2 participants + 1 line + 1 freeze), 2 skipped.
-    assert notes[0]["stats"] == {"applied": 7, "skipped": 2, "total_amount": "6.00"}, notes[0]
+    assert notes[0]["stats"] == {"applied": 7, "skipped": 2, "total_amount": {eq.code: "6.00"}}, notes[0]  # INTENTIONAL, 028 F-028-30: the total is per equivalent
 
     async with factory() as s:
         ids = dict(

@@ -72,6 +72,10 @@ class _ExecResult:
             raise AssertionError("Expected <= 1 row")
         return self._items[0]
 
+    def one_or_none(self):  # 028 `F-028-23`: the router reads the equivalent as `(id, precision)`
+        item = self.scalar_one_or_none()
+        return None if item is None else (item.id, getattr(item, "precision", 2))
+
     def all(self):
         return list(self._items)
 

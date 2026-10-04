@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
-from app.utils.validation import MONEY_MAX_SCALE
+from app.utils.validation import money_step
 
 from app.core.simulator.models import (
     EdgeClearingHistory,
@@ -38,7 +38,10 @@ from app.schemas.trustline import TrustLineUpdateRequest
 # `Equivalent.precision` is deliberately NOT used as the quantum here - it is a DISPLAY minimum
 # (`app/utils/money.py`), not the ledger's grain, and rounding stored money to it would be the same
 # defect wearing a different constant.
-_LEDGER_QUANTUM = Decimal(1).scaleb(-MONEY_MAX_SCALE)
+#
+# CORRECTION 2026-10-04 (028 `F-028-31`, owner В-4): precision IS the accounting step now, and the doors refuse a
+# limit finer than it. Growth and decay write in `money_step(Equivalent.precision)`; the stored and the original
+# limit are still read WHOLE (no rounding of what is stored), which is what the paragraph above protects.
 
 # Programme 021, stage 1: the placeholder the request model needs in its required `signature` field on the
 # internal path. `require_signature=False` is what makes the service skip the check - never this value, which
@@ -198,10 +201,8 @@ class TrustDriftEngine:
             if not eq or not creditor_pid or not debtor_pid:
                 continue
 
-            try:
-                limit = Decimal(str(tl.get("limit", 0))).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
+            try:  # 028 `F-028-31`: the original limit WHOLE - the ceiling and the floor are built from it
+                limit = Decimal(str(tl.get("limit", 0)))
             except Exception:
                 continue
             if limit <= 0:
@@ -254,15 +255,16 @@ class TrustDriftEngine:
 
         eq_upper = eq_code.strip().upper()
         try:
-            eq_id = (
+            eq_row = (
                 await clearing_session.execute(
-                    select(Equivalent.id).where(Equivalent.code == eq_upper)
+                    select(Equivalent.id, Equivalent.precision).where(Equivalent.code == eq_upper)
                 )
-            ).scalar_one_or_none()
+            ).one_or_none()
         except Exception:
             return TrustDriftResult(updated_count=0)
-        if not eq_id:
+        if not eq_row:
             return TrustDriftResult(updated_count=0)
+        eq_id, step = eq_row[0], money_step(eq_row[1])
 
         updated_edges: set[tuple[str, str]] = set()
         committed_limit_updates: list[TrustDriftLimitUpdate] = []
@@ -284,6 +286,7 @@ class TrustDriftEngine:
                 touched_edges=touched_edges,
                 eq_upper=eq_upper,
                 eq_id=eq_id,
+                step=step,
                 tick_index=tick_index,
                 cleared_amount_per_edge=cleared_amount_per_edge,
                 cfg=cfg,
@@ -329,6 +332,7 @@ class TrustDriftEngine:
         touched_edges: set[tuple[str, str]],
         eq_upper: str,
         eq_id,
+        step: Decimal,
         tick_index: int,
         cleared_amount_per_edge: dict[tuple[str, str], float],
         cfg: TrustDriftConfig,
@@ -343,10 +347,8 @@ class TrustDriftEngine:
             if not hist:
                 continue
 
-            try:
-                original_limit = Decimal(str(hist.original_limit)).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
+            try:  # 028 `F-028-31`: whole, not truncated to cents
+                original_limit = Decimal(str(hist.original_limit))
             except Exception:
                 continue
 
@@ -403,7 +405,7 @@ class TrustDriftEngine:
             new_limit = min(
                 (current_limit * rate_mult),
                 (original_limit * max_growth),
-            ).quantize(_LEDGER_QUANTUM, rounding=ROUND_DOWN)
+            ).quantize(step, rounding=ROUND_DOWN)  # 028 `F-028-31`: the equivalent's step, not the storage grain
 
             # 019 stage-3 fix-delta review (P1-B, class 1): GROWTH ONLY RAISES. `max_growth` is a
             # ceiling on growth ("Макс. кратность роста от original_limit",
@@ -465,7 +467,7 @@ class TrustDriftEngine:
             pid: uid for uid, pid in (run._real_participants or [])
         }
 
-        eq_id_cache: dict[str, uuid.UUID] = {}
+        eq_id_cache: dict[str, tuple[uuid.UUID, Decimal]] = {}
         updated = 0
         isolation_checked = False
         touched_eq_codes: set[str] = set()
@@ -519,10 +521,8 @@ class TrustDriftEngine:
             decay_mult = Decimal(str(1 - cfg.decay_rate))
             min_ratio = Decimal(str(cfg.min_limit_ratio))
 
-            try:
-                original_limit = Decimal(str(hist.original_limit)).quantize(
-                    Decimal("0.01"), rounding=ROUND_DOWN
-                )
+            try:  # 028 `F-028-31`: whole, not truncated to cents
+                original_limit = Decimal(str(hist.original_limit))
             except Exception:
                 continue
 
@@ -535,14 +535,14 @@ class TrustDriftEngine:
             if eq_code not in eq_id_cache:
                 eq_row = (
                     await session.execute(
-                        select(Equivalent.id).where(Equivalent.code == eq_code)
+                        select(Equivalent.id, Equivalent.precision).where(Equivalent.code == eq_code)
                     )
-                ).scalar_one_or_none()
+                ).one_or_none()
                 if eq_row is None:
                     continue
-                eq_id_cache[eq_code] = eq_row
+                eq_id_cache[eq_code] = (eq_row[0], money_step(eq_row[1]))
 
-            eq_id = eq_id_cache.get(eq_code)
+            eq_id, step = eq_id_cache.get(eq_code) or (None, None)
             if not eq_id:
                 continue
 
@@ -592,9 +592,7 @@ class TrustDriftEngine:
                 # this rounding is an identity on a stored value; `ROUND_UP` is kept because a
                 # floor must never be understated, and it is the one place in this file where
                 # rounding up is the safe direction (see `F-015-16` on the rounding-mode split).
-                debt_floor = Decimal(str(debt_amount)).quantize(
-                    _LEDGER_QUANTUM, rounding=ROUND_UP
-                )
+                debt_floor = Decimal(str(debt_amount)).quantize(step, rounding=ROUND_UP)  # 028: in the step
             except Exception:
                 debt_floor = Decimal("0")
             # T1514: the ledger's grain, as on the growth side. `ROUND_DOWN` is kept, and it
@@ -604,7 +602,7 @@ class TrustDriftEngine:
                 (current_limit * decay_mult),
                 (original_limit * min_ratio),
                 debt_floor,
-            ).quantize(_LEDGER_QUANTUM, rounding=ROUND_DOWN)
+            ).quantize(step, rounding=ROUND_DOWN)
 
             if new_limit == current_limit:
                 continue

@@ -16,7 +16,7 @@ from app.schemas.payment import (
 )
 from app.db.models.participant import Participant
 from app.utils.exceptions import BadRequestException
-from app.utils.validation import parse_money_amount
+from app.utils.validation import parse_money_amount, require_money_step
 
 router = APIRouter()
 
@@ -37,6 +37,8 @@ async def check_capacity(
     # The capacity answer must be given for an amount the payment path would actually
     # accept: otherwise capacity says 'yes' to a value POST /payments then refuses.
     amount_decimal = parse_money_amount(amount, field="amount", require_positive=True)
+    if payment_router.precision is not None:  # 028 `F-028-23`: and in the equivalent's step, as the payment
+        require_money_step(amount_decimal, precision=payment_router.precision, equivalent=equivalent)
 
     return payment_router.check_capacity(current_participant.pid, to, amount_decimal)
 

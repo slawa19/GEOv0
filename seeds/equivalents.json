@@ -7,7 +7,7 @@
   },
   {
     "code": "HOUR",
-    "precision": 1,
+    "precision": 2,
     "description": "Time-based unit (1 hour of work)",
     "metadata": {"type": "time"}
   },

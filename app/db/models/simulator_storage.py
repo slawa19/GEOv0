@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, Float, Index, Integer, JSON, Numeric, String, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Float, Index, Integer, JSON, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -27,7 +27,7 @@ class SimulatorRun(Base):
 
     sim_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tick_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # sha256(run_id)[:4]: up to 2**32-1 (034)
 
     intensity_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ops_sec: Mapped[float | None] = mapped_column(Float, nullable=True)

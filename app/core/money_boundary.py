@@ -250,6 +250,16 @@ class MoneyBoundary:
         if held:
             raise self.integrity_hold_conflict(held)
 
+    async def share_equivalent_step(self, equivalent_id: UUID, *, timeout_ms: int | None = None) -> tuple[str, int] | None:
+        """`(code, precision)` of the equivalent row, read `FOR SHARE` - the accounting step a writer checks (028
+        `F-028-25`). The admin PATCH takes the row `FOR NO KEY UPDATE` before it lowers the precision, so a writer
+        holding this lock commits before the PATCH reads its usage, and one arriving after it reads the new step.
+        Its place in the one order: after the writer's line locks, before its debt rows. None: the row is gone."""
+
+        rows = await self._locking(select(Equivalent.code, Equivalent.precision).where(
+            Equivalent.id == equivalent_id).with_for_update(read=True), timeout_ms)
+        return (str(rows[0][0]), int(rows[0][1])) if rows else None
+
     async def _snapshot_net_positions(
         self,
         *,

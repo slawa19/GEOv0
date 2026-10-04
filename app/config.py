@@ -1,5 +1,5 @@
 import re
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar, FrozenSet
 from urllib.parse import urlsplit
 
@@ -268,7 +268,7 @@ class Settings(BaseSettings):
     SIMULATOR_REAL_MAX_TIMEOUTS_PER_TICK: int | None = None
     SIMULATOR_REAL_MAX_ERRORS_TOTAL: int | None = None
     SIMULATOR_CLEARING_MAX_EDGES_FOR_FX: int = 30
-    SIMULATOR_REAL_AMOUNT_CAP: Decimal | None = None  # opt-in; positive, quantized down to 0.01
+    SIMULATOR_REAL_AMOUNT_CAP: Decimal | None = None  # opt-in; positive; applied in each equivalent's step (028)
     SIMULATOR_REAL_ENABLE_INJECT: int = 0  # enabled at >= 1
     SIMULATOR_REAL_MONEY_REPLAY_ATTEMPTS: int = 3
     SIMULATOR_REAL_MAX_CONSEC_MONEY_NO_PROGRESS: int = 10
@@ -403,13 +403,14 @@ class Settings(BaseSettings):
     @field_validator("SIMULATOR_REAL_AMOUNT_CAP", mode="before")
     @classmethod
     def _amount_cap(cls, value: object) -> Decimal | None:
-        """Empty, not a number, NaN or not positive -> None (no cap); otherwise quantized down to 0.01."""
+        """Empty, not a number, not finite or not positive -> None (no cap). Not quantized (028 `F-028-32`): the
+        planner floors each amount to its equivalent's step, so the cap is applied in that step."""
         # One boundary around the whole parse, as the raw read had: quantize() refuses Infinity and 1e100 too.
         try:
             cap = Decimal(str(value if value is not None else "").strip())
-            if cap.is_nan() or cap <= 0:
+            if not cap.is_finite() or cap <= 0:
                 return None
-            return cap.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            return cap
         except InvalidOperation:
             return None
 

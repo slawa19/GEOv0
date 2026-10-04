@@ -210,10 +210,10 @@ class MetricsBottlenecks:
 
                 # 2026-08-20 / p007_t715: values stay Decimal from the column to
                 # the wire. No float ever touches them here.
-                by_key: dict[str, list[tuple[int, Decimal]]] = {str(k): [] for (k, _u) in keys}
+                # A stored NULL is a gap ("not measured" at that tick), not a row to skip: skipping it carried the
+                # previous value over a tick that was never measured (028 F-028-7).
+                by_key: dict[str, list[tuple[int, Optional[Decimal]]]] = {str(k): [] for (k, _u) in keys}
                 for r in rows:
-                    if r.value is None:
-                        continue
                     by_key.setdefault(str(r.key), []).append((int(r.t_ms), r.value))
 
                 # Resample persisted tick metrics to (from_ms..to_ms, step_ms) using carry-forward.

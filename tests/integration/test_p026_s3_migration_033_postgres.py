@@ -27,7 +27,11 @@ _LINES = "SELECT id, status, \"limit\", close_requested_at IS NOT NULL FROM trus
 async def test_033_adds_the_request_and_goes_back_only_without_a_pending_one(committed_database) -> None:
     url = committed_database.url
     await committed_database.engine.dispose()
-    assert repository_head() == _AFTER and await _version(url) == [(_AFTER,)]
+    assert await _version(url) == [(repository_head(),)]
+    if repository_head() != _AFTER:  # a later head (034, 028 `T2811`): step down to the revision under test
+        stepped = _alembic(url, "downgrade", _AFTER)
+        assert stepped.returncode == 0, stepped.stderr
+    assert await _version(url) == [(_AFTER,)]
     down = _alembic(url, "downgrade", _BEFORE)
     assert down.returncode == 0, down.stderr
 

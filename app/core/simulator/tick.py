@@ -542,7 +542,15 @@ class RealTick:
         except Exception:
             rr._logger.debug("capacity_aware: debt snapshot load failed, falling back to static limits")
 
-        planned = rr._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot)
+        # 028 `F-028-32`: amounts in each equivalent's step (the payment door refuses finer ones). Best-effort like the
+        # snapshot: without it the planner picks cents, and the door refuses what is finer than an equivalent's step.
+        precision_by_eq: dict[str, int] = {}
+        try:
+            precision_by_eq = {str(code): int(p) for code, p in (await session.execute(
+                select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(list(equivalents))))).all()}
+        except Exception:
+            rr._logger.debug("planner: equivalent precision load failed, falling back to cents")
+        planned = rr._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot, precision_by_eq=precision_by_eq)
         with rr._lock:
             run.ops_sec = float(len(planned))
             run.queue_depth = len(planned)

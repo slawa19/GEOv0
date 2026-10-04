@@ -33,6 +33,7 @@ from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import (
     is_storable_money,
     parse_money_amount,
+    require_money_step,
     validate_equivalent_code,
     validate_trustline_policy,
 )
@@ -467,6 +468,8 @@ class TrustLineService:
         await MoneyBoundary(self.session).lock_pair_lines(
             [(equivalent.id, from_participant_id, to_participant.id)], timeout_ms=lock_timeout_ms)
 
+        await self._require_step(equivalent.id, limit, timeout_ms=lock_timeout_ms)
+
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
         # (docs/ru/02-protocol-spec.md:333) — and, since migration
@@ -623,6 +626,8 @@ class TrustLineService:
             validate_trustline_policy(data.policy)
 
         equivalent_code = await self._equivalent_code(trustline.equivalent_id)
+        if new_limit is not None:
+            await self._require_step(trustline.equivalent_id, new_limit)
         await batch._touch(trustline.equivalent_id, equivalent_code)
 
         if new_limit is not None:
@@ -818,6 +823,15 @@ class TrustLineService:
             )
             imported.append(trustline)
         return imported
+
+    async def _require_step(self, equivalent_id: UUID, limit: Decimal, *, timeout_ms: int | None = None) -> None:
+        """028 `F-028-23`/`F-028-25` (owner В-4): a limit finer than the equivalent's step is refused, never rounded.
+        The step is read under the equivalent row `FOR SHARE`, held to commit, so a PATCH lowering the precision
+        either waits for this write and then sees it, or commits first and this write reads the new step."""
+
+        step_of = await MoneyBoundary(self.session).share_equivalent_step(equivalent_id, timeout_ms=timeout_ms)
+        code, precision = step_of or ("?", 8)
+        require_money_step(limit, precision=precision, equivalent=code, field="limit")
 
     async def _equivalent_code(self, equivalent_id: UUID) -> str:
         code = (
