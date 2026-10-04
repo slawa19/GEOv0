@@ -191,7 +191,8 @@ async def test_the_clearing_plan_leaves_out_a_suspended_participant(stand) -> No
         assert len(await load_snapshot(s, eq.code)) == 3  # control: the cycle is planned while B is active
         await _admin_status(s, p["B"].pid)
     async with stand() as s:
-        assert await load_snapshot(s, eq.code) == []
+        left = [(e.debtor_id, e.creditor_id) for e in await load_snapshot(s, eq.code)]
+    assert left == [(p["C"].id, p["A"].id)], left  # only the edge without B: no cycle remains to plan
 
 
 # --- the stand: freeze (admin, mixed inject event) x writer x arrival order ------------------------------------------

@@ -25,7 +25,8 @@ import sys
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_SELECTOR = "tests/integration/test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py"
+# 028 `F-028-28`: was the p019 deadlock module, which keeps one test now (its `metadata` site became unreachable).
+_SELECTOR = "tests/integration/test_p015_t1523_replay_after_a_hold_or_an_abort.py"
 _HOW_TO = "docs/ru/backend/postgres-local-portable.md"
 
 
