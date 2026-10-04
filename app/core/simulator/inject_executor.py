@@ -505,6 +505,9 @@ class InjectExecutor:
                     require_signature=False,
                     # The event's flush points stay the event's own (see `execute_create`).
                     flush=False,
+                    # 028 F-028-14: bounded like the event's other lock waits; a `55P03` propagates as the
+                    # runner's transient class (`SQLAlchemyError` below), and the event stays pending.
+                    lock_timeout_ms=MoneyBoundary.lock_budget_ms(),
                 )
             except _TRUST_LINE_REFUSALS as exc:
                 self._logger.warning(
