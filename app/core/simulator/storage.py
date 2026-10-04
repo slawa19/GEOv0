@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from sqlalchemy import delete, select, update as sql_update
@@ -223,6 +223,21 @@ def _measured_value(
     return raw if isinstance(raw, Decimal) else Decimal(str(raw))
 
 
+def _storable(value: Optional[Decimal], *, run_id: str, t_ms: int, key: str) -> Optional[Decimal]:
+    """F-028-7: a value the metric column cannot hold is stored as NULL ("not measured"), not left to fail the tick.
+
+    The bound is read from the column: rounded to its scale as PostgreSQL rounds, the value keeps
+    `precision - scale` integer digits. One unrepresentable point would otherwise roll back all seven keys."""
+    if value is None:
+        return None
+    column = SimulatorRunMetric.__table__.c.value.type
+    quantum = Decimal(1).scaleb(-column.scale)
+    if value.is_finite() and abs(value.quantize(quantum, ROUND_HALF_UP)) < Decimal(10) ** (column.precision - column.scale):
+        return value
+    logger.warning("simulator.storage.metric_unrepresentable run_id=%s t_ms=%s key=%s", run_id, t_ms, key)
+    return None
+
+
 async def write_tick_metrics(
     *,
     run_id: str,
@@ -344,6 +359,8 @@ async def write_tick_metrics(
 
             if not rows:
                 return
+            for row in rows:
+                row["value"] = _storable(row["value"], run_id=str(run_id), t_ms=int(t_ms), key=str(row["key"]))
 
             table = SimulatorRunMetric.__table__
             stmt = insert_fn(table)

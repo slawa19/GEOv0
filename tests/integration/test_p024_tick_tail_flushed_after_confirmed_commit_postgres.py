@@ -36,13 +36,14 @@ async def _restart(run: RunRecord) -> None:
     async def _no_heartbeat(_run_id: str) -> None:
         return None
 
-    unused = dict.fromkeys(["new_run_id", "get_scenario_raw", "edges_by_equivalent", "artifacts"])
+    unused = dict.fromkeys(["new_run_id", "get_scenario_raw", "edges_by_equivalent"])
+    artifacts = type("A", (), {"start_events_writer": lambda _s, _r: None})()  # restart restarts it (028 F-028-4)
     await RunLifecycle(
         lock=unit_tick()._runner._lock, runs={run.run_id: run}, set_active_run_id=lambda *_: None,
         utc_now=lambda: None, sse=type("S", (), {"prune_event_buffer_locked": lambda _s, _r: None})(),
         heartbeat_loop=_no_heartbeat, publish_run_status=lambda _: None, run_to_status=lambda _: None,
         get_run_status_payload_json=lambda _: {}, real_max_in_flight_default=1, get_max_active_runs=lambda: 0,
-        get_max_run_records=lambda: 0, logger=None, **unused,
+        get_max_run_records=lambda: 0, logger=None, artifacts=artifacts, **unused,
     ).restart(run.run_id)
 
 

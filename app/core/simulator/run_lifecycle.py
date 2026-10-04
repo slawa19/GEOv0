@@ -112,6 +112,20 @@ class RunLifecycle:
                 },
             )
 
+    def _enforce_entry_limits_locked(self, run: RunRecord) -> None:
+        """F-028-5: a run re-entering `running` from an inactive state passes the owner and global limits of create."""
+        if str(run.state) in ("running", "paused", "stopping"):
+            return  # already counted as active
+        max_per_owner = int(self._get_max_active_runs_per_owner() or 0) if self._get_max_active_runs_per_owner else 1
+        if run.owner_id and max_per_owner > 0:
+            count, active_run_id = self._count_active_runs_for_owner_locked(run.owner_id)
+            if count >= max_per_owner:
+                raise ConflictException(
+                    "Owner already has an active run",
+                    details={"conflict_kind": "owner_active_exists", "active_run_id": active_run_id},
+                )
+        self._enforce_active_run_limit_locked()
+
     def _prune_run_records_locked(self) -> None:
         max_records = int(self._get_max_run_records() or 0)
         if max_records <= 0:
@@ -345,7 +359,10 @@ class RunLifecycle:
                 # Idempotent: keep stopped
                 pass
             else:
+                self._enforce_entry_limits_locked(run)
                 run.state = "running"
+                if run.owner_id:
+                    self._set_active_run_id(run_id, run.owner_id)
 
         await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)
@@ -471,6 +488,8 @@ class RunLifecycle:
                             "active_run_id": existing,
                         },
                     )
+            self._enforce_entry_limits_locked(run)
+            if run.owner_id:
                 # _set_active_run_id is always set (non-Optional Callable)
                 self._set_active_run_id(run_id, run.owner_id)
 
@@ -492,6 +511,7 @@ class RunLifecycle:
 
             # Keep buffer but prune to avoid unbounded growth across long sessions.
             self._sse.prune_event_buffer_locked(run)
+            self._artifacts.start_events_writer(run_id)  # stop() ended it (F-028-4); idempotent
 
         await self._ensure_heartbeat(run)
         self._publish_run_status(run_id)
