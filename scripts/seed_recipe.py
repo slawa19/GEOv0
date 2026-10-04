@@ -36,10 +36,10 @@ WHAT IT REFUSES TO SEED AT ALL. A description may declare a state that no produc
 reach. `TrustLineService` writes exactly two statuses - `'active'` at creation
 (`app/core/trustlines/service.py:221`) and `'closed'` at close (`:494`) - and nothing anywhere in
 `app/` writes `'frozen'` to `trust_lines.status` - since 028 `F-028-29` (migration 035) the CHECK refuses it
-and a freeze lives on the participant only. `greenfield-village-100` declares nine frozen trust
-lines. Writing that column here would be precisely the domain bypass this programme exists to remove,
-so the seed refuses the whole community and names every line, rather than seeding it half-true. The
-divergence is recorded in `specs/BACKLOG.md` (2026-09-22) and is the owner's to settle.
+and a freeze lives on the participant only. A description declaring a frozen line is refused whole, every
+line named, rather than seeded half-true. Until 2026-10-04 that was `greenfield-village-100` (nine such lines,
+`specs/BACKLOG.md` 2026-09-22); owner В-2 settled it - the lines are `active` now, their creditors are the
+community's frozen participants, and greenfield seeds end to end.
 """
 
 from __future__ import annotations

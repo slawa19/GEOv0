@@ -144,7 +144,7 @@ UI (MVP) — что должно быть на странице:
 	- `Equivalent`:
 		- `ALL` (все)
 		- конкретный код (из `equivalents.json` и/или из trustlines)
-	- `Status` (multi-select): `active`, `frozen`, `closed`
+	- `Status` (multi-select): `active`, `closed` (статуса линии `frozen` нет с 2026-10-04, 028 `F-028-29`)
 	- `Threshold` (строка/число, по умолчанию `0.10`): используется для подсветки bottleneck
 	- `Layout`: `fcose (force)`, `grid`, `circle`
 	- Toggle: `Labels` (показывать/скрывать подписи)
@@ -164,7 +164,6 @@ UI (MVP) — что должно быть на странице:
 	- `business` отличается формой/размером (увеличенный скруглённый прямоугольник), без отдельной рамки.
 - Цвет рёбер по статусу trustline:
 	- `active` — синий
-	- `frozen` — серый
 	- `closed` — светло-серый
 - Bottleneck:
 	- условие: `available/limit < threshold` (только для `active`)
@@ -404,7 +403,7 @@ UI правила:
 - DomainEvent: `event_id`, `event_type`, `timestamp`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`, `payload`.
 
 ### 6.5. Graph / Integrity / Incidents
-- `GET /admin/trustlines?equivalent={code}&creditor={pid}&debtor={pid}&status={active|frozen|closed}`
+- `GET /admin/trustlines?equivalent={code}&creditor={pid}&debtor={pid}&status={active|closed}`
 - `GET /integrity/status`
 - `POST /integrity/verify`
 - `POST /admin/transactions/{tx_id}/abort` (body: `{reason}`)

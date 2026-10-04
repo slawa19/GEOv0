@@ -46,27 +46,27 @@ from scripts.seed_recipe import (  # noqa: E402
 # =================================================================================================
 
 
-def test_riverside_is_seedable_and_greenfield_is_not_and_the_difference_is_named():
-    """The counter-check pair for the refusal that stops greenfield being seeded at all.
-
-    Riverside declares nothing unreachable, so the rule lets a real description through; greenfield
-    declares nine frozen trust lines, and every one of them is NAMED. A rule that refused both would
-    look identical from the greenfield side alone.
+def test_both_descriptions_are_seedable_and_a_declared_frozen_line_is_still_named():
+    """028 `F-028-29` (INTENTIONAL change): greenfield's nine frozen lines became `active` (their creditors are its
+    frozen participants), so both real descriptions pass; until then greenfield was refused by them. The rule keeps
+    its counter-check on a planted line: a description declaring a `frozen` line is refused, and the line NAMED.
     """
 
     riverside = community_schema.load_community("riverside-town-50", root=_COMMUNITIES)
     greenfield = community_schema.load_community("greenfield-village-100", root=_COMMUNITIES)
 
     assert unreachable_declared_states(riverside) == []
+    assert unreachable_declared_states(greenfield) == []
+    greenfield["trustlines"][0]["status"] = "frozen"
 
     offenders = unreachable_declared_states(greenfield)
-    assert len(offenders) == 9, offenders
+    assert len(offenders) == 1, offenders
     declared_frozen = [
         (line["equivalent"], line["from"], line["to"])
         for line in greenfield["trustlines"]
         if line["status"] not in REACHABLE_TRUSTLINE_STATUSES
     ]
-    assert len(declared_frozen) == 9
+    assert len(declared_frozen) == 1
     for equivalent, creditor, debtor in declared_frozen:
         assert any(
             creditor in line and debtor in line and equivalent in line for line in offenders

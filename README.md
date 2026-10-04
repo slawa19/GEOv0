@@ -568,10 +568,9 @@ Refresh the database from the community recipe:
 .\scripts\run_local.ps1 start
 ```
 
-`-SeedCommunity` names the community, but `riverside-town-50` is the only one that can be seeded
-today: `greenfield-village-100` declares nine frozen trust lines that no product operation creates,
-so the seed refuses it by name rather than writing a domain column directly (`specs/BACKLOG.md`,
-2026-09-22). The Admin UI token is handed to the Admin UI in `VITE_ADMIN_TOKEN`, and the Simulator
+`-SeedCommunity` names the community: `riverside-town-50` (the default) or `greenfield-village-100`. Until
+2026-10-04 greenfield was refused by name for nine frozen trust lines; programme 028 (`F-028-29`) removed that
+line status, the lines are `active` and their creditors are greenfield's frozen participants. The Admin UI token is handed to the Admin UI in `VITE_ADMIN_TOKEN`, and the Simulator
 UI gets its own `VITE_GEO_DEV_ACCESS_TOKEN`; both default to the backend's dev token, and
 `GEO_DEV_ADMIN_TOKEN` overrides both. If you set it, clear the Simulator UI's stored token
 (`geo.sim.v2.accessToken` in localStorage), which wins over the variable.

@@ -1,15 +1,9 @@
 """028 E3 (`T2831`, `F-028-28`, owner В-1): a suspended participant takes no part in money - reproducers.
 
-THE BOUNDARY (spec 028, "Граница заморозки"): the freeze takes the participant row `FOR UPDATE`; every money writer
-takes `FOR SHARE` on the rows of every participant it touches - first, in `participants.id` order, before its lines -
-and decides from the status read under that lock. So a freeze either waits for a writer in flight or makes it refuse.
-
-THE CRITERION of the stand (Verification plan, п. 5): no money write lands with `suspended` committed before it.
-"Writer first": the writer holds its locks, the freeze must wait, the writer's effect lands, then the freeze. "Freeze
-first": the freeze holds its lock uncommitted, the writer must wait and then refuse - its effect never lands.
-
-Red on `86742876` (nothing read the participant's status): every case below.
-"""
+The freeze takes the participant row `FOR UPDATE`; every money writer takes `FOR SHARE` on its participants' rows first
+(`participants.id` order) and decides from the status read under it. Stand criterion (Verification plan, п. 5): no money
+write lands with `suspended` committed before it - "writer first": the freeze waits; "freeze first": the writer waits and
+refuses. On `86742876`: 17 of 20 red (spec Changelog, E3)."""
 
 from __future__ import annotations
 

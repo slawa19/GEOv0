@@ -1,13 +1,8 @@
 """Migration 035 (028 `T2832`, F-028-29): `frozen` lines become `active`, the CHECK admits `active | closed`.
 
-From 034 with a `frozen` line (one plain, one holding a close request at limit 0), an `active` and a `closed` one: the
-upgrade turns both `frozen` rows `active` with limit, policy and request unchanged and touches nothing else; the CHECK
-then refuses `frozen`. The downgrade restores the old CHECK only (irreversible by data: no row becomes `frozen`), and
-the upgrade applies again. One head.
-
-MUTATIONS that must redden this: drop the UPDATE (the new CHECK cannot be created over a `frozen` row); keep `frozen`
-in the new CHECK (it is stored).
-"""
+Both `frozen` rows (one with a close request) become `active`, nothing else changes, the CHECK refuses `frozen`; the
+downgrade restores the old CHECK only (irreversible by data). MUTATIONS that redden it: drop the UPDATE; keep `frozen`
+in the new CHECK."""
 
 from __future__ import annotations
 

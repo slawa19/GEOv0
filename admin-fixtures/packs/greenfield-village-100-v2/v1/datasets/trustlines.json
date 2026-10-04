@@ -408,7 +408,7 @@
     "limit": "4791.05",
     "used": "2966.00",
     "available": "1825.05",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-12-15T19:14:00Z",
     "policy": {
       "auto_clearing": true,
@@ -2136,7 +2136,7 @@
     "limit": "2728.19",
     "used": "61.37",
     "available": "2666.82",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-11-24T23:04:00Z",
     "policy": {
       "auto_clearing": true,
@@ -2440,7 +2440,7 @@
     "limit": "5.00",
     "used": "0.75",
     "available": "4.25",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-11-05T19:35:00Z",
     "policy": {
       "auto_clearing": false,
@@ -2616,7 +2616,7 @@
     "limit": "1372.16",
     "used": "42.47",
     "available": "1329.69",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-10-25T17:34:00Z",
     "policy": {
       "auto_clearing": true,
@@ -3336,7 +3336,7 @@
     "limit": "5.00",
     "used": "2.00",
     "available": "3.00",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-12-09T09:19:00Z",
     "policy": {
       "auto_clearing": false,
@@ -4920,7 +4920,7 @@
     "limit": "184.17",
     "used": "52.65",
     "available": "131.52",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-11-29T15:10:00Z",
     "policy": {
       "auto_clearing": true,
@@ -4936,7 +4936,7 @@
     "limit": "240.02",
     "used": "16.77",
     "available": "223.25",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-11-28T14:59:00Z",
     "policy": {
       "auto_clearing": true,
@@ -6408,7 +6408,7 @@
     "limit": "1993.75",
     "used": "1595.00",
     "available": "398.75",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-11-25T22:07:00Z",
     "policy": {
       "auto_clearing": true,
@@ -6840,7 +6840,7 @@
     "limit": "5.00",
     "used": "1.50",
     "available": "3.50",
-    "status": "frozen",
+    "status": "active",
     "created_at": "2025-10-29T17:10:00Z",
     "policy": {
       "auto_clearing": true,

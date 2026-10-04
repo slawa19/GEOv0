@@ -51,8 +51,8 @@ param(
     [string]$PgUser = 'geo',
 
     # The community whose committed recipe is executed through the domain services to populate the
-    # database. `greenfield-village-100` is accepted so its own named refusal is what the operator
-    # sees (specs/BACKLOG.md 2026-09-22), not a parameter-validation error that hides the reason.
+    # database. Both communities seed since 028 `F-028-29` (greenfield's frozen lines became `active`; until then
+    # it was accepted here so its own named refusal reached the operator, specs/BACKLOG.md 2026-09-22).
     [ValidateSet('riverside-town-50', 'greenfield-village-100')]
     [string]$SeedCommunity = 'riverside-town-50',
 
