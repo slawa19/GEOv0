@@ -1,6 +1,6 @@
 # BACKLOG — находки без программы
 
-**Обновлено:** 2026-10-03 (остаток программы 025 после закрытия)
+**Обновлено:** 2026-10-04 (чистка по реестру 028, `T2801`; предыдущая правка — 2026-10-03)
 
 Здесь живут находки, которые не тянут на отдельную программу, но и не должны потеряться.
 Правило AGENTS.md §2 прямое: узкая очевидная правка не требует церемонии; новый контракт или
@@ -16,19 +16,13 @@
 
 | Пункт | Sev | Суть | Evidence |
 |---|---|---|---|
-| Admin: экран Events (timeline) | — | **Не фронтовая работа, но и не greenfield.** `GET /admin/events` действительно не существует (перечислены все 27 маршрутов `admin.py`, `/events` нет ни под каким именем; в `openapi.yaml` только `/simulator/events*`). Нет страницы, роута и пункта меню. **Нюанс:** `GET /admin/audit-log` (`admin.py:899`) покрывает лишь 10 операторских мутаций + логин и критерий «фильтр по `tx_id` даёт полный упорядоченный список шагов» удовлетворить не может. Зато `integrity_audit_log` **уже является процессным источником событий** с индексированным `tx_id`; работа сводится к «добавить фильтры + страницу», а не «построить пайплайн событий». Корреляции `run_id`/`scenario_id` нет нигде | нет маршрута: `app/api/v1/admin.py`; `admin-ui/src/router/index.ts` (12 записей — 10 страниц + редиректы `/` и `/feature-flags`; `/events` отсутствует); `admin-ui/src/layout/AppShell.vue:21-30`. Писатели аудита: `admin.py:276` `_add_audit_entry`, `auth.py:68`. Модель `app/db/models/audit_log.py:28-44` (`tx_id` index, `operation_type` PAYMENT/CLEARING/TRUSTLINE_*, checksum before/after, `affected_participants`, `error_details`); пишут `payments/engine.py:1134`, `clearing/service.py:1042`, `trustlines/service.py:122,226,319`, `simulator/real_tick_orchestrator.py:447`, `api/v1/integrity.py:266`. Чтение: `GET /integrity/audit-log` — `app/api/v1/integrity.py:470`, доступ `deps.require_participant_or_admin`, параметры **только** `page`/`per_page`, ноль фильтров; `admin-ui` его не вызывает (0 вхождений `integrity/audit-log` в `admin-ui/src`). Требование — `docs/ru/admin-ui/specs/UNFINISHED.md` п.1 |
-| Admin: экраны Transactions / Clearing | — | **Не фронтовая работа, но объём меньше заявленного.** Списочных `GET /admin/transactions[/{tx_id}]` нет; есть только `POST /admin/transactions/{tx_id}/abort` (`admin.py:996`) и `GET /admin/clearing/cycles` (`:2056`). **Нюанс:** `GET /payments` и `GET /payments/{tx_id}` уже существуют с фильтрами `direction/status/equivalent/from_date/to_date/page/per_page` — они лишь заскоуплены на запрашивающего, и обхода для админа в коде нет. Задача = «снять requester-scoping за админским маршрутом», а не новая фича. **Поправка:** архивная рекомендация «использовать user API» неверна — у админского токена нет участника, к которому можно привязаться | `app/api/v1/payments.py:107` (список), `:91` (деталь); requester вшит в WHERE — `app/core/payments/service.py:1054-1070`, ветки `is_admin` нет. Неверная рекомендация — `docs/ru/archive/ui-spec-revision-proposal-2026-01-10.md:525-526`. Требование — `UNFINISHED.md` п.2 |
+| **[LATER — решение владельца 2026-10-04 (В-5): «Администратор вправе видеть чужие платежи. И вообще все. Но это нужно не сейчас. Записать в доработку». Получатель — будущая работа над админскими экранами, не 028]** Admin: экран Events (timeline) | — | **Не фронтовая работа, но и не greenfield.** `GET /admin/events` действительно не существует (перечислены все 27 маршрутов `admin.py`, `/events` нет ни под каким именем; в `openapi.yaml` только `/simulator/events*`). Нет страницы, роута и пункта меню. **Нюанс:** `GET /admin/audit-log` (`admin.py:899`) покрывает лишь 10 операторских мутаций + логин и критерий «фильтр по `tx_id` даёт полный упорядоченный список шагов» удовлетворить не может. Зато `integrity_audit_log` **уже является процессным источником событий** с индексированным `tx_id`; работа сводится к «добавить фильтры + страницу», а не «построить пайплайн событий». Корреляции `run_id`/`scenario_id` нет нигде | нет маршрута: `app/api/v1/admin.py`; `admin-ui/src/router/index.ts` (12 записей — 10 страниц + редиректы `/` и `/feature-flags`; `/events` отсутствует); `admin-ui/src/layout/AppShell.vue:21-30`. Писатели аудита: `admin.py:276` `_add_audit_entry`, `auth.py:68`. Модель `app/db/models/audit_log.py:28-44` (`tx_id` index, `operation_type` PAYMENT/CLEARING/TRUSTLINE_*, checksum before/after, `affected_participants`, `error_details`); пишут `payments/engine.py:1134`, `clearing/service.py:1042`, `trustlines/service.py:122,226,319`, `simulator/real_tick_orchestrator.py:447`, `api/v1/integrity.py:266`. Чтение: `GET /integrity/audit-log` — `app/api/v1/integrity.py:470`, доступ `deps.require_participant_or_admin`, параметры **только** `page`/`per_page`, ноль фильтров; `admin-ui` его не вызывает (0 вхождений `integrity/audit-log` в `admin-ui/src`). Требование — `docs/ru/admin-ui/specs/UNFINISHED.md` п.1 |
+| **[LATER — решение владельца 2026-10-04 (В-5), тот же принцип: админ видит все платежи; снятие привязки `GET /payments` к запрашивающему — будущая работа, не 028]** Admin: экраны Transactions / Clearing | — | **Не фронтовая работа, но объём меньше заявленного.** Списочных `GET /admin/transactions[/{tx_id}]` нет; есть только `POST /admin/transactions/{tx_id}/abort` (`admin.py:996`) и `GET /admin/clearing/cycles` (`:2056`). **Нюанс:** `GET /payments` и `GET /payments/{tx_id}` уже существуют с фильтрами `direction/status/equivalent/from_date/to_date/page/per_page` — они лишь заскоуплены на запрашивающего, и обхода для админа в коде нет. Задача = «снять requester-scoping за админским маршрутом», а не новая фича. **Поправка:** архивная рекомендация «использовать user API» неверна — у админского токена нет участника, к которому можно привязаться | `app/api/v1/payments.py:107` (список), `:91` (деталь); requester вшит в WHERE — `app/core/payments/service.py:1054-1070`, ветки `is_admin` нет. Неверная рекомендация — `docs/ru/archive/ui-spec-revision-proposal-2026-01-10.md:525-526`. Требование — `UNFINISHED.md` п.2 |
 | Admin Liquidity Phase 2 (Bottlenecks edges, Participants net position, Concentration/HHI, Clearing impact) | — | Осознанно вне MVP. HHI/top-shares частично реализованы, но на странице Graph, а не как экран Liquidity | `admin-ui/src/composables/useGraphAnalytics.ts`, `operatorAdvice.ts:32-34,184-197`. Churn/Gini нет нигде |
-| `audit.drift` не в принятом union нормализатора | P3 | Событие производится, но нормализатор относит его в `ignored('unknown')`. Переклассифицировано как продуктовое решение по наблюдаемости, а не доказанный дефект | основной производитель `app/core/simulator/real_tick_orchestrator.py:425`, второй — `app/core/simulator/real_payments_executor.py:152`; `simulator-ui/v2/src/api/normalizeSimulatorEvent.ts:568`; диагностический бакет `useSimulatorRealMode.ts:94` |
-| ~~`/simulator/events/poll` всегда возвращает `[]`~~ — **закрыт 2026-08-23 программой 011** | P3 | Развилка вынесена владельцу и решена делегированием внешнему ревьюеру (`VERDICT-F0117: A`): контракт описывает то, что есть. Оба документа объявляют массив с `maxItems: 0`, а описания `equivalent`/`after` больше не обещают семантику курсора, которой в MVP нет. Реализация replay-буфера остаётся отдельной продуктовой функцией и **не** является долгом этой строки. Прежние якоря этой строки к моменту закрытия оба указывали не туда — обработчик уехал на `simulator.py:2583`, а `openapi.yaml:1013-1016` попал внутрь другого пути | `app/api/v1/simulator.py` (`# MVP: no replay buffer.`); `api/openapi.yaml` (`/simulator/events/poll`); `specs/011-canon-describes-what-it-returns/spec.md`, `F-011-7` |
-| Судьба `/ws` и `event_bus` | — | Маршрут живой, производитель есть, потребителя нет. Решение keep-or-deprecate заблокировано за F-005-1 (токен в query string) | `app/api/v1/websocket.py:17`; производитель — `event_bus.publish(` в `app/core/payments/service.py:94` |
-| `docs/ru/pwa/` | — | Домена `pwa` нет в каноне `documentation-rules.md` §2.2, входящих ссылок нет. Мёртвый документ или отложенная работа | `docs/ru/pwa/specs/pwa-client-ui-spec.md` |
-| npm-уязвимости в lock-файлах обоих UI — найдено 2026-09-20 | — | **Замер:** `admin-ui` — 20 (1 low, 4 moderate, 14 high, 1 critical), из них в production-зависимостях 4 high; `simulator-ui/v2` — 9 (1 moderate, 6 high, 2 critical), в production 2 high. **Дешёвого пути нет, и это главное в записи:** `npm audit fix` без `--force` трогает 28 и 18 пакетов соответственно и не закрывает ни одной записи — итоговые числа после него те же. Всё остальное требует `--force`, то есть мажорных апгрейдов build-тулчейна, а он же является механизмом, которым репозиторий себя проверяет (§5): апгрейд до рефакторинга рискует гейтом, на котором рефакторинг измеряется, после — копит долг. Поэтому это выбор момента владельцем, а не узкая правка. **Чем это НЕ является:** не состоянием установки — дерево чистое, `package-lock.json` не трогался; не связано с `audit.drift`, `integrity_audit_log` и каталогами `_audit*` | `npm --prefix admin-ui audit`, `npm --prefix simulator-ui/v2 audit`; production-числа — те же команды с `--omit=dev`; `npm audit fix --dry-run` → `removed 2 packages, changed 28 packages` (admin-ui) и `changed 18 packages` (simulator) при неизменных итоговых числах. Общие для обоих деревьев advisory — `GHSA-c2c7-rcm5-vvqj` (picomatch ReDoS), в admin-ui дополнительно `GHSA-xxjr-mmjv-4gpg` (lodash) **Решено владельцем 2026-10-03: заняться сейчас, отдельным срезом** — обновление сборочного инструментария обоих UI с полной проверкой (меняет механизм проверки — §15 обязателен). **Результат среза 2026-10-03 (ветка `claude/ui-npm-vulns`, до §15-ревью и слияния):** замер на `main` `6141ffa` в тот же день уже другой, чем 2026-09-20 (advisory-база и фиксы двигались): `admin-ui` 30 (1 low, 4 moderate, 24 high, 1 critical), production 4 high (`lodash`, `lodash-es` через `element-plus`, `nanoid`, `postcss`); `simulator-ui/v2` 16 (1 moderate, 13 high, 2 critical), production 2 high (`nanoid`, `postcss`). Теперь `npm audit fix` без `--force` закрывает **всю** production-часть in-range-бампами lock-файла (`package.json` не тронут): итоги 30→15 и 16→9, production 4→0 и 2→0. Остаток — dev-тулчейн, закрыт четырьмя бампами: `vitest` ^4.1.11 в обоих UI (не 5.x: 4.1.11 закрывает все advisory, Node ^20 \|\| ^22 \|\| >=24), `happy-dom` ^20.14.5 (simulator), `@typescript-eslint/parser` ^8.71.0 (simulator), в `admin-ui` — `overrides` на `@typescript-eslint/parser` и `@typescript-eslint/eslint-plugin` ^8.71.0 при сохранённых `@vue/eslint-config-typescript` 13 и `.eslintrc.cjs`. **После:** `npm audit` и `npm audit --omit=dev` — 0 в обоих UI. Число тестов не изменилось (admin-ui 389, simulator-ui/v2 1077); адаптации — в сообщениях коммитов среза, ни один ассерт не ослаблен. Команды: `npm audit --json` / `npm audit --omit=dev --json` в каталоге каждого UI, `metadata.vulnerabilities`. **Побочно, lock-drift:** корень `admin-ui/package-lock.json` перечислял `d3-force` и `lucide-vue-next`, которых нет в `admin-ui/package.json`; `git grep -E "d3-force|lucide" -- admin-ui ":!admin-ui/package-lock.json"` пуст, `npm audit fix` их вычистил вместе с устаревшим вложенным `minimatch` 9.0.5 под `glob`. **Класс 2, не держит срез:** миграция `admin-ui` на ESLint 9 и flat-config (`@vue/eslint-config-typescript` 14+) — получатель: следующий срез тулчейна UI; до неё `overrides` в `admin-ui/package.json` держит typescript-eslint 8 под конфигом 13.x, который сам объявляет ^7. **Внутренний adversarial среза (2026-10-03):** в Vitest 4 `vi.restoreAllMocks()` больше не сбрасывает реализации `vi.fn()` — в `admin-ui/src/test/setup.ts` добавлен `vi.resetAllMocks()` (прежняя изоляция; все 389 зелёные). **Предсуществующее, класс 2** (получатель — владелец тестов Admin UI): при случайном порядке (`vitest run --sequence.shuffle`) прогон Admin падает на необработанной ошибке `window.getComputedStyle is not a function` (тест подменяет `window`, компонент element-plus обращается к нему после разбора окружения) — 3 из 3 на `main` с Vitest 2, 2 из 3 на Vitest 4; все ассерты проходят, в обычном порядке зелёный. **§15 (Codex `gpt-6-astra` high, read-only, клон `claude/ui-npm-vulns` на `c7becde`, `.local-run/codex-review/2026-10-03-ui-npm/final.md`):** `VERDICT-UI-NPM: WEAK`, `NO-TEST-WEAKENED: YES`, `RUNTIME-UNCHANGED: YES`, `CI-INSTALLABLE: YES`, `READY-TO-MERGE: YES`, класс 1 — 0, P2 — 1 (класс 2). **Класс 2, получатель — владелец UI-инструментария (следующий срез UI-тулчейна):** `eslint-visitor-keys@5.0.1` (`admin-ui/package-lock.json` ~:1756, `simulator-ui/v2/package-lock.json` ~:1366) требует Node `^20.19.0 || ^22.13.0 || >=24`, а CI закреплён на `22.12.0` (`.github/workflows/quality.yml` ~:104, ~:663) — npm только предупреждает (engine-strict не задан), `Required UI gates` на 22.12 зелёные; выровнять пин Node (≥ 22.13) или выбор зависимости вместе с миграцией ESLint 9. Холодный тайм-аут контрактного теста Admin после `npm ci` (≈4,6 с при лимите 5 с ещё на Vitest 2) — при повторе в `required-ui` дешёвая честная мера: документированно поднять тайм-аут только этому тесту, без ретраев и с сохранением ассертов. |
-
-### Класс 2 из среза `T2508.1` программы 025 — внесено 2026-10-02, получатель — программа 024 (след `T2413.2`) / стадия 3 программы 025 (`T2504.1`)
-
-- **Четыре slow-теста давно красные вне обязательного гейта.** `tests/integration/test_p019_t1908_lock_removal_experiments_postgres.py:329` требует флаг проверки `True` в строках аудита (`AssertionError: [('CLEARING', None), ('PAYMENT', None)]`), а с 024 `T2413.2` денежные писатели пишут `verification_passed=None` («проверка не проводилась», `app/core/clearing/service.py:2328`, `app/core/payments/service.py:1980`; миграция 032). Падают одинаково на `bc5d444` и после `T2508.1` (исполнитель, junit; подтверждено §15-ревью статически). Обязательный гейт исключает `slow`, поэтому падение никто не видел — ровно тот класс, о котором предупреждает AGENTS.md §5 (маркер как источник ложного зелёного). Это экспериментальный стенд решённой развилки удаления блокировок (019 `T1908`); естественный исход — удаление с SHA решения в `T2504.1` (зонды и стенды решённых развилок), либо правка ожидания на `None` владельцем 024, если стенд сохраняется. Денег не касается.
-- **Флейк `test_b_opposing_directions_on_one_pair[locks_off-inject_inject]`** (вне обязательного гейта; найден при `-IncludeExpensive` в `T2417` 024, 2026-10-02). На базе `6e25aaa` падает в 3 из 4 отладочных прогонов с `SerializationError`, на ветке — в 1 из 2; это инжект против инжекта на одной паре, клиринга не касается. Получатель — владелец тика и инжекта симулятора; связано с уже записанной записью «стенд инжекта не проверяет механизм повтора `40001`». Денег не теряет: инжект откатывается целиком.
+| **[взято в 028, F-028-35, 34 (E4)]** `audit.drift` не в принятом union нормализатора | P3 | Событие производится, но нормализатор относит его в `ignored('unknown')`. Переклассифицировано как продуктовое решение по наблюдаемости, а не доказанный дефект | основной производитель `app/core/simulator/real_tick_orchestrator.py:425`, второй — `app/core/simulator/real_payments_executor.py:152`; `simulator-ui/v2/src/api/normalizeSimulatorEvent.ts:568`; диагностический бакет `useSimulatorRealMode.ts:94` |
+| **[взято в 028, F-028-46 (E7)]** Судьба `/ws` и `event_bus` | — | Маршрут живой, производитель есть, потребителя нет. Решение keep-or-deprecate заблокировано за F-005-1 (токен в query string) | `app/api/v1/websocket.py:17`; производитель — `event_bus.publish(` в `app/core/payments/service.py:94` |
+| **[взято в 028, F-028-50 (E11)]** `docs/ru/pwa/` | — | Домена `pwa` нет в каноне `documentation-rules.md` §2.2, входящих ссылок нет. Мёртвый документ или отложенная работа | `docs/ru/pwa/specs/pwa-client-ui-spec.md` |
+| UI-тулчейн: остаток среза npm-уязвимостей — найдено 2026-09-20, срез 2026-10-03 | — | **npm-уязвимости закрыты** (срез 2026-10-03, PR #103, `ef318c0d`: `npm audit` и `npm audit --omit=dev` — 0 в обоих UI; реестр 028 № 8). **Остаток — класс 2, получатель — владелец UI-инструментария:** (1) пин Node: **[сделано в 028, F-028-10 (E9, `T2893`): пин Node 22.13.1]** `eslint-visitor-keys@5.0.1` требовал Node `^20.19.0 || ^22.13.0 || >=24`, а CI был закреплён на `22.12.0`; npm только предупреждает (engine-strict не задан). (2) Миграция `admin-ui` на ESLint 9 и flat-config (`@vue/eslint-config-typescript` 14+): до неё `overrides` в `admin-ui/package.json` держит typescript-eslint 8 под конфигом 13.x, который сам объявляет ^7. (3) При случайном порядке (`vitest run --sequence.shuffle`) прогон Admin падает на необработанной ошибке `window.getComputedStyle is not a function` (3 из 3 на Vitest 2, 2 из 3 на Vitest 4; ассерты проходят, в обычном порядке зелёный) — получатель владелец тестов Admin UI. (4) Холодный тайм-аут контрактного теста Admin после `npm ci` (≈4,6 с при лимите 5 с) — при повторе в `required-ui` дешёвая честная мера: документированно поднять тайм-аут только этому тесту, без ретраев и с сохранением ассертов. | Прежний замер, команды и §15-вердикт среза (`VERDICT-UI-NPM: WEAK`, класс 1 — 0) — `git show c51afdcb:specs/BACKLOG.md`, строка 26; `npm --prefix admin-ui audit`, `npm --prefix simulator-ui/v2 audit`. |
 
 ### Пределы справочного измерителя покрытия (025 `T2501`) — внесено 2026-10-03, класс 2 по §19.4
 
@@ -42,34 +36,25 @@
 
 Ревью Codex на `af37070` (`.local-run/codex-review/2026-10-02-024-close/final.md`; `READY-TO-CLOSE: YES`, класс 1 — 0).
 
-- **R-024-6 осиротел** (P3; получатель — владелец Admin backend/API). Критерий плана 024 (`specs/024-core-hygiene/spec.md:168`) требует отказа или разделения по эквивалентам для сводки ликвидности без фильтра, а суженный объём включил только удаление эквивалента из F-024-12 (`:269`). `/admin/liquidity/summary` агрегирует без фильтра эквивалента (`app/api/v1/admin.py:787`) и группирует нетто-позиции только по участнику (`:832`); денежный wire-тест передаёт `equivalent=USD` (`tests/integration/test_p011_admin_money_is_a_decimal_string_on_the_wire.py:571`). Случай «два эквивалента, фильтр опущен» не реализован и не утверждён. Связано с записью о `total_available` (S2 026). Денег не двигает — это отображение.
+- **[взято в 028, F-028-37 (E5)]** **R-024-6 осиротел** (P3; получатель — владелец Admin backend/API). Критерий плана 024 (`specs/024-core-hygiene/spec.md:168`) требует отказа или разделения по эквивалентам для сводки ликвидности без фильтра, а суженный объём включил только удаление эквивалента из F-024-12 (`:269`). `/admin/liquidity/summary` агрегирует без фильтра эквивалента (`app/api/v1/admin.py:787`) и группирует нетто-позиции только по участнику (`:832`); денежный wire-тест передаёт `equivalent=USD` (`tests/integration/test_p011_admin_money_is_a_decimal_string_on_the_wire.py:571`). Случай «два эквивалента, фильтр опущен» не реализован и не утверждён. Связано с записью о `total_available` (S2 026). Денег не двигает — это отображение.
 - **Контракт `verification_passed = null` не утверждён на HTTP-пути** (P3; получатель — владелец integrity API, при следующей правке). Тесты денежных операций проверяют `None` в базе (`tests/integration/test_p019_direct_execution_effects_postgres.py:118`), миграция — допустимость NULL (`tests/integration/test_p024_migration_032_postgres.py:39`), а `GET /integrity/audit-log` (`tests/integration/test_integrity_endpoints.py:54`) не проверяет `after_state.verification_passed`: подмена `None` на `false` в сериализаторе (`app/api/v1/integrity.py:389`) стёрла бы различие «проверка не проводилась» (протокол §11.4, `docs/ru/02-protocol-spec.md:2067`), не уронив ни одного теста.
-- **Флейк по реальному времени в обязательном гейте** (найден на CI PR #100, 2026-10-02; получатель — владелец платежей/тестов сверки). `tests/unit/test_p015_step5b_criterion_b.py::test_step5b_a_corrupted_payment_record_is_failed[intent_flow]` упал на `Required backend gates` с `TimeoutException: Routing time…` — поиск маршрута ограничен настенными 500 мс (`ROUTING_PATH_FINDING_TIMEOUT_MS`, `app/config.py`), загруженный раннер их превысил; локально 3 из 3 зелёные, перезапуск job на том же коммите `44267b8` — зелёный. Тест зависит от реального времени (AGENTS.md §11). Дешёвая правка — поднять тайм-аут маршрутизации в фикстуре этого теста или управлять часами; денег не касается.
+- **[сделано в 028, F-028-11 (E9, `T2894`); строка снимается при сведении `T2899.7`]** **Флейк по реальному времени в обязательном гейте** (найден на CI PR #100, 2026-10-02; получатель — владелец платежей/тестов сверки). `tests/unit/test_p015_step5b_criterion_b.py::test_step5b_a_corrupted_payment_record_is_failed[intent_flow]` упал на `Required backend gates` с `TimeoutException: Routing time…` — поиск маршрута ограничен настенными 500 мс (`ROUTING_PATH_FINDING_TIMEOUT_MS`, `app/config.py`), загруженный раннер их превысил; локально 3 из 3 зелёные, перезапуск job на том же коммите `44267b8` — зелёный. Тест зависит от реального времени (AGENTS.md §11). Дешёвая правка — поднять тайм-аут маршрутизации в фикстуре этого теста или управлять часами; денег не касается.
 
 ### Класс 2 из закрывающего ревью программы 026 — внесено 2026-10-02, получатели — владельцы тестов книги/платежа и симулятора
 
 Ревью Codex на `d930da5` (`.local-run/codex-review/2026-10-02-026-close/final.md`; `READY-TO-CLOSE: YES`, класс 1 — 0, `CROSS-SLICE-MONEY-SOUND: YES` статически). Обязательные проверки п. 5 плана 026 покрыты не на всех путях приложения; денежного дефекта не показано — это пробелы evidence, не ремонт.
 
-- **Multipath через пару с запрошенным закрытием в `PaymentService`** — `tests/integration/test_p026_s3_pending_transit_postgres.py:157` проверяет несколько потоков прямо через `Book`; подмены сервиса (`:100`, `:132`) дают по одному маршруту. Связка `pending_pair_capacity` + привязка нескольких маршрутов + накопленные резервы не проверена.
-- **Pending-линия не оживает через дрейф доверия и импорт** (п. 5.8) — фильтры `app/core/simulator/trust_drift_engine.py:379`, `:608` без отдельного поведенческого контртеста.
-- **Настоящий commit-unknown после автозакрытия** (п. 5.7) — `tests/integration/test_p026_s4_tick_close_publication_postgres.py:109` откатывает и вручную выбирает ветку неизвестного исхода; закоммиченный COMMIT с потерянным подтверждением и восстановлением не исполнен.
-- **Знаковое `available` в проекциях симулятора на долге из настоящего платежа** (п. 5.9) — `tests/unit/test_p026_s2_signed_available_in_simulator.py:43` строит долг прямой вставкой (`tests/unit/test_p021_interact_trust_line_actions_wire.py:96`); публичный API и Admin покрыты настоящим путём.
-- **Барьер PATCH линии против платежа и клиринга** (п. 5.6) — есть стенды close/платёж/клиринг и снижение/инжект; отдельного расписания PATCH ↔ платёж/клиринг нет.
-- **Клиринг, завершающий закрытие, при снятом согласии и с исключением `closed`** (п. 5.10) — положительное завершение и общие проверки согласия есть, совместного отрицательного случая нет.
-- Попутно (вне диапазона 026, предсуществующее): §5.2 протокола требует `active` для PATCH (`docs/ru/02-protocol-spec.md` ~:364), а `app/core/trustlines/service.py:565` отказывает только `closed` (замороженную линию PATCH принимает). Получатель — владелец протокола; Current/Intended не сверялись.
+- **[взято в 028, F-028-29 (E3)]** Попутно (вне диапазона 026, предсуществующее): §5.2 протокола требует `active` для PATCH (`docs/ru/02-protocol-spec.md` ~:364), а `app/core/trustlines/service.py:565` отказывает только `closed` (замороженную линию PATCH принимает). Получатель — владелец протокола; Current/Intended не сверялись.
 
 ### Дубли сущностей рефакторинга 015–026 — аудит и решение консультации, 2026-10-02 (класс 2; получатели — по строкам)
 
 Повод — отказ владельца от поля `payment_capacity` (026 `T2604`, дубль `/payments/capacity` и `/payments/max-flow`) и его вопрос «не наплодилось ли других ненужных дублирующих сущностей». Аудит только чтением: 5 инвентаризаций по поверхностям (БД, ядро, API, проверки, симулятор/UI), судьи, опровергатель на каждого кандидата — 39 кандидатов, 14 опровергнуто, 25 подтверждено (это не 25 дефектов: многие — одни и те же объекты с разных поверхностей). Решение — консультация Codex (`gpt-6-astra` запрошенная, reasoning high, read-only; клон `main` @ `37fcb67`; `.local-run/codex-review/2026-10-02-dup-audit/final.md`): `VERDICT-DUP-AUDIT: ACCEPT-WITH-CHANGES`, `DO-NOW-GROUPS: G4`, `NEXT-MIGRATION-GROUPS: G1,G2`, `BACKLOG-ONLY-GROUPS: G3,G5,G6,G7,G8`, `KEEP-GROUPS: G9`, `REFUTED-FINDINGS: NONE`, `PRODUCT-QUESTIONS: 0`. Ни одна группа не даёт денежной потери; основание «сейчас» есть только у G4. Ревьюер ничего не запускал — это статическое решение, не evidence гейтов. **Правило на будущее:** до нового поля, сущности или проверки — искать существующий расчёт (эндпоинт, функция ядра, UI, оригинальный GEO) и записывать ответ в спеку как §19.2 п. 4.
 
 - **G1 — итоговые столбцы журнала** (`debt_operations.effect_count`/`effect_digest`/`intent_digest`, `debt_operation_equivalents.effect_count`/`effect_digest`/`in_intent`/`in_scope` и их CHECK; пишет `app/core/ledger/book.py:890-919`). Пересчитываются из строк `debt_journal_entries` и интента той же операции; ни один продовый путь не сравнивает их с исходными строками (`reconciliation.py:465` выбирает `intent_digest` и не использует; `:451` читает только членство). Не инертны: их держат CHECK и триггеры неизменяемости (`app/db/journal_tables.py:210`, `:362`; `app/db/journal_triggers.py:159`). **Решение: вернуться в ближайшей авторизованной правке журнала** — одной новой миграцией, сохранив строки членства, идентичность транзакции и FK, теги версий (`schema_version`, `intent_encoding_version`, `money_encoding_version` в эту чистку не входят) и все настоящие отказы; удаление `in_intent`/`in_scope` — сознательное сужение метаданных, а не беспотерьная дедупликация. Отдельную миграцию ради чистки не строить и **не строить верификатор, чтобы оправдать столбцы**. Ложная проза исправлена 2026-10-02: докстринг `_entry_digest` больше не обещает сверку. Получатель — следующая авторизованная программа, меняющая журнал; §15 обязателен.
-- **G2 — индексы** `ix_debt_operations_open` (перекрыт уникальным `(kind, identity)`, `journal_tables.py:224`; конверт адресуется по PK, `book.py:912`) и `ix_debt_journal_entries_operation` (префикс уникального `(operation_id, …)`, `journal_tables.py:330`). **Решение: там же, только после замера** планов, размера индексов и HOT до и после; логическое перекрытие не доказывает равной скорости. Прогнать стенд гонки идентичности конверта `T1529`.
 - **G3 — DDL журнала дважды** (модель для `create_all`, `app/db/journal_triggers.py:25`, и миграция 029). Второй путь живой (`tests/conftest.py:136`, `:274`, `:279`; канонический раннер ставит флаг миграций только при его отсутствии, `scripts/verify_local.ps1:152`), паритет держит `tests/integration/test_p018_b_schema_parity_postgres.py`. **Решение: BACKLOG, получатель — работа по тестовой схеме (025)**: снимается вместе с путём `create_all`, а не миграцией журнала; поведенческие ассерты паритетных тестов сохранить.
-- **G4 — `RealTick` копирует шесть настроек раннера при создании** (`app/core/simulator/tick.py:130-138`); два теста ставили бюджет клиринга 5000 мс после создания и шли на 250 мс по умолчанию. **Решение: починить сейчас, только тесты** — сделано в ветке `claude/dup-audit`. Это не ложно-зелёный тест (его поведенческие ассерты настоящие) и не находка класса 1. Шесть копий в продовом коде — BACKLOG, получатель — владелец тика симулятора.
 - **G5 — одно множество видов операций дважды**: `_PRE_BASELINE_ONLY_KINDS` (`app/core/ledger/book.py:632`) и `_NOT_EXAMINED_KINDS` (`app/core/ledger/reconciliation.py:177`). Сейчас совпадают; открытое направление (сверка пропускает вид, который книга не ограничивает) требует будущей несогласованной правки. **Решение: BACKLOG** — одна константа при следующей авторизованной правке политики видов писателей; §15 обязателен (сверка).
 - **G6 — маркеры «не проверено» и результат `trust_limits` строятся дважды**: типизированно в API (`app/api/v1/integrity.py:40`, модели `app/schemas/integrity.py:53`) и словарями в checkpoint (`app/core/integrity.py:90`). Расхождение уже было (Admin в S1), текущего нет. **Решение: BACKLOG** — один построитель при следующем изменении этого вывода; не строить настоящую проверку zero-sum ради устаревших комментариев (`specs/README.md:105`). §15 обязателен.
 - **G7 — мёртвый и повторённый код**: `flow_planner.money_of`/`ATOM_SCALE` (`app/core/clearing/flow_planner.py:149`) — **не трогать: файл закреплён хешем протокола приёмки v3** (`scripts/measure_p023_planner_acceptance_v3.py:66`, `:90`; *2026-10-02: раннер и пин сняты 025 `T2504.1` — причина «не трогать» больше не действует, приёмка v3 относится к `ef3c640`*); `CommittedOccurrence.amount_text` (`app/core/clearing/runner.py:138`, читает только тест); квант scale-8 в ~5 местах (`book.py:679`, `payments/service.py:567` — разные контракты, общий helper из книги не экспортировать); счётчики повтора симулятора — только два из них дублируют `committed_total` (`app/core/simulator/money_replay.py:565`); цикл «живая строка побеждает» в двух построителях (`snapshot_builder.py:167`, `edge_patch_builder.py:255`); экспорт `DEBT_OPERATION_IDENTITY_CONSTRAINTS` (`book.py:128`) без продового потребителя — читает только `tests/unit/test_p015_t1529_…` (добавлено консультацией). **Решение: BACKLOG**, независимые чистки по одной, при касании файла; правки повтора и клиринга — с §15.
-- **G8 — дубли UI**: computed «закрытие — запрос» в двух компонентах (`EdgeDetailPopup.vue:153`, `TrustlineManagementPanel.vue:152`); выражение ключа ревизии снимка в двух watcher (`useInteractMode.ts:273`, `useInteractDataCache.ts:394` — действия разные, оба watcher нужны); алиас `graphPageHelpers.money` (`admin-ui/src/pages/graph/graphPageHelpers.ts:30`; функции страниц — не алиасы). Часть — из 012/013, не из рефакторинга. **Решение: BACKLOG**, при касании компонента.
 - **G9 — оставить** (`принято`): заглушка подписи `_UNSIGNED` в пяти местах (значение не читается); `debt_growth` в аудите платежа (хранит лимит на момент операции — журнал его не хранит); вторая проверка роста в платеже (`payments/service.py:1920`, `:1928` — результат идёт в аудит; книга независимо покрывает всех писателей, `book.py:859`). При этом **строка бюджета S1 спеки 026 «≤1 пакетный SELECT» реализацию не описывает** (у растущего платежа два SELECT роста); записано здесь, ослаблять книгу ради бюджета задним числом нельзя. Копии helper'ов БД в скриптах замеров оставить: v3 хеширует весь `measure_p023_planner_acceptance.py` (`:68`), ограждения имён разные.
 
 ### Класс 2 из внутреннего adversarial S4 (`T2603.2`) программы 026 — внесено 2026-10-02, получатель — владелец жизненного цикла рана симулятора / закрывающее ревью `T2610` программы 026
@@ -84,18 +69,11 @@
 
 **S4 (`T2603.2`, 2026-10-02) обе записи не взял, получатель — `T2610`.** Контрольная сумма: новая форма меняет сравнение с сохранёнными checkpoint'ами — решение о версии формы, не узкая правка. `TRUSTLINE_CLOSED`: по коду путь недостижим — `_live_trustline` и `FOR UPDATE` сервиса идут в одной SERIALIZABLE-транзакции; закрытие, закоммиченное после её снимка, даёт `40001` на `FOR UPDATE`, до снимка — `404 TRUSTLINE_NOT_FOUND`; стендом не проверено (спека 026, «Результаты T2603.2»).
 
-- **Контрольная сумма целостности не включает состояние запроса закрытия** (P3). `app/core/integrity.py:34` выбирает у линии только концы, лимит и статус, `:57` хеширует `trustline|from|to|limit|status` — без `close_requested_at`, хотя строка инвентаризации `T2600` (`specs/026-geo-alignment/spec.md:160`) требует «request-state в явно новой форме checksum». Следствие: у активной линии с лимитом 0 и поддерживаемым долгом запрос закрытия не меняет сумму, хотя маршрутизация (пара только уменьшается) и завершение после него иные. Не сделано в S3: новая форма суммы меняет сравнение с сохранёнными checkpoint'ами (старые разойдутся с новыми без изменения состояния) — это отдельное решение о версии формы, а не узкая правка; денег не теряется — запрос и завершение пишутся в аудит (`TRUST_LINE_CLOSE_REQUEST`, `TRUST_LINE_CLOSE` с `completed_by`).
-- **Interact: конфликт `TRUSTLINE_CLOSED` из сервиса уходит вложенным конвертом GEO** (сосед P2-1, найден при его исправлении 2026-10-02; по коду, стендом не воспроизведён). Обработчики `trustline-update` и `trustline-close` (`app/api/v1/simulator.py`, ~`:1442` и действие закрытия) находят живую линию через `_live_trustline`, а сервис отказывает `ConflictException(reason=TRUSTLINE_CLOSED)` (`app/core/trustlines/service.py:565`, `:678`), если линия закрылась между этим чтением и его блокировкой строки. С S3 такое закрытие делает и `Book` — погашение долга, закоммиченное в это окно; раньше только встречное явное закрытие. Ответ — 409 в обоих случаях, но тело `{error:{…}}` вместо плоского `{code, message, details}` из OpenAPI. Fix-delta переводит в плоское тело только `TRUSTLINE_CLOSE_REQUESTED` (воспроизведённый путь); дешёвая правка — тот же перевод для `TRUSTLINE_CLOSED` плюс стенд гонки. Денежной потери нет.
+- **[взято в 028, F-028-6 (E6)]** **Interact: конфликт `TRUSTLINE_CLOSED` из сервиса уходит вложенным конвертом GEO** (сосед P2-1, найден при его исправлении 2026-10-02; по коду, стендом не воспроизведён). Обработчики `trustline-update` и `trustline-close` (`app/api/v1/simulator.py`, ~`:1442` и действие закрытия) находят живую линию через `_live_trustline`, а сервис отказывает `ConflictException(reason=TRUSTLINE_CLOSED)` (`app/core/trustlines/service.py:565`, `:678`), если линия закрылась между этим чтением и его блокировкой строки. С S3 такое закрытие делает и `Book` — погашение долга, закоммиченное в это окно; раньше только встречное явное закрытие. Ответ — 409 в обоих случаях, но тело `{error:{…}}` вместо плоского `{code, message, details}` из OpenAPI. Fix-delta переводит в плоское тело только `TRUSTLINE_CLOSE_REQUESTED` (воспроизведённый путь); дешёвая правка — тот же перевод для `TRUSTLINE_CLOSED` плюс стенд гонки. Денежной потери нет.
 
 ### Класс 2 из §15-ревью `T2602` (S2) программы 026 — внесено 2026-09-29, получатель — владелец контракта Admin (`T2604` программы 026 отменена владельцем 2026-10-02)
 
-- **`total_available` сводки ликвидности Admin уменьшается снижением лимита ниже долга.** `/admin/liquidity/summary` отдаёт `total_available` = `SUM(limit − used)` (`app/api/v1/admin.py` ~:782; так и описано в `api/openapi.yaml`), `LiquidityPage` показывает его как «Total available». С S2 `available` линии бывает отрицательным, и превышение долга над сниженным доверием вычитается из суммы. Контрактное поле задокументировано ровно как эта сумма, поэтому в fix-delta S2 не меняется. Денежной потери нет — это отображение агрегата.
-- ~~**Подсказка топа bottleneck-рёбер ликвидности называет знаковую сумму «оставшейся доступной ёмкостью»**~~ **Закрыто 2026-10-02** (ветка `claude/026-s5-cancel`): подсказка `liquidity.help.topBottleneckEdges` (`admin-ui/src/i18n/en.ts:100`, `ru.ts:100`) называет величину неиспользованным доверием, говорит, что она бывает отрицательной и не является платёжной ёмкостью. Исходная запись: **Подсказка топа bottleneck-рёбер ликвидности называет знаковую сумму «оставшейся доступной ёмкостью»** (внесено 2026-10-02 из ревью fix-delta S2; получатель — владелец текстов Admin UI / `T2604`). `admin-ui/src/i18n/en.ts:100` — `'liquidity.help.topBottleneckEdges': 'Edges with the lowest remaining available capacity (Available = Limit − Used) for the current snapshot.'`, `ru.ts:100` — «Рёбра с минимальной оставшейся доступной ёмкостью … (Available = Limit − Used)»; показывается тултипом `LiquidityPage.vue:392`. С S2 `available` бывает отрицательным и ёмкостью не является (подсказка `trustlines.available` уже исправлена в S2). Формулировка, денежной потери нет.
-- **Стенд инжекта против закоммиченного снижения не проверяет механизм повтора `40001` раннера** (внесено 2026-10-02 из ревью fix-delta S2; получатель — владелец тика и инжекта симулятора). `tests/integration/test_p026_s2_inject_sees_a_committed_lowering_postgres.py` утверждает только итог (долг остался 80) и что чтение линии шло после снимка; число чтений линии (`line_reads`) печатается, но не проверяется, `40001` и вторая попытка (`real_runner_impl.py`, `simulator.real.inject.transient_retry`) не наблюдаются. Итог «долг 80» дал бы и отказ без повтора. Исправление P1 (`FOR SHARE` в `app/core/simulator/inject_executor.py:~572`) этим стендом доказано по итогу, а не по пути. Механизм проверки, денежной потери нет.
-
-### Класс 2 из §15-ревью `T2601` (S1) программы 026 — внесено 2026-09-29, получатель — `T2603.1` (S3) программы 026
-
-- **Сделано 2026-10-02 (`T2603.1`):** строка аудита платежа несёт `affected_participants.debt_growth` (до, после, лимит каждого выросшего долга); `invariants_checked` и `verification_passed = null` не тронуты. Исходная запись — историческая: **Проверенный переход и применённый лимит не пишутся в метаданные аудита операции** (развилка 4 консультации `T2600`; §15 P3). `check_debt_growth` (`app/core/invariants.py`) успешный результат отбрасывает, запись `IntegrityAuditLog` платежа по-прежнему несёт пустые `invariants_checked` и `verification_passed = null` (`app/core/payments/service.py`, `_write_integrity_audit`). Отложено: остаток потолка S1 — 7 строк продукта из 300 после fix-delta, а S3 всё равно вводит аудит запроса и завершения закрытия. Денежной потери нет: рост отказывается на пути записи; журнал хранит сам переход, но не лимит на момент операции. Старые записи доказательством соблюдения роста не станут.
+- **[взято в 028, F-028-37 (E5)]** **`total_available` сводки ликвидности Admin уменьшается снижением лимита ниже долга.** `/admin/liquidity/summary` отдаёт `total_available` = `SUM(limit − used)` (`app/api/v1/admin.py` ~:782; так и описано в `api/openapi.yaml`), `LiquidityPage` показывает его как «Total available». С S2 `available` линии бывает отрицательным, и превышение долга над сниженным доверием вычитается из суммы. Контрактное поле задокументировано ровно как эта сумма, поэтому в fix-delta S2 не меняется. Денежной потери нет — это отображение агрегата.
 
 ### Класс 2 из `T2415.2` (ёмкость против встречного долга) программы 024 — внесено 2026-09-29
 
@@ -105,11 +83,8 @@
 - **Simulator UI показывает «доступно» как остаток лимита прямой линии** (`simulator-ui/v2/src/composables/useInteractMode.ts:~280`, `availableCapacity` = `available` линии `to → from`): при оплате только зачётом встречного долга поле пустое, хотя `payment-targets` (роутер) цель уже отдаёт. Получатель — итерация Simulator UI (022/после ядра; UI вне owner surface 024).
 
 - **Сетевой псевдокод §6.5.2 протокола применяет политику линии следующего узла к платящему участнику** (`docs/ru/02-protocol-spec.md` §6.5.2: `get_trust_line(next_pid, participant.pid)` → `can_be_intermediate` кредитора проверяется для должника). Хаб реализует «запрет — заявление владельца линии» (§6.3.1, решение владельца 2026-09-29; `docs/ru/simulator/backend/fixtures-mapping.md`: «`can_be_intermediate` решает кредитор»). §6.5.2 описывает зарезервированный сетевой режим PREPARE, не хаб; получатель — владелец протокола при следующей правке сетевого режима.
-- ~~**Изменение линии после снимка платежа платёж не видит — решение владельца о `FOR SHARE`**~~ **Закрыто 2026-09-29 (`T2415.3`, решение владельца A):** ядро читает обе активные линии пары `FOR SHARE` до конца денежной транзакции; стенд ниже без xfail, зелёный на PostgreSQL, повтор по `40001` (`pgcode=40001 where=execute`) и отказ на свежем снимке. Исходная запись — историческая: (класс 2 по §19.5; §15-ревью `T2415.2`, круг fix-delta, P2; получатель — владелец платежей, решение — владелец продукта). Ядро читает линии пары обычным чтением в снимке SERIALIZABLE-транзакции (`app/core/payments/service.py` `_segment`). Стенд `tests/integration/test_p024_router_capacity_matches_balance.py::test_a_freeze_committed_between_routing_and_binding` (строгий xfail, режим B, без sleep): платёж P строит маршрут (снимок взят), F замораживает единственную линию пары и коммитит, затем P связывает и коммитит — «after the freeze: COMMITTED, attempts 1, debts ['20.00000000']»; `40001` нет, потому что F не читает долгов и SSI упорядочивает P «до» F. Изменение, закоммиченное до снимка платежа, ядро видит (`test_a_line_changed_after_routing_is_refused_by_the_core`). **Строгий вариант (оценка, не реализовано):** `.with_for_update(read=True)` на запросе линий в `_segment` — 1 строка продукта плюс снятие маркера со стенда. Под SERIALIZABLE `FOR SHARE` на строке, изменённой после снимка, даёт `40001` («could not serialize access due to concurrent update»), он уже в множестве повтора платежа (`_RETRYABLE_PAYMENT_SQLSTATES`, `40001`/`40P01`), повтор берёт свежий снимок и отказывает — предиката не меняет. Проба 2026-09-29 (правка не закоммичена): стенд с `FOR SHARE` — passed (платёж не закоммичен). Цена: платёж держит разделяемые блокировки строк линий своего маршрута до коммита — писатели линий (PATCH/закрытие, дрейф доверия, заморозка инжектом всех линий участника одним UPDATE) ждут его, и наоборот; в тике симулятора (много платежей в одной транзакции) — до коммита тика. Взаимоблокировка возможна (P держит S(L2) и ждёт S(L1), писатель держит X(L1) и ждёт X(L2)) — PostgreSQL обрывает одну сторону `40P01`, для платежа это повтор; для писателей линий — их собственная обработка (не проверено). Клиринг строк линий не блокирует на запись (читает долги `FOR UPDATE` и стоп `FOR SHARE`) — конфликт с ним не добавляется (по коду, не проверено стендом).
-- **Политика линии, записанная сценарием симулятора, не проверяется валидатором политики — три чтения расходятся с API** (класс 2 по §19.5; внутренний adversarial-проход `T2415.2`/`T2415.3`, 2026-09-29; получатель — владелец валидации политики линий). Сценарий пишет `policy` дословно (`app/core/simulator/real_scenario_seeder.py:257-259`, `app/core/trustlines/service.py:715` проверяет только, что это объект; `fixtures/simulator/scenario.schema.json:235` — `additionalProperties: true`), минуя `validate_trustline_policy`. (1) `can_be_intermediate: "false"` или `"0"` — `bool()` в `pair_rules` читает непустую строку как **разрешение**; через API такая строка не проходит (только `bool`). (2) `can_be_intermediate: null` — `bool(None)` = запрет (излишний отказ), хотя API хранит `null` как «не задано». (3) `blocked_participants` сверяется только с pid (`validation.py:617-620` требует список строк, но не проверяет, что это pid): имена, UUID и иные формы молча не действуют. Денежной потери по API-пути нет; путь — только сценарий (и прямые записи в БД). Дешёвая правка — прогнать политику сценария через тот же валидатор; не срез 024.
+- **[пп. (1)–(2) взято в 028, F-028-3 (E2); п. (3) — LATER]** **Политика линии, записанная сценарием симулятора, не проверяется валидатором политики — три чтения расходятся с API** (класс 2 по §19.5; внутренний adversarial-проход `T2415.2`/`T2415.3`, 2026-09-29; получатель — владелец валидации политики линий). Сценарий пишет `policy` дословно (`app/core/simulator/real_scenario_seeder.py:257-259`, `app/core/trustlines/service.py:715` проверяет только, что это объект; `fixtures/simulator/scenario.schema.json:235` — `additionalProperties: true`), минуя `validate_trustline_policy`. (1) `can_be_intermediate: "false"` или `"0"` — `bool()` в `pair_rules` читает непустую строку как **разрешение**; через API такая строка не проходит (только `bool`). (2) `can_be_intermediate: null` — `bool(None)` = запрет (излишний отказ), хотя API хранит `null` как «не задано». (3) `blocked_participants` сверяется только с pid (`validation.py:617-620` требует список строк, но не проверяет, что это pid): имена, UUID и иные формы молча не действуют. Денежной потери по API-пути нет; путь — только сценарий (и прямые записи в БД). Дешёвая правка — прогнать политику сценария через тот же валидатор; не срез 024.
 - **`FOR SHARE` ядра (`T2415.3`) против многострочных писателей линий симулятора: дрейф доверия пропускает тик** (класс 2 по §19.5; анализ блокировок `T2415.3`, 2026-09-29, по коду, стендом не проверено; получатель — владелец тика симулятора). Затухание (`app/core/simulator/trust_drift_engine.py:441`, вызов `tick.py:1307`) и рост (`trust_drift_engine.py:227`, вызов `tick.py:1057`) меняют несколько строк линий одним flush; платёж держит `FOR SHARE` на линиях пар маршрута до конца своей транзакции (у тика — до денежного коммита тика, `money_replay.py:540-558`). Возможна взаимоблокировка платёж ↔ дрейф: PostgreSQL обрывает одну сторону `40P01`. Платёж повторяет (`_RETRYABLE_PAYMENT_SQLSTATES`); дрейф не повторяет: затухание — `decay_failed` и пропуск тика (`tick.py:1316`), `40001` на коммите затухания помечается как `REAL_MODE_MONEY_CONFLICT_UNRESOLVED` (`tick.py:392`, `:637`); рост — откат и `growth_failed` (`tick.py:1079-1086`), при этом счётчики в памяти уже увеличены (`trust_drift_engine.py:354-361`). Денег не теряется. Инжект заморозки участника (`inject_executor.py:986-1009`) — тоже многострочный, но повторяет один раз (`real_runner_impl.py:52`, `:466`).
-- **PATCH/закрытие линии отвечает 500 на `40001`** (класс 2, существовал до `T2415.3`; получатель — владелец API линий). Писатели одной строки (`app/core/trustlines/service.py:595`, `:601`, `:673`; симулятор `app/api/v1/simulator.py:1438-1450`, `:1530-1542`) повтора не имеют; SSI-конфликт с платежом уходит в общий обработчик — 500 `E010` (`app/main.py:182-196`). `FOR SHARE` взаимоблокировки с ними не создаёт (одна строка, advisory-лока нет) — писатель лишь ждёт коммита платежа (у тика — до денежного коммита тика).
-- **`/payments/max-flow` может завысить оценку, совместимую с политикой** (класс 2; §15-ревью `T2415.2`, круг fix-delta, P2; получатель — владелец роутера). Политика проверяется на каждом дополняющем пути (`app/core/payments/router.py`, `calculate_max_flow`), но перераспределение остаточного потока её не сохраняет. Контрпример ревьюера (статический, не исполнен): рёбра ёмкости 1 A→U→V→B, A→Y→W→V, U→Z→B, активная линия U→A блокирует Z; первый путь A→U→V→B, второй через обратное ребро A→Y→W→V→U→Z→B — оценка 2, а совместимая с политикой ёмкость 1 (итоговый поток требует A→U→Z→B). `find_flow_routes` 2 отказывает; касается `/payments/max-flow` и `include_max_available` в `payment-targets` (`app/api/v1/simulator.py:~2286`). Деньги не двигаются.
 
 ### Класс 2 из закрытия Ш5 программы 024: флейк p017 — внесено 2026-09-29, получатель — владелец `tests/migrated_schema.py`
 
@@ -119,8 +94,8 @@
 
 Найдено исполнителями `T2416.2` и `T2416.3` на `claude/024-sh6`, не исправлено (закрытый список Ш6; денежной потери нет).
 
-- **После stop→restart писатель событий артефактов не перезапускается.** `stop` вызывает `stop_events_writer`, а `restart` — не `start_events_writer` (`app/core/simulator/run_lifecycle.py`), поэтому перезапущенный ран перестаёт дописывать `events.ndjson`. SSE не затронут.
-- **`resume` из `error` не проверяет ни лимит владельца, ни глобальный.** `create_run` считает отображение на упавший ран устаревшим и очищает его, поэтому последовательность «ран A упал → создан ран B → resume A» оставляет владельцу два `running` рана.
+- **[взято в 028, F-028-4 (E1)]** **После stop→restart писатель событий артефактов не перезапускается.** `stop` вызывает `stop_events_writer`, а `restart` — не `start_events_writer` (`app/core/simulator/run_lifecycle.py`), поэтому перезапущенный ран перестаёт дописывать `events.ndjson`. SSE не затронут.
+- **[взято в 028, F-028-5 (E1)]** **`resume` из `error` не проверяет ни лимит владельца, ни глобальный.** `create_run` считает отображение на упавший ран устаревшим и очищает его, поэтому последовательность «ран A упал → создан ран B → resume A» оставляет владельцу два `running` рана.
 - **Отмена вызывающего `resume`/`restart` во время ожидания старого heartbeat** (он ещё завершается) оставляет ран `running` без heartbeat до следующего `resume`.
 - **`flush_pending_storage` читает номер тика и отметку через `… or -1`** (`app/core/simulator/tick.py`, ~`:1610`, `:1614`): тик 0 превращается в «нет данных», и финальная запись после неудачного коммита хвоста его пропускает. **Достижимый диагностический долг, класс 2** (исправлено 2026-09-29 по §15-ревью Ш6, P3; прежняя запись называла это гипотезой): пока реальный тик ждёт (`runtime_impl.py:916`), живой `restart` сбрасывает `tick_index` в 0 (`run_lifecycle.py:478`), `_ensure_heartbeat` сохраняет живую задачу (`:162`), и её хвост читает изменяемый номер (`tick.py:1492`) — полезная нагрузка с тиком 0 достижима через приложение. Статический контрпример расписания ревьюера (`.local-run/codex-review/2026-09-29-024sh6/final.md`), не исполнен.
 
@@ -134,7 +109,6 @@
 
 Ревью Codex на `64fafb9` (`.local-run/codex-review/2026-09-29-024sh4/final.md`; `VERDICT-024SH4: WEAK`, `READY-TO-MERGE: NO` из-за P2, `PRODUCT-QUESTIONS: 0`, класс 1 = 0). P2 (потолок суммы симулятора ронял старт) исправлен fix-delta на той же ветке. Денежной потери нет. Три отложенных пункта Ш4 ревьюер признал техническими решениями, не вопросами владельцу; здесь — их диспозиция.
 
-- **Версия: `.env` может перебить процессное окружение через псевдоним** (P3; получатель — следующий срез, трогающий источники настроек). С `T2414.1` версия для `/health` — поле `GEO_APP_VERSION` с `AliasChoices("GEO_APP_VERSION", "APP_VERSION")` (`app/config.py`). При процессном `APP_VERSION=release`, без процессного `GEO_APP_VERSION` и с `GEO_APP_VERSION=stale` в `.env` выбирается `stale`: pydantic-settings сливает словари источников по ключу-псевдониму, оба ключа выживают, и приоритет получает первый псевдоним, а не источник. До `T2414.1` `.env` для версии не читался вовсе. Узкой правки без собственного источника настроек нет (приоритет источника виден только в источнике), а собственный источник этот шаг не строит — решение ревью: «resolve source precedence before alias preference; retain the documented legacy alias». Обход для развёртываний: задавать версию одним именем в одном месте.
 - **`NotFoundException` несёт `E001`** (решение ревью: `E009` для общего «не найдено», HTTP 404 и конкретное сообщение сохраняются, `E001` — только отказ маршрутизации, `docs/ru/02-protocol-spec.md` §9.6; получатель — отдельный узкий срез `Contract: yes` с §15). Код видят клиенты; `app/core/simulator/rejection_codes.py` сопоставляет по классу исключения и тексту, не по коду.
 - **Логирование не сконфигурировано** (решение ревью: центральная конфигурация, действующий `LOG_LEVEL`, request-id в записи, редакция секретов, существующие идентификаторы событий сохраняются; формат выбирается технически; получатель — следующий срез наблюдаемости, AGENTS.md §12). Сегодня записи уровня ниже WARNING приложения теряются, а `http.unhandled_error` пишет `exc_info` — текст исключения и пути трассировки не редактируются.
 - **`/admin/config` объявляет mutable ключи без эффекта** (решение ревью: сообщать настоящую изменяемость, согласованно с тем, чтобы Admin UI её соблюдал; горячую переконфигурацию ради неработающих ручек не вводить; `RECOVERY_*` убирает 022 по П4; получатель — 022 / владелец Admin UI вместе с бэкендом). Admin UI (`admin-ui/src/pages/ConfigPage.vue:163`) правит все двенадцать ключей и флаг игнорирует — одно снятие флага на бэкенде превратит правку в UI в 400.
@@ -143,55 +117,18 @@
 
 Ревью Codex на `d453f8c` (`VERDICT-024SH3: WEAK`, `READY-TO-MERGE: YES`, класс 1 = 0; Changelog спеки 024). Денежной потери нет.
 
-- **Непересекающиеся пары платежей конфликтуют всегда** — *2026-10-03: взято в программу 027 ([`027-concurrent-payments/spec.md`](027-concurrent-payments/spec.md)), авторизована владельцем; замер стенда p027 там же. Запись оставлена как история.* (P2; получатель — владелец платежей/роутинга, носитель посылки 019). Стенд R-024-11: 20/20 повторов с `40001` в обоих плечах, все 40 платежей в итоге закоммичены (`specs/024-core-hygiene/spec.md`, «Ш3»). При `ROUTING_GRAPH_CACHE_TTL_SECONDS=0` по умолчанию (`app/config.py:~182`) роутер читает все активные линии и долги эквивалента внутри транзакции платежа (`app/core/payments/router.py:~197`, `:~207`) — посылка 019 «SERIALIZABLE разводит конфликт по паре» на этом стенде не держится; цена — лишние повторы, не деньги. 019 автоматически не переоткрывается; нужна отдельная находка с замером пропускной способности.
-- **Перерасход тестового бюджета Ш3** (P3; получатель — оркестратор 024, консолидация — 025): +637 против плана 200–350 (стенд 302, тест миграции 72, гард 71, остальное — перевод тестов на новый контракт). Бюджет задним числом не поднимается; перед Ш6 — пересмотр по правилу объёма спеки (вместе с перерасходом Ш2).
 - **Платёж и клиринг могут закоммититься без строки аудита при не-DB сбое сборки аудита** (давнее, не регрессия Ш3; получатель — владелец аудита/024). `app/core/payments/service.py:~1986`, `app/core/clearing/service.py:~2360`; адаптированный тест это прямо показывает (`tests/integration/test_payment_audit_serialization_failure_postgres.py:~151`). Денежный эффект верен; неполна лишь запись аудита.
 
 ### Класс 2 из закрывающего ревью программы 023 — внесено 2026-09-28, получатель — владелец раннера клиринга и аренды
 
 - **Отмена во время освобождения аренды теряет структурированный отчёт о прогрессе** (P2). Сценарий: согласованный треугольник закоммичен; разблокировка в Redis зависает, затем `/clearing/auto` отменяется. Результат возвращается внутри контекста аренды (`app/core/clearing/runner.py:~448`), чья очистка ждёт Redis (`app/utils/distributed_lock.py:~278`, `:~233`), и отмена выходит за пределы обёртки прогресса (`runner.py:~393`), минуя журнал вхождений и объёма эндпоинта (`app/api/v1/clearing.py:~153`). Долг закоммичен верно — страдает полнота отчёта. Расписание статическое, не исполнялось. Починка: фиксировать прогресс до освобождения аренды либо сохранять его в исключении отмены; тест — зависший unlock и отмена после коммита.
-- **Докстринг планировщика устарел, но заморожен** (P3). `app/core/clearing/flow_planner.py:1-4` говорит «NOT WIRED» и «no production entrypoint calls this module», хотя с 023(d) весь клиринг планирует через него. Исправить нельзя без согласованного шага: раннер приёмки v3 проверяет sha256 файла против `ef3c640` (`FROZEN_SOURCES` в `scripts/measure_p023_planner_acceptance_v3.py`) и отказывается работать. Починка — вместе с первым содержательным изменением планировщика: правка докстринга плюс датированное обновление замороженного хеша и заметка, что приёмка v3 относится к `ef3c640`. Получатель — владелец планировщика (023 закрыта; следующее касание — 024 или 025). *2026-10-02: раннер v3 с `FROZEN_SOURCES` и тест, проверявший пин, сняты 025 `T2504.1` (источник — `44954ebb`); докстринг правится без обновления хеша, приёмка v3 по-прежнему относится к `ef3c640`.*
-
-### Класс 2 из §15-ревью стадии 4 программы 021 — внесено 2026-09-28, получатель — программа 024 (хранилище симулятора); **2026-09-29: шаг `T2416.3`** (суженный план 024 после консультации `T2400`)
-
-- **Провал коммита хвоста тика подавляет финальный повтор записи.** `app/core/simulator/tick.py:~1179` помечает полезную нагрузку сброшенной до коммита хвоста (`:~1184`). Если оба писателя отработали, а коммит упал и откатился, остановка рана зовёт `flush_pending_storage`, который пропускает уже помеченную нагрузку (`:~1240`). Метрики и узкие места этого тика теряются. Порядок унаследован (`real_tick_persistence.py:150` на `2df5703`), это не регрессия стадии 4. Денег это не касается: метрики не денежные. Починка: помечать нагрузку сброшенной только после подтверждённого коммита, тест — провал коммита хвоста с последующей остановкой рана.
+- **[взято в 028, F-028-17 (E11)]** **Докстринг планировщика устарел, но заморожен** (P3). `app/core/clearing/flow_planner.py:1-4` говорит «NOT WIRED» и «no production entrypoint calls this module», хотя с 023(d) весь клиринг планирует через него. Исправить нельзя без согласованного шага: раннер приёмки v3 проверяет sha256 файла против `ef3c640` (`FROZEN_SOURCES` в `scripts/measure_p023_planner_acceptance_v3.py`) и отказывается работать. Починка — вместе с первым содержательным изменением планировщика: правка докстринга плюс датированное обновление замороженного хеша и заметка, что приёмка v3 относится к `ef3c640`. Получатель — владелец планировщика (023 закрыта; следующее касание — 024 или 025). *2026-10-02: раннер v3 с `FROZEN_SOURCES` и тест, проверявший пин, сняты 025 `T2504.1` (источник — `44954ebb`); докстринг правится без обновления хеша, приёмка v3 по-прежнему относится к `ef3c640`.*
 
 ### Класс 2 из §15-ревью среза (d) программы 023 — внесено 2026-09-28
 
 Ревью Codex на `aaa9870` (`VERDICT-023D: WEAK`, `READY-TO-MERGE: YES`, класс 1 = 0; Changelog спеки 023). Денежной потери нет.
 
-- ~~**Объём клиринга тика теряется при таймауте после коммита.**~~ **Закрыто 2026-09-28 стадией 4 программы 021** (`T2105`, ветка `claude/021-s4`, слита PR #75 `968189a`): объём — из закоммиченного прогресса раннера; узел `test_p023_d_tick_driver_through_runner_postgres.py::test_a_timeout_after_a_commit_reports_the_committed_volume` читает результат `stand.tick()`. *Исходная запись:* Получатель — стадия 4 программы 021 (перенос координатора в `tick.py`). Координатор инициализирует объём нулём и присваивает реальный только при успешном завершении (`app/core/simulator/real_tick_clearing_coordinator.py:~159`, `:~225`, `:~232`, `:~272`). Когда одно вхождение закоммичено, а следующее упирается в жёсткий таймаут, прогресс уходит в БД и SSE (`real_clearing_engine.py:~459`, `:~506`), но метрика `clearing_volume` (`real_tick_orchestrator.py:~494`, `real_tick_metrics.py:~110`) получает ноль. Поведение старое; тест приёмки `tests/integration/test_p023_d_tick_driver_through_runner_postgres.py:~284` результат тика не проверяет. Починка: объём из переданного прогресса, а не из успешного возврата. Тест должен читать `stand.tick()`.
 - **Холодный старт процесса приложения не проверен.** Получатель — программа 023 (закрытие) или следующий касающийся планировщика срез. Приёмка (d) требовала свежий процесс без прогрева. Тест сбрасывает только `_planner_executor` в уже работающем процессе pytest (`test_p023_d_tick_driver_through_runner_postgres.py:~207`). Реальное погашение на холодном **воркере** доказано, на холодном **процессе приложения** — нет. Evidence (`evidence/2026-09-28-d-cold-spawn.txt:~14`) это раскрывает. **2026-09-28, сведение закрытия 023 (`T2306`):** не проверено и закрытием не проверяется; по §19.5 — класс 2, программу не держит. Получатель после закрытия 023 — следующий срез, касающийся планировщика или запуска процесса хаба (кандидат — 024, стадия 6; **2026-09-29: `T2414.2`** — вынос супервизора и запуска, с ограниченной проверкой холодного процесса); до него — названная непроверенная поверхность в разделе закрытия спеки 023 (вместе с Linux-`spawn` под uvicorn/контейнером).
-
-### 2026-09-28 — проверка изоляции периодического клиринга по псевдоключу не реализована (открытое решение), класс 2
-
-Источник — §15-ревью среза (c) программы 023, P2-1, и предложение fix-delta (спека 023, Changelog 2026-09-28, fix-delta (c), п. 5; решение 9, «Выбор формы»). Форма (б) — отказ периодического раннера при строке `simulator_runs` с `mode = 'real'` или при `SIMULATOR_DB_ENABLED = false` — **обнаруживает видимые нарушения, а не доказывает отсутствие данных симулятора**: `cleanup-simulator` удаляет строки ранов, но не участников, линии и долги; другой процесс с выключенным хранением и проглоченный `upsert_run` проверке не видны. Предложена точная дешёвая проверка: существует ли долг, у должника или кредитора которого `public_key` равен псевдоключу симулятора (`sha256(pid)` в hex, `simulated_public_key`, `real_scenario_seeder.py:30`). Помеха: тестовый сидер `tests/p020_support.py::seed_graph` даёт участникам тот же псевдоключ — тесты периодического прохода пришлось бы перевести на другие ключи. Срез (d) её не взял («Не реализуется»). Денежной потери нет: периодический клиринг по умолчанию выключен, поддерживаемое развёртывание — раздельные базы хаба и симулятора, каждое вхождение проходит границу 019. **Получатель — программа, следующей трогающая изоляцию периодического клиринга** (исполнитель не назначен); выбор технический, не вопрос владельца. До решения гарантия — правило развёртывания.
-
-### Класс 2 со стадии 4 программы 021 — внесено 2026-09-28
-
-- **Комментарии ссылаются на удалённые модули `real_tick_*`.** Стадия 4 удалила модули; якоря в прозе остались там, где файл вне её owner surface: ~~`app/api/v1/simulator.py:1964`~~ (цикл Interact-клиринга — **исправлено 2026-09-28 `T2109`**: ссылка на `tick.py::RealTick._execute_clearing_with_timeout`), `app/core/simulator/metrics_bottlenecks.py:177`, `:272` (022), `app/core/simulator/storage.py:408`, `:523`, `app/core/simulator/run_perimeter.py:18`, `docs/ru/admin-ui/specs/UNFINISHED.md:101`. Поведения не касается. Получатель — владелец каждого файла при следующей правке. **2026-09-29, 024 `T2411`:** якоря в `metrics_bottlenecks.py`, `storage.py`, `run_perimeter.py` перенаправлены на методы `RealTick` в `tick.py`; `UNFINISHED.md:101` оставлен — датированное примечание 2026-08-11 с якорями своей даты (§13 AGENTS.md).
-- ~~**Тайминг ассерта в стенде холодного `spawn`, контроль 2**~~ — **закрыто 2026-09-28 fix-delta `T2109` (`af53797`, слит PR #77 `5cf6240`)**: стенды p023(d) требуют прогресс на каждом тике, не срезанном жёстким таймаутом, и дренаж за ≤ 5 тиков; эмуляция медленной БД — старые ассерты 4 красных, новые зелёные; 12 повторов (6 без нагрузки, 6 под переподпиской CPU 1× и 2×) — зелёные; spec 021, Changelog. *Исходная запись* (внесено 2026-09-28, `T2109`; класс 2, получатель — 025 или владелец стенда 023(d)). `tests/integration/test_p023_d_tick_driver_through_runner_postgres.py::test_planning_past_the_hard_timeout_is_reported_and_its_late_result_starts_nothing` требует, чтобы следующий тик закрыл **оба** цикла под бюджетом по умолчанию 250 мс; в одном прогоне из четырёх (целевой набор из 140 модулей, `claude/021-t2109` на `08c6fbf`) первый коммит съел бюджет: `reason=budget_exhausted committed=1 elapsed_ms=297`, `assert (1 == 2)`. Продукт ведёт себя по контракту (бюджет проверяется перед стартом цикла, остаток — на следующем тике); ложно-красным может быть только стенд. Узкая правка — ассерт «оба цикла за ≤ N тиков» или прогретый первый коммит, без повышения бюджета продукта.
-
-### Схемная гигиена: `trustlines.policy` — nullable-колонка, в которую никто не пишет `null`
-
-Внесено 2026-08-23 при закрытии 011. Колонка объявлена nullable и имеет **только Python-side
-`default=`** (`app/db/models/trustline.py:15-21`), который срабатывает лишь когда атрибут не задан;
-server default отсутствует. При этом **ни один писатель приложения не пишет `null`**: `create`
-кладёт `data.policy or {}` (`app/core/trustlines/service.py:190`), `update` кладёт словарь
-(`:334-336`), симуляторное действие не передаёт kwarg и получает дефолт ORM
-(`app/api/v1/simulator.py:1116-1121`), инжектор и real-mode-сидер передают словари
-(`inject_executor.py:506`, `:622`; `real_scenario_seeder.py:213-224`), `scripts/seed_db.py:359-382`
-приводит не-словарь к `{}`.
-
-Разрыв нашёлся так: два юнит-теста вставляли `policy=None` **прямо через ORM**, минуя
-Python-дефолт, и строили строку, которую приложение написать не может — из-за чего проверка
-конформности ответов канону видела `policy: null` на проволоке. Фикстуры исправлены на `{}`
-(`tests/unit/test_admin_liquidity_summary.py`, `tests/unit/test_admin_trustlines_bottlenecks.py`),
-и канон **сознательно** продолжает утверждать, что `policy` — объект: объявить его nullable значило
-бы ослабить верное утверждение ради строки, которой служба не производит.
-
-Остаток — не контрактный дефект, а гигиена схемы: либо `nullable=False` + server default, либо
-явное решение, что `null` допустим, и тогда канон обязан это сказать. Владельца нет.
 
 ### Индекс артефактов симулятора обещает content type, которого выгрузка не отдаёт
 
@@ -220,22 +157,19 @@ Python-дефолт, и строили строку, которую прилож
 
 | Пункт | Sev | Суть | Evidence | Статус |
 |---|---|---|---|---|
-| П1 024 — ёмкость против встречного долга | решение | Протокол §6.3.1 не засчитывает встречный долг; ядро и `/balance` засчитывают и без линии; роутер — нет. Три чтения и рекомендация — `024/spec.md`, «Продуктовые вопросы» | `router.py:256-300`; `payments/service.py:1845-1858`; `balance/service.py:190-209`; репродьюсер `024/review-2026-09-27/scripts/impl-payments/repro_router_debt_only.py` | решение |
 | П2 024 = `T1547` — настоящие участники в ране | решение | Сидер пропускает существующий pid и привязывает настоящего участника; `action_payment_real` проводит от его имени неподписанный `create_payment_internal`. Ломает посылку 021 о ключах | `real_scenario_seeder.py:97-133`; `api/v1/simulator.py:1689` | решение, до `T2100` **Актуализация 2026-10-02 (закрытие 024):** описание выше — состояние до стадии 0; стадия 0 024 (PR #66) сузила адопцию до псевдо-ключа симулятора (`app/core/simulator/real_scenario_seeder.py:48`, `:99`; `specs/024-core-hygiene/spec.md:241`); срок «до `T2100`» снят. Продуктовая половина открыта; получатели — владелец продукта и владелец симулятора. **Решено владельцем 2026-10-03: оставить как есть.** Симулятор действует только за участников, которых создал сам (их ключ вычисляет симулятор, `app/core/simulator/real_scenario_seeder.py:30`); за участника с собственным ключом не платит и запуск такого сценария отказывает (`SIMULATOR_PID_TAKEN`). Участники симулятора — полноценные участники хаба (те же таблицы, линии и правила). Довод владельца: это демо-проект, прод — отдельная инсталляция; запрет дешёвый и защищает прод, если симулятор окажется там включён по ошибке. Вопрос закрыт. |
 | П3 024 — долги уже существующих эквивалентов как baseline сверки | решение | Принимаем ли текущие долги в существующих эквивалентах как исходное состояние для сверки, понимая, что их начальную правильность сверка не подтвердит (формулировка консультации — `specs/024-core-hygiene/spec.md:120`). Блокирует только backfill baseline существующих эквивалентов; новые эквиваленты получают baseline при создании (`T2412.2`). До ответа эквивалент без baseline — `warning` (`UNVERIFIABLE`, `missing_evidence: baseline`) в `/integrity/status` | `specs/024-core-hygiene/spec.md:120-124`; `scripts/take_reconciliation_baseline.py` | открыто; получатель — владелец продукта, backfill после решения — владелец финансового ядра/оператор (перенесено при закрытии 024, 2026-10-02) **Решено владельцем 2026-10-03: пересоздать демо-данные.** Текущая инсталляция — демонстрационная; старые эквиваленты без точки отсчёта не принимаются задним числом, а демо-база засевается заново (засев рецептом сам ставит точку отсчёта, README «Fresh local database — automatic»). Для продовой инсталляции правило — точка отсчёта только при создании эквивалента (`T2412.2`); backfill не строится. Исполнение — оператором стенда по подтверждению целевой базы. |
 | Инверсия `core → schemas`, `utils → schemas`, `db → schemas` | P3 | 9 модулей ядра + 11 симулятора работают на API-DTO; циклов импортов нет (Tarjan пуст); 56 ленивых импортов, структурная причина одна — эйджерный `simulator/__init__.py:1` (021). Документировать, не чинить: «доменная модель вместо DTO» — новый слой | AL-6/7 | принято |
 | `chk_transaction_state` допускает шесть состояний, которых никто не пишет | P3 | `ROUTED/PREPARE_IN_PROGRESS/PREPARED/PROPOSED/WAITING/REJECTED` — ограда 030 сознательно; «зарегистрировано, но не описано» (§17) | `db/models/transaction.py:25`; AL-17 | принято, документировать |
 | 18 применённых миграций с недостижимыми dialect-ветками | P3 | `sqlite_where` в 022:159, 026:166 и др.; миграции неизменяемы (§3) — только документировать | TC-15 | принято |
-| `naming_convention` для индексов | P3 | 29 индексов `ix_*` (ORM) против `idx_*` (миграции), `uq_` против `ux_`; паритет проверяется лишь для 4 таблиц журнала. Для существующих — не трогать; для новых объектов — ~~024 стадия 7~~ **025** (2026-09-29: стадия 7 024 снята консультацией `T2400`, тестовый актив и паритет схемы — 025) | TC-14; `test_p018_b_schema_parity_postgres.py:47` | открыто |
-| Допущенный отказ: первый ответ 4xx/504, повтор того же `tx_id` — 200 `ABORTED` | P3 | Протокол прил. E: «тот же результат»; закреплено тестом `test_p015_t1523_replay_after_a_hold_or_an_abort.py:288/:315` — вопрос протокола, не кода | `payments/service.py:2458-2463` против `:899-905`; IP-04 | решение |
-| ~~`max_hop_usage:"0.0"` принимается и молча игнорируется;~~ `"NaN"` даёт 500 после проверки подписи | P3 | `validation.py:621-627` против `router.py:272-276`; проверено исполнением. **2026-09-29 (`T2415.3`):** часть `"0.0"` — класс 1 (посредничество вопреки запрету), исправлена решением владельца B — запрет при значении, равном нулю в точности (`app/core/payments/capacity.py` `pair_rules`); остаётся только 500 на `"NaN"` | IP-08 | открыто (NaN) |
-| Ротация refresh-токена не атомарна; без Redis отзыв живёт в памяти одного процесса | P3 | `auth/service.py:270-291`, `utils/security.py:43-50` | IP-09; «Пробелы покрытия без владельца» | открыто |
+| **[взято в 028, F-028-42, 43 (E6)]** Допущенный отказ: первый ответ 4xx/504, повтор того же `tx_id` — 200 `ABORTED` | P3 | Протокол прил. E: «тот же результат»; закреплено тестом `test_p015_t1523_replay_after_a_hold_or_an_abort.py:288/:315` — вопрос протокола, не кода | `payments/service.py:2458-2463` против `:899-905`; IP-04 | решение |
+| **[взято в 028, F-028-2 (E2)]** ~~`max_hop_usage:"0.0"` принимается и молча игнорируется;~~ `"NaN"` даёт 500 после проверки подписи | P3 | `validation.py:621-627` против `router.py:272-276`; проверено исполнением. **2026-09-29 (`T2415.3`):** часть `"0.0"` — класс 1 (посредничество вопреки запрету), исправлена решением владельца B — запрет при значении, равном нулю в точности (`app/core/payments/capacity.py` `pair_rules`); остаётся только 500 на `"NaN"` | IP-08 | открыто (NaN) |
+| **[п. (1) взято в 028, F-028-22 (E6); п. (2) — LATER]** Ротация refresh-токена не атомарна; без Redis отзыв живёт в памяти одного процесса | P3 | `auth/service.py:270-291`, `utils/security.py:43-50` | IP-09; «Пробелы покрытия без владельца» | открыто |
 | Redis недоступен во время работы → plain-text 500 на **каждом** запросе через `rate_limit` | P3 | `deps.py:69`; `REDIS_ENABLED=false` — лок no-op, деньги не зависят | IMPL-CL-04 (раздел 4) | открыто |
-| `/integrity/verify` и `/audit-log` открыты любому участнику: полный скан и запись аудита на вызов | P3 | `api/v1/integrity.py:152-319`; INFERENCE о раскрытии рёбер клирингов | IMPL-CL-18; F-016-1 | решение |
+| **[взято в 028, F-028-44 (E6)]** `/integrity/verify` и `/audit-log` открыты любому участнику: полный скан и запись аудита на вызов | P3 | `api/v1/integrity.py:152-319`; INFERENCE о раскрытии рёбер клирингов | IMPL-CL-18; F-016-1 | решение |
 | У `integrity_checkpoints` нет TTL; сверка каждые 300 с читает весь журнал | P3 | `reconciliation.py:325-474`; `integrity.py:139-151` — §12 «у каждого семейства runtime-артефактов есть TTL» | IMPL-CL-21 | открыто |
-| Инициатор `CLEARING` — произвольный «первый должник» (протокол §7.3 — хаб); `payload.cycle` содержит debt id вместо PID; `CLEARING_NOTICE` не отправляется | P3 | `clearing/service.py:2064-2086` | IMPL-CL-15 | решение (023?) |
+| **[пп. (1), (3) взято в 028, F-028-45 (E7), F-028-46; п. (2) `payload.cycle` принят как есть — реестр № 238]** Инициатор `CLEARING` — произвольный «первый должник» (протокол §7.3 — хаб); `payload.cycle` содержит debt id вместо PID; `CLEARING_NOTICE` не отправляется | P3 | `clearing/service.py:2064-2086` | IMPL-CL-15 | решение (023?) |
 | Утечка SSE-подписки при обрыве до старта генератора ест лимиты 10/50 | P3 | INFERENCE — отмена в Starlette до первого чанка не проверена стендом; измерить, не чинить вслепую | `sse_broadcast.py`; SIM-13 | открыто, измерить |
-| Пять валидаторов «naive → UTC» в `schemas/` — остаток SQLite; строка «Trustline timestamps» выше предлагает их *расширить* | P3 | После 017 все колонки `DateTime(timezone=True)`; держит один unit-тест `test_trustline_timestamps.py:11`. Берёт 024 стадия 2; запись выше — историческая. **2026-09-29: шаг `T2411` — исполнено** на ветке `claude/024-sh1` (все пять удалены; тест наивного значения удалён как проверяющий удалённый контракт, тест сохранения смещения оставлен) | AL-11, N-13 | закрыто `T2411` |
 | Обязательный гейт тестирует экспериментальный детектор 020, которого нет в продукте | P3 | `test_p020_experimental_detectors_postgres.py` (26 эл.), `test_p020_rank_bound_diagnostic.py` (49), `scripts/p020_*` — 669 + 1 951 строка; `023/spec.md:125` называет только import-guard | TC-06 | получатель 023 (d). **2026-09-28, сведение закрытия 023:** (d) не взяла — Non-goals 023 («экспериментальные детекторы и evidence 020 … не меняются»); оба теста на `5cf6240` на месте. Передаётся 025 (стадия 3, доказанное удаление). **Условие до удаления** (`specs/README.md`, п. 6(в)): каталог `_CONSENTS` из `test_p020_experimental_detectors_postgres.py:182` (`None`, `[]`, `{}`, `0.0`, `2.5`, отсутствующий ключ, `NULL`-политика) в `test_p023_flow_planner_snapshot_postgres.py` не перенесён — там только строки и `True`/`False`/`0`/`1`. **2026-10-03, 025 `T2502.1`:** условие выполнено — каталог перенесён литеральными ожиданиями (`specs/025-test-asset-consolidation/spec.md`, «Результаты T2502.1»); удаление теста 020 — за `T2504.2` |
 
 ### Класс 2 из §15-ревью стадии 1 программы 021 — внесено 2026-09-28, получатель — программа 021
@@ -243,171 +177,36 @@ Python-дефолт, и строили строку, которую прилож
 Ревью Codex на `3527834` (`VERDICT-021S1: WEAK`, `READY-TO-MERGE: YES`, класс 1 = 0; Changelog спеки 021). Денежной потери нет.
 
 - **Повторный засев копит закрытые записи линии.** Импорт начальных статусов ищет существующую линию без учёта закрытых (`app/core/trustlines/service.py:~744`) и вставляет новую (`:~756`): каждый новый ран сценария с закрытой линией добавляет ещё одну закрытую запись и строку аудита. Это расходится с описанием идемпотентности засева (`app/api/v1/simulator.py:~540`). Поведение прежнее, намеренно сохранено и закреплено тестом `tests/integration/test_p021_seed_writes_trust_lines_through_the_service_postgres.py:~140`. Решение — при следующем касании засева в 021.
-- **Описание метаданных аудита в OpenAPI отстаёт.** `api/openapi.yaml:~8135` перечисляет формы записи линий без `checkpoint_scope` и `initial_status`, которые пишет сервис (`app/core/trustlines/service.py:~235`, `:~772`). Потребитель может принять общую для транзакции контрольную сумму за переход одной операции. Схема допускает лишние ключи (`additionalProperties: true`, `:~8142`), значит это долг документации, а не отказ схемы. Правится с канонической записью OpenAPI при следующей стадии 021, затрагивающей аудит.
+- **[взято в 028, F-028-16 (E11)]** **Описание метаданных аудита в OpenAPI отстаёт.** `api/openapi.yaml:~8135` перечисляет формы записи линий без `checkpoint_scope` и `initial_status`, которые пишет сервис (`app/core/trustlines/service.py:~235`, `:~772`). Потребитель может принять общую для транзакции контрольную сумму за переход одной операции. Схема допускает лишние ключи (`additionalProperties: true`, `:~8142`), значит это долг документации, а не отказ схемы. Правится с канонической записью OpenAPI при следующей стадии 021, затрагивающей аудит.
 - **Гард исключения заморозки не держит «ровно одно присваивание»** (§15-ревью стадии 2 на `0ade748`, P3, 2026-09-28). `tests/unit/test_p021_simulator_writes_trust_lines_only_through_the_service.py:~102` принимает каждое совпадающее присваивание, а `:~103` складывает совпадения в множество. Поэтому второе такое же `frozen_tl.status = "frozen"` в том же модуле проходит и скан записи, и проверку исключения (`:~129`). Контрпроверка (`:~150`) меняет переменную или значение, но не дублирует разрешённую строку. Гард не пустой, но слабее обещанного спекой (строка «Гард R-021-1 не пуст»). Починка — считать вхождения и требовать ровно одно; контрпроверка — продублированная разрешённая строка.
 - **2026-09-28, сведение закрытия 021 (`T2110`):** ни один из трёх пунктов 021 не исправила — стадии, касающиеся засева, аудита и гарда, слиты без них. По §19.5 программу не держат. Получатель после закрытия 021 — владелец (исполнитель не назначен): пересев и описание OpenAPI — при следующем касании засева или канона аудита линий; гард — при следующей правке гардов 021 или в 025.
 
 ### 2026-09-28 — флейк CI на PR #68 (класс 2), получатель — владелец стендов p019
 
-- **Посылка стенда p019 зависит от тайминга.** Job `required-backend`, прогон `36383388623`, попытка 1: `tests/integration/test_p019_staged_refusal_is_durable_postgres.py::test_the_owner_yields_to_a_committed_winner_of_the_same_tx_id` упал на посылке стенда «the second payment never waited on the edit's row lock». Посылку обнаруживает опрос во время тика (`_row_lock_waiter_exists`), поэтому она зависит от планирования. Модуль прошёл 4 из 4 локально на том же HEAD; перезапуск (попытка 2) зелёный. Денежной потери нет — отказ стенда, не продукта. Статус: **закрыто 2026-09-28** (`614fad5`, `973f4bc`, ветка `claude/p019-flake`).
-  - **Второй прогон того же узла.** `36390360987` (PR #71, `71d00a6`): `assert winners == ["COMMITTED"]` → `[]`; в логе дважды `payment.timeout_abort_failed` одного `tx_id` и `staged_refusal_record_failed … error_type=PaymentTransactionUnusable`.
-  - **Механизм (оба падения — один дефект стенда; гипотеза «опрос промахивается» не подтвердилась).** Стенд ставил `COMMIT_TIMEOUT_SECONDS = 0.5` на весь процесс, и этот бюджет получали платежи, которые субъектом не были. Прогон 1: таймаут отменил не ожидание лока (`service.py:1919`), а `check_debt_symmetry` (`service.py:1973`), то есть уже прошедший guard и неконкурентный seq 0. Seq 1 заблокирован правкой и пройти guard не мог. Тик упал на seq 0, и seq 1 до лока не дошёл, поэтому посылка была красной по делу. Прогон 2: seq 1 честно ждал на guard. «Победитель» из хука стартовал сразу после `gate.release`, гонялся с коммитом правки при бюджете 0.5 s и сам ушёл в таймаут. Его `PaymentTransactionUnusable` вылетел из хука `record_definitive_refusal`, `money_replay.py:458` записал сбой записи, и `winners` остался пустым. Приложение в обоих случаях повело себя по контракту `T1912`, дефекта приложения нет.
-  - **Исправление.** Короткий бюджет теперь получает только денежная фаза seq 1 (`_Subject` оборачивает `_run_payment_operation`, 2.0 s); остальные платежи идут на бюджете приложения. Посылка читается, а не опрашивается: сквозной регистратор guard'а seq 1 фиксирует выдачу, завершение по `CancelledError` и то, что правка держала строку всё это время. Победитель стартует после барьера `_CommitGate.committed`, поэтому цикл повторов по 40001 не нужен. Попутно найден третий дефект стенда: в `test_stopping_the_run_…` опрос `pg_locks` без фильтра по базе засчитывал ожидание **параллельного** тира на том же сервере. Теперь опрос идёт по pid бэкенда seq 1. Поведенческие ассерты не менялись.
-  - **Счёт.** До исправления естественное воспроизведение локально 0/16 для узла. Отдельно 1 падение `test_stopping_…` в параллельной паре на базе. Детерминированная эмуляция медленного раннера (+0.7 s в первом `check_debt_symmetry` или в коммите правки после release) даёт на базе 2/2 падения с сигнатурами CI, на исправлении 0/2. После `614fad5` в параллели: 2/16 падений `test_stopping_…`, это дефект опроса без pid. После правки по pid 30/30 зелёных (дерево `973f4bc` без удаления неиспользуемого импорта): три параллельных тира по 10 прогонов под нагрузкой 16 процессов на 16 ядрах.
-  - **Мутации** (все красные). Без барьера победителя получаем `winners == []` через 40001. С правкой, отпущенной до тика, 4 узла падают на посылке `{'held_at_issue': False, 'ended': 'returned', …}`. С возвратом бюджета 0.5 s на весь процесс seq 0 падает `ABORTED`.
-  - **Не исправлено, открыто:** соседний `test_p019_refusal_classes_characterization_postgres.py`, строка `timeout_confirmed_rollback`, несёт тот же узор: бюджет 0.5 s на процесс и опрос `pg_locks` по всему серверу на окне ≤ 0.5 s. Падений в CI не наблюдалось; получатель — владелец стендов p019.
+- **Соседний `test_p019_refusal_classes_characterization_postgres.py` несёт тот же узор, что исправленный выше стенд p019** (флейк CI на PR #68; остальные пункты записи закрыты — реестр 028 № 95): строка `timeout_confirmed_rollback` — бюджет 0.5 s на процесс и опрос `pg_locks` по всему серверу на окне ≤ 0.5 s. Падений в CI не наблюдалось; получатель — владелец стендов p019.
 
 ### Остаток adversarial-ревью стадии 0 программы 024 — 2026-09-27, класс 2
 
 | Пункт | Sev | Суть | Evidence | Статус |
 |---|---|---|---|---|
 | TOCTOU в сидере рана | P3 | Проверка ключа и выборка `existing_p` — два запроса; настоящий участник, зарегистрировавший pid между ними, был бы адоптирован. Недостижимо на практике: pid = f(ключа), заранее не известен | `real_scenario_seeder.py` (после `27bca3b`) | принято, §19.2 п. 6 |
-| Ран адоптирует симулированных участников чужого рана | P3 | Правило различает «создан симулятором» / «настоящий», но не «создан моим раном»: ран владельца A подхватывает или замораживает псевдо-участников рана владельца B. Настоящий ответ — ключи рана (021) | `inject_executor.py` add_participant / freeze | открыто. Получатель был 021; **2026-09-28, сведение закрытия 021:** 021 не закрывает — `T2100` сняла ключи рана (псевдо-ключ остаётся `sha256(pid)`, «моего рана» он не различает). Получатель — владелец, вместе с П2 024 = `T1547` |
-| Статус участника не перепроверяется после подключения WS | P3 | Заморозка во время открытого сокета не рвёт соединение; при подключении проверка теперь есть (`f02d73e`) | `app/api/v1/websocket.py` | открыто |
 
-### Остаток §15-ревью шага Ш2 (`T2412`) программы 024 — 2026-09-29, класс 2
-
-Ревью Codex `bc2d1f1` (`.local-run/codex-review/2026-09-29-024sh2/final.md`): P2-1 (пропуск по локу стирал отказ job'а) исправлен fix-delta на той же ветке; P3-3 (общий бюджет тестов Ш2/Ш6) записан в строках `T2412`/`T2416` спеки 024. Сюда — остаток.
-
-| Пункт | Sev | Суть | Evidence | Статус |
-|---|---|---|---|---|
-| Mock Admin UI отказывает в удалении эквивалента из-за чекпойнтов | P3 | С `T2412.3` бэкенд не считает integrity-чекпойнты использованием (они `ON DELETE CASCADE`); mock по-прежнему отказывает при `integrity_checkpoints > 0`, так что неактивный и иначе неиспользуемый эквивалент удаляется против бэкенда и не удаляется в mock-режиме. Цель — выровнять предикат отказа mock'а (trustlines/debts); показ числа чекпойнтов в диалоге сам по себе не неверен. Admin UI — вне owner surface 024 | `admin-ui/src/api/mockApi.ts:1416`; `app/api/v1/admin.py` (`admin_delete_equivalent`) | открыто. Получатель — владелец Admin UI / 022 |
-
-### 2026-09-28 — поправка механизма: `simulator-super-smoke` красный из-за устаревших стендов, не из-за продукта
+### 2026-09-28 — поправка механизма: `simulator-super-smoke` красный из-за устаревших стендов, не из-за продукта — **[взято в 028, F-028-8 (E9, `T2891`): job перенесён на PostgreSQL; приёмка сохранности рана — после E1 (F-028-1)]**
 
 Записи 2026-09-21 и 2026-09-23 ниже и F-021-16 называют причиной «`SerializationError`, нет ретрая на пути тика». Ревью тестов 2026-09-28 (программа 025, зона D, чтение кода на `5748c516`; **не исполнено**) даёт другой механизм. **part2** строит фабрику сессий на соединении режима A (`tests/integration/test_simulator_super_smoke.py:831-838`), а клиринг отвергает сессию, привязанную к соединению, намеренно (`app/core/clearing/service.py:1576-1583`) — отсюда `clearing.external_connection_bind_unsupported`; тест к тому же ведёт `RealClearingEngine`, который удаляет 021. **part3** запускает real-ран через `client` режима A: сессия запроса — одна незакоммиченная SERIALIZABLE-транзакция, `auth_headers` пишет и читает `participants` через неё, heartbeat сеет и читает `participants` на своих сессиях — SSI-конфликт повторяется на каждом тике; три соседних модуля были переведены на режим B в 017/2b (T1702), этот пропущен. Проверка гипотезы: прогнать part3 под `MODE_B`. Что остаётся настоящим: `simulator_runs.seed` объявлен int32 при 32-битном беззнаковом значении (тестом не утверждается) и отсутствие ретрая на setup-фазе тика — класс 2, теряется тик, не деньги. Получатель — 021 (стенды) и 025 (пробел 11). **2026-09-28, сведение закрытия 021:** `T2109` перевёл part2 с удалённого драйвера на шаг клиринга тика и прогнал (`-IncludeExpensive`) — part2 по-прежнему **красный** по названной причине стенда (`clearing.external_connection_bind_unsupported`), part1/part3 не запускались; стенды 021 не исправила. Получатель — 025.
-
-| Пункт | Sev | Суть | Evidence | Статус |
-|---|---|---|---|---|
-| Манифест тестов 021 неполон | P3 | Селектор `real_tick_|real_clearing_engine|_RealRunnerPort|money_replay` пропускает 5 файлов, импортирующих шим `app.core.simulator.real_runner`, который удаляет T2109: `test_simulator_real_amount_model`, `…_clearing_throttle`, `…_events_stress`, `…_flush_pending_storage`, `…_planner_determinism` | `specs/025-test-asset-consolidation/evidence-2026-09-28/verdicts/zone-D-simulator.json` | **закрыто 2026-09-28 `T2109`**: шим удалён, все 22 модуля, импортировавшие `app.core.simulator.real_runner`, переведены на `real_runner_impl.RealRunnerImpl`; `…_clearing_throttle` к этому моменту уже удалён 023(d); R-021-9 держит отсутствие импорта |
-| «Выживающие контракты» 021, п. 3 Verification plan | P3 | `test_static_clearing_applies_payment_effects_after_commit` не утверждает порядок (после P1 вызов — документированный no-op, `real_tick_clearing_coordinator.py:486-490`); контроль `errors_total` уже утверждает `test_p015_p1_money_replay_postgres.py::test_a_tail_failure_after_the_money_commit_never_replays_money`. Сохранять как REWRITE только `test_every_early_return_hands_back_decimal_zeros` и тест static-каденции | там же | **закрыто 2026-09-28 стадией 3 021** (`1d8a2cd1`): контроль `errors_total` удалён как дубль названного теста p015; `test_static_clearing_applies_payment_effects_after_commit` сохранён по букве п. 3 Verification plan (дешёв, не мешает; пересмотр — в манифесте `T2107` стадии 4); ранний возврат и каденция перенесены — Changelog 021 |
-
-## Требуют отдельной спеки, не узкой правки
-
-| Пункт | Sev | Current / Intended / Optimal | Evidence |
-|---|---|---|---|
-| Launcher runtime helpers — `спека` 2026-08-12 | P3 | **Current:** не «12 функций»: в трёх launcher-скриптах 15 повторяющихся имён, пять тел идентичны, десять различаются. `Stop-ProcessById` различается осознанной lifecycle-семантикой: full-stack требует fingerprint и ждёт подтверждения остановки, run-real принимает уже исчезнувший процесс, run-local допускает вызов без fingerprint. **Intended:** общие safety primitives имеют один проверяемый контракт, launcher-specific policy остаётся явной. **Optimal:** shared launcher-runtime module + migration/real start-status-stop milestones; это новый межскриптовый контракт и по AGENTS.md §2 не является узкой правкой. До спеки поведение не выравнивать копированием | AST inventory — exit `0`, `duplicates=15 identical=5 different=10`; идентичны `Exit-LauncherLifecycleLock`, `Get-EffectiveDatabaseUrl`, `Get-FullStackOwnershipMetadata`, `Get-LauncherLifecycleLockName`, `Get-ProcessIdentityObservation`; различаются `Assert-NoActiveFullStackOwnership`, `Enter-LauncherLifecycleLock`, `Get-ListeningPid`, `Get-ProcessStartTimeFingerprint`, `Get-ProjectTools`, `Invoke-PythonScript`, `Stop-ProcessById`, `Test-HttpEndpoint`, `Update-EnvLocal`, `Wait-ForPortToBeFree`. Anchors: `run_local.ps1:175`, `run_full_stack.ps1:280`, `run_real_simulator.ps1:151`; canonical launcher selector — exit `0`, `118 passed` |
 
 ## Узкие правки — не требуют спеки
 
 | Пункт | Sev | Суть | Evidence |
 |---|---|---|---|
-| Trustline timestamps — `[x]` 2026-08-11 | P2 на SQLite / P3 на PG | `TrustLine` теперь трактует потерявшие timezone SQLite timestamps как UTC и сохраняет явный aware offset. Pure schema и реальные create/get HTTP responses проверяют `created_at`/`updated_at`. Canonical `wave5_backlog_trustline_timestamps` — exit `0`, `32 passed`; финальный API selector `wave5_backlog_trustline_timestamps_api` — exit `0`, `4 passed`; pinned Ruff и diff-check — exit `0` | `app/schemas/trustline.py:22-30`; `tests/unit/test_trustline_timestamps.py`; `tests/integration/test_trustlines_get_by_id.py` |
-| TODO-ESC — `[x]` 2026-08-11 | P3 | Anchor reconciliation показала, что finding уже исправлена коммитом `c3db303`: `WindowShell` предоставляет per-window container, destructive confirmation вешает/снимает listener только на нём, а тест доказывает, что container ESC disarm'ит, а global `window` ESC — нет. **Current = Intended = Optimal:** поведение не менять; удалены только stale TODO-labels. Targeted Vitest — exit `0`, `1 passed`; Simulator typecheck, diff-check — exit `0`; `rg TODO-ESC simulator-ui/v2/src` — exit `1`, ноль совпадений | `WindowShell.vue:45-46`; `useDestructiveConfirmation.ts:65-67,123-147`; `useDestructiveConfirmation.test.ts:45-99` |
-| M20: `??` как молчаливый дефолт — `[x]` 2026-08-12 | P3 | Исходные 13 мест закрыты независимыми срезами. Финальный precision-срез нормализует ключи, сохраняет precision `4` и fail-closed возвращает пустую/`null` аналитику без метаданных; Liquidity скрывает денежные итоги и показывает предупреждение вместо `?? 2`. Найденный вне исходного списка дубликат зарегистрирован отдельной строкой ниже | `useGraphAnalytics.ts:29-32,130-135,198-524`; `LiquidityPage.vue:133-155,214-218,312-330`; targeted Vitest — exit `0`, `26 passed`; Admin build — exit `0`; lint — exit `0`, `117` baseline warnings / `0` errors; diff-check — exit `0` |
 | Graph histogram precision fallback | P3 | **Current:** runtime `GraphAnalyticsDrawer` и неиспользуемый `BalanceTab` всё ещё форматируют атомы через `precisionByEq.get(eq) ?? 2`. **Intended:** отсутствие precision не должно менять порядок величины. **Optimal:** общий fail-closed renderer/prop после подтверждения owner surface; не включено молча в M20-срез composable/Liquidity | `admin-ui/src/pages/graph/GraphAnalyticsDrawer.vue:815-816`; `admin-ui/src/pages/graph/tabs/BalanceTab.vue:71-72` |
-| Participant timestamps без UTC-normalization | P3 | **Current:** trustline/admin-audit/incident schemas уже нормализуют naive SQLite timestamp как UTC, а public/admin participant DTO возвращают `created_at`/`updated_at` без такого validator. **Intended:** wire timestamps однозначно timezone-aware. **Optimal:** отдельный schema/API slice с SQLite countercheck; не смешан с закрытым trustline timestamp finding | `app/schemas/participant.py:27,33-34`; `app/schemas/admin.py:108-117`; сравнить `app/schemas/admin.py:90-95,140-147` |
-| Bottleneck-порог: float в SQL против decimal в mock — `[x]` 2026-08-12 | P2 | **Current:** три real endpoint-а сравнивали Numeric через float/SQL, mock — decimal-safe, а три UI-поверхности отправляли свободную строку. **Intended:** строгий `< threshold`, одинаковый на точной границе и для high-precision decimal; `[0,1]` проверяется до запроса. **Optimal:** общий backend Decimal predicate + общий UI parser/guard, без изменения wire schema. Реализовано в `02feee7` | Backend loader/predicate: `app/api/v1/admin.py:96,567,669-694,793-810,2175`, `app/core/admin/metrics.py:61-72,516-531`; transport/UI guards: `realApi.ts:577-590,705,715,943`, Liquidity `:44,101-107,257,265`, Dashboard `:30,111-117,169-172,493,499`, Graph `useGraphAnalytics.ts:140-145` + toolbar `:111,347`. Первый backend gate exit `4` до collection из-за inherited `DEBUG=release`; с `DEBUG=false` — exit `0`, `31 passed`. Первый Admin build exit `1` (mock tuple и shadowed `t`), после исправления — exit `0`; full Admin test — `219 passed`; lint — exit `0`, `117` baseline warnings / `0` errors; pinned Ruff `0.1.14` и diff-check — exit `0` |
-| Непроверенные касты в API-клиентах — `[x]` 2026-08-12 | P3 | Simulator: девять action/list/target 2xx shapes проходят `simulatorContractJson` (`simulatorApi.ts:197-362`, decoders `simulatorContracts.ts:637-681`). Admin: общий Zod pagination wrapper требует `items/page/per_page/total`, а equivalents list проверяет item schema (`realApi.ts:291-306,674-893`). Обе стороны fail-closed до composables. Внешний review нашёл P2 в первой версии Admin schema: canonical nullable audit actor/object, trustline policy, equivalent description и incident created_at ошибочно требовали non-null строки/объект. Remediation синхронизировала Zod с backend schemas и оставила numeric/type anti-vacuum для каждого nullable поля | Simulator RED — exit `1`, `9 failed / 23 passed`; green contract + downstream — exit `0`, `44 passed`; временный overly-narrow snapshot type дал typecheck exit `1` (2 ошибки), после разделения strict backend decoder/optional snapshot fallback typecheck, build и lint — exit `0`. Admin RED — exit `1`, `5 failed / 5 passed`: все malformed 2xx принимались; green focused — exit `0`, `20 passed`; full Admin — exit `0`, `229 passed`; build — exit `0`; lint — exit `0`, `117` baseline warnings / `0` errors. Review remediation `realApi.ts:111-172`, `realApi.listContracts.test.ts:30-140`: targeted exit `0`, `31 passed`; build и diff-check — exit `0` |
-| Дублирование политики в движке — `[x]` 2026-08-11 | P3 | **Current:** `prepare` и `prepare_routes` независимо повторяли SQL/JSON-расчёт capacity и persisted reservations. **Intended:** single- и multipath используют одну формулу, сохраняя разные validation, lock aggregation, `local_reserved`, retry и logging. **Optimal:** общий приватный helper в том же модуле; lifecycle-пути не объединяются. Реализовано и закрыто | До: `app/core/payments/engine.py:571-793,795-1036`; после: общий `_get_segment_capacity_and_reserved_usage` на `:571-651`, entrypoints `:653,818`, call-sites `:754,933`; anti-vacuum/equivalence `tests/integration/test_payment_prepare_capacity_policy.py:122-204`. Canonical non-PG `wave5_backlog_prepare_policy_nonpg` → exit `0`, `64 passed`; `wave5_backlog_prepare_policy_2pc` → exit `0`, `7 passed`; disposable PG `geov0_test_wave5_prepare_policy_helper_811`, `-BackendMarker postgres`, три concurrency-selector → exit `0`, `16 passed`; pre-create absent, pre-drop connections `0`, post-drop absent. Pinned Ruff `0.1.14` и diff-check → exit `0`; Black `24.1.1` нового теста → exit `0`, существующий `engine.py` diagnostic → exit `1`, `would reformat engine.py` (repository-wide baseline debt не расширен) |
-| Мёртвые экспорты — `[x]` 2026-08-12 | P3 | Неиспользуемые `PaymentRouter.find_paths`/Yen и UI `restartRun` удалены после нулевого runtime-reference scan; policy/max-hop проверки перенесены на живой `find_flow_routes` (`router.py:460-550`, `test_routing_reserved_and_policy.py:177-256`). `bestEffortTotal` удалён только после подключения обязательного pagination schema — его fallback больше не может маскировать malformed backend 2xx | До: `router.py:552-630`, `simulatorApi.ts:127-131`, `realApi.ts:541-549`; после: active-tree reference scan по `restartRun|find_paths|bestEffortTotal|heapq` — `0`. Первый backend запуск exit `2` из-за nonexistent selector; исправленный — exit `0`, `7 passed`. Simulator contract — `14 passed`, typecheck/build — exit `0`. Удаление pagination fallback доказано Admin RED/green и full gates из соседнего закрытого пункта |
-| [x] `tmp_*` скрипты под git | P3 | Закрыто 2026-08-11: четыре неиспользуемых tracked-скрипта удалены, мёртвая `Show-RecentLog` удалена из `run_full_stack.ps1`; канонические диагностики и fixture validators сохранены | До: `scripts/tmp_check_graph_isolates.js`, `scripts/tmp_sse_watch.py`, `scripts/fix_concatenated_admin_fixtures.py`, `scripts/verify_hybrid_approach.ps1`, `run_full_stack.ps1:378-402`. После: runtime/package/docs reference scan — только эта закрывающая запись и историческое evidence `specs/001-codebase-renovation/tasks.md:394`; `npm --prefix admin-ui run validate:fixtures` → exit `0`, `Fixtures OK`; `scripts/verify_local.ps1 -TaskSlug wave5_backlog_dead_scripts_cleanup -BackendOnly -BackendSelector tests/integration/test_simulator_sse_smoke.py,tests/integration/test_simulator_artifacts_events_ndjson.py,tests/unit/test_run_full_stack_database_url_redaction.py -Python ./.venv/Scripts/python.exe` → exit `0`, `120 passed` |
-| Trust-drift мутация до коммита — `[x]` 2026-08-11 | P3 | **Current:** growth менял scenario/cache до собственного commit, decay — до commit внешнего tick-owner; при rollback БД и runtime расходились. История clearing уже описывает ранее подтверждённый clearing и остаётся немедленной. **Intended:** limit/cache публикуются только при подтверждённом commit. **Optimal:** staged `TrustDriftLimitUpdate` и общий post-commit applicator, без нового слоя транзакций | До: `trust_drift_engine.py:253-282,405-431`; после: staged result `models.py:32-44`, applicator `trust_drift_engine.py:104-134`, growth commit resolution `:314-329`, decay owner callback `real_tick_trust_drift_coordinator.py:83-97`. RED после staging — exit `1`, `2 failed / 52 passed` (`1000 != 980.0`, `350 != 300.0`); targeted green — exit `0`, `57 passed`; extended sibling matrix — exit `0`, `75 passed`; failure/cancellation anti-vacuum `test_trust_drift.py:381-446`, `test_real_tick_commit_cancellation.py:341-404`; pinned Ruff `0.1.14` и diff-check — exit `0` |
-| 53 теста лаунчера молча пропускаются вне Windows — `[x]` 2026-08-12 | P3 | **Current:** формулировка устарела: тесты не Windows-gated, а ищут `pwsh`/`powershell` на любой ОС; при отсутствии интерпретатора skip явный (`PowerShell is required`). В файле 51 logical test: 39 требуют PowerShell, 12 source-policy тестов независимы; параметризация двумя доступными интерпретаторами даёт 118 cases. **Intended:** required Windows CI и локальный canonical gate действительно выполняют PowerShell cases. **Optimal:** product/test code не менять; отдельный Linux portability job был бы изменением CI policy, а не узкой правкой. Canonical `wave5_launcher_tests_status` — exit `0`, `118 passed`; AST inventory — exit `0`, `logical_tests=51 powershell_dependent=39 source_only=12` | `tests/unit/test_run_full_stack_database_url_redaction.py:16-47,107-108`; `.github/workflows/quality.yml` required Windows job |
-
-| `.snap` не покрыт `.gitattributes` — `[x]` 2026-09-20, найдено 2026-08-21 | P3 | **Current (было):** `.gitattributes` перечислял `*.ts`, `*.vue`, `*.json` и прочее как `eol=lf`, но `*.snap` не назван и попадал под `* text=auto`; vitest переписывал снапшот с LF, поэтому обычный прогон оставлял рабочее дерево грязным без единого изменения содержимого (`git status` показывает файл изменённым, `git diff` пуст). **Intended:** зелёный прогон не меняет рабочее дерево. **Optimal — шире, чем записанная здесь одна строка.** Замер 2026-09-20 показал, что `.snap` — один из **35** файлов, лежащих в дереве как CRLF при `i/lf` в индексе: туда же `*.txt`, `*.mjs`, `*.cjs`, `*.toml`, `*.ini`, `*.mako`, `.nvmrc`, `Dockerfile`, `.gitignore`. Правило `*.snap text eol=lf` закрыло бы один литерал из класса, поэтому вместо него `* text=auto eol=lf`: решение про LF перестаёт зависеть от `core.autocrlf` конкретного клона, а Windows-native скрипты держат CRLF собственными `eol=crlf`-строками. Расхождение с прежним «Optimal» записано здесь, а не обойдено молча (AGENTS.md §1) | `.gitattributes` (первая строка + комментарий с причиной); `simulator-ui/v2/src/legacyReference/__snapshots__/legacyWindowsMarkupSnapshots.test.ts.snap`. Замер до правки: `git ls-files --eol` → `1364 i/lf w/lf`, `44 i/lf w/crlf`, из них 13 — `ps1/cmd/bat`. Воспроизведение до правки: два полных прогона `verify_local.ps1` подряд, оба оставили снапшот `M`. После правки и ренормализации дерева — прогон гейта дерево не пачкает |
 | Декодирование вывода subprocess по локали хоста — найдено 2026-09-20 | P3 | **Current:** семь тестовых call-site'ов зовут `subprocess.run(..., text=True)` без `encoding=`, то есть декодируют вывод дочернего процесса кодовой страницей локали машины. Этот класс уже выстрелил в восьмом месте: на ru-RU pwsh 7.6.6 локализованный префикс `WARNING` приходит в UTF-8, `cp1252` не знает байта `0x9D`, reader-поток умирает, `stdout` приходит `None`, и 13 тестов падают `TypeError`, не дойдя до своей диагностики. Восьмое место закрыто коммитом `aa2353b`; оставшиеся семь запускают `sys.executable` или `bash`, поэтому сегодня молчат — но по удаче (у этих детей вывод сейчас ASCII), а не по устройству. **Intended:** результат гейта не зависит от языка интерфейса и кодовой страницы машины, на которой он запущен. **Optimal:** `encoding="utf-8", errors="replace"` на каждом из семи вызовов — класс clean, продуктового выбора нет. Не включено в срез, который чинил восьмое место: это был бы попутный рефакторинг семи чужих модулей (AGENTS.md §9), а по §19.5 находка относится к классу 2 — свойство механизма проверки, не потеря на денежном пути. **Чего CI не увидит:** `windows-latest` en-US печатает ASCII-`WARNING`, поэтому required-гейт зелёный независимо от того, исправлено это или нет | `tests/migrated_schema.py:90`, `tests/contract/test_p011_responses_conform_to_the_canon.py:1502`, `tests/integration/test_p015_step5c_hold_races_postgres.py:599`, `tests/unit/test_alembic_postgres_only.py:30,59`, `tests/unit/test_deployment_config.py:156`, `tests/unit/test_p015_b4_entries_and_money.py:890`, `tests/unit/test_postgres_marker_fail_closed.py:23`. Закрытое восьмое место для сравнения — `tests/unit/test_run_full_stack_database_url_redaction.py:105,1388`. Воспроизведение класса: хост с `$PSUICulture` не en-US и `locale.getpreferredencoding(False)` не UTF-8 |
-
-### [x] Класс 2 из ревью среза (a) программы 023 (P2) — внесено 2026-09-26, **закрыто 2026-09-27**, получатель — 023, срез (a): дефект `(T)` замороженного раннера
-
-**Закрыто 2026-09-27.** Исправлено коммитом `cddabb6` (протокол v2: память меряется в отдельном дочернем процессе со своим сторожем, вне судимого вызова; неудавшийся замер памяти — `NOT MEASURED`, не ноль, и такая ячейка не PASS). Прогон v3 `20260926T105934Z` измерил память во всех 212 из 212 ячеек: `evidence/2026-09-26-a3-acceptance-results.json` — `memory: MEASURED` × 212, итог раннера `memory not measured 0`. Исходный FAIL v1 сохранён. Текст ниже — историческая запись находки.
-
-Раннер `scripts/measure_p023_planner_acceptance.py` (заморожен `45c4e7d`) после 20 судимых замеров и сообщения о плане делает в том же дочернем процессе отдельный неучитываемый вызов под `tracemalloc` (`_child_cell`, `:311-318`). Под трассировкой вызов молчит дольше `CALL_TIMEOUT_S + KILL_GRACE_S` = 10 с, и сторож родителя (`scripts/measure_p020_detector_cost.py::run_child`, `:563`) убивает процесс с сообщением **`TIMEOUT: killed: silent for 10 s`**; `summarize` (`:325-372`) засчитывает это провалом ячейки. Прогон `20260926T052821Z`: 13 ячеек с этой причиной, в 7 — единственной; пиковая память этих 13 ячеек не измерена. Шесть нарушений p95 от дефекта не зависят. Ревью: `.local-run/codex-review/2026-09-26-023a/final.md` (P2, класс 2). Лекарство — новая версия диагностического протокола, в которой память меряется вне сторожа судимого вызова; исходный FAIL сохраняется. При закрытии 023 пункт основанием продолжать программу не становится.
-
-### Класс 2 из перекрёстного прохода по срезу (a) программы 023 (P3) — внесено 2026-09-27, получатель — программа 023
-
-Перекрёстный проход `geov0-49` 2026-09-26 (только чтение, `b886fa8..b27c896`; список F1–F8 — handoff в `specs/README.md`). F1 и F3 (раннер v3 выходил с кодом 0 при FAIL и при числе ячеек < 212) исправлены на ветке `claude/023-a3` (`run_verdict`/`exit_code`, `tests/unit/test_p023_v3_run_gate.py`); F8 — закрытие пункта `(T)` выше. Оставшиеся пять — по §19.5 класс 2 (свойства механизма проверки и полнота записи, денежной потери нет), программу не держат. Якоря сверены 2026-09-27 на ветке после слияния `main`.
-
-- **F2 — тест таймаута вакуумен.** `tests/unit/test_p023_v3_acceptance_protocol.py:192`: случай `"timeout"` подаёт 3 тёплых замера вместо 20, поэтому ячейка проваливается уже по нехватке тёплых замеров независимо от того, видит ли `judge` таймаут; ассерт — лишь непустой `fail_reasons`. Удаление ветки таймаута в `judge` этот тест не покраснит. Лекарство — 20 замеров плюс таймаут и ассерт на причину таймаута.
-- **F4 — утверждения о прогоне без артефакта.** `check_sources` (`scripts/measure_p023_planner_acceptance_v3.py:90-95`) хеширует только планировщик, v1 и v2; `measure_p020_detector_cost.py`, `measure_p020_dfs_acceptance.py`, `p023_target_family.py` и сам раннер v3 не хешируются. `results.json` не пишет HEAD, признак грязного дерева и версию сервера PostgreSQL: `machine` = `{platform: "Windows-10-10.0.26200-SP0", python: "3.11.9", postmaster_start_*}`. Поэтому «прогон на `a3b1f2f`», «PostgreSQL 16.9» и «Windows 11» в спеке 023 (раздел «Замер v3 среза (a)») стоят на пересказе, а не на артефакте. Лекарство для следующего замера — записывать HEAD, `git status --porcelain`, `SELECT version()` и хеши всех импортируемых скриптов.
-- **F5 — docstring генератора расходится с кодом.** `scripts/p023_target_family.py:23-24` описывает `perim_hubs` как «хабы + не-хабы с чётным индексом» и `perim_nohubs` как «не-хабы с нечётным индексом»; код `:193-194` берёт `int(v[-3:]) % 4 != 0` и `% 4 != 1` — периметры перекрываются, а не делятся по чётности. Замороженные хеши графов и результат прогона от этого не зависят; неверна проза.
-- **F6 — 48 из 212 ячеек — пустые контроли.** Сверено по `evidence/2026-09-26-a3-acceptance-results.json`: 48 ячеек области `empty` (0 рёбер, 0 циклов — контроль корректности), планируют по-настоящему 144 целевые и 20 стрессовых. «212/212» верно как вердикт протокола, но не как число нагруженных замеров. В спеку 023 внесено одним предложением.
-- **F7 — разогрев в дочернем процессе памяти не хронометрируется.** `scripts/measure_p023_planner_acceptance_v2.py:130-160` (`_child_memory`, вызов `:144`): неучитываемый разогревочный вызов перед трассируемым не меряется и не подпадает под потолок 5 000 мс — его ограничивает только сторож `MEMORY_WATCHDOG_S`. Судимые вызовы идут в другом дочернем процессе, так что гейт это не ослабляет; но один лишний вызов планировщика на ячейку остаётся без замера времени.
-- **2026-09-28, сведение закрытия 023 (`T2306`):** F2, F4, F5, F7 не исправлены (F6 внесён в спеку одним предложением). Замер v3 записан и больше не перезапускается; пункты — свойства инструмента замера среза (a), программу не держат. Получатель после закрытия 023 — тот, кто следующим запустит или изменит раннеры `scripts/measure_p023_planner_acceptance*.py` (исполнитель не назначен); F2 — кандидат 025 (тесты инструментов).
-- **2026-10-02:** раннеры v1/v2/v3, генератор, профиль и тесты протокола v3 сняты 025 `T2504.1` (ревизии восстановления — spec 025, «Результаты T2504.1»); у F2, F4, F5, F7 больше нет предмета в дереве, получателя нет. Записанные результаты не меняются.
-
-### Класс 2 — остаток закрытия программы 020 — внесено 2026-09-26, получатель — программа 023
-
-020 закрыта суженной (`specs/020-clearing-one-transaction/spec.md`, раздел «Закрытие программы (2026-09-26)»). Продовое обнаружение клиринга остаётся прежним, пока его не заменит 023; его известные ограничения (раздел «Сужение по §19.4» спеки 020; по §19.5 — класс 2, денежной потери нет):
-
-1. SQL-детекторы ограничивают **ротации** до дедупликации (`app/core/clearing/service.py:767`, `:895`): на глубине 3 — 33–34 уникальных треугольника вместо 100.
-2. Порядок кандидатов — длина, затем сумма (`:585`): короткий цикл раньше более крупного длинного; при равных суммах длина тоже впереди.
-3. Порог DFS `> 50` проверяется только между корнями (`:1380`): на глубине ≥ 5 ответ не ограничен сотней (6 434 цикла, u2k global d6).
-4. `auto_clear` исполняет короткую ступень лестницы раньше широкой (`:2317`): на общем ребре остаются другие долги, чем по цели.
-5. Глобальные глубины 7 и 10 на графах 200/2 000 и крупнее не укладываются в 10 с; полный `auto_clear` на 400/4 000 — около 51 с (см. пункт об аренде ниже).
-6. SQL-предикат консента шире продового `_policy_flag`, а Python-перефильтрация идёт **после** `LIMIT`: отклонённые консентом циклы могут занять места (правка паритета `07f2a4f` касается только экспериментального детектора 020).
-7. По чтению кода, не измерено: DFS на глубине ≥ 5 может вернуть 2-цикл (`:1340`).
-
-Evidence — `specs/020-clearing-one-transaction/evidence/`, п. 7/7a спеки 020. Решение о судьбе ассертов R-020-1 и их строгих маркеров принимает 023.
-
-**2026-09-28, 023 срез (d) (PR #74, `2df5703`) и сведение закрытия 023 (`T2306`).** Продовое обнаружение заменено: все продуктовые вызывающие исполняют клиринг через раннер MTCS, `ClearingService.auto_clear` удалён. **Пп. 4 и 5 закрыты удалением `auto_clear`.** **Пп. 1–3, 6, 7 остаются** — теперь это ограничения **диагностики** `find_cycles` (`GET /clearing/cycles`, `GET /admin/clearing/cycles`, `scripts/seed_recipe.py`): денежного пути у неё нет, 023 её сознательно не заменяет (Non-goals 023). Якоря пп. 1–3, 6, 7 — на 2026-09-26, после (d) не перепроверялись. **Получатель — владелец диагностики клиринга** (исполнитель не назначен); по §19.5 — класс 2, не держат ни одну программу.
-
-**Находки закрывающего ревью 020** (Codex `gpt-6-astra` high, read-only, заморожено на `722c408`, диапазон `e21c441..722c408`: `VERDICT-020-CLOSE: WEAK`, `APP-UNTOUCHED: YES`, класс 1 = 0, класс 2 = 3, `READY-TO-CLOSE-020: YES`; вывод `.local-run/codex-review/2026-09-26-020close/final.md`, не коммитится):
-
-- **P2 — числа рафинирования не подкреплены артефактом в дереве.** Спека 020 (раздел «Сужение по §19.4») приводит тайминги rank-bound DFS («22 ячейки дольше 10 с») и 24 красных при мутации. Сырого вывода и драйвера тайминга в дереве нет: все три файла `evidence/` старше коммита рафинирования `5337e57`. Сами числа — единичные диагностические замеры вне канонического раннера, и спека их так и называет. Получатель — 023 (владелец evidence): если 023 опирается на эти числа, сохранить вывод и команду воспроизведения; иначе считать их квалифицированным наблюдением, а не приёмкой. **2026-09-28, сведение закрытия 023:** 023 на эти числа не опирается (спека 023, Verification plan, п. 3; приёмка — только собственные замороженные раннеры v1–v3) — числа остаются квалифицированным наблюдением 020; пункт закрыт для 023.
-- **P2 — строгие маркеры R-020-1 поглощают часть посторонних регрессий.** В тесте лестницы (`tests/integration/test_p020_selection_amount_first_unique_cycles_postgres.py:176`) обычный контроль требует лишь `cleared == occurrences >= 1`. Регрессия «остановка после первого треугольника» проходит контроль и засчитывается как ожидаемый `TargetMismatch`. В тесте переполнения проверка подмножества принимает пустой глобальный результат. Обычные исключения и строгий XPASS при этом видны. Это слабость теста, а не денежный дефект продукта. Получатель — 023 (владелец верификации): отделить ассерты сохраняемого поведения от сравнения с целью. **2026-09-28, 023 срез (d):** строгие маркеры R-020-1 сняты; тест лестницы переписан на цель потока (`V_edge` против оракула через `POST /clearing/auto`, без маркера, точные число вхождений и остаток); тесты переполнения и равных сумм удалены с записью в модуле.
-- **P3 — пометки закрытия попали в ячейки замера; таблица стадий расходилась с решением о закрытии.** Исправлено до слияния тем же PR #60: числовые ячейки п. 7a восстановлены, строки стадий 3 и 5 приведены к записи «Закрытие программы».
 
 ### 2026-09-28 — режим исполнения клиринга без вхождения плана (решение Р4 среза (d) программы 023), класс 2, получатель — программа 024, стадия 6; **2026-09-29: шаг `T2417`** (стадия 6 сужена консультацией `T2400`); **2026-10-02: исполнено `T2417`** на `claude/024-t2417` (раздел «Результаты T2417 (2026-10-02)» спеки 024; закрывается после §15)
 
 После среза (d) 023 ни один продуктовый вызывающий не исполняет клиринг мимо общего раннера (`tests/unit/test_p023_d_product_callers_go_through_the_runner.py`). Общая граница исполнения `ClearingService.execute_clearing_with_amount` остаётся: её зовёт `execute_occurrence` (`app/core/clearing/service.py`, путь v2), а **режим без `ClearingOccurrence`** (сумма = залоченный минимум, идентичность v1 по набору долгов) зовут ещё seed-инструмент рецептов (`scripts/seed_recipe.py:689`) и около 40 тестовых файлов, в том числе доказательства границы 019/015/020 (`grep -rlE execute_clearing_with_amount tests/`). Консультация `2026-09-28-023d-forks` (P2-1): удалять этот режим — отдельным срезом, после миграции тестов на `execute_occurrence` и явного решения по seed-инструменту (переход на раннер или на вхождения). Денежной потери нет: режим v1 проходит ту же границу 019 и сверку v1. **Получатель — программа 024, стадия 6 («монолиты по швам», клиринг)** (**2026-09-29: `T2417`**, после миграции тестов силами 025); миграцию тестов ведёт 025 (стадия 3, доказанное удаление/перенос). Идентичность и сверка v1 для исторических вхождений остаются в любом случае (решения 5–6 023).
 
-### Класс 2 из ревью стадии 2 программы 020 (P2-4) — внесено 2026-09-26: аренда Redis `/clearing/auto` истекает раньше полного вызова
-
-**Получатель — владелец HTTP-допуска и распределённого лока** (`app/api/v1/clearing.py`, `app/utils/distributed_lock.py`); программа 020 им не является. P2, класс 2 по §19.5 (денежной потери нет). Находка Codex, §15-ревью стадии 2 020 на `5eec36f` (`.local-run/codex-review/2026-09-25-020s2/final.md`), цифры — из записанного evidence 020.
-
-- **Current:** `POST /clearing/auto` берёт Redis-лок `dlock:clearing:<eq>` с `ttl_seconds=30` и `wait_timeout_seconds=2.0` (`app/api/v1/clearing.py:53-54`); лок не продлевается (`app/utils/distributed_lock.py:54`, `SET NX EX` один раз). Если вызов длится дольше 30 с, аренда истекает, и второй HTTP-запрос может её взять, пока первый ещё идёт.
-- **Замер (actual / threshold):** нынешний `auto_clear` на графе h4k (400/4 000) — `total_ms=51199.81120002922` против аренды **30 000 мс** (`specs/020-clearing-one-transaction/evidence/2026-09-25-stage2-detector-cost-results.json`, три прогона 51,1–51,4 с); экспериментальный DFS полной глубины на d8k (200/8 000) — около **49 с** (49,2–49,5 с по тому же файлу). В дополнительном замере (п. 7a спеки 020) полные вызовы на плато — 102–295 с, часть не завершилась за 300 с.
-- **Почему не класс 1:** двойного клиринга и потери долга это не показывает. Денежная граница — исключительный сессионный лок эквивалента, `SERIALIZABLE`, перечитывание долгов под `FOR UPDATE` и проверки текущей суммы/политики (`app/core/clearing/service.py`, граница 019); Redis — best-effort и может отсутствовать. Истёкшая аренда разрешает второму запросу **ждать** денежный лок, а не провести клиринг дважды.
-- **Intended / Optimal:** решает владелец HTTP-допуска (продление, TTL по измеренной стоимости, честное описание аренды как best-effort). Не воспроизведено как конкурентный сценарий двух HTTP-запросов.
-- **020 аренду не меняет** — ни продления, ни увеличения TTL, ни обрезки вызова на 30 с, ни изменения потолка 101 успеха: это расширило бы авторизованное изменение (ревью, P2-4). Стадия 3 020, если состоится, обязана сохранить 019, сообщить стоимость всего вызова и не заявлять исключение на весь запрос.
-- **2026-09-26, закрытие 020:** пункт остаётся открытым. Его закрывает проект программы 023 — возобновляемая аренда с проверкой токена владельца на эквивалент, общая для ручного и периодического запуска (консультация `.local-run/codex-review/2026-09-26-020-clearing-algorithm/final.md`, P2-6); 020 аренду не меняла.
-- **2026-09-28, программа 023 срез (d):** `POST /clearing/auto` переведён на общий раннер под возобновляемой арендой того же ключа (`app/core/clearing/runner.py::run_awaited_clearing`, `LEASE_TIMINGS`: TTL 30 с, продление каждые 10 с); ручной и периодический проходы одного эквивалента исключают друг друга там, где настроен Redis. Закрывается слиянием среза (d); без Redis распределённой единственности по-прежнему нет (решение 7 023).
-- **2026-09-28, сведение закрытия 023: закрыто** — срез (d) слит PR #74 (`2df5703`). Оговорка: аренда проверена только на двойнике трёх команд Redis; реальный Redis ни одним прогоном 023 не покрыт (раздел закрытия спеки 023).
-
-### Класс 2 из закрывающего ревью программы 019 (`T1910`, часть 5b) — внесено 2026-09-25
-
-**Неизвестный исход коммита клиринга: решение о повторе может принять ошибка чтения-разрешения, а не коммита.** P2, класс 2 по §19.5. Получатель — программа 020, которая владеет `app/core/clearing/service.py`.
-
-- **Current:** `_commit_to_terminal` вернул ошибку коммита, и запускается чтение-разрешение `_reconcile_committed_execution` (`app/core/clearing/service.py:2212`). Если это чтение само падает с `40001`/`40P01`, `reconciliation_task.result()` пробрасывает его ошибку. Внешний `except` (`:2247`) отдаёт её `_end_attempt_on_error`, тот разрешает исход ещё раз и, не найдя вхождения, поднимает `_ClearingAttemptConflict` (`:184`). Решение о повторе рождается из вторичной ошибки.
-- **Intended:** предусловие 3 четвёртого круга 019 — «unknown commit is never retried»; повтор разрешён только при подтверждённом откате.
-- **Optimal:** при провале разрешения сохранить классификацию исходной ошибки коммита.
-- **Почему не класс 1:** проверено оркестратором по коду. Идентичность исполнения детерминирована (`_execution_tx_id`, `:275`; `tx_id_str = execution_tx_id`, `:2062`), поэтому повтор несёт тот же `tx_id`: он либо упрётся в уникальность, либо найдёт закоммиченное вхождение. Второго проведения клиринга нет.
-- **Не воспроизведено:** находка Codex сделана чтением (вывод `.local-run/codex-review/2026-09-25-019s5b/final.md`).
-- **Закрыто 2026-09-25, программа 020 стадия 1** (ветка `claude/020-stage1`: правка `d448284`, сужение `b959fe7`). Воспроизведено до правки (`1446e14` на базе; инъекция сбоев, расписание по P2-3 второго круга Codex): неизвестный коммит (инъекция), первое полное разрешение падает настоящим `40P01`, второе (классификатора) честно не находит вхождения — на базе 2 попытки и `30` очищенных. Правка: ошибка резолвера больше никогда не классифицируется как конфликт попытки. После её провала выполняется **ещё одно** полное разрешение (одно, без цикла): нашло вхождение — это успех с его суммой (и `ClearingCommittedAfterCancellation` при ожидающей отмене); не нашло или тоже упало — поднимается ошибка (или отмена) самого COMMIT: неизвестный коммит — `E010` без повтора, повтор только при `40001`/`40P01`, сообщённом PostgreSQL на COMMIT. Тесты в `tests/integration/test_p020_unknown_commit_is_not_retried_when_the_resolver_fails_postgres.py`: цель `test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried`; контроли — подтверждённый `40001` на COMMIT повторяется, закоммиченное вхождение за потерянным подтверждением возвращает сумму, неразрешённый неизвестный коммит — `E010` без повтора, и `test_control_d_a_durable_commit_whose_first_resolution_deadlocks_returns_its_amount` (закоммиченное вхождение при упавшем первом разрешении возвращает `30`, а не `E010` — побочный эффект первой версии правки `d448284`, закрыт сужением, красный на `1446e14`).
-- **Потеря импульса отмены в блоке разрешения коммита — закрыто 2026-09-25 (`40bbbdc`), по находке класса 2 ревью Codex `5255644`.** Импульс отмены вызывающего, пришедший во время разрешения, терялся, если это разрешение затем падало: `_drain_task` поднимал ошибку задачи до того, как вернуть запомненную отмену. На `5255644` так терялась отмена (неизвестный коммит → `E010` вместо `CancelledError`), а после `40001` на COMMIT шёл повтор после отмены (2 попытки, `30` очищено). Правка: у `_drain_task` параметр `surface_result` (по умолчанию `True` — прежнее поведение); блок разрешения коммита осушает оба разрешения с `False` и читает результат сам, так что импульс любого из них попадает в `commit_cancellation`. Тесты: `test_a_cancellation_during_a_failing_second_resolution_propagates`, `test_a_cancellation_during_a_failing_resolution_after_a_refused_commit_is_not_retried` (сбои разрешений — инъекция, отмена — настоящий `Task.cancel()`).
-- **Остаток, класс 2 по §19.5 — внесено 2026-09-25, получатель — программа 020.** У трёх других вызывающих `_drain_task` (`app/core/clearing/service.py:216` `_rollback_before_interlock`, `:236` `_close_checked_out_connection`, `:280` `_release_interlock_session`) импульс по-прежнему теряется, если осушаемая задача падает: они намеренно поднимают ошибку задачи (`surface_result=True`), и отмена уходит вместе с ней. Это откат/закрытие соединения, деньги не двигает; не воспроизведено.
-
-### Класс 2 из закрывающего ревью программы 015 (`T1509`) — внесено 2026-09-21
-
-Обе находки вернул Codex на замороженном `056e720..d2aa411`, обе `VERDICT-CONFIRMED`, обе перепроверены оркестратором
-по коду. `CLASS-1-COUNT: 0`, поэтому по §19.5 программу они не держат.
-
-**Получатель обеих — владелец, диспозиционно.** §19.5 требует дату *и* получателя, и запись «получателя нет»
-требование не удовлетворяет, а лишь обнажает пропуск (найдено консультацией Codex 2026-09-21). Программы,
-владеющей этими поверхностями, действительно не существует: 015 закрыта, 016 не авторизована, а путь совместимости
-SQLite и `docs/ru/02-protocol-spec.md` не входят в owner surface ни одной живой программы. Поэтому получателем
-назначен владелец — и назначение означает **решение о судьбе**, а не авторизацию на реализацию (§19.5: рефакторинг
-без наблюдаемой потери не авторизуется).
-
-**Предполагаемый исполнитель, записан 2026-09-21 по указанию сессии, заведшей черновики 017–022.** Получателем по
-§19.5 остаётся **владелец** — ссылка ниже его не заменяет, потому что программы 017–022 существуют только как
-**неавторизованные черновики** в ветке `claude/017-core-refactoring-specs` (`57b1169`) и в `main` их нет; указатель
-на них не может быть получателем, пока владелец их не вычитал. Сопоставление сделано по их `## Owner surface`, а не
-по теме: **017** (Postgres единственным движком) владеет `app/config.py`, `app/db/sqlite_transaction_control.py` и
-`app/main.py:323-500` — то есть тем самым путём совместимости SQLite, и при реализации он этот путь **удаляет**, а
-вместе с ним и находки, которые на нём стоят; **019** (платёж одной транзакцией) переписывает
-`app/core/payments/service.py`, где живут обе находки про гонку вставки. Где соответствия по owner surface нет —
-`scripts/seed_db.py`, `docs/ru/02-protocol-spec.md`, красный scheduled-job, — исполнитель **не назван**, и
-догадка вместо него не поставлена.
-
-| Пункт | Sev | Суть | Evidence |
-|---|---|---|---|
-| SQLite-совместимость добавляет колонку удержания без внешнего ключа | P3 | Модель объявляет `ON DELETE RESTRICT` «на обоих диалектах» — доказательство удержания нельзя удалить, пока удержание на него ссылается. Путь совместимости для **существующего SQLite-файла** добавляет только nullable-колонку, **намеренно и с записанной причиной**: FK ссылается на `debt_reconciliation_results`, которой в файле старше шага 5a нет, и при `foreign_keys=ON` SQLite отказал бы в записи вовсе. Следствие: на таком файле удаление строки-доказательства ничем не отвергается. **Деньги при этом не проходят:** отказ читает саму колонку, а не FK, поэтому удержание переживает удаление доказательства — теряется причина, аудит и возможность объяснить, почему эквивалент стоит. PostgreSQL получает FK миграцией 028, свежий SQLite — из `create_all`; дыра только у dev-файлов, созданных до шага 5a | объявление — `app/db/models/equivalent.py:26`; пропуск с причиной — `app/main.py:377`, ALTER — `:408`; отказ читает колонку — `app/core/payments/engine.py:474-484`, `app/core/payments/service.py:742-749` |
-| Протокол в RU-дереве говорит, что сверки нет, а она есть | P3 | `docs/ru/02-protocol-spec.md` утверждает: «Расхождение между `debts` и журналом операций… Это **не сделано** и принадлежит программе 015. До тех пор состояние честное: проверки нет, и система об этом говорит». К `d2aa411` это неверно — сверка реализована и планируется. Это ровно тот случай §1, когда документ расходится с кодом, и опаснее обычного: нормативное дерево уверяет читателя, что обнаружения **нет**, тогда как именно на его наличии стоит условие остановки §19.5. Правка узкая и не требует спеки, но по §19.5 она **не становится задачей закрываемой программы** | `docs/ru/02-protocol-spec.md:1802`; реализация — `app/core/ledger/reconciliation.py:780` (`verify_journal_equals_change`); планировщик — `app/main.py:176` |
-
-
-### Долг CI без владельца: `Simulator visual E2E` красный минимум с 2026-09-14 — внесено 2026-09-21
+### Долг CI без владельца: `Simulator visual E2E` красный минимум с 2026-09-14 — внесено 2026-09-21 — **[сделано в 028, F-028-9 (E9, `T2892`); строка снимается при сведении `T2899.7`]**
 
 Найдено при проверке CI после пуша закрытия 015. **Запись существует потому, что провалившаяся проверка не может
 называться «косметикой» без разрешения владельца (§18), а нигде в репозитории она не зафиксирована.** Получатель —
@@ -434,190 +233,15 @@ SQLite и `docs/ru/02-protocol-spec.md` не входят в owner surface ни 
 | Пункт | Sev | Суть | Evidence |
 |---|---|---|---|
 | Staged-ветка гонки вставки не доходит до собственного обработчика | P3 | **Current:** в режиме `commit=False` INSERT идёт внутри `async with self.session.begin_nested()`; когда он поднимает `IntegrityError`, повторный `select(...)` в `except`-блоке падает `PendingRollbackError`, а если вызывающий обернул вызов в собственный `begin_nested()` — `InvalidRequestError`. То есть `_resolve_existing_payment` на staged-гонке не вызывается вовсе, и исполнитель тика записывает `INTERNAL_ERROR` вместо классифицированного конфликта. Денег это неправильно не двигает и долга не теряет — поэтому класс 2, а не 1. **Дефект предшествует `T1548`.** Измерено однососессионной конструкцией на SQLite; поведение под настоящей конкуренцией PostgreSQL — **не установлено** | `app/core/payments/service.py:939-946` (повторный поиск в обработчике), вызывающий с собственным `begin_nested()` — `app/core/simulator/real_payments_executor.py:421` **Повышено 2026-09-21 срезом `T1523`: воспроизведено на настоящем PostgreSQL двумя по-настоящему конкурентными соединениями** — второе соединение коммитит конфликтующую строку между поиском и вставкой, и наружу вместо объявленного `409` выходит `sqlalchemy.exc.InvalidRequestError: Can't operate on closed transaction inside context manager`. То есть прежняя оговорка «под конкуренцией PostgreSQL не установлено» снята. **Чего у этой записи нет:** проба была одноразовой и в дереве не сохранена, поэтому утверждение **не открывается командой** — при следующем заходе его придётся воспроизводить заново, и это само по себе слабость записи (§15). Денег по-прежнему не теряет: дублирующий staged-платёж рапортует внутренней ошибкой вместо конфликта. |
-| Ответ на гонку вставки зависит от окружения, а не от случая | P3 | Одна и та же гонка на SERIALIZABLE даёт клиенту **разный совет**: при `23505` повторное чтение отвечает «Payment with same tx_id is in progress» (не retryable, «ждите»), при `40001` классификатор отвечает retryable-конфликтом «отправьте снова». Внесено 2026-09-21 ячейкой 5 матрицы `T1523`: в прогоне одного модуля стенд попадал в первую ветку, в полном PostgreSQL-тире — во вторую, и первый полный прогон на этом и покраснел, потому что премиса предполагала уникальное нарушение. Денег ни одна ветка не двигает дважды, поэтому класс 2. **Почему ветка переключается — не установлено;** гипотеза, записанная в самом тесте: процесс-глобальный кэш графа `PaymentRouter` — промах кэша заставляет проигравшего прочитать строки, которые победитель затем пишет, и SSI отказывает раньше, чем консультируется уникальный индекс | ветки — `app/core/payments/service.py:930-946` (re-read `23505`) против `:947-995` (классификация `40001`); тест фиксирует фактическую ветку и ассертит именно её — `tests/integration/test_p015_t1523_in_progress_and_insert_race_postgres.py:373` |
-| `test_payment_timeouts.py` подделывает собственный коммит | P3 | Тест правит состояние прямым `UPDATE transactions SET state='COMMITTED'` (`:186-194`) вместо настоящего коммита движка, то есть проверяет тайм-аут над эффектом, которого не было. Ячейка 7 матрицы `T1523` перекрывает его настоящим коммитом (`tests/unit/test_p015_t1523_the_commit_landed_then_the_caller_failed.py:183,239`), поэтому покрытие не потеряно. Старый тест **не тронут намеренно**: бриф `T1523` запрещает довешивать ассерты на соседние тесты. Он не мёртв — краснеет под той же мутацией, что и ячейка 7, — просто слабее, чем читается | `tests/unit/test_payment_timeouts.py:112,186-194` |
-| SQLite-тир не может измерять идемпотентность гонки вставки | P3 | Два настоящих соединения до ветки `UNIQUE(tx_id)` на SQLite не доходят: WAL-снимок читателя превращает проигравший INSERT в `SQLITE_BUSY`, который классифицируется в `RetryablePaymentConflictException` раньше, чем нарушение уникальности вообще рассматривается. Не дефект, а **граница измерителя**: заявлять по SQLite-тиру, что гонка вставки проверена, нельзя | `app/core/payments/service.py:109-133` (`_classify_payment_db_error`) |
-| `scripts/seed_db.py` пишет `PAYMENT`-строки без отпечатка | P3 | После `T1548` это единственный в дереве производитель строк, повтор которых приложение теперь отказывается обслуживать. Сегодня безвредно: повтор их `tx_id` недостижим — ключи сидированных участников не проходят `VerifyKey(..., Base64Encoder)`, а два беcподписных пути минтят собственные ключи. Значение записи — предупредить того, кто когда-нибудь переиспользует сидер | `scripts/seed_db.py:515-527`, `:543-562` (литерал `"idempotency": None` на `:555`); 240 таких строк в двух v2-паках; проверка подписи — `app/core/auth/crypto.py:16`, отказ до поиска идемпотентности — `app/core/payments/service.py:707` против `:723-731` |
-| Юнит-тесты SQLite-тира падают, если их направить на PostgreSQL | P3 | Диагностическое, предшествует срезу: с `TEST_DATABASE_URL` на PostgreSQL тесты, исполняющие настоящий платёж, падают `InvalidRequestError` в коммите. Контрольный прогон **нетронутого** `tests/unit/test_p1_payment_run_perimeter.py` в той же конфигурации падает так же — то есть это свойство фикстуры вне своего тира, а не правки. Запись нужна, чтобы такой прогон не приняли за регрессию | контроль: `tests/unit/test_p1_payment_run_perimeter.py` (6 из 12 падают вне тира) |
 
-
-### Проглатывание исключений: экземпляры без владельца
-
-Клиринговые «братья» этого паттерна принадлежат программе 003. Перечисленные ниже — **не принадлежат
-никому**: поверхности `app/core/trustlines/` и `app/api/v1/integrity.py` не входят в owner surface
-ни одной из программ 002–007. Регистрируются здесь, чтобы не потеряться до появления владельца.
-
-**Два разных последствия, которые нельзя смешивать.** Почти во всех обсуждениях этого паттерна их
-путают:
-
-- **(а) отравление незакрытой транзакции.** Проглоченное исключение от запроса к БД оставляет
-  сессию в сломанном состоянии, а код идёт дальше к `commit()`. Лечится транзакционной защитой
-  (savepoint / явный rollback вложенной операции);
-- **(б) потеря записи аудита при закоммиченном бизнес-изменении.** Проглоченное исключение
-  отменяет вставку `IntegrityAuditLog`, но бизнес-мутация коммитится как ни в чём не бывало.
-  Это молчаливый пробел **полноты аудита**, и транзакционная защита его **не чинит** — она лишь
-  делает так, что запись гарантированно не пишется, а не пишется случайно.
-
-| # | Место | Что именно проглатывается | Класс |
-|---|---|---|---|
-| 1 — `[x]` 2026-08-11 | `app/core/trustlines/service.py:75-78` | До правки `create()` проглатывал ошибку initial checkpoint до любой записи. Теперь failure пропагируется до `TrustLine`/commit; `tests/unit/test_trustline_audit_fail_closed.py:19-75` доказывает exception, `commit.assert_not_awaited()` и ноль строк после rollback. Canonical `wave5_backlog_trustline_precheckpoint` — exit `0`, `8 passed`; pinned Ruff и diff-check — exit `0` | (а), закрыто |
-| 2 — `[x]` 2026-08-11 | `app/core/trustlines/service.py:106-135` | До правки голый `except Exception: pass` накрывал post-flush checkpoint и построение `IntegrityAuditLog`, после чего trustline коммитился без аудита. Теперь весь audit stage fail-closed до commit. Параметрический `tests/unit/test_trustline_audit_fail_closed.py:18-85` доказывает отказ и initial, и post-flush checkpoint: commit не вызван, после rollback строк нет. Canonical `wave5_backlog_trustline_create_audit` — exit `0`, `9 passed`; pinned Ruff и diff-check — exit `0` | (а) и (б), закрыто |
-| 3 — `[x]` 2026-08-11 | `app/core/trustlines/service.py:168-250` | `update()` больше не проглатывает ни initial, ни post-flush checkpoint/audit failure: ошибка выходит до commit, rollback восстанавливает прежний limit. Первый `wave5_backlog_trustline_update_audit` честно завершился exit `1`, `2 failed, 8 passed`: test fixture создавал TrustLine до flush нового Equivalent и передавал `equivalent_id=None`. После исправления harness `wave5_backlog_trustline_update_audit_fix` — exit `0`, `10 passed`; pinned Ruff и diff-check — exit `0` | (а) и (б), закрыто |
-| 4 — `[x]` 2026-08-11 | `app/core/trustlines/service.py:282-360` | `close()` теперь fail-closed на initial и post-flush checkpoint/audit stage. Параметрический `tests/unit/test_trustline_audit_fail_closed.py` проверяет обе точки: commit не вызван, rollback сохраняет `status='active'`. Canonical `wave5_backlog_trustline_close_audit` — exit `0`, `12 passed`; pinned Ruff и diff-check — exit `0` | (а) и (б), закрыто |
-| 5 — `[x]` 2026-08-11 | `app/api/v1/integrity.py:252-258` | `POST /integrity/verify` больше не подменяет ошибку checkpoint старым/пустым checksum и не идёт к commit после возможно отравленного DB query. `tests/integration/test_integrity_endpoints.py` фиксирует forced checkpoint failure, `commit.assert_not_awaited()` и ноль audit rows после rollback. Canonical `wave5_backlog_integrity_checkpoint` — exit `0`, `17 passed`; pinned Ruff и diff-check — exit `0` | (а), закрыто |
-
-**2026-08-12 / remediation внешнего ревью.** Первоначальные тесты пунктов 1–4 подменяли весь
-checkpoint-helper и не проверяли его внутреннюю границу. Ревью exact HEAD `92e86a6` обнаружило, что
-`compute_integrity_checkpoint_for_equivalent()` проглатывал неожиданный отказ `InvariantChecker`,
-возвращал checkpoint без `passed`, а потребители трактовали отсутствие как `True`. Теперь только
-ожидаемый `IntegrityViolationException` записывается как проверенный failed-check; недоступный checker
-пропагируется владельцу UoW, а отсутствующий `passed` fail-closed означает `False` во всех потребителях
-checkpoint. Новые counterchecks ломают именно `InvariantChecker.check_zero_sum` и доказывают exception,
-отсутствие commit и отсутствие TrustLine. Canonical `wave5_extrem_integrity` — exit `0`, `25 passed`;
-pinned Ruff `0.1.14` и scoped diff-check — exit `0`.
-
-Повторное ревью нашло соседний batch false-green: `compute_and_store_integrity_checkpoints()` всё
-ещё проглатывал тот же отказ, коммитил пустой batch и позволял background supervisor опубликовать
-`*_success`. Batch теперь откатывается и повторно выбрасывает любой `BaseException`; существующий
-supervisor переводит job в `failed/*_error`. Countercheck с настоящим inner checker доказывает
-исключение и terminal rollback. Canonical `wave5_extrem_integrity_batch2` — exit `0`, `31 passed`;
-pinned Ruff и diff-check — exit `0`.
-
-**`integrity.py:284-285` — это НЕ тот паттерн, и внешнее ревью его переоценило.** Там `try`
-накрывает только `db.add(IntegrityAuditLog(...))` и `model_dump()` — чисто in-memory операции,
-никакого IO. Отравить транзакцию они не могут; максимум — скрыть ошибку сериализации. Держать в
-одном списке с пунктами 1-5 неверно.
-
-
-**Пополнение 2026-08-20 — `T809-B1`, класс (а) в самом денежном ядре.**
-`app/core/payments/engine.py:538-541`: отказ `await self.session.rollback()` накрыт
-`except Exception: pass`, после чего цикл **продолжает ретрай на сессии в неизвестном состоянии**.
-Это буквально механизм, вокруг которого построена закрытая программа 004: проглоченный отказ
-отравляет транзакцию, а следующий отказ уже не попадает в retry-предикат. Дедупликация выполнена —
-якорь `engine.py:53x` в `specs/` не встречался.
-
-Знаменатель класса предъявлен впервые: **82 голых `except` в `app/`, из них 46 (56 %) в денежном и
-recovery-ядре** (`payments/engine.py` — 20, `payments/service.py` — 15). Число является **нижней
-границей**: `contextlib.suppress` и формы с комментарием между строками не считались.
-
-**Обновление 2026-08-21 — замер сделан воспроизводимым, запись подтверждена.** Программа 010 заведена
-([`010-money-core-fail-closed/spec.md`](010-money-core-fail-closed/spec.md)); знаменатель теперь
-пересчитывается скриптом
-[`measure_swallowed_exceptions.py`](010-money-core-fail-closed/measure_swallowed_exceptions.py) по AST.
-Определение здешнего числа — «тело обработчика есть ровно `pass`» — воспроизвелось: доля **56%**
-совпала точно, `payments/engine.py` дал те же **20**. На HEAD `24e03d1` числа выросли до **90 / 51**
-за счёт срезов T714/T715, то есть «нижняя граница» была честной формулировкой.
-`contextlib.suppress` в `app/` — **0 вхождений**, истинно голых `except:` — **0**.
-
-**Что замер изменил по существу:** класс градуирован, и сплошной правки в нём нет. Из шести сайтов
-денежного ядра, где проглочен отказ `rollback()`/`commit()`, ручной разбор оставил **один** дефект
-(`payments/engine.py:540`); `clearing/service.py:57` пробрасывает, `:143` инвалидирует соединение
-fail-closed и является образцом правильной формы, `recovery.py:245`/`:250` возвращают `False`, а
-`clearing/service.py:219` продолжает на **отдельной** сессии и переведён во вход в разбор, а не в
-дефект. Якорь самой находки уточнён: `:537-541`, а не `:538-541`.
-
-**Владелец правки — follow-up программа, а не 008** (решение оркестратора 2026-08-20, владелец
-согласился). Денежное ядро в программе 008 объявлено read-only именно затем, чтобы ревью не рождало
-правок в самом рискованном коде без собственной спеки и гейтов; §5 `codex-orchestrator-rule.md`
-требует для несвязанной находки явно принятого follow-up, а не расширения текущей фазы.
-Контрдовод Codex записан и остаётся в силе: при этом маршруте живой риск целостности стоит дольше.
-**Исполнение в любом случае ждёт подъёма Postgres** — правка `payments/engine.py` требует
-Postgres-гейта с одноразовой БД по матрице `plan.md` §6, а на текущей машине БД не поднята.
-## M20: разбор
-
-Перепроверено на HEAD `ea9cde9` (2026-08-10). Прежняя формулировка была неверна почти во всём.
-
-**Масштаб.** `simulator-ui/v2/src` — **659 вхождений `??` в 628 строках 104 файлов**; `admin-ui/src` —
-**174 вхождения в 160 строках 31 файла**. Итого **833**, а не 190. Утверждение «в admin-ui ноль
-попаданий» ложно: `admin-ui/src/api/mockApi.ts` — 34 вхождения, `api/realApi.ts` — 27,
-`composables/useGraphAnalytics.ts` — 17, `utils/decimal.ts` — 14.
-
-**Почему старые цифры неверны.** Артефакты `plans/m20-nullish-coalescing-audit.{raw.txt,grouped.json,meta.json}`
-внутренне согласованы (190 вхождений / 178 уникальных строк; формы `?? ''`=107, `?? 0`=61, `?? null`=22),
-но не описывают кодовую базу по двум независимым причинам:
-
-1. **Слепы к формам.** Регекс ловил только три литерала. Пропущены `?? []` (28), `?? false` (12),
-   `?? {}` (8), `?? undefined` (8), `?? 1` (7), `?? true` (5) и ~211 дефолтов-идентификаторов/выражений.
-2. **Устарели.** mtime артефактов — 2026-02-24, HEAD — 2026-08-10. Они покрывают **37 из 104** текущих
-   файлов с `??` (38-й, `utils/escOverlayStack.test.ts`, из репозитория исчез). Оставшиеся **67 файлов
-   держат 320 вхождений**; крупнейшие **среди нетестовых** — `composables/realEventPipeline.ts`
-   (38; файл добавлен 2026-08-09), `composables/useWindowController.ts` (18),
-   `composables/realFx/useRealTxFx.ts` (12), `composables/windowManager/useWindowManager.ts` (12),
-   `components/NodeCardOverlay.vue` (10). Оговорка «нетестовых» существенна: вселенная 104/67 файлов
-   тесты **включает**, и по абсолютному счёту выше половины этого списка стоят
-   `components/SimulatorAppRoot.interact.test.ts` (28), `components/ManualPaymentPanel.test.ts` (22)
-   и `components/TrustlineManagementPanel.test.ts` (13) — правки они не требуют, но ранжирование без
-   этой оговорки вводит в заблуждение.
-
-Guard'ов вида `String(… ?? '')` в simulator-ui — **96** (91 вне тестов), а не 67.
-
-**Все восемь прежних «горячих точек» указывали не туда.** Пять смещены на 1-3 строки
-(`TopBar.vue:69,95,96,102,103` → реально `?? 0` на `:72,98,99,105,106`; `SystemBalanceBar.vue:19` → `:20`),
-три указывали на строки без `??` вообще (`useInteractDataCache.ts:222-223` — пустая строка и комментарий
-`// ---`; `SimulatorAppRoot.vue:282` — `)`, `:474` — открывающая `computed<InteractPhase>`, `:622` —
-`if (!snap) return null`).
-
-**Флагманская находка «знаменатель success-rate в TopBar» дефектом не является.** `ctx.runStats` —
-всегда материализованный реактивный объект (`useSimulatorApp.ts:518-527`, каждое поле инициализировано
-`0`/`{}`), поэтому `?? 0` там — недостижимая мёртвая защита, а `successRatePct` и без того закрыт
-`if (a <= 0) return 0`. То же с `SystemBalanceBar.vue:20`: `useSystemBalance.ts:50-56` возвращает полный
-объект по умолчанию, `utilization` нулевым/undefined не бывает.
-
-### Действительно требуют правки — 13 мест (22 строки)
-
-| # | file:line | Что не так |
-|---|---|---|
-| 1 | `[x]` `simulator-ui/v2/src/composables/interact/useInteractDataCache.ts:118,438` | 2026-08-11: `normalizeAmount(unknown)` сохраняет trimmed исходную строку, если decimal-parser её отверг, и по-прежнему нормализует валидное значение. Контрпроверки обоих путей — `useInteractDataCache.snapshotTrustlines.test.ts:127-167`. Targeted Vitest — exit `0`, `3 passed`; Simulator typecheck — exit `0`; первый build остановился до компиляции на внешнем `DEBUG=release` (exit `1`, Pydantic bool parsing), повтор `DEBUG=false; npm --prefix simulator-ui/v2 run build` — exit `0` |
-| 2 | `[x]` `…useInteractDataCache.ts:439` | 2026-08-11: snapshot `used` проходит через тот же `normalizeAmount`; невалидное непустое значение больше не превращается в `''`. Evidence и gates — пункт 1 |
-| 3 | `[x]` `…useInteractDataCache.ts:441` | 2026-08-11: snapshot `available` проходит через тот же `normalizeAmount`; невалидное непустое значение больше не превращается в `''`. Evidence и gates — пункт 1 |
-| 4 | `[x]` `simulator-ui/v2/src/composables/useInteractMode.ts:638` | 2026-08-11: `actionClearingReal` теперь декодирует 2xx через `simulatorContracts.ts:382-411,432-434`; обязательный целый `cleared_cycles >= 0`, canonical `from`/`to` и остальная форма проверяются до передачи в interact mode, поэтому ложный `?? 0` удалён. Красный прогон contract-test до decoder — exit `1`, `3 failed / 11 passed`, `expected ... to be an instance of SimulatorContractError`; после исправления contract + downstream interact selectors — exit `0`, `38 passed`; typecheck и build (`DEBUG=false`) — exit `0` |
-| 5 | `[x]` `…useInteractMode.ts:670-671` | 2026-08-11: финальный status использует обязательные `res.cleared_cycles` и `res.cycles.length`; отсутствующее/строковое поле и неканонический edge отклоняются, а честный ноль проходит (`simulatorApi.contract.test.ts:146-150,203-233`). Evidence и gates — пункт 4 |
-| 6-8 | `[x]` `admin-ui/src/pages/LiquidityPage.vue:139-141,299-322` | 2026-08-11: при отсутствующем `summary` счётчики теперь остаются `undefined`, а KPI-row не монтируется; честные серверные нули после успешной загрузки сохраняются. Countercheck — `adminAsyncOwnership.test.ts:341-372`. Первый targeted run был exit `1`, `1 failed / 13 passed`: shallow-stub `ElStatistic` не рендерил дочернее значение; после исправления теста — exit `0`, `14 passed`. |
-| 9-11 | `[x]` `admin-ui/src/pages/LiquidityPage.vue:149-151,325-351` | 2026-08-11: при отсутствующем `summary` денежные computed возвращают `null`, а весь KPI-row скрыт; строковый серверный `"0"` остаётся честным нулём. Первый build был exit `1`: advice-контракт получил optional computed; после чтения полей из подтверждённого `summary` build (`DEBUG=false`) — exit `0`, targeted Vitest — exit `0`, `14 passed`, `git diff --check` — exit `0`. |
-| 12 | `[x]` `admin-ui/src/composables/useGraphAnalytics.ts:29-32,130-135,198-524` | 2026-08-12: все decimal→atoms пути используют нормализованный ключ и только подтверждённый non-negative integer precision; при отсутствии metadata derived analytics возвращает `[]`/`null`, а не атомы precision=2. Тесты доказывают mixed-case `EUR`, precision `4` (`0.0001` = один атом) и fail-closed missing-map |
-| 13 | `[x]` `admin-ui/src/pages/LiquidityPage.vue:133-155,214-218,312-330` | 2026-08-12: precision `0` больше не превращается в `2`; lookup нормализован. Без выбранного/загруженного equivalent денежный KPI-row скрыт, таблицы показывают `—`, UI выводит явное предупреждение; строки trustline форматируются по собственному equivalent. Gates: targeted Vitest exit `0`, `26 passed`; build exit `0`; lint exit `0`, `117` baseline warnings / `0` errors; diff-check exit `0` |
-
-На 2026-08-12 все 13 исходных M20-пунктов закрыты независимыми срезами 1–3, 4–5, 6–11 и 12–13.
-Найденный при финальном reference scan sibling в histogram renderer зарегистрирован отдельной открытой
-строкой реестра и не выдаётся за часть исходного набора.
-
-**2026-08-12 / correction внешнего ревью для пункта 13.** Коммит `976c391` поставил precision-guard
-на строку немонетарных count KPI и оставил денежные total limit/used/available видимыми при
-`selectedPrecision=null`, то есть первоначальная запись выше была ложноположительной. Guard перенесён
-на денежную строку; count KPI остаются видимыми при загруженном summary. Countercheck фиксирует обе
-ветки через `showCountKpis`/`showMoneyKpis`. Targeted Admin Vitest — exit `0`, `28 passed`; Admin build
-— exit `0`; scoped diff-check — exit `0`.
-
-Повторное ревью показало, что первый remediation-test смотрел только exposed computed и оставался бы
-зелёным при обратной перестановке template bindings. Тест теперь рендерит default slot root-card и
-проверяет оба `data-testid`: count-row остаётся, money-row исчезает без precision. Targeted Vitest —
-exit `0`, `17 passed`; перестановка guard'ов больше не может пройти вхолостую.
-
-### Не является дефектом — не поднимать заново
-
-`TopBar.vue:72,98,99,105,106`; `SystemBalanceBar.vue:20,26`; `useInteractDataCache.ts:228,232`
-(`String(v ?? '').trim()`); `SimulatorAppRoot.vue:623` (`snap.links ?? []`);
-`EdgeDetailPopup.vue:127` — сделано намеренно: `:116` рисует `'—%'`, `:122` ставит aria «unknown»,
-`?? 0` задаёт только ширину полосы; `api/simulatorContracts.ts:68` — месяц уже ограничен `1..12`
-проверками рядом; `layout/forceLayout.ts:596` — `idxById` строится на `:243-244`, недостижимо;
-все 96 guard'ов `String(x ?? '')`; все `?? []` перед циклами; все `?? null` как sentinel «ничего не выбрано».
-
-### Вывод
-
-Сплошной codemod по-прежнему запрещён, но по более сильной причине, чем раньше: 833 вхождения против
-13 настоящих. И **самый тяжёлый пункт (`precisionByEq … ?? 2` → `decimalToAtoms`) находится в admin-ui,
-который исходный аудит вообще не сканировал.**
-
-Артефакты `plans/m20-nullish-coalescing-audit.*` следует **удалить, а не цитировать**: это устаревший
-и слепой к формам снимок, он лежит в неотслеживаемом каталоге без git-истории, и 13 мест выше полностью
-его замещают.
 
 ## Пробелы покрытия без владельца
 
 Перечислены в [`006-verification-integrity/spec.md`](006-verification-integrity/spec.md) в разделе
-«Пробелы покрытия без владельца»: `integrity.py`/`invariants.py` без независимой проверки, паритет
-ORM↔миграции только для одной таблицы, ни одного браузерного прогона реального SSE, admin
-real-transport smoke вне CI, конкурентность auth challenge/refresh помечена `UNVERIFIED / NO FIX`.
+«Пробелы покрытия без владельца»: ни одного браузерного прогона реального SSE, admin real-transport
+smoke вне CI, конкурентность auth challenge/refresh помечена `UNVERIFIED / NO FIX`. Два других пункта
+того раздела сняты программой 028 (2026-10-04): `integrity.py`/`invariants.py` без независимой проверки —
+закрыто (реестр № 139), паритет ORM↔миграции только для одной таблицы — принято как есть (реестр № 234).
 
 ## Долги волны 011 — поведенческие, вне её Non-goals
 
@@ -627,7 +251,7 @@ real-transport smoke вне CI, конкурентность auth challenge/refr
 
 | Долг | В чём он | Почему не в 011 | Якоря |
 |---|---|---|---|
-| `F-011-8` | Политика trust-линии валидируется на публичном пути (`validate_trustline_policy` на `POST`/`PATCH /trustlines`) и **не** валидируется на симуляторном: сидер сценариев пишет в ту же колонку произвольный JSON, и эти строки отдаются теми же ответами | Закрытие требует либо валидации на втором пути, либо санации хранимых строк — и то и другое меняет поведение | `app/utils/validation.py`, `api/openapi.yaml` (`TrustLine.policy`, `additionalProperties: true` намеренно) |
+| **[взято в 028, F-028-3 (E2)]** `F-011-8` | Политика trust-линии валидируется на публичном пути (`validate_trustline_policy` на `POST`/`PATCH /trustlines`) и **не** валидируется на симуляторном: сидер сценариев пишет в ту же колонку произвольный JSON, и эти строки отдаются теми же ответами | Закрытие требует либо валидации на втором пути, либо санации хранимых строк — и то и другое меняет поведение | `app/utils/validation.py`, `api/openapi.yaml` (`TrustLine.policy`, `additionalProperties: true` намеренно) |
 | `F-011-9`, поведенческая часть | Одна и та же временная метка уходит в двух форматах: через модель — с `Z`, через `list[Any]` графового ответа — без смещения. Три поля: `AdminGraphTransactionItem.created_at/updated_at` и `incidents[].created_at` | Починка добавит смещение в строку на проволоке. Решение внешнего ревьюера `VERDICT-F0119: DESCRIBE_ONLY`; **в 012 не передаётся** — 012 владеет денежным представлением, а не временем | `app/api/v1/admin.py:217`, `:252-253`; `app/schemas/graph.py:32` |
 | Разрыв generated-схемы SSE | Ни одна из четырёх схем SSE-событий не попадает в `app.openapi()`: эти модели нигде не служат `response_model`, а SSE-маршруты возвращают `StreamingResponse`. Клиент, сгенерированный из приложения, не знает **всего семейства событий**, а не отдельных полей | Требует либо публикации схем через отдельный механизм, либо изменения способа отдачи потока | Установлено `RT-011-5`; защищённый §8 контракт SSE существует только в `api/openapi.yaml` |
 
@@ -645,7 +269,6 @@ real-transport smoke вне CI, конкурентность auth challenge/refr
 | Долг | В чём он | Почему ни у кого нет | Якоря |
 |---|---|---|---|
 | **1. Форматтеры не читают точность эквивалента** | Девятнадцать производств денежной строки через два локальных форматтера, ни один из которых не читает `Equivalent.precision`. Число проверено грепом и исполнением: `_fmt_decimal_for_api` — 16 вызовов плюс определение, `_fmt_num_or_str` — 4. Спека 012 называла 18, её ревьюер 22; оба числа считали разные множества | 012 держит этот файл **только на валидацию входа** и прямо записала «recorded, not fixed: that is output formatting». 015 файл в owner surface не берёт: его находки лежат в `payments/router.py`, `api/v1/integrity.py` и трёх файлах `core/simulator/`. Все прежние владельцы — 009, 010, 011 — закрыты | `app/api/v1/simulator.py:784` (`_fmt_decimal_for_api`), `:2112` (`_fmt_num_or_str`) |
-| **2. Написание клиента уезжает в снапшот дословно** | С `T1201` дверь принимает `"0.100000000"` — величина `0.1`, хранится точно, — поэтому снапшот сценария может нести написание, которого в леджере нет. **Экспоненциальная запись здесь недостижима**, и это проверено: `limit` в этих трёх местах объявлен `str \| None`, все вызывающие передают поля, типизированные `str`, `Decimal` до них не доходит, а `str()` над строкой — тождество | Тот же разрыв владения, что и у пункта 1 | `app/api/v1/simulator.py:867`, `:885`, `:894` |
 
 Первичная запись обеих — внутреннее adversarial-ревью программы 012 (`T1210`), в её спеке и в коммите `cfa4475`.
 
@@ -662,51 +285,14 @@ real-transport smoke вне CI, конкурентность auth challenge/refr
 поверхностей закрыты, поэтому здесь регистрируется не адресат, а факт его отсутствия — по тому же
 правилу, что и раздел выше.
 
-### 1. Примеры в документации не сверяются со схемами ничем
-
-**Замерено, а не выведено из отсутствия находок.** `api/openapi.yaml` читают **16** файлов в
-`tests/` — и все до одного сверяют со схемой **код**, ни один не открывает Markdown. Единственный
-тест, который вообще читает документацию, — `tests/unit/test_deployment_config.py:190-215`: он пиннит
-строки команд docker-compose в `06-contributing.md`. Ссылки на `02-protocol-spec.md` в тестах
-(`test_p1_trustline_reopen_postgres.py:8,144`, `test_interact_actions_backend_p1.py:1642,1684`) —
-прозаические цитаты в комментариях, не валидация. Ни `.github/workflows/quality.yml`, ни
-`scripts/verify_local.ps1` документацию не касаются; pre-commit, Makefile, nox и tox в репозитории
-отсутствуют.
-
-**Что это стоило:** `"limit": 1000.00` в протокольных спеках трёх языков давал `422` с декабря 2025
-(когда `api/openapi.yaml` объявил `limit: string`) и был замечен только сплошным ревью 2026-08-25.
-Исправлен в `2790e28`.
-
-**Почему не закрыто здесь.** Закрыть — значит разметить, какой fenced-блок какой схеме принадлежит, а
-эта же задача показала, что по содержимому это **не выводится**: большинство блоков в
-`02-protocol-spec.md` сознательно не соответствуют схемам двери (внутренние записи транзакций,
-hub→участник сообщения, конверт `ERROR`). Извлечение json-блоков с прогоном через pydantic-модели
-двери реализуемо, но требует явной разметки. Это отдельная узкая спека, а не правка.
-
-### 2. RU §5.2 неполон, и перевод здесь полнее источника
-
-Необычное направление дрейфа, поэтому записано отдельно:
-
-- `docs/ru/02-protocol-spec.md:357` (источник) — «(Hub v0.1) `limit` ≥ 0»;
-- `docs/en/02-protocol-spec.md:367` и `docs/pl/02-protocol-spec.md:353` (перевод) — «New `limit` ≥
-  current `debt[to→from]`».
-
-**Оба утверждения истинны, и каждое называет свою половину правила.** Код обеспечивает и то и другое:
-`parse_money_amount(..., require_non_negative=True)` (`app/core/trustlines/service.py:340`) и отдельно
-`if new_limit < used: raise BadRequestException("Cannot reduce trustline limit below used amount")`
-(`:364-369`), где `used` определён как «debt where debtor is `to` and creditor is `from`»
-(`:759-775`) — то есть буквально `debt[to→from]` из EN.
-
-Поэтому приводить EN/PL к RU было бы **вредно**: это стёрло бы верное знание. Дописать порог в RU
-внутри волны 012 нельзя — источник вне её предмета, и правка источника документации требует
-владельца. Долг: RU не называет порог `limit ≥ used`, который дверь реально проверяет.
+### 2. Остаток: дрейф EN/PL §5.1 и §6.2 — принято (RU §5.2 снят программой 028, реестр № 146)
 
 Смежно и той же природы (замечено, не чинилось): EN/PL §5.1 шаг 5 говорят «Create
 `TRUST_LINE_CREATE (COMMITTED)` transaction», где RU говорит «Зафиксировать запись в
 `IntegrityAuditLog` (best-effort)»; EN/PL §6.2 не содержат поля `tx_id` и абзаца про идемпотентность,
 которые в RU есть. Датированный дрейф перевода.
 
-### 3. Пример конверта `ERROR` §9.5 расходится с рантаймом
+### 3. Пример конверта `ERROR` §9.5 расходится с рантаймом — **[взято в 028, F-028-18 (E11)]**
 
 `docs/{ru,en,pl}/02-protocol-spec.md` §9.5 показывает `details: {limit: 1000.00, requested: …}`
 числами. Схема здесь **ничего не требует**: `details` во всех схемах ошибок `openapi.yaml` — свободный
@@ -751,7 +337,7 @@ surface открытых программ реестра — проверено 
 Полные формулировки, чем опровергнуты прежние, и якоря — в строках `T716`/`T717`
 [`007-simulator-analytics-surface/spec.md`](007-simulator-analytics-surface/spec.md).
 
-### 1. Переполнение `NUMERIC(20,8)` на `total_debt` уносит весь тик метрик, и наружу сигнала нет
+### 1. Переполнение `NUMERIC(20,8)` на `total_debt` уносит весь тик метрик, и наружу сигнала нет — **[взято в 028, F-028-7 (E1)]**
 
 `open` · **живой дефект продакшен-кода**, не молчащая аннотация. Наследник `T717(б)` 007;
 тот же класс, что `F-007-1` — уверенное ложное утверждение о данных.
@@ -861,31 +447,6 @@ affinity. **Цена слепоты дефолтного тира — число
 выше настоящей. Замеры 2026-08-25 сделаны на своей базе `geov0_test_closure007` — создана,
 отработана и удалена в том же прогоне.
 
-### 2. Аннотации тика объявляют `float` там, где ходит `Decimal`
-
-`open` · P3, поведение не затронуто. Наследник `T716(б)` 007, **с исправлением его формулировки.**
-
-`app/core/simulator/real_tick_payments_coordinator.py:22` (поле dataclass), `:109` (локальная
-переменная — тот самый словарь, который проходит весь тик) и
-`app/core/simulator/real_tick_persistence.py:81` объявляют `dict[str, dict[str, float]]`.
-Прежняя запись 007 утверждала, что значения «теперь `Optional[float]`». **Опровергнуто прогоном:**
-в словарь ложатся `float` (`avg_route_length`, `active_participants`, `active_trustlines`) **и
-`Decimal`** (`total_debt`, `clearing_volume` — `real_tick_metrics.py:107`, `:111-113`), а `None`
-не ложится никогда: ни один сайт присваивания не пишет `None` (пять сайтов, все в
-`real_tick_metrics.py:105,107,111,134,135`), «не измерено» выражается **отсутствием ключа** и
-становится `NULL` только у читателя словаря (`storage.py:406-411`). Настоящий дрейф — `Decimal`,
-а не `Optional`; правильная аннотация уже объявлена у соседа по цепочке —
-`real_tick_metrics.py:35`.
-
-Почему поведение цело: единственный потребитель словаря — `write_tick_metrics`, принимающий
-`Decimal` по контракту (`storage.py:325`); в JSON словарь не уходит
-(`run._real_last_tick_storage_payload` живёт только в памяти, два сайта —
-`real_tick_persistence.py:89`, `:210`).
-
-Почему ошибка молчит — **измерено, а не предположено:** `mypy` не встречается ни разу в
-`.github/workflows/quality.yml` (единственный workflow репозитория) и отсутствует в
-`requirements-dev.txt` — он даже не установлен.
-
 ### 3. Мёртвый параметр `utc_now` в `MetricsBottlenecks`
 
 `open` · P3. Наследник `T716(в)` 007, жив ровно как описан.
@@ -895,32 +456,6 @@ affinity. **Цена слепоты дефолтного тира — число
 убрал запись из обработчика GET. Датированный комментарий на месте (`:62-64`). Единственный сайт
 конструирования — `app/core/simulator/runtime_impl.py:133-140`; он был вне owner surface среза
 2026-08-20, поэтому параметр оставлен, а не удалён.
-
-## Найдено волной 013 — строгий декодер админки превращает аддитивное изменение сервера в отказ страницы
-
-**Найдено 2026-09-11** перекрёстным ревью финальной дельты 013, проверено оркестратором по коду.
-
-**Что установлено.** `admin-ui/src/api/realApi.ts` объявляет `included`/`truncated` закрытым списком
-из трёх имён — это правка самой волны 013, и она верна: канон объявляет ровно эти три, продюсер по
-построению других не выдаёт. Но `requestJson` считает промах схемы **фатальным для всего ответа**:
-при несовпадении выбрасывается `INVALID_RESPONSE`, и страница графа не получает **ничего** —
-ни участников, ни линий доверия, ни долгов. То есть четвёртое имя коллекции, добавленное сервером,
-гасит экран целиком вместо того, чтобы обесценить одно поле метаданных.
-
-**Достижимо при рассинхроне версий:** новый сервер, старый собранный бандл админки. Это обычное
-состояние во время выкатки, а не экзотика.
-
-**Почему не исправлено волной 013.** Это не свойство одного поля, а **политика декодирования всего
-клиента**: сегодня она звучит «схема — контракт, промах фатален», и у неё есть основания — именно
-она поймала бы расхождение канона и продюсера, ради которого волна и сужала тип. Менять её внутри
-фикс-раунда чужой находки значило бы решить за весь клиент мимоходом. Варианты, между которыми надо
-выбирать осознанно: `z.enum([...]).catch(…)` на этих двух полях; фильтрация неизвестных имён на
-границе; или общее правило «метаданные деградируют, данные — нет». У каждого своя цена, и первая
-из них ослабляет ровно тот гард, который волна только что поставила.
-
-**Получателя нет.** 013 закрывает предмет и в её поверхность политика декодирования не входит; 016
-объявляет `api/openapi.yaml` read-only и клиентских схем не касается. Поэтому запись здесь, как
-факт отсутствия адресата, а не как передача.
 
 ## Найдено волной 013 — атрибуция платежа в админских метриках молчаливо считает «не участвовал»
 
@@ -959,32 +494,7 @@ if str(t_type) == "PAYMENT":
 перемешали две работы в одном коммите. Поэтому указатель лежит здесь; когда 016 будет слита, находка
 переносится в её тело одной строкой.
 
-## Без владельца с 2026-08-24 — `api/openapi.yaml` после закрытия программы 011
-
-**Названо 2026-09-10**, поводом послужил вердикт внешнего ревью `VERDICT-AUTHORITY: OUT-OF-SURFACE`
-по правке канона волной 012.
-
-**Что установлено.** `## Owner surface` программы 012 запрещает трогать `api/openapi.yaml` с прямым
-указанием владельца — «владелец 011». Программа 011 **закрыта 2026-08-24**. То есть запрет действует,
-а адресат, к которому он отсылает, больше не существует: закрытая программа не принимает правок, не
-ведёт ревью и не отвечает за контракт.
-
-**Почему это не формальность.** У репозитория `api/openapi.yaml` объявлен авторитетом №1 для
-REST-контракта (`specs/README.md`), а `AGENTS.md` §8 требует менять его согласованным набором —
-реализация + схема + поведенческие тесты + документация. Набор можно собрать; чего нельзя собрать без
-владельца — это **решения о том, что канон должен обещать**. Беспризорный контракт не блокирует
-работу, он просто делает каждую правку канона правкой без ревьюера по существу.
-
-**Прецедент, уже стоивший волне.** Это второй раз, когда закрытая программа названа владельцем
-предмета: 012 однажды передала форму денег в 011 записью «это её поверхность», 011 закрылась класс не
-взяв, и находка пролежала потерянной всю волну. Правило, выведенное тогда, применяется и здесь:
-проверять надо не «названа ли граница», а «кто это возьмёт и жив ли он».
-
-**Что сделано, а что нет.** 012 правит канон осознанно и согласованным набором по §8, и факт правки
-записан в её `T1213`. Не сделано и здесь не решается: кто ведёт `api/openapi.yaml` дальше. Кандидаты
-— живая программа с контрактной поверхностью либо отдельная строка в `AGENTS.md` §8; выбор шире 012.
-
-## Долг без владельца после `T1213` волны 012 — `HOUR` объявлен с разной точностью в двух наборах
+## Долг без владельца после `T1213` волны 012 — `HOUR` объявлен с разной точностью в двух наборах — **[взято в 028, F-028-26 (E2)]**
 
 **Найдено внешним ревью 2026-09-10** (`gpt-6-astra`, medium) при проверке дельты `T1212`. К сужению
 `Equivalent.precision` отношения не имеет: расхождение старше, сужением не создано и не лечится —
@@ -1013,7 +523,7 @@ REST-контракта (`specs/README.md`), а `AGENTS.md` §8 требует �
 не содержание поставляемых наборов; 013 (фронтенд) данные не владеет; 015 исключает поверхность 012.
 Поэтому долг лежит здесь, а не «передан».
 
-### 2026-09-11 — `MISSED-3`: передача в 012 заявлена, получение не видно
+### 2026-09-11 — `MISSED-3`: передача в 012 заявлена, получение не видно — **[взято в 028, F-028-21 (E11)]**
 
 Найдено при перепроверке `T1400` программы 014. Разбор 008 перевёл `MISSED-3` из группы `AA` в
 группу `Q`, то есть **в программу 012**, и на этом основании 014 исключила его из своей области
@@ -1089,28 +599,11 @@ Postgres-набор реплея клиринга с реальной конку
 (`tests/integration/test_clearing_commit_replay_postgres.py:587,772`). Слабейшее —
 `tests/unit/test_payment_timeouts.py:182`: подменяет prepare пустышкой, а commit — функцией, которая
 лишь метит транзакцию `COMMITTED`, и **никогда не применяет долговой эффект**; доказывает
-восстановление ответа, а не финансовую атомарность. Публичный тест дубликата
-(`tests/integration/test_payments_idempotency.py:75`) сверяет id и статус и **не смотрит на долг
-после реплея**.
+восстановление ответа, а не финансовую атомарность. *(Сказанное здесь о публичном тесте дубликата закрыто, реестр 028 № 163.)*
 
 **Три границы, проверенные мной по коду вслед за ревьюером:**
 
-- **`app/api/v1/integrity.py:404-436` — ремонт удаляет реальный долг, если линия доверия
-  ЗАМОРОЖЕНА.** Выборка идёт по `TrustLine.status == "active"`, отсутствующий ключ даёт лимит `0`, и
-  долг сносится. Это записано как намеренное в собственном docstring эндпоинта: «If a debt has no
-  active trustline (limit treated as 0), the debt is removed». Уже заведено как **`F-015-6`, `P1`**
-  (`015/spec.md:76`, задача `T1511`) — и **лежит неавторизованным с 2026-08-24**.
-- **`app/core/payments/engine.py:1552` — дрейф ровно в один квант хранения ПРИНИМАЕТСЯ.**
-  `tolerance = Decimal("0.00000001")`, сравнение строгое `abs(drift) > tolerance`. Это ровно тот
-  предел обнаружения, о который бьётся формулировка владельца «ошибка будет накапливаться».
-  Механизм записан в `012/spec.md:147-148` как объяснение, почему `F-012-1` ничем не ловится;
-  **владельца у самой границы нет**, и она обязана стать явным решением приёмки в 015.
-- **`app/core/payments/service.py:214` — НОВАЯ НАХОДКА, не записанная нигде.** Сравнение отпечатка
-  запроса стоит под условием `existing_fp is not None`. Транзакция, сохранённая **без** отпечатка,
-  сравнение равенства запросов **обходит целиком**: повтор с другим запросом под тем же `tx_id`
-  вернёт сохранённый результат вместо конфликта. Ревьюер выполнил изолированный зонд резолвера:
-  при отсутствующем отпечатке — `STORED_RESULT` на другой запрос, при заполненном — конфликт.
-  **Установлено поведение ветки, не существование затронутых строк в продакшене.** Получателя нет.
+*(Три границы, названные здесь, сняты программой 028 (2026-10-04): ремонт `/integrity` — эндпоинтов нет, реестр № 160; допуск дрейфа в один квант — механизм заменён сверкой, № 161; обход `existing_fp is not None` — закрыт `T1548`, № 162.)*
 
 **Рекомендованный порядок работ** (решение за владельцем, здесь записано как вход):
 
@@ -1160,25 +653,6 @@ Postgres, оба E2E и super-smoke остаются `scheduled/manual`. Пат�
 базы к одним именам, либо закрепить правило «удалять ограничения только через отражение». **Получателя
 нет.**
 
-### 2026-09-11 — Postgres-тир тестов работает не в том уровне изоляции, что приложение
-
-Найдено при шаге 3 фазы B программы 015. Приложение создаёт движок PostgreSQL с
-`isolation_level=settings.DB_POSTGRES_ISOLATION_LEVEL` — `SERIALIZABLE` (`app/db/session.py`). Общий
-тестовый движок (`tests/conftest.py`, `create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)`)
-уровень не задаёт и работает в `READ COMMITTED` по умолчанию сервера.
-
-**Следствие:** всё, что зависит от снимка `SERIALIZABLE` — ошибки `40001`, снимок, зафиксированный до
-ожидания лока, повтор единицы работы, — Postgres-тир **не видит**, хотя приложение живёт именно в этом
-режиме. Тест, зелёный в `READ COMMITTED`, может описывать поведение, которого у приложения нет, и
-наоборот. Второй слой того же рода: `db_session` на Postgres оборачивает тест во внешнюю транзакцию,
-и транзакционные advisory-локи под ней **не снимаются ни одним «commit»** — стенд не отличает
-писателя, державшего лок, от потерявшего его.
-
-**Обход в 015:** стенд шага 3 строит свой движок `SERIALIZABLE` с настоящим пулом. Сам общий движок
-не менялся: перевод всего тира на `SERIALIZABLE` поменяет поведение 136 Postgres-тестов и требует
-отдельного прогона и разбора. **Получатель — программа 015, шаг 8** («явные Postgres-гейты приёмки для
-границ локов, повторов…»), где это условие приёмки, а не улучшение.
-
 ## Отложено из 015 при задании закрытия — 2026-09-14
 
 **Основание:** вопрос владельца 2026-09-14 «не ушли ли мы в бесконечное шлифование»; ответ по числам и
@@ -1191,30 +665,9 @@ Postgres, оба E2E и super-smoke остаются `scheduled/manual`. Пат�
 
 | Задача | Что осталось | Получатель |
 |---|---|---|
-| `T1507` | выровнять `/integrity` API, OpenAPI и протокол; английский канон всё ещё называет zero-sum проверкой (с `T1542`) | нет; берётся только по заявке с ответами §19.2 |
-| `T1510` | остаток `F-015-8`: политика и `max_paths` роутера в предсказательных маршрутах; защита от собственного PID уже сделана `T1545` | нет; берётся только по заявке с ответами §19.2 |
-| `T1511` | сама починка ремонта (`F-015-6`); оба эндпоинта закрыты `409`/`E008`, потеря сдержана | нет; берётся только по заявке с ответами §19.2 |
-| `T1512` | `participants/service.py` и `admin/metrics.py` складывают разные эквиваленты; представление, не движение денег | нет; берётся только по заявке с ответами §19.2 |
+| **[взято в 028, F-028-36 (E5)]** `T1512` | `participants/service.py` и `admin/metrics.py` складывают разные эквиваленты; представление, не движение денег | нет; берётся только по заявке с ответами §19.2 |
 | `T1513` | форма денежной строки на выходе `/trustlines`, `/payments`, `/capacity`, `/max-flow`; `min_scale`-ловушка | нет; берётся только по заявке с ответами §19.2 |
-| `T1514` | остаток: PID вне сценария; инжект при обратном долге закрыт отказом 2026-09-24 (`F-015-12`, `tests/integration/test_p015_f01512_inject_refuses_an_opposing_debt_postgres.py`); сдерживание инжекта дало `T1544` и шаг 5 | нет; берётся только по заявке с ответами §19.2 |
-| `T1515` | планировщик симулятора обещает ёмкость выше расчёта ядра; реализм симулятора | нет; берётся только по заявке с ответами §19.2 |
-| `T1517` | контракт подписи: связывание типа операции; потеря денег не воспроизведена | нет; берётся только по заявке с ответами §19.2 |
-| `T1518` | остаток `F-015-14`, четыре строки расхождений с протоколом; предмет спора — документ | нет; берётся только по заявке с ответами §19.2 |
-| `T1519` | мёртвый код: `validate_idempotency_key`, `PaymentService.get_payment`, `PaymentDetail` и др. **2026-09-29, 024 `T2411`:** эти три и `RealRunner._apply_inject_event` удалены; `DeferredRealPaymentEffects.apply_once` не доказан мёртвым (keep); недостижимая ветка клиринга (`interlocked_equivalent_id is None and debts`) — в поверхности `T2417`. **2026-10-02, `T2417`:** ветка оставлена — она не принадлежит режиму без вхождения: попытки без интерлока запускает и вхождение, когда предварительное чтение в сессии вызывающего не видит всех долгов (`app/core/clearing/service.py`, `execute_clearing_with_amount`, `len(preflight_debts) != len(debt_ids)`) | нет; берётся только по заявке с ответами §19.2 |
-| `T1521` | два режима округления денег (`F-015-16`); денежного расхождения на живом пути не измерено | нет; берётся только по заявке с ответами §19.2 |
-| `T1531` | перечитывающий `SELECT` журнала перезаписываем слушателем; противник внутри процесса, припаркована 2026-09-13 | нет; берётся только по заявке с ответами §19.2 |
-| `T1536` | слушатель после охранника переадресует UPDATE метаданных долга; противник внутри процесса, припаркована 2026-09-13 | нет; берётся только по заявке с ответами §19.2 |
-| `T1538` | проверенную запись журнала можно удалить после проверки; противник внутри процесса | нет; берётся только по заявке с ответами §19.2 |
-| `T1539` | учёт savepoint-ов `T1532` даёт ложный отказ при трассирующем слушателе; в продакшене такого слушателя нет, гипотеза §18 | нет; берётся только по заявке с ответами §19.2 |
-| `T1541` | CI строит схему трижды, около 17 s на плановом job | нет; берётся только по заявке с ответами §19.2 |
-| `T1542` | `docs/en/03-architecture.md` рисует DDL `debts` без `ON DELETE`; сливается с `T1507` | нет; берётся только по заявке с ответами §19.2 |
-| `T1547` | real-mode симулятора пишет в общую `debts` без отдельного opt-in; стоп эквивалента `T1544` уже связывает симулятор | нет; берётся только по заявке с ответами §19.2 |
-| `T1552` | `POST /clearing/auto` возвращает необъявленный `400` при выключенном клиринге; решено `409`/`E008` через узел `T1544`, бриф готов, только код | нет; берётся только по заявке с ответами §19.2 |
-| `T1554` | подмена `checksum_after` при сбое контрольной точки в платеже и клиринге; выделена ключевым ревью шага 5 | нет; берётся только по заявке с ответами §19.2 |
-| `T1555` | `_resolve_inject_debt_equivalent_ids` перебирает все эквиваленты; `SCOPE-EDGE-CASE-ONLY` по ревью Codex | нет; берётся только по заявке с ответами §19.2 |
-| `T1556` | распределённый лок планового цикла целостности; `COST: FOLLOW-UP` по ревью Codex | нет; берётся только по заявке с ответами §19.2 |
-| `T1549`-находка 1 | одновременное `POST /api/v1/trustlines` одной тройки на `SERIALIZABLE` отвечает `[201, 500]` вместо `[201, 409 CONCURRENT_TRUSTLINE_CREATE]`: `40001` не обрабатывается, `TrustLineService.create` ловит только `IntegrityError` (`app/core/trustlines/service.py:236`, `:292`); той же формы, не измерено, `app/core/participants/service.py:82`. Дубликата нет, неверен статус. Тест `test_p1_trustline_reopen_postgres.py::test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declared_conflict` помечен `xfail(strict=True)`; репродьюсер `specs/015-financial-core-verification/closure-briefs/evidence/repro_trustline_40001.py`. **2026-09-24:** 019 это **не** закрывает — дефект не порождён коммитами платежа, у создания линии свой коммит и своя обработка ошибок (`app/core/trustlines/service.py:286`; консультация 019, `T1900`); `xfail` — `tests/integration/test_p1_trustline_reopen_postgres.py:169`. Узкий срез с классификатором `40001` возможен отдельно | нет; берётся только по заявке с ответами §19.2 |
-| `T1549`-находка 2 | тесты, явно закреплённые на `READ COMMITTED` и не названные контрпробами, остались как есть: `test_clearing_skip_releases_locks_postgres.py:374`, `test_concurrent_clearing_payment_lost_update_postgres.py:183`, `test_concurrent_prepare_routes_bottleneck_postgres.py:119`, `test_payment_commit_advisory_locks_postgres.py` (`:135`, `:345`, `:1024`, `:1142`, `:1268`), `test_payment_idempotency_postgres.py:118`. Копии на `SERIALIZABLE`: проходят все, кроме двух — одновременные клиринг и платёж (`INSERT INTO transactions` клиринга получил `40001` и вышел как `Internal server error`) и узкое место маршрутов (`TimeoutError`, барьер считает вызовы лока); **дефект ли это приложения — не установлено**, потери денег не показано | нет; берётся только по заявке с ответами §19.2 |
+| **[взято в 028, F-028-20 (E6)]** `T1552` | `POST /clearing/auto` возвращает необъявленный `400` при выключенном клиринге; решено `409`/`E008` через узел `T1544`, бриф готов, только код | нет; берётся только по заявке с ответами §19.2 |
 
 **Программа 016 (`specs/016-duplicate-policy-owners/`) не авторизуется** решением 2026-09-14: восемь P2
 дублирования политики не отвечают на вопрос 1 §19.2 (наблюдаемая потеря), а в роадмапе `README.md`
@@ -1224,7 +677,7 @@ Postgres, оба E2E и super-smoke остаются `scheduled/manual`. Пат�
 
 Обе находки родились от одного: обязательный гейт впервые поехал на PostgreSQL, и то, что скрывал SQLite, стало видно. Ни одна не держит 017 — по §19.5 это класс 2, деньги и долг по ним не движутся неправильно.
 
-### 2026-09-21 — половина прогонов симулятора не сохраняется на PostgreSQL: `seed` объявлен int32, а генерируется в 32 бита без знака
+### 2026-09-21 — половина прогонов симулятора не сохраняется на PostgreSQL: `seed` объявлен int32, а генерируется в 32 бита без знака — **[взято в 028, F-028-1 (E1)]**
 
 **Получатель: владелец.** Предполагаемый исполнитель — 021 (симулятор как клиент домена) либо отдельная узкая правка; не авторизовано. **2026-09-28, сведение закрытия 021:** 021 это не взяла — Non-goals 021 («Не чинит `simulator_runs.seed`»); остаётся отдельной узкой правкой (исполнитель не назначен).
 
@@ -1238,7 +691,7 @@ Postgres, оба E2E и super-smoke остаются `scheduled/manual`. Пат�
 
 **Чего эта запись не утверждает.** Правильная ширина колонки не выбрана: `BigInteger`, сужение генерации до 31 бита и хранение как строки дают разные последствия для существующих строк и для воспроизводимости прогонов. Это развилка миграции, и по протоколу решений 2026-09-21 она решается консультацией Codex, а не по умолчанию.
 
-### 2026-09-21 — `simulator-super-smoke` не получил сервис Postgres: job стал бы заведомо красным
+### 2026-09-21 — `simulator-super-smoke` не получил сервис Postgres: job стал бы заведомо красным — **[взято в 028, F-028-8 (E9, `T2891`): job перенесён на PostgreSQL; приёмка сохранности рана — после E1 (F-028-1)]**
 
 **Получатель: 019 и владелец записи выше.** Задача `T1701` требовала дать job'у сервис и URL в том же срезе. **Сделано не было, и это измеренный отказ, а не пропуск.**
 
@@ -1268,13 +721,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 
 **Что проверено:** его никто не зовёт — ни CI, ни npm-скрипт, ни тест. `tests/unit/test_simulator_scenario_allowlist_and_archives.py` утверждает лишь, что архивные **сценарии** не загружаются, про этот скрипт он молчит.
 
-### 2026-09-22 — документы симулятора описывали прежний вход генератора сценариев
-
-**Закрыто тем же PR**, запись оставлена, чтобы расхождение не переоткрывали как новое. `docs/ru/simulator/backend/fixtures-mapping.md` называл входом генератора seed-модули и выводил `groupId` из диапазонов номеров в PID (раздел 3.2) — ровно тот вывод смысла из формы, против которого написан §9 `AGENTS.md`; `scenarios-and-engine.md` вёл стрелку схемы от канонических admin-фикстур; `realistic-scenarios.md` указывал на функцию внутри генератора. Все три приведены к действующему пути, прежнее описание помечено историческим, а не удалено.
-
-Попутно измерено и записано: `can_be_intermediate` решает **кредитор один**, а не пара «business ↔ business», как утверждали оба `*-v2.md` — 147 линий `business → person` против 48 в Greenfield, 63 против 18 в Riverside.
-
-### 2026-09-22 — заморозка участника не мешает маршруту идти через него
+### 2026-09-22 — заморозка участника не мешает маршруту идти через него — **[взято в 028, F-028-28 (E3)]**
 
 **Получатель: владелец.** Класс по §19.5 пока **2**, и ровно по одной причине: репродьюсера нет. Если он напишется, находка становится классом 1 — это денежный путь.
 
@@ -1286,7 +733,7 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 
 Найдено при написании рецепта `T1713`: рецепт может запретить *называть* замороженного участника после заморозки, но помешать роутеру идти *через* него не может.
 
-### 2026-09-22 — статус трастлайна `frozen` объявлен протоколом и недостижим продуктом
+### 2026-09-22 — статус трастлайна `frozen` объявлен протоколом и недостижим продуктом — **[взято в 028, F-028-29 (E3)]**
 
 **Получатель: владелец.** Класс 2, репродьюсера нет.
 
@@ -1304,77 +751,24 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 
 **Развилка та же, что и выше:** либо продукт обязан уметь замораживать линию и тогда это пробел реализации, либо статус из протокола ушёл и тогда неверен протокол. Решать до того, как `T1711` напишет обходной путь.
 
-### 2026-09-23 — лаунчер не может поднять бэкенд на машине с обычным venv: владение по PID не выполнимо
-
-**Получатель: владелец.** Класс 2 по §19.5 — деньги не движутся, но **ежедневный цикл владельца сломан**, и это не регрессия `T1710`: воспроизведено на немодифицированном `run_full_stack.ps1` с `origin/main`.
-
-`\.venv\Scripts\python.exe` на Windows — это **venvlauncher-заглушка**, а не копия интерпретатора: 274 712 байт против 103 192 у базового `python.exe`, содержимое разное. Она порождает базовый интерпретатор **дочерним процессом**, поэтому слушатель порта никогда не равен запущенному PID.
-
-**Воспроизведено оркестратором независимо 2026-09-23**, вне лаунчера:
-
-```powershell
-$p = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList "-m","http.server","18399","--bind","127.0.0.1" -PassThru
-(Get-NetTCPConnection -LocalPort 18399 -State Listen).OwningProcess   # != $p.Id
-```
-
-Результат: запущенный PID 16120, слушатель 28012, имя процесса `python`. `Wait-ForLaunchedServiceOwnership` требует точного равенства, поэтому старт бэкенда падает с «port is owned by a different process».
-
-**Два honest варианта, выбор за владельцем:** пересоздать `.venv` с `--symlinks`, чтобы `python.exe` был настоящим интерпретатором; либо признать дочерний процесс в контракте владения — сопоставлять по дереву процессов, а не по равенству PID. Второе надёжнее (не зависит от того, как собран venv у следующего разработчика), но трогает `Get-ListeningPid` / `Wait-ForLaunchedServiceOwnership`, то есть механизм владения, который сам по себе защищает от убийства чужого процесса.
-
-### 2026-09-23 — где живёт переносной PostgreSQL: вопрос владельцу, не агенту
-
-**Получатель: владелец.** Решения нет, есть обоснованное предложение.
-
-`docs/ru/backend/postgres-local-portable.md` ставит кластер в `%USERPROFILE%	ools`, то есть **вне папки проекта**, а решение владельца 2026-09-21 гласит «никаких каталогов вне папки проекта» (`AGENTS.md` §7).
-
-**Предложение исполнителя `T1710` — не менять**, с тремя проверяемыми доводами: правило писалось про **рабочие каталоги задачи** (worktree, клоны ревью, артефакты), которые уезжают вместе с ней, а кластер — инструмент машины, ровесник Node и Python; кластер **общий по построению** — runbook делит его между параллельными агентами, внутри worktree каждый ставил бы свой (~300 МБ и минуты на задачу); `pgdata` — изменяемая БД, а гард `test_p014_t1406_no_mutable_database_in_the_working_tree.py` существует ровно потому, что база в рабочем дереве однажды уже оказалась.
-
-Если владелец решит иначе, менять придётся §1–§3 runbook и путь `$data`, **а не лаунчер** — тот знает только `host:port`.
-
 ## Остаток закрывающего ревью стадии 1 программы 017 — 2026-09-23
 
 Ревью Codex на `37fec08..5e687dd` вернуло `CLASS-1-COUNT: 0`, `CLASS-2-COUNT: 13`, `READY-TO-CLOSE: YES`. По §19.5 стадия закрывается, и находки класса 2 **не становятся задачами** программы. Семь из тринадцати исправлены узкой правкой после закрытия, потому что каждая либо регрессия этой же стадии, либо ложное утверждение о деструктивной операции; правка только сужает, новых сущностей не вводит. Пять записаны здесь и **не чинятся**, и причина общая: все пять — про сам механизм проверки, а тринадцать находок подряд о механизме это числовой признак петли §19.5. Строить гарды над гардами — ровно то, что §19.4 велит прекратить.
 
-**Получатель всех пяти — владелец.** Ни одна не двигает деньги и не имеет пути в продукте.
+**Остаток после 028 E0:** две записи ниже. Пять пунктов (F2, F6, F7, F8, F9) приняты как есть — реестр 028 № 195–199, раздел «Принято программой 028».
 
-- **F2 — граница сброса доказывает пространство имён, а не владение.** `scripts/dev_database.py` принимает любую базу по шаблону `geov0_dev_*`; простаивающая база соседнего агента проходит так же, как своя. Замер отказа на `geov0_test_p017t1711` доказал отделение от тестового пространства имён, а не защиту соседних dev-баз. Починка требует метаданных владения — **новой сущности**, то есть это уже не починка, а предложение программы.
-- **F6 — `GeneratorExit` на выходе генератора прячет отказ очистки.** Если контекст-менеджер провизионирования обернуть в асинхронный генератор и закрыть его, флаг тела остаётся «упало», и отказ `DROP DATABASE` сводится к предупреждению. Путь достижим только такой обёрткой; в репозитории её нет.
-- **F7 — гарды «каждый PR» не смотрят `needs:`.** `needs: container-smoke` на обязательном job'е тихо снял бы его с PR, потому что `container-smoke` только расписанный. Контрпример — мутация; в сегодняшнем workflow такого нет.
-- **F8 — у покрытия операций нет независимого знаменателя.** `every_operation_examined` сравнивает операции журнала с операциями, которые увидела сверка, — оба числа из одного источника и могут вместе пропустить одну и ту же команду рецепта. Предсказано чтением, прогоном не подтверждено.
-- **F9 — исключение для `quality.yml` в гарде единственного владельца шире фикстуры, которую объясняет.** Исключён весь файл, поэтому вторая копия bootstrap в том же workflow невидима.
 
-**Отдельно — готовность советует сбросить базу, когда не сошлась сверка.** Найдено исполнителем узкой правки (PR #18), вне её объёма и поэтому здесь. Когда `reconciliation_passed` проваливается, лаунчер отказывает стартовать и советует `reset-db`. Но проваленная сверка — это **денежное расхождение**, и сброс уничтожает единственное его свидетельство: журнал, долги и baseline, по которым можно установить, какая операция его внесла. Для демонстрационной базы совет безвреден, для базы, где владелец что-то делал руками, — нет. §9 называет нарушение целостности гейтом, а не поводом начать заново. Решение нужно одно: при `FAILED` сверки лаунчер отказывает **и не советует сброс**, а называет, как сохранить состояние перед разбором. Правка одной строки сообщения, но это решение, а не опечатка.
+**[сделано в 028, F-028-13 (E9, `T2895`); строка снимается при сведении `T2899.7`]** **Отдельно — готовность советует сбросить базу, когда не сошлась сверка.** Найдено исполнителем узкой правки (PR #18), вне её объёма и поэтому здесь. Когда `reconciliation_passed` проваливается, лаунчер отказывает стартовать и советует `reset-db`. Но проваленная сверка — это **денежное расхождение**, и сброс уничтожает единственное его свидетельство: журнал, долги и baseline, по которым можно установить, какая операция его внесла. Для демонстрационной базы совет безвреден, для базы, где владелец что-то делал руками, — нет. §9 называет нарушение целостности гейтом, а не поводом начать заново. Решение нужно одно: при `FAILED` сверки лаунчер отказывает **и не советует сброс**, а называет, как сохранить состояние перед разбором. Правка одной строки сообщения, но это решение, а не опечатка.
 
-**Отдельно — репродьюсер к записи о транзите через замороженного участника.** Ревьюер дал его явно, **не исполняя**: активные A, B, C; линии B→A и C→B с лимитом 10 и разрешённым посредничеством; заморозить B; платёж 1 из A в C с `max_hops=2` — роутер путь допускает, статус B не читается. **В класс 1 это не переводит**, и ревьюер сказал почему: протокол `suspended` только именует, запрета транзита в нём нет, а репродьюсер поведения без нормативной посылки не доказывает, что поведение неверно. Запись выше остаётся развилкой из трёх исходов, и первым шагом по ней остаётся решение, а не код.
+**[взято в 028, F-028-28 (E3)]** **Отдельно — репродьюсер к записи о транзите через замороженного участника.** Ревьюер дал его явно, **не исполняя**: активные A, B, C; линии B→A и C→B с лимитом 10 и разрешённым посредничеством; заморозить B; платёж 1 из A в C с `max_hops=2` — роутер путь допускает, статус B не читается. **В класс 1 это не переводит**, и ревьюер сказал почему: протокол `suspended` только именует, запрета транзита в нём нет, а репродьюсер поведения без нормативной посылки не доказывает, что поведение неверно. Запись выше остаётся развилкой из трёх исходов, и первым шагом по ней остаётся решение, а не код.
 
 ## Найдено переключением тира на Postgres (017, стадия 2c) — 2026-09-23
 
-### `simulator-super-smoke` теперь красный на старте тира — сознательно
+### `simulator-super-smoke` теперь красный на старте тира — сознательно — **[взято в 028, F-028-8 (E9, `T2891`): job перенесён на PostgreSQL; приёмка сохранности рана — после E1 (F-028-1)]**
 
 **Получатель: владелец.** Класс 2. Расписанный job на `windows-latest`, где сервиса Postgres нет. До стадии 2c он шёл на SQLite; после неё SQLite-тира не существует, и тир отказывает до сбора тестов (exit 4).
 
 Давать ему Postgres сейчас бессмысленно: он уже заблокирован двумя дефектами, записанными выше 2026-09-21, — переполнением `simulator_runs.seed` в int32 и `SerializationError` без ретрая на пути реального тика. Отключать триггер, чтобы job не краснел, — худший вариант: зелёный job, который ничего не проверяет. **Оставлен красным с названной причиной.** Условие возврата: оба блокера устранены, после чего job получает сервис Postgres и URL.
-
-### В базе тира остаются строки без жертв
-
-После полного прогона в базе тира лежат 5 строк `integrity_audit_log` (модули `p1_*`, `payment_engine_uow_retry`, `payment_engine_audit_conflict`, `unit/test_p015_step5c_reaction_and_hold`) и 3 строки `simulator_runs`. Их сегодня никто не читает, поэтому ни один тест от них не краснеет. Это тот же класс, что RESIDUE стадии 2b, только без жертвы; по §2 без сигнала не чинится. Станет находкой, как только появится тест, который эти таблицы считает.
-
-### Гард `T1525` освобождает теперь любой модуль под `tests/`, а не только 56 маркерных
-
-Раньше исключение гарда опиралось на `pytestmark = pytest.mark.postgres`. После переключения гарантия Postgres — это сам тир, для всех модулей. Расширение обосновано новым инвариантом (тир отказывает без Postgres), и контрпроверка на известных SQLite-модулях зелёная, но **это расширение исключения**, и внешнее ревью стадии 2 должно его проверить.
-
-## Остаток закрывающего ревью стадии 2 программы 017 — 2026-09-23
-
-Ревью Codex на `ea14726..253359b`: `CLASS-1-COUNT: 0`, `READY-TO-CLOSE: YES`. Стадия закрыта по §19.5. Четыре находки из шести исправлены узкой правкой после закрытия; две записаны здесь и не чинятся — обе про сам механизм проверки, а шесть находок подряд о механизме — числовой признак петли §19.5. **Получатель — владелец.** Ни одна не двигает деньги.
-
-- **F2 — расширенное исключение гарда `T1525` даёт ложноотрицательный путь.** После переключения тира на Postgres исключение гарда распространилось с 56 бывших маркерных модулей на все под `tests/`. Функция, признающая модуль «отказывающим не-Postgres», принимает подходящий отказ **где угодно** в модуле и не связывает его с конкретным конструктором движка. Модуль может присвоить `URL = "sqlite+aiosqlite:///:memory:"`, построить `create_async_engine(URL)` без контроля транзакций и держать не связанный с этим Postgres-хелпер со скипом — сканер его пропустит. Починка требует связать отказ с конструктором разбором AST — это гард над гардом. Предсказано чтением, исполнением не подтверждено. Оркестратор сам вынес это расширение ревьюеру, когда принимал его.
-- **F6 — посылка о `scratch_db` была неполной, и исправлена в спеке 017.** На SQLite-стендах живут не только тесты механизма SQLite, но и доменные тесты: политика адаптивного клиринга, SSE аудита, аудит после тика. Они проверяют поведение приложения на SQLite. **Для стадии 3 это условие:** прежде чем убрать SQLite из `scratch_db`, эти тесты обязаны переехать на Postgres, иначе их покрытие умрёт вместе со стендом.
-
-### Ось Windows PowerShell 5.1 не измеряется в CI вовсе
-
-**Получатель — владелец.** Класс 2. Разрыв между локальным Windows (3020 выбранных тестов) и CI на ubuntu (2967) объяснён полностью, все 53 из 53: `tests/unit/test_run_full_stack_database_url_redaction.py` параметризуется по интерпретаторам PowerShell, найденным при сборе (`shutil.which` и `%SystemRoot%`). На Windows их два — pwsh 7 и Windows PowerShell 5.1, на ubuntu один. Доказано исполнением: сбор в чистом worktree дал те же 3020, гипотеза о локальных артефактах опровергнута.
-
-Логика лаунчеров — редакция секретов, владение процессами, откат при старте — **проверяется** в обязательном гейте на Linux под pwsh 7, так что ложного зелёного по логике нет. Не проверяется только работа тех же лаунчеров под Windows PowerShell 5.1: на Linux его нет в принципе, а ни один CI-job не запускает этот модуль на Windows. Директивы `#Requires` в лаунчерах нет, `README.md` показывает запуск без указания редакции. Если поддержка 5.1 обязательна — её сейчас измеряет только локальный прогон на Windows.
 
 ## Найдено срезом S1 стадии 3 программы 017 — 2026-09-24
 
@@ -1385,23 +779,6 @@ $p = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList "-m","ht
 Регенерация EUR и HOUR даже на старом коде даёт файлы, отличные от закоммиченных. Пример: в `EUR/snapshot.json` закоммичено `"net_balance_atoms": "-7250"`, генератор пишет `"7250"` — оба при `net_sign: -1`. Если знак несёт `net_sign`, то `net_balance_atoms` — модуль, и верен генератор, а закоммиченный файл учитывает знак дважды.
 
 **Почему это не было видно:** `prebuild` сборки Simulator UI v2 перегенерирует только UAH, поэтому EUR и HOUR никогда не сверялись с генератором. Файлы не правились, причина не разобрана — нужно установить, какая сторона верна, прежде чем перегенерировать.
-
-## Найдено ревью программы 025 — 2026-10-03
-
-### Пределы тира инструментов (025 `T2502.2`) — внесено 2026-10-03, класс 2 по §19.4
-
-**Получатель — владелец инструментов проверки.** Класс 2, P1 по серьёзности, деньги не затрагивает. Источник — единственный §15-круг по fix-delta (`VERDICT-025-T2502-2-FD: BROKEN`, `CLASS-1-COUNT: 0`, `CLASS-2-COUNT: 2`), не воспроизводилось исполнением (ревьюер читал файлы и документацию).
-
-Два класса обхода привязки тира `tooling-tests/` к CI; оба требуют **намеренной правки** механизма запуска, а не случайной:
-
-- **`pytest.ini` `addopts` с опцией, завершающей pytest до проверок conftest** (`--help`, `--version`): исполнение тестов не происходит, проверки счёта и исхода не доходят, раннер принимает exit 0 (`scripts/verify_local.ps1:105`, `:240`, `:257`, `:312`; `tooling-tests/conftest.py:75`, `:131`; `pytest.ini:41`). Раннер очищает `PYTEST_ADDOPTS`, но не `addopts` конфигурации.
-- **Workflow: `needs:` и `shell:`.** Зависимость job'а тира от job'а, пропускаемого на PR (`container-smoke`, `.github/workflows/quality.yml:271`), пропускает и сам job; `shell: "echo {0}"` на шаге оставляет распознаваемый `run`, но ничего не исполняет (`tooling-tests/conftest.py:268`, `:272`, `:286`). Не проверяются также `defaults.run`, `strategy.matrix`, `timeout-minutes`, `working-directory` — контрпримера молчаливого успеха не построено.
-
-Кроме того, `PYTEST_PLUGINS` не ограничен; произвольный код плагина вне гарантии любой защиты внутри того же процесса (§19.2, п. 3).
-
-**Почему не строится.** (1) Сигнал петли §19.5: четыре находки подряд касаются самого механизма привязки, а не предметной области. (2) Обход требует умышленной перенастройки `pytest.ini` или workflow; такая правка меняет сам механизм проверки и является триггером внешнего ревью (§15), то есть ловится ревью, а не тестом. Гарантия сужена записью в докстринге `tooling-tests/conftest.py` и в спеке `specs/025-test-asset-consolidation/spec.md` (Changelog 2026-10-03).
-
-**Самый дешёвый общий вариант, если когда-либо будет авторизован — маркер завершения.** Исполняющая сессия (`tooling-tests/conftest.py`, `pytest_sessionfinish`) пишет маркер в каталог артефактов раннера; раннер (`scripts/verify_local.ps1`, шаг `$runTooling`) считает успехом только exit 0 **и** наличие свежего маркера с числом выбранных случаев. Это закрывает `--help`/`--version` и любой другой выход до исполнения независимо от источника опции. Не закрывает `needs:`/`shell:` (процесс раннера не стартует вовсе) — их ловит только ревью workflow или проверка job-лога после push (`gh run view <id> --log`). Если строится — ответы на шесть вопросов §19.2 обязательны, цена: одна запись файла и одна проверка в раннере.
 
 ## Остаток программы 025 после закрытия — внесено 2026-10-03
 
@@ -1436,10 +813,6 @@ $p = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList "-m","ht
 ### (c) Открытый класс 2 срезов 025, которого ещё нет в BACKLOG
 
 **Получатель — владелец инструментов проверки** (кроме оговорённого).
-- **Лаунчеры и раннер больше не проверяются под Linux `pwsh`** (`T2502.2`, внутренний adversarial, (d)): до переноса `required-backend` (ubuntu) гонял их одним хостом `pwsh`; раздел `tooling-tests/powershell` исполняется только на Windows `required-ui` с обоими хостами. Связано с записью «Ось Windows PowerShell 5.1 не измеряется в CI вовсе» (017).
-- **Порядок маскировки в `required-ui`:** раздел powershell стоит до UI-гейтов, его отказ скрывает их результат в этом прогоне; `if: always()` запрещён самой привязкой. Оставлено сознательно (раздел ~70 с).
-- **Гарды продукта, сканирующие `tests/`, не читают `tooling-tests/`** (`test_p019_lock_primitives_live_in_money_boundary.py`, `test_p021_t2109_the_tick_clears_through_the_runner.py`, `test_p015_b4_counterexample_marker_is_not_a_hiding_place.py`); сканы бутстрапа `alembic_version` и SQLite-URL расширены, эти — нет.
-- **Число тира — не состав:** случай, заменённый более слабым под тем же `EXPECTED_CASES`, проходит; привязка к CI — форма YAML, а не факт исполнения (проверка job-лога после push — `gh run view <id> --log`).
 - **MOVE-OUT-функции внутри KEEP/MIXED-модулей не выделены** (`T2502.2`): `test_p015_b4_counterexample_marker_is_not_a_hiding_place.py::test_pytest_no_longer_registers_the_marker`, `test_flow_and_periodicity.py::test_realistic_v2_fixture_flow_chains_match_group_ids`, пять проверок переписи эквивалентов в `test_p012_t1212_…_postgres.py`, `test_p014_t1402_…::test_no_checked_in_fixture_publishes_a_zero_sum_verdict`; две проверки с вердиктом DELETE-REMOVED перенесены в составе `t1406` целиком. Получатель — будущий срез тестового актива.
 - **`viz_rules.net_sign_from_atoms` и `collect_magnitudes`** вызывающих в `app/` не имеют, исполняются только генератором демо-фикстур и его тестом в `tooling-tests/portable` (`T2502.1`, F-025-2 (a)); `net_sign_from_atoms` дублирует `net_balance_utils.atoms_to_net_sign`. Получатель — владелец симулятора: перенос в генератор — правка `app/`, не попутно.
 
@@ -1688,28 +1061,148 @@ Ledger промежуточного внешнего ревью волн 1–2 (
 | Откат лаунчера восстанавливает состав запущенных сервисов, а не снимок образа/конфига | Принятое ограничение однонодовой dev-топологии | `run_local.ps1:485-533`, `run_real_simulator.ps1:779-796`, `run_full_stack.ps1:963`. Снимка образа не существует нигде |
 | Канонический `ENV` выигрывает у legacy-алиаса `ENVIRONMENT` | Намеренное поведение; конфликтующие поддерживаемые значения по-прежнему fail-close | `app/config.py:87`, поле `:90-92`, резолвер `:258-283`, fail-close `:276-280` |
 
-## Остаток закрывающего ревью стадии 3 программы 017 — 2026-09-24
+### Принято программой 028 (E0): живо, но не чинится — 2026-10-04
 
-Класс 2 по §19.5; программу 017 не держит. Получатель — следующая работа, трогающая соответствующий файл.
+Пункты ниже сняты из своих разделов: наблюдаемой потери на денежном пути нет (§19.2 п. 1) либо починка — новая сущность без выигрыша. Это решение программы 028 по реестру, а не новая находка; переоткрывает такой пункт только новая находка с потерей (§17). Прежний текст пункта — `git show c51afdcb:specs/BACKLOG.md` (строка — в колонке «Якорь» реестра [`028-backlog-rework/register.md`](028-backlog-rework/register.md)), evidence и решение — там же под номером.
 
-- ~~**Гард `T1707` не видит `getattr(obj, "dialect")`.** `tests/unit/test_p017_no_second_dialect.py:252` распознаёт чтение диалекта только как `ast.Attribute`; обработчик вызовов (`:259`) литеральный `getattr` не разбирает. Воспроизведено 2026-09-24: `scan_source` на `if not getattr(engine, "dialect").name.startswith("postgres"): return` → `{}`. Это шире заявленных слепых пятен (`:65`: имена, собранные в рантайме). Лечение — либо распознавать `getattr` с литеральным вторым аргументом, либо назвать это слепым пятном в сообщении гарда. P2.~~ — закрыто 2026-09-24, коммит `chore(017): close the stage-3 review remainder` (ветка `claude/017-polish`): гард читает `getattr(<expr>, "<литерал>")` как `<expr>.<литерал>`; `getattr` с нелитеральным именем назван слепым пятном в сообщении гарда.
-- ~~**Тест формы записи журнала может пройти на чужом CHECK.** `tests/unit/test_p015_b4a_journal_mechanism.py:1226` обещает краснеть при снятии `chk_debt_journal_entries_delta`, но вход `before=2, after=3, delta=0` отвергает и арифметический CHECK, а ассерт `:1274` принимает любой CHECK. Точное имя ограничения держат `tests/integration/test_p015_b4_entries_and_money_postgres.py:2426,2563`, так что эффект не потерян. P3.~~ — закрыто 2026-09-24, коммит `chore(017): close the stage-3 review remainder` (ветка `claude/017-polish`): каждая подделка утверждает имя ограничения, которое PostgreSQL сообщает (проверяет CHECK по алфавиту имён); снятие `chk_debt_journal_entries_delta` из миграции 022 краснит тест (измерено).
-- ~~**Замер «250 015 значений» в докстринге `app/core/ledger/journal.py:489` невоспроизводим из дерева:** пробы, популяции и команды в репозитории нет. Удаление `MONEY_ROUND_TRIP` от этого не становится небезопасным — точное хранение держат `test_p015_b4a_journal_mechanism.py:970` и `test_p015_b4a_journal_postgres.py:86`. P3.~~ — закрыто 2026-09-24, коммит `chore(017): close the stage-3 review remainder` (ветка `claude/017-polish`): докстринг заменён проверяемым утверждением о `AsyncpgNumeric` и ссылками на два теста точного хранения.
-- ~~**Проза в настоящем времени о SQLite** осталась в `app/api/v1/admin.py:1332,1431,1551`, `app/core/clearing/service.py:97,909,972`, `app/core/ledger/reconciliation.py:965,1134`, `app/core/simulator/inject_executor.py:44`, `app/db/models/simulator_storage.py:14,68,96,123`, `app/schemas/equivalents.py:28`, `app/schemas/trustline.py:28`, `scripts/cleanup_simulator_runs.py:88` и в части `docs/ru` (`runbook-dev-wsl2…:293`, `network-economy-analyzer-spec.md`, `simulator/scenarios-and-engine.md:37,468,575`). Поведения не меняет; правится попутно при следующем касании файла.~~ — закрыто 2026-09-24, коммит `chore(017): close the stage-3 review remainder` (ветка `claude/017-polish`): перечисленные места приведены к текущему коду.
-- **Половина `T1541` — bootstrap entrypoint'а — не тронута** (записано при закрытии стадии 2): префлайт `docker-entrypoint.sh` строит схему отдельно от тира; число прогонов `upgrade head` за сессию не мерено.
-- **Замер времени CI с промахом кэша зависимостей** не сделан — за стадию промаха не случилось (бюджет `T1706`).
+| № реестра | Что было (якорь BACKLOG — суть) | Почему не чинится |
+|---|---|---|
+| 20 | стр. 53, multipath через pending-пару в сервисе — Пробел evidence | Нет наблюдаемой потери: ядро ограничено `pending_pair_capacity` (`capacity.py:37`), путь через `Book` покрыт |
+| 21 | стр. 54, pending-линия и дрейф/импорт — Нет контртеста | Нет потери: фильтр в коде, тест лишь страховка |
+| 22 | стр. 55, commit-unknown после автозакрытия — Не исполнен | Нет потери: пробел evidence, не дефект |
+| 23 | стр. 56, знаковое `available` на настоящем долге — Долг вставлен прямо | Нет потери: API и Admin покрыты настоящим путём |
+| 24 | стр. 57, PATCH против платежа/клиринга — Нет отдельного расписания | Нет потери: гонку закрывает блокировка строки 027 |
+| 25 | стр. 58, клиринг-завершение при снятом согласии — Нет совместного отрицательного случая | Нет потери: положительный путь и проверки согласия есть |
+| 28 | стр. 66, G2 перекрытые индексы — Логическое перекрытие | Нет потери; без замера планов не строить |
+| 30 | стр. 68, G4 копии настроек в `RealTick` — Тестовая половина сделана | Нет потери: продовые копии читают настройки при создании, поведение верно |
+| 34 | стр. 72, G8 дубли UI | Нет потери |
+| 38 | стр. 87, checksum без `close_requested_at` — Новая форма меняет сравнение чекпойнтов | Нет потери: запрос и завершение закрытия пишутся в аудит |
+| 51 | стр. 112, `/payments/max-flow` завышает оценку — Перераспределение потока игнорирует политику | Пользователь видит «можно до 2», а провести можно 1 — искажение есть; потери денег и расхождения с каноном нет: протокол объявляет оценку верхней, платёж сверх неё честно отказывает ядро; точный политико-совместимый max-flow — новый алгоритм (§19.3) |
+| 58 | стр. 137, `.env` перебивает окружение через псевдоним — Приоритет псевдонима, не источника | Нет потери: обход — одно имя в одном месте; деньги не зависят |
+| 70 | стр. 168, изоляция периодического клиринга по псевдоключу — Форма (б) — обнаружение | Нет потери: периодический клиринг выключен по умолчанию, гарантия — раздельные базы. Опора проверки на `simulator_runs` чинится № 187 |
+| 73 | стр. 175, `trustlines.policy` nullable — Никто не пишет `null` | Нет потери; `nullable=False` — новая миграция без выигрыша |
+| 81 | стр. 229, `naming_convention` индексов — ORM `ix_*` против `idx_*` | Нет потери; существующие не трогать (см. № 164) |
+| 98 | стр. 265, ран адоптирует участников чужого рана — Ключей рана нет | Нет потери: решение П2 2026-10-03 — участники симулятора полноценные |
+| 99 | стр. 266, статус участника после подключения WS — Не перепроверяется | Нет потери: у `/ws` нет потребителя (№ 6) |
+| 104 | стр. 289, launcher runtime helpers — 15 дублей, 5 идентичных | Нет потери: новый межскриптовый модуль; безопасность lifecycle покрыта тиром инструментов |
+| 121 | стр. 333–339, пп. 1–3, 6, 7 диагностики `find_cycles` — `LIMIT` до дедупликации и т. п. | Нет потери: только диагностика `GET /clearing/cycles`, денежного пути нет; пп. 4–5 закрыты удалением `auto_clear` |
+| 131 | стр. 437, ответ на гонку зависит от окружения — 23505 против 40001 | Нет потери: ни одна ветка не двигает деньги дважды; ветка `40001` под RC не возникает |
+| 132 | стр. 438, `test_payment_timeouts.py` подделывает коммит | Нет потери: покрытие держит ячейка 7 `T1523` настоящим коммитом |
+| 134 | стр. 440, `seed_db.py` пишет `PAYMENT` без отпечатка — Предупреждение на будущее | Нет потери: повтор их `tx_id` недостижим (запись сама это говорит) |
+| 144 | стр. 648, написание клиента уезжает в снапшот — Экспонента недостижима | Нет потери: величина хранится точно, меняется только написание |
+| 145 | стр. 665, §1 примеры документации не сверяются — Нужна разметка блоков | Нет потери: пример `limit` исправлен `2790e28`, остаток — новый механизм |
+| 154 | стр. 899, 013 строгий декодер гасит страницу — Сценарий рассинхрона версий | Нет потери: сервер четвёртого имени не шлёт; ослабление гарда 013 вредно |
+| 166 | стр. 1194, `T1507` `/integrity` API, OpenAPI, протокол — EN называет zero-sum проверкой | Нет потери: EN заморожен |
+| 167 | стр. 1195, `T1510` политика и `max_paths` в предсказательных маршрутах — Цитата устарела | Остаток не сформулирован через потерю (§19.2 п. 1) |
+| 171 | стр. 1199, `T1514` PID вне сценария — Защита есть | Остаток не сформулирован через потерю |
+| 172 | стр. 1200, `T1515` планировщик обещает больше ядра — Реализм | Нет потери: ядро отказывает |
+| 173 | стр. 1201, `T1517` подпись не связывает тип операции | Нет потери: не воспроизведена, `tx_id` уникален |
+| 174 | стр. 1202, `T1518` четыре строки расхождений с протоколом — Цитаты устарели | Нет потери; спор о документе, нужен новый аудит, если возьмут |
+| 176 | стр. 1204, `T1521` два режима округления | Нет потери: расхождения на живом пути не измерено |
+| 178 | стр. 1209, `T1541` CI строит схему трижды — ~17 с на плановом job | Нет потери: секунды на расписании |
+| 179 | стр. 1210, `T1542` DDL `debts` в EN | Нет потери: перевод не нормативен |
+| 180 | стр. 1211, `T1547` real-mode без opt-in | Нет потери: real-mode — запрошенный оператором режим; решение П2 |
+| 194 | стр. 1324, где живёт переносной PostgreSQL — Ждёт «да» | Технический вопрос, не вопрос владельцу; потери нет: документ описывает работающее размещение установленного инструмента, а правило «каталоги внутри проекта» касается рабочих артефактов агентов |
+| 195 | стр. 1338, F2 сброс dev-базы по пространству имён | Нет потери: чинится только метаданными владения — новая сущность |
+| 196 | стр. 1339, F6 `GeneratorExit` прячет отказ очистки — Обёртки нет | Нет потери: нет входа (§19.2 п. 6) |
+| 197 | стр. 1340, F7 гарды не смотрят `needs:` | Нет потери: ловится ревью workflow; дубль № 209 |
+| 198 | стр. 1341, F8 нет независимого знаменателя — Гард над гардом | Нет потери |
+| 199 | стр. 1342, F9 исключение `quality.yml` шире фикстуры | Нет потери: пути в продукте нет |
+| 203 | стр. 1358, строки без жертв в базе тира | Нет потери: нет сигнала — нет починки (§9) |
+| 209 | стр. 1391, пределы тира инструментов — `--help`, `needs:`, `shell:` | Нет потери: нужна умышленная перенастройка |
+| 212 | стр. 1438, (c1) лаунчеры не под Linux `pwsh` | Нет потери: логика проверяется на Windows двумя хостами |
+| 213 | стр. 1439, (c2) раздел powershell до UI-гейтов — Маскирует | Нет потери: оставлено сознательно, раздел ~70 с |
+| 214 | стр. 1440, (c3) гарды продукта не читают `tooling-tests/` | Нет потери: сигнала нет |
+| 215 | стр. 1441, (c4) число тира — не состав | Нет потери: гард над гардом |
+| 226 | стр. 1697, половина `T1541` — bootstrap entrypoint | Нет потери: сигнала нет |
+| 227 | стр. 1698, замер CI с промахом кэша | Нет потери: замер ради замера |
+| 228 | стр. 1704, повтор `pay()` видит устаревший `Equivalent` | Нет потери: привязывающее чтение отказывает до записи долга |
+| 229 | стр. 1706, то же, недетерминированный путь отказа | Тот же дефект; критерий «20 повторов» записан для того, кто возьмёт |
+| 234 | стр. 615–620 (2), паритет ORM↔миграции — Был для одной таблицы | Нет потери: расхождения имён живут в № 81, № 164 |
+| 238 | стр. 236 (2), `payload.cycle` несёт debt id, а не PID — Протокол ждёт участников | Нет потери: поле никто не читает, участники рядом в `edges`; менять форму сохранённой записи ради примера протокола несоразмерно |
 
-## Остаток ревью стадии 4 программы 019 — 2026-09-25
+## Закрыто программой 028, 2026-10-04
 
-- **Повтор `pay()` на заимствованной сессии видит устаревший `Equivalent` в предварительной проверке остановки/удержания** (класс 2, P3). `app/core/payments/service.py:~1189` выбирает ORM-объект без обновления атрибутов, проверка читает их на `:~1269-1279`, очистка неудачной попытки может закоммитить без expire (`:~2377-2399`). Исход верный: связывающее чтение `FOR SHARE` (`:~1913`) отказывает до записи долга (ABORTED, денег не двинуто); лишний проход маршрутизации и связывания. Правка при следующем касании: `populate_existing` / expire перед повтором.
+Чистка BACKLOG (стадия E0, `T2801`): ниже — пункты, снятые как закрытые или потерявшие предмет. История не теряется: решение, evidence и проверка по каждому — в [`028-backlog-rework/register.md`](028-backlog-rework/register.md) под указанным номером; прежний текст пункта — `git show c51afdcb:specs/BACKLOG.md` (строка-якорь в реестре). Не переоткрывать без новой находки (§17).
 
-- **Дополнено 2026-09-25 (019, стадия 5, `T1909`) — тот же дефект, наблюдение двумя путями** (класс 2 по §19.5, получатель — следующее касание `app/core/payments/service.py`). `create_payment_internal` отдаёт **одну** сессию каждой попытке `pay()` (`service.py:~1012-1019`, через `_borrowed_session` `:~226`), и предварительная проверка стопа/hold (`:~1306-1322`) на повторе читает закоммиченный hold/стоп то как неустановленный, то как установленный. Гипотеза (не доказана): устаревший ORM-экземпляр `Equivalent` в identity map сессии — иногда он обновляется, иногда нет. Денег это не касается: связывающее чтение `FOR SHARE` в денежной фазе авторитетно и отказывает до записи долга. Цена — недетерминированный путь отказа (предпроверка или связывание), из-за которого на `T1909` два стенда нельзя было строить на `create_payment_internal`: `test_p019_owner_before_row_races_postgres.py` перешёл на `pay()` с фабрикой, `test_p015_b4_entries_and_money_postgres.py::test_c17_p_…` — на ворота «незакоммиченная деактивация». Правка прежняя: `populate_existing`/expire перед повтором; критерий закрытия — повтор на заимствованной сессии отказывает предпроверкой детерминированно (стенд: закоммиченный hold между попытками, 20 повторов).
+| № реестра | Что было (якорь BACKLOG — суть) | Статус и evidence закрытия |
+|---|---|---|
+| 5 | стр. 23, `/simulator/events/poll` — Закрыто 011 | FIXED: запись зачёркнута, `F-011-7` |
+| 8 | стр. 26, npm-уязвимости — Аудит закрыт срезом | FIXED: PR #103, `ef318c0d` |
+| 13 | стр. 30, четыре slow-теста красные — Ассерт ждал `True` | FIXED: `tests/integration/test_p019_t1908_lock_removal_experiments_postgres.py:331` ждёт `None`; адаптация `b8e49da0` (027 `T2704`) |
+| 14 | стр. 31, флейк `locks_off-inject_inject` — `SerializationError` 3/4 | OBSOLETE (вероятно): `app/config.py:85-107` (только READ COMMITTED); SSI-тесты сняты `b8e49da0` |
+| 41 | стр. 93, подсказка bottleneck — Закрыто 2026-10-02 | FIXED: `admin-ui/src/i18n/en.ts:100` |
+| 42 | стр. 94, стенд инжекта и повтор `40001` — Повтор SSI | OBSOLETE: `app/config.py:85-107` (RC) |
+| 43 | стр. 98, метаданные `debt_growth` — Сделано `T2603.1` | FIXED: `app/core/payments/service.py:1995` |
+| 47 | стр. 108, решение о `FOR SHARE` — Закрыто, 027 заменила на `FOR UPDATE` | FIXED: запись зачёркнута; `money_boundary.py:119` |
+| 50 | стр. 111, PATCH/закрытие → 500 на `40001` — SSI | OBSOLETE: `trustlines/service.py:549-555`, RC |
+| 62 | стр. 146, непересекающиеся пары конфликтуют — Взято в 027 | FIXED: программа 027 закрыта 2026-10-04 |
+| 63 | стр. 147, перерасход бюджета Ш3 — Учёт | ACCEPTED: запись |
+| 67 | стр. 157, провал коммита хвоста тика — Исправлено 024 `T2416.3` | FIXED: `app/core/simulator/tick.py:165-172` (`on_commit`) |
+| 68 | стр. 163, объём клиринга при таймауте — Закрыто PR #75 | FIXED: запись зачёркнута |
+| 71 | стр. 172, комментарии на `real_tick_*` — Перенаправлены 024 `T2411` | FIXED: `tick.py:3` исторический; `UNFINISHED.md:101` датированный |
+| 72 | стр. 173, тайминг стенда `spawn` — Закрыто PR #77 | FIXED: запись зачёркнута |
+| 75 | стр. 223, П1 ёмкость против встречного долга — Решено 2026-09-29 | FIXED: 024 `T2415.3` |
+| 90 | стр. 238, пять валидаторов naive→UTC — Закрыто `T2411` | FIXED: запись |
+| 95 | стр. 252, флейк p019 staged_refusal — Закрыто `614fad5`, `973f4bc` | FIXED: запись |
+| 100 | стр. 274, mock Admin отказывает в удалении из-за чекпойнтов | OBSOLETE: `admin-ui/src/api/mockApi.ts:384` всегда `integrity_checkpoints: 0`, условие `:1416` не срабатывает |
+| 102 | стр. 282, манифест тестов 021 — Закрыто `T2109` | FIXED: запись |
+| 103 | стр. 283, «выживающие контракты» 021 п. 3 — Закрыто `1d8a2cd1` | FIXED: запись |
+| 105 | стр. 295, trustline timestamps `[x]` | FIXED: `app/schemas/trustline.py:22` |
+| 106 | стр. 296, TODO-ESC `[x]` | FIXED: `c3db303` |
+| 107 | стр. 297, M20 `??` `[x]` | FIXED: запись |
+| 109 | стр. 299, participant timestamps без UTC — Причина — SQLite | OBSOLETE: `app/db/models/participant.py:17-18` `DateTime(timezone=True)`; SQLite удалён 017 |
+| 110 | стр. 300, bottleneck float/decimal `[x]` | FIXED: `02feee7` |
+| 111 | стр. 301, непроверенные касты `[x]` | FIXED: запись |
+| 112 | стр. 302, дублирование политики в движке `[x]` | OBSOLETE: `app/core/payments/engine.py` удалён |
+| 113 | стр. 303, мёртвые экспорты `[x]` | FIXED: запись |
+| 114 | стр. 304, `tmp_*` скрипты `[x]` | FIXED: запись |
+| 115 | стр. 305, trust-drift мутация до коммита `[x]` | FIXED: запись |
+| 116 | стр. 306, 53 теста лаунчера `[x]` | FIXED: запись |
+| 117 | стр. 308, `.snap` / `.gitattributes` `[x]` | FIXED: `.gitattributes` |
+| 119 | стр. 311, дефект `(T)` раннера `[x]` | FIXED: `cddabb6` |
+| 120 | стр. 321–325, F2, F4, F5, F6, F7 раннеров 023 | OBSOLETE: раннеры удалены `44954ebb` (`scripts/measure_p023_planner_acceptance*.py` нет) |
+| 122 | стр. 347–349, находки закрывающего ревью 020 — Числа, маркеры, P3 | FIXED: записи 2026-09-28 |
+| 124 | стр. 355–366, аренда Redis `/clearing/auto` — Закрыто PR #74 | FIXED: `2df5703`; `app/core/clearing/runner.py:445-448` |
+| 125 | стр. 370–378, неизвестный коммит клиринга — Закрыто 020 | FIXED: `d448284`, `b959fe7`, `40bbbdc` |
+| 126 | стр. 379, остаток `_drain_task` у трёх вызывающих — Интерлок | OBSOLETE: `_rollback_before_interlock`, `_close_checked_out_connection`, `_release_interlock_session` в `clearing/service.py` нет (grep пуст) |
+| 127 | стр. 406, SQLite без FK удержания | OBSOLETE: `app/config.py:48` только `postgresql+asyncpg`; `app/db/sqlite_transaction_control.py` удалён |
+| 128 | стр. 407, RU-протокол «сверки нет» | FIXED: `docs/ru/02-protocol-spec.md:1908-1916` описывает сверку |
+| 133 | стр. 439, SQLite-тир и гонка вставки | OBSOLETE: SQLite-тира нет |
+| 135 | стр. 441, юнит-тесты SQLite-тира на PostgreSQL | OBSOLETE: один тир (AGENTS §5) |
+| 136 | стр. 463–489, пп. 1–5 и `integrity.py:284` — Закрыто 2026-08-11/12 | FIXED: записи `[x]` |
+| 137 | стр. 492–525, `engine.py:538` проглоченный `rollback()` | OBSOLETE: `app/core/payments/engine.py` удалён |
+| 138 | стр. 526–613, M20 разбор и «не является дефектом» | FIXED / ACCEPTED: таблица 13 `[x]`; раздел «не поднимать заново» |
+| 139 | стр. 615–620 (1), `integrity.py`/`invariants.py` не проверены независимо | FIXED: сверка журнала с изменением и независимый эталон операции — `app/core/ledger/reconciliation.py` (программы 015, 018) |
+| 146 | стр. 686, §2 RU §5.2 неполон — Порог «ниже долга» снят 026 | OBSOLETE: `app/core/trustlines/service.py:608-610`; RU уже описывает |
+| 152 | стр. 864, 007 §2 аннотации `float` — Объекта нет | FIXED: `app/core/simulator/storage.py:231` объявляет `Optional[Decimal или float]`; модулей `real_tick_*` нет |
+| 156 | стр. 962, `api/openapi.yaml` без владельца | FIXED: `AGENTS.md` §8: защищённые поверхности, включая `api/openapi.yaml`, меняются «намеренным согласованным набором: реализация + schema/config + behavioral tests + … |
+| 160 | стр. ~1110, ремонт `/integrity` удаляет долг (`F-015-6`) | OBSOLETE: ремонтных эндпоинтов в `app/api/v1/integrity.py` нет; удалены `91b6f794` |
+| 161 | стр. ~1116, допуск дрейфа в один квант | OBSOLETE: `engine.py` удалён; сверка — `app/core/ledger/reconciliation.py` |
+| 162 | стр. ~1122, `existing_fp is not None` обходит конфликт | FIXED: `app/core/payments/service.py:783-804` отказывает при отсутствующем отпечатке (`T1548`) |
+| 163 | стр. ~1093, публичный тест дубликата не смотрит на долг — Не было в триаже | FIXED: `tests/integration/test_payments_idempotency.py:23-76` сверяет долги, операции и записи журнала |
+| 165 | стр. 1163, тир не в той изоляции, что приложение | OBSOLETE: `app/config.py:85-107` (только RC); тир берёт уровень из настроек |
+| 168 | стр. 1196, `T1511` починка ремонта | OBSOLETE: `91b6f794` |
+| 175 | стр. 1203, `T1519` мёртвый код — Удалено или оставлено осознанно | FIXED: `validate_idempotency_key`, `PaymentDetail` в `app` нет (grep) |
+| 177 | стр. 1205–1208, `T1531`, `T1536`, `T1538`, `T1539` журнал в процессе | OBSOLETE: `app/core/ledger/journal.py` удалён `2b8b0228` (018) |
+| 182 | стр. 1213, `T1554` подмена `checksum_after` | OBSOLETE: `payments/service.py:1992`, `clearing/service.py:2005` пишут `""` |
+| 183 | стр. 1214, `T1555` перебор эквивалентов инжекта | FIXED: `real_runner_impl.py:481-483` — только эквиваленты `inject_debt` |
+| 184 | стр. 1215, `T1556` распределённый лок цикла целостности | OBSOLETE: `reconciliation.py:1286` «no advisory lock» |
+| 185 | стр. 1216, `T1549`-1 `[201, 500]` на создании линии | OBSOLETE: `trustlines/service.py:317-323` → 409 `CONCURRENT_TRUSTLINE_CREATE`; `xfail` в `test_p1_trustline_reopen_postgres.py` нет |
+| 186 | стр. 1217, `T1549`-2 тесты на RC и SERIALIZABLE | OBSOLETE: `test_payment_commit_advisory_locks_postgres.py` удалён; приложение на RC |
+| 190 | стр. 1271, документы симулятора о входе генератора — Закрыто тем же PR | FIXED: запись |
+| 193 | стр. 1307, лаунчер: владение по PID — Закрыто | FIXED: `d392532e`; `run_full_stack.ps1:400-437` |
+| 204 | стр. 1362, гард `T1525` | OBSOLETE: `tests/conftest.py:410` — «the deleted T1525 engine guard» |
+| 205 | стр. 1370, F2 ложноотрицательный путь `T1525` | OBSOLETE: то же |
+| 206 | стр. 1371, F6 посылка о `scratch_db` | OBSOLETE: SQLite удалён 017 стадией 3 |
+| 207 | стр. 1373, Windows PowerShell 5.1 в CI | FIXED: `quality.yml:130-142`; тир перебирает `pwsh` и `powershell.exe` |
+| 225 | стр. 1693–1696, четыре зачёркнутых пункта — Закрыто | FIXED: запись `chore(017): close the stage-3 review remainder` |
 
 ## Класс 2 из §15 fix-delta ревью стадии 2 программы 027 — внесено 2026-10-04
 
 **Получатель — владелец денежного ядра.** Класс 2 по §19.5, P2 по серьёзности, **денежного дефекта ревью не установило** (`CLASS-1-COUNT: 0`; движение долга неверным не показано, оба случая — неограниченное или избыточное ожидание). Источник — единственный §15-круг по fix-delta `a2e309e0..188fcee9`: Codex `gpt-6-astra` high (запрошенная модель), read-only, `VERDICT-027-S2-FD: WEAK`, `FINDINGS-CLOSED: 3/4`, `LOCK-PROTOCOL: WEAK`, `READY-TO-MERGE-S2: YES`; вывод — `.local-run/codex-review/2026-10-04-027-s2-fd/final.md` (не коммитится). **Исполнением не воспроизводилось**: ревьюер тестов не запускал, расписания ниже — его описание для воспроизведения. Номера строк — на `188fcee9`.
 
-- **Создание линии внутри инжекта берёт блокировку без таймаута.** `app/core/trustlines/service.py:463` вызывает `lock_pair_lines` без `timeout_ms`, и запрос попадает в неограниченный `await session.execute` (`app/core/money_boundary.py:110`). Реальный инжект достигает вызова через `app/core/simulator/inject_executor.py:929` → `:495`. Предварительная ограниченная блокировка охватывает только участников эффектов `inject_debt` (`app/core/simulator/real_runner_impl.py:488`): для события, где есть лишь `create_trustline`, набор пуст, а сам staging ожидается без таймаута (`:548`). **Расписание:** существует линия A→B; другая транзакция держит её строку `FOR UPDATE`; инжект создаёт B→A; запрос на `trustlines/service.py:463` ждёт освобождения A→B без предела, `55P03` не возникает, обработчик переходного отказа не получает управление. Заявленное ограничение ожиданий инжекта — `specs/027-concurrent-payments/spec.md`, стадия 2. Новый путь зависания, введённый fix-delta; неправильного движения долга не установлено. Предполагаемое дешёвое направление (**не авторизовано здесь**): передавать бюджет владельца и в путь создания линии.
+- **[сделано в 028, F-028-14 (E10, `T2896`); строка снимается при сведении `T2899.7`]** **Создание линии внутри инжекта берёт блокировку без таймаута.** `app/core/trustlines/service.py:463` вызывает `lock_pair_lines` без `timeout_ms`, и запрос попадает в неограниченный `await session.execute` (`app/core/money_boundary.py:110`). Реальный инжект достигает вызова через `app/core/simulator/inject_executor.py:929` → `:495`. Предварительная ограниченная блокировка охватывает только участников эффектов `inject_debt` (`app/core/simulator/real_runner_impl.py:488`): для события, где есть лишь `create_trustline`, набор пуст, а сам staging ожидается без таймаута (`:548`). **Расписание:** существует линия A→B; другая транзакция держит её строку `FOR UPDATE`; инжект создаёт B→A; запрос на `trustlines/service.py:463` ждёт освобождения A→B без предела, `55P03` не возникает, обработчик переходного отказа не получает управление. Заявленное ограничение ожиданий инжекта — `specs/027-concurrent-payments/spec.md`, стадия 2. Новый путь зависания, введённый fix-delta; неправильного движения долга не установлено. Предполагаемое дешёвое направление (**не авторизовано здесь**): передавать бюджет владельца и в путь создания линии.
 - **`lock_timeout` ограничивает каждое отдельное ожидание, а не захват набора целиком.** `app/core/money_boundary.py:114-132` ставит `lock_timeout` и выполняет один запрос на весь набор; PostgreSQL 16 применяет предел к **каждому ожиданию блокировки** по отдельности (документация GUC `lock_timeout`). **Расписание:** три строки, нужные клирингу, в порядке ID держат три транзакции; после начала захвата их освобождают на 4-й, 8-й и 12-й секундах. При `lock_budget_ms() = 5000` каждое ожидание длится около 4 с, `55P03` не возникает, а захват занимает около 12 с. Клиринг ждёт попытку напрямую (`app/core/clearing/service.py:1520`), а дедлайн проверяет только после конфликта (`:1527`), поэтому получив строки после 12 с, он продолжит работу, превысив и бюджет захвата 5 с, и общий бюджет 10 с. Заявленная граница захвата — `min(total, commit)` (`money_boundary.py:101`, спека 027, стадия 2). Тест держит набор одним конкурентом (`tests/integration/test_p027_t2706_fix_delta_postgres.py:119`), поэтому накопление последовательных ожиданий не проверяется. Предполагаемое дешёвое направление (**не авторизовано здесь**): ограничивать весь захват абсолютным дедлайном владельца (`statement_timeout` или дедлайн корутины).
 
 **Критерий закрытия:** для обоих случаев — стенд, где ожидание превышает бюджет владельца и отказ приходит не позже бюджета (первый — линия удержана, инжект только с `create_trustline`; второй — три держателя, освобождаемые последовательно, как выше).
@@ -1718,5 +1211,5 @@ Ledger промежуточного внешнего ревью волн 1–2 (
 
 Класс 2 по §19.5; денежного дефекта нет (`CLASS-1-COUNT: 0`, `MONEY-SAFETY: SOUND`). Источник — закрывающее ревью `T2707` (`81ac5b6..e3ad3b7b`): Codex `gpt-6-astra` high (запрошенная модель), read-only, `VERDICT-027-CLOSE: WEAK`, `READY-TO-CLOSE: YES`; ответ — `.local-run/codex-review/2026-10-04-027-close/final.md` (не коммитится). Пункты 3–5 ревью (создание линии внутри инжекта без таймаута, `lock_timeout` на отдельное ожидание, предсуществующий порядок захвата в drift) уже внесены выше (раздел 027 fix-delta, `specs/BACKLOG.md:1712`, `:1713`, `:110`) и здесь не дублируются.
 
-- **Q3 стенда принимает `committed >= 1` вместо 40/40 клирингов.** Спека требует 40/40 (`specs/027-concurrent-payments/spec.md:272`), стенд утверждает `committed >= 1` (`tests/integration/test_p027_disjoint_concurrency_stand_postgres.py:745`); остаточные долги циклов измеряются на `:725`, но не утверждаются, а сохранение нетто-позиций проходит и при частичном клиринге. Записанный результат 40/40 (`T2705`) этим не опровергнут; слабее контракта регрессионный критерий. **Получатель — владелец стенда.** Закрытие: ассерт 40/40 и `cycle_debts_left == 0` в Q3.
-- **Inject-тест ограниченного ожидания принимает любую раннюю постороннюю ошибку.** `tests/integration/test_p027_t2706_fix_delta_postgres.py:127` перехватывает любое исключение; ветка инжекта проверяет лишь отсутствие `asyncio.TimeoutError`, отметки fired и конверта (`:135`, `:137`), поэтому немедленный `RuntimeError` до захвата блокировки удовлетворяет всем условиям. Локальная слабость теста, не доказанный дефект денег. **Получатель — владелец тестов инжекта.** Закрытие: свидетель, что блокировка достигнута, и проверка ожидаемого переходного отказа (класс и SQLSTATE).
+- **[сделано в 028, F-028-15 (E10, `T2897`); строка снимается при сведении `T2899.7`]** **Q3 стенда принимает `committed >= 1` вместо 40/40 клирингов.** Спека требует 40/40 (`specs/027-concurrent-payments/spec.md:272`), стенд утверждает `committed >= 1` (`tests/integration/test_p027_disjoint_concurrency_stand_postgres.py:745`); остаточные долги циклов измеряются на `:725`, но не утверждаются, а сохранение нетто-позиций проходит и при частичном клиринге. Записанный результат 40/40 (`T2705`) этим не опровергнут; слабее контракта регрессионный критерий. **Получатель — владелец стенда.** Закрытие: ассерт 40/40 и `cycle_debts_left == 0` в Q3.
+- **[сделано в 028, F-028-14 (E10, `T2896`); строка снимается при сведении `T2899.7`]** **Inject-тест ограниченного ожидания принимает любую раннюю постороннюю ошибку.** `tests/integration/test_p027_t2706_fix_delta_postgres.py:127` перехватывает любое исключение; ветка инжекта проверяет лишь отсутствие `asyncio.TimeoutError`, отметки fired и конверта (`:135`, `:137`), поэтому немедленный `RuntimeError` до захвата блокировки удовлетворяет всем условиям. Локальная слабость теста, не доказанный дефект денег. **Получатель — владелец тестов инжекта.** Закрытие: свидетель, что блокировка достигнута, и проверка ожидаемого переходного отказа (класс и SQLSTATE).
