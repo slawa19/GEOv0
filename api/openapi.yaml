@@ -5936,10 +5936,36 @@ components:
         rule:
           # `policy`: which trust-line policy the route breaks.
           type: string
-      # Each reason keeps the keys its producer adds beside it (`available`/`needed`/`from`/`to` of a hop,
-      # `equivalent`/`precision`, `equivalents`, `participants`, `field`, ...). Never present: the Redis lock key and
-      # the delta check's `drifts` (other participants' ids and sums).
-      additionalProperties: true
+        # The other keys a producer may add beside its reason. The set is CLOSED - an allow-list in the code
+        # (`_PUBLIC_REFUSAL_DETAILS`): a diagnostic naming other participants (the invariants' `violations`, the delta
+        # check's `drifts`) or an internal id (the Redis lock key) never reaches a participant (§15 review `T2899.4`).
+        conflict_kind: {type: string}
+        path: {type: array, items: {type: string}}
+        available: {type: string}
+        needed: {type: string}
+        reserved: {type: string}
+        from: {type: string}
+        to: {type: string}
+        equivalent: {type: string}
+        equivalents: {type: array, items: {type: string}}
+        precision: {type: integer}
+        field: {type: string}
+        participants: {type: array, items: {type: string}}
+        wait_timeout_seconds: {type: number}
+        invariant: {type: string}
+        max_scale: {type: integer}
+        max_precision: {type: integer}
+        max_integer_digits: {type: integer}
+        validation:
+          # pydantic's errors of the request body (`POST /payments`, before admission).
+          type: array
+          items:
+            type: object
+            properties:
+              loc: {type: array, items: {anyOf: [{type: string}, {type: integer}]}}
+              msg: {type: string}
+              type: {type: string}
+      additionalProperties: false
 
     PaymentResult:
       type: object

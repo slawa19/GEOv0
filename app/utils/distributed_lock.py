@@ -178,7 +178,7 @@ class RenewableLease:
                 await self._delete_own_token(event="acquire_uncertain")
                 raise ConflictException(
                     "Resource is busy",
-                    details={"wait_timeout_seconds": wait_timeout_seconds, "reason": "timeout"},
+                    details={"wait_timeout_seconds": wait_timeout_seconds, "reason": "timeout", "retryable": True},
                 )
             if ok:
                 self._acquired = True
@@ -186,7 +186,9 @@ class RenewableLease:
                 return
             if self._clock() >= deadline:
                 _lease_logger.info("event=lease.busy key=%s", self.key)
-                raise ConflictException("Resource is busy", details={"wait_timeout_seconds": wait_timeout_seconds})
+                # 028 §15 review `T2899.4` #4: another owner holds the key - transient, the caller may retry.
+                raise ConflictException("Resource is busy", details={"wait_timeout_seconds": wait_timeout_seconds,
+                                                                     "reason": "busy", "retryable": True})
             await asyncio.sleep(poll_interval_seconds)
 
     async def renew(self) -> bool:

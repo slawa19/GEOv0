@@ -370,8 +370,12 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # initiator; `GET /admin/graph/snapshot`, `/admin/graph/ego`), `IntegrityAuditLogAffectedParticipants` names
 # `checkpoint_scope` and `initial_status` (`GET /integrity/audit-log`). Measured with a per-entry dump of every ledger
 # against the canon of `0a50ba62` (`.local-run/e7/dump.py`, not committed): error and security ledgers identical.
+# 2026-10-04 / programme 028 `T2899.4` fix-delta (§15 review of E6+E7, #1): count HOLDS at 63, digest moves. The three
+# payments operations change content: `PaymentRefusalDetails` becomes a CLOSED set of keys (the code's allow-list);
+# the generated side stays `Dict[str, Any]`. Measured with a per-entry dump of every ledger on `da7c7adc` and on this
+# tree: no other entry of any ledger differs.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "fa1b007944a7eb0388c14715b038d5e5ceef3eb35b827179c61854468a5a70a9"
+    "326ba6cf1f4793d1e688cfbae04eeb510beb3174a35f4365503b4c6def6dcf39"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;

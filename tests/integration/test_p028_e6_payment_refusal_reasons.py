@@ -21,7 +21,9 @@ from app.config import settings
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PAYMENT_REFUSAL_REASONS, PaymentService
+from app.core.invariants import InvariantChecker
 from app.db.models.participant import Participant
+from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.main import app
 from app.utils.exceptions import IntegrityViolationException
@@ -34,6 +36,7 @@ from tests.integration.test_scenarios import _sign_payment_request, register_and
 pytestmark = MODE_B
 
 REACHED_ELSEWHERE = {"unverifiable_legacy_identity"}
+FOREIGN = "0f0e0d0c-0b0a-4908-8706-050403020100"
 
 
 async def _never(*_args, **_kwargs):
@@ -141,11 +144,32 @@ async def test_an_admitted_refusal_keeps_its_reason_on_the_replay(client, db_ses
     drift = await _post(client, alice, _payment_body(alice, bob, code, "1.00"))
     assert "drifts" not in drift.text and drift.json()["error"]["details"]["reason"] == "other", drift.text
 
+    # §15 review `T2899.4` #1: an invariant on an intermediate pair names its debtor, creditor and sums
+    # (`violations`, `app/core/invariants.py`) - the admin's row keeps them, the payer's answers do not.
+    async def over_limit(*_a, **_kw):
+        raise IntegrityViolationException("Trust limit exceeded", details={"invariant": "TRUST_LIMIT_VIOLATION",
+                                          "violations": [{"debtor_id": FOREIGN, "debt_amount": "77.70"}]})
+
+    monkeypatch.setattr(InvariantChecker, "check_debt_growth", over_limit)
+    leaky = _payment_body(alice, bob, code, "1.00")
+    for answer in (await _post(client, alice, leaky), await _post(client, alice, leaky)):  # POST, stored ABORTED
+        assert FOREIGN not in answer.text and "77.70" not in answer.text, answer.text
+    assert FOREIGN in str((await db_session.execute(select(Transaction.error).where(
+        Transaction.tx_id == leaky["tx_id"]))).scalar_one()), "the stored row lost its diagnostics"
+
     # A route naming a participant that does not exist: an internal error, answered without its repr.
     monkeypatch.setattr(PaymentRouter, "find_flow_routes",
                         lambda self, a, b, amount, **_kw: [([a, "ghost", b], Decimal(amount))])
-    ghost = await _post(client, alice, _payment_body(alice, bob, code, "1.00"))
+    ghosted = _payment_body(alice, bob, code, "1.00")
+    ghost = await _post(client, alice, ghosted)
     assert ghost.status_code == 500 and "ghost" not in ghost.text and "{" not in ghost.json()["error"]["message"]
+    # #2: a stored E010 row with a diagnostic text is read back with the code's meaning only, the row kept intact.
+    diagnostic = {"code": "E010", "message": "Participants not found: {'ghost'}", "details": {}}
+    await db_session.execute(update(Transaction).where(Transaction.tx_id == ghosted["tx_id"]).values(error=diagnostic))
+    await db_session.commit()
+    reads = [await _post(client, alice, ghosted), await client.get(f"/api/v1/payments/{ghosted['tx_id']}",
+             headers=alice["headers"]), await client.get("/api/v1/payments", headers=alice["headers"])]
+    assert all("Participants not found" not in r.text and r.status_code == 200 for r in reads), [r.text for r in reads]
     monkeypatch.undo()
 
     # The timeout of an admitted payment, and its replay.

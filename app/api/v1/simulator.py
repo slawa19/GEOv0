@@ -34,7 +34,7 @@ from app.core.clearing.runner import (
 )
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService, public_refusal_details
+from app.core.payments.service import PaymentService, public_refusal_details, public_refusal_message
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import (
@@ -756,7 +756,7 @@ def _perimeter_unavailable_error(run_id: str) -> JSONResponse:
 
 
 async def _resolve_participant_or_error(
-    *, session, pid: str, field: str, scoped_pids: Optional[set[str]] = None
+    *, session, pid: str, field: str, scoped_pids: Optional[set[str]] = None, reason: Optional[str] = None
 ) -> tuple[Optional[Participant], Optional[JSONResponse]]:
     """Resolve a participant, optionally restricted to the perimeter of one run.
 
@@ -771,7 +771,7 @@ async def _resolve_participant_or_error(
         status_code=404,
         code="PARTICIPANT_NOT_FOUND",
         message="Participant not found",
-        details={"field": field, "pid": pid_s},
+        details={"field": field, "pid": pid_s, **({"reason": reason} if reason else {})},
     )
     if not pid_s:
         return None, not_found
@@ -786,15 +786,16 @@ async def _resolve_participant_or_error(
 
 
 async def _resolve_equivalent_or_error(
-    *, session, code: str
+    *, session, code: str, reason: Optional[str] = None
 ) -> tuple[Optional[Equivalent], Optional[JSONResponse]]:
     eq_code = str(code or "").strip().upper()
+    not_found = {"equivalent": eq_code, **({"reason": reason} if reason else {})}
     if not eq_code:
         return None, _action_error(
             status_code=404,
             code="EQUIVALENT_NOT_FOUND",
             message="Equivalent not found",
-            details={"equivalent": eq_code},
+            details=not_found,
         )
     eq = (
         await session.execute(select(Equivalent).where(Equivalent.code == eq_code))
@@ -804,7 +805,7 @@ async def _resolve_equivalent_or_error(
             status_code=404,
             code="EQUIVALENT_NOT_FOUND",
             message="Equivalent not found",
-            details={"equivalent": eq_code},
+            details=not_found,
         )
     return eq, None
 
@@ -1066,7 +1067,7 @@ class _ActionParties:
 
 
 async def _action_parties_or_error(
-    *, run_id: str, db, from_pid: str, to_pid: str, equivalent: str
+    *, run_id: str, db, from_pid: str, to_pid: str, equivalent: str, payment: bool = False
 ) -> tuple[Optional[_ActionParties], Optional[JSONResponse]]:
     """The perimeter half of a mutating action, in its fixed order of refusals.
 
@@ -1082,15 +1083,18 @@ async def _action_parties_or_error(
     scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
     if not perimeter_available:
         return None, _perimeter_unavailable_error(run_id)
+    # `payment`: the refusals carry the payment's machine reason (028 `F-028-42`, §15 review `T2899.4` #3).
     from_p, err = await _resolve_participant_or_error(
-        session=db, pid=from_pid, field="from_pid", scoped_pids=scoped_pids
+        session=db, pid=from_pid, field="from_pid", scoped_pids=scoped_pids, reason="other" if payment else None
     )
     if err is not None:
         return None, err
-    to_p, err = await _resolve_participant_or_error(session=db, pid=to_pid, field="to_pid", scoped_pids=scoped_pids)
+    to_p, err = await _resolve_participant_or_error(session=db, pid=to_pid, field="to_pid", scoped_pids=scoped_pids,
+                                                     reason="recipient_not_found" if payment else None)
     if err is not None:
         return None, err
-    eq, err = await _resolve_equivalent_or_error(session=db, code=equivalent)
+    eq, err = await _resolve_equivalent_or_error(session=db, code=equivalent,
+                                                 reason="equivalent_not_found" if payment else None)
     if err is not None:
         return None, err
     assert from_p is not None and to_p is not None and eq is not None
@@ -1623,7 +1627,7 @@ async def action_payment_real(
     assert run is not None
 
     parties, err = await _action_parties_or_error(
-        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent
+        run_id=run_id, db=db, from_pid=req.from_pid, to_pid=req.to_pid, equivalent=req.equivalent, payment=True
     )
     if err is not None:
         return err
@@ -1638,7 +1642,7 @@ async def action_payment_real(
             status_code=400,
             code="INVALID_AMOUNT",
             message=str(getattr(exc, "message", None) or "Invalid amount"),
-            details={"amount": req.amount},
+            details={"amount": req.amount, "reason": public_refusal_details(exc.details, exc.code)["reason"]},
         )
     if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
         return err
@@ -1727,7 +1731,7 @@ async def action_payment_real(
         return _action_error(
             status_code=int(getattr(exc, "status_code", 409) or 409),
             code="PAYMENT_REJECTED",
-            message=str(getattr(exc, "message", None) or str(exc)),
+            message=public_refusal_message(exc.code, exc.message),
             details=public_refusal_details(exc.details, exc.code),
         )
 

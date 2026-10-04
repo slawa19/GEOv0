@@ -284,7 +284,9 @@ async def test_the_order_of_refusals(client, stand) -> None:
 
     # Payment: the perimeter BEFORE the amount.
     r = await _post(client, "payment-real", {**foreign, "amount": "x"})
-    assert (r.status_code, r.json()) == (404, not_in_run)
+    # 028 `T2899.4` #3: the payment's refusal also names its machine reason (intended change).
+    assert (r.status_code, r.json()) == (404, {**not_in_run, "details": {**not_in_run["details"],
+                                                                         "reason": "recipient_not_found"}})
     r = await _post(client, "payment-real", {**TRIPLE, "amount": "0"})
     assert (r.status_code, r.json()["code"]) == (400, "INVALID_AMOUNT")
     assert _Recorder.events == [], "a refusal published an event"

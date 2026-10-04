@@ -84,18 +84,24 @@ PAYMENT_REFUSAL_REASONS = (
     "tx_id_reused", UNVERIFIABLE_LEGACY_IDENTITY_REASON, "invalid_signature", "recipient_not_found",
     AMOUNT_NOT_POSITIVE, "self_payment", "equivalent_not_found", "other",
 )
-#: Never answered: the Redis key names an internal id; the delta check's drifts name other participants and their
-#: sums (they stay in the stored row an admin reads, not in a participant's answer).
-_PRIVATE_REFUSAL_DETAILS = frozenset({"lock_key", "drifts"})
+#: The ONLY keys a participant's refusal answer carries - an allow-list, so a producer's diagnostics never reach it by
+#: default (§15 review `T2899.4` #1: the invariants' `violations` name other participants' ids and debts, the delta
+#: check's `drifts` their sums, the Redis lock key an internal id). The stored row an admin reads keeps everything.
+_PUBLIC_REFUSAL_DETAILS = frozenset({
+    "reason", "max_available", "retryable", "conflict_kind", "rule", "path", "available", "needed", "reserved", "from",
+    "to", "equivalent", "equivalents", "precision", "field", "participants", "wait_timeout_seconds", "invariant",
+    "max_scale", "max_precision", "max_integer_digits", "validation",
+})
 
 
 def public_refusal_details(details: "dict | None", code: str | None) -> dict:
     """What a payment refusal's `details` may show its participant: the private keys dropped, `reason` from the set.
 
-    A timeout (`E007`, by the code's own meaning) without a reason is `timeout`; a reason outside the set is `other`.
+    Only the keys of `_PUBLIC_REFUSAL_DETAILS`. A timeout (`E007`, by the code's own meaning) without a reason is
+    `timeout`; a reason outside the set is `other`.
     """
 
-    public = {k: v for k, v in dict(details or {}).items() if k not in _PRIVATE_REFUSAL_DETAILS}
+    public = {k: v for k, v in dict(details or {}).items() if k in _PUBLIC_REFUSAL_DETAILS}
     reason = public.get("reason") or ("timeout" if code == ErrorCode.E007.value else None)
     public["reason"] = reason if reason in PAYMENT_REFUSAL_REASONS else "other"
     return public
@@ -106,7 +112,15 @@ def public_payment_result(result: PaymentResult) -> PaymentResult:
 
     if result.error is not None:
         result.error.details = public_refusal_details(result.error.details, result.error.code)
+        result.error.message = public_refusal_message(result.error.code, result.error.message)
     return result
+
+
+def public_refusal_message(code: str | None, message: str | None) -> str:
+    """An internal error (`E010`) is answered with the code's meaning only, whatever text it was raised or STORED
+    with (§15 review `T2899.4` #2); the stored row keeps its text for the admin."""
+
+    return ERROR_MESSAGES[ErrorCode.E010] if code == ErrorCode.E010.value else str(message or "")
 
 
 def _conflict_cause(exc: BaseException) -> str:
