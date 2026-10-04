@@ -98,10 +98,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22.12
+      - name: Set up Node.js 22.13
         uses: actions/setup-node@v4
         with:
-          node-version: "22.12.0"
+          node-version: "22.13.1"
           cache: npm
           cache-dependency-path: |
             admin-ui/package-lock.json
@@ -684,10 +684,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22.12
+      - name: Set up Node.js 22.13
         uses: actions/setup-node@v4
         with:
-          node-version: "22.12.0"
+          node-version: "22.13.1"
           cache: npm
           cache-dependency-path: |
             admin-ui/package-lock.json
@@ -715,26 +715,34 @@ jobs:
           PW_E2E_PORT: "41732"
         run: npm --prefix simulator-ui/v2 run test:e2e:smoke
 
-  # STILL ON SQLite, AND THAT IS A MEASURED REFUSAL, NOT AN OVERSIGHT (2026-09-21, T1701).
-  # Programme 017 says this job gets a PostgreSQL service and URL in the same slice as the required
-  # gate, because stage 2 makes PostgreSQL mandatory for every DB test and would otherwise break it.
-  # Pointing it at PostgreSQL today produces a job that is red on arrival. Measured on
-  # PostgreSQL 16.15 (`geov0_test_p017s1b`, `-BackendSelector tests/integration/test_simulator_super_smoke.py
-  # -IncludeExpensive`): `2 failed, 1 passed in 5.18s`, for two causes that live outside this file:
-  #   * `simulator_runs.seed` is `sa.Integer` in the model and in migration 013, while the run seed
-  #     is the first four bytes of a SHA-256 (`app/core/simulator/run_lifecycle.py:168-169`), so
-  #     roughly half of all runs exceed int32: `invalid input for query argument $11: 3122177940
-  #     (value out of int32 range)`. SQLite's INTEGER is 64-bit, which is why this has never shown.
-  #   * the real-mode tick raises `SerializationError` ("Canceled on identification as a pivot")
-  #     with no retry on that path - the SERIALIZABLE behaviour programme 019 owns.
-  # Neither is a workflow defect and neither is in this slice's surface. The service and URL land
-  # here once they are fixed; until then this job runs the tier it can actually pass, and the
-  # reason is written down rather than discovered again.
+  # ON POSTGRESQL SINCE 2026-10-04 (programme 028, F-028-8). Until then this job ran on
+  # `windows-latest`, which has no service containers, and pytest exited `4` on arrival (run
+  # `36374399886`: the test tier refuses a missing or SQLite URL since 017 stage 2c). It now has
+  # the same ubuntu runner and `postgres:16` service as `required-backend`; the database name is
+  # derived by `verify_local.ps1` from the task slug (`geov0_test_ci-super-smoke`), which is why no
+  # URL or reset opt-in is set here. The three stands (part1-3) measured green on PostgreSQL 16
+  # after programme 027 (`3 passed`, five runs, 028 Changelog 2026-10-04). Known and not hidden:
+  # `simulator_runs.seed` is still `Integer` while the seed is 32 unsigned bits (F-028-1, stage E1);
+  # `upsert_run` swallows the resulting `value out of int32 range`, so the stands do not see it.
   simulator-super-smoke:
     name: Simulator super-smoke (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geov0_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out repository
@@ -750,7 +758,6 @@ jobs:
             requirements-dev.txt
 
       - name: Install backend dependencies
-        shell: pwsh
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run task-isolated expensive simulator selector
@@ -773,10 +780,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22.12
+      - name: Set up Node.js 22.13
         uses: actions/setup-node@v4
         with:
-          node-version: "22.12.0"
+          node-version: "22.13.1"
           cache: npm
           cache-dependency-path: admin-ui/package-lock.json
 
@@ -804,10 +811,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up Node.js 22.12
+      - name: Set up Node.js 22.13
         uses: actions/setup-node@v4
         with:
-          node-version: "22.12.0"
+          node-version: "22.13.1"
           cache: npm
           cache-dependency-path: simulator-ui/v2/package-lock.json
 

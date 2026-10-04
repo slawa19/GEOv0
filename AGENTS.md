@@ -106,7 +106,7 @@ git grep -n $contractMarker
 
 - Backend: Python 3.11 (target в CI и tooling), FastAPI, Pydantic v2, SQLAlchemy async, Alembic; PostgreSQL — единственный движок и для локальной разработки, и для тестов (программа 017, `DATABASE_URL` только `postgresql+asyncpg`).
 - Admin UI: Vue 3, TypeScript, Vite, Pinia, Element Plus; Vitest и Playwright.
-- Simulator UI v2: Vue 3, TypeScript, Vite, Vitest/happy-dom и Playwright. Node 22.12 в CI.
+- Simulator UI v2: Vue 3, TypeScript, Vite, Vitest/happy-dom и Playwright. Node 22.13 в CI.
 - Backend app: `app/main.py`. REST schema: `api/openapi.yaml`.
 - Локальный стек: `scripts/run_local.ps1`, `scripts/run_full_stack.ps1`, `scripts/run_simulator_ui.ps1`.
 - Test discovery, markers и `cache_dir` для прямого pytest: `pytest.ini` (не дублируйте настройки в новом месте).
