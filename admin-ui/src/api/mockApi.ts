@@ -245,6 +245,62 @@ function bottleneckOrder(eq: string) {
   }
 }
 
+/**
+ * Money aggregates of the liquidity summary inside ONE equivalent. Called only when an equivalent is selected:
+ * under ALL the server computes no money sums and no cross-equivalent nets (028 F-028-37, owner В-3), and the
+ * mock must not compute them either, not merely hide the result.
+ */
+function computeLiquidityMoney(
+  activeTrustlines: Trustline[],
+  debts: Debt[],
+  byPid: Map<string, Participant>,
+  eq: string,
+  limit: number,
+) {
+  let totalLimit = '0'
+  let totalUsed = '0'
+  let totalAvailable = '0'
+  for (const t of activeTrustlines) {
+    totalLimit = addDecimalStrings(totalLimit, String(t.limit || '0'))
+    totalUsed = addDecimalStrings(totalUsed, String(t.used || '0'))
+    totalAvailable = addDecimalStrings(totalAvailable, String(t.available || '0'))
+  }
+
+  const netByPid = new Map<string, string>()
+  for (const d of debts) {
+    if (String(d.equivalent || '').trim().toUpperCase() !== eq) continue
+    const debtor = String(d.debtor || '').trim()
+    const creditor = String(d.creditor || '').trim()
+    const amt = String(d.amount || '0')
+    if (debtor) netByPid.set(debtor, addDecimalStrings(netByPid.get(debtor) || '0', '-' + amt))
+    if (creditor) netByPid.set(creditor, addDecimalStrings(netByPid.get(creditor) || '0', amt))
+  }
+
+  const netRows = [...netByPid.entries()].map(([pid, net]) => ({
+    pid,
+    display_name: byPid.get(pid)?.display_name || '',
+    net,
+  }))
+
+  const topCreditors = netRows.filter((r) => compareDecimalStrings(r.net, '0') > 0)
+  topCreditors.sort((a, b) => compareDecimalStrings(b.net, a.net))
+
+  const topDebtors = netRows.filter((r) => compareDecimalStrings(r.net, '0') < 0)
+  topDebtors.sort((a, b) => compareDecimalStrings(a.net, b.net))
+
+  const topByAbsNet = [...netRows]
+  topByAbsNet.sort((a, b) => compareDecimalStrings(absDecimalString(b.net), absDecimalString(a.net)))
+
+  return {
+    totalLimit,
+    totalUsed,
+    totalAvailable,
+    topCreditors: topCreditors.slice(0, limit),
+    topDebtors: topDebtors.slice(0, limit),
+    topByAbsNet: topByAbsNet.slice(0, limit),
+  }
+}
+
 async function getParticipantsDataset(): Promise<Participant[]> {
   if (!mockParticipants) mockParticipants = await loadJson<Participant[]>('datasets/participants.json')
   return mockParticipants
@@ -1075,39 +1131,10 @@ export const mockApi = {
         return true
       })
 
-      let totalLimit = '0'
-      let totalUsed = '0'
-      let totalAvailable = '0'
-      for (const t of activeTrustlines) {
-        totalLimit = addDecimalStrings(totalLimit, String(t.limit || '0'))
-        totalUsed = addDecimalStrings(totalUsed, String(t.used || '0'))
-        totalAvailable = addDecimalStrings(totalAvailable, String(t.available || '0'))
-      }
-
-      const netByPid = new Map<string, string>()
-      for (const d of debts) {
-        if (eq && String(d.equivalent || '').trim().toUpperCase() !== eq) continue
-        const debtor = String(d.debtor || '').trim()
-        const creditor = String(d.creditor || '').trim()
-        const amt = String(d.amount || '0')
-        if (debtor) netByPid.set(debtor, addDecimalStrings(netByPid.get(debtor) || '0', '-' + amt))
-        if (creditor) netByPid.set(creditor, addDecimalStrings(netByPid.get(creditor) || '0', amt))
-      }
-
-      const netRows = [...netByPid.entries()].map(([pid, net]) => ({
-        pid,
-        display_name: byPid.get(pid)?.display_name || '',
-        net,
-      }))
-
-      const topCreditors = netRows.filter((r) => compareDecimalStrings(r.net, '0') > 0)
-      topCreditors.sort((a, b) => compareDecimalStrings(b.net, a.net))
-
-      const topDebtors = netRows.filter((r) => compareDecimalStrings(r.net, '0') < 0)
-      topDebtors.sort((a, b) => compareDecimalStrings(a.net, b.net))
-
-      const topByAbsNet = [...netRows]
-      topByAbsNet.sort((a, b) => compareDecimalStrings(absDecimalString(b.net), absDecimalString(a.net)))
+      // 028 F-028-37 / owner В-3: эквиваленты полностью независимы. Без выбранного эквивалента деньги
+      // не вычисляются ВООБЩЕ (как на сервере, `app/api/v1/admin.py`): сначала ветка `eq`, потом
+      // арифметика; под ALL остаются только счётчики и безразмерная доля узких мест.
+      const money = eq ? computeLiquidityMoney(activeTrustlines, debts, byPid, eq, limit) : null
 
       const topBottleneckEdges = [...bottleneckEdges]
       topBottleneckEdges.sort(bottleneckOrder(eq))
@@ -1122,12 +1149,12 @@ export const mockApi = {
           bottlenecks: bottleneckEdges.length,
           incidents_over_sla: incidentsOverSla.length,
           // 028 F-028-37: контракт сервера — без эквивалента деньги `null`, списки нетто пусты.
-          total_limit: eq ? totalLimit : null,
-          total_used: eq ? totalUsed : null,
-          total_available: eq ? totalAvailable : null,
-          top_creditors: eq ? topCreditors.slice(0, limit) : [],
-          top_debtors: eq ? topDebtors.slice(0, limit) : [],
-          top_by_abs_net: eq ? topByAbsNet.slice(0, limit) : [],
+          total_limit: money ? money.totalLimit : null,
+          total_used: money ? money.totalUsed : null,
+          total_available: money ? money.totalAvailable : null,
+          top_creditors: money ? money.topCreditors : [],
+          top_debtors: money ? money.topDebtors : [],
+          top_by_abs_net: money ? money.topByAbsNet : [],
           top_bottleneck_edges: topBottleneckEdges.slice(0, limit),
         },
       }
