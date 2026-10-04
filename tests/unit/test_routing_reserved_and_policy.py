@@ -128,6 +128,7 @@ async def test_build_graph_capacity_is_the_limit_and_respects_policy():
         def __init__(self, id_: uuid.UUID, pid: str):
             self.id = id_
             self.pid = pid
+            self.status = "active"  # 028 `F-028-28`: the graph skips a participant that is not active
 
     equivalent = _Equivalent(uuid.uuid4(), code)
 

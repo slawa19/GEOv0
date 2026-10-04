@@ -47,7 +47,7 @@ async def test_admin_trustlines_list_filters_and_pagination(client, db_session):
         equivalent_id=usd.id,
         limit=Decimal("50.00"),
         policy={"auto_clearing": True, "can_be_intermediate": True},
-        status="frozen",
+        status="closed",  # 028 `F-028-29`: was `frozen`, no longer a line status
     )
     db_session.add_all([tl1, tl2])
 
@@ -99,12 +99,14 @@ async def test_admin_trustlines_list_filters_and_pagination(client, db_session):
     assert payload["total"] == 1
 
     # Filter by status
-    r = await client.get("/api/v1/admin/trustlines?status=frozen", headers=headers)
+    r = await client.get("/api/v1/admin/trustlines?status=closed", headers=headers)
     assert r.status_code == 200
     payload = r.json()
     items = payload["items"]
     assert len(items) == 1
-    assert items[0]["status"] == "frozen"
+    assert items[0]["status"] == "closed"
+    r = await client.get("/api/v1/admin/trustlines?status=frozen", headers=headers)
+    assert r.status_code == 422, r.text  # 028 `F-028-29`: not a status any more
     assert payload["total"] == 1
 
     # Filter by creditor/debtor

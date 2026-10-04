@@ -263,7 +263,6 @@ export const EN: Record<string, string> = {
   'trustlines.limit': 'Limit',
   'trustlines.status.active': 'active',
   'trustlines.status.closed': 'closed',
-  'trustlines.status.frozen': 'frozen',
 
   'auditLog.action': 'Action',
   'auditLog.actor': 'Actor',

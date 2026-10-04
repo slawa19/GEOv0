@@ -580,7 +580,7 @@ async def test_inject_freeze_removes_from_active_routing(db_session) -> None:
 
     Verifications:
       - DB: participant.status = 'suspended'
-      - DB: incident trustlines status = 'frozen'
+      - DB: incident trustlines stay 'active' (028 F-028-29; until then 'frozen')
       - run._edges_by_equivalent: no edges involving frozen PID
       - scenario dicts updated in-place
       - Non-incident trustlines (B→C) remain active
@@ -754,15 +754,16 @@ async def test_inject_freeze_removes_from_active_routing(db_session) -> None:
             f"Frozen participant should be 'suspended', got '{target.status}'"
         )
 
-        # Verify: all incident trustlines are frozen.
+        # Verify: incident trustlines stay active - 028 `F-028-29` (INTENTIONAL change): the freeze is the
+        # participant's; until then every incident line became `frozen`.
         await db_session.refresh(tl_ab)
         await db_session.refresh(tl_ba)
         await db_session.refresh(tl_ac)
         await db_session.refresh(tl_ca)
-        assert tl_ab.status == "frozen", f"A→B should be frozen, got '{tl_ab.status}'"
-        assert tl_ba.status == "frozen", f"B→A should be frozen, got '{tl_ba.status}'"
-        assert tl_ac.status == "frozen", f"A→C should be frozen, got '{tl_ac.status}'"
-        assert tl_ca.status == "frozen", f"C→A should be frozen, got '{tl_ca.status}'"
+        assert tl_ab.status == "active", f"A→B should stay active, got '{tl_ab.status}'"
+        assert tl_ba.status == "active", f"B→A should stay active, got '{tl_ba.status}'"
+        assert tl_ac.status == "active", f"A→C should stay active, got '{tl_ac.status}'"
+        assert tl_ca.status == "active", f"C→A should stay active, got '{tl_ca.status}'"
 
         # Verify: non-incident trustline B→C remains active.
         await db_session.refresh(tl_bc)
@@ -794,16 +795,9 @@ async def test_inject_freeze_removes_from_active_routing(db_session) -> None:
         assert target_in_scenario is not None
         assert target_in_scenario["status"] == "suspended"
 
-        # Incident trustlines in scenario marked frozen.
-        frozen_tl_count = sum(
-            1
-            for tl in scenario["trustlines"]
-            if tl.get("status") == "frozen"
-            and (tl.get("from") == target.pid or tl.get("to") == target.pid)
-        )
-        assert frozen_tl_count == 4, (
-            f"Expected 4 frozen trustlines in scenario, got {frozen_tl_count}"
-        )
+        # Incident trustlines in scenario keep their status (028 `F-028-29`; until then marked frozen).
+        frozen_tl_count = sum(1 for tl in scenario["trustlines"] if tl.get("status") == "frozen")
+        assert frozen_tl_count == 0, f"Expected no frozen trustline in scenario, got {frozen_tl_count}"
 
         # Non-incident trustline B→C in scenario remains active.
         bc_in_scenario = next(

@@ -66,7 +66,7 @@ async def test_admin_trustlines_bottlenecks_filters_and_sorts(client, db_session
         equivalent_id=usd.id,
         limit=Decimal("100.00"),
         policy={},
-        status="frozen",
+        status="closed",  # 028 `F-028-29`: was `frozen`, no longer a line status
     )
     db_session.add_all([tl1, tl2, tl_boundary, tl3])
     await db_session.flush()

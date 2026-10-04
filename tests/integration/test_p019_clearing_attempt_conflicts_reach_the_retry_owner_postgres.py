@@ -55,7 +55,9 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 BARRIER = "p019_t1909_barrier"
 #: The checkpoint site left with the checkpoint (024 `T2413.2`: the clearing computes none in its transaction).
-SITES = ["metadata", "net_positions"]  # 027: `trust_lines` is now first read by the line lock
+# 027: `trust_lines` is now first read by the line lock; 028 `F-028-28`: `participants` by the participant lock, the
+# attempt's FIRST lock - neither table is first read after the cycle rows any more, so neither site can deadlock there.
+SITES = ["net_positions"]
 
 
 @pytest_asyncio.fixture

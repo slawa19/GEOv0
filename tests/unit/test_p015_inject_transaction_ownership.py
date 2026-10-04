@@ -37,7 +37,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, event, select
+from sqlalchemy import event, select
 from sqlalchemy.exc import DBAPIError
 
 from app.core.simulator.inject_executor import InjectOwnerLockSetTooNarrow
@@ -547,34 +547,10 @@ async def _fresh_freeze_state(w: _FreezeWorld) -> tuple[str, str]:
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_staging_a_freeze_outside_the_lock_set_raises_before_staging_it(db_session) -> None:
-    w = await _seed_freeze_world(db_session)
-    runner, _arts = _make_runner()
-
-    with pytest.raises(InjectOwnerLockSetTooNarrow) as raised:
-        await runner._inject_executor.stage_inject_event(
-            db_session,
-            scenario=_freeze_scenario(w),
-            event=_freeze_scenario(w)["events"][0],
-            # The run's perimeter, as the owner passes it: since programme 024 (F-024-4b) a freeze
-            # target OUTSIDE it must be simulator-created, and this world's keys are not.
-            pid_to_participant_id={w.target_pid: w.target_id, w.other_pid: w.other_id},
-            locked_equivalent_ids={w.run_eq_id},
-        )
-
-    assert raised.value.missing_equivalent_ids == frozenset({w.other_eq_id})
-    assert not (db_session.new or db_session.dirty or db_session.deleted), (
-        "the freeze staged changes before discovering it lacked a lock: "
-        f"new={db_session.new} dirty={db_session.dirty}"
-    )
-    await db_session.rollback()
-    assert await _fresh_freeze_state(w) == ("active", "active")
-
-
-@MODE_B
-@pytest.mark.asyncio
-async def test_the_owner_locks_a_freezes_incident_equivalents_before_staging(db_session) -> None:
-    """The owner reads the incident equivalents first: one attempt, no expansion needed."""
+async def test_a_freeze_names_no_equivalent_and_writes_no_line(db_session) -> None:
+    """028 `F-028-29`: a freeze suspends the participant and writes no trust line, so the owner's set stays the run's
+    (until then it read the incident equivalents first, and the line became `frozen`; the tests of that expansion
+    were removed with it)."""
     w = await _seed_freeze_world(db_session)
     runner, arts = _make_runner()
     run = _make_run(
@@ -587,154 +563,8 @@ async def test_the_owner_locks_a_freezes_incident_equivalents_before_staging(db_
         db_session, run_id="r1", run=run, scenario=_freeze_scenario(w)
     )
 
-    assert spy.locked_sets == [frozenset({w.run_eq_id, w.other_eq_id})], spy.locked_sets
-    assert await _fresh_freeze_state(w) == ("suspended", "frozen")
-    assert run._real_fired_scenario_event_indexes == {0}
-    assert _notes(arts) == ["inject applied"]
-
-
-@MODE_B
-@pytest.mark.asyncio
-async def test_the_owner_widens_the_lock_set_once_for_a_trustline_created_after_its_read(
-    db_session,
-) -> None:
-    """The expansion is the backstop for a race: a trustline appears between the read and staging.
-
-    Modelled exactly - the incident trustline is committed by another session right after the
-    owner's lock-set read - rather than by hoping two tasks interleave.
-    """
-    w = await _seed_freeze_world(db_session)
-    async with w.sessions() as s:  # start with no incident trustline at all
-        await s.execute(delete(TrustLine).where(TrustLine.id == w.tl_id))
-        await s.commit()
-    runner, arts = _make_runner()
-    run = _make_run(
-        participants=[(w.target_id, w.target_pid), (w.other_id, w.other_pid)],
-        equivalents=[w.run_eq_code],
-    )
-    spy = _StageSpy(runner)
-
-    real_resolve = runner._resolve_inject_owner_lock_ids
-    created: list[uuid.UUID] = []
-
-    async def _resolve_then_a_trustline_appears(session, **kwargs):
-        lock_ids = await real_resolve(session, **kwargs)
-        if not created:
-            async with w.sessions() as s:
-                tl = TrustLine(
-                    from_participant_id=w.other_id,
-                    to_participant_id=w.target_id,
-                    equivalent_id=w.other_eq_id,
-                    limit=Decimal("50"),
-                    status="active",
-                )
-                s.add(tl)
-                await s.commit()
-                created.append(tl.id)
-        return lock_ids
-
-    runner._resolve_inject_owner_lock_ids = _resolve_then_a_trustline_appears  # type: ignore[method-assign]
-
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_freeze_scenario(w)
-    )
-
-    assert created, "non-vacuity: the racing trustline was never created"
-    assert spy.locked_sets == [
-        frozenset({w.run_eq_id}),
-        frozenset({w.run_eq_id, w.other_eq_id}),
-    ], spy.locked_sets
-    async with w.sessions() as s:
-        tl_status = (
-            await s.execute(select(TrustLine.status).where(TrustLine.id == created[0]))
-        ).scalar_one()
-        p_status = (
-            await s.execute(select(Participant.status).where(Participant.id == w.target_id))
-        ).scalar_one()
-    assert (str(p_status), str(tl_status)) == ("suspended", "frozen")
-    assert run._real_fired_scenario_event_indexes == {0}
-    assert _notes(arts) == ["inject applied"]
-
-
-@MODE_B
-@pytest.mark.asyncio
-async def test_a_freeze_of_two_participants_in_two_outside_equivalents_completes(
-    db_session,
-) -> None:
-    """External review of step 3, the countercheck: RED before the owner read incident equivalents.
-
-    Two participants, each with its only incident trustline in a different equivalent the run
-    does not list. Staging stops at the first missing equivalent; the one allowed expansion is
-    spent on it; the retry stops at the second - on a topology nobody is changing - and the event
-    stayed pending on every tick.
-    """
-    n = _nonce()
-    run_eq = Equivalent(code=f"MR{n}".upper()[:16], precision=2, is_active=True)
-    eq_a = Equivalent(code=f"MA{n}".upper()[:16], precision=2, is_active=True)
-    eq_b = Equivalent(code=f"MB{n}".upper()[:16], precision=2, is_active=True)
-    people = [
-        Participant(
-            pid=f"MF{i}_{n}", display_name=f"P{i}", public_key=f"pk_mf{i}_{n}"[:64],
-            type="person", status="active",
-        )
-        for i in range(4)
-    ]
-    db_session.add_all([run_eq, eq_a, eq_b, *people])
-    await db_session.flush()
-    target_a, peer_a, target_b, peer_b = people
-    tl_a = TrustLine(
-        from_participant_id=peer_a.id, to_participant_id=target_a.id,
-        equivalent_id=eq_a.id, limit=Decimal("50"), status="active",
-    )
-    tl_b = TrustLine(
-        from_participant_id=peer_b.id, to_participant_id=target_b.id,
-        equivalent_id=eq_b.id, limit=Decimal("50"), status="active",
-    )
-    db_session.add_all([tl_a, tl_b])
-    await db_session.commit()
-
-    runner, arts = _make_runner()
-    run = _make_run(
-        participants=[(p.id, p.pid) for p in people], equivalents=[run_eq.code]
-    )
-    spy = _StageSpy(runner)
-    scenario = {
-        "participants": [{"id": p.pid} for p in people],
-        "trustlines": [],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {"op": "freeze_participant", "participant_id": target_a.pid},
-                    {"op": "freeze_participant", "participant_id": target_b.pid},
-                ],
-            }
-        ],
-    }
-
-    await runner._apply_due_scenario_events(db_session, run_id="r1", run=run, scenario=scenario)
-
-    assert spy.locked_sets == [frozenset({run_eq.id, eq_a.id, eq_b.id})], spy.locked_sets
-    async with sessionmaker_of(db_session)() as s:
-        statuses = dict(
-            (
-                await s.execute(
-                    select(Participant.pid, Participant.status).where(
-                        Participant.id.in_([target_a.id, target_b.id])
-                    )
-                )
-            ).all()
-        )
-        tl_statuses = set(
-            (
-                await s.execute(
-                    select(TrustLine.status).where(TrustLine.id.in_([tl_a.id, tl_b.id]))
-                )
-            ).scalars().all()
-        )
-    assert statuses == {target_a.pid: "suspended", target_b.pid: "suspended"}, statuses
-    assert tl_statuses == {"frozen"}, tl_statuses
+    assert spy.locked_sets == [frozenset({w.run_eq_id})], spy.locked_sets
+    assert await _fresh_freeze_state(w) == ("suspended", "active")
     assert run._real_fired_scenario_event_indexes == {0}
     assert _notes(arts) == ["inject applied"]
 

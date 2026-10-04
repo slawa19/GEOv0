@@ -1,5 +1,9 @@
 """T1543: a legally frozen trust line is compared with its stored limit, not with zero.
 
+028 `F-028-29` (owner В-2, 2026-10-04): the line status `frozen` is gone (migration 035), and with it the four
+tests of a frozen line. What remains is the rule's other half: `active` against its stored limit; `closed` or no
+live line against zero. The text below is the T1543 history.
+
 THE DEFECT. `check_trust_limits` outer-joined a debt only to an `active` trust line and substituted
 a limit of zero when none matched, so a debt on a FROZEN line counted as exceeding a limit of zero.
 Three observable consequences followed, and each has a test below that was red before the fix:
@@ -30,20 +34,13 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
 
-from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
-import app.core.ledger.book as book_module
-from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import IntegrityViolationException
-from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
 
 
@@ -110,147 +107,7 @@ async def _line_with_debt(
 # --- the defect ------------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_a_debt_within_the_limit_of_a_frozen_line_is_not_a_violation(db_session):
-    eq, _creditor, _debtor = await _line_with_debt(
-        db_session, status="frozen", limit="100", debt="42"
-    )
-
-    assert await InvariantChecker(db_session).check_trust_limits(equivalent_id=eq.id) == []
-
-
-@pytest.mark.asyncio
-async def test_a_frozen_line_within_its_limit_leaves_the_checkpoint_healthy(db_session):
-    eq, _creditor, _debtor = await _line_with_debt(
-        db_session, status="frozen", limit="100", debt="42"
-    )
-
-    cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
-
-    # 026 `T2601`: the entry also lists allowed excess (none here) and says growth is not verified.
-    assert cp.invariants_status["checks"]["trust_limits"] == {
-        "passed": True,
-        "violations": 0,
-        "over_limit_allowed": [],
-        "growth": {"status": "not_verified", "reason": "requires_operation_prestate"},
-    }
-    assert cp.invariants_status["status"] == "healthy"
-    assert cp.invariants_status["alerts"] == []
-    assert cp.invariants_status["passed"] is True
-
-
-async def _pay_with_the_flow_perturbed(
-    db_session,
-    monkeypatch,
-    *,
-    eq_code: str,
-    sender_id,
-    receiver_pid: str,
-    amount: str,
-) -> tuple[object, str, list]:
-    """A REAL payment on the direct path (`PaymentService.pay`, programme 019 stage 4).
-
-    Until stage 4 these tests committed a hand-seeded PREPARED payment through `PaymentEngine.commit`;
-    migration 030 refuses that seed and the engine is gone. The harness is kept: after the book applies
-    each flow the session's identity map is expired - what a stale-data re-run does - and the audit and
-    invariant path must survive it. The perturbation is evidence only if it ran (returned, asserted).
-    """
-
-    original = book_module._apply_payment_flow
-    perturbed: list = []
-
-    async def _apply_flow_and_expire(session, flow):
-        result = await original(session, flow)
-        session.expire_all()
-        perturbed.append(flow)
-        return result
-
-    monkeypatch.setattr(book_module, "_apply_payment_flow", _apply_flow_and_expire)
-    request = PaymentCreateRequest(
-        tx_id="tx-" + uuid.uuid4().hex,
-        to=receiver_pid,
-        equivalent=eq_code,
-        amount=amount,
-        signature="__internal__",
-    )
-    try:
-        result = await PaymentService.pay(
-            sessionmaker_of(db_session), sender_id, request, require_signature=False
-        )
-    finally:
-        PaymentRouter.invalidate_cache(eq_code)
-    return result, request.tx_id, perturbed
-
-
-@MODE_B
-@pytest.mark.asyncio
-async def test_a_partial_repayment_of_debt_on_a_frozen_line_commits(db_session, monkeypatch):
-    # The creditor pays the debtor 10 against a debt of 42 on the frozen line the creditor
-    # extended: the flow reduces the debt to 32. Before the fix the commit-time check read the
-    # remaining 32 against a limit of zero and ABORTED the payment - so a debt on a frozen line
-    # could only be reduced by paying all of it in one payment.
-    eq, creditor, debtor = await _line_with_debt(
-        db_session, status="frozen", limit="100", debt="42"
-    )
-    # Plain values: the harness expires the identity map during the payment.
-    eq_id, eq_code, creditor_id, debtor_id, debtor_pid = eq.id, eq.code, creditor.id, debtor.id, debtor.pid
-    # A REAL payment needs a route: the frozen line offers no routing capacity (that is its point), so
-    # the debtor trusts the creditor on a small active line of its own. The segment creditor->debtor
-    # then has capacity 1 + the reverse debt 42; the payment of 10 only REDUCES the debt on the frozen
-    # line (the flow nets it first), and the commit-time check reads the remaining 32 against the frozen
-    # line's stored limit of 100. Measured 2026-09-25: without this line the router refuses (E002),
-    # which is routing's rule for a frozen line and not the defect this test pins.
-    db_session.add(
-        TrustLine(
-            from_participant_id=debtor_id,
-            to_participant_id=creditor_id,
-            equivalent_id=eq_id,
-            limit=Decimal("1"),
-            status="active",
-        )
-    )
-    await db_session.commit()
-
-    result, _tx_id, perturbed = await _pay_with_the_flow_perturbed(
-        db_session, monkeypatch, eq_code=eq_code, sender_id=creditor_id, receiver_pid=debtor_pid, amount="10"
-    )
-    assert result.status == "COMMITTED", result
-    assert len(perturbed) == 1, perturbed
-
-    async with sessionmaker_of(db_session)() as observer:
-        remaining = (
-            await observer.execute(
-                select(Debt.amount).where(
-                    Debt.debtor_id == debtor_id,
-                    Debt.creditor_id == creditor_id,
-                    Debt.equivalent_id == eq_id,
-                )
-            )
-        ).scalar_one()
-    assert Decimal(str(remaining)) == Decimal("32")
-
-
 # --- controls: the rule must not slide into its wrong neighbours ----------------------------
-
-
-@pytest.mark.asyncio
-async def test_a_frozen_line_over_its_limit_is_reported_against_that_limit(db_session):
-    # INTENTIONAL, 026 `T2601` (owner, В3, 2026-09-29): a debt over the limit is no longer a snapshot
-    # violation but an allowed, REPORTED state; growth is refused on the write path. What T1543 pins
-    # survives: the frozen line is compared with its stored limit (excess 50), not with zero (150).
-    eq, creditor, debtor = await _line_with_debt(
-        db_session, status="frozen", limit="100", debt="150"
-    )
-
-    (entry,) = await InvariantChecker(db_session).check_trust_limits(equivalent_id=eq.id)
-    assert entry["creditor_id"] == str(creditor.id)
-    assert entry["debtor_id"] == str(debtor.id)
-    assert Decimal(entry["trust_limit"]) == Decimal("100")
-    assert Decimal(entry["excess"]) == Decimal("50")
-
-    cp = await compute_integrity_checkpoint_for_equivalent(db_session, equivalent_id=eq.id)
-    assert cp.invariants_status["status"] == "healthy"
-    assert cp.invariants_status["checks"]["trust_limits"]["over_limit_allowed"] == [entry]
 
 
 @pytest.mark.asyncio

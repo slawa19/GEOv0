@@ -37,7 +37,9 @@ def test_freeze_participant_does_not_overwrite_non_active_trustline_status_in_sc
         frozen_pids=["FROZEN"],
     )
 
+    # 028 `F-028-29` (INTENTIONAL change): no line status is written any more - the participant is suspended and
+    # its edges leave the planner's adjacency; until then the active lines became `frozen` here.
     tls = scenario["trustlines"]
-    assert tls[0]["status"] == "frozen"
-    assert tls[1]["status"] == "deleted"  # must not be overwritten
-    assert tls[2]["status"] == "frozen"  # missing -> active -> frozen
+    assert [tl.get("status") for tl in tls] == ["active", "deleted", None]
+    assert scenario["participants"][0]["status"] == "suspended"
+    assert run._edges_by_equivalent == {"EUR": [("A", "B")]}
