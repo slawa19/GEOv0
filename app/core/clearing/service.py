@@ -716,6 +716,8 @@ class ClearingService:
           deliberately still accepts `0.05` for a precision-1 `HOUR`.  Enacting it here, in the
           detector only, would have created debts that are storable, payable and permanently
           unclearable - and it would still have left the fast path and the fallback disagreeing.
+          CORRECTION 2026-10-04 (028 `F-028-23`, `F-028-26`, owner В-4): HOUR has precision 2, and the
+          doors now refuse amounts finer than the step; this detector stays step-blind on purpose.
 
         `d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0` already says "a real debt", it is
         per-table so the planner can push it down, and it is the same rule the DFS applies.

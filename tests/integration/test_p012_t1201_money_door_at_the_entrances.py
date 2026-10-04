@@ -181,7 +181,11 @@ async def test_the_smallest_storable_limit_is_signable_by_a_client_that_signs_wh
     `data.limit` IS a `str`; the T1210-bis test-honesty pass corrected the claim.)
     """
 
-    await _seed_equivalent(db_session)
+    # INTENTIONAL, 028 `F-028-23` (owner В-4, 2026-10-04): precision is the accounting step, so the smallest
+    # storable limit is a legal limit only of a precision-8 equivalent; the spelling under test is unchanged.
+    eq = await _seed_equivalent(db_session)
+    eq.precision = 8
+    await db_session.commit()
     lender = await register_and_login(client, "Door_Smallest_Lender")
     borrower = await register_and_login(client, "Door_Smallest_Borrower")
     lender_key = SigningKey(base64.b64decode(lender["priv"]))

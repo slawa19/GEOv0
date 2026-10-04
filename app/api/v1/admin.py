@@ -79,7 +79,7 @@ from app.utils.exceptions import (
 )
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 from app.utils.request_id import new_request_id, request_id_var, validate_request_id
-from app.utils.validation import validate_equivalent_code, validate_equivalent_precision
+from app.utils.validation import MONEY_MAX_SCALE, validate_equivalent_code, validate_equivalent_precision
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
@@ -1180,7 +1180,8 @@ async def admin_create_equivalent(
     responses={
         409: {
             "model": ErrorEnvelope,
-            "description": "Stored equivalent requires an explicit legacy-data repair",
+            "description": "Stored equivalent requires an explicit legacy-data repair, or a lower precision under "
+            "stored lines, debts or journal entries (precision_in_use)",
         }
     },
 )
@@ -1231,6 +1232,23 @@ async def admin_update_equivalent(
     # committed meets 40001 and refuses on its retry. Two outcomes only: the writer commits before this
     # PATCH returns, or this PATCH commits first and the writer refuses. No advisory lock since 019 stage 5
     # (`T1909`): the row lock is the whole protocol.
+
+    # 028 `F-028-25` (owner В-4): precision is the accounting step, so lowering it under stored data would make
+    # those amounts finer than the step. Read AFTER the row lock above: every writer that checks the step holds
+    # this row `FOR SHARE` to its commit (`MoneyBoundary.share_equivalent_step`), so its row is visible here. A
+    # step finer than the storage scale is the scale (`noncanonical_precision` repair stays possible).
+    if body.precision is not None and body.precision < min(int(eq.precision), MONEY_MAX_SCALE):
+        from app.db.journal_tables import debt_journal_entries
+
+        used = await db.scalar(select(
+            select(TrustLine.id).where(TrustLine.equivalent_id == eq.id).exists()
+            | select(Debt.id).where(Debt.equivalent_id == eq.id).exists()
+            | select(debt_journal_entries.c.id).where(debt_journal_entries.c.equivalent_id == eq.id).exists()))
+        if used:
+            raise ConflictException(
+                f"Equivalent {eq.code} holds lines, debts or journal entries; its precision cannot be lowered",
+                details={"code": eq.code, "reason": "precision_in_use", "precision": eq.precision},
+            )
 
     before = {
         "symbol": eq.symbol,

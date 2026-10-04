@@ -17,6 +17,8 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Optional
 
+from app.utils.validation import floor_to_step
+
 
 def pair_capacity(
     *, line_limit: Decimal | None, payer_owes: Decimal, payee_owes: Decimal, pair_has_active_line: bool
@@ -28,19 +30,17 @@ def pair_capacity(
     return (line_limit if line_limit is not None else Decimal("0")) - payer_owes + payee_owes
 
 
-#: The ledger's grain: "strictly less" over money that has at most eight fraction digits.
-_GRAIN = Decimal("1E-8")
-
-
-def pending_pair_capacity(capacity: Decimal, *, payee_owes: Decimal) -> Decimal:
+def pending_pair_capacity(capacity: Decimal, *, payee_owes: Decimal, step: Decimal) -> Decimal:
     """A hop over a pair with a requested close: the pair's debt must end strictly lower (В2).
 
     Only the payee's debt to the payer can shrink by this hop: paying `t` turns it into `payee_owes - t`, whose
     size is below `payee_owes` exactly while `t < 2 * payee_owes` (repay, or cross zero into a smaller reverse
     debt the other line must still allow - `capacity`). Without such a debt the hop can only grow the pair.
+    "Strictly less" is one accounting STEP of the equivalent, floored to it (028 `F-028-23`, owner В-4): with the
+    storage grain `1E-8` a payment of 2.00 over owes 1 split into 1.99999999 here plus 0.00000001 elsewhere.
     """
 
-    return min(capacity, 2 * payee_owes - _GRAIN) if payee_owes > 0 else Decimal("0")
+    return floor_to_step(min(capacity, 2 * payee_owes - step), step) if payee_owes > 0 else Decimal("0")
 
 
 def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str], frozenset[str]]:
@@ -50,7 +50,8 @@ def pair_rules(lines: Iterable[tuple[str, dict | None]]) -> tuple[frozenset[str]
     blocked: set[str] = set()
     for owner_pid, policy in lines:
         policy = policy if isinstance(policy, dict) else {}
-        forbids = not bool(policy.get("can_be_intermediate", True))
+        # `null` is "not set", as the API stores it (028 `F-028-3`); a non-bool never gets here - the doors refuse it.
+        forbids = policy.get("can_be_intermediate") is not None and not bool(policy.get("can_be_intermediate"))
         try:  # owner decision B (024 T2415.3): forbids EXACTLY at zero - "0.0", "0e0", 0 yes, 0.5 no
             forbids = forbids or Decimal(str(policy.get("max_hop_usage", 1))) == 0
         except (InvalidOperation, ValueError, TypeError):  # unparsable (None, "abc", NaN signal): permits, as before

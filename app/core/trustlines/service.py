@@ -33,6 +33,7 @@ from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import (
     is_storable_money,
     parse_money_amount,
+    require_money_step,
     validate_equivalent_code,
     validate_trustline_policy,
 )
@@ -462,6 +463,8 @@ class TrustLineService:
         # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
         await MoneyBoundary(self.session).lock_pair_lines([(equivalent.id, from_participant_id, to_participant.id)])
 
+        await self._require_step(equivalent.id, limit)
+
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
         # (docs/ru/02-protocol-spec.md:333) — and, since migration
@@ -618,6 +621,8 @@ class TrustLineService:
             validate_trustline_policy(data.policy)
 
         equivalent_code = await self._equivalent_code(trustline.equivalent_id)
+        if new_limit is not None:
+            await self._require_step(trustline.equivalent_id, new_limit)
         await batch._touch(trustline.equivalent_id, equivalent_code)
 
         if new_limit is not None:
@@ -813,6 +818,14 @@ class TrustLineService:
             )
             imported.append(trustline)
         return imported
+
+    async def _require_step(self, equivalent_id: UUID, limit: Decimal) -> None:
+        """028 `F-028-23`/`F-028-25` (owner В-4): a limit finer than the equivalent's step is refused, never rounded.
+        The step is read under the equivalent row `FOR SHARE`, held to commit, so a PATCH lowering the precision
+        either waits for this write and then sees it, or commits first and this write reads the new step."""
+
+        code, precision = await MoneyBoundary(self.session).share_equivalent_step(equivalent_id) or ("?", 8)
+        require_money_step(limit, precision=precision, equivalent=code, field="limit")
 
     async def _equivalent_code(self, equivalent_id: UUID) -> str:
         code = (

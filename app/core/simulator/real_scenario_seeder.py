@@ -14,8 +14,14 @@ from app.core.simulator.scenario_equivalent import (
     scenario_default_equivalent,
 )
 from app.core.trustlines.service import InitialTrustLine, TrustLineService
-from app.utils.exceptions import ConflictException
-from app.utils.validation import is_storable_money, validate_equivalent_code
+from app.utils.exceptions import BadRequestException, ConflictException
+from app.utils.validation import (
+    AMOUNT_PRECISION_EXCEEDED,
+    is_storable_money,
+    require_money_step,
+    validate_equivalent_code,
+    validate_trustline_policy,
+)
 
 
 # Programme 024, F-024-4b (SIM-02). A run acts for its participants without signatures (the
@@ -43,6 +49,20 @@ class SimulatorPidTakenError(ConflictException):
             details={"code": SIMULATOR_PID_TAKEN, "pid": pid},
         )
         self.pid = pid
+
+
+SCENARIO_TRUSTLINE_REFUSED = "SCENARIO_TRUSTLINE_REFUSED"
+
+
+class ScenarioTrustLineRefused(ConflictException):
+    """028 `F-028-3`/`F-028-24`: a scenario line the trust-line doors would refuse - its policy breaks the policy
+    grammar, or its limit is finer than the equivalent's step. Seeding stops naming the line; it is never skipped
+    (the policy decides who mediates) and never rounded (owner В-4)."""
+
+    def __init__(self, line: str, reason: str, message: str) -> None:
+        super().__init__(f"{SCENARIO_TRUSTLINE_REFUSED}: trust line {line}: {message}",
+                         details={"code": SCENARIO_TRUSTLINE_REFUSED, "reason": reason, "line": line})
+        self.line = line
 
 
 def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
@@ -198,10 +218,13 @@ class RealScenarioSeeder:
                 "blocked_participants": [],
             }
 
+            # `FOR SHARE` with the precision re-read (028 `F-028-25`): the step checked below cannot be lowered by an
+            # admin PATCH before this seeding commits.
             eq_rows = (
                 (
                     await session.execute(
-                        select(Equivalent).where(Equivalent.code.in_(eq_codes))
+                        select(Equivalent).where(Equivalent.code.in_(eq_codes)).order_by(Equivalent.id)
+                        .with_for_update(read=True).execution_options(populate_existing=True)
                     )
                 )
                 .scalars()
@@ -257,6 +280,15 @@ class RealScenarioSeeder:
                 policy = tl.get("policy")
                 if not isinstance(policy, dict):
                     policy = default_policy
+                line = f"{from_pid}->{to_pid} {eq}"
+                try:
+                    validate_trustline_policy(policy)
+                except BadRequestException as exc:
+                    raise ScenarioTrustLineRefused(line, "invalid_policy", exc.message) from exc
+                try:
+                    require_money_step(limit, precision=eq_by_code[eq].precision, equivalent=eq, field="limit")
+                except BadRequestException as exc:
+                    raise ScenarioTrustLineRefused(line, AMOUNT_PRECISION_EXCEEDED, exc.message) from exc
 
                 initial.append(
                     InitialTrustLine(

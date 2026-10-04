@@ -24,7 +24,7 @@ async def test_trust_drift_decay_never_shrinks_below_used_debt(db_session):
         code=("D" + nonce[:15]).upper(),
         symbol="D",
         description=None,
-        precision=2,
+        precision=8,  # INTENTIONAL, 028 В-4: drift writes scale-8 limits, legal only at precision 8 until E4 (F-028-31)
         metadata_={},
         is_active=True,
     )

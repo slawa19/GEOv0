@@ -39,6 +39,11 @@ def to_money_str(value: Decimal, precision: int) -> str:
     was considered and deliberately rejected: precision is editable by an admin, so it would
     retroactively invalidate rows that are already in the ledger.
 
+    CORRECTION 2026-10-04 (028 `F-028-23`, `F-028-26`, owner В-4): `HOUR` has precision 2 (the legacy
+    `seeds/equivalents.json` said 1), and precision IS now the accounting step - the doors refuse an
+    amount finer than it and the admin cannot lower it under stored data. This renderer still never
+    erases: a stored non-multiple (written before 028) is shown, not floored.
+
     So `precision` keeps its job of setting the MINIMUM number of digits shown -- a
     precision-2 equivalent still renders `0.05` as `"0.05"` and zero as `"0.00"`, byte for
     byte as before -- and loses only its power to erase what does not divide by it.

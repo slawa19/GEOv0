@@ -3246,7 +3246,7 @@ paths:
         '409':
           description: >-
             Run is terminal, the action conflicts with current state, the run's scenario names a participant the
-            simulator did not create - SIMULATOR_PID_TAKEN, or the line's close is requested and the new limit is
+            simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED, or the line's close is requested and the new limit is
             positive - TRUSTLINE_CLOSE_REQUESTED (the request is not cancelled; a zero limit is accepted) (flat envelope)
           content:
             application/json:
@@ -3456,7 +3456,7 @@ paths:
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
         '409':
-          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)
           content:
             application/json:
               schema:
@@ -3524,7 +3524,7 @@ paths:
         '404':
           $ref: '#/components/responses/SimulatorActionNotFound'
         '409':
-          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+          description: The run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)
           content:
             application/json:
               schema:
@@ -3713,7 +3713,7 @@ components:
           schema:
             $ref: '#/components/schemas/SimulatorActionError'
     SimulatorActionConflict:
-      description: Run is terminal, the action conflicts with current state, or the run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN (flat envelope)
+      description: Run is terminal, the action conflicts with current state, or the run's scenario names a participant the simulator did not create - SIMULATOR_PID_TAKEN; or a scenario trust line breaks the trust-line rules - SCENARIO_TRUSTLINE_REFUSED (flat envelope)
       content:
         application/json:
           schema:
@@ -4969,6 +4969,7 @@ components:
           type: integer
           nullable: true
           minimum: 0
+          description: "Raising is always allowed; lowering an equivalent that holds a trust line, a debt or a journal entry is refused - 409 `E008` with `details.reason = precision_in_use` (028)."
           # 0..8, narrowed from 0..18 (012 / S1, 2026-08-25). Two independent reasons, and
           # they agree: the ledger stores money in `Numeric(20, 8)` (`debts.amount`,
           # `trust_lines.limit`), so eight fraction digits is all it can keep; and the
@@ -5403,6 +5404,7 @@ components:
           $ref: '#/components/schemas/EquivalentCode'
         limit:
           type: string
+          description: "A multiple of the equivalent's step `10^-precision` (028, owner decision 2026-10-04: precision is the accounting step); a finer value is refused, never rounded - 400 `E009` with `details.reason = amount_precision_exceeded`, `equivalent`, `precision`."
         policy:
           type: object
           additionalProperties: true
@@ -5470,6 +5472,7 @@ components:
       properties:
         limit:
           type: string
+          description: "A multiple of the equivalent's step `10^-precision` (028, owner decision 2026-10-04: precision is the accounting step); a finer value is refused, never rounded - 400 `E009` with `details.reason = amount_precision_exceeded`, `equivalent`, `precision`."
         policy:
           type: object
           additionalProperties: true
@@ -5733,6 +5736,7 @@ components:
           $ref: '#/components/schemas/EquivalentCode'
         amount:
           type: string
+          description: "A multiple of the equivalent's step `10^-precision` (028, owner decision 2026-10-04: precision is the accounting step); a finer value is refused, never rounded - 400 `E009` with `details.reason = amount_precision_exceeded`, `equivalent`, `precision`."
         description:
           type: string
         constraints:

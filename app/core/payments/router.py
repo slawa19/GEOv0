@@ -20,7 +20,7 @@ from app.db.models.equivalent import Equivalent
 from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath
 from app.config import settings
 from app.utils.metrics import ROUTING_FAILURES_TOTAL
-from app.utils.validation import validate_equivalent_code
+from app.utils.validation import floor_to_step, money_step, validate_equivalent_code
 from app.utils.exceptions import BadRequestException, TimeoutException
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,8 @@ class PaymentRouter:
         self.edge_no_transit: Dict[str, Dict[str, frozenset]] = {}
         # 026 В2: pairs (participant UUIDs) holding a requested close - the core's lock-mode hint, not a rule.
         self.pending_pairs: Set[frozenset] = set()
+        # 028 `F-028-23`: the equivalent's precision when the graph was built; every capacity is floored to its step.
+        self.precision: Optional[int] = None
         self.from_cache = False  # the last build_graph() was served by the shared cache (027: may be stale)
         self.pids: Dict[UUID, str] = {} # Map UUID to PID string for easier graph keys
         self.uuids: Dict[str, UUID] = {} # Map PID string to UUID
@@ -237,6 +239,7 @@ class PaymentRouter:
         self.uuids = dict(uuids)
         self.edge_no_transit = {u: dict(v) for u, v in (no_transit or [{}])[0].items()}
         self.pending_pairs = set(no_transit[1]) if len(no_transit) > 1 else set()
+        self.precision = no_transit[2] if len(no_transit) > 2 else None
         self.from_cache = True
         return True
 
@@ -248,8 +251,9 @@ class PaymentRouter:
     ) -> None:
         read_started = next(self._ticks)
         # 1. Get Equivalent ID. 027 stage 1: columns, not ORM objects, throughout (F-027-4).
-        stmt = select(Equivalent.id).where(Equivalent.code == equivalent_code)
-        equivalent_id = (await self.session.execute(stmt)).scalar_one_or_none()
+        stmt = select(Equivalent.id, Equivalent.precision).where(Equivalent.code == equivalent_code)
+        row = (await self.session.execute(stmt)).one_or_none()
+        equivalent_id, self.precision = (row[0], int(row[1])) if row is not None else (None, None)
         if equivalent_id is None:
             logger.warning(f"Equivalent {equivalent_code} not found")
             self.graph = {}
@@ -321,6 +325,7 @@ class PaymentRouter:
         # hold none (019 `T1909`). A pair with an active line gets a hop in each direction whose capacity
         # is positive; a pair without one gets none (024 `T2415.2`, owner decision 2026-09-29, GEO).
         lines = {(tl.from_participant_id, tl.to_participant_id): tl for tl in trustlines}
+        step = money_step(self.precision)
         for x, y in {frozenset(k) for k in lines if k[0] != k[1]}:
             pair = [lines[k] for k in ((x, y), (y, x)) if k in lines]
             forbid, blocked = pair_rules((self.pids.get(tl.from_participant_id), tl.policy) for tl in pair)
@@ -336,8 +341,11 @@ class PaymentRouter:
                     payee_owes=payee_owes,
                     pair_has_active_line=True,
                 )
+                # 028 `F-028-23`: in the equivalent's step, so every split `min(remaining, bottleneck)` and every
+                # max-flow sum is a multiple of it (a stored non-multiple is never offered).
+                cap = floor_to_step(cap, step)
                 if pending:
-                    cap = pending_pair_capacity(cap, payee_owes=payee_owes)
+                    cap = pending_pair_capacity(cap, payee_owes=payee_owes, step=step)
                 if payer_pid and payee_pid and cap > 0:
                     self._add_capacity(payer_pid, payee_pid, cap)
                     self._set_edge_policy(payer_pid, payee_pid, payee_pid not in forbid)
@@ -356,6 +364,7 @@ class PaymentRouter:
                 dict(self.uuids),
                 {u: dict(v) for u, v in self.edge_no_transit.items()},
                 set(self.pending_pairs),
+                self.precision,
             )
 
     def _add_capacity(self, u: str, v: str, amount: Decimal):

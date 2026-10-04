@@ -50,7 +50,13 @@ from app.utils.exceptions import (
     TimeoutException,
 )
 from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
-from app.utils.validation import validate_equivalent_code, validate_tx_id, parse_money_amount
+from app.utils.validation import (
+    money_step,
+    parse_money_amount,
+    require_money_step,
+    validate_equivalent_code,
+    validate_tx_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1220,6 +1226,19 @@ class PaymentService:
                 refusal=_public_error_of_stored(stored),
             )
 
+        # 028 `F-028-23` (owner В-4): an amount finer than the equivalent's step is refused, never rounded. Best
+        # effort here, after the idempotency decision; the binding phase checks every declared flow again.
+        try:
+            require_money_step(amount, precision=equivalent.precision, equivalent=equivalent_code)
+        except BadRequestException:
+            try:
+                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+
+                PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
+            except Exception:
+                pass
+            raise
+
         # T1544: a deactivated equivalent takes no new payment. Best effort, on the row loaded above
         # and AFTER the idempotency decision, so a replay of an already-accepted tx_id still answers
         # with its stored result. It is not the binding check - that one is at commit, behind the
@@ -1740,6 +1759,12 @@ class PaymentService:
         self._locked_lines = await self._boundary.lock_pair_lines(
             {(equivalent_id, participants[u], participants[v]) for path, _ in routes for u, v in zip(path, path[1:])}
         )
+        # 028 `F-028-23` (owner В-4): no declared flow finer than the equivalent's step - whatever route the router
+        # handed over (a forced or stale split included). See `_step` for why a plain read is enough.
+        code, precision = await self._step(equivalent_id)
+        for _path, route_amount in routes:
+            require_money_step(Decimal(route_amount), precision=precision, equivalent=code)
+        step = money_step(precision)
 
         # `reserved` is what EARLIER ROUTES OF THIS PAYMENT already claim on a segment (multipath over one
         # edge); no other transaction reserves anything (019 stage 5, `T1909`).
@@ -1752,7 +1777,7 @@ class PaymentService:
             for sender_pid, receiver_pid in zip(path, path[1:]):
                 sender_id = participants[sender_pid]
                 receiver_id = participants[receiver_pid]
-                available, lines = await self._segment(sender_id, receiver_id, equivalent_id)
+                available, lines = await self._segment(sender_id, receiver_id, equivalent_id, step)
                 hop_rules[(sender_pid, receiver_pid)] = pair_rules(
                     (pid_of[owner_id], policy) for owner_id, _limit, policy, *_ in lines
                 )
@@ -1799,7 +1824,7 @@ class PaymentService:
 
         return (await self._segment(sender_id, receiver_id, equivalent_id))[0]
 
-    async def _segment(self, sender_id, receiver_id, equivalent_id) -> "tuple[Decimal, list]":
+    async def _segment(self, sender_id, receiver_id, equivalent_id, step=None) -> "tuple[Decimal, list]":
         """Capacity of one hop and its pair's active lines `(owner_id, limit, policy, ...)`: the core's FINAL check.
 
         Read AFTER `_bind_payment` locked every non-closed line of the pair `FOR UPDATE` (027 stage 2; until then
@@ -1814,6 +1839,7 @@ class PaymentService:
         locked = self._locked_lines
         if locked is None:  # a direct call outside the binding phase locks the pair itself
             locked = await self._boundary.lock_pair_lines([(equivalent_id, sender_id, receiver_id)])
+        step = step if step is not None else money_step((await self._step(equivalent_id))[1])
         rows = [row for row in locked if row.equivalent_id == equivalent_id and {row.from_participant_id, row.to_participant_id}
                 == pair and (row.status == "active" or (row.status == "frozen" and row.close_requested_at is not None))]
         lines = [row for row in rows if row.status == "active"]
@@ -1823,8 +1849,19 @@ class PaymentService:
         capacity = pair_capacity(line_limit=limit, payer_owes=sender_owes, payee_owes=receiver_owes,
                                  pair_has_active_line=bool(lines))
         if any(row.close_requested_at is not None for row in rows):
-            capacity = pending_pair_capacity(capacity, payee_owes=receiver_owes)
+            capacity = pending_pair_capacity(capacity, payee_owes=receiver_owes, step=step)
         return capacity, list(lines)
+
+    async def _step(self, equivalent_id: uuid.UUID) -> tuple[str, int]:
+        """`(code, precision)` of the equivalent (028 `F-028-23`). A plain read, NOT the stop's row lock (which the
+        money phase takes, T1544 - taking it here made a stop arriving after the binding wait for the payment): a
+        payment crosses lines of the equivalent, and the admin refuses to lower the precision of an equivalent that
+        has any line (`F-028-25`), so the step read here can only have become finer - and an amount or a bound in
+        the coarser step is a multiple of the finer one."""
+
+        row = (await self.session.execute(
+            select(Equivalent.code, Equivalent.precision).where(Equivalent.id == equivalent_id))).one_or_none()
+        return (str(row[0]), int(row[1])) if row is not None else ("?", 8)
 
     async def _debt_amount(
         self, debtor_id: uuid.UUID, creditor_id: uuid.UUID, equivalent_id: uuid.UUID

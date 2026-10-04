@@ -62,7 +62,7 @@ def _drift_engine(run=None) -> TrustDriftEngine:
 
 async def _seed(db_session, *, existing_amount: Decimal, limit: Decimal):
     n = _nonce()
-    eq = Equivalent(code=f"T{n}".upper()[:16], precision=2, is_active=True)
+    eq = Equivalent(code=f"T{n}".upper()[:16], precision=8, is_active=True)  # INTENTIONAL, 028 В-4: drift writes scale-8 limits, legal only at precision 8 until E4 (F-028-31)
     creditor = Participant(
         pid=f"TCRED_{n}", display_name="Creditor", public_key=f"pk_tcred_{n}"[:64],
         type="person", status="active",

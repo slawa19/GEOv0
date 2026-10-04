@@ -816,7 +816,7 @@ class _NoopArtifacts:
     ("scenario_limit", "exponential_spelling", "precision", "wire"),
     [
         # `E-`: the same class the ledger producers can reach.
-        ("0.00000001", "1E-8", 2, None),
+        ("0.00000001", "1E-8", 8, None),  # INTENTIONAL, 028 `F-028-23`/В-4: scale-8 money is legal only at precision 8 (precision = the step)
         # `E+`: NOT reachable from storage (T1200 measured that), but this producer renders a
         # scenario-supplied value before it is ever stored, and `Decimal(str("1e3"))` is
         # `Decimal('1E+3')`.  So the invariant needs both signs after all.

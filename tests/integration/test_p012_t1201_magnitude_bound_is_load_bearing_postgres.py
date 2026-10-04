@@ -74,7 +74,7 @@ async def pair(pg_client: AsyncClient) -> AsyncGenerator[dict, None]:
     code = f"MG{nonce}".upper()[:16]
 
     async with TestingSessionLocal() as session:
-        equivalent = Equivalent(code=code, description="T1201 magnitude probe", precision=2)
+        equivalent = Equivalent(code=code, description="T1201 magnitude probe", precision=8)  # INTENTIONAL, 028 `F-028-23`/В-4: scale-8 money is legal only at precision 8 (precision = the step)
         session.add(equivalent)
         await session.commit()
         equivalent_id = equivalent.id

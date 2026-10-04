@@ -1,5 +1,5 @@
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from typing import Any
 
 from app.utils.exceptions import BadRequestException
@@ -490,6 +490,10 @@ def parse_money_amount(
     above is otherwise unchanged and still holds - narrowing precision did not close this
     finding, because precision is a DISPLAY parameter and the column bound is what refuses an
     unstorable value.  Only the number in it is out of date.
+
+    CORRECTION (028 `F-028-23`, 2026-10-04, owner В-4): precision is now the ACCOUNTING STEP and the
+    deferred decision is taken - not here, but after the equivalent is resolved, by `require_money_step`
+    at every entrance. This door stays the storage door; the step is a second rule, never a rounding.
     """
 
     def _reject(message: str, **extra: Any) -> BadRequestException:
@@ -535,6 +539,39 @@ def parse_money_amount(
     if require_non_negative and value < 0:
         raise _reject("Amount must be non-negative")
 
+    return value
+
+
+#: `details.reason` of a money value finer than its equivalent's step (028 `F-028-23`, owner В-4).
+AMOUNT_PRECISION_EXCEEDED = "amount_precision_exceeded"
+
+
+def money_step(precision: int) -> Decimal:
+    """The accounting step of an equivalent: `10**-precision` (owner В-4, 2026-10-04: precision IS the step)."""
+
+    return Decimal(1).scaleb(-int(precision))
+
+
+def floor_to_step(value: Decimal, step: Decimal) -> Decimal:
+    """`value` rounded DOWN to a multiple of `step` - for a CAPACITY, never for a client's amount."""
+
+    return (value / step).to_integral_value(rounding=ROUND_FLOOR) * step
+
+
+def require_money_step(value: Decimal, *, precision: int, equivalent: str, field: str = "amount") -> Decimal:
+    """Refuse (400 `E009`) a money value that is not a multiple of its equivalent's step - never round it.
+
+    A rule on the VALUE, like the storage door above: `"1.50"` and `"1.500"` pass at precision 2, `"1.505"` does
+    not. Called after the equivalent is resolved, at every entrance; the writers that hold the equivalent row
+    `FOR SHARE` call it with the precision read under that lock (`F-028-25`).
+    """
+
+    if value % money_step(precision) != 0:
+        raise BadRequestException(
+            f"{field} has more fraction digits than equivalent {equivalent} allows ({precision})",
+            details={"field": field, "reason": AMOUNT_PRECISION_EXCEEDED, "equivalent": equivalent,
+                     "precision": int(precision)},
+        )
     return value
 
 
@@ -611,6 +648,8 @@ def validate_trustline_policy(policy: dict[str, Any]) -> None:
                 as_decimal = Decimal(str(value))
             except (InvalidOperation, ValueError):
                 raise BadRequestException(f"trustline.policy.{key} must be a number")
+        if not as_decimal.is_finite():  # 028 F-028-2: "NaN" raised InvalidOperation below (500), "Infinity" passed
+            raise BadRequestException(f"trustline.policy.{key} must be a finite number")
         if as_decimal < 0:
             raise BadRequestException(f"trustline.policy.{key} must be >= 0")
 
