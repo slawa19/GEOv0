@@ -26,14 +26,15 @@ GROWTH_NOT_VERIFIED_BY_SNAPSHOT: Dict[str, str] = {
 def _supporting_line():
     """The creditor's live line toward the debtor of a `Debt` row, at its stored limit (T1543).
 
-    `active` and `frozen` support a debt; a `closed` or missing line supports none (limit 0).
+    An `active` line supports a debt (since 028 `F-028-29` the only live status); a `closed` or missing line
+    supports none (limit 0).
     """
 
     return and_(
         TrustLine.from_participant_id == Debt.creditor_id,
         TrustLine.to_participant_id == Debt.debtor_id,
         TrustLine.equivalent_id == Debt.equivalent_id,
-        TrustLine.status.in_(("active", "frozen")),
+        TrustLine.status == "active",
     )
 
 
@@ -109,7 +110,7 @@ class InvariantChecker:
     ) -> List[dict]:
         """The SNAPSHOT side of the trust limit (026 `T2601`, fork 4): observation, not proof.
 
-        A debt above the stored limit of its supporting live line (`active`/`frozen`) is ALLOWED - the
+        A debt above the stored limit of its supporting live line (`active`) is ALLOWED - the
         limit was lowered under it (owner, В3) - and is returned as an `over_limit_allowed` entry with
         debt, limit and excess. A snapshot cannot see growth (`GROWTH_NOT_VERIFIED_BY_SNAPSHOT`); that is
         `check_debt_growth`'s, on the write path. A debt with NO supporting live line (closed or

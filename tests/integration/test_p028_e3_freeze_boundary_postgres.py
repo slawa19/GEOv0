@@ -177,7 +177,7 @@ async def test_a_debt_after_the_freeze_in_the_same_event_is_skipped(stand) -> No
     async with stand() as s:
         await runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
     debts, _ = await _footprint(stand, eq, p["B"])
-    assert debts == [(str(p["B"].id), str(p["A"].id), "3.00")], debts
+    assert [(d, c, Decimal(a)) for d, c, a in debts] == [(str(p["B"].id), str(p["A"].id), Decimal("3"))], debts
     assert await _status(stand, p["B"]) == "suspended"
 
 
@@ -206,11 +206,13 @@ async def _writer(kind, stand, eq, p, debt_ids):  # noqa: F811
 
 async def _freezer(kind, stand, eq, p, hold: asyncio.Event | None):  # noqa: F811
     async with stand() as s:
-        if hold is not None:  # pause right before COMMIT, every lock of the freeze held
-            commit = s.commit
+        if hold is not None:  # pause right before the COMMIT of the freeze, every lock of it held
+            commit, calls = s.commit, []
 
-            async def held_commit():
-                await hold.wait()
+            async def held_commit():  # the inject's first commit ends its read of the event's equivalents
+                calls.append(1)
+                if len(calls) == (1 if kind == "admin" else 2):
+                    await hold.wait()
                 return await commit()
 
             s.commit = held_commit

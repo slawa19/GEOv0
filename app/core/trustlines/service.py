@@ -119,7 +119,7 @@ CHECKPOINT_SCOPE_KEY = "checkpoint_scope"
 CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
 
 #: The statuses a scenario may give a trust line it imports (`TrustLine.status`).
-INITIAL_STATUSES = frozenset({"active", "frozen", "closed"})
+INITIAL_STATUSES = frozenset({"active", "closed"})  # 028 `F-028-29`: no `frozen`
 
 #: Triples per live-line lookup of `import_initial_trustlines` (3 bind parameters each).
 _IMPORT_LOOKUP_CHUNK = 1000
@@ -275,7 +275,7 @@ class TrustLineService:
     uniqueness, the debt check of a close, status rules and audit.
 
     `import_initial_trustlines` is a THIRD, narrower operation: the simulator seeder's import of a scenario's
-    initial state, statuses `active`/`frozen`/`closed` included. It is not a participant's operation and carries no
+    initial state, statuses `active`/`closed` included. It is not a participant's operation and carries no
     signature at all. No PUBLIC PARTICIPANT operation reaches it; an AUTHORIZED simulator request does, transitively
     (upload a scenario, start a run, an action triggers lazy seeding: `app/api/v1/simulator.py` -> the seeder),
     under the simulator's action authorization and run access, and the seeder refuses real participants' pids.
@@ -349,7 +349,7 @@ class TrustLineService:
 
     async def close(self, trustline_id: UUID, user_id: UUID, data: TrustLineCloseRequest) -> TrustLine:
         """Close, or request the close of, a line; returns its FACTUAL state (026 `T2603.1`): `closed`, or still
-        `active`/`frozen` with limit 0 and `close_requested_at` while the debt it supports is owed."""
+        `active` with limit 0 and `close_requested_at` while the debt it supports is owed."""
 
         batch = TrustLineWriteBatch(self.session, transaction_scoped=False)
         trustline = await self.execute_close(batch, trustline_id, user_id, data, require_signature=True)
@@ -463,6 +463,10 @@ class TrustLineService:
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
+        # 028 `F-028-28` (owner В-1): both ends `FOR SHARE` first (the one order: participants -> lines), the status
+        # read by that statement - no line to or from a suspended participant (409 `participant_suspended`).
+        await MoneyBoundary(self.session).refuse_suspended_participants(
+            [from_participant_id, to_participant.id], timeout_ms=lock_timeout_ms)
         # 027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` first, so a creation waits for a money writer in
         # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
         await MoneyBoundary(self.session).lock_pair_lines(
@@ -665,7 +669,7 @@ class TrustLineService:
         THE RULE (owner В1/В2, 2026-09-29; protocol §5.3): the limit becomes 0 and `close_requested_at` is set.
         Only the debt the line SUPPORTS counts - the debtor (`to`) owing the creditor (`from`); a debt the other
         way belongs to the other line. Zero: the line is `closed` now (completion row `TRUST_LINE_CLOSE`,
-        `completed_by = request`). Otherwise it stays `active`/`frozen` (a freeze is kept) with a
+        `completed_by = request`). Otherwise it stays `active` with a
         `TRUST_LINE_CLOSE_REQUEST` row, and the money operation that brings that debt to exactly 0 closes it
         (`app/core/ledger/book.py`, `_settle_requested_closes`). Repeating the request while it is pending
         changes nothing and writes no row.
@@ -750,7 +754,7 @@ class TrustLineService:
           not live, so importing a `closed` line again adds another closed incarnation;
         * lines of ONE call are not checked against each other: two live lines of one triple in one scenario
           still fail at the flush on the live-uniqueness index, and the caller rolls the seeding back;
-        * the status is stored as given (`active`, `frozen` or `closed`), the policy as given.
+        * the status is stored as given (`active` or `closed`), the policy as given.
 
         The caller has already parsed the scenario and dropped what it cannot use (unknown participant or
         equivalent, a limit that is not a storable non-negative amount); anything else reaching here is a
@@ -926,7 +930,7 @@ class TrustLineService:
         equivalent: str | None = None,
         creditor_pid: str | None = None,
         debtor_pid: str | None = None,
-        status: Literal["active", "frozen", "closed"] | None = None,
+        status: Literal["active", "closed"] | None = None,
         limit: int | None = None,
         offset: int | None = None,
     ) -> list[TrustLine]:
@@ -983,7 +987,7 @@ class TrustLineService:
         equivalent: str | None = None,
         creditor_pid: str | None = None,
         debtor_pid: str | None = None,
-        status: Literal["active", "frozen", "closed"] | None = None,
+        status: Literal["active", "closed"] | None = None,
     ) -> int:
         query = select(func.count()).select_from(TrustLine)
 

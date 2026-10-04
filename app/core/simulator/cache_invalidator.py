@@ -84,17 +84,8 @@ def invalidate_caches_after_inject(
                         if pid in frozen_set:
                             p_dict["status"] = "suspended"
 
-            # Update scenario["trustlines"][i]["status"] for incident edges.
-            s_trustlines = scenario.get("trustlines")
-            if isinstance(s_trustlines, list):
-                for tl_dict in s_trustlines:
-                    if isinstance(tl_dict, dict):
-                        frm = str(tl_dict.get("from") or "").strip()
-                        to = str(tl_dict.get("to") or "").strip()
-                        if frm in frozen_set or to in frozen_set:
-                            prev = str(tl_dict.get("status") or "active").strip().lower()
-                            if prev == "active":
-                                tl_dict["status"] = "frozen"
+            # 028 `F-028-29`: the scenario's lines keep their status (`frozen` is no line status any more); a
+            # suspended participant's edges leave the planner's adjacency below.
 
             # Remove frozen edges from run._edges_by_equivalent.
             if run._edges_by_equivalent is not None:

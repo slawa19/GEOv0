@@ -5,8 +5,11 @@
 pinned connection) with READ COMMITTED and row locks: "lock what you check, read after the lock". History - the
 019 and 024 specs, which keep their decisions as written.
 
-* **Lines of pairs** (`lock_pair_lines`): every money writer locks `FOR UPDATE` every non-closed (`active` or
-  `frozen`) line of EVERY pair whose debt it reads or writes, both directions, in ONE global order (`ORDER BY
+* **Participants** (`lock_participants`, 028 `F-028-28`): FIRST, every money writer takes `FOR SHARE` on the row of
+  every participant it touches, in `participants.id` order, and decides from the status that statement read; a freeze
+  (the admin's, an inject event's) takes its row `FOR UPDATE`. A suspended participant takes no part in money.
+* **Lines of pairs** (`lock_pair_lines`): every money writer locks `FOR UPDATE` every non-closed (`active`; `frozen`
+  is gone since 028 `F-028-29`) line of EVERY pair whose debt it reads or writes, both directions, in ONE global order (`ORDER BY
   trust_lines.id`) over its whole set, and only then reads a debt, a limit, a policy or a close request of those
   pairs. A debt of a pair exists only beside a live line of that pair (spec 027, "Долг на паре без незакрытой
   линии"), so two writers of one pair always meet on a line row, and disjoint pairs never meet at all. A staged
@@ -21,9 +24,9 @@ pinned connection) with READ COMMITTED and row locks: "lock what you check, read
   wait, and a snapshot older than the lock reads a debt the holder has since changed.
 
 There are no advisory locks, no reservations (`prepare_locks` is dropped by migration `031`) and no pinned clearing
-connection. The ONE ORDER: lines (sorted by id) -> the equivalent row -> the debt rows. A writer that adds a line
-lock later in its transaction (a stale route, an inject effect on a pair it did not name) may meet a deadlock
-(`40P01`); its owner retries the whole transaction.
+connection. The ONE ORDER: participants (sorted by id) -> lines (sorted by id) -> the equivalent row -> the debt rows.
+A writer that adds a lock later in its transaction (a stale route, an inject effect on a pair or a participant it did
+not name) may meet a deadlock (`40P01`); its owner retries the whole transaction.
 """
 
 from __future__ import annotations
@@ -115,6 +118,42 @@ class MoneyBoundary:
         rows = list((await self.session.execute(stmt)).all())
         await self.session.execute(set_timeout, {"t": str(previous)})
         return rows
+
+    #: `details.reason` of a refusal over a participant out of circulation (028 `F-028-28`, owner В-1): a
+    #: `suspended` (frozen) one, or any other status that is not `active` (`deleted` - the admin ban - and `left`).
+    PARTICIPANT_SUSPENDED_REASON = "participant_suspended"
+
+    @classmethod
+    def participant_suspended_conflict(cls, pids: list[str]) -> ConflictException:
+        return ConflictException(f"Participant {', '.join(pids)} is not active",
+                                 details={"reason": cls.PARTICIPANT_SUSPENDED_REASON, "participants": pids})
+
+    async def lock_participants(self, participant_ids: Iterable[UUID], *, exclusive: Iterable[UUID] = (),
+                                timeout_ms: int | None = None) -> dict[UUID, tuple[str, str]]:
+        """The FIRST locks of a money writer (028 `F-028-28`): the rows of every participant it touches, `FOR SHARE`
+        (`FOR UPDATE` for `exclusive` - the targets of a freeze in the same transaction), in `participants.id` order,
+        and RETURN `{id: (status, pid)}` read by the locking statement itself - never from a loaded ORM object.
+
+        A freeze takes its row `FOR UPDATE`, so it waits for a writer holding the row and a writer arriving after it
+        waits for its commit and reads `suspended` (READ COMMITTED). Writers among themselves do not meet (`FOR SHARE`
+        is shared). Rows of different strengths are taken one statement per row, still in the one order."""
+
+        strong = set(exclusive)
+        ids = sorted(set(participant_ids) | strong)
+        cols = select(Participant.id, Participant.status, Participant.pid)
+        if not strong:
+            stmts = [cols.where(Participant.id.in_(ids)).order_by(Participant.id).with_for_update(read=True)] if ids else []
+        else:
+            stmts = [cols.where(Participant.id == i).with_for_update(read=i not in strong) for i in ids]
+        return {row[0]: (str(row[1]), str(row[2])) for stmt in stmts for row in await self._locking(stmt, timeout_ms)}
+
+    async def refuse_suspended_participants(self, participant_ids: Iterable[UUID], *,
+                                            timeout_ms: int | None = None) -> None:
+        """`lock_participants`, then a 409 `participant_suspended` naming every participant that is not active."""
+        out = sorted(pid for status, pid in (await self.lock_participants(participant_ids, timeout_ms=timeout_ms)
+                                             ).values() if status != "active")
+        if out:
+            raise self.participant_suspended_conflict(out)
 
     async def lock_pair_lines(self, pairs: Iterable[tuple[UUID, UUID, UUID]], *, timeout_ms: int | None = None) -> list:
         """Lock every non-closed line of each pair `(equivalent_id, a, b)`, both directions, `FOR UPDATE`, in

@@ -269,7 +269,7 @@ class TopologyChangedPayload(BaseModel):
     added_edges: List[TopologyChangedEdgeRef] = Field(default_factory=list)
     # Edges that were removed from the topology (future use).
     removed_edges: List[TopologyChangedEdgeRef] = Field(default_factory=list)
-    # Edges that remain but should be considered frozen (status change).
+    # Edges incident to a suspended participant (028 `F-028-28`: no line status changes; they carry nothing).
     frozen_edges: List[TopologyChangedEdgeRef] = Field(default_factory=list)
 
     # Optional patches to update the graph without a full snapshot refresh.
@@ -655,7 +655,7 @@ class SimulatorActionTrustlineCloseRequest(BaseModel):
 class SimulatorActionTrustlineCloseResponse(BaseModel):
     ok: bool = True
     trustline_id: str
-    # 026 `T2603.2`: the line's actual state - `closed`, or still live (`active`/`frozen`) with the request.
+    # 026 `T2603.2`: the line's actual state - `closed`, or still live (`active`) with the request.
     status: str
     close_requested_at: Optional[datetime] = None
     client_action_id: Optional[str] = None

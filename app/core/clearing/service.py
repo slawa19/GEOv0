@@ -32,14 +32,11 @@ logger = logging.getLogger(__name__)
 # decide whether its early return can answer the question it was asked - see the comment there.
 _SQL_DETECTOR_MAX_CYCLE_LENGTH = 4
 
-# Trust-line statuses whose consent clearing reads (T1551, 2026-09-13, Codex review
-# `CLEARING-FROZEN: ALLOW-REDUCTION`).  `frozen` is admitted: protocol §7.2 searches cycles over
-# `debts` alone and §7.4 asks only for `policy.auto_clearing`, and clearing subtracts one amount
-# around a cycle, so it creates no new exposure.  Excluding frozen lines meant the over-limit debt
-# §11.5.2 freezes a line for could never be reduced by a cycle.  `closed` stays excluded.  ONE
-# tuple for the SQL detectors and for `_cycle_respects_auto_clearing` - which serves both the
-# find-time filter and execution-time revalidation - so discovery and execution cannot disagree.
-_CLEARABLE_TRUSTLINE_STATUSES = ("active", "frozen")
+# Trust-line statuses whose consent clearing reads. `frozen` was admitted by T1551 (2026-09-13) and no longer
+# exists (028 `F-028-29`, owner В-2: a line is `active` or `closed`; the freeze lives on the participant, and an
+# occurrence through a suspended one is skipped at execution, `F-028-28`). `closed` stays excluded. ONE tuple for
+# the SQL detectors and for `_cycle_respects_auto_clearing`, so discovery and execution cannot disagree.
+_CLEARABLE_TRUSTLINE_STATUSES = ("active",)
 _SQL_CLEARABLE_TRUSTLINE_STATUSES = (
     "(" + ", ".join(f"'{status}'" for status in _CLEARABLE_TRUSTLINE_STATUSES) + ")"
 )
@@ -1679,6 +1676,19 @@ class ClearingService:
                     select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id).where(Debt.id.in_(debt_ids))
                 )
             ).all()
+            # 028 `F-028-28` (owner В-1): the cycle's participants `FOR SHARE` before its lines (the one order), the
+            # status read by that statement; an occurrence through a suspended participant is skipped, by reason.
+            statuses = await MoneyBoundary(self.session).lock_participants(
+                {p for row in edges for p in (row.debtor_id, row.creditor_id)}, timeout_ms=MoneyBoundary.lock_budget_ms())
+            if suspended := sorted(pid for status, pid in statuses.values() if status != "active"):
+                logger.info("event=clearing.skip_participant_suspended cycle_len=%s participants=%s",
+                            len(cycle), suspended)
+                try:
+                    CLEARING_EVENTS_TOTAL.labels(event="execute", result="skip_participant_suspended").inc()
+                except Exception:
+                    pass
+                await self._rollback_skipped_execution()
+                return None
             self._locked_lines = await MoneyBoundary(self.session).lock_pair_lines(
                 edges, timeout_ms=MoneyBoundary.lock_budget_ms())
         except Exception as exc:

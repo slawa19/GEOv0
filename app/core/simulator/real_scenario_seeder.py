@@ -273,14 +273,17 @@ class RealScenarioSeeder:
                 if not is_storable_money(limit):
                     continue
 
+                line = f"{from_pid}->{to_pid} {eq}"
                 status = str(tl.get("status") or "active").strip().lower()
-                if status not in {"active", "frozen", "closed"}:
+                if status == "frozen":  # 028 `F-028-29` (owner В-2): no such line status; freeze the participant
+                    raise ScenarioTrustLineRefused(line, "trust_line_status_frozen",
+                                                   "a trust line is active or closed; a freeze is the participant's")
+                if status not in {"active", "closed"}:
                     status = "active"
 
                 policy = tl.get("policy")
                 if not isinstance(policy, dict):
                     policy = default_policy
-                line = f"{from_pid}->{to_pid} {eq}"
                 try:
                     validate_trustline_policy(policy)
                 except BadRequestException as exc:
