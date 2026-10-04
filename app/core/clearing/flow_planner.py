@@ -469,6 +469,9 @@ _ELIGIBLE_EDGES_SQL = """
                       AND t.status = ANY(CAST(:statuses AS text[]))
     WHERE d.equivalent_id = :equivalent_id
       AND d.amount > 0
+      -- 028 `F-028-28`: execution skips an occurrence through a participant that is not active; planning it
+      -- anyway would end every plan at it and starve the equivalent (re-plan limit). Same rule, both sides.
+      AND NOT EXISTS (SELECT 1 FROM participants p WHERE p.id IN (d.debtor_id, d.creditor_id) AND p.status <> 'active')
 """
 _SCOPE_SQL = """
       AND d.debtor_id = ANY(CAST(:scope AS uuid[]))

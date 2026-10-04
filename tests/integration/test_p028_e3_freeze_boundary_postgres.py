@@ -181,6 +181,19 @@ async def test_a_debt_after_the_freeze_in_the_same_event_is_skipped(stand) -> No
     assert await _status(stand, p["B"]) == "suspended"
 
 
+@pytest.mark.asyncio
+async def test_the_clearing_plan_leaves_out_a_suspended_participant(stand) -> None:  # noqa: F811
+    """Adversarial pass: a planned cycle through B would be skipped at execution and end every plan (starvation)."""
+    from app.core.clearing.flow_planner import load_snapshot
+
+    eq, p, _ = await _world(stand, debts=_DEBTS)
+    async with stand() as s:
+        assert len(await load_snapshot(s, eq.code)) == 3  # control: the cycle is planned while B is active
+        await _admin_status(s, p["B"].pid)
+    async with stand() as s:
+        assert await load_snapshot(s, eq.code) == []
+
+
 # --- the stand: freeze (admin, mixed inject event) x writer x arrival order ------------------------------------------
 
 _DEBTS = (("A", "B", "30.00"), ("B", "C", "30.00"), ("C", "A", "30.00"))  # a cycle through B, for the clearing
