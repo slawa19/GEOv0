@@ -7,7 +7,7 @@ from sqlalchemy import select, delete
 from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
-from app.utils.security import decode_token, create_access_token, create_refresh_token, revoke_jti
+from app.utils.security import claim_jti, decode_token, create_access_token, create_refresh_token
 from app.utils.exceptions import UnauthorizedException, NotFoundException
 from app.config import settings
 
@@ -124,7 +124,9 @@ class AuthService:
         if not participant:
             raise UnauthorizedException("Invalid refresh token")
 
-        await revoke_jti(jti, exp=payload.get("exp"))
+        # 028 `F-028-22`: the token is used once - a concurrent second use of it loses the claim.
+        if not await claim_jti(jti, exp=payload.get("exp")):
+            raise UnauthorizedException("Invalid refresh token")
 
         access_token = create_access_token(subject=pid)
         new_refresh_token = create_refresh_token(subject=pid)

@@ -52,6 +52,7 @@ from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 BARRIER = "p019_t1909_barrier"
 #: The checkpoint site left with the checkpoint (024 `T2413.2`: the clearing computes none in its transaction).
@@ -232,7 +233,7 @@ async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, 
         clearings = (
             await s.execute(
                 select(Transaction.tx_id, Transaction.state).where(
-                    Transaction.type == "CLEARING", Transaction.initiator_id.in_(seed["participant_ids"])
+                    Transaction.type == "CLEARING", transactions_of(seed["participant_ids"])
                 )
             )
         ).all()

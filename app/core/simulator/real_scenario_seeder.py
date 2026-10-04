@@ -17,7 +17,8 @@ from app.core.trustlines.service import InitialTrustLine, TrustLineService
 from app.utils.exceptions import BadRequestException, ConflictException
 from app.utils.validation import (
     AMOUNT_PRECISION_EXCEEDED,
-    is_storable_money,
+    MONEY_QUANTIZATION,
+    money_storability_violation,
     require_money_step,
     validate_equivalent_code,
     validate_trustline_policy,
@@ -269,8 +270,9 @@ class RealScenarioSeeder:
                 # seeding transaction with `numeric field overflow`.  Skipping the single
                 # trustline keeps the blast radius of a bad config entry where the rest of
                 # this loop already puts it -- one edge missing, not a scenario that will not
-                # load -- and matches how every other malformed field here is handled.
-                if not is_storable_money(limit):
+                # load -- and matches how every other malformed field here is handled. A limit finer
+                # than 1E-8 is finer than any step: the step check below refuses it by name (028 E4).
+                if money_storability_violation(limit) not in (None, MONEY_QUANTIZATION):
                     continue
 
                 line = f"{from_pid}->{to_pid} {eq}"

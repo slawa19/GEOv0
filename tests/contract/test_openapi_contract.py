@@ -67,10 +67,15 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 22
 # repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
 # removed from the application and the canon by the owner's decision of that day. Measured on both
 # trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
+# 2026-10-04 / programme 028 E6 (`F-028-44`, owner В-7): 66 -> 67. `GET /integrity/summary` enters (the participant-or-admin
+# dependency's optional `X-Admin-Token`, absent from the canon - the class its siblings carried); the four admin-only
+# integrity operations change content (canon `X-Admin-Token` `required: true`, generated `required: false`, as every
+# admin operation here). Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed): no other entry differs.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "0a077abe825b59ef9e0e33610348332df2854f3ee12cb361d55844c3139059d0"
+    "23f96ef181db1d576b2bfbd1ec73e288c41a97b1b1514ef1b8fd7d90d7fe55b7"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 66
+TRANSPORT_HEADER_DRIFT_COUNT = 67
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -348,10 +353,31 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # enters or leaves: the canon's `TrustLine.status` enum loses `frozen` (`POST`, `PATCH`, `DELETE`, both `GET` of
 # `/trustlines`; the Admin trustline, bottleneck, liquidity, metrics and both graph reads); the generated side still
 # says `string`. Measured with a per-entry dump against the canon of `86742876` (its digest is the previous one).
+# 2026-10-04 / programme 028 E5 (`F-028-36`, `F-028-37`, owner В-3): count HOLDS at 62, digest moves. SEVEN entries
+# change content, none enters or leaves: `ParticipantStats` becomes `per_equivalent[]` (`GET /participants/me`),
+# `ParticipantPublicStats.total_incoming_trust` an array per equivalent (inside every read that carries a
+# `Participant`: `GET /participants`, `/participants/search`, `/participants/{pid}`, `PATCH /participants/me`,
+# `POST /participants`), and the liquidity summary's three money totals become nullable. In each of the seven the
+# changed sub-schemas are EQUAL on both sides; the entries stay in the ledger for their older differences. Measured
+# with a per-entry dump of both ledgers on `3fb5acd3` and on this tree: error ledger identical, 62 / 51.
+# 2026-10-04 / programme 028 E6: 62 -> 63. `GET /integrity/summary` enters (`F-028-44`; the canon closes its objects
+# with `additionalProperties: false`, pydantic does not); the three payments reads change content: `PaymentError.details`
+# becomes `PaymentRefusalDetails` with the required `reason` (`F-028-42`), the generated side stays `Dict[str, Any]`.
+# Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed): no other entry differs.
+# 2026-10-04 / programme 028 E7 (`F-028-45`, `F-028-16`): count HOLDS at 63, digest moves. THREE entries change
+# content, none enters or leaves: `AdminGraphTransactionItem.initiator_pid` becomes nullable (a clearing records no
+# initiator; `GET /admin/graph/snapshot`, `/admin/graph/ego`), `IntegrityAuditLogAffectedParticipants` names
+# `checkpoint_scope` and `initial_status` (`GET /integrity/audit-log`). Measured with a per-entry dump of every ledger
+# against the canon of `0a50ba62` (`.local-run/e7/dump.py`, not committed): error and security ledgers identical.
+# 2026-10-04 / programme 028 `T2899.4` fix-delta (§15 review of E6+E7, #1): count HOLDS at 63, digest moves. The three
+# payments operations change content: `PaymentRefusalDetails` becomes a CLOSED set of keys (the code's allow-list);
+# the generated side stays `Dict[str, Any]`. Measured with a per-entry dump of every ledger on `da7c7adc` and on this
+# tree: no other entry of any ledger differs.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "b1e3e778e9cf2ec150be255a4ff6911c1c8d8abe792dce911afde219cbbbcd88"
+    "326ba6cf1f4793d1e688cfbae04eeb510beb3174a35f4365503b4c6def6dcf39"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 62
+SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -475,8 +501,15 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-10-02 / programme 026 `T2603.1`: count HOLDS at 51, digest moves. ONE entry changes content: the canon's
 # `PATCH /trustlines/{id}` declares 409 (a positive limit while a close is requested); FastAPI declares no 409 there.
 # Measured with the same per-entry dump on `d9cce2d` and on this tree.
+# 2026-10-04 / programme 028 E6: count HOLDS at 51, digest moves; none enters or leaves. The canon's four admin-only
+# integrity operations (`F-028-44`) drop the `401` an admin route never answers (a missing or wrong token is 403), so
+# `GET /integrity/audit-log` still matches its generated twin and the new `GET /integrity/summary` matches on arrival;
+# `status`, `checksum` and `verify` change content (their canon-only 429 and generated-only 422 stay);
+# `resume`/`restart` declare the 409 of the entry limits (`T2864`) on both halves and stay for their older differences.
+# Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed).
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "ce80eccb2729aeea4faa4a18249112a47800a9e22b9d8410f1cfd2235cd95c7b"
+    "d9e62ef35c926fff19b11e02fc6e08b56e8f44e8fe650afe7ad60b2097c515e0"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
@@ -489,10 +522,14 @@ ERROR_RESPONSE_DRIFT_COUNT = 51
 # repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
 # removed from the application and the canon by the owner's decision of that day. Measured on both
 # trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
+# 2026-10-04 / programme 028 E6 (`F-028-44`, owner В-7): 66 -> 67. `GET /integrity/summary` enters (bearer on both halves, the
+# generated optional admin header); the four admin-only integrity operations change content to `security: []` with a
+# required `X-Admin-Token` in the canon, the class of every admin operation here. Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed): no other entry differs.
 SECURITY_DRIFT_SHA256 = (
-    "7a4ca14f10cafe5fb3a6691a4a268334639e67cafdbe5264f9e16762ffb40b75"
+    "207d2b164491edd8fc3a02c72296687b647e78acb02ad9a16b0203b5fe1a7f9b"
 )
-SECURITY_DRIFT_COUNT = 66
+SECURITY_DRIFT_COUNT = 67
 
 
 def _repo_root() -> Path:
@@ -1121,7 +1158,6 @@ def test_run_status_schema_preserves_stop_and_counter_fields() -> None:
 
 def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> None:
     from app.schemas.simulator import (
-        SimulatorAuditDriftEvent,
         SimulatorEvent,
         SimulatorRunStatusEvent,
         SimulatorTxFailedEvent,
@@ -1142,7 +1178,6 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
         "#/components/schemas/SimulatorTxUpdatedEvent",
         "#/components/schemas/SimulatorTxFailedEvent",
         "#/components/schemas/SimulatorClearingDoneEvent",
-        "#/components/schemas/SimulatorAuditDriftEvent",
         "#/components/schemas/SimulatorTopologyChangedEvent",
         "#/components/schemas/SimulatorRunStatusEvent",
     ]
@@ -1157,20 +1192,7 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
     assert schemas["SimulatorEventEdgeRef"]["required"] == ["from", "to"]
     assert "from_" not in schemas["SimulatorEventEdgeRef"]["properties"]
 
-    assert set(schemas["SimulatorAuditDriftEvent"]["properties"]) == {
-        "event_id",
-        "ts",
-        "type",
-        "equivalent",
-        "tick_index",
-        "severity",
-        "total_drift",
-        "drifts",
-        "source",
-    }
-    assert set(SimulatorAuditDriftEvent.model_json_schema()["properties"]) == set(
-        schemas["SimulatorAuditDriftEvent"]["properties"]
-    )
+    assert "SimulatorAuditDriftEvent" not in schemas  # 028 F-028-35 (owner В-11): the event is removed
     assert set(schemas["SimulatorTopologyChangedEvent"]["properties"]) == {
         "event_id",
         "ts",

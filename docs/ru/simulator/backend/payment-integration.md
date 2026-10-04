@@ -238,11 +238,10 @@ UI не читает внутренние состояния платежей; �
 ## 5) Что эмитим в SSE (симулятор), когда платёж выполнен/не выполнен
 
 Важно:
-- `PaymentService` best-effort публикует `event_bus.publish(... event="payment.received" ...)`.
-- Но контракт симулятора для UI — это `SimulatorEvent` union (`tx.updated`, `clearing.done`, `run_status`).
+- `PaymentService` ничего не публикует наружу (`payment.received` и его шина удалены 2026-10-04, программа 028, F-028-46).
+- Контракт симулятора для UI — это `SimulatorEvent` union (`tx.updated`, `clearing.done`, `run_status`).
 
 MVP правило:
-- симулятор **не обязан** проксировать `payment.received` как есть.
 - симулятор должен преобразовать результаты действий (success/fail) в **визуальные события**:
   - `tx.updated` для подсветки рёбер/узлов
   - и обновления метрик

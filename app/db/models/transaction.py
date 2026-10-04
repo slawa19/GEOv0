@@ -10,7 +10,8 @@ class Transaction(Base):
     tx_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    initiator_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='RESTRICT'), nullable=False, index=True)
+    # NULL on a CLEARING (028 F-028-45, migration 036): a clearing has no initiator. A PAYMENT keeps one (CHECK below).
+    initiator_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey('participants.id', ondelete='RESTRICT'), nullable=True, index=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     signatures: Mapped[list | None] = mapped_column(JSON, default=list)
     state: Mapped[str] = mapped_column(String(30), nullable=False, default='NEW', index=True)
@@ -29,5 +30,6 @@ class Transaction(Base):
         # Same text as the migration, so create_all and alembic build the same table
         # (tests/integration/test_p019_migration_030_postgres.py).
         CheckConstraint("type <> 'PAYMENT' OR state IN ('COMMITTED', 'ABORTED')", name='chk_transaction_payment_terminal'),
+        CheckConstraint("type <> 'PAYMENT' OR initiator_id IS NOT NULL", name='chk_transaction_payment_has_initiator'),
         UniqueConstraint('initiator_id', 'type', 'idempotency_key', name='uq_transactions_initiator_type_idempotency'),
     )

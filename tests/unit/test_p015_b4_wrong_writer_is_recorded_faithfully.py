@@ -65,6 +65,7 @@ from tests.p015_b4_support import (
     missing_journal_tables,
     stored_rows,
 )
+from tests.debt_setup import transactions_of
 
 
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
@@ -383,7 +384,7 @@ async def _clearing_tx_id(factory, triangle: _Triangle) -> str:
             await fresh.execute(
                 select(Transaction.tx_id).where(
                     Transaction.type == "CLEARING",
-                    Transaction.initiator_id.in_([triangle.a.id, triangle.b.id, triangle.c.id]),
+                    transactions_of([triangle.a.id, triangle.b.id, triangle.c.id]),
                 )
             )
         ).scalars().all()
@@ -823,7 +824,7 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
                 await fresh.execute(
                     select(Transaction.tx_id).where(
                         Transaction.type == "CLEARING",
-                        Transaction.initiator_id.in_(
+                        transactions_of(
                             [triangle.a.id, triangle.b.id, triangle.c.id]
                         ),
                     )
@@ -1297,7 +1298,7 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
                     # Scoped to this triangle. The `db_session` fixture truncates every table
                     # on SQLite, so an unscoped query would work today - and would silently
                     # start reading someone else's rows the day this module moves.
-                    Transaction.initiator_id.in_(
+                    transactions_of(
                         [triangle.a.id, triangle.b.id, triangle.c.id]
                     ),
                 )

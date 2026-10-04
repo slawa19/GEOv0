@@ -1914,11 +1914,8 @@ class ClearingService:
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
 
-        # 2. Create Transaction (CLEARING)
-        # We need an initiator? System or one of participants.
-        # Let's pick the first debtor.
-        initiator_id = debts[0].debtor_id
-
+        # 2. Create Transaction (CLEARING). No initiator (028 F-028-45, owner В-8): the hub closes the cycle, nobody
+        # asks for it; who took part is `edges`.
         tx_uuid = uuid.UUID(execution_tx_id)
         tx_id_str = execution_tx_id
 
@@ -1957,7 +1954,7 @@ class ClearingService:
             tx_id=tx_id_str,
             idempotency_key=f"clearing:{tx_id_str}",
             type="CLEARING",
-            initiator_id=initiator_id,
+            initiator_id=None,
             payload=tx_payload,
             state="NEW",
         )

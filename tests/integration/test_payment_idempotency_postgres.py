@@ -69,7 +69,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
     from app.db.models.participant import Participant
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
-    from app.utils.event_bus import event_bus
+    from app.core.payments.service import PaymentPostCommitEffects
     from tests.conftest import TestingSessionLocal
 
     monkeypatch.setattr(settings, "ROUTING_PATH_FINDING_TIMEOUT_MS", 5000)
@@ -86,12 +86,16 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
     sender_pid = f"A_ID_{nonce}"
     receiver_pid = f"B_ID_{nonce}"
 
-    publications: list[dict] = []
+    publications: list = []  # post-commit effects applied (028 F-028-46: no `payment.received` bus to watch)
+    _apply_once = PaymentPostCommitEffects.apply_once
 
-    def _capture_publish(**kwargs):
-        publications.append(dict(kwargs))
+    def _capture_publish(self):
+        applied = _apply_once(self)
+        if applied:
+            publications.append(self)
+        return applied
 
-    monkeypatch.setattr(event_bus, "publish", _capture_publish)
+    monkeypatch.setattr(PaymentPostCommitEffects, "apply_once", _capture_publish)
 
     loser_passed_initial_lookup = asyncio.Event()
     release_loser = asyncio.Event()
@@ -253,8 +257,6 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
             assert audits[0].verification_passed is None  # 024 `T2413.2`: None = the row records the operation, no check ran
 
         assert len(publications) == 1
-        assert publications[0]["event"] == "payment.received"
-        assert publications[0]["payload"]["tx_id"] == tx_id
     finally:
         primary_error = sys.exc_info()[1]
         try:

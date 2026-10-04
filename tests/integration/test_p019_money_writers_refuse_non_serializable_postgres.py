@@ -49,6 +49,7 @@ from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 _REASON = "isolation_not_read_committed"
 
@@ -96,7 +97,7 @@ async def _state(committed_database, seed) -> dict:
         transactions = (
             await s.execute(
                 select(Transaction.type, Transaction.state).where(
-                    Transaction.initiator_id.in_(seed["participant_ids"])
+                    transactions_of(seed["participant_ids"])
                 )
             )
         ).all()
@@ -210,7 +211,7 @@ async def _run_writer(name: str, session, seed, committed_database):
                 engine.apply_trust_decay(run, session, 7, {(a_pid, b_pid, code): Decimal("100.00")}, scenario)
             )
         return await _call(
-            engine.apply_trust_growth(run, session, {(b_pid, a_pid)}, code, 7, {(b_pid, a_pid): 30.0})
+            engine.apply_trust_growth(run, session, {(b_pid, a_pid)}, code, 7)
         )
     raise AssertionError(f"unknown writer {name}")
 

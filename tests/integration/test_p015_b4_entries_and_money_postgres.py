@@ -102,6 +102,7 @@ from tests.p015_b4_support import (
     stored_rows,
 )
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.debt_setup import transactions_of
 
 #: Every refusal of the book before SQL (018): a caller error or money the column cannot hold.
 BOOK_REFUSALS = (BookError,)
@@ -587,7 +588,7 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
         transactions = (
             await fresh.execute(
                 select(Transaction.tx_id).where(
-                    Transaction.initiator_id.in_(world.participant_ids)
+                    transactions_of(world.participant_ids)
                 )
             )
         ).scalars().all()

@@ -82,8 +82,14 @@ def _bin_from_pct(pct: float, bins: int = DEBT_BINS) -> int:
 
 
 def _to_atoms(amount: Decimal, precision: int) -> int:
+    # The rule of `app.core.simulator.net_balance_utils.net_decimal_to_atoms`, mirrored because
+    # this tool runs without the app on its path (028 F-028-39): HALF_UP, and a net that is not
+    # zero never becomes zero atoms, so a sub-quantum net keeps its sign.
     scale10 = Decimal(10) ** int(precision)
-    return int((amount * scale10).to_integral_value(rounding=ROUND_HALF_UP))
+    atoms = int((amount * scale10).to_integral_value(rounding=ROUND_HALF_UP))
+    if atoms == 0 and amount != 0:
+        return 1 if amount > 0 else -1
+    return atoms
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -131,14 +137,17 @@ def main(argv: list[str] | None = None) -> int:
 
     pid_set = {str(p.get("pid") or "") for p in participants if isinstance(p, dict)}
 
-    # Build net atoms per (eq, pid) using debts: net = credits - debts.
-    net_atoms_by_eq_pid: dict[str, dict[str, int]] = {code: {pid: 0 for pid in pid_set if pid} for code in eq_codes}
+    # Build the exact net per (eq, pid) using debts: net = credits - debts, in Decimal; atoms only
+    # after the subtraction (028 F-028-39, as the admin graph does).
+    net_by_eq_pid: dict[str, dict[str, Decimal]] = {
+        code: {pid: Decimal(0) for pid in pid_set if pid} for code in eq_codes
+    }
 
     for d in debts or []:
         if not isinstance(d, dict):
             continue
         eq = str(d.get("equivalent") or "").strip().upper()
-        if not eq or eq not in net_atoms_by_eq_pid:
+        if not eq or eq not in net_by_eq_pid:
             continue
         debtor = str(d.get("debtor") or "").strip()
         creditor = str(d.get("creditor") or "").strip()
@@ -151,12 +160,12 @@ def main(argv: list[str] | None = None) -> int:
         if amt <= 0:
             continue
 
-        atoms = _to_atoms(amt, precision_by_eq.get(eq, 0))
-        net_atoms_by_eq_pid[eq][creditor] = net_atoms_by_eq_pid[eq].get(creditor, 0) + atoms
-        net_atoms_by_eq_pid[eq][debtor] = net_atoms_by_eq_pid[eq].get(debtor, 0) - atoms
+        net_by_eq_pid[eq][creditor] = net_by_eq_pid[eq].get(creditor, Decimal(0)) + amt
+        net_by_eq_pid[eq][debtor] = net_by_eq_pid[eq].get(debtor, Decimal(0)) - amt
 
     for eq in eq_codes:
-        net_by_pid = net_atoms_by_eq_pid.get(eq, {})
+        precision = precision_by_eq.get(eq, 0)
+        net_by_pid = {pid: _to_atoms(net, precision) for pid, net in net_by_eq_pid.get(eq, {}).items()}
         mags = [abs(int(net_by_pid.get(str(p.get("pid") or ""), 0))) for p in participants if isinstance(p, dict)]
         mags_sorted = sorted(mags)
 

@@ -193,3 +193,25 @@ describe('realApi bottleneck threshold transport', () => {
     ])
   })
 })
+
+describe('realApi liquidity summary decoder (028 F-028-37)', () => {
+  it('accepts the summary without an equivalent: money null, net lists empty', async () => {
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
+    const body = {
+      equivalent: null, threshold: 0.1, updated_at: '2026-10-04T00:00:00Z', active_trustlines: 2, bottlenecks: 0,
+      incidents_over_sla: 0, total_limit: null, total_used: null, total_available: null,
+      top_creditors: [], top_debtors: [], top_by_abs_net: [], top_bottleneck_edges: [],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })),
+    )
+
+    const env = await realApi.liquiditySummary({})
+
+    expect(env.success).toBe(true)
+    expect(env.success && [env.data.total_limit, env.data.total_used, env.data.total_available]).toEqual([null, null, null])
+    expect(env.success && env.data.active_trustlines).toBe(2)
+  })
+})

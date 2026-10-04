@@ -119,7 +119,8 @@ def _answer(result: ClearingPassResult, *, error: BaseException | None = None) -
         409: {
             "model": ErrorEnvelope,
             "description": "Equivalent is not active (operator stop or integrity hold) before any occurrence "
-            "committed, or the equivalent's clearing lease is held by another pass",
+            "committed, the equivalent's clearing lease is held by another pass, or clearing is switched off "
+            "(`details.reason = clearing_disabled`)",
         },
     },
 )

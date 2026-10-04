@@ -623,17 +623,21 @@ export const mockApi = {
           incoming: topShares(debtors.map((r) => r.share)),
         }
 
-        // Distribution + rank use net = credit - debt over all participants.
-        const netAtomsByPid = new Map<string, bigint>()
-        for (const p of participants || []) netAtomsByPid.set(p.pid, 0n)
+        // Distribution + rank use net = credit - debt over all participants. As the server (028 F-028-40): the exact
+        // difference first (at the ledger's 8 digits), ranked by it, then truncated toward zero once to `prec`.
+        const exactScale = Math.max(8, prec)
+        const exactNetByPid = new Map<string, bigint>()
+        for (const p of participants || []) exactNetByPid.set(p.pid, 0n)
         for (const d of debts || []) {
           if (String(d.equivalent || '').trim().toUpperCase() !== eqCode) continue
-          const amt = decimalToAtoms(d.amount, prec)
-          netAtomsByPid.set(d.debtor, (netAtomsByPid.get(d.debtor) || 0n) - amt)
-          netAtomsByPid.set(d.creditor, (netAtomsByPid.get(d.creditor) || 0n) + amt)
+          const amt = decimalToAtoms(d.amount, exactScale)
+          exactNetByPid.set(d.debtor, (exactNetByPid.get(d.debtor) || 0n) - amt)
+          exactNetByPid.set(d.creditor, (exactNetByPid.get(d.creditor) || 0n) + amt)
         }
+        const unit = 10n ** BigInt(exactScale - prec)
+        const netAtomsByPid = new Map(Array.from(exactNetByPid, ([p, v]) => [p, v / unit] as const))
 
-        const sortedPids = Array.from(netAtomsByPid.entries())
+        const sortedPids = Array.from(exactNetByPid.entries())
           .sort((a, b) => (a[1] === b[1] ? a[0].localeCompare(b[0]) : b[1] > a[1] ? 1 : -1))
           .map(([p]) => p)
 
@@ -1096,12 +1100,13 @@ export const mockApi = {
           active_trustlines: activeTrustlines.length,
           bottlenecks: bottleneckEdges.length,
           incidents_over_sla: incidentsOverSla.length,
-          total_limit: totalLimit,
-          total_used: totalUsed,
-          total_available: totalAvailable,
-          top_creditors: topCreditors.slice(0, limit),
-          top_debtors: topDebtors.slice(0, limit),
-          top_by_abs_net: topByAbsNet.slice(0, limit),
+          // 028 F-028-37: контракт сервера — без эквивалента деньги `null`, списки нетто пусты.
+          total_limit: eq ? totalLimit : null,
+          total_used: eq ? totalUsed : null,
+          total_available: eq ? totalAvailable : null,
+          top_creditors: eq ? topCreditors.slice(0, limit) : [],
+          top_debtors: eq ? topDebtors.slice(0, limit) : [],
+          top_by_abs_net: eq ? topByAbsNet.slice(0, limit) : [],
           top_bottleneck_edges: topBottleneckEdges.slice(0, limit),
         },
       }

@@ -8,11 +8,13 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
+from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.core.balance.service import BalanceService
 from app.schemas.participant import ParticipantCreateRequest
-from app.schemas.participant import ParticipantStats, ParticipantUpdateRequest
+from app.schemas.participant import ParticipantEquivalentStats, ParticipantStats, ParticipantUpdateRequest
+from app.utils.money import to_money_str
 from app.core.auth.crypto import get_pid_from_public_key, verify_signature
 from app.core.auth.canonical import canonical_json
 from app.utils.exceptions import ConflictException, NotFoundException, BadRequestException, InvalidSignatureException
@@ -91,64 +93,76 @@ class ParticipantService:
         if not participant:
             raise NotFoundException(f"Participant {pid} not found")
 
-        incoming_sum = (
-            await self.db.execute(
-                select(func.coalesce(func.sum(TrustLine.limit), 0)).where(
-                    TrustLine.to_participant_id == participant.id,
-                    TrustLine.status == "active",
-                )
-            )
-        ).scalar_one()
+        incoming = await self._trust_by_equivalent(participant.id)
         participant.public_stats = {
-            "total_incoming_trust": self._fmt_amount(Decimal(str(incoming_sum or 0))),
+            "total_incoming_trust": [
+                {"equivalent": code, "amount": to_money_str(sides["in"], precision)}
+                for code, (precision, sides) in sorted(incoming.items())
+                if sides["in_lines"]
+            ],
             "member_since": participant.created_at,
         }
         return participant
 
-    def _fmt_amount(self, value: Decimal) -> str:
-        try:
-            return str(value.quantize(Decimal("0.00")))
-        except Exception:
-            return str(value)
+    async def _trust_by_equivalent(self, participant_id) -> dict[str, tuple[int, dict]]:
+        """Active trust to and from the participant, summed WITHIN each equivalent (028 F-028-36).
+
+        Owner В-3: equivalents are independent, so a sum never crosses the equivalent boundary.
+        """
+
+        line_in = TrustLine.to_participant_id == participant_id
+        rows = (
+            await self.db.execute(
+                select(
+                    Equivalent.code,
+                    Equivalent.precision,
+                    func.coalesce(func.sum(TrustLine.limit).filter(line_in), 0),
+                    func.count().filter(line_in),
+                    func.coalesce(func.sum(TrustLine.limit).filter(~line_in), 0),
+                )
+                .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+                .where(
+                    TrustLine.status == "active",
+                    or_(line_in, TrustLine.from_participant_id == participant_id),
+                )
+                .group_by(Equivalent.code, Equivalent.precision)
+            )
+        ).all()
+        return {
+            code: (int(precision), {"in": Decimal(incoming), "in_lines": int(n_in), "out": Decimal(outgoing)})
+            for code, precision, incoming, n_in, outgoing in rows
+        }
 
     async def get_participant_stats(self, participant_id) -> ParticipantStats:
-        outgoing_sum = (
-            await self.db.execute(
-                select(func.coalesce(func.sum(TrustLine.limit), 0)).where(
-                    TrustLine.from_participant_id == participant_id,
-                    TrustLine.status == "active",
+        trust = await self._trust_by_equivalent(participant_id)
+        balance = {row.code: row for row in (await BalanceService(self.db).get_summary(participant_id)).equivalents}
+
+        missing = set(balance) - set(trust)
+        precision_by_code = {code: precision for code, (precision, _sides) in trust.items()}
+        if missing:
+            rows = await self.db.execute(
+                select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(missing))
+            )
+            precision_by_code.update({code: int(precision) for code, precision in rows.all()})
+
+        per_equivalent = []
+        for code in sorted(set(trust) | set(balance)):
+            precision = precision_by_code[code]
+            sides = trust.get(code, (precision, {"in": Decimal(0), "out": Decimal(0)}))[1]
+            zero = to_money_str(Decimal(0), precision)
+            row = balance.get(code)
+            per_equivalent.append(
+                ParticipantEquivalentStats(
+                    equivalent=code,
+                    total_incoming_trust=to_money_str(sides["in"], precision),
+                    total_outgoing_trust=to_money_str(sides["out"], precision),
+                    # BalanceService already renders these with `to_money_str` at this precision.
+                    total_debt=row.total_debt if row else zero,
+                    total_credit=row.total_credit if row else zero,
+                    net_balance=row.net_balance if row else zero,
                 )
             )
-        ).scalar_one()
-
-        incoming_sum = (
-            await self.db.execute(
-                select(func.coalesce(func.sum(TrustLine.limit), 0)).where(
-                    TrustLine.to_participant_id == participant_id,
-                    TrustLine.status == "active",
-                )
-            )
-        ).scalar_one()
-
-        total_outgoing_trust = Decimal(str(outgoing_sum or 0))
-        total_incoming_trust = Decimal(str(incoming_sum or 0))
-
-        balance = await BalanceService(self.db).get_summary(participant_id)
-        total_debt = Decimal("0")
-        total_credit = Decimal("0")
-        for eq in balance.equivalents:
-            total_debt += Decimal(str(eq.total_debt))
-            total_credit += Decimal(str(eq.total_credit))
-
-        net_balance = total_credit - total_debt
-
-        return ParticipantStats(
-            total_incoming_trust=self._fmt_amount(total_incoming_trust),
-            total_outgoing_trust=self._fmt_amount(total_outgoing_trust),
-            total_debt=self._fmt_amount(total_debt),
-            total_credit=self._fmt_amount(total_credit),
-            net_balance=self._fmt_amount(net_balance),
-        )
+        return ParticipantStats(per_equivalent=per_equivalent)
 
     async def update_participant(self, participant_id, data: ParticipantUpdateRequest) -> Participant:
         participant = await self.db.get(Participant, participant_id)

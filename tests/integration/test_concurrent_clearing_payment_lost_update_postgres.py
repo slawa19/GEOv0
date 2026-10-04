@@ -31,6 +31,7 @@ from tests.p023_support import TEST_PLAN_ID, occurrence_of
 # template; its rows go with the clone's drop and nothing is deleted row by row (018 B0b; see
 # `tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 
 
@@ -56,7 +57,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
     from app.db.models.participant import Participant
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
-    from app.utils.event_bus import event_bus
+    from app.core.payments.service import PaymentPostCommitEffects
     from tests.conftest import TestingSessionLocal
 
     nonce = uuid.uuid4().hex[:10]
@@ -71,12 +72,16 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
     # 025 `T2508.1`: the plan occurrence of the cycle, declared (30, the minimum), executed while the payment waits.
     occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
 
-    publications: list[dict] = []
+    publications: list = []  # post-commit effects applied (028 F-028-46: no `payment.received` bus to watch)
+    _apply_once = PaymentPostCommitEffects.apply_once
 
-    def _capture_publish(**kwargs):
-        publications.append(dict(kwargs))
+    def _capture_publish(self):
+        applied = _apply_once(self)
+        if applied:
+            publications.append(self)
+        return applied
 
-    monkeypatch.setattr(event_bus, "publish", _capture_publish)
+    monkeypatch.setattr(PaymentPostCommitEffects, "apply_once", _capture_publish)
 
     clearing_parked = asyncio.Event()
     release_clearing = asyncio.Event()
@@ -293,7 +298,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
                 await verify.scalars(
                     select(Transaction).where(
                         Transaction.type == "CLEARING",
-                        Transaction.initiator_id.in_(participant_ids),
+                        transactions_of(participant_ids),
                     )
                 )
             ).all()
@@ -344,8 +349,6 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
             }
 
         assert len(publications) == 1
-        assert publications[0]["event"] == "payment.received"
-        assert publications[0]["payload"]["tx_id"] == payment_tx_id
     finally:
         primary_error = sys.exc_info()[1]
         try:

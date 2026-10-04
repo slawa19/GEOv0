@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -69,6 +69,7 @@ from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
+from app.core.simulator.net_balance_utils import net_decimal_to_atoms
 from app.core.trustlines.service import TrustLineService
 from app.core.ledger.reconciliation import take_baseline
 from app.db.reconciliation_tables import debt_reconciliation_baselines
@@ -261,7 +262,7 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
         return []
     stmt = (
         select(Transaction, Participant.pid)
-        .join(Participant, Transaction.initiator_id == Participant.id)
+        .outerjoin(Participant, Transaction.initiator_id == Participant.id)  # a CLEARING has none (028 F-028-45)
         .order_by(desc(Transaction.updated_at))
         .limit(limit)
     )
@@ -273,7 +274,7 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
             "tx_id": tx.tx_id,
             "type": tx.type,
             "state": tx.state,
-            "initiator_pid": str(initiator_pid),
+            "initiator_pid": None if initiator_pid is None else str(initiator_pid),
             "created_at": tx.created_at,
             "updated_at": tx.updated_at,
             "equivalent": payload.get("equivalent"),
@@ -693,11 +694,14 @@ async def _load_admin_trustline_bottlenecks(
             TrustLine.status == "active",
             TrustLine.limit > 0,
         )
-        .order_by(available_expr.asc(), TrustLine.created_at.asc())
     )
 
     if equivalent:
-        stmt = stmt.where(EquivalentModel.code == equivalent)
+        stmt = stmt.where(EquivalentModel.code == equivalent).order_by(available_expr.asc(), TrustLine.created_at.asc())
+    else:
+        # 028 F-028-38 (owner В-3): without an equivalent the rows mix units, and ordering by the
+        # amount compared 0.5 hours with 10 hryvnias. The share available/limit is unitless.
+        stmt = stmt.order_by((available_expr / TrustLine.limit).asc(), TrustLine.created_at.asc())
 
     rows = (await db.execute(stmt)).all()
     total = 0
@@ -772,7 +776,7 @@ async def admin_trustlines_bottlenecks(
 
 @router.get("/liquidity/summary", response_model=AdminLiquiditySummaryResponse)
 async def admin_liquidity_summary(
-    equivalent: str | None = Query(None, description="Equivalent code (optional; omit for ALL)"),
+    equivalent: str | None = Query(None, description="Equivalent code (optional; omitted: counters only, money null)"),
     threshold: _DecimalThreshold = 0.10,
     limit: int = Query(10, ge=1, le=50, description="Top-N size for ranked lists"),
     db: AsyncSession = Depends(deps.get_db),
@@ -784,13 +788,19 @@ async def admin_liquidity_summary(
     used_expr = func.coalesce(Debt.amount, 0)
     available_expr = TrustLine.limit - used_expr
 
-    totals_stmt = (
-        select(
-            func.count().label("active_trustlines"),
+    # 028 F-028-37 (owner В-3): money is summed and ranked only within one equivalent. Without one only the lines are
+    # counted - no money SUM runs at all (§15 review of E5) - the totals are null and the net lists empty.
+    money_sums = (
+        [
             func.coalesce(func.sum(TrustLine.limit), 0).label("total_limit"),
             func.coalesce(func.sum(used_expr), 0).label("total_used"),
             func.coalesce(func.sum(available_expr), 0).label("total_available"),
-        )
+        ]
+        if eq_code
+        else []
+    )
+    totals_stmt = (
+        select(func.count().label("active_trustlines"), *money_sums)
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
         .outerjoin(
@@ -808,9 +818,9 @@ async def admin_liquidity_summary(
 
     totals = (await db.execute(totals_stmt)).one()
     active_trustlines = int(totals.active_trustlines or 0)
-    total_limit = totals.total_limit
-    total_used = totals.total_used
-    total_available = totals.total_available
+    total_limit = totals.total_limit if eq_code else None
+    total_used = totals.total_used if eq_code else None
+    total_available = totals.total_available if eq_code else None
 
     # Incidents over SLA ("stuck" payments): none exists since migration 030; compatibility until П4.
     incidents_over_sla = 0
@@ -843,15 +853,19 @@ async def admin_liquidity_summary(
     net = net_stmt.subquery()
     net_base = select(net.c.pid, net.c.display_name, net.c.net)
 
-    top_creditors_rows = (
-        await db.execute(net_base.where(net.c.net > 0).order_by(net.c.net.desc()).limit(limit))
-    ).all()
-    top_debtors_rows = (
-        await db.execute(net_base.where(net.c.net < 0).order_by(net.c.net.asc()).limit(limit))
-    ).all()
-    top_abs_rows = (
-        await db.execute(net_base.order_by(func.abs(net.c.net).desc()).limit(limit))
-    ).all()
+    top_creditors_rows: list = []
+    top_debtors_rows: list = []
+    top_abs_rows: list = []
+    if eq_code:
+        top_creditors_rows = (
+            await db.execute(net_base.where(net.c.net > 0).order_by(net.c.net.desc()).limit(limit))
+        ).all()
+        top_debtors_rows = (
+            await db.execute(net_base.where(net.c.net < 0).order_by(net.c.net.asc()).limit(limit))
+        ).all()
+        top_abs_rows = (
+            await db.execute(net_base.order_by(func.abs(net.c.net).desc()).limit(limit))
+        ).all()
 
     top_creditors = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_creditors_rows]
     top_debtors = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_debtors_rows]
@@ -1666,7 +1680,6 @@ async def admin_graph_snapshot(
             return
 
         precision = _eq_precision(eqc)
-        scale10 = Decimal(10) ** precision
 
         # Build participant id map for aggregation.
         pid_list = [p.pid for p in participants_list if p.pid]
@@ -1710,15 +1723,11 @@ async def admin_graph_snapshot(
         mags: list[int] = []
         debt_mags: list[int] = []
 
-        def _to_atoms(amount: Decimal) -> int:
-            # amount is Decimal in major units; convert to integer atoms.
-            return int((amount * scale10).to_integral_value(rounding=ROUND_HALF_UP))
-
         for p in participants_list:
             deb = debt_by_pid.get(p.pid, Decimal(0))
             cre = credit_by_pid.get(p.pid, Decimal(0))
             net_dec = cre - deb
-            atoms = _to_atoms(net_dec)
+            atoms = net_decimal_to_atoms(net_dec, precision=precision)
             net_atoms_by_pid[p.pid] = atoms
             mags.append(abs(atoms))
             if atoms < 0:
@@ -2039,7 +2048,6 @@ async def admin_graph_ego(
             return
 
         precision = _eq_precision_ego(eqc)
-        scale10 = Decimal(10) ** precision
 
         pid_list = [p.pid for p in participants_list if p.pid]
         if not pid_list:
@@ -2081,16 +2089,14 @@ async def admin_graph_ego(
         for pid0, s in c_rows:
             credit_by_pid[str(pid0)] = s
 
-        def _to_atoms(amount: Decimal) -> int:
-            return int((amount * scale10).to_integral_value(rounding=ROUND_HALF_UP))
-
         mags: list[int] = []
         debt_mags: list[int] = []
         net_atoms_by_pid: dict[str, int] = {}
         for p in participants_list:
             deb = debt_by_pid.get(p.pid, Decimal(0))
             cre = credit_by_pid.get(p.pid, Decimal(0))
-            atoms = _to_atoms(cre - deb)
+            # 028 F-028-39: the shared rule keeps the sign of a sub-quantum net (T1210).
+            atoms = net_decimal_to_atoms(cre - deb, precision=precision)
             net_atoms_by_pid[p.pid] = atoms
             mags.append(abs(atoms))
             if atoms < 0:

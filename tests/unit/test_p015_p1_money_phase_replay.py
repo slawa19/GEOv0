@@ -51,9 +51,6 @@ class _Emitter:
     def emit_tx_failed(self, **_kwargs) -> None:
         self.failed += 1
 
-    def emit_audit_drift(self, **_kwargs) -> None:
-        return None
-
 
 class _PaymentEffect:
     def __init__(self) -> None:

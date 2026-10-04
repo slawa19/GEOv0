@@ -158,10 +158,7 @@ Base Compose передаёт переменную (`${CLEARING_PERIODIC_ENABLED
 - `/health/db` и `/api/v1/health/db` публично сообщают только reachable/latency и
   не возвращают exception text или dialect. Полная диагностика доступна как
   `GET /api/v1/admin/health/db` только с `X-Admin-Token`.
-- WebSocket `/api/v1/ws` принимает access token через
-  `Sec-WebSocket-Protocol: bearer, <access_token>`. Legacy `?token=` отклоняется,
-  потому что uvicorn/proxy могут журналировать request path. Для браузера:
-  `new WebSocket(url, ["bearer", accessToken])`.
+- WebSocket-канала нет: `/api/v1/ws` удалён 2026-10-04 (программа 028, F-028-46).
 
 ## Миграции и данные
 

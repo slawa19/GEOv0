@@ -775,7 +775,6 @@ class RealRunnerImpl:
         touched_edges: set[tuple[str, str]],
         eq_code: str,
         tick_index: int,
-        cleared_amount_per_edge: dict[tuple[str, str], float],
     ) -> TrustDriftResult:
         return await self._trust_drift_engine.apply_trust_growth(
             run,
@@ -783,7 +782,6 @@ class RealRunnerImpl:
             touched_edges,
             eq_code,
             tick_index,
-            cleared_amount_per_edge,
         )
 
     async def _apply_trust_decay(

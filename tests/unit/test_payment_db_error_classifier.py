@@ -37,6 +37,7 @@ def test_retryable_database_conflicts_use_existing_sanitized_contract(
     assert classified.details == {
         "retryable": True,
         "conflict_kind": "database_concurrency",
+        "reason": "busy",  # 028 `F-028-42`
     }
     assert sqlstate not in str(classified.to_dict())
 

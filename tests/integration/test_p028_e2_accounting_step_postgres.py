@@ -226,6 +226,7 @@ def _scenario(policy=None, limit="10") -> dict:
     ({"can_be_intermediate": "false"}, "10", "invalid_policy"),
     ({"max_hop_usage": "NaN"}, "10", "invalid_policy"),
     (None, "10.005", STEP),
+    (None, "10.000000001", STEP),  # 028 E4 (T2899.1 class 2): unstorable, was skipped silently before the step
 ])
 @pytest.mark.asyncio
 async def test_seeding_refuses_a_line_the_doors_would_refuse_and_names_it(db_session, policy, limit, reason) -> None:

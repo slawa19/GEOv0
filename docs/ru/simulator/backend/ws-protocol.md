@@ -138,7 +138,6 @@ MVP правило: `run_status` — единственный обязатель
 - `tx.updated`
 - `tx.failed`
 - `clearing.done`
-- `audit.drift`
 - `topology.changed`
 
 Пояснения для UI находятся в
@@ -180,7 +179,6 @@ MVP правило: `run_status` — единственный обязатель
 | `tx.updated` | SSE | визуальные подсветки транзакций |
 | `tx.failed` | SSE | отказ/ошибка платежа (нормализованный код в `error.code`) |
 | `clearing.done` | SSE | завершение клиринга + `cycle_edges` для FX |
-| `audit.drift` | SSE | обнаруженный integrity drift |
 | `topology.changed` | SSE | изменение topology/graph state |
 
 Команды (REST): `pause`, `resume`, `stop`, `restart` (опц.), `intensity`.

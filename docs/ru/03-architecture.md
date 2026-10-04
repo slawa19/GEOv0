@@ -58,14 +58,14 @@
 └─────────────┼────────────────────────┼──────────────────────┘
               │                        │
               └────────────────────────┘
-                      │ HTTPS / WebSocket
+                      │ HTTPS
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Community Hub                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                   API Layer                          │    │
 │  │  ┌─────────┐  ┌──────────┐  ┌─────────────────┐     │    │
-│  │  │  REST   │  │WebSocket │  │  Admin Routes   │     │    │
+│  │  │  REST   │  │SSE (sim) │  │  Admin Routes   │     │    │
 │  │  │  API    │  │  Server  │  │                 │     │    │
 │  │  └────┬────┘  └────┬─────┘  └────────┬────────┘     │    │
 │  └───────┼────────────┼─────────────────┼──────────────┘    │
@@ -123,7 +123,7 @@
 - Платежи с маршрутизацией (single + **limited multipath**; параметры в [`config-reference.md`](config-reference.md))
 - **Full multipath** (целевой экспериментальный режим; актуальный статус сверять с [`02-protocol-spec.md`](02-protocol-spec.md) и [`config-reference.md`](config-reference.md))
 - Автоматический клиринг: целевые политики и параметры описаны в [`config-reference.md`](config-reference.md)
-- REST API + WebSocket уведомления
+- REST API (уведомления участника о платеже и клиринге — будущая доработка, механизм доставки не выбран: [`02-protocol-spec.md`](02-protocol-spec.md) §7.4.1)
 - Базовая админка (операторские функции и feature flags — см. [`admin-ui/README.md`](admin-ui/README.md))
 - Web-клиент **PWA** (primary клиент для MVP)
 
@@ -161,8 +161,7 @@ GEOv0-PROJECT/
 │   │       ├── integrity.py
 │   │       ├── health.py
 │   │       ├── admin.py        # Admin API endpoints
-│   │       ├── simulator.py    # Simulator API (runs, SSE, Interact)
-│   │       └── websocket.py
+│   │       └── simulator.py    # Simulator API (runs, SSE, Interact)
 │   │
 │   ├── core/                   # Business logic
 │   │   ├── auth/               # challenge/login/refresh, подписи Ed25519, canonical JSON
@@ -575,7 +574,7 @@ CREATE TABLE transactions (
     tx_id VARCHAR(64) UNIQUE NOT NULL,
     idempotency_key VARCHAR(128),
     type VARCHAR(50) NOT NULL,
-    initiator_id UUID REFERENCES participants(id),
+    initiator_id UUID REFERENCES participants(id),  -- NULL у CLEARING (миграция 036); PAYMENT — обязателен (CHECK)
     payload JSONB NOT NULL,
     signatures JSONB DEFAULT '[]',
     state VARCHAR(30) NOT NULL,
@@ -691,11 +690,12 @@ Balance:
   GET    /api/v1/balance/debts          # Долги (входящие/исходящие)
 
 
-WebSocket:
-  WS     /api/v1/ws                     # Real-time уведомления
+Уведомления участника (о платеже, о сумме клиринга) — будущая доработка: канал `/api/v1/ws` удалён
+(решение владельца В-9 от 2026-10-04, программа 028, F-028-46), механизм доставки не выбран, постоянное
+соединение не обязательно.
 
 Примечание про «асинхронность» и оффлайн:
-- В Hub v0.1 WebSocket используется для best-effort уведомлений (возможны пропуски/дубликаты); после переподключения клиент сверяет состояние через REST.
+- В Hub v0.1 уведомлений нет; клиент узнаёт состояние через REST.
 - Оффлайн клиента (UX) не требует протокольных состояний согласования. Протокольные состояния `PROPOSED/WAITING/REJECTED` и сетевые ACK-фазы относятся к расширенному (распределённому) режиму и зарезервированы.
 
 Integrity:

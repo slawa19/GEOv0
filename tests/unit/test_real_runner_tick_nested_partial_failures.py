@@ -205,14 +205,6 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
             result=result,
             post_commit_effects=PaymentPostCommitEffects(
                 equivalent=str(equivalent),
-                recipient_pid=str(to_pid),
-                event_payload={
-                    "tx_id": result.tx_id,
-                    "from": "A",
-                    "to": str(to_pid),
-                    "equivalent": str(equivalent),
-                    "amount": str(amount),
-                },
             ),
         )
 

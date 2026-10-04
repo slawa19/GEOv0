@@ -175,9 +175,10 @@ class AdminLiquiditySummaryResponse(BaseModel):
     bottlenecks: StrictInt = Field(0, ge=0)
     incidents_over_sla: StrictInt = Field(0, ge=0)
 
-    total_limit: Decimal = Decimal("0")
-    total_used: Decimal = Decimal("0")
-    total_available: Decimal = Decimal("0")
+    # 028 F-028-37 (owner В-3): null without an equivalent - money is never summed across them.
+    total_limit: Optional[Decimal] = None
+    total_used: Optional[Decimal] = None
+    total_available: Optional[Decimal] = None
 
     top_creditors: list[AdminLiquidityNetRow] = Field(default_factory=list)
     top_debtors: list[AdminLiquidityNetRow] = Field(default_factory=list)

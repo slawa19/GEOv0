@@ -84,9 +84,10 @@ export type LiquiditySummary = {
   active_trustlines: number
   bottlenecks: number
   incidents_over_sla: number
-  total_limit: string
-  total_used: string
-  total_available: string
+  // 028 F-028-37: null without an equivalent; the net lists are then empty.
+  total_limit: string | null
+  total_used: string | null
+  total_available: string | null
   top_creditors: LiquidityNetRow[]
   top_debtors: LiquidityNetRow[]
   top_by_abs_net: LiquidityNetRow[]
@@ -103,7 +104,8 @@ export type Transaction = {
   tx_id: string
   idempotency_key?: string | null
   type: string
-  initiator_pid: string
+  /** Null on a CLEARING, which records no initiator (028 F-028-45). */
+  initiator_pid: string | null
   equivalent?: string | null
   /** PAYMENT: who paid. Absent when the internal payload did not carry it. */
   from?: string

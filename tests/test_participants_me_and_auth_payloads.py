@@ -71,12 +71,8 @@ async def test_participants_me_get_and_patch(client, auth_user):
     assert r.status_code == 200
     me = r.json()
     assert me["pid"] == auth_user["pid"]
-    assert "stats" in me
-    assert "total_incoming_trust" in me["stats"]
-    assert "total_outgoing_trust" in me["stats"]
-    assert "total_debt" in me["stats"]
-    assert "total_credit" in me["stats"]
-    assert "net_balance" in me["stats"]
+    # 028 F-028-36: per-equivalent figures only; a new participant has none.
+    assert me["stats"] == {"per_equivalent": []}
 
     # PATCH /participants/me (signed changes)
     update_payload = {"display_name": "Alice Smith"}

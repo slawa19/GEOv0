@@ -564,7 +564,10 @@ class TrustLineService:
         `E010`), nothing is applied.
         """
 
-        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update()
+        # 028 `F-028-6`: `populate_existing` - the row as the lock returns it. A caller that read the line earlier in
+        # this session (the Interact actions do) would otherwise decide on its identity-map copy from before the wait.
+        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update().execution_options(
+            populate_existing=True)
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
 
@@ -679,7 +682,10 @@ class TrustLineService:
         one is waited for and read, and a later one waits for this close.
         """
 
-        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update()
+        # 028 `F-028-6`: `populate_existing` - the row as the lock returns it. A caller that read the line earlier in
+        # this session (the Interact actions do) would otherwise decide on its identity-map copy from before the wait.
+        stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update().execution_options(
+            populate_existing=True)
         result = await self.session.execute(stmt)
         trustline = result.scalar_one_or_none()
 

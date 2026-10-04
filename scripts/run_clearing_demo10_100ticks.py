@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
@@ -80,11 +81,12 @@ class ClearingStats:
     done_ticks: list[int]
 
 
-def _analyze_events_ndjson(raw: bytes, *, started_at: datetime) -> dict[str, Any]:
+def _analyze_events_ndjson(raw: bytes, *, started_at: datetime, equivalent: str) -> dict[str, Any]:
     tx_updated = 0
     clearing_done = 0
     cleared_cycles_total = 0
-    cleared_amount_total = 0.0
+    # 028 F-028-41 (owner В-3): cleared money is summed within the run's one equivalent, in Decimal.
+    cleared_amount_total = Decimal(0)
     done_ticks: list[int] = []
     done_ticks_interact: list[int] = []
     done_ticks_auto: list[int] = []
@@ -115,10 +117,11 @@ def _analyze_events_ndjson(raw: bytes, *, started_at: datetime) -> dict[str, Any
                 cleared_cycles_total += int(evt.get("cleared_cycles") or 0)
             except Exception:
                 pass
-            try:
-                cleared_amount_total += float(str(evt.get("cleared_amount") or 0.0))
-            except Exception:
-                pass
+            if str(evt.get("equivalent") or "").strip().upper() == equivalent.strip().upper():
+                try:
+                    cleared_amount_total += Decimal(str(evt.get("cleared_amount") or 0))
+                except InvalidOperation:
+                    pass
             try:
                 ts = _parse_dt(str(evt.get("ts")))
                 dt = (ts - started_at).total_seconds()
@@ -148,7 +151,8 @@ def _analyze_events_ndjson(raw: bytes, *, started_at: datetime) -> dict[str, Any
         },
         "clearing": {
             "cleared_cycles_total": cleared_cycles_total,
-            "cleared_amount_total": round(cleared_amount_total, 6),
+            "cleared_amount_total": str(cleared_amount_total),
+            "cleared_amount_equivalent": equivalent,
             "done_ticks": done_ticks_sorted,
             "done_tick_gaps": gaps,
             "done": {
@@ -427,7 +431,7 @@ def main() -> int:
         timeout_sec=max(args.timeout_sec, 60),
     )
 
-    analyzed = _analyze_events_ndjson(events_raw, started_at=started_at)
+    analyzed = _analyze_events_ndjson(events_raw, started_at=started_at, equivalent=args.equivalent)
 
     out = {
         "run_id": run_id,

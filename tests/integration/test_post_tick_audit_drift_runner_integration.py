@@ -88,7 +88,7 @@ async def _seed_triangle(session: AsyncSession) -> tuple[str, list[str]]:
 
 
 @pytest.mark.asyncio
-async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
+async def test_an_outside_write_after_the_tick_emits_no_audit_drift_and_no_log_row(
     audit_session_factory,
     monkeypatch,
 ) -> None:
@@ -260,19 +260,12 @@ async def test_post_tick_audit_drift_emits_sse_and_persists_integrity_log(
 
     assert injected["done"] is True, "Expected drift injection to run"
 
-    drift_events = [e for e in captured if isinstance(e, dict) and e.get("type") == "audit.drift"]
-    assert drift_events, f"Expected at least one audit.drift event, got types={[e.get('type') for e in captured]}"
-    assert any(e.get("source") == "post_tick_audit" for e in drift_events), drift_events
-
-    # Verify audit log persisted.
+    # 028 F-028-35 (owner В-11): no post-tick audit - neither the SSE event nor the integrity-log row.
+    assert [e for e in captured if isinstance(e, dict) and e.get("type") == "audit.drift"] == []
     async with audit_session_factory() as verify:
-        row = (
+        rows = (
             await verify.execute(
-                select(IntegrityAuditLog)
-                .where(IntegrityAuditLog.operation_type == "SIMULATOR_AUDIT_DRIFT")
-                .limit(1)
+                select(IntegrityAuditLog).where(IntegrityAuditLog.operation_type == "SIMULATOR_AUDIT_DRIFT")
             )
-        ).scalars().first()
-        assert row is not None
-        assert row.verification_passed is False
-        assert isinstance(row.affected_participants, dict)
+        ).scalars().all()
+        assert rows == []

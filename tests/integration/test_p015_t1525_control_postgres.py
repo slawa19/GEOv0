@@ -65,6 +65,7 @@ from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.utils.exceptions import IntegrityViolationException
+from tests.debt_setup import transactions_of
 
 _PAYMENT = Decimal("7.00")
 
@@ -147,7 +148,7 @@ async def _stored_transactions(factory, world: _World) -> dict[str, str]:
         rows = (
             await fresh.execute(
                 select(Transaction.tx_id, Transaction.state).where(
-                    Transaction.initiator_id.in_([world.sender.id, world.receiver.id])
+                    transactions_of([world.sender.id, world.receiver.id])
                 )
             )
         ).all()

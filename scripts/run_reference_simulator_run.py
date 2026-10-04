@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -18,7 +19,9 @@ class IntegrityResult:
     details: dict[str, Any]
 
 
-def _summarize_trust_limits_violations(integrity_details: dict[str, Any]) -> dict[str, Any] | None:
+def _summarize_trust_limits_violations(
+    integrity_details: dict[str, Any], *, equivalent: str
+) -> dict[str, Any] | None:
     """Best-effort summary of TRUST_LIMIT_VIOLATION details from /integrity/verify response."""
 
     if not isinstance(integrity_details, dict):
@@ -27,8 +30,8 @@ def _summarize_trust_limits_violations(integrity_details: dict[str, Any]) -> dic
     if not isinstance(eqs, dict) or not eqs:
         return None
 
-    # We usually verify a single equivalent; pick the first entry if multiple.
-    _eq_code, eq_payload = next(iter(eqs.items()))
+    # 028 F-028-41 (owner В-3): the run's own equivalent, not whichever entry comes first.
+    eq_payload = eqs.get(equivalent)
     if not isinstance(eq_payload, dict):
         return None
     inv = eq_payload.get("invariants")
@@ -47,23 +50,20 @@ def _summarize_trust_limits_violations(integrity_details: dict[str, Any]) -> dic
     if not isinstance(violations, list):
         return {"violations": int(tl.get("violations") or 0)}
 
-    def _to_float(v: Any) -> float:
+    def _to_decimal(v: Any) -> Decimal:
         try:
-            return float(v)
-        except Exception:
-            try:
-                return float(str(v))
-            except Exception:
-                return 0.0
+            return Decimal(str(v))
+        except InvalidOperation:
+            return Decimal(0)
 
     enriched: list[dict[str, Any]] = []
     for item in violations:
         if not isinstance(item, dict):
             continue
-        v_amt = _to_float(item.get("violation_amount"))
+        v_amt = _to_decimal(item.get("violation_amount"))
         enriched.append({**item, "_violation_amount_num": v_amt})
 
-    enriched.sort(key=lambda x: x.get("_violation_amount_num", 0.0), reverse=True)
+    enriched.sort(key=lambda x: x["_violation_amount_num"], reverse=True)
     top = []
     for item in enriched[:3]:
         top.append(
@@ -76,7 +76,7 @@ def _summarize_trust_limits_violations(integrity_details: dict[str, Any]) -> dic
             }
         )
 
-    max_amt = enriched[0].get("_violation_amount_num") if enriched else 0.0
+    max_amt = str(enriched[0]["_violation_amount_num"]) if enriched else "0"
     return {
         "violations": len(enriched),
         "max_violation_amount": max_amt,
@@ -198,12 +198,13 @@ def _integrity_verify(
     return IntegrityResult(status="unknown", details={"raw": res})
 
 
-def _analyze_events(events_path: Path) -> dict[str, Any]:
+def _analyze_events(events_path: Path, *, equivalent: str) -> dict[str, Any]:
     counts: dict[str, int] = {}
 
     clearing_done = 0
     cleared_cycles_total = 0
-    cleared_amount_total = 0.0
+    # 028 F-028-41 (owner В-3): cleared money is summed within the run's one equivalent, in Decimal.
+    cleared_amount_total = Decimal(0)
 
     tx_updated = 0
     tx_failed = 0
@@ -230,13 +231,13 @@ def _analyze_events(events_path: Path) -> dict[str, Any]:
                 cleared_cycles_total += int(evt.get("cleared_cycles") or 0)
             except Exception:
                 pass
-            try:
-                # cleared_amount may be null
-                v = evt.get("cleared_amount")
-                if v is not None:
-                    cleared_amount_total += float(v)
-            except Exception:
-                pass
+            # cleared_amount may be null
+            v = evt.get("cleared_amount")
+            if v is not None and str(evt.get("equivalent") or "").strip().upper() == equivalent.strip().upper():
+                try:
+                    cleared_amount_total += Decimal(str(v))
+                except InvalidOperation:
+                    pass
 
     return {
         "counts": counts,
@@ -245,7 +246,8 @@ def _analyze_events(events_path: Path) -> dict[str, Any]:
         "tx_failed_by_code": dict(sorted(tx_failed_by_code.items(), key=lambda kv: (-kv[1], kv[0]))),
         "clearing_done": clearing_done,
         "cleared_cycles_total": cleared_cycles_total,
-        "cleared_amount_total": cleared_amount_total,
+        "cleared_amount_total": str(cleared_amount_total),
+        "cleared_amount_equivalent": equivalent,
     }
 
 
@@ -552,10 +554,14 @@ def main() -> int:
         timeout_sec=args.timeout_sec,
     )
 
-    trust_limits_before = _summarize_trust_limits_violations(integrity_before.details)
-    trust_limits_after = _summarize_trust_limits_violations(integrity_after.details)
+    trust_limits_before = _summarize_trust_limits_violations(
+        integrity_before.details, equivalent=args.equivalent
+    )
+    trust_limits_after = _summarize_trust_limits_violations(
+        integrity_after.details, equivalent=args.equivalent
+    )
 
-    events_analysis = _analyze_events(out_dir / "events.ndjson")
+    events_analysis = _analyze_events(out_dir / "events.ndjson", equivalent=args.equivalent)
     summary_counters = _load_summary_counters(out_dir / "summary.json")
 
     report = {

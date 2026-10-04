@@ -17,12 +17,14 @@ from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.reconciliation_tables import debt_reconciliation_results
 from app.schemas.integrity import (
     EquivalentIntegrityStatus,
+    EquivalentIntegritySummary,
     InvariantOutcome,
     InvariantWithdrawn,
     IntegrityAuditLogItem,
     IntegrityAuditLogResponse,
     IntegrityChecksumResponse,
     IntegrityStatusResponse,
+    IntegritySummaryResponse,
     IntegrityVerifyRequest,
     IntegrityVerifyResponse,
     InvariantResult,
@@ -88,7 +90,7 @@ async def _latest_reconciliation_results(db: AsyncSession) -> dict:
     columns = debt_reconciliation_results.c
     rows = (
         await db.execute(
-            select(columns.equivalent_id, columns.id, columns.status, columns.detail).where(
+            select(columns.equivalent_id, columns.id, columns.status, columns.detail, columns.last_checked_at).where(
                 columns.is_latest.is_(True)
             )
         )
@@ -135,10 +137,35 @@ def _reconciliation_view(eq: Equivalent, latest) -> tuple[str, list[str]]:
     return severity, alerts
 
 
+@router.get("/summary", response_model=IntegritySummaryResponse)
+async def get_integrity_summary(
+    db: AsyncSession = Depends(deps.get_db),
+    _actor=Depends(deps.require_participant_or_admin),
+) -> IntegritySummaryResponse:
+    """028 `F-028-44` (owner В-7): per equivalent, the verdict of the LAST STORED check and whether money is held.
+
+    Reads stored rows only - the equivalent's hold and its latest reconciliation result (`_reconciliation_view`), so a
+    call checks nothing and writes nothing. No stored result is `warning` with `checked_at = null`, never `healthy`.
+    The checks themselves, their details and the log are the admin's (`status`, `verify`, `checksum`, `audit-log`).
+    """
+
+    latest = await _latest_reconciliation_results(db)
+    equivalents = (await db.execute(select(Equivalent).order_by(Equivalent.code))).scalars().all()
+    return IntegritySummaryResponse(equivalents=[
+        EquivalentIntegritySummary(
+            equivalent=eq.code,
+            status=_reconciliation_view(eq, latest.get(eq.id))[0],
+            checked_at=getattr(latest.get(eq.id), "last_checked_at", None),
+            hold=eq.integrity_hold_result_id is not None,
+        )
+        for eq in equivalents
+    ])
+
+
 @router.get("/status", response_model=IntegrityStatusResponse)
 async def get_integrity_status(
     db: AsyncSession = Depends(deps.get_db),
-    _actor=Depends(deps.require_participant_or_admin),
+    _actor=Depends(deps.require_admin),
 ) -> IntegrityStatusResponse:
     checker = InvariantChecker(db)
 
@@ -211,7 +238,7 @@ async def get_integrity_status(
 async def get_integrity_checksum(
     equivalent: str,
     db: AsyncSession = Depends(deps.get_db),
-    _actor=Depends(deps.require_participant_or_admin),
+    _actor=Depends(deps.require_admin),
 ) -> IntegrityChecksumResponse:
     validate_equivalent_code(equivalent)
 
@@ -235,7 +262,7 @@ async def get_integrity_checksum(
 async def verify_integrity(
     body: IntegrityVerifyRequest,
     db: AsyncSession = Depends(deps.get_db),
-    _actor=Depends(deps.require_participant_or_admin),
+    _actor=Depends(deps.require_admin),
 ) -> IntegrityVerifyResponse:
     """Re-run the invariant checks (trust limits, debt symmetry) now and record an audit row.
 
@@ -349,7 +376,7 @@ async def get_integrity_audit_log(
     page: int = 1,
     per_page: int = 20,
     db: AsyncSession = Depends(deps.get_db),
-    _actor=Depends(deps.require_participant_or_admin),
+    _actor=Depends(deps.require_admin),
 ) -> IntegrityAuditLogResponse:
     page = max(1, int(page))
     per_page = max(1, min(200, int(per_page)))

@@ -58,7 +58,7 @@ async def test_a_growth_failing_after_its_mutation_is_rolled_back_by_the_engine(
     checkpoints.fail_on_call = 2  # one equivalent: call 2 is the after-mutation checkpoint
 
     with pytest.raises(RuntimeError, match="forced trust-line batch failure"):
-        await engine.apply_trust_growth(run, db_session, {(a_pid, b_pid)}, eq_code, 1, {(a_pid, b_pid): 5.0})
+        await engine.apply_trust_growth(run, db_session, {(a_pid, b_pid)}, eq_code, 1)
     assert checkpoints.count == 2, "premise: the failure point was reached"
 
     await db_session.commit()  # a later commit on the same session

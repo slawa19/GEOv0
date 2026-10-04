@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clearing.service import ClearingService
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
-from app.utils.exceptions import BadRequestException, ConflictException
+from app.utils.exceptions import ConflictException
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p020_support import Edge, debt_uuid, participant_uuid, ring, seed_graph
 from tests.p023_support import positive_debt_total, remaining_debts, require_target, slice_c_surface
@@ -471,8 +471,10 @@ async def test_the_awaited_entry_refuses_when_clearing_is_disabled_and_runs_unde
     factory = sessionmaker_of(db_session)
 
     monkeypatch.setattr(settings, "CLEARING_ENABLED", False)
-    with pytest.raises(BadRequestException):
+    # 028 `F-028-20` (decision `T1552`): a state of the server, not a bad request - 409/E008 `clearing_disabled`.
+    with pytest.raises(ConflictException) as disabled:
         await api.run_awaited_clearing(factory, None, CODE)
+    assert disabled.value.details == {"reason": "clearing_disabled"}, disabled.value.details
     assert await _clearings(factory) == []
     monkeypatch.setattr(settings, "CLEARING_ENABLED", True)
 

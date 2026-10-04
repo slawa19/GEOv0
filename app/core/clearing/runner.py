@@ -67,7 +67,7 @@ from app.core.clearing.service import (
 from app.db.models.equivalent import Equivalent
 from app.db.models.simulator_storage import SimulatorRun
 from app.utils.distributed_lock import RenewableLease, renewable_lease
-from app.utils.exceptions import BadRequestException, ConflictException, GeoException
+from app.utils.exceptions import ConflictException, GeoException
 from app.utils.validation import validate_equivalent_code
 
 logger = logging.getLogger(__name__)
@@ -435,12 +435,13 @@ async def run_awaited_clearing(
 ) -> ClearingPassResult:
     """The `/clearing/auto`-compatible entry (decision 7): awaited, under the equivalent's renewable lease.
 
-    Refuses when `CLEARING_ENABLED` is off. A lease held by another owner is `ConflictException` after
-    `wait_timeout_seconds`. The entry of `POST /clearing/auto` since slice (d).
+    Refuses (409 `clearing_disabled`) when `CLEARING_ENABLED` is off. A lease held by another owner is
+    `ConflictException` after `wait_timeout_seconds`. The entry of `POST /clearing/auto` since slice (d).
     """
 
     if not settings.CLEARING_ENABLED:
-        raise BadRequestException("Clearing is disabled")
+        # 028 `F-028-20` (decision `T1552`, 2026-09-14): a state of the server, not a bad request.
+        raise ConflictException("Clearing is disabled", details={"reason": "clearing_disabled"})
     validate_equivalent_code(equivalent_code)
     async with renewable_lease(
         redis_client, lease_key(equivalent_code), wait_timeout_seconds=wait_timeout_seconds, **LEASE_TIMINGS

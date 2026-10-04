@@ -164,4 +164,31 @@ describe('mockApi.participantMetrics', () => {
     expect(env.data.activity?.clearing_committed[7]).toBe(0)
     expect(env.data.activity?.has_transactions).toBe(true)
   })
+
+  it('ranks by the exact net and truncates it once, as the server (028 F-028-40)', async () => {
+    // §15 review of E5 (`T2899.4`): credit 0.015 and debt 0.006 at precision 2 are net 0.009 -> "0.00"; truncating
+    // each side to atoms first gave 1 - 0 = "0.01".
+    vi.stubGlobal('window', { ...window, location: new URL('http://localhost/?scenario=happy') } as unknown as Window)
+    const participants = ['PID_A', 'PID_B', 'PID_C'].map((pid) => ({ pid, display_name: pid, type: 'person', status: 'active' }))
+    const datasets: Record<string, unknown> = {
+      'scenarios/happy.json': { name: 'happy', latency_ms: { min: 0, max: 0 } },
+      'datasets/participants.json': participants,
+      'datasets/equivalents.json': [{ code: 'GEO', precision: 2, description: 'GEO', is_active: true }],
+      'datasets/trustlines.json': [],
+      'datasets/debts.json': [
+        { equivalent: 'GEO', debtor: 'PID_B', creditor: 'PID_A', amount: '0.015' },
+        { equivalent: 'GEO', debtor: 'PID_A', creditor: 'PID_C', amount: '0.006' },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const hit = Object.keys(datasets).find((k) => String(input).includes(`/admin-fixtures/v1/${k}`))
+      return hit ? jsonResponse(datasets[hit]) : new Response('Not Found', { status: 404, statusText: 'Not Found' })
+    }) as unknown as typeof fetch)
+
+    const env = await mockApi.participantMetrics('PID_A', { equivalent: 'GEO', threshold: '0.10' })
+    expect(env.success).toBe(true)
+    if (!env.success) return
+    expect(env.data.rank?.net).toBe('0.00')
+    expect(env.data.rank?.rank).toBe(1)
+  }, 15000)
 })

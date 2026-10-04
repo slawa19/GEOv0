@@ -396,3 +396,21 @@ def fixture_block_violations(
             violations.extend(_statement_violations(stmt, path))
     violations.sort(key=lambda v: (v.lineno, v.col_offset, v.reason))
     return violations
+
+
+def transactions_of(participant_ids: Iterable[Any]) -> Any:
+    """`transactions` rows of a test world: a payment by its initiator, a clearing by a debtor of its `edges`.
+
+    028 F-028-45 (migration 036): a clearing records no initiator, so `initiator_id IN (...)` no longer finds it."""
+    from sqlalchemy import exists, or_, text
+
+    from app.db.models.participant import Participant
+    from app.db.models.transaction import Transaction
+
+    ids = list(participant_ids)
+    debtor_of_an_edge = exists().where(
+        Participant.id.in_(ids),
+        text("CAST(transactions.payload AS jsonb) -> 'edges' @> "
+             "jsonb_build_array(jsonb_build_object('debtor', participants.pid))"),
+    )
+    return or_(Transaction.initiator_id.in_(ids), debtor_of_an_edge)

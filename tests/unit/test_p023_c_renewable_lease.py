@@ -149,8 +149,10 @@ async def test_a_second_owner_is_refused_while_the_first_holds_the_key() -> None
     first = _lease(api, redis, clock)
     await first.acquire(wait_timeout_seconds=0.0)
     second = _lease(api, redis, clock)
-    with pytest.raises(ConflictException):
+    with pytest.raises(ConflictException) as busy:
         await second.acquire(wait_timeout_seconds=0.0)
+    # 028 `T2899.4` #4: a held key is a transient refusal the caller may retry.
+    assert (busy.value.details.get("reason"), busy.value.details.get("retryable")) == ("busy", True), busy.value.details
     assert redis.store[KEY][0] == first.token and first.lost is False
     assert first.token != second.token
 
@@ -348,9 +350,10 @@ async def test_a_hanging_set_is_bounded_by_the_acquisition_budget() -> None:
     redis = _FakeRedis(time.monotonic)
     redis.hang_set = True
     lease = _lease(api, redis, time.monotonic, **_SHORT)
-    with pytest.raises(ConflictException):
+    with pytest.raises(ConflictException) as timed_out:
         await _bounded(lease.acquire(wait_timeout_seconds=0.1), "SET")
     assert lease.lost is True, "an unconfirmed acquisition is not ownership"
+    assert timed_out.value.details.get("retryable") is True, timed_out.value.details  # 028 `T2899.4` #4
 
 
 @pytest.mark.asyncio

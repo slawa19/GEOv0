@@ -227,21 +227,6 @@ class SimulatorClearingDoneEvent(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class SimulatorAuditDriftEvent(BaseModel):
-    event_id: str
-    ts: datetime
-    type: Literal["audit.drift"]
-    equivalent: str
-    tick_index: int
-
-    severity: Literal["warning", "critical"]
-    total_drift: str
-    drifts: List[Dict[str, Any]]
-    source: Literal["post_tick_audit", "delta_check"]
-
-    model_config = ConfigDict(extra="allow")
-
-
 class TopologyChangedNodeRef(BaseModel):
     pid: str
     name: Optional[str] = None
@@ -338,7 +323,6 @@ SimulatorEvent = Union[
     SimulatorTxUpdatedEvent,
     SimulatorTxFailedEvent,
     SimulatorClearingDoneEvent,
-    SimulatorAuditDriftEvent,
     SimulatorTopologyChangedEvent,
     SimulatorRunStatusEvent,
 ]

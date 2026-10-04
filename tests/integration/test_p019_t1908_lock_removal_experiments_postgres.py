@@ -63,6 +63,7 @@ from tests.p019_locks_off import blocked_by
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 pytestmark = [pytest.mark.slow]
 
@@ -280,7 +281,7 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
         clearings = (
             await s.execute(
                 select(Transaction.tx_id, Transaction.state).where(
-                    Transaction.type == "CLEARING", Transaction.initiator_id.in_(seed["participant_ids"])
+                    Transaction.type == "CLEARING", transactions_of(seed["participant_ids"])
                 )
             )
         ).all()

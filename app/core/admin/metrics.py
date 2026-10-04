@@ -378,19 +378,24 @@ async def _compute_rank_and_distribution(
         .group_by(Participant.pid)
     )
 
-    debt_by_pid: dict[str, int] = {}
+    # 028 F-028-40: subtract in Decimal first, then truncate to atoms. Truncating each side and
+    # subtracting the atoms could be one atom off the truncated exact net.
+    debt_by_pid: dict[str, Decimal] = {}
     for pid, amt in (await db.execute(debtor_stmt)).all():
-        debt_by_pid[str(pid)] = _decimal_to_atoms(amt or Decimal("0"), eq.precision)
+        debt_by_pid[str(pid)] = Decimal(amt or 0)
 
-    credit_by_pid: dict[str, int] = {}
+    credit_by_pid: dict[str, Decimal] = {}
     for pid, amt in (await db.execute(creditor_stmt)).all():
-        credit_by_pid[str(pid)] = _decimal_to_atoms(amt or Decimal("0"), eq.precision)
+        credit_by_pid[str(pid)] = Decimal(amt or 0)
 
-    net_by_pid: dict[str, int] = {}
-    for pid in all_pids:
-        net_by_pid[pid] = int(credit_by_pid.get(pid, 0) - debt_by_pid.get(pid, 0))
+    exact_net_by_pid = {
+        pid: credit_by_pid.get(pid, Decimal(0)) - debt_by_pid.get(pid, Decimal(0)) for pid in all_pids
+    }
+    net_by_pid: dict[str, int] = {
+        pid: _decimal_to_atoms(net, eq.precision) for pid, net in exact_net_by_pid.items()
+    }
 
-    sorted_pids = sorted(all_pids, key=lambda p: (-net_by_pid.get(p, 0), p))
+    sorted_pids = sorted(all_pids, key=lambda p: (-exact_net_by_pid[p], p))
 
     n = len(sorted_pids)
 
@@ -652,7 +657,7 @@ async def _compute_activity(
     # Committed tx activity.
     tx_rows = (
         await db.execute(
-            select(Transaction.type, Transaction.payload, Transaction.state, Transaction.created_at, Transaction.updated_at, Transaction.initiator_id)
+            select(Transaction.type, Transaction.payload, Transaction.state, Transaction.created_at, Transaction.updated_at)
             .where(
                 Transaction.type.in_({"PAYMENT", "CLEARING"}),
                 Transaction.state == "COMMITTED",
@@ -663,7 +668,7 @@ async def _compute_activity(
 
     has_transactions = len(tx_rows) > 0
 
-    for t_type, payload, state, created_at, updated_at, initiator_id in tx_rows:
+    for t_type, payload, state, created_at, updated_at in tx_rows:
         # payload is dict (JSON)
         pl = payload or {}
         payload_eq = pl.get("equivalent") if isinstance(pl, dict) else None
@@ -677,10 +682,8 @@ async def _compute_activity(
                 to_pid = str(pl.get("to") or "")
                 involved = from_pid == participant_pid or to_pid == participant_pid
         else:
-            # CLEARING: payload.edges[] has debtor/creditor PIDs.
-            if initiator_id == participant_id:
-                involved = True
-            if not involved and isinstance(pl, dict):
+            # CLEARING: payload.edges[] has debtor/creditor PIDs (a clearing records no initiator, 028 F-028-45).
+            if isinstance(pl, dict):
                 edges = pl.get("edges")
                 if isinstance(edges, list):
                     for e in edges:

@@ -1682,6 +1682,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunStatus'
+        '409':
+          description: >-
+            E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
+            the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
+            limit of active runs is reached (`global_active_limit`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1740,6 +1749,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunStatus'
+        '409':
+          description: >-
+            E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
+            the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
+            limit of active runs is reached (`global_active_limit`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2777,8 +2795,9 @@ paths:
         '409':
           description: >-
             E008 before any occurrence committed: the equivalent is not active (operator stop or integrity
-            hold; `details.reason`), or its clearing lease is held by another pass. Met after progress, the
-            same stop answers 200 `interrupted` instead.
+            hold; `details.reason`), its clearing lease is held by another pass, or clearing is switched off
+            (`CLEARING_ENABLED = false`, `details.reason = clearing_disabled`, 028 `F-028-20`). Met after
+            progress, the same stop answers 200 `interrupted` instead.
           content:
             application/json:
               schema:
@@ -2863,6 +2882,12 @@ paths:
     post:
       tags: [Payments]
       summary: Create payment
+      description: >-
+        Every refusal names its machine reason in `details.reason` (`PaymentRefusalDetails`, 028 `F-028-42`): before
+        admission in the error envelope (4xx/5xx), after it in the stored `ABORTED` result. Repeating the same
+        `tx_id` with the same body after a definitive refusal answers that stored `ABORTED` result and the same
+        error; a new attempt is a new `tx_id` (`F-028-43`, protocol appendix E). An internal error's `message` is
+        the code's meaning only (no internals).
       parameters:
         - in: header
           name: Idempotency-Key
@@ -3063,10 +3088,45 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /integrity/summary:
+    get:
+      tags: [Integrity]
+      summary: Integrity summary per equivalent (participant or admin)
+      description: >-
+        028 `F-028-44` (owner decision 2026-10-04, В-7): per equivalent, the verdict of the LAST STORED check - the
+        equivalent's integrity hold and its latest debt reconciliation result - and nothing more. Nothing is
+        recomputed and nothing is written by the call. No stored result is `warning` with `checked_at: null`, never
+        `healthy`. The checks themselves, their details and the audit log are admin-only.
+      responses:
+        '200':
+          description: The summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegritySummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /integrity/status:
     get:
       tags: [Integrity]
-      summary: Get integrity status
+      summary: Get integrity status (admin)
+      description: >-
+        Admin-only since 028 `F-028-44` (В-7): it re-runs the invariant checks and names the violating pairs and
+        sums. A participant reads `GET /integrity/summary`.
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
       responses:
         '200':
           description: Current integrity status
@@ -3074,8 +3134,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityStatusResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3084,8 +3142,14 @@ paths:
   /integrity/checksum/{equivalent}:
     get:
       tags: [Integrity]
-      summary: Get latest integrity checksum for equivalent
+      summary: Get latest integrity checksum for equivalent (admin)
+      security: []
       parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
         - in: path
           name: equivalent
           required: true
@@ -3098,8 +3162,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityChecksumResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3110,7 +3172,14 @@ paths:
   /integrity/verify:
     post:
       tags: [Integrity]
-      summary: Run invariant verification
+      summary: Run invariant verification (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -3124,8 +3193,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityVerifyResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3138,8 +3205,14 @@ paths:
   /integrity/audit-log:
     get:
       tags: [Integrity]
-      summary: List integrity verification audit log entries
+      summary: List integrity verification audit log entries (admin)
+      security: []
       parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
         - in: query
           name: page
           schema:
@@ -3160,8 +3233,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityAuditLogResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -4496,7 +4567,10 @@ components:
             - WAITING
             - REJECTED
         initiator_pid:
+          # The pid of who asked for the operation; null on a CLEARING, which records no initiator (028
+          # F-028-45, migration 036) - who took part in it is `edges`. Always present.
           type: string
+          nullable: true
         from:
           # PAYMENT only: the paying participant's pid.
           type: string
@@ -5186,11 +5260,18 @@ components:
           additionalProperties: true
 
     ParticipantPublicStats:
+      # 028 F-028-36 (owner decision В-3, 2026-10-04): equivalents are independent, so incoming
+      # trust is reported per equivalent and never summed across them. The public profile discloses
+      # exactly what it disclosed before - incoming trust and the membership date - and nothing else.
       type: object
       required: [total_incoming_trust, member_since]
       properties:
         total_incoming_trust:
-          type: string
+          # One element per equivalent with at least one ACTIVE incoming trustline, ordered by
+          # equivalent code; empty when there is none.
+          type: array
+          items:
+            $ref: '#/components/schemas/EquivalentAmount'
         member_since:
           type: string
           format: date-time
@@ -5224,19 +5305,53 @@ components:
           items:
             $ref: '#/components/schemas/Participant'
 
-    ParticipantStats:
+    EquivalentAmount:
       type: object
-      required: [total_incoming_trust, total_outgoing_trust, total_debt, total_credit, net_balance]
+      required: [equivalent, amount]
       properties:
+        equivalent:
+          type: string
+        amount:
+          # Money, exact decimal string with at least the equivalent's `precision` digits
+          # (to_money_str: never drops a stored digit).
+          type: string
+
+    ParticipantStats:
+      # 028 F-028-36 (owner decision В-3, 2026-10-04): the caller's OWN figures, one element per
+      # equivalent. The former scalar totals summed different equivalents into one number and were
+      # removed (no consumer in the repository).
+      type: object
+      required: [per_equivalent]
+      properties:
+        per_equivalent:
+          # One element per equivalent in which the participant has an active trustline (either
+          # direction) or a debt (either direction), ordered by equivalent code; empty otherwise.
+          type: array
+          items:
+            $ref: '#/components/schemas/ParticipantEquivalentStats'
+
+    ParticipantEquivalentStats:
+      # All five amounts are money as exact decimal strings rendered with at least the
+      # equivalent's `precision` digits, never fewer than the stored value needs.
+      type: object
+      required: [equivalent, total_incoming_trust, total_outgoing_trust, total_debt, total_credit, net_balance]
+      properties:
+        equivalent:
+          type: string
         total_incoming_trust:
+          # SUM of active trustline limits TO the participant in this equivalent.
           type: string
         total_outgoing_trust:
+          # SUM of active trustline limits FROM the participant in this equivalent.
           type: string
         total_debt:
+          # What the participant owes in this equivalent.
           type: string
         total_credit:
+          # What others owe the participant in this equivalent.
           type: string
         net_balance:
+          # total_credit - total_debt.
           type: string
 
     ParticipantWithStats:
@@ -5792,111 +5907,65 @@ components:
         message:
           type: string
         details:
-          # Read back verbatim from the transactions.error JSON column
-          # (app/core/payments/service.py:1282-1286). The payment engine's abort writer coerces a
-          # missing payload to {} (app/core/payments/engine.py:1761-1778), so a row it wrote
-          # always carries an object.
-          #
-          # It is NOT the only writer, which is why the null branch below is real rather than a
-          # concession to hypothetical legacy rows: `scripts/seed_db.py:459` stores
-          # `error=item.get("error")` straight from a fixtures pack, bypassing that normalizer
-          # entirely, and the shipped pack's ABORTED rows carry `{"code", "message"}` with no
-          # `details` key at all (admin-fixtures/.../transactions.json:29, :346). For those rows
-          # `.get("details")` yields None and `PaymentError` serializes `"details": null`
-          # (executed; `details` is `Optional[Dict[str, Any]] = None` on app/schemas/payment.py:57
-          # and no read on this route sets `exclude_none`).
-          #
-          # The tail is OPEN, and that is the point: both abort paths forward the `.details` of
-          # whatever 4xx GeoException prepare or commit raised. The prepare path classifies at
-          # app/core/payments/service.py:898-903 and writes at :922 and :938; the commit path
-          # forwards at :1001, :1017, :1067 and :1083. (One 896-903 range used to stand for all of
-          # that; T1108 found it covering a single branch of two and starting mid-expression.)
-          # So adding a `details=` to any 4xx raise changes this object with no schema change.
-          # The branches below therefore DOCUMENT what the code emits today. `anyOf`, never
-          # `oneOf`: a closed union would make an unlisted-but-real response non-conforming, and
-          # a `oneOf` with a catch-all is worse still - every documented payload would match two
-          # branches and be rejected for matching more than one.
-          #
-          # The null is the last branch rather than a sibling `nullable: true`. In OpenAPI 3.0.3
-          # `nullable` modifies a sibling `type` and nothing else, so beside a bare `anyOf` it was
-          # inert and this node rejected the null it claimed to allow (`F-011-10`).
-          anyOf:
-            # Plain abort with no diagnostic payload - cancellation and timeout (E007), the
-            # default abort (E010), and the E002 raised when routing finds no capacious path.
-            - type: object
-              additionalProperties: false
-            # E002, insufficient capacity on one hop (app/core/payments/engine.py:767, :949).
-            # available / needed / reserved are money, so exact decimal strings.
-            - type: object
-              required: [available, needed, reserved, from, to]
-              properties:
-                available:
-                  type: string
-                needed:
-                  type: string
-                reserved:
-                  type: string
-                from:
-                  type: string
-                to:
-                  type: string
-              additionalProperties: false
-            # E008 from RetryablePaymentConflictException (app/utils/exceptions.py:78-81):
-            # a retryable database serialization failure. `retryable` is the client-facing
-            # signal that the same payment may be resubmitted.
-            - type: object
-              required: [retryable, conflict_kind]
-              properties:
-                retryable:
-                  type: boolean
-                conflict_kind:
-                  type: string
-              additionalProperties: false
-            # E008 from the post-apply per-participant delta check
-            # (app/core/payments/engine.py:1594). `equivalent` is deliberately a plain string,
-            # NOT EquivalentCode: the producer falls back to the equivalent UUID when the code
-            # cannot be read, and the code pattern would reject a real response.
-            - type: object
-              required: [invariant, source, equivalent, equivalent_id, total_drift, drifts]
-              properties:
-                invariant:
-                  type: string
-                  enum: [PAYMENT_DELTA_DRIFT]
-                source:
-                  type: string
-                equivalent:
-                  type: string
-                equivalent_id:
-                  type: string
-                total_drift:
-                  type: string
-                drifts:
-                  type: array
-                  items:
-                    type: object
-                    required: [participant_id, participant_uuid, expected_delta, actual_delta, drift]
-                    properties:
-                      participant_id:
-                        type: string
-                      participant_uuid:
-                        type: string
-                      expected_delta:
-                        type: string
-                      actual_delta:
-                        type: string
-                      drift:
-                        type: string
-                    additionalProperties: false
-              additionalProperties: false
-            # E008 from the three protocol invariants re-checked before commit - the same three
-            # shapes the integrity endpoints return, from the same producers.
-            - $ref: '#/components/schemas/InvariantViolationDetails'
-            # The open tail. Any other 4xx GeoException raised in prepare or commit reaches this
-            # node with its own details; this branch is what keeps such a response conforming.
-            - type: object
-            # The seeded abort rows described above, which carry no `details` key at all.
-            - nullable: true
-              enum: [null]
+          $ref: '#/components/schemas/PaymentRefusalDetails'
+
+    PaymentRefusalDetails:
+      # 028 `F-028-42` (owner decision 2026-10-04, В-6). The `details` of every payment refusal as its participant
+      # reads it - the error envelope of `POST /payments` and the stored `ABORTED` result of `POST`/`GET /payments`
+      # (`app/core/payments/service.py`, `public_refusal_details`; applied in `app/api/v1/payments.py`). The human
+      # RU/EN text is the client's, composed from `code + reason + details`; `message` is a server-side English hint.
+      # The stored row an admin reads (`AdminGraphTransactionError`) is not filtered.
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          # The closed set of the listed domain refusals; anything else - an internal error, an unforeseen input -
+          # is `other` beside its own `code`, and the promise is no wider.
+          type: string
+          enum: [no_route, insufficient_capacity, policy, participant_suspended, amount_precision_exceeded,
+                 equivalent_integrity_hold, equivalent_inactive, busy, timeout, tx_id_reused,
+                 unverifiable_legacy_identity, invalid_signature, recipient_not_found, amount_not_positive,
+                 self_payment, equivalent_not_found, other]
+        max_available:
+          # `no_route` / `insufficient_capacity` found by routing: what the payer can send the payee now (the
+          # max-flow of `GET /payments/max-flow`), at the equivalent's precision. `"0.00"`-like for `no_route`.
+          type: string
+        retryable:
+          # `busy`: the same request may be sent again.
+          type: boolean
+        rule:
+          # `policy`: which trust-line policy the route breaks.
+          type: string
+        # The other keys a producer may add beside its reason. The set is CLOSED - an allow-list in the code
+        # (`_PUBLIC_REFUSAL_DETAILS`): a diagnostic naming other participants (the invariants' `violations`, the delta
+        # check's `drifts`) or an internal id (the Redis lock key) never reaches a participant (§15 review `T2899.4`).
+        conflict_kind: {type: string}
+        path: {type: array, items: {type: string}}
+        available: {type: string}
+        needed: {type: string}
+        reserved: {type: string}
+        from: {type: string}
+        to: {type: string}
+        equivalent: {type: string}
+        equivalents: {type: array, items: {type: string}}
+        precision: {type: integer}
+        field: {type: string}
+        participants: {type: array, items: {type: string}}
+        wait_timeout_seconds: {type: number}
+        invariant: {type: string}
+        max_scale: {type: integer}
+        max_precision: {type: integer}
+        max_integer_digits: {type: integer}
+        validation:
+          # pydantic's errors of the request body (`POST /payments`, before admission).
+          type: array
+          items:
+            type: object
+            properties:
+              loc: {type: array, items: {anyOf: [{type: string}, {type: integer}]}}
+              msg: {type: string}
+              type: {type: string}
+      additionalProperties: false
 
     PaymentResult:
       type: object
@@ -6208,6 +6277,8 @@ components:
       properties:
         operation_type:
           # The eight operation types. This value selects the shape of the three open objects below.
+          # SIMULATOR_AUDIT_DRIFT is HISTORICAL: its writer, the post-tick audit, was removed by 028
+          # `F-028-35` (2026-10-04); rows written before stay in the log and are served as they are.
           type: string
           enum:
             - TRUST_LINE_CREATE
@@ -6522,6 +6593,32 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
+
+    IntegritySummaryResponse:
+      type: object
+      required: [equivalents]
+      properties:
+        equivalents:
+          type: array
+          items:
+            type: object
+            required: [equivalent, status, checked_at, hold]
+            properties:
+              equivalent:
+                type: string
+              status:
+                type: string
+                enum: [healthy, warning, critical]
+              checked_at:
+                # When the last stored check last ran; null - none is stored yet (the status is then `warning`).
+                type: string
+                format: date-time
+                nullable: true
+              hold:
+                # Money in this equivalent is held until an admin clears it.
+                type: boolean
+            additionalProperties: false
       additionalProperties: false
 
     IntegrityChecksumResponse:
@@ -7073,37 +7170,6 @@ components:
             $ref: '#/components/schemas/SimulatorGraphLinkPatch'
       additionalProperties: true
 
-    SimulatorAuditDriftEvent:
-      type: object
-      required: [event_id, ts, type, equivalent, tick_index, severity, total_drift, drifts, source]
-      properties:
-        event_id:
-          type: string
-        ts:
-          type: string
-          format: date-time
-        type:
-          type: string
-          enum: [audit.drift]
-        equivalent:
-          $ref: '#/components/schemas/EquivalentCode'
-        tick_index:
-          type: integer
-        severity:
-          type: string
-          enum: [warning, critical]
-        total_drift:
-          type: string
-        drifts:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-        source:
-          type: string
-          enum: [post_tick_audit, delta_check]
-      additionalProperties: true
-
     TopologyChangedNodeRef:
       type: object
       required: [pid]
@@ -7200,7 +7266,6 @@ components:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
         - $ref: '#/components/schemas/SimulatorTxFailedEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
-        - $ref: '#/components/schemas/SimulatorAuditDriftEvent'
         - $ref: '#/components/schemas/SimulatorTopologyChangedEvent'
         - $ref: '#/components/schemas/SimulatorRunStatusEvent'
 
@@ -7849,8 +7914,10 @@ components:
           maximum: 1
         items:
           # Active trustlines with limit > 0 whose available/limit ratio is strictly below
-          # `threshold`, ordered by available ascending then created_at ascending, capped at the
-          # `limit` query parameter. `used` is the matching Debt row (0 when there is none) and
+          # `threshold`, capped at the `limit` query parameter. With `equivalent` the order is
+          # available ascending then created_at ascending; WITHOUT it the rows carry different
+          # units, so the order is the ratio available/limit ascending then created_at ascending
+          # (028 F-028-38, owner decision В-3: no comparison across equivalents). `used` is the matching Debt row (0 when there is none) and
           # `available` is limit - used, both computed in the query, not stored.
           type: array
           items:
@@ -7866,9 +7933,9 @@ components:
         display_name:
           type: string
         net:
-          # Money: total credited minus total debited across the selected equivalent(s), as an
-          # exact decimal string (AGENTS.md section 8). Negative for a net debtor. NOT atoms -
-          # this is the raw Debt.amount sum in major units.
+          # Money: total credited minus total debited in the selected equivalent, as an exact
+          # decimal string (AGENTS.md section 8). Negative for a net debtor. NOT atoms - this is
+          # the raw Debt.amount sum in major units. Rows exist only when `equivalent` is given.
           type: string
 
     AdminLiquiditySummaryResponse:
@@ -7925,26 +7992,34 @@ components:
           type: integer
           minimum: 0
         total_limit:
-          # Money, exact decimal string: SUM of TrustLine.limit over active lines.
+          # Money, exact decimal string: SUM of TrustLine.limit over the active lines of the ONE
+          # selected equivalent. Null when `equivalent` is omitted: money is never summed across
+          # equivalents (028 F-028-37, owner decision В-3, 2026-10-04); the counters above stay.
           type: string
+          nullable: true
         total_used:
-          # Money: SUM of coalesce(Debt.amount, 0) over the same lines.
+          # Money: SUM of coalesce(Debt.amount, 0) over the same lines; null without `equivalent`.
           type: string
+          nullable: true
         total_available:
-          # Money: SUM of (limit - used). Equals total_limit - total_used.
+          # Money: SUM of the signed (limit - used) of the same lines of one equivalent. Equals
+          # total_limit - total_used; null without `equivalent`.
           type: string
+          nullable: true
         top_creditors:
-          # Net > 0, descending, capped at the `limit` query parameter.
+          # Net > 0, descending, capped at the `limit` query parameter. Empty without
+          # `equivalent`: a net position is ranked only within one equivalent (028 F-028-37).
           type: array
           items:
             $ref: '#/components/schemas/AdminLiquidityNetRow'
         top_debtors:
-          # Net < 0, ascending (most negative first), same cap.
+          # Net < 0, ascending (most negative first), same cap; empty without `equivalent`.
           type: array
           items:
             $ref: '#/components/schemas/AdminLiquidityNetRow'
         top_by_abs_net:
-          # Ranked by abs(net) with no sign filter, so its rows overlap the two lists above.
+          # Ranked by abs(net) with no sign filter, so its rows overlap the two lists above; empty
+          # without `equivalent`.
           type: array
           items:
             $ref: '#/components/schemas/AdminLiquidityNetRow'
@@ -8121,10 +8196,11 @@ components:
           # (n - rank) / (n - 1), and exactly 1.0 when n <= 1.
           type: number
         net:
-          # Money, exact decimal string - but it has been through atoms and back
-          # (_decimal_to_atoms truncates toward zero at the equivalent's precision, then
-          # _atoms_to_decimal quantizes), so it can differ from AdminParticipantBalanceRow.net in
-          # the sub-precision digits and it carries exactly `precision` decimal places.
+          # Money, exact decimal string: credits minus debts subtracted exactly in Decimal FIRST,
+          # then truncated toward zero at the equivalent's precision (028 F-028-40; truncating
+          # each side before subtracting could be off by one atom). It can differ from
+          # AdminParticipantBalanceRow.net only in the sub-precision digits and carries exactly
+          # `precision` decimal places. `rank` orders by the exact net.
           type: string
 
     AdminParticipantCapacitySide:
@@ -8351,8 +8427,8 @@ components:
           type: string
 
     IntegrityAuditLogDriftItem:
-      # Built by audit_tick_balance (app/core/simulator/post_tick_audit.py:248-255) and copied
-      # verbatim into both affected_participants.drifts and error_details.drifts.
+      # Historical (SIMULATOR_AUDIT_DRIFT rows written before 028 `F-028-35`). Built by the removed
+      # post-tick audit and copied verbatim into both affected_participants.drifts and error_details.drifts.
       #
       # Four keys, not five: this is NOT the drift item declared inline under
       # PaymentError.details, which is built by the payment engine
@@ -8380,7 +8456,8 @@ components:
       # required, because INTEGRITY_VERIFY writes `{}` (app/api/v1/integrity.py:272) - it audits
       # an equivalent, not a set of participants.
       #
-      #   TRUST_LINE_CREATE         {from, to}
+      #   TRUST_LINE_CREATE         {from, to}; a scenario import adds initial_status
+      #   TRUST_LINE_*              + checkpoint_scope when written in a caller's transaction
       #   TRUST_LINE_UPDATE/CLOSE   {from, to, trustline_id}; CLOSE (the completion) adds completed_by
       #   TRUST_LINE_CLOSE_REQUEST  {from, to, trustline_id}
       #   PAYMENT                   {participants, debt_growth?}
@@ -8414,6 +8491,17 @@ components:
               debt_before: {type: string}
               debt_amount: {type: string}
               trust_limit: {type: string}
+        checkpoint_scope:
+          # TRUST_LINE_* rows of an internal caller's batch (`TrustLineWriteBatch`, 021 stage 1): the row belongs to
+          # one caller transaction that may hold several operations of the equivalent. The name predates 024
+          # `T2413.2`, which removed the checkpoints; absent on a public operation's row.
+          type: string
+          enum: [caller_transaction]
+        initial_status:
+          # TRUST_LINE_CREATE of a scenario import (`import_initial_trustlines`): the status the line was created
+          # with. `frozen` only on rows written before migration 035 (028 F-028-29).
+          type: string
+          enum: [active, closed, frozen]
         completed_by:
           # TRUST_LINE_CLOSE since 026 `T2603.1`: `request` (closed at the request, no supported debt) or the
           # money operation kind that brought the supported debt to 0 (`PAYMENT`, `CLEARING`); `tx_id` is then
@@ -8440,8 +8528,7 @@ components:
           type: integer
           minimum: 0
         source:
-          # The single literal the orchestrator passes. The SSE audit.drift event admits
-          # `delta_check` as well; this writer does not.
+          # The single literal the removed post-tick audit wrote (historical rows).
           type: string
           enum: [post_tick_audit]
 
@@ -8508,8 +8595,8 @@ components:
               enum: [null]
 
     IntegrityAuditLogPostTickBalance:
-      # SIMULATOR_AUDIT_DRIFT's own single-key vocabulary
-      # (app/core/simulator/real_tick_orchestrator.py:469-474). It shares no key name with the
+      # SIMULATOR_AUDIT_DRIFT's own single-key vocabulary (historical rows; the writer was removed
+      # by 028 `F-028-35`). It shares no key name with the
       # three protocol invariants.
       type: object
       required: [passed, total_drift]
@@ -8587,8 +8674,7 @@ components:
               $ref: '#/components/schemas/InvariantResult'
 
     IntegrityAuditLogDriftError:
-      # error_details as SIMULATOR_AUDIT_DRIFT writes it
-      # (app/core/simulator/real_tick_orchestrator.py:476-479).
+      # error_details as SIMULATOR_AUDIT_DRIFT wrote it (historical rows; writer removed by 028 `F-028-35`).
       type: object
       required: [drifts, severity]
       additionalProperties: true
@@ -8599,8 +8685,7 @@ components:
           items:
             $ref: '#/components/schemas/IntegrityAuditLogDriftItem'
         severity:
-          # `warning` when total_drift is under 1% of the tick volume, `critical` otherwise and
-          # whenever the ratio cannot be computed (app/core/simulator/real_tick_orchestrator.py
-          # :413-421).
+          # `warning` when total_drift was under 1% of the tick volume, `critical` otherwise and
+          # whenever the ratio could not be computed.
           type: string
           enum: [warning, critical]

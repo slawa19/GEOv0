@@ -11,7 +11,7 @@ equivalent for the whole seeding transaction.
 
 THE CHARACTERIZATION (green before and after, the half that must NOT move): the initial statuses
 `active`/`closed` (028 `F-028-29`: `frozen` is refused, below) and the fallback of anything else to `active`, the policy default, the skips (no
-equivalent, unknown participant, negative, non-numeric and unstorable limits, a live line already there) and
+equivalent, unknown participant, negative, non-numeric and too-large limits - 028 E4: a limit finer than 1E-8 is refused by name instead, a live line already there) and
 repeated seeding - including the one surprising property found while pinning it: a `closed` scenario line is
 NOT found by the live-line lookup, so every repeated seeding imports it once more as a new closed row.
 
@@ -66,7 +66,7 @@ def _world() -> dict:
             # skipped
             {"from": pid["C"], "to": pid["D"], "equivalent": e1, "limit": "-1"},
             {"from": pid["C"], "to": pid["A"], "equivalent": e1, "limit": "abc"},
-            {"from": pid["D"], "to": pid["A"], "equivalent": e1, "limit": "0.000000001"},
+            {"from": pid["D"], "to": pid["A"], "equivalent": e1, "limit": "1000000000000"},  # too large to store (028 E4: 1E-9 now refuses)
             {"from": pid["A"], "to": f"P21S_GHOST_{n}", "equivalent": e1, "limit": "5"},
             {"from": pid["A"], "to": pid["D"], "equivalent": "", "limit": "5"},
             {"from": pid["C"], "to": pid["B"], "equivalent": e1, "limit": "99"},  # a live line exists

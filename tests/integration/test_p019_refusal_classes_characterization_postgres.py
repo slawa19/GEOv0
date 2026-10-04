@@ -413,12 +413,13 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
     # ── the table ─────────────────────────────────────────────────────────────────────────────
     inactive, hold = MoneyBoundary.EQUIVALENT_INACTIVE_REASON, MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
     assert observed == {
+        # 028 `F-028-42`: every refusal names its reason (intended change; it was None for these three).
         "routing_before_new": {
-            "first": (400, "E002", None), "stored": None,
+            "first": (400, "E002", "insufficient_capacity"), "stored": None,
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "recheck_after_new": {
-            "first": (400, "E002", None), "stored": ("ABORTED", "E002"),
+            "first": (400, "E002", "no_route"), "stored": ("ABORTED", "E002"),
             "replay": (200, "ABORTED", "E002"), "replay_moved": False,
         },
         "stop_before_new": {
@@ -438,7 +439,7 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
             "replay": (200, "ABORTED", "E008"), "replay_moved": False,
         },
         "timeout_confirmed_rollback": {
-            "first": (504, "E007", None), "stored": ("ABORTED", "E007"),
+            "first": (504, "E007", "timeout"), "stored": ("ABORTED", "E007"),
             "replay": (200, "ABORTED", "E007"), "replay_moved": False,
         },
     }, observed

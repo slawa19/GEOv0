@@ -14,7 +14,6 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from app.utils.event_bus import event_bus
 
 
 class _MetricRecorder:
@@ -72,10 +71,6 @@ async def test_staged_payment_rollback_has_no_rows_or_effects(db_session, monkey
     suffix = uuid.uuid4().hex[:8]
     sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)
     tx_id = f"staged-rollback-{suffix}"
-    subscription = await event_bus.subscribe(
-        pid=receiver.pid,
-        events=["payment.received"],
-    )
     PaymentRouter._graph_cache[equivalent.code] = object()  # type: ignore[assignment]
 
     try:
@@ -99,11 +94,9 @@ async def test_staged_payment_rollback_has_no_rows_or_effects(db_session, monkey
         debt_count = await db_session.scalar(select(func.count()).select_from(Debt))
         assert tx_count == 0
         assert debt_count == 0
-        assert subscription.queue.empty()
         assert equivalent.code in PaymentRouter._graph_cache
     finally:
         PaymentRouter.invalidate_cache(equivalent.code)
-        await event_bus.unsubscribe(subscription)
 
 
 @pytest.mark.asyncio
@@ -114,10 +107,6 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
     suffix = uuid.uuid4().hex[:8]
     sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)
     tx_id = f"staged-commit-{suffix}"
-    subscription = await event_bus.subscribe(
-        pid=receiver.pid,
-        events=["payment.received"],
-    )
     # 027 stage 1: TTL off, so the staged payment routes afresh and the entry below only witnesses the cache.
     monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 0)
     metric_recorder = _MetricRecorder()
@@ -151,7 +140,6 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
             )
 
         assert staged.post_commit_effects is not None
-        assert subscription.queue.empty()
         assert PaymentRouter._graph_cache[equivalent.code] is stale_cache_entry
         assert invalidations == []
         assert [
@@ -163,7 +151,6 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
         assert staged.post_commit_effects.apply_once() is False
         await asyncio.sleep(0)
 
-        assert subscription.queue.qsize() == 1
         # 027 stage 1: a money commit leaves the route cache in place - only topology edits drop it.
         assert PaymentRouter._graph_cache[equivalent.code] is stale_cache_entry
         assert invalidations == []
@@ -191,11 +178,9 @@ async def test_staged_payment_effects_apply_once_after_outer_commit(
             )
         assert retry.post_commit_effects is None
         await asyncio.sleep(0)
-        assert subscription.queue.qsize() == 1
         assert invalidations == []
     finally:
         PaymentRouter.invalidate_cache(equivalent.code)
-        await event_bus.unsubscribe(subscription)
 
 
 @pytest.mark.asyncio
@@ -234,10 +219,6 @@ async def test_staged_payment_cancellation_rolls_back_without_effects(db_session
     suffix = uuid.uuid4().hex[:8]
     sender, receiver, equivalent = await _seed_direct_route(db_session, suffix)
     tx_id = f"staged-cancel-{suffix}"
-    subscription = await event_bus.subscribe(
-        pid=receiver.pid,
-        events=["payment.received"],
-    )
 
     try:
         with pytest.raises(asyncio.CancelledError):
@@ -261,7 +242,5 @@ async def test_staged_payment_cancellation_rolls_back_without_effects(db_session
         debt_count = await db_session.scalar(select(func.count()).select_from(Debt))
         assert tx_count == 0
         assert debt_count == 0
-        assert subscription.queue.empty()
     finally:
         PaymentRouter.invalidate_cache(equivalent.code)
-        await event_bus.unsubscribe(subscription)

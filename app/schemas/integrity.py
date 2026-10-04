@@ -105,6 +105,19 @@ class IntegrityStatusResponse(BaseModel):
     alerts: List[str] = Field(default_factory=list)
 
 
+class EquivalentIntegritySummary(BaseModel):
+    """028 `F-028-44` (owner В-7): one equivalent as a participant may see it - the last stored check, nothing more."""
+
+    equivalent: str
+    status: Literal["healthy", "warning", "critical"]
+    checked_at: Optional[datetime]  # the last real check; null - none stored yet (then `warning`)
+    hold: bool
+
+
+class IntegritySummaryResponse(BaseModel):
+    equivalents: List[EquivalentIntegritySummary]
+
+
 class IntegrityChecksumResponse(BaseModel):
     equivalent: str
     checksum: str

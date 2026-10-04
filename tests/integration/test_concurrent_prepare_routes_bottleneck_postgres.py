@@ -56,7 +56,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     from app.db.models.participant import Participant
     from app.db.models.transaction import Transaction
     from app.db.models.trustline import TrustLine
-    from app.utils.event_bus import event_bus
+    from app.core.payments.service import PaymentPostCommitEffects
     from app.utils.exceptions import RoutingException
     from tests.conftest import TestingSessionLocal
 
@@ -124,12 +124,16 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
 
     monkeypatch.setattr(PaymentService, "_retry_or_none", _count_retry)
 
-    publications: list[dict] = []
+    publications: list = []  # post-commit effects applied (028 F-028-46: no `payment.received` bus to watch)
+    _apply_once = PaymentPostCommitEffects.apply_once
 
-    def _capture_publish(**kwargs):
-        publications.append(dict(kwargs))
+    def _capture_publish(self):
+        applied = _apply_once(self)
+        if applied:
+            publications.append(self)
+        return applied
 
-    monkeypatch.setattr(event_bus, "publish", _capture_publish)
+    monkeypatch.setattr(PaymentPostCommitEffects, "apply_once", _capture_publish)
 
     async def _pay(sender_id, tx_id: str):
         async with TestingSessionLocal() as session:
@@ -251,8 +255,6 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
             ]
 
         assert len(publications) == 1
-        assert publications[0]["event"] == "payment.received"
-        assert publications[0]["payload"]["tx_id"] == committed_tx_id
     finally:
         primary_error = sys.exc_info()[1]
         try:

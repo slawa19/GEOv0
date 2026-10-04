@@ -521,6 +521,25 @@ describe('F-013-R3: the attribution fields the producer publishes are actually r
     // they were counted to. Before F-013-R4 this row blanked them too.
     expect(renderCounts(a, a.paymentCommitted, 'payments')).toBe('0 / 0 / 0')
   })
+
+  it('028 F-028-45: a clearing is attributed by its edges only, never by an initiator', () => {
+    // A clearing records no initiator (`initiator_pid: null`); a stale initiator on an edgeless row
+    // no longer makes it ours, and edges naming us count with a null initiator.
+    const edgeless = analyticsFor({
+      transactions: [producerRow({ tx_id: 'cl-old', type: 'CLEARING', initiator_pid: PID })],
+      included,
+    }).selectedActivity.value as Activity
+    expect(edgeless.clearingCommitted[7]).toBe(0)
+    expect(edgeless.clearings.incompleteWindows).toEqual([7, 30, 90])
+
+    const named = analyticsFor({
+      transactions: [
+        producerRow({ tx_id: 'cl-new', type: 'CLEARING', initiator_pid: null, edges: [{ debtor: PID, creditor: THIRD }] }),
+      ],
+      included,
+    }).selectedActivity.value as Activity
+    expect(renderCounts(named, named.clearingCommitted, 'clearings')).toBe('1 / 1 / 1')
+  })
 })
 
 // =================================================================================================
