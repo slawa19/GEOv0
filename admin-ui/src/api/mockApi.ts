@@ -26,7 +26,9 @@ import {
   type IntegrityVerifyResponse,
 } from './adminContracts'
 import { TOAST_DEDUPE_MS } from '../constants/timing'
-import { absDecimalString, addDecimalStrings, compareDecimalStrings, isRatioBelowThreshold } from '../utils/decimal'
+import {
+  absDecimalString, addDecimalStrings, compareDecimalRatios, compareDecimalStrings, isRatioBelowThreshold,
+} from '../utils/decimal'
 import { t } from '../i18n'
 import type {
   AuditLogEntry,
@@ -228,6 +230,19 @@ function newUuid(): string {
     const value = Math.floor(Math.random() * 16)
     return (char === 'x' ? value : (value & 0x3) | 0x8).toString(16)
   })
+}
+
+/**
+ * 028 F-028-49 (owner В-3), as the server (`app/api/v1/admin.py`, F-028-38): inside one equivalent the
+ * narrowest edge is the smallest `available`; across equivalents amounts are not comparable, so the order is
+ * by the unitless share `available/limit`.
+ */
+function bottleneckOrder(eq: string) {
+  return (a: Trustline, b: Trustline): number => {
+    const [av, bv] = [String(a.available || '0'), String(b.available || '0')]
+    const c = eq ? compareDecimalStrings(av, bv) : compareDecimalRatios(av, String(a.limit), bv, String(b.limit))
+    return c !== 0 ? c : String(a.created_at || '').localeCompare(String(b.created_at || ''))
+  }
 }
 
 async function getParticipantsDataset(): Promise<Participant[]> {
@@ -515,6 +530,7 @@ export const mockApi = {
         loadOptionalJson<Incident[]>('datasets/incidents.json', []),
         loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
+      const auditLog = await getAuditLogDataset().catch(() => [] as AuditLogEntry[])
 
       const pidToName = new Map(participants.map((p) => [p.pid, String(p.display_name || '').trim() || p.pid]))
       const precisionByEq = new Map(
@@ -775,22 +791,30 @@ export const mockApi = {
         }
       }
 
+      // 028 F-028-49, as the server (`app/core/admin/metrics.py`): a committed payment is the participant's by
+      // `payload.from/to`, a clearing by its `payload.edges` (a clearing records no initiator, F-028-45);
+      // `participant_ops` are the participant's own audit actions, not transactions.
       for (const tx of transactions || []) {
-        if (String(tx.initiator_pid || '').trim() !== pidKey) continue
-        if (eqCode && getTxEq(tx) !== eqCode) continue
-        const createdMs = safeIsoToMs(tx.created_at)
-        if (!createdMs) continue
-
         const type = String(tx.type || '').trim().toUpperCase()
-        const state = String(tx.state || '').trim().toUpperCase()
-        const isCommitted = state === 'COMMITTED'
-
+        if (String(tx.state || '').trim().toUpperCase() !== 'COMMITTED') continue
+        if (eqCode && getTxEq(tx) !== eqCode) continue
+        const pl = ((tx as unknown as { payload?: unknown }).payload ?? {}) as Record<string, unknown>
+        const edges = Array.isArray(pl.edges) ? (pl.edges as Array<Record<string, unknown>>) : []
+        const involved = type === 'PAYMENT' ? pl.from === pidKey || pl.to === pidKey
+          : type === 'CLEARING' && edges.some((e) => e?.debtor === pidKey || e?.creditor === pidKey)
+        const anchorMs = safeIsoToMs(tx.updated_at || tx.created_at)
+        if (!involved || !anchorMs) continue
         for (const w of windows) {
-          if (createdMs < nowMs - w * dayMs) continue
-          participant_ops[w] = (participant_ops[w] ?? 0) + 1
-          if (isCommitted && type === 'PAYMENT') payment_committed[w] = (payment_committed[w] ?? 0) + 1
-          if (isCommitted && type === 'CLEARING') clearing_committed[w] = (clearing_committed[w] ?? 0) + 1
+          if (anchorMs < nowMs - w * dayMs) continue
+          if (type === 'PAYMENT') payment_committed[w] = (payment_committed[w] ?? 0) + 1
+          else clearing_committed[w] = (clearing_committed[w] ?? 0) + 1
         }
+      }
+      for (const entry of auditLog) {
+        const action = String(entry.action || '')
+        if (entry.object_id !== pidKey || !(action.startsWith('PARTICIPANT_') || action.startsWith('admin.participants.'))) continue
+        const ms = safeIsoToMs(entry.timestamp)
+        for (const w of windows) if (ms && ms >= nowMs - w * dayMs) participant_ops[w] = (participant_ops[w] ?? 0) + 1
       }
 
       const activity: ParticipantMetrics['activity'] = {
@@ -801,9 +825,12 @@ export const mockApi = {
         participant_ops,
         payment_committed,
         clearing_committed,
-        has_transactions: (transactions || []).some(
-          (tx) => String(tx.initiator_pid || '').trim() === pidKey && (!eqCode || getTxEq(tx) === eqCode),
-        ),
+        // As the server: any committed payment or clearing in the widest window (not per participant).
+        has_transactions: (transactions || []).some((tx) => {
+          const ms = safeIsoToMs(tx.updated_at || tx.created_at)
+          return ['PAYMENT', 'CLEARING'].includes(String(tx.type || '').toUpperCase())
+            && String(tx.state || '').toUpperCase() === 'COMMITTED' && !!ms && ms >= nowMs - Math.max(...windows) * dayMs
+        }),
       }
 
       return {
@@ -1003,11 +1030,7 @@ export const mockApi = {
         return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: thr })
       })
 
-      candidates.sort((a, b) => {
-        const c = compareDecimalStrings(String(a.available || '0'), String(b.available || '0'))
-        if (c !== 0) return c
-        return String(a.created_at || '').localeCompare(String(b.created_at || ''))
-      })
+      candidates.sort(bottleneckOrder(eq))
 
       return { success: true, data: { threshold: Number(thr), items: candidates.slice(0, limit) } }
     })
@@ -1085,11 +1108,7 @@ export const mockApi = {
       topByAbsNet.sort((a, b) => compareDecimalStrings(absDecimalString(b.net), absDecimalString(a.net)))
 
       const topBottleneckEdges = [...bottleneckEdges]
-      topBottleneckEdges.sort((a, b) => {
-        const c = compareDecimalStrings(String(a.available || '0'), String(b.available || '0'))
-        if (c !== 0) return c
-        return String(a.created_at || '').localeCompare(String(b.created_at || ''))
-      })
+      topBottleneckEdges.sort(bottleneckOrder(eq))
 
       return {
         success: true,

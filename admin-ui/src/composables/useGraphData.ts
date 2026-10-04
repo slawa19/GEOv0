@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { api } from '../api'
@@ -183,6 +183,14 @@ export function useGraphData(opts: {
   const included = ref<string[]>([])
   const truncated = ref<string[]>([])
 
+  // 028 F-028-49 (C2, owner В-3): an equivalent the page chose for the operator is SHOWN as chosen, until the
+  // operator picks one; one graph shows one equivalent, and the operator must see which and why.
+  const autoSelectedEq = ref('')
+  const eqAutoSelected = computed(() => !!autoSelectedEq.value && normalizeEqCode(opts.eq.value) === autoSelectedEq.value)
+  watch(opts.eq, (v) => {
+    if (normalizeEqCode(v) !== autoSelectedEq.value) autoSelectedEq.value = ''
+  })
+
   const availableEquivalents = computed(() => {
     const fromDs = (equivalents.value || []).map((e) => normalizeEqCode(e.code)).filter(Boolean)
     const fromTls = (trustlines.value || []).map((t) => normalizeEqCode(t.equivalent)).filter(Boolean)
@@ -291,6 +299,7 @@ export function useGraphData(opts: {
         const currentEq = normalizeEqCode(opts.eq.value)
         if (!currentEq || !availableEquivalents.value.includes(currentEq)) {
           opts.eq.value = computePrimaryEquivalent(payload.trustlines, payload.equivalents)
+          autoSelectedEq.value = normalizeEqCode(opts.eq.value)
         }
       }
 
@@ -508,6 +517,7 @@ export function useGraphData(opts: {
     transactions,
 
     availableEquivalents,
+    eqAutoSelected,
     precisionByEq,
     participantByPid,
     filteredTrustlines,

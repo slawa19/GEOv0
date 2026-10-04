@@ -55,7 +55,7 @@ describe('F-028-49: mock activity attributes committed transactions by their par
     const env = await mockApi.participantMetrics('PID_A', { equivalent: 'UAH' })
     expect(env.success).toBe(true)
     if (!env.success) return
-    expect(env.data.activity.payment_committed[7]).toBe(1)
-    expect(env.data.activity.clearing_committed[7]).toBe(1)
+    expect(env.data.activity?.payment_committed[7]).toBe(1)
+    expect(env.data.activity?.clearing_committed[7]).toBe(1)
   })
 })
