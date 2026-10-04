@@ -270,7 +270,9 @@ async def test_a_community_declaring_an_unreachable_state_is_refused_before_anyt
     root = tmp_path / "communities"
     shutil.copytree(Path(__file__).resolve().parents[2] / "seeds" / "communities" / COMMUNITY, root / COMMUNITY)
     described = json.loads((root / COMMUNITY / "community.json").read_text(encoding="utf-8"))
-    described["trustlines"][0]["status"] = "frozen"
+    have, refs = {(t["from"], t["to"]) for t in described["trustlines"]}, [x["ref"] for x in described["participants"]]
+    x, y = next((x, y) for x in refs for y in refs if x != y and (x, y) not in have)  # an extra line: the recipe holds
+    described["trustlines"].append({**described["trustlines"][0], "from": x, "to": y, "status": "frozen"})
     (root / COMMUNITY / "community.json").write_text(json.dumps(described), encoding="utf-8")
 
     async with cloned_database(
