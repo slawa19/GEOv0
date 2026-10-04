@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, ref } from 'vue'
+import { effectScope, nextTick, ref } from 'vue'
 
 const apiMock = vi.hoisted(() => ({
   graphSnapshot: vi.fn(),
@@ -157,6 +157,20 @@ describe('useGraphData', () => {
     ]
 
     expect(g.availableEquivalents.value).toEqual(['EUR', 'USD'])
+  })
+
+  it('028 F-028-49 (C2): an equivalent chosen for the operator is marked as chosen, until the operator picks', async () => {
+    apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('A'))
+    apiMock.clearingCycles.mockResolvedValueOnce(cyclesEnvelope('EUR'))
+    const eq = ref('')
+    const g = useGraphData({ eq, isRealMode: ref(false), focusMode: ref(false), focusRootPid: ref(''),
+      focusDepth: ref(1), statusFilter: ref<string[]>([]) })
+    await g.loadData()
+    expect(eq.value).toBe('EUR')
+    expect(g.eqAutoSelected.value).toBe(true)
+    eq.value = 'UAH'
+    await nextTick()
+    expect(g.eqAutoSelected.value).toBe(false)
   })
 
   it('does not claim mock focus data is ready while the full snapshot is loading', async () => {
