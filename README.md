@@ -426,7 +426,7 @@ deletes it any more, and removing the SQLite engine did not authorize deleting i
 The launchers' reset action is restricted to their own `geov0_dev_<slug>`
 PostgreSQL database and fails closed for every other name.
 
-GitHub Actions runs the same verifier with Python 3.11 and Node 22.12; its required
+GitHub Actions runs the same verifier with Python 3.11 and Node 22.13; its required
 backend job runs the whole tier on a `postgres:16` service on every pull request;
 the database-free tooling tier (`tooling-tests/`) runs as blocking steps of
 `static-diagnostics` (portable partition) and `required-ui` (PowerShell partition).

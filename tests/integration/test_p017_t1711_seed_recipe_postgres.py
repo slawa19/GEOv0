@@ -690,11 +690,22 @@ async def test_the_launcher_readiness_survives_a_clearing_the_product_ran(
             await _driver_sql(
                 factory, [f"UPDATE debts SET amount = amount + 1 WHERE id = {_literal(debt_id)}"]
             )
-            with pytest.raises(dev_database.DevDatabaseRefusal, match="reconciliation_passed"):
+            with pytest.raises(dev_database.DevDatabaseRefusal, match="reconciliation_passed") as diverged:
                 await dev_database.cmd_ready(url, community=COMMUNITY)
+            # F-028-13: this refusal must not advise `reset-db` - a reset drops the journal, the debts and the
+            # baseline, the only evidence of which operation made them diverge - and must say to keep the state.
+            assert "reset-db" not in str(diverged.value), str(diverged.value)
+            assert "Keep it as it is" in str(diverged.value), str(diverged.value)
             await _driver_sql(
                 factory, [f"UPDATE debts SET amount = amount - 1 WHERE id = {_literal(debt_id)}"]
             )
             assert await dev_database.cmd_ready(url, community=COMMUNITY) == 0
+
+            # Positive control for F-028-13: the narrowing is the reconciliation's alone. A database whose seed was
+            # never adopted (an unfinished or foreign initialization) is still advised to be reset.
+            monkeypatch.setattr(dev_database, "adopted_key_table_path", lambda _database: tmp_path / "absent.json")
+            with pytest.raises(dev_database.DevDatabaseRefusal, match="no ref -> PID table") as unadopted:
+                await dev_database.cmd_ready(url, community=COMMUNITY)
+            assert "reset-db" in str(unadopted.value), str(unadopted.value)
         finally:
             await engine.dispose()
