@@ -54,6 +54,7 @@ async function mountBottomBar(opts: { isDemoUi: boolean; propOverrides?: Record<
     apiMode: 'real' as const,
     activeSegment: 'auto' as const,
     isDemoFixtures: false,
+    equivalentOptions: ['UAH', 'EUR'],
 
     showResetView: false,
     resetView: vi.fn(),

@@ -2,6 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 
 
 import type { GraphSnapshot } from '../types'
 import { extractErrorMessage } from '../utils/errorMessage'
+import { paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
@@ -523,17 +524,22 @@ export function useInteractMode(opts: {
 
   async function confirmPayment(amount: string): Promise<void> {
     fsm.clearError()
+    // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
+    const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select From and To first')
-      await opts.actions.sendPayment(from, to, amount, opts.equivalent.value, { signal })
+      // 028 F-028-51: the refusal text is composed here from code + reason + details (owner В-6).
+      await opts.actions.sendPayment(from, to, amount, eq, { signal }).catch((e: unknown) => {
+        throw new Error(paymentRefusalText(e, eq))
+      })
       if (!isCurrent()) return
 
-      setSuccessToastMessage(`Payment sent: ${amount} ${opts.equivalent.value}`)
+      setSuccessToastMessage(`Payment sent: ${amount} ${eq}`)
 
       // BUG-5: log to history
-      pushHistory('💸', `Payment ${amount} ${opts.equivalent.value}: ${from} → ${to}`)
+      pushHistory('💸', `Payment ${amount} ${eq}: ${from} → ${to}`)
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
       void refreshTrustlines({ force: true })
       resetToIdle()
@@ -542,18 +548,20 @@ export function useInteractMode(opts: {
 
   async function confirmTrustlineCreate(limit: string): Promise<void> {
     fsm.clearError()
+    // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
+    const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select From and To first')
-      await opts.actions.createTrustline(from, to, limit, opts.equivalent.value, { signal })
+      await opts.actions.createTrustline(from, to, limit, eq, { signal })
       if (!isCurrent()) return
 
       setSuccessToastMessage(`Trustline created: ${from} → ${to}`)
 
       // BUG-5: log to history
       pushHistory('🔗', `Trustline created: ${from} → ${to} (${limit})`)
-      invalidateTrustlinesCache(opts.equivalent.value)
+      invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
     })
@@ -561,21 +569,23 @@ export function useInteractMode(opts: {
 
   async function confirmTrustlineUpdate(newLimit: string): Promise<void> {
     fsm.clearError()
+    // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
+    const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select trustline first')
-      await opts.actions.updateTrustline(from, to, newLimit, opts.equivalent.value, { signal })
+      await opts.actions.updateTrustline(from, to, newLimit, eq, { signal })
       if (!isCurrent()) return
 
-      setSuccessToastMessage(`Limit updated: ${newLimit} ${opts.equivalent.value}`)
+      setSuccessToastMessage(`Limit updated: ${newLimit} ${eq}`)
 
       // BUG-5: log to history
       pushHistory('✏️', `Trustline updated: ${from} → ${to} → limit ${newLimit}`)
       const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
       // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
-      patchTrustlineLimitLocal(from, to, newLimit, opts.equivalent.value)
-      invalidateTrustlinesCache(opts.equivalent.value)
+      patchTrustlineLimitLocal(from, to, newLimit, eq)
+      invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
     })
@@ -583,11 +593,13 @@ export function useInteractMode(opts: {
 
   async function confirmTrustlineClose(): Promise<void> {
     fsm.clearError()
+    // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
+    const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       if (!from || !to) throw new Error('Select trustline first')
-      const res = await opts.actions.closeTrustline(from, to, opts.equivalent.value, { signal })
+      const res = await opts.actions.closeTrustline(from, to, eq, { signal })
       if (!isCurrent()) return
 
       // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
@@ -598,8 +610,8 @@ export function useInteractMode(opts: {
 
       // BUG-5: log to history
       pushHistory('🗑️', msg)
-      if (res.status !== 'closed') dataCache.patchTrustlineLimitLocal(from, to, '0', opts.equivalent.value)
-      invalidateTrustlinesCache(opts.equivalent.value)
+      if (res.status !== 'closed') dataCache.patchTrustlineLimitLocal(from, to, '0', eq)
+      invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
     })
@@ -644,11 +656,13 @@ export function useInteractMode(opts: {
 
   async function confirmClearing(): Promise<void> {
     fsm.clearError()
+    // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
+    const eq = opts.equivalent.value
     await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
       // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
       fsm.enterClearingPreview()
 
-      const res = await opts.actions.runClearing(opts.equivalent.value, { signal })
+      const res = await opts.actions.runClearing(eq, { signal })
       if (!isCurrent()) return
       fsm.setLastClearing(res)
 
@@ -656,14 +670,14 @@ export function useInteractMode(opts: {
       const clearedCycles = res.cleared_cycles
       const clearedAmt = res.total_cleared_amount ?? '0'
       if (clearedCycles > 0) {
-        pushHistory('🌀', `Clearing: ${clearedCycles} cycle(s), −${clearedAmt} ${opts.equivalent.value}`)
+        pushHistory('🌀', `Clearing: ${clearedCycles} cycle(s), −${clearedAmt} ${eq}`)
       } else {
         pushHistory('🌀', `Clearing: no cycles found`)
       }
 
       // BUG-3: trigger FX animation immediately after receiving clearing response.
       // This call is fire-and-forget — errors are intentionally ignored.
-      if (res && typeof opts.onClearingDone === 'function') {
+      if (res && typeof opts.onClearingDone === 'function' && opts.equivalent.value === eq) {
         try { opts.onClearingDone(res) } catch { /* ignore */ }
       }
 

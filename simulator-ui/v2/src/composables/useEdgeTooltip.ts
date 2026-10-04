@@ -1,6 +1,8 @@
 import type { Ref } from 'vue'
 import type { GraphLink } from '../types'
 
+import { equivalentPrecision } from '../config/equivalentPrecision'
+import { formatMoney, moneyText } from '../utils/money'
 import { placeOverlayNearAnchor } from '../utils/overlayPosition'
 
 type HoveredEdgeLike = {
@@ -24,11 +26,10 @@ type UseEdgeTooltipReturn = {
 export function useEdgeTooltip(deps: UseEdgeTooltipDeps): UseEdgeTooltipReturn {
   function formatEdgeAmountText(link: GraphLink | null | undefined) {
     const unit = deps.getUnit()
-    const toNum = (v: unknown) => {
-      const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN
-      return Number.isFinite(n) ? n : null
-    }
-    const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+    // 028 F-028-48: money as text at the equivalent's precision (was: Number + 2 fraction digits).
+    const precision = equivalentPrecision(unit)
+    const toNum = (v: unknown) => moneyText(v)
+    const fmt = { format: (v: string) => formatMoney(v, precision) }
 
     const used = toNum(link?.used)
     const limit = toNum(link?.trust_limit)

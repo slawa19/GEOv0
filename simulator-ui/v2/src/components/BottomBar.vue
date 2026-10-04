@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
-import { EQUIVALENT_CODES } from '../config/equivalents'
 import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
 import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
 import HudBar from './common/HudBar.vue'
@@ -12,6 +11,8 @@ type Props = {
   activeSegment: 'sandbox' | 'auto' | 'interact'
 
   isDemoFixtures: boolean
+  /** 028 F-028-47 (C1): the equivalents the API names (`equivalentOptions`). */
+  equivalentOptions: readonly string[]
 
   showResetView: boolean
   resetView: () => void
@@ -143,7 +144,7 @@ async function onRunClearingOnce() {
         </template>
         <template v-else>
           <select v-model="eq" class="ds-select" aria-label="Equivalent">
-            <option v-for="code in EQUIVALENT_CODES" :key="code" :value="code">{{ code }}</option>
+            <option v-for="code in props.equivalentOptions" :key="code" :value="code">{{ code }}</option>
           </select>
         </template>
       </div>

@@ -212,7 +212,8 @@ describe('useInteractMode', () => {
     im.selectNode('bob')
     await im.confirmPayment('1.00')
 
-    expect(im.state.error).toBe('No route between selected participants')
+    // 028 F-028-51: a payment refusal reads as the client's text of its code, not the server's `message`.
+    expect(im.state.error).toBe('No payment route between these participants.')
   })
 
   it('cancel keeps busy=true until in-flight action settles; cancelled error does not leak', async () => {

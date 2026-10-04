@@ -13,9 +13,9 @@ import { DEFAULT_MONEY_PRECISION, normalizePrecision } from '../utils/money'
  *     `setEquivalentPrecisions` once real mode has an authenticated session.
  *  2. `SHIPPED_EQUIVALENT_PRECISION` — what the fixtures in
  *     `public/simulator-fixtures/v1/<EQ>/` were generated with. Demo/fast-mock mode has no
- *     backend at all, so without this layer the shipped `HOUR` snapshot (atoms at
- *     precision 1) would be read as precision 2 and every balance on it would be wrong by
- *     a factor of ten. Values mirror `seeds/equivalents.json`; `EUR` ships as a fixture
+ *     backend at all, so this layer is the only precision it has. Values mirror
+ *     `seeds/equivalents.json` (`HOUR` is 2 since owner decision В-4, 028 E2 `382575da`;
+ *     it was 1, and an anonymous visitor of a backend at 2 read balances ten times off). `EUR` ships as a fixture
  *     only and is not in the seeds, so it takes the default.
  *  3. `DEFAULT_MONEY_PRECISION` — the same fallback `to_money_str` itself uses.
  *
@@ -33,7 +33,7 @@ import { DEFAULT_MONEY_PRECISION, normalizePrecision } from '../utils/money'
 /** Precision the shipped demo fixtures were generated with. Mirrors `seeds/equivalents.json`. */
 export const SHIPPED_EQUIVALENT_PRECISION: Readonly<Record<string, number>> = Object.freeze({
   UAH: 2,
-  HOUR: 1,
+  HOUR: 2,
   KWH: 2,
 })
 
@@ -71,4 +71,21 @@ export function equivalentPrecision(code: unknown): number {
   if (typeof shipped === 'number') return shipped
 
   return DEFAULT_MONEY_PRECISION
+}
+
+/** The codes the equivalents catalogue answered (028 F-028-47, C1): empty when it was not readable. */
+export function catalogueEquivalentCodes(): string[] {
+  return Object.keys(fromApi.value)
+}
+
+/**
+ * 028 F-028-48 (owner В-4: precision IS the accounting step): a client HINT for an amount finer than the
+ * equivalent's step. A rule on the value - `"1.500"` passes at 2 - like `require_money_step` on the server,
+ * which stays the authority (the precision here may be the shipped fallback). `null` when nothing to say.
+ */
+export function amountStepHint(amount: string | null, equivalent: string): string | null {
+  const precision = equivalentPrecision(equivalent)
+  const fraction = /^\d+(?:\.(\d+))?$/.exec(String(amount ?? '').trim())?.[1] ?? ''
+  if (!/[1-9]/.test(fraction.slice(precision))) return null
+  return `${String(equivalent).toUpperCase()} allows at most ${precision} decimal places; the server will refuse this amount.`
 }

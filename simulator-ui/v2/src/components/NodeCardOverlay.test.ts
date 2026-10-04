@@ -4,6 +4,7 @@ import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
+import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 
 const nodeCardOverlaySource = readFileSync(resolve(process.cwd(), 'src/components/NodeCardOverlay.vue'), 'utf8')
 
@@ -197,8 +198,11 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
   })
 
   it('NC-2: the same available amount must not render identically under UAH and HOUR', async () => {
+    // 028 В-4: HOUR ships at 2 like UAH, so the catalogue answers 1 here to keep two precisions apart.
+    setEquivalentPrecisions([{ code: 'HOUR', precision: 1 }])
     const asUah = await availableTextFor('UAH')
     const asHour = await availableTextFor('HOUR')
+    resetEquivalentPrecisions()
 
     expect(
       asHour,

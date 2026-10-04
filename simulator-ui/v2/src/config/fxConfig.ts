@@ -15,8 +15,6 @@
 
 import { toLowerTrim } from '../utils/stringHelpers'
 
-export { EQUIVALENT_CODES } from './equivalents'
-
 export const FX_CONFIG = {
   /**
    * Clearing/Tx FX parameters (canonical, mode-agnostic).

@@ -378,7 +378,8 @@ const {
   quality,
   labelsLod,
 
-  effectiveEq,
+  sceneEq,
+  equivalentOptions,
 
   interact,
 
@@ -1333,7 +1334,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       <template v-if="dataReady && (isInteractUi || isAutoRunUi)">
         <SystemBalanceBar
           :balance="interact.systemBalance"
-          :equivalent="effectiveEq"
+          :equivalent="sceneEq"
           :compact="isAutoRunUi"
         />
 
@@ -1394,7 +1395,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
           :state="wmEdgeDetailEffectiveState(win)"
-          :unit="effectiveEq"
+          :unit="sceneEq"
           :used="emptyToNull(wmEdgeDetailEffectiveLink?.used)"
           :reverse-used="emptyToNull(wmEdgeDetailEffectiveLink?.reverse_used)"
           :limit="emptyToNull(wmEdgeDetailEffectiveLink?.trust_limit)"
@@ -1435,7 +1436,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           v-else-if="isWmInteractPanelWindow(win, 'payment')"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
-          :unit="effectiveEq"
+          :unit="sceneEq"
           :available-capacity="interact.mode.availableCapacity.value"
           :trustlines-loading="trustlinesLoading"
           :payment-targets-loading="paymentTargetsLoading"
@@ -1458,7 +1459,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           ref="tlPanel"
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
-          :unit="effectiveEq"
+          :unit="sceneEq"
           :used="emptyToNull(interactSelectedLink?.used)"
           :current-limit="emptyToNull(interactSelectedLink?.trust_limit)"
           :available="emptyToNull(interactSelectedLink?.available)"
@@ -1480,7 +1481,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :phase="wmInteractPanelPhase(win)"
           :state="interact.mode.state"
           :busy="interact.mode.busy.value"
-          :equivalent="effectiveEq"
+          :equivalent="sceneEq"
           :confirm-clearing="interact.mode.confirmClearing"
           :cancel="cancelInteractWindowFromUi"
         />
@@ -1502,6 +1503,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :api-mode="apiMode"
       :active-segment="activeSegment"
       :is-demo-fixtures="isDemoFixtures"
+      :equivalent-options="equivalentOptions"
       :show-reset-view="showResetView"
       :reset-view="resetView"
       :run-id="real.runId"

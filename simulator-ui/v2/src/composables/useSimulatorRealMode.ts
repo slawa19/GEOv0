@@ -644,6 +644,7 @@ export function useSimulatorRealMode(opts: {
     incDiag(diag.events_by_type, evt.type)
     executeRealEventIntents(intents, {
       getActiveRunId: () => real.runId,
+      getSceneEquivalent: () => state.snapshot?.equivalent ?? null,
       optionalFxEnabled,
       onAnySseEvent,
       refreshSnapshot: () => void refreshSnapshot(),

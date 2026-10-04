@@ -59,8 +59,9 @@ describe('useSystemBalance', () => {
     })
 
     expect(balance!.value).toEqual({
-      totalUsed: 0,
-      totalAvailable: 0,
+      totalUsed: '0',
+      totalAvailable: '0',
+      equivalent: '',
       activeTrustlines: 0,
       activeParticipants: 0,
       utilization: 0,
@@ -80,8 +81,8 @@ describe('useSystemBalance', () => {
     })
 
     const b = balance!.value
-    expect(b.totalUsed).toBe(0)
-    expect(b.totalAvailable).toBe(0)
+    expect(Number(b.totalUsed)).toBe(0)
+    expect(Number(b.totalAvailable)).toBe(0)
     expect(b.activeTrustlines).toBe(0)
     expect(b.activeParticipants).toBe(0)
     expect(b.utilization).toBe(0)
@@ -106,8 +107,8 @@ describe('useSystemBalance', () => {
     })
 
     const b = balance!.value
-    expect(b.totalUsed).toBeCloseTo(450, 5)
-    expect(b.totalAvailable).toBeCloseTo(1550, 5)
+    expect(Number(b.totalUsed)).toBeCloseTo(450, 5)
+    expect(Number(b.totalAvailable)).toBeCloseTo(1550, 5)
     expect(b.activeTrustlines).toBe(2)
     expect(b.activeParticipants).toBe(3)
     expect(b.isClean).toBe(false)
@@ -125,7 +126,7 @@ describe('useSystemBalance', () => {
     scope.run(() => {
       balance = useSystemBalance(ref<GraphSnapshot | null>(makeSnapshot(links, []))).balance
     })
-    expect(balance!.value.totalAvailable).toBe(10)
+    expect(Number(balance!.value.totalAvailable)).toBe(10)
     scope.stop()
   })
 
@@ -141,7 +142,7 @@ describe('useSystemBalance', () => {
     })
 
     expect(balance!.value.isClean).toBe(true)
-    expect(balance!.value.totalUsed).toBe(0)
+    expect(Number(balance!.value.totalUsed)).toBe(0)
 
     scope.stop()
   })
@@ -163,8 +164,8 @@ describe('useSystemBalance', () => {
 
     const b = balance!.value
     expect(b.activeTrustlines).toBe(1)
-    expect(b.totalUsed).toBeCloseTo(500, 5)
-    expect(b.totalAvailable).toBeCloseTo(500, 5)
+    expect(Number(b.totalUsed)).toBeCloseTo(500, 5)
+    expect(Number(b.totalAvailable)).toBeCloseTo(500, 5)
 
     scope.stop()
   })
@@ -204,8 +205,8 @@ describe('useSystemBalance', () => {
     })
 
     const b = balance!.value
-    expect(b.totalUsed).toBe(0)
-    expect(b.totalAvailable).toBe(0)
+    expect(Number(b.totalUsed)).toBe(0)
+    expect(Number(b.totalAvailable)).toBe(0)
     expect(Number.isFinite(b.utilization)).toBe(true)
 
     scope.stop()
@@ -222,8 +223,8 @@ describe('useSystemBalance', () => {
       balance = useSystemBalance(snapshot).balance
     })
 
-    expect(balance!.value.totalUsed).toBeCloseTo(300, 5)
-    expect(balance!.value.totalAvailable).toBeCloseTo(700, 5)
+    expect(Number(balance!.value.totalUsed)).toBeCloseTo(300, 5)
+    expect(Number(balance!.value.totalAvailable)).toBeCloseTo(700, 5)
 
     scope.stop()
   })
@@ -239,7 +240,7 @@ describe('useSystemBalance', () => {
     })
 
     // Initial: null snapshot → all zeros.
-    expect(balance!.value.totalUsed).toBe(0)
+    expect(Number(balance!.value.totalUsed)).toBe(0)
 
     // Update snapshot.
     snapshot.value = makeSnapshot(
@@ -251,14 +252,14 @@ describe('useSystemBalance', () => {
     await nextTick()
 
     // Before debounce fires — still sees old value (null → 0).
-    expect(balance!.value.totalUsed).toBe(0)
+    expect(Number(balance!.value.totalUsed)).toBe(0)
 
     // Advance time past debounce (100ms) → debouncedSnap.value is updated.
     vi.advanceTimersByTime(150)
 
     // After debounce — computed reflects new snapshot.
-    expect(balance!.value.totalUsed).toBeCloseTo(200, 5)
-    expect(balance!.value.totalAvailable).toBeCloseTo(800, 5)
+    expect(Number(balance!.value.totalUsed)).toBeCloseTo(200, 5)
+    expect(Number(balance!.value.totalAvailable)).toBeCloseTo(800, 5)
     expect(balance!.value.activeTrustlines).toBe(1)
 
     scope.stop()
@@ -278,7 +279,7 @@ describe('useSystemBalance', () => {
     })
 
     expect(balance!.value.isClean).toBe(true)
-    expect(balance!.value.totalUsed).toBe(0)
+    expect(Number(balance!.value.totalUsed)).toBe(0)
     expect(balance!.value.utilization).toBe(0)
 
     scope.stop()

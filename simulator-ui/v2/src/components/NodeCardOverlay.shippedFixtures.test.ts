@@ -5,6 +5,7 @@ import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
+import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 import type { GraphNode, GraphSnapshot } from '../types'
 
 /**
@@ -17,14 +18,17 @@ import type { GraphNode, GraphSnapshot } from '../types'
  * card shows an amount that is 10^precision times too large.
  *
  * `_meta/README.txt` names UAH the active equivalent for this build, and
- * `seeds/equivalents.json` gives UAH precision 2 and HOUR precision 1.
+ * `seeds/equivalents.json` gives UAH and HOUR precision 2 (HOUR was 1 before owner decision В-4, 028).
  */
 
 /** Precision as `seeds/equivalents.json` declares it for the shipped fixture equivalents. */
 const PRECISION_BY_EQUIVALENT: Record<string, number> = {
   UAH: 2,
-  HOUR: 1,
+  HOUR: 2,
 }
+
+/** A catalogue answer for HOUR that differs from UAH, for the counter-check (028 В-4 made both 2). */
+const HOUR_CATALOGUE_PRECISION = 1
 
 function loadShippedSnapshot(equivalent: string): GraphSnapshot {
   // Anchored on this file, not on `process.cwd()`: the fixture must be found however vitest is
@@ -134,19 +138,21 @@ describe('RT-012-5: node-card balance on the shipped simulator fixtures', () => 
     const node = firstNonZeroNode(loadShippedSnapshot('UAH'))
     const atoms = signedAtoms(node)
 
+    setEquivalentPrecisions([{ code: 'HOUR', precision: HOUR_CATALOGUE_PRECISION }])
     const asUah = renderBalance(node, 'UAH')
     const asHour = renderBalance(node, 'HOUR')
+    resetEquivalentPrecisions()
 
     expect(
       atomsToMajor(atoms, PRECISION_BY_EQUIVALENT.UAH),
       'Counter-check premise: the same atoms must mean different money under UAH and HOUR, '
         + 'otherwise this case proves nothing.',
-    ).not.toBe(atomsToMajor(atoms, PRECISION_BY_EQUIVALENT.HOUR))
+    ).not.toBe(atomsToMajor(atoms, HOUR_CATALOGUE_PRECISION))
 
     expect(
       asUah,
       `${atoms} atoms render as "${asUah}" under UAH (precision ${PRECISION_BY_EQUIVALENT.UAH}) and as `
-        + `"${asHour}" under HOUR (precision ${PRECISION_BY_EQUIVALENT.HOUR}). Identical output means `
+        + `"${asHour}" under HOUR (precision ${HOUR_CATALOGUE_PRECISION}). Identical output means `
         + 'the card ignores the equivalent it is labelled with, so the number the operator reads is '
         + 'not an amount of anything.',
     ).not.toBe(asHour)
