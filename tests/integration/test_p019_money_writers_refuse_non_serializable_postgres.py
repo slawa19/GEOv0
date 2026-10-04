@@ -211,7 +211,7 @@ async def _run_writer(name: str, session, seed, committed_database):
                 engine.apply_trust_decay(run, session, 7, {(a_pid, b_pid, code): Decimal("100.00")}, scenario)
             )
         return await _call(
-            engine.apply_trust_growth(run, session, {(b_pid, a_pid)}, code, 7, {(b_pid, a_pid): 30.0})
+            engine.apply_trust_growth(run, session, {(b_pid, a_pid)}, code, 7)
         )
     raise AssertionError(f"unknown writer {name}")
 
