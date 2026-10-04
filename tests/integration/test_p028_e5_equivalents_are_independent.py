@@ -43,6 +43,12 @@ def _debt(debtor: Participant, creditor: Participant, eq: Equivalent, amount: st
     return Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal(amount))
 
 
+async def _seed_debts(db_session, label: str, debts: list[Debt]) -> None:
+    async with debt_fixture_setup(db_session, label=label):
+        db_session.add_all(debts)
+    await db_session.commit()
+
+
 # F-028-36 - the participant's own figures and the public profile, per equivalent
 
 
@@ -54,11 +60,8 @@ async def test_me_reports_each_equivalent_separately_and_loses_no_digit(client, 
     uah, hour = await _two_equivalents(db_session)
     db_session.add_all([_line(peer, me, uah, "200"), _line(me, peer, hour, "10")])
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="me-two-equivalents"):
-        db_session.add_all(
-            [_debt(me, peer, uah, "100"), _debt(peer, me, hour, "5"), _debt(small, me, uah, "0.005")]
-        )
-    await db_session.commit()
+    debts = [_debt(me, peer, uah, "100"), _debt(peer, me, hour, "5"), _debt(small, me, uah, "0.005")]
+    await _seed_debts(db_session, "me-two-equivalents", debts)
 
     r = await client.get("/api/v1/participants/me", headers=auth_user["headers"])
     assert r.status_code == 200, r.text
@@ -106,9 +109,7 @@ async def test_public_profile_shows_incoming_trust_per_equivalent_and_nothing_ne
     uah, hour = await _two_equivalents(db_session)
     db_session.add_all([_line(alice, bob, uah, "100"), _line(alice, bob, hour, "5"), _line(bob, alice, uah, "7")])
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="public-profile"):
-        db_session.add(_debt(bob, alice, uah, "3"))
-    await db_session.commit()
+    await _seed_debts(db_session, "public-profile", [_debt(bob, alice, uah, "3")])
 
     r = await client.get("/api/v1/participants/bob", headers=auth_user["headers"])
     assert r.status_code == 200, r.text
@@ -130,9 +131,7 @@ async def _liquidity_world(db_session) -> None:
     # UAH line: ratio 10/1000 = 0.01, available 10. HOUR line: ratio 0.5/10 = 0.05, available 0.5.
     db_session.add_all([_line(alice, bob, uah, "1000"), _line(carol, bob, hour, "10")])
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="liquidity"):
-        db_session.add_all([_debt(bob, alice, uah, "990"), _debt(bob, carol, hour, "9.5")])
-    await db_session.commit()
+    await _seed_debts(db_session, "liquidity", [_debt(bob, alice, uah, "990"), _debt(bob, carol, hour, "9.5")])
 
 
 @pytest.mark.asyncio
@@ -189,9 +188,7 @@ async def test_graph_net_sign_keeps_a_sub_quantum_net(client, db_session, route)
     uah, _hour = await _two_equivalents(db_session)
     db_session.add(_line(alice, bob, uah, "100"))
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="graph-sign"):
-        db_session.add(_debt(bob, alice, uah, "0.004"))
-    await db_session.commit()
+    await _seed_debts(db_session, "graph-sign", [_debt(bob, alice, uah, "0.004")])
 
     r = await client.get(route, headers=_ADMIN, params={"equivalent": "UAH"})
     assert r.status_code == 200, r.text
@@ -206,10 +203,8 @@ async def test_rank_net_subtracts_before_it_truncates(client, db_session):
     uah, _hour = await _two_equivalents(db_session)
     db_session.add_all([_line(alice, bob, uah, "100"), _line(carol, alice, uah, "100")])
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="sub-quantum"):
-        # alice: credit 0.015, debt 0.006 -> net +0.009; bob -0.015; carol +0.006.
-        db_session.add_all([_debt(bob, alice, uah, "0.015"), _debt(alice, carol, uah, "0.006")])
-    await db_session.commit()
+    # alice: credit 0.015, debt 0.006 -> net +0.009; bob -0.015; carol +0.006.
+    await _seed_debts(db_session, "sub-quantum", [_debt(bob, alice, uah, "0.015"), _debt(alice, carol, uah, "0.006")])
 
     r = await client.get("/api/v1/admin/participants/alice/metrics", headers=_ADMIN, params={"equivalent": "UAH"})
     assert r.status_code == 200, r.text
