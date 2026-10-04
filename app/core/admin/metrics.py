@@ -657,7 +657,7 @@ async def _compute_activity(
     # Committed tx activity.
     tx_rows = (
         await db.execute(
-            select(Transaction.type, Transaction.payload, Transaction.state, Transaction.created_at, Transaction.updated_at, Transaction.initiator_id)
+            select(Transaction.type, Transaction.payload, Transaction.state, Transaction.created_at, Transaction.updated_at)
             .where(
                 Transaction.type.in_({"PAYMENT", "CLEARING"}),
                 Transaction.state == "COMMITTED",
@@ -668,7 +668,7 @@ async def _compute_activity(
 
     has_transactions = len(tx_rows) > 0
 
-    for t_type, payload, state, created_at, updated_at, initiator_id in tx_rows:
+    for t_type, payload, state, created_at, updated_at in tx_rows:
         # payload is dict (JSON)
         pl = payload or {}
         payload_eq = pl.get("equivalent") if isinstance(pl, dict) else None
@@ -682,10 +682,8 @@ async def _compute_activity(
                 to_pid = str(pl.get("to") or "")
                 involved = from_pid == participant_pid or to_pid == participant_pid
         else:
-            # CLEARING: payload.edges[] has debtor/creditor PIDs.
-            if initiator_id == participant_id:
-                involved = True
-            if not involved and isinstance(pl, dict):
+            # CLEARING: payload.edges[] has debtor/creditor PIDs (a clearing records no initiator, 028 F-028-45).
+            if isinstance(pl, dict):
                 edges = pl.get("edges")
                 if isinstance(edges, list):
                     for e in edges:

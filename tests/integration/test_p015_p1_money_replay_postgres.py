@@ -84,6 +84,7 @@ from tests.p019_support import deadlock_after_the_wait
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
 # the drop is the only disposal of rows: nothing is deleted row by row.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 _LIMIT = Decimal("1000.00")
 #: Seeded before the tick so both writers UPDATE the same row instead of inserting it.
@@ -413,7 +414,7 @@ async def _transactions(session_factory, world: _World) -> dict[str, str]:
         rows = (
             await fresh.execute(
                 select(Transaction.tx_id, Transaction.state).where(
-                    Transaction.initiator_id.in_(ids)
+                    transactions_of(ids)
                 )
             )
         ).all()

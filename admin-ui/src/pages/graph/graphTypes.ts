@@ -70,7 +70,7 @@ export type Transaction = {
   tx_id: string
   idempotency_key?: string | null
   type: string
-  initiator_pid: string
+  initiator_pid: string | null // null on a CLEARING (028 F-028-45)
   equivalent?: string | null
   payload?: Record<string, unknown>
   signatures?: unknown[] | null

@@ -500,7 +500,8 @@ async def _seed_from_admin_fixtures_datasets(
 
                 initiator_pid = str(item.get("initiator_pid") or "").strip()
                 initiator = p_by_pid.get(initiator_pid)
-                if not initiator:
+                is_clearing = str(item.get("type") or "") == "CLEARING"  # no initiator (028 F-028-45, migration 036)
+                if not initiator and not is_clearing:
                     continue
 
                 created_at = _parse_dt(item.get("created_at")) or datetime.now(timezone.utc)
@@ -528,7 +529,7 @@ async def _seed_from_admin_fixtures_datasets(
                         tx_id=tx_id,
                         idempotency_key=item.get("idempotency_key"),
                         type=tx_type,
-                        initiator_id=initiator.id,
+                        initiator_id=None if is_clearing else initiator.id,
                         payload=item.get("payload") or {},
                         signatures=item.get("signatures") or [],
                         state=tx_state or "NEW",

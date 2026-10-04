@@ -23,8 +23,8 @@ _LINES = ("SELECT to_participant_id, status, \"limit\", close_requested_at IS NO
 async def test_035_turns_frozen_lines_active_and_refuses_frozen(committed_database) -> None:
     url = committed_database.url
     await committed_database.engine.dispose()
-    assert repository_head() == _AFTER and await _version(url) == [(_AFTER,)]
-    assert _alembic(url, "downgrade", _BEFORE).returncode == 0
+    assert await _version(url) == [(repository_head(),)]
+    assert _alembic(url, "downgrade", _BEFORE).returncode == 0  # from a later head (036, 028 `T2871`) too
 
     eq, a, *debtors = (uuid.uuid4() for _ in range(6))
     await _exec(url, "INSERT INTO equivalents (id, code, precision, is_active) VALUES (:id, 'M035', 2, true)", id=eq)

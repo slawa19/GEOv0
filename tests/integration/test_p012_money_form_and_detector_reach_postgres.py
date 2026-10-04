@@ -112,6 +112,7 @@ from tests.p023_support import TEST_PLAN_ID, occurrence_of
 # connection-bound session), so only it runs on a disposable clone of the migrated template and leaves
 # its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`). The others stay mode A.
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
+from tests.debt_setup import transactions_of
 
 
 def _route_default(endpoint, name: str) -> int:
@@ -739,7 +740,7 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
             await verify.scalars(
                 select(Transaction).where(
                     Transaction.type == "CLEARING",
-                    Transaction.initiator_id.in_(participant_ids),
+                    transactions_of(participant_ids),
                 )
             )
         ).one()

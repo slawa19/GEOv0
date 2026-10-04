@@ -69,6 +69,7 @@ from tests.debt_setup import debt_fixture_setup
 from tests.p015_b4_support import ENTRIES_TABLE, OPERATIONS_TABLE, missing_journal_tables, stored_rows
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import _routed_over
+from tests.debt_setup import transactions_of
 
 #: One scale-8 atom. The clearing half of `C6` is wrong by exactly this much on every edge.
 ATOM = Decimal("0.00000001")
@@ -331,7 +332,7 @@ async def _clearing_tx_id(factory, triangle: _Triangle) -> str:
             await fresh.execute(
                 select(Transaction.tx_id).where(
                     Transaction.type == "CLEARING",
-                    Transaction.initiator_id.in_(triangle.participant_ids),
+                    transactions_of(triangle.participant_ids),
                 )
             )
         ).scalars().all()
@@ -967,7 +968,7 @@ async def test_c6_p_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still
                     Transaction.type == "CLEARING",
                     # Scoped to this triangle: `geov0_test_ci` is shared, and an unscoped query
                     # would read a neighbouring session's clearing.
-                    Transaction.initiator_id.in_(triangle.participant_ids),
+                    transactions_of(triangle.participant_ids),
                 )
             )
         ).all()

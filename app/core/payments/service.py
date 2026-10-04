@@ -539,8 +539,6 @@ class PaymentPostCommitEffects:
     """Best-effort effects that are only valid after the DB transaction commits."""
 
     equivalent: str
-    recipient_pid: str
-    event_payload: dict[str, str]
     invalidate_routing_cache: bool = True
     include_engine_success_metrics: bool = False
     _applied: bool = field(default=False, init=False, repr=False)
@@ -583,17 +581,8 @@ class PaymentPostCommitEffects:
                 PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
         except Exception:
             pass
-
-        try:
-            from app.utils.event_bus import event_bus
-
-            event_bus.publish(
-                recipient_pid=self.recipient_pid,
-                event="payment.received",
-                payload=dict(self.event_payload),
-            )
-        except Exception:
-            pass
+        # No `payment.received` publication: `/ws` and its bus are removed (028 F-028-46, owner В-9); a payment
+        # notification is a future feature with its delivery mechanism open (`docs/ru/02-protocol-spec.md` §7.4.1).
         return True
 
 
@@ -1547,14 +1536,6 @@ class PaymentService:
         # back.
         effects = PaymentPostCommitEffects(
             equivalent=equivalent_code,
-            recipient_pid=receiver_pid,
-            event_payload={
-                "tx_id": tx_id_str,
-                "from": sender_pid,
-                "to": receiver_pid,
-                "equivalent": equivalent_code,
-                "amount": str(amount),
-            },
             # 027 stage 1: a money commit leaves the route cache in place (it ages out by its TTL; the core's
             # final check re-reads every pair) - only topology edits drop it.
             invalidate_routing_cache=False,

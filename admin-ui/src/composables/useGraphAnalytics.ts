@@ -595,7 +595,7 @@ export function useGraphAnalytics(opts: {
         // WHAT THAT DOES NOT SAY (external review of 013). "Server-side and untruncated" is not
         // "exactly attributed". `app/core/admin/metrics.py:693` decides whether a PAYMENT involves
         // this participant from `payload["from"]` / `payload["to"]` alone - no fallback to
-        // `initiator_id` such as the CLEARING branch one line below has, and no signal on the wire
+        // `initiator_id` (the CLEARING branch has none either since 028 F-028-45), and no signal on the wire
         // for a row it could not place. A payment whose stored payload lacks those keys therefore
         // arrives inside a confident number instead of beside a doubt, and nothing on THIS branch
         // can recover it: the counter comes over as a finished integer. The limitation is recorded
@@ -800,13 +800,9 @@ export function useGraphAnalytics(opts: {
             const e = edge as Record<string, unknown>
             return e.debtor === pid || e.creditor === pid
           })
-          // Kept from the original: a participant who initiated the clearing counts even if the
-          // published edges do not name them. Only the shape of the guard changed, not this rule.
-          if (!involved) involved = String(tx.initiator_pid || '') === pid
-        } else if (String(tx.initiator_pid || '') === pid) {
-          attributable = true
-          involved = true
         }
+        // No initiator fallback: a clearing records none (028 F-028-45, `initiator_pid: null`), so a
+        // clearing without `edges` stays unattributable.
       }
 
       // Window attribution, computed BEFORE the verdict is used, because a doubt has to be filed

@@ -83,6 +83,7 @@ from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
@@ -233,7 +234,7 @@ async def _clearing_transactions(factory, seed) -> int:  # noqa: F811 - `factory
             await verify.scalar(
                 select(func.count(Transaction.id)).where(
                     Transaction.type == "CLEARING",
-                    Transaction.initiator_id.in_(seed["participant_ids"]),
+                    transactions_of(seed["participant_ids"]),
                 )
             )
         )
@@ -520,7 +521,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
                 await verify.scalar(
                     select(func.count(Transaction.id)).where(
                         Transaction.type == "CLEARING",
-                        Transaction.initiator_id.in_(seed["participant_ids"]),
+                        transactions_of(seed["participant_ids"]),
                     )
                 )
             )

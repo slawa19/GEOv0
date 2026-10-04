@@ -104,7 +104,8 @@ export type Transaction = {
   tx_id: string
   idempotency_key?: string | null
   type: string
-  initiator_pid: string
+  /** Null on a CLEARING, which records no initiator (028 F-028-45). */
+  initiator_pid: string | null
   equivalent?: string | null
   /** PAYMENT: who paid. Absent when the internal payload did not carry it. */
   from?: string

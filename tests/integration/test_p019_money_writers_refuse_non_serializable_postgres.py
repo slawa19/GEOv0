@@ -49,6 +49,7 @@ from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 _REASON = "isolation_not_read_committed"
 
@@ -96,7 +97,7 @@ async def _state(committed_database, seed) -> dict:
         transactions = (
             await s.execute(
                 select(Transaction.type, Transaction.state).where(
-                    Transaction.initiator_id.in_(seed["participant_ids"])
+                    transactions_of(seed["participant_ids"])
                 )
             )
         ).all()

@@ -93,6 +93,7 @@ from tests.unit.test_p015_step5c_reaction_and_hold import hold_directly
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 HOLD = MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
 _ATOM = Decimal("0.00000001")
@@ -496,7 +497,7 @@ async def test_step5c_p_a_clearing_that_waited_behind_the_reaction_refuses_in_it
             }
             clearings = await verify.scalar(
                 select(func.count(Transaction.id)).where(
-                    Transaction.type == "CLEARING", Transaction.initiator_id.in_(seed["participant_ids"])
+                    Transaction.type == "CLEARING", transactions_of(seed["participant_ids"])
                 )
             )
         assert debts == {

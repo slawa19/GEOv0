@@ -127,8 +127,7 @@ GEOv0-PROJECT/
 │   │   │   ├── auth.py
 │   │   │   ├── participants.py
 │   │   │   ├── trustlines.py
-│   │   │   ├── payments.py
-│   │   │   └── websocket.py
+│   │   │   └── payments.py
 │   │   │
 │   │   └── v1/admin.py      # Admin API endpoints
 │   │

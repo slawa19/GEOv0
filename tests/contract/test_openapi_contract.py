@@ -365,8 +365,13 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # becomes `PaymentRefusalDetails` with the required `reason` (`F-028-42`), the generated side stays `Dict[str, Any]`.
 # Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
 # committed): no other entry differs.
+# 2026-10-04 / programme 028 E7 (`F-028-45`, `F-028-16`): count HOLDS at 63, digest moves. THREE entries change
+# content, none enters or leaves: `AdminGraphTransactionItem.initiator_pid` becomes nullable (a clearing records no
+# initiator; `GET /admin/graph/snapshot`, `/admin/graph/ego`), `IntegrityAuditLogAffectedParticipants` names
+# `checkpoint_scope` and `initial_status` (`GET /integrity/audit-log`). Measured with a per-entry dump of every ledger
+# against the canon of `0a50ba62` (`.local-run/e7/dump.py`, not committed): error and security ledgers identical.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "59e618aa2132c4fb1ac8933998902f041504e14faf97bdf3d1847b743acb2f7b"
+    "fa1b007944a7eb0388c14715b038d5e5ceef3eb35b827179c61854468a5a70a9"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;

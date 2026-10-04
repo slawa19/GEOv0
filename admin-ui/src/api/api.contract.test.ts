@@ -133,7 +133,9 @@ describe('API contract invariants', () => {
       equivalents: [{ code: 'GEO', precision: 2, description: 'GEO', is_active: true }],
       debts: [],
       audit_log: [],
-      transactions: [],
+      // 028 F-028-45: a clearing records no initiator - the decoder must take `initiator_pid: null`.
+      transactions: [{ tx_id: 'cl-1', type: 'CLEARING', state: 'COMMITTED', initiator_pid: null, equivalent: 'GEO',
+        created_at: '2026-10-04T00:00:00Z', updated_at: '2026-10-04T00:00:00Z', edges: [{ debtor: 'PID_A', creditor: 'PID_B' }] }],
     }
 
     const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: payload }))

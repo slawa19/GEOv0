@@ -4567,7 +4567,10 @@ components:
             - WAITING
             - REJECTED
         initiator_pid:
+          # The pid of who asked for the operation; null on a CLEARING, which records no initiator (028
+          # F-028-45, migration 036) - who took part in it is `edges`. Always present.
           type: string
+          nullable: true
         from:
           # PAYMENT only: the paying participant's pid.
           type: string
@@ -8457,7 +8460,8 @@ components:
       # required, because INTEGRITY_VERIFY writes `{}` (app/api/v1/integrity.py:272) - it audits
       # an equivalent, not a set of participants.
       #
-      #   TRUST_LINE_CREATE         {from, to}
+      #   TRUST_LINE_CREATE         {from, to}; a scenario import adds initial_status
+      #   TRUST_LINE_*              + checkpoint_scope when written in a caller's transaction
       #   TRUST_LINE_UPDATE/CLOSE   {from, to, trustline_id}; CLOSE (the completion) adds completed_by
       #   TRUST_LINE_CLOSE_REQUEST  {from, to, trustline_id}
       #   PAYMENT                   {participants, debt_growth?}
@@ -8491,6 +8495,17 @@ components:
               debt_before: {type: string}
               debt_amount: {type: string}
               trust_limit: {type: string}
+        checkpoint_scope:
+          # TRUST_LINE_* rows of an internal caller's batch (`TrustLineWriteBatch`, 021 stage 1): the row belongs to
+          # one caller transaction that may hold several operations of the equivalent. The name predates 024
+          # `T2413.2`, which removed the checkpoints; absent on a public operation's row.
+          type: string
+          enum: [caller_transaction]
+        initial_status:
+          # TRUST_LINE_CREATE of a scenario import (`import_initial_trustlines`): the status the line was created
+          # with. `frozen` only on rows written before migration 035 (028 F-028-29).
+          type: string
+          enum: [active, closed, frozen]
         completed_by:
           # TRUST_LINE_CLOSE since 026 `T2603.1`: `request` (closed at the request, no supported debt) or the
           # money operation kind that brought the supported debt to 0 (`PAYMENT`, `CLEARING`); `tx_id` is then

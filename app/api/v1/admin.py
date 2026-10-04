@@ -262,7 +262,7 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
         return []
     stmt = (
         select(Transaction, Participant.pid)
-        .join(Participant, Transaction.initiator_id == Participant.id)
+        .outerjoin(Participant, Transaction.initiator_id == Participant.id)  # a CLEARING has none (028 F-028-45)
         .order_by(desc(Transaction.updated_at))
         .limit(limit)
     )
@@ -274,7 +274,7 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
             "tx_id": tx.tx_id,
             "type": tx.type,
             "state": tx.state,
-            "initiator_pid": str(initiator_pid),
+            "initiator_pid": None if initiator_pid is None else str(initiator_pid),
             "created_at": tx.created_at,
             "updated_at": tx.updated_at,
             "equivalent": payload.get("equivalent"),

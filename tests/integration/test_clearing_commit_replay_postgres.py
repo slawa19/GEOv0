@@ -21,6 +21,7 @@ from tests.p023_support import LATER_PLAN_ID, TEST_PLAN_ID, occurrence_of
 # template and its rows go with the clone's drop - nothing is deleted row by row (018 B0b; see
 # `tests/tier_on_a_clone.py`). The SERIALIZABLE engines are built over `committed_database.engine`.
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
+from tests.debt_setup import transactions_of
 
 
 
@@ -205,7 +206,7 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
                 await verify.scalars(
                     select(Transaction).where(
                         Transaction.type == "CLEARING",
-                        Transaction.initiator_id.in_(participant_ids),
+                        transactions_of(participant_ids),
                     )
                 )
             ).all()
@@ -775,7 +776,7 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
                 await verify.scalars(
                     select(Transaction).where(
                         Transaction.type == "CLEARING",
-                        Transaction.initiator_id.in_(participant_ids),
+                        transactions_of(participant_ids),
                     )
                 )
             ).all()

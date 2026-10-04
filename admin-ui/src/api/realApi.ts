@@ -187,7 +187,7 @@ const TransactionSchema = z
     tx_id: z.string(),
     type: z.string(),
     state: z.string(),
-    initiator_pid: z.string(),
+    initiator_pid: z.string().nullable(), // null on a CLEARING (028 F-028-45)
     created_at: z.string(),
     updated_at: z.string(),
     equivalent: z.string().nullable().optional(),
