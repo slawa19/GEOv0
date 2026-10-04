@@ -9,7 +9,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.config import settings
 from app.db.models.debt import Debt
@@ -138,8 +138,20 @@ async def _liquidity_world(db_session) -> None:
 async def test_liquidity_summary_without_an_equivalent_sums_no_money(client, db_session):
     await _liquidity_world(db_session)
 
-    r = await client.get("/api/v1/admin/liquidity/summary", headers=_ADMIN, params={"threshold": "0.10"})
+    # §15 review of E5 (`T2899.4`, class 2): under ALL the money is not summed at all - not summed and then nulled.
+    statements: list[str] = []
+    connection = await db_session.connection()
+
+    def _record(_conn, _cursor, statement, *_args):
+        statements.append(statement.lower())
+
+    event.listen(connection.sync_connection, "before_cursor_execute", _record)
+    try:
+        r = await client.get("/api/v1/admin/liquidity/summary", headers=_ADMIN, params={"threshold": "0.10"})
+    finally:
+        event.remove(connection.sync_connection, "before_cursor_execute", _record)
     assert r.status_code == 200, r.text
+    assert statements and not [s for s in statements if "sum(" in s], [s for s in statements if "sum(" in s]
     body = r.json()
     assert body["equivalent"] is None
     assert (body["active_trustlines"], body["bottlenecks"]) == (2, 2)

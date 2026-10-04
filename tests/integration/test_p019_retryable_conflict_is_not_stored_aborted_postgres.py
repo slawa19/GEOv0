@@ -163,7 +163,7 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
     assert first.status_code == 409, first.text
     error = first.json()["error"]
     assert error["code"] == "E008", error
-    assert error["details"] == {"retryable": True, "conflict_kind": "database_concurrency"}, error
+    assert error["details"] == {"retryable": True, "conflict_kind": "database_concurrency", "reason": "busy"}, error
     subject_debt_before_resubmission = (await debts(factory, world)).get(
         (world.alice["pid"], world.bob["pid"])
     )

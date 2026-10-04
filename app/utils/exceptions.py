@@ -78,6 +78,7 @@ class RetryablePaymentConflictException(ConflictException):
             details={
                 "retryable": True,
                 "conflict_kind": "database_concurrency",
+                "reason": "busy",  # 028 `F-028-42`: the same refusal as a held payment lock - try again
             },
         )
 

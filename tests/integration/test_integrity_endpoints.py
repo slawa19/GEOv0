@@ -4,6 +4,8 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
+
+from app.config import settings
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
@@ -23,6 +25,9 @@ from tests.integration.test_scenarios import register_and_login
 
 from tests.debt_setup import debt_fixture_setup
 
+# 028 `F-028-44` (owner В-7): the integrity checks are the admin's - a participant gets 403 (intended replacement).
+INTEGRITY_ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
+
 
 async def _seed_equivalent(db_session, code: str):
     result = await db_session.execute(select(Equivalent).where(Equivalent.code == code))
@@ -40,18 +45,18 @@ async def test_integrity_status_and_verify_and_audit_log(client: AsyncClient, db
     await _seed_equivalent(db_session, "USD")
     user = await register_and_login(client, "IntegrityUser")
 
-    resp = await client.get("/api/v1/integrity/status", headers=user["headers"])
+    resp = await client.get("/api/v1/integrity/status", headers=INTEGRITY_ADMIN)
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["status"] in {"healthy", "warning", "critical"}
     assert "USD" in payload["equivalents"]
 
-    resp = await client.post("/api/v1/integrity/verify", json={}, headers=user["headers"])
+    resp = await client.post("/api/v1/integrity/verify", json={}, headers=INTEGRITY_ADMIN)
     assert resp.status_code == 200
     verify_payload = resp.json()
     assert "USD" in verify_payload["equivalents"]
 
-    resp = await client.get("/api/v1/integrity/audit-log", headers=user["headers"])
+    resp = await client.get("/api/v1/integrity/audit-log", headers=INTEGRITY_ADMIN)
     assert resp.status_code == 200
     log_payload = resp.json()
     assert isinstance(log_payload.get("items"), list)
@@ -79,12 +84,12 @@ async def test_integrity_checksum_returns_404_until_checkpoint_exists(client: As
         )
     await db_session.commit()
 
-    resp = await client.get("/api/v1/integrity/checksum/USD", headers=user["headers"])
+    resp = await client.get("/api/v1/integrity/checksum/USD", headers=INTEGRITY_ADMIN)
     assert resp.status_code == 404
 
     await compute_and_store_integrity_checkpoints(db_session)
 
-    resp = await client.get("/api/v1/integrity/checksum/USD", headers=user["headers"])
+    resp = await client.get("/api/v1/integrity/checksum/USD", headers=INTEGRITY_ADMIN)
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["equivalent"] == "USD"
@@ -168,7 +173,7 @@ async def test_integrity_status_and_verify_serialize_sqlite_checkpoint_as_utc(
     user = await register_and_login(client, "IntegrityTimezoneUser")
     await compute_and_store_integrity_checkpoints(db_session)
 
-    status = await client.get("/api/v1/integrity/status", headers=user["headers"])
+    status = await client.get("/api/v1/integrity/status", headers=INTEGRITY_ADMIN)
     assert status.status_code == 200, status.text
     status_last_verified = status.json()["equivalents"]["TZCHK"]["last_verified"]
     _assert_datetime_has_offset(status_last_verified)
@@ -176,7 +181,7 @@ async def test_integrity_status_and_verify_serialize_sqlite_checkpoint_as_utc(
     verify = await client.post(
         "/api/v1/integrity/verify",
         json={"equivalent": "TZCHK"},
-        headers=user["headers"],
+        headers=INTEGRITY_ADMIN,
     )
     assert verify.status_code == 200, verify.text
     verify_last_verified = verify.json()["equivalents"]["TZCHK"]["last_verified"]

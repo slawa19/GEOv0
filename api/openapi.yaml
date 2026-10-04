@@ -1682,6 +1682,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunStatus'
+        '409':
+          description: >-
+            E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
+            the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
+            limit of active runs is reached (`global_active_limit`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1740,6 +1749,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunStatus'
+        '409':
+          description: >-
+            E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
+            the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
+            limit of active runs is reached (`global_active_limit`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2777,8 +2795,9 @@ paths:
         '409':
           description: >-
             E008 before any occurrence committed: the equivalent is not active (operator stop or integrity
-            hold; `details.reason`), or its clearing lease is held by another pass. Met after progress, the
-            same stop answers 200 `interrupted` instead.
+            hold; `details.reason`), its clearing lease is held by another pass, or clearing is switched off
+            (`CLEARING_ENABLED = false`, `details.reason = clearing_disabled`, 028 `F-028-20`). Met after
+            progress, the same stop answers 200 `interrupted` instead.
           content:
             application/json:
               schema:
@@ -2863,6 +2882,12 @@ paths:
     post:
       tags: [Payments]
       summary: Create payment
+      description: >-
+        Every refusal names its machine reason in `details.reason` (`PaymentRefusalDetails`, 028 `F-028-42`): before
+        admission in the error envelope (4xx/5xx), after it in the stored `ABORTED` result. Repeating the same
+        `tx_id` with the same body after a definitive refusal answers that stored `ABORTED` result and the same
+        error; a new attempt is a new `tx_id` (`F-028-43`, protocol appendix E). An internal error's `message` is
+        the code's meaning only (no internals).
       parameters:
         - in: header
           name: Idempotency-Key
@@ -3063,10 +3088,45 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /integrity/summary:
+    get:
+      tags: [Integrity]
+      summary: Integrity summary per equivalent (participant or admin)
+      description: >-
+        028 `F-028-44` (owner decision 2026-10-04, В-7): per equivalent, the verdict of the LAST STORED check - the
+        equivalent's integrity hold and its latest debt reconciliation result - and nothing more. Nothing is
+        recomputed and nothing is written by the call. No stored result is `warning` with `checked_at: null`, never
+        `healthy`. The checks themselves, their details and the audit log are admin-only.
+      responses:
+        '200':
+          description: The summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegritySummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /integrity/status:
     get:
       tags: [Integrity]
-      summary: Get integrity status
+      summary: Get integrity status (admin)
+      description: >-
+        Admin-only since 028 `F-028-44` (В-7): it re-runs the invariant checks and names the violating pairs and
+        sums. A participant reads `GET /integrity/summary`.
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
       responses:
         '200':
           description: Current integrity status
@@ -3074,8 +3134,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityStatusResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -3084,8 +3142,14 @@ paths:
   /integrity/checksum/{equivalent}:
     get:
       tags: [Integrity]
-      summary: Get latest integrity checksum for equivalent
+      summary: Get latest integrity checksum for equivalent (admin)
+      security: []
       parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
         - in: path
           name: equivalent
           required: true
@@ -3098,8 +3162,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityChecksumResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3110,7 +3172,14 @@ paths:
   /integrity/verify:
     post:
       tags: [Integrity]
-      summary: Run invariant verification
+      summary: Run invariant verification (admin)
+      security: []
+      parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -3124,8 +3193,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityVerifyResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3138,8 +3205,14 @@ paths:
   /integrity/audit-log:
     get:
       tags: [Integrity]
-      summary: List integrity verification audit log entries
+      summary: List integrity verification audit log entries (admin)
+      security: []
       parameters:
+        - in: header
+          name: X-Admin-Token
+          required: true
+          schema:
+            type: string
         - in: query
           name: page
           schema:
@@ -3160,8 +3233,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityAuditLogResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -5833,111 +5904,39 @@ components:
         message:
           type: string
         details:
-          # Read back verbatim from the transactions.error JSON column
-          # (app/core/payments/service.py:1282-1286). The payment engine's abort writer coerces a
-          # missing payload to {} (app/core/payments/engine.py:1761-1778), so a row it wrote
-          # always carries an object.
-          #
-          # It is NOT the only writer, which is why the null branch below is real rather than a
-          # concession to hypothetical legacy rows: `scripts/seed_db.py:459` stores
-          # `error=item.get("error")` straight from a fixtures pack, bypassing that normalizer
-          # entirely, and the shipped pack's ABORTED rows carry `{"code", "message"}` with no
-          # `details` key at all (admin-fixtures/.../transactions.json:29, :346). For those rows
-          # `.get("details")` yields None and `PaymentError` serializes `"details": null`
-          # (executed; `details` is `Optional[Dict[str, Any]] = None` on app/schemas/payment.py:57
-          # and no read on this route sets `exclude_none`).
-          #
-          # The tail is OPEN, and that is the point: both abort paths forward the `.details` of
-          # whatever 4xx GeoException prepare or commit raised. The prepare path classifies at
-          # app/core/payments/service.py:898-903 and writes at :922 and :938; the commit path
-          # forwards at :1001, :1017, :1067 and :1083. (One 896-903 range used to stand for all of
-          # that; T1108 found it covering a single branch of two and starting mid-expression.)
-          # So adding a `details=` to any 4xx raise changes this object with no schema change.
-          # The branches below therefore DOCUMENT what the code emits today. `anyOf`, never
-          # `oneOf`: a closed union would make an unlisted-but-real response non-conforming, and
-          # a `oneOf` with a catch-all is worse still - every documented payload would match two
-          # branches and be rejected for matching more than one.
-          #
-          # The null is the last branch rather than a sibling `nullable: true`. In OpenAPI 3.0.3
-          # `nullable` modifies a sibling `type` and nothing else, so beside a bare `anyOf` it was
-          # inert and this node rejected the null it claimed to allow (`F-011-10`).
-          anyOf:
-            # Plain abort with no diagnostic payload - cancellation and timeout (E007), the
-            # default abort (E010), and the E002 raised when routing finds no capacious path.
-            - type: object
-              additionalProperties: false
-            # E002, insufficient capacity on one hop (app/core/payments/engine.py:767, :949).
-            # available / needed / reserved are money, so exact decimal strings.
-            - type: object
-              required: [available, needed, reserved, from, to]
-              properties:
-                available:
-                  type: string
-                needed:
-                  type: string
-                reserved:
-                  type: string
-                from:
-                  type: string
-                to:
-                  type: string
-              additionalProperties: false
-            # E008 from RetryablePaymentConflictException (app/utils/exceptions.py:78-81):
-            # a retryable database serialization failure. `retryable` is the client-facing
-            # signal that the same payment may be resubmitted.
-            - type: object
-              required: [retryable, conflict_kind]
-              properties:
-                retryable:
-                  type: boolean
-                conflict_kind:
-                  type: string
-              additionalProperties: false
-            # E008 from the post-apply per-participant delta check
-            # (app/core/payments/engine.py:1594). `equivalent` is deliberately a plain string,
-            # NOT EquivalentCode: the producer falls back to the equivalent UUID when the code
-            # cannot be read, and the code pattern would reject a real response.
-            - type: object
-              required: [invariant, source, equivalent, equivalent_id, total_drift, drifts]
-              properties:
-                invariant:
-                  type: string
-                  enum: [PAYMENT_DELTA_DRIFT]
-                source:
-                  type: string
-                equivalent:
-                  type: string
-                equivalent_id:
-                  type: string
-                total_drift:
-                  type: string
-                drifts:
-                  type: array
-                  items:
-                    type: object
-                    required: [participant_id, participant_uuid, expected_delta, actual_delta, drift]
-                    properties:
-                      participant_id:
-                        type: string
-                      participant_uuid:
-                        type: string
-                      expected_delta:
-                        type: string
-                      actual_delta:
-                        type: string
-                      drift:
-                        type: string
-                    additionalProperties: false
-              additionalProperties: false
-            # E008 from the three protocol invariants re-checked before commit - the same three
-            # shapes the integrity endpoints return, from the same producers.
-            - $ref: '#/components/schemas/InvariantViolationDetails'
-            # The open tail. Any other 4xx GeoException raised in prepare or commit reaches this
-            # node with its own details; this branch is what keeps such a response conforming.
-            - type: object
-            # The seeded abort rows described above, which carry no `details` key at all.
-            - nullable: true
-              enum: [null]
+          $ref: '#/components/schemas/PaymentRefusalDetails'
+
+    PaymentRefusalDetails:
+      # 028 `F-028-42` (owner decision 2026-10-04, В-6). The `details` of every payment refusal as its participant
+      # reads it - the error envelope of `POST /payments` and the stored `ABORTED` result of `POST`/`GET /payments`
+      # (`app/core/payments/service.py`, `public_refusal_details`; applied in `app/api/v1/payments.py`). The human
+      # RU/EN text is the client's, composed from `code + reason + details`; `message` is a server-side English hint.
+      # The stored row an admin reads (`AdminGraphTransactionError`) is not filtered.
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          # The closed set of the listed domain refusals; anything else - an internal error, an unforeseen input -
+          # is `other` beside its own `code`, and the promise is no wider.
+          type: string
+          enum: [no_route, insufficient_capacity, policy, participant_suspended, amount_precision_exceeded,
+                 equivalent_integrity_hold, equivalent_inactive, busy, timeout, tx_id_reused,
+                 unverifiable_legacy_identity, invalid_signature, recipient_not_found, amount_not_positive,
+                 self_payment, equivalent_not_found, other]
+        max_available:
+          # `no_route` / `insufficient_capacity` found by routing: what the payer can send the payee now (the
+          # max-flow of `GET /payments/max-flow`), at the equivalent's precision. `"0.00"`-like for `no_route`.
+          type: string
+        retryable:
+          # `busy`: the same request may be sent again.
+          type: boolean
+        rule:
+          # `policy`: which trust-line policy the route breaks.
+          type: string
+      # Each reason keeps the keys its producer adds beside it (`available`/`needed`/`from`/`to` of a hop,
+      # `equivalent`/`precision`, `equivalents`, `participants`, `field`, ...). Never present: the Redis lock key and
+      # the delta check's `drifts` (other participants' ids and sums).
+      additionalProperties: true
 
     PaymentResult:
       type: object
@@ -6563,6 +6562,32 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
+
+    IntegritySummaryResponse:
+      type: object
+      required: [equivalents]
+      properties:
+        equivalents:
+          type: array
+          items:
+            type: object
+            required: [equivalent, status, checked_at, hold]
+            properties:
+              equivalent:
+                type: string
+              status:
+                type: string
+                enum: [healthy, warning, critical]
+              checked_at:
+                # When the last stored check last ran; null - none is stored yet (the status is then `warning`).
+                type: string
+                format: date-time
+                nullable: true
+              hold:
+                # Money in this equivalent is held until an admin clears it.
+                type: boolean
+            additionalProperties: false
       additionalProperties: false
 
     IntegrityChecksumResponse:

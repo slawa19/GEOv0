@@ -125,19 +125,8 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
     ("AdminAuditLogItem", "after_state"): "same column family and writers as before_state",
     ("AdminGraphTransactionError", "details"): (
         "the .details of whatever GeoException aborted the transaction, stored raw in the "
-        "transactions.error JSON column - the same open tail as PaymentError.details, reached "
-        "through a different read"
-    ),
-    ("PaymentError", "details"): (
-        "documented variants plus a deliberately open tail: both abort paths forward the "
-        ".details of whatever 4xx GeoException prepare or commit raised. The prepare path "
-        "classifies at app/core/payments/service.py:898-903 and writes at :922 and :938; the "
-        "commit path forwards at :1001, :1017, :1067 and :1083. The single 896-903 anchor first "
-        "written here covered one branch of the two and started mid-expression. So a new details= "
-        "anywhere under "
-        "app/core/payments/ changes this node with no schema change. The known shapes are "
-        "described in the canon; the tail cannot be closed without making a real response "
-        "non-conforming"
+        "transactions.error JSON column, unfiltered (the admin's read; the participant's read is "
+        "PaymentRefusalDetails since 028 F-028-42)"
     ),
 }
 

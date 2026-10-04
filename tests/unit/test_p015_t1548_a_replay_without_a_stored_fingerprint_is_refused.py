@@ -417,7 +417,8 @@ async def test_a_row_of_another_type_or_another_sender_keeps_its_own_answer(db_s
 
     with pytest.raises(ConflictException) as excinfo:
         await _replay(db_session, people, tx_id=str(other_sender.tx_id))
-    assert (excinfo.value.details or {}).get("reason") is None, excinfo.value.details
+    # 028 `F-028-42`: the generic reason of a reused tx_id, never the unverifiable-identity one (intended replacement).
+    assert (excinfo.value.details or {}).get("reason") == "tx_id_reused", excinfo.value.details
 
     other_type = _legacy_row(
         people, tx_id="t1548-clearing-" + uuid.uuid4().hex[:8], idempotency=None
@@ -428,4 +429,5 @@ async def test_a_row_of_another_type_or_another_sender_keeps_its_own_answer(db_s
 
     with pytest.raises(ConflictException) as excinfo:
         await _replay(db_session, people, tx_id=str(other_type.tx_id))
-    assert (excinfo.value.details or {}).get("reason") is None, excinfo.value.details
+    # 028 `F-028-42`: the generic reason of a reused tx_id, never the unverifiable-identity one (intended replacement).
+    assert (excinfo.value.details or {}).get("reason") == "tx_id_reused", excinfo.value.details

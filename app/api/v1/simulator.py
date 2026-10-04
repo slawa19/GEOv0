@@ -34,7 +34,7 @@ from app.core.clearing.runner import (
 )
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, public_refusal_details
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import (
@@ -435,6 +435,24 @@ def _action_error(
 ) -> JSONResponse:
     payload = SimulatorActionError(code=code, message=message, details=details).model_dump(mode="json", by_alias=True)
     return JSONResponse(status_code=int(status_code), content=payload)
+
+
+#: 028 `T2864`: `resume` and `restart` re-enter `running` under the limits of create (`F-028-5`).
+_ENTRY_LIMIT_CONFLICT = {"model": ErrorEnvelope, "description": "The owner already has an active run, or the global "
+                         "limit of active runs is reached (E008, `details.conflict_kind`)"}
+
+
+def _flat_trustline_conflict(exc: ConflictException, details: dict, reasons: tuple[str, ...]) -> JSONResponse:
+    """A trust-line action's own conflict in its flat 409 body (`SimulatorActionError`); any other one propagates.
+
+    The service names it in `details.reason` (`TRUSTLINE_CLOSE_REQUESTED`, 026 `T2603.1`; `TRUSTLINE_CLOSED`, 028
+    `F-028-6` - a line closed by another writer while the action waited for its row lock). Call after the rollback.
+    """
+
+    reason = (exc.details or {}).get("reason")
+    if reason not in reasons:
+        raise exc
+    return _action_error(status_code=409, code=str(reason), message=exc.message, details=details)
 
 
 def _get_run_checked_or_error(
@@ -1477,15 +1495,7 @@ async def action_trustline_update(
         # requested (026 `T2603.1`) is this action's own refusal and answers in its flat body; any other conflict
         # propagates unchanged.
         await db.rollback()
-        details = exc.details or {}
-        if details.get("reason") != "TRUSTLINE_CLOSE_REQUESTED":
-            raise
-        return _action_error(
-            status_code=409,
-            code="TRUSTLINE_CLOSE_REQUESTED",
-            message=exc.message,
-            details=refusal_details,
-        )
+        return _flat_trustline_conflict(exc, refusal_details, ("TRUSTLINE_CLOSE_REQUESTED", "TRUSTLINE_CLOSED"))
     except Exception:
         await db.rollback()
         raise
@@ -1548,6 +1558,8 @@ async def action_trustline_close(
     # 026 `T2603.1` (owner В1): no debt refusal here - the service closes at once when the debt the line supports
     # is 0 and otherwise records the request (limit 0, the line stays live until `Book` closes it).
     # Programme 021, stage 2: as in `action_trustline_update`.
+    refusal_details = {"from_pid": parties.from_p.pid, "to_pid": parties.to_p.pid, "equivalent": parties.eq.code,
+                       "trustline_id": str(tl.id)}
     trust_lines = TrustLineService(db)
     batch = trust_lines.begin_internal_batch()
     try:
@@ -1561,6 +1573,9 @@ async def action_trustline_close(
         await batch.finish()
         await db.refresh(tl)
         await db.commit()
+    except ConflictException as exc:
+        await db.rollback()
+        return _flat_trustline_conflict(exc, refusal_details, ("TRUSTLINE_CLOSED",))
     except Exception:
         await db.rollback()
         raise
@@ -1669,9 +1684,12 @@ async def action_payment_real(
             status_code=exc.status_code,
             code="CONFLICT",
             message=exc.message,
-            details=exc.details,
+            details=public_refusal_details(exc.details, exc.code),
         )
     except RoutingException as exc:
+        # 028 `F-028-42`: the refusal's machine reason (and `max_available`) beside the action's own fields.
+        reason = {k: v for k, v in public_refusal_details(exc.details, exc.code).items()
+                  if k in ("reason", "max_available")}
         if any_path_exists is False:
             return _action_error(
                 status_code=409,
@@ -1682,6 +1700,7 @@ async def action_payment_real(
                     "from_pid": from_p.pid,
                     "to_pid": to_p.pid,
                     "requested": req.amount,
+                    **reason,
                 },
             )
         return _action_error(
@@ -1693,6 +1712,7 @@ async def action_payment_real(
                 "from_pid": from_p.pid,
                 "to_pid": to_p.pid,
                 "requested": req.amount,
+                **reason,
             },
         )
     except TimeoutException as exc:
@@ -1700,7 +1720,7 @@ async def action_payment_real(
             status_code=503,
             code="ENGINE_TIMEOUT",
             message=str(getattr(exc, "message", None) or "Engine timeout"),
-            details={"equivalent": eq.code, "from_pid": from_p.pid, "to_pid": to_p.pid},
+            details={"equivalent": eq.code, "from_pid": from_p.pid, "to_pid": to_p.pid, "reason": "timeout"},
         )
     except GeoException as exc:
         # Best-effort mapping for unexpected business errors.
@@ -1708,7 +1728,7 @@ async def action_payment_real(
             status_code=int(getattr(exc, "status_code", 409) or 409),
             code="PAYMENT_REJECTED",
             message=str(getattr(exc, "message", None) or str(exc)),
-            details=getattr(exc, "details", None) or {},
+            details=public_refusal_details(exc.details, exc.code),
         )
 
     # Success: emit best-effort tx.updated SSE. `run` already fetched by _get_run_checked above.
@@ -2733,7 +2753,7 @@ async def pause_run(
     return await runtime.pause(run_id)
 
 
-@router.post("/runs/{run_id}/resume", response_model=RunStatus)
+@router.post("/runs/{run_id}/resume", response_model=RunStatus, responses={409: _ENTRY_LIMIT_CONFLICT})
 async def resume_run(
     run_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
@@ -2773,7 +2793,7 @@ async def stop_run(
     )
 
 
-@router.post("/runs/{run_id}/restart", response_model=RunStatus)
+@router.post("/runs/{run_id}/restart", response_model=RunStatus, responses={409: _ENTRY_LIMIT_CONFLICT})
 async def restart_run(
     run_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),

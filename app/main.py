@@ -198,7 +198,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.exception_handler(GeoException)
 async def geo_exception_handler(request: Request, exc: GeoException):
-    return JSONResponse(status_code=exc.status_code, content=_error_with_request_id(exc.to_dict()))
+    body = exc.to_dict()
+    if exc.code == ErrorCode.E010.value:
+        # 028 `F-028-42`: an internal error's own text may carry internals (a Python repr); it is logged under the
+        # request id and the caller gets the code's meaning.
+        logger.error("http.internal_error request_id=%s message=%s", request_id_var.get(), exc.message)
+        body["error"]["message"] = ERROR_MESSAGES[ErrorCode.E010]
+    return JSONResponse(status_code=exc.status_code, content=_error_with_request_id(body))
 
 
 @app.exception_handler(RequestValidationError)

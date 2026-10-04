@@ -50,7 +50,10 @@ from app.utils.exceptions import (
     TimeoutException,
 )
 from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
+from app.utils.money import to_money_str
 from app.utils.validation import (
+    AMOUNT_NOT_POSITIVE,
+    AMOUNT_PRECISION_EXCEEDED,
     money_step,
     parse_money_amount,
     require_money_step,
@@ -70,6 +73,40 @@ _RETRYABLE_PAYMENT_SQLSTATES = ROLLED_BACK_SQLSTATES
 #: request identity cannot be verified, so "the same request" cannot be established. Not retryable -
 #: repeating the request cannot make the stored row grow a fingerprint.
 UNVERIFIABLE_LEGACY_IDENTITY_REASON = "unverifiable_legacy_identity"
+
+#: 028 `F-028-42` (owner В-6): the closed set of `details.reason` a payment refusal answers with, before admission (an
+#: error envelope) and after it (the stored `ABORTED` result). Every listed domain refusal names its own; anything else
+#: - an internal error, an unforeseen input - answers `other` beside its own `code`, and the promise is no wider. The
+#: client composes the human RU/EN text from `code + reason + details` (E8, `T2884`).
+PAYMENT_REFUSAL_REASONS = (
+    "no_route", "insufficient_capacity", "policy", MoneyBoundary.PARTICIPANT_SUSPENDED_REASON, AMOUNT_PRECISION_EXCEEDED,
+    MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON, MoneyBoundary.EQUIVALENT_INACTIVE_REASON, "busy", "timeout",
+    "tx_id_reused", UNVERIFIABLE_LEGACY_IDENTITY_REASON, "invalid_signature", "recipient_not_found",
+    AMOUNT_NOT_POSITIVE, "self_payment", "equivalent_not_found", "other",
+)
+#: Never answered: the Redis key names an internal id; the delta check's drifts name other participants and their
+#: sums (they stay in the stored row an admin reads, not in a participant's answer).
+_PRIVATE_REFUSAL_DETAILS = frozenset({"lock_key", "drifts"})
+
+
+def public_refusal_details(details: "dict | None", code: str | None) -> dict:
+    """What a payment refusal's `details` may show its participant: the private keys dropped, `reason` from the set.
+
+    A timeout (`E007`, by the code's own meaning) without a reason is `timeout`; a reason outside the set is `other`.
+    """
+
+    public = {k: v for k, v in dict(details or {}).items() if k not in _PRIVATE_REFUSAL_DETAILS}
+    reason = public.get("reason") or ("timeout" if code == ErrorCode.E007.value else None)
+    public["reason"] = reason if reason in PAYMENT_REFUSAL_REASONS else "other"
+    return public
+
+
+def public_payment_result(result: PaymentResult) -> PaymentResult:
+    """A stored payment result as its participant reads it: an `ABORTED` error's details through the same filter."""
+
+    if result.error is not None:
+        result.error.details = public_refusal_details(result.error.details, result.error.code)
+    return result
 
 
 def _conflict_cause(exc: BaseException) -> str:
@@ -755,9 +792,9 @@ class PaymentService:
     ) -> PaymentResult:
         """Apply one idempotency policy to both lookup and insert-race rows."""
         if existing_tx.type != "PAYMENT":
-            raise ConflictException("tx_id already used")
+            raise ConflictException("tx_id already used", details={"reason": "tx_id_reused"})
         if existing_tx.initiator_id != sender_id:
-            raise ConflictException("tx_id already used")
+            raise ConflictException("tx_id already used", details={"reason": "tx_id_reused"})
 
         existing_payload = existing_tx.payload or {}
         existing_idempotency = existing_payload.get("idempotency")
@@ -808,7 +845,7 @@ class PaymentService:
             )
 
         if existing_fp != request_fingerprint:
-            raise ConflictException("tx_id already used for a different request")
+            raise ConflictException("tx_id already used for a different request", details={"reason": "tx_id_reused"})
 
         # 2026-08-22 / p010.  This shortcut returns a stored result BEFORE the narrowing and
         # the postcondition, so a scoped caller replaying an idempotency key would otherwise
@@ -832,10 +869,7 @@ class PaymentService:
                     "event=payment.idempotent_replay_unverifiable tx_id=%s",
                     str(existing_tx.tx_id),
                 )
-                raise RoutingException(
-                    "No route found with sufficient capacity",
-                    insufficient_capacity=False,
-                )
+                raise RoutingException(insufficient_capacity=False, details={"reason": "no_route"})
             escaped = {
                 str(pid)
                 for path in paths
@@ -848,10 +882,7 @@ class PaymentService:
                     str(existing_tx.tx_id),
                     sorted(escaped),
                 )
-                raise RoutingException(
-                    "No route found with sufficient capacity",
-                    insufficient_capacity=False,
-                )
+                raise RoutingException(insufficient_capacity=False, details={"reason": "no_route"})
 
         try:
             from app.utils.metrics import PAYMENT_EVENTS_TOTAL
@@ -1128,7 +1159,7 @@ class PaymentService:
                     ).inc()
                 except Exception:
                     pass
-                raise InvalidSignatureException("Missing signature")
+                raise InvalidSignatureException("Missing signature", details={"reason": "invalid_signature"})
 
         receiver = (
             await self.session.execute(
@@ -1142,7 +1173,7 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="not_found").inc()
             except Exception:
                 pass
-            raise NotFoundException(f"Receiver {request.to} not found")
+            raise NotFoundException(f"Receiver {request.to} not found", details={"reason": "recipient_not_found"})
 
         if sender.id == receiver.id:
             try:
@@ -1151,7 +1182,7 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
             except Exception:
                 pass
-            raise BadRequestException("Cannot pay to yourself")
+            raise BadRequestException("Cannot pay to yourself", details={"reason": "self_payment"})
 
         equivalent = (
             await self.session.execute(
@@ -1165,7 +1196,7 @@ class PaymentService:
                 PAYMENT_EVENTS_TOTAL.labels(event="create", result="not_found").inc()
             except Exception:
                 pass
-            raise NotFoundException(f"Equivalent {request.equivalent} not found")
+            raise NotFoundException(f"Equivalent {request.equivalent} not found", details={"reason": "equivalent_not_found"})
 
         # A rolled-back savepoint may expire the session identity map. Keep the validated wire identifiers as plain
         # values so result construction never triggers implicit async ORM IO.
@@ -1173,6 +1204,7 @@ class PaymentService:
         receiver_pid = str(receiver.pid)
         equivalent_id = equivalent.id
         equivalent_code = str(equivalent.code)
+        equivalent_precision = int(equivalent.precision)
 
         # Signature payload (canonical JSON) is part of the API contract for MVP.
         # IMPORTANT: it must include tx_id and must exclude the `signature` field itself.
@@ -1202,7 +1234,7 @@ class PaymentService:
                     ).inc()
                 except Exception:
                     pass
-                raise InvalidSignatureException("Invalid signature")
+                raise InvalidSignatureException("Invalid signature", details={"reason": "invalid_signature"})
 
         # Idempotency: same tx_id + same canonical payload => return same result.
         # same tx_id + different canonical payload => 409.
@@ -1338,10 +1370,7 @@ class PaymentService:
                         # returns exactly that when the perimeter cannot be established, and
                         # treating it as "no restriction" would be a literal return of
                         # `F-009-1`.
-                        raise RoutingException(
-                            "No route found with sufficient capacity",
-                            insufficient_capacity=False,
-                        )
+                        raise RoutingException(insufficient_capacity=False, details={"reason": "no_route"})
                     self._confine_router_to_perimeter(
                         self.router, allowed_participant_pids
                     )
@@ -1386,9 +1415,14 @@ class PaymentService:
                         ).inc()
                     except Exception:
                         pass
+                    # 028 `F-028-42`: how much this payer can send the payee now, for the client's text (owner В-6).
+                    available = Decimal((await asyncio.to_thread(
+                        self.router.calculate_max_flow, sender_pid, receiver_pid)).max_amount)
                     raise RoutingException(
                         "No route found with sufficient capacity",
                         insufficient_capacity=True,
+                        details={"reason": "insufficient_capacity" if available > 0 else "no_route",
+                                 "max_available": to_money_str(available, equivalent_precision)},
                     )
 
                 # Postcondition, and not a formality: the narrowing above and this check
@@ -1407,10 +1441,7 @@ class PaymentService:
                             "event=payment.route_escaped_perimeter pids=%s",
                             sorted(escaped),
                         )
-                        raise RoutingException(
-                            "No route found with sufficient capacity",
-                            insufficient_capacity=False,
-                        )
+                        raise RoutingException(insufficient_capacity=False, details={"reason": "no_route"})
 
                 routes_payload = [
                     {"path": path, "amount": str(route_amount)}
@@ -1758,7 +1789,8 @@ class PaymentService:
             ).all()
         }
         if len(participants) != len(pids):
-            raise GeoException(f"Participants not found: {pids - set(participants)}")
+            logger.error("event=payment.route_participants_missing pids=%s", sorted(pids - set(participants)))
+            raise GeoException("Route participants not found")
         # 028 `F-028-28` (owner В-1): every participant of every route - payer, payee, each hop - `FOR SHARE` BEFORE
         # the lines, in `participants.id` order, its status read by that statement: a suspended one carries nothing.
         await self._boundary.refuse_suspended_participants(participants.values())
@@ -1794,6 +1826,7 @@ class PaymentService:
                         f"Available: {available}, Needed: {route_amount}, Reserved: {reserved}",
                         insufficient_capacity=True,
                         details={
+                            "reason": "insufficient_capacity",
                             "available": str(available),
                             "needed": str(route_amount),
                             "reserved": str(reserved),
@@ -1815,7 +1848,7 @@ class PaymentService:
             # The router's policy rule again, on lines read here: a route handed to the core is not trusted.
             if why := route_breaks_policy(list(path), lambda u, v: hop_rules[(u, v)]):
                 raise RoutingException(f"Route breaks a trust line policy: {why}", insufficient_capacity=False,
-                                       details={"path": list(path), "reason": why})
+                                       details={"path": list(path), "reason": "policy", "rule": why})
             declared_routes.append(tuple(segments))
         return PaymentDeclaration(tx_id=tx_id, routes=tuple(declared_routes))
 

@@ -26,6 +26,8 @@ import uuid
 from decimal import Decimal
 
 import pytest
+
+from app.config import settings
 from sqlalchemy import select, text
 
 import app.core.payments.service as payment_service
@@ -46,6 +48,9 @@ from tests.integration.test_scenarios import register_and_login
 from tests.p019_support import require_target
 
 NOT_VERIFIED_GROWTH = {"status": "not_verified", "reason": "requires_operation_prestate"}
+
+# 028 `F-028-44` (owner В-7): the integrity checks are the admin's - a participant gets 403 (intended replacement).
+INTEGRITY_ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
 
 async def _parties(session, *lines: tuple[str, str, str]):
@@ -138,9 +143,9 @@ async def test_the_periodic_check_reports_an_over_limit_debt_as_allowed(db_sessi
     assert (trust["passed"], trust["violations"], trust["growth"]) == (True, 0, NOT_VERIFIED_GROWTH)
     assert trust["over_limit_allowed"] == allowed
 
-    for response in (await client.get("/api/v1/integrity/status", headers=user["headers"]),
+    for response in (await client.get("/api/v1/integrity/status", headers=INTEGRITY_ADMIN),
                      await client.post("/api/v1/integrity/verify", json={"equivalent": eq_code},
-                                       headers=user["headers"])):
+                                       headers=INTEGRITY_ADMIN)):
         assert response.status_code == 200, response.text
         body = response.json()
         view = body["equivalents"][eq_code]

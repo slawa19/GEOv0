@@ -8,14 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, public_payment_result, public_refusal_details
 from app.utils.distributed_lock import redis_distributed_lock
 from app.schemas.payment import (
     CapacityResponse, MaxFlowResponse,
     PaymentCreateRequest, PaymentResult, PaymentsList
 )
 from app.db.models.participant import Participant
-from app.utils.exceptions import BadRequestException
+from app.utils.exceptions import BadRequestException, GeoException
 from app.utils.validation import parse_money_amount, require_money_step
 
 router = APIRouter()
@@ -71,7 +71,19 @@ async def create_payment(
 ):
     """
     Create and execute a payment.
+
+    028 `F-028-42`: every refusal - the error envelope here, the stored `ABORTED` result - carries `details.reason`.
     """
+    try:
+        return public_payment_result(await _create_payment(
+            payment_in, current_participant, redis_client, payment_sessions))
+    except GeoException as exc:
+        # A copy: the raised exception may be held elsewhere (a stored refusal is written from it unfiltered).
+        raise GeoException(exc.message, code=exc.code, details=public_refusal_details(exc.details, exc.code),
+                           status_code=exc.status_code) from exc
+
+
+async def _create_payment(payment_in: dict, current_participant: Participant, redis_client, payment_sessions):
     try:
         payment_req = PaymentCreateRequest.model_validate(payment_in)
     except ValidationError as exc:
@@ -105,11 +117,11 @@ async def get_payment(
     Get payment details by Transaction ID.
     """
     service = PaymentService(session)
-    return await service.get_payment_for_participant(
+    return public_payment_result(await service.get_payment_for_participant(
         tx_id,
         requester_participant_id=current_participant.id,
         requester_pid=current_participant.pid,
-    )
+    ))
 
 @router.get("", response_model=PaymentsList)
 async def list_payments(
@@ -138,4 +150,4 @@ async def list_payments(
         page=page,
         per_page=per_page,
     )
-    return PaymentsList(items=items)
+    return PaymentsList(items=[public_payment_result(item) for item in items])

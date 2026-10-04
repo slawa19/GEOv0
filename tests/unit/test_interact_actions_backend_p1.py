@@ -870,6 +870,7 @@ async def test_action_payment_real_retryable_conflict_is_not_rejected(
         "details": {
             "retryable": True,
             "conflict_kind": "database_concurrency",
+            "reason": "busy",  # 028 `F-028-42`
         },
     }
     assert response.json()["code"] != "PAYMENT_REJECTED"

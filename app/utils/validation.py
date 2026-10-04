@@ -8,6 +8,9 @@ from app.schemas.equivalent import normalize_equivalent_metadata
 
 _EQUIVALENT_CODE_RE = re.compile(r"^[A-Z0-9_]{1,16}$")
 
+#: `details.reason` of an amount that is zero or negative where a positive one is required (028 `F-028-42`).
+AMOUNT_NOT_POSITIVE = "amount_not_positive"
+
 
 def validate_equivalent_code(code: str) -> None:
     if not isinstance(code, str) or not code or not _EQUIVALENT_CODE_RE.fullmatch(code):
@@ -319,7 +322,7 @@ def parse_amount_decimal(
         raise _reject("Invalid amount format")
 
     if require_positive and as_decimal <= 0:
-        raise _reject("Amount must be positive")
+        raise _reject("Amount must be positive", reason=AMOUNT_NOT_POSITIVE)
 
     return as_decimal
 
@@ -530,7 +533,7 @@ def parse_money_amount(
         raise _reject("Invalid amount format", max_scale=MONEY_MAX_SCALE)
 
     if require_positive and value <= 0:
-        raise _reject("Amount must be positive")
+        raise _reject("Amount must be positive", reason=AMOUNT_NOT_POSITIVE)
 
     # A trust-line limit may be zero but not negative.  This lived on the pydantic schema as
     # `ge=0` while `limit` was typed `Decimal`; when the field became a `str` (signed verbatim,

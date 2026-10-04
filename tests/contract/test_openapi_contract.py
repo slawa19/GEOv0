@@ -67,10 +67,15 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 22
 # repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
 # removed from the application and the canon by the owner's decision of that day. Measured on both
 # trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
+# 2026-10-04 / programme 028 E6 (`F-028-44`, owner В-7): 66 -> 67. `GET /integrity/summary` enters (the participant-or-admin
+# dependency's optional `X-Admin-Token`, absent from the canon - the class its siblings carried); the four admin-only
+# integrity operations change content (canon `X-Admin-Token` `required: true`, generated `required: false`, as every
+# admin operation here). Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed): no other entry differs.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "0a077abe825b59ef9e0e33610348332df2854f3ee12cb361d55844c3139059d0"
+    "23f96ef181db1d576b2bfbd1ec73e288c41a97b1b1514ef1b8fd7d90d7fe55b7"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 66
+TRANSPORT_HEADER_DRIFT_COUNT = 67
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -355,10 +360,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # `POST /participants`), and the liquidity summary's three money totals become nullable. In each of the seven the
 # changed sub-schemas are EQUAL on both sides; the entries stay in the ledger for their older differences. Measured
 # with a per-entry dump of both ledgers on `3fb5acd3` and on this tree: error ledger identical, 62 / 51.
+# 2026-10-04 / programme 028 E6: 62 -> 63. `GET /integrity/summary` enters (`F-028-44`; the canon closes its objects
+# with `additionalProperties: false`, pydantic does not); the three payments reads change content: `PaymentError.details`
+# becomes `PaymentRefusalDetails` with the required `reason` (`F-028-42`), the generated side stays `Dict[str, Any]`.
+# Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed): no other entry differs.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "5955403c59c9cda49ff3276f8e419835e59fcf6450da07daf4a3e4fb66534151"
+    "59e618aa2132c4fb1ac8933998902f041504e14faf97bdf3d1847b743acb2f7b"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 62
+SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -482,8 +492,15 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-10-02 / programme 026 `T2603.1`: count HOLDS at 51, digest moves. ONE entry changes content: the canon's
 # `PATCH /trustlines/{id}` declares 409 (a positive limit while a close is requested); FastAPI declares no 409 there.
 # Measured with the same per-entry dump on `d9cce2d` and on this tree.
+# 2026-10-04 / programme 028 E6: count HOLDS at 51, digest moves; none enters or leaves. The canon's four admin-only
+# integrity operations (`F-028-44`) drop the `401` an admin route never answers (a missing or wrong token is 403), so
+# `GET /integrity/audit-log` still matches its generated twin and the new `GET /integrity/summary` matches on arrival;
+# `status`, `checksum` and `verify` change content (their canon-only 429 and generated-only 422 stay);
+# `resume`/`restart` declare the 409 of the entry limits (`T2864`) on both halves and stay for their older differences.
+# Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed).
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "ce80eccb2729aeea4faa4a18249112a47800a9e22b9d8410f1cfd2235cd95c7b"
+    "d9e62ef35c926fff19b11e02fc6e08b56e8f44e8fe650afe7ad60b2097c515e0"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
@@ -496,10 +513,14 @@ ERROR_RESPONSE_DRIFT_COUNT = 51
 # repair operations (`POST /integrity/repair/net-mutual-debts`, `/cap-debts-to-trust-limits`) are
 # removed from the application and the canon by the owner's decision of that day. Measured on both
 # trees: the previous ledger minus those two keys hashes to the new digest, so no other entry changed.
+# 2026-10-04 / programme 028 E6 (`F-028-44`, owner В-7): 66 -> 67. `GET /integrity/summary` enters (bearer on both halves, the
+# generated optional admin header); the four admin-only integrity operations change content to `security: []` with a
+# required `X-Admin-Token` in the canon, the class of every admin operation here. Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
+# committed): no other entry differs.
 SECURITY_DRIFT_SHA256 = (
-    "7a4ca14f10cafe5fb3a6691a4a268334639e67cafdbe5264f9e16762ffb40b75"
+    "207d2b164491edd8fc3a02c72296687b647e78acb02ad9a16b0203b5fe1a7f9b"
 )
-SECURITY_DRIFT_COUNT = 66
+SECURITY_DRIFT_COUNT = 67
 
 
 def _repo_root() -> Path:

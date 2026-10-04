@@ -19,7 +19,7 @@ from app.config import settings
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key
 from app.core.payments.router import PaymentRouter
 import app.core.payments.service as payment_service_module
-from app.core.payments.service import PaymentService, PaymentTransactionUnusable
+from app.core.payments.service import PaymentService, PaymentTransactionUnusable, public_refusal_details
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
@@ -34,6 +34,12 @@ from app.utils.exceptions import (
 from tests.conftest import MODE_B
 from tests.integration.test_scenarios import register_and_login, _sign_payment_request
 
+
+
+def _public(error: dict) -> dict:
+    """028 `F-028-42`: what a participant reads of a stored refusal - `details` with its `reason` (intended change)."""
+
+    return {**error, "details": public_refusal_details(error.get("details"), error.get("code"))}
 
 
 def _envelope_error(response) -> dict:
@@ -257,6 +263,7 @@ async def test_retryable_database_failure_uses_e008_at_service_boundary(
     assert raised.value.details == {
         "retryable": True,
         "conflict_kind": "database_concurrency",
+        "reason": "busy",
     }
     # 019 `T1905` (FORK-4): an exhausted retryable conflict is a conflict, never a definitive refusal -
     # nothing is recorded, so the client's resubmission of the same tx_id executes. Until `T1905` this
@@ -347,6 +354,7 @@ async def test_http_insert_serialization_failure_returns_declared_conflict(
         "details": {
             "retryable": True,
             "conflict_kind": "database_concurrency",
+            "reason": "busy",
         },
     }
 
@@ -467,7 +475,7 @@ async def test_prepare_preserves_typed_client_error_in_http_and_transaction(
     # 027 stage 1: a capacity refusal at binding is final only after the request's ONE re-route.
     expected_calls = ["single" if route_count == 1 else "multipath"] * (2 if expected_code == "E002" else 1)
     assert response.status_code == expected_status, response.text
-    assert _envelope_error(response) == expected_payload
+    assert _envelope_error(response) == _public(expected_payload)
     assert calls == expected_calls
 
     transaction = (
@@ -487,8 +495,8 @@ async def test_prepare_preserves_typed_client_error_in_http_and_transaction(
     )
     assert get_response.status_code == 200, get_response.text
     assert retry_response.status_code == 200, retry_response.text
-    assert get_response.json()["error"] == expected_payload
-    assert retry_response.json()["error"] == expected_payload
+    assert get_response.json()["error"] == _public(expected_payload)
+    assert retry_response.json()["error"] == _public(expected_payload)
     assert calls == expected_calls
 
 
@@ -534,7 +542,7 @@ async def test_operational_prepare_error_is_sanitized_everywhere(
         json=body,
     )
     assert first_response.status_code == 500, first_response.text
-    assert _envelope_error(first_response) == safe_error
+    assert _envelope_error(first_response) == _public(safe_error)
     assert calls == ["single" if route_count == 1 else "multipath"]
 
     transaction = (
@@ -561,9 +569,9 @@ async def test_operational_prepare_error_is_sanitized_everywhere(
     assert get_response.status_code == 200, get_response.text
     assert retry_response.status_code == 200, retry_response.text
     assert list_response.status_code == 200, list_response.text
-    assert get_response.json()["error"] == safe_error
-    assert retry_response.json()["error"] == safe_error
-    assert [item["error"] for item in list_response.json()["items"]] == [safe_error]
+    assert get_response.json()["error"] == _public(safe_error)
+    assert retry_response.json()["error"] == _public(safe_error)
+    assert [item["error"] for item in list_response.json()["items"]] == [_public(safe_error)]
 
     exposed_payload = json.dumps(
         {
@@ -619,7 +627,7 @@ async def test_typed_server_prepare_error_is_sanitized(
         "details": {},
     }
     assert response.status_code == 500, response.text
-    assert _envelope_error(response) == safe_error
+    assert _envelope_error(response) == _public(safe_error)
     assert calls == ["single"]
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
@@ -847,7 +855,7 @@ async def test_operational_commit_error_is_sanitized_in_response_and_transaction
         "details": {},
     }
     assert response.status_code == 500, response.text
-    assert _envelope_error(response) == safe_error
+    assert _envelope_error(response) == _public(safe_error)
     transaction = (
         await db_session.execute(select(Transaction).where(Transaction.tx_id == tx_id))
     ).scalar_one()

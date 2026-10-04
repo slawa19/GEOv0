@@ -27,6 +27,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+
+from app.config import settings
 from httpx import AsyncClient
 from pydantic import ValidationError
 
@@ -41,6 +43,9 @@ from tests.debt_setup import debt_fixture_setup
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WITHDRAWN = {"status": "not_verified", "reason": "check_withdrawn"}
+
+# 028 `F-028-44` (owner В-7): the integrity checks are the admin's - a participant gets 403 (intended replacement).
+INTEGRITY_ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
 
 async def _seed(db_session) -> Equivalent:
@@ -72,7 +77,7 @@ async def test_status_endpoint_publishes_no_zero_sum_verdict(
     eq = await _seed(db_session)
     user = await register_and_login(client, "WithdrawStatus")
 
-    resp = await client.get("/api/v1/integrity/status", headers=user["headers"])
+    resp = await client.get("/api/v1/integrity/status", headers=INTEGRITY_ADMIN)
     assert resp.status_code == 200
     payload = resp.json()
 
@@ -97,7 +102,7 @@ async def test_verify_endpoint_publishes_no_zero_sum_verdict(
     eq = await _seed(db_session)
     user = await register_and_login(client, "WithdrawVerify")
 
-    resp = await client.post("/api/v1/integrity/verify", json={}, headers=user["headers"])
+    resp = await client.post("/api/v1/integrity/verify", json={}, headers=INTEGRITY_ADMIN)
     assert resp.status_code == 200
     payload = resp.json()
 

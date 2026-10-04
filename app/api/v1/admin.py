@@ -788,13 +788,19 @@ async def admin_liquidity_summary(
     used_expr = func.coalesce(Debt.amount, 0)
     available_expr = TrustLine.limit - used_expr
 
-    totals_stmt = (
-        select(
-            func.count().label("active_trustlines"),
+    # 028 F-028-37 (owner В-3): money is summed and ranked only within one equivalent. Without one only the lines are
+    # counted - no money SUM runs at all (§15 review of E5) - the totals are null and the net lists empty.
+    money_sums = (
+        [
             func.coalesce(func.sum(TrustLine.limit), 0).label("total_limit"),
             func.coalesce(func.sum(used_expr), 0).label("total_used"),
             func.coalesce(func.sum(available_expr), 0).label("total_available"),
-        )
+        ]
+        if eq_code
+        else []
+    )
+    totals_stmt = (
+        select(func.count().label("active_trustlines"), *money_sums)
         .select_from(TrustLine)
         .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
         .outerjoin(
@@ -812,8 +818,6 @@ async def admin_liquidity_summary(
 
     totals = (await db.execute(totals_stmt)).one()
     active_trustlines = int(totals.active_trustlines or 0)
-    # 028 F-028-37 (owner В-3): money is summed and ranked only within one equivalent. Without one
-    # the counters stay, the money totals are null and the net lists are empty.
     total_limit = totals.total_limit if eq_code else None
     total_used = totals.total_used if eq_code else None
     total_available = totals.total_available if eq_code else None

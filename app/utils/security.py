@@ -31,23 +31,27 @@ def _exp_to_epoch_seconds(exp: Any) -> int:
     return 0
 
 
-async def revoke_jti(jti: str, *, exp: Any) -> None:
-    if not jti:
-        return
+async def claim_jti(jti: str, *, exp: Any) -> bool:
+    """Revoke `jti` only if it is not revoked yet; True for the one caller that revoked it (028 `F-028-22`).
+
+    A refresh token is used once: of two requests presenting it at the same time exactly one claims it - `SET NX`
+    in Redis, the check and the write under one lock in memory. The in-memory store is per process (a multi-process
+    deployment without Redis is BACKLOG № 240).
+    """
 
     exp_epoch = _exp_to_epoch_seconds(exp)
     now_epoch = int(time.time())
-    if exp_epoch and exp_epoch <= now_epoch:
-        return
-
+    if not jti or (exp_epoch and exp_epoch <= now_epoch):
+        return False
     if settings.REDIS_ENABLED and _redis_client is not None:
         ttl = exp_epoch - now_epoch if exp_epoch else int(settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
-        ttl = max(1, int(ttl))
-        await _redis_client.set(f"jwt:jti:revoked:{jti}", "1", ex=ttl)
-        return
-
+        return bool(await _redis_client.set(f"jwt:jti:revoked:{jti}", "1", ex=max(1, int(ttl)), nx=True))
     async with _revoked_jti_lock:
+        known = _revoked_jti.get(jti)
+        if known is not None and (not known or known > now_epoch):
+            return False
         _revoked_jti[jti] = exp_epoch
+        return True
 
 
 async def is_jti_revoked(jti: str) -> bool:

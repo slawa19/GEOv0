@@ -58,12 +58,11 @@ async def redis_distributed_lock(
                 break
 
             if time.monotonic() >= deadline:
+                # 028 `F-028-42`: the key names an internal id - it is logged, never answered; the caller may retry.
+                _lease_logger.info("event=lock.busy key=%s", key)
                 raise ConflictException(
                     "Resource is busy",
-                    details={
-                        "lock_key": key,
-                        "wait_timeout_seconds": wait_timeout_seconds,
-                    },
+                    details={"reason": "busy", "retryable": True, "wait_timeout_seconds": wait_timeout_seconds},
                 )
 
             await asyncio.sleep(poll_interval_seconds)
@@ -179,17 +178,15 @@ class RenewableLease:
                 await self._delete_own_token(event="acquire_uncertain")
                 raise ConflictException(
                     "Resource is busy",
-                    details={"lock_key": self.key, "wait_timeout_seconds": wait_timeout_seconds, "reason": "timeout"},
+                    details={"wait_timeout_seconds": wait_timeout_seconds, "reason": "timeout"},
                 )
             if ok:
                 self._acquired = True
                 self._confirm(sent_at)
                 return
             if self._clock() >= deadline:
-                raise ConflictException(
-                    "Resource is busy",
-                    details={"lock_key": self.key, "wait_timeout_seconds": wait_timeout_seconds},
-                )
+                _lease_logger.info("event=lease.busy key=%s", self.key)
+                raise ConflictException("Resource is busy", details={"wait_timeout_seconds": wait_timeout_seconds})
             await asyncio.sleep(poll_interval_seconds)
 
     async def renew(self) -> bool:
