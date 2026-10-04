@@ -41,7 +41,8 @@ from app.utils.exceptions import (
     ForbiddenException,
     NotFoundException,
 )
-from app.utils.validation import AMOUNT_PRECISION_EXCEEDED, is_storable_money, money_step
+from app.utils.validation import (AMOUNT_PRECISION_EXCEEDED, MONEY_QUANTIZATION, is_storable_money, money_step,
+                                  money_storability_violation)
 
 #: `skipped_reasons` key of an effect refused over a participant that is not active (028 `F-028-28`).
 PARTICIPANT_SUSPENDED = MoneyBoundary.PARTICIPANT_SUSPENDED_REASON
@@ -555,8 +556,9 @@ class InjectExecutor:
             # Storage-capacity door (012 / F-012-1).  Nothing bounded the magnitude: a `Debt.amount` of 1e12 or more
             # does not fit Numeric(20, 8) and aborts the whole inject transaction with
             # `numeric field overflow`.  An inject entry that cannot be applied is skipped,
-            # which is this executor's declared behaviour for every other unusable field.
-            if not is_storable_money(amount):
+            # which is this executor's declared behaviour for every other unusable field. A value finer than 1E-8
+            # is finer than any step: it goes on to the step check below and is skipped with its reason (028 E4).
+            if money_storability_violation(amount) not in (None, MONEY_QUANTIZATION):
                 self._logger.warning(
                     "simulator.real.inject.inject_debt.amount_unstorable amount=%s",
                     amount,

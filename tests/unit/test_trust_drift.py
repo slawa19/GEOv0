@@ -322,7 +322,6 @@ class TestInitTrustDrift:
         # Initial counters must be zero
         assert hist_ab.clearing_count == 0
         assert hist_ab.last_clearing_tick == -1
-        assert hist_ab.cleared_volume == 0.0
 
 
 # ===================================================================
@@ -353,11 +352,9 @@ class TestApplyTrustGrowth:
         PaymentRouter._graph_cache["UAH"] = object()
 
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
-        cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 200.0}
 
         res = await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=5,
-            cleared_amount_per_edge=cleared_amounts,
         )
 
         assert res.updated_count == 1
@@ -394,7 +391,6 @@ class TestApplyTrustGrowth:
                 {("alice", "bob")},
                 "UAH",
                 tick_index=8,
-                cleared_amount_per_edge={("alice", "bob"): 200.0},
             )
 
         assert scenario["trustlines"][0]["limit"] == 1000
@@ -403,7 +399,6 @@ class TestApplyTrustGrowth:
         history = run._edge_clearing_history["alice:bob:UAH"]
         assert history.clearing_count == 1
         assert history.last_clearing_tick == 8
-        assert history.cleared_volume == Decimal("200.00")
         PaymentRouter._graph_cache.pop("UAH", None)
 
     async def test_growth_cancellation_after_commit_applies_committed_effects(self, db_session) -> None:
@@ -428,7 +423,6 @@ class TestApplyTrustGrowth:
                 {("alice", "bob")},
                 "UAH",
                 tick_index=9,
-                cleared_amount_per_edge={("alice", "bob"): 200.0},
             )
         )
 
@@ -461,11 +455,9 @@ class TestApplyTrustGrowth:
         session = await _drift_session(db_session, alice_bob_limit=current_limit)
 
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
-        cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 100.0}
 
         res = await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=5,
-            cleared_amount_per_edge=cleared_amounts,
         )
 
         assert res.updated_count == 1
@@ -483,7 +475,7 @@ class TestApplyTrustGrowth:
         assert Decimal(str(ab_tl["limit"])) == Decimal(cap).quantize(Decimal("1E-8"))
 
     async def test_growth_updates_clearing_history(self, db_session) -> None:
-        """After growth: clearing_count += 1, last_clearing_tick updated, cleared_volume accumulated."""
+        """After growth: clearing_count += 1, last_clearing_tick updated, and no float volume (028 F-028-33)."""
         scenario = _make_scenario(trust_drift={"enabled": True, "growth_rate": 0.05})
         runner = _make_runner(scenario=scenario)
         run = _make_run()
@@ -491,32 +483,26 @@ class TestApplyTrustGrowth:
 
         session = await _drift_session(db_session, alice_bob_limit=1000.0)
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
-        cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 300.0}
         tick = 7
 
         await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=tick,
-            cleared_amount_per_edge=cleared_amounts,
         )
 
         hist = run._edge_clearing_history["alice:bob:UAH"]
         assert hist.clearing_count == 1
         assert hist.last_clearing_tick == tick
-        assert hist.cleared_volume == 300.0
 
         # Second growth call — history accumulates
         session2 = await _drift_session(db_session, alice_bob_limit=1050.0)
-        cleared_amounts2: dict[tuple[str, str], float] = {("alice", "bob"): 150.0}
         tick2 = 12
 
         await runner._apply_trust_growth(
             run, session2, touched_edges, "UAH", tick_index=tick2,
-            cleared_amount_per_edge=cleared_amounts2,
         )
 
         assert hist.clearing_count == 2
         assert hist.last_clearing_tick == tick2
-        assert hist.cleared_volume == 450.0  # 300 + 150
 
     async def test_growth_skipped_when_disabled(self) -> None:
         """enabled=False → 0 updated, no DB calls."""
@@ -528,11 +514,9 @@ class TestApplyTrustGrowth:
         session = AsyncMock()
 
         touched_edges: set[tuple[str, str]] = {("alice", "bob")}
-        cleared_amounts: dict[tuple[str, str], float] = {("alice", "bob"): 200.0}
 
         res = await runner._apply_trust_growth(
             run, session, touched_edges, "UAH", tick_index=5,
-            cleared_amount_per_edge=cleared_amounts,
         )
 
         assert res.updated_count == 0

@@ -88,7 +88,6 @@ class EdgeClearingHistory:
     original_limit: Decimal  # лимит при создании trustline
     clearing_count: int = 0  # кол-во клирингов через это ребро
     last_clearing_tick: int = -1  # тик последнего клиринга
-    cleared_volume: Decimal = Decimal("0")  # суммарный объём клиринга
 
 
 @dataclass

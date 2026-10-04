@@ -319,7 +319,6 @@ async def test_trust_growth_preserves_the_stored_limit_precision(db_session) -> 
         touched_edges={(creditor.pid, debtor.pid)},
         eq_code=eq.code,
         tick_index=1,
-        cleared_amount_per_edge={},
     )
 
     after = await _stored_limit(db_session, eq, creditor, debtor)
@@ -355,7 +354,6 @@ async def test_trust_growth_still_respects_the_max_growth_ceiling(db_session) ->
         touched_edges={(creditor.pid, debtor.pid)},
         eq_code=eq.code,
         tick_index=1,
-        cleared_amount_per_edge={},
     )
 
     after = await _stored_limit(db_session, eq, creditor, debtor)
@@ -388,7 +386,6 @@ async def test_the_scenario_limit_is_not_laundered_through_float(db_session) -> 
         touched_edges={(creditor.pid, debtor.pid)},
         eq_code=eq.code,
         tick_index=1,
-        cleared_amount_per_edge={},
     )
     engine.apply_committed_effects(scenario=run._scenario_raw, result=result)
 

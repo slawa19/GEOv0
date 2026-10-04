@@ -222,7 +222,7 @@ export type GraphLink = {
 
 ### 4.1 Общие требования
 - Полный текущий union: `run_status`, `tx.updated`, `tx.failed`,
-  `clearing.done`, `audit.drift`, `topology.changed`. Required fields и payload
+  `clearing.done`, `topology.changed` (событие дрейфа аудита удалено 2026-10-04, 028 `F-028-35`). Required fields и payload
   каждого варианта определяет `SimulatorEvent` в
   [`api/openapi.yaml`](../../../../../api/openapi.yaml); примеры ниже не являются
   исчерпывающей схемой.

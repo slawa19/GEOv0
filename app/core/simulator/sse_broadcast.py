@@ -10,7 +10,6 @@ from app.config import settings
 from app.core.simulator.models import RunRecord, _Subscription
 from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
-    SimulatorAuditDriftEvent,
     SimulatorClearingDoneEvent,
     SimulatorTopologyChangedEvent,
     SimulatorTxFailedEvent,
@@ -680,46 +679,6 @@ class SseEventEmitter:
         except Exception:
             self._logger.warning(
                 "simulator.sse.clearing_done_emit_error eq=%s",
-                str(equivalent),
-                exc_info=True,
-            )
-            return None
-
-    def emit_audit_drift(
-        self,
-        *,
-        run_id: str,
-        run: RunRecord,
-        equivalent: str,
-        tick_index: int,
-        severity: str,
-        total_drift: str,
-        drifts: list[dict[str, Any]],
-        source: str,
-    ) -> Optional[str]:
-        try:
-            eq_upper = str(equivalent or "").strip().upper()
-            if not eq_upper:
-                return None
-
-            return self._publish(
-                run_id=run_id,
-                run=run,
-                payload_factory=lambda allocated_id: SimulatorAuditDriftEvent(
-                    event_id=allocated_id,
-                    ts=self._utc_now(),
-                    type="audit.drift",
-                    equivalent=eq_upper,
-                    tick_index=int(tick_index),
-                    severity=str(severity),
-                    total_drift=str(total_drift),
-                    drifts=list(drifts or []),
-                    source=str(source),
-                ).model_dump(mode="json", by_alias=True),
-            )
-        except Exception:
-            self._logger.warning(
-                "simulator.sse.audit_drift_emit_error eq=%s",
                 str(equivalent),
                 exc_info=True,
             )

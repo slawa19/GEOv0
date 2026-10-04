@@ -190,30 +190,6 @@ class DeferredRealPaymentEffects:
             return
 
         if item.outcome == "rejected":
-            details = (item.error_details or {}).get("details")
-            if (
-                isinstance(details, dict)
-                and str(details.get("invariant") or "") == "PAYMENT_DELTA_DRIFT"
-            ):
-                try:
-                    self.emitter.emit_audit_drift(
-                        run_id=self.run_id,
-                        run=self.run,
-                        equivalent=item.equivalent,
-                        tick_index=int(self.run.tick_index or 0),
-                        severity="critical",
-                        total_drift=str(details.get("total_drift") or "0"),
-                        drifts=list(details.get("drifts") or []),
-                        source="delta_check",
-                    )
-                except Exception:
-                    self.logger.warning(
-                        "simulator.real.audit_drift_observation_failed run_id=%s seq=%s",
-                        self.run_id,
-                        item.seq,
-                        exc_info=True,
-                    )
-
             with self.lock:
                 self.run.last_event_type = "tx.failed"
                 self.run.attempts_total += 1

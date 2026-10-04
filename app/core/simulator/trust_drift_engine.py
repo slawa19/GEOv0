@@ -232,7 +232,6 @@ class TrustDriftEngine:
         touched_edges: set[tuple[str, str]],
         eq_code: str,
         tick_index: int,
-        cleared_amount_per_edge: dict[tuple[str, str], float],
     ) -> TrustDriftResult:
         """Apply trust growth to edges that participated in clearing.
 
@@ -288,7 +287,6 @@ class TrustDriftEngine:
                 eq_id=eq_id,
                 step=step,
                 tick_index=tick_index,
-                cleared_amount_per_edge=cleared_amount_per_edge,
                 cfg=cfg,
                 pid_to_uuid=pid_to_uuid,
                 updated_edges=updated_edges,
@@ -334,7 +332,6 @@ class TrustDriftEngine:
         eq_id,
         step: Decimal,
         tick_index: int,
-        cleared_amount_per_edge: dict[tuple[str, str], float],
         cfg: TrustDriftConfig,
         pid_to_uuid: dict[str, uuid.UUID],
         updated_edges: set[tuple[str, str]],
@@ -355,12 +352,6 @@ class TrustDriftEngine:
             # Update history
             hist.clearing_count += 1
             hist.last_clearing_tick = tick_index
-            try:
-                hist.cleared_volume += Decimal(
-                    str(cleared_amount_per_edge.get((creditor_pid, debtor_pid), 0.0))
-                ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-            except Exception:
-                pass
 
             creditor_uuid = pid_to_uuid.get(creditor_pid)
             debtor_uuid = pid_to_uuid.get(debtor_pid)

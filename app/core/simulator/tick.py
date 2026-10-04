@@ -18,7 +18,8 @@ THE TICK, IN ORDER, WITH ITS DURABILITY BOUNDARIES (spec 021, "Решения" i
 4. Trust decay - its OWN commit, before its edge patch is published; a failed decay is rolled back HERE by the
    owner of its transaction (`T2100` P2-4), so nothing of it reaches a later commit.
 5. Metrics and bottlenecks - their own, later commit; a failure there does not undo the decay.
-6. The post-tick audit (best effort).
+6. No post-tick audit: removed by 028 `F-028-35` (owner В-11) - every payment passed `check_payment_delta`, and the
+   journal reconciliation (015) is the detector.
 
 A failure anywhere after the money boundary costs the tail, never the money: the observation buffer has already
 resolved, so the tail's rollback cannot un-publish a committed payment and nothing in it can replay money.
@@ -62,7 +63,6 @@ from app.core.simulator.money_replay import (
     run_money_phase_with_bounded_replay,
 )
 from app.core.simulator.net_balance_utils import to_money_str
-from app.core.simulator.post_tick_audit import audit_tick_balance
 from app.core.simulator.real_payments_executor import DeferredRealPaymentEffects, RealPaymentsResult
 from app.core.simulator.real_scenario_seeder import SIMULATOR_PID_TAKEN, SimulatorPidTakenError
 from app.core.simulator.run_perimeter import run_perimeter_pids
@@ -72,7 +72,6 @@ from app.core.simulator.scenario_equivalent import (
 )
 from app.core.simulator.sse_broadcast import SseEventEmitter, publish_closed_trustlines
 from app.core.simulator.viz_patch_helper import VizPatchHelper
-from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -328,14 +327,6 @@ class RealTick:
                         payments_result=payments_phase,
                     )
 
-                    await self._audit_after_tick(
-                        session=session,
-                        run_id=run_id,
-                        run=run,
-                        equivalents=equivalents,
-                        payments_phase=payments_phase,
-                        clearing_volume_by_eq=clearing_volume_by_eq,
-                    )
                 except Exception as tick_error:
                     # CRITICAL: always attempt rollback on tick failure. Otherwise the pooled connection can be
                     # returned in an invalid transaction state, and later ticks fail with "Can't reconnect until
@@ -876,7 +867,6 @@ class RealTick:
             cleared_amount = Decimal("0")
             touched_nodes: set[str] = set()
             touched_edges: set[tuple[str, str]] = set()
-            cleared_amount_per_edge: dict[tuple[str, str], float] = {}
             done_emitted = False
 
             def _on_committed(occurrence, eq: str = eq) -> None:
@@ -894,9 +884,6 @@ class RealTick:
                     if creditor_pid and debtor_pid:
                         edge_key = (creditor_pid, debtor_pid)
                         touched_edges.add(edge_key)
-                        cleared_amount_per_edge[edge_key] = cleared_amount_per_edge.get(edge_key, 0.0) + float(
-                            occurrence.amount
-                        )
 
             try:
                 eq_t0 = time.monotonic()
@@ -955,7 +942,7 @@ class RealTick:
                 async with session_local() as clearing_session:
                     if touched_edges:
                         await self._grow_trust_after_clearing(
-                            run_id, run, eq, clearing_session, touched_edges, cleared_amount_per_edge
+                            run_id, run, eq, clearing_session, touched_edges
                         )
                     closed: set[tuple[str, str]] = set()
                     node_patch, edge_patch = await self._clearing_patches(
@@ -1063,7 +1050,6 @@ class RealTick:
         eq: str,
         clearing_session: Any,
         touched_edges: set[tuple[str, str]],
-        cleared_amount_per_edge: dict[tuple[str, str], float],
     ) -> None:
         """Trust growth on the edges clearing touched, on the clearing's session; a failure is logged, not raised."""
         rr = self._runner
@@ -1074,7 +1060,6 @@ class RealTick:
                 touched_edges=touched_edges,
                 eq_code=eq,
                 tick_index=int(run.tick_index or 0),
-                cleared_amount_per_edge=cleared_amount_per_edge,
             )
             if int(getattr(growth, "updated_count", 0) or 0) > 0:
                 try:
@@ -1683,125 +1668,5 @@ class RealTick:
             rr._logger.warning(
                 "simulator.real.flush_pending_storage_failed run_id=%s",
                 str(run_id),
-                exc_info=True,
-            )
-
-    # ── the post-tick audit (best effort) ─────────────────────────────────────────────────────────────
-
-    async def _audit_after_tick(
-        self,
-        *,
-        session: Any,
-        run_id: str,
-        run: RunRecord,
-        equivalents: list[str],
-        payments_phase: TickPaymentsPhase,
-        clearing_volume_by_eq: dict[str, Decimal],
-    ) -> None:
-        """Detect participant drift; kept as it was (dated decision, spec 021 Changelog 2026-09-28, stage 4)."""
-        rr = self._runner
-        try:
-            emitter = getattr(rr, "_sse_emitter", None)
-            sim_idem = getattr(rr._real_payments_executor, "_sim_idempotency_key", None)
-
-            for eq_code in equivalents:
-                audit = await audit_tick_balance(
-                    session=session,
-                    equivalent_code=str(eq_code),
-                    tick_index=int(run.tick_index or 0),
-                    payments_result=payments_phase,
-                    clearing_volume_by_eq=clearing_volume_by_eq,
-                    run_id=str(run_id),
-                    sim_idempotency_key=sim_idem,
-                )
-                if audit.ok:
-                    continue
-
-                # Severity heuristic: warning if drift < 1% of tick volume.
-                severity = "critical"
-                if audit.tick_volume > 0:
-                    try:
-                        ratio = audit.total_drift / audit.tick_volume
-                        if ratio < Decimal("0.01"):
-                            severity = "warning"
-                    except Exception:
-                        severity = "critical"
-
-                rr._logger.warning(
-                    "event=post_tick_audit.drift run_id=%s tick=%s eq=%s total_drift=%s severity=%s",
-                    str(run_id),
-                    int(run.tick_index or 0),
-                    str(eq_code),
-                    str(audit.total_drift),
-                    str(severity),
-                )
-
-                # 1) SSE event (best-effort).
-                try:
-                    if emitter is not None:
-                        emitter.emit_audit_drift(
-                            run_id=str(run_id),
-                            run=run,
-                            equivalent=str(eq_code),
-                            tick_index=int(run.tick_index or 0),
-                            severity=str(severity),
-                            total_drift=str(audit.total_drift),
-                            drifts=list(audit.drifts or []),
-                            source="post_tick_audit",
-                        )
-                except Exception:
-                    rr._logger.warning(
-                        "event=post_tick_audit.emit_failed run_id=%s tick=%s eq=%s",
-                        str(run_id),
-                        int(run.tick_index or 0),
-                        str(eq_code),
-                        exc_info=True,
-                    )
-
-                # 2) IntegrityAuditLog (best-effort).
-                try:
-                    session.add(
-                        IntegrityAuditLog(
-                            operation_type="SIMULATOR_AUDIT_DRIFT",
-                            tx_id=None,
-                            equivalent_code=str(eq_code).strip().upper(),
-                            state_checksum_before="",
-                            state_checksum_after="",
-                            affected_participants={
-                                "drifts": list(audit.drifts or []),
-                                "tick_index": int(run.tick_index or 0),
-                                "source": "post_tick_audit",
-                            },
-                            invariants_checked={
-                                "post_tick_balance": {
-                                    "passed": False,
-                                    "total_drift": str(audit.total_drift),
-                                }
-                            },
-                            verification_passed=False,
-                            error_details={
-                                "drifts": list(audit.drifts or []),
-                                "severity": str(severity),
-                            },
-                        )
-                    )
-                    await session.commit()
-                except Exception:
-                    try:
-                        await session.rollback()
-                    except Exception:
-                        pass
-                    rr._logger.warning(
-                        "event=post_tick_audit.persist_failed run_id=%s tick=%s eq=%s",
-                        str(run_id),
-                        int(run.tick_index or 0),
-                        str(eq_code),
-                        exc_info=True,
-                    )
-        except Exception:
-            rr._logger.warning(
-                "event=post_tick_audit.failed run_id=%s tick=%s",
-                str(run_id),
-                int(run.tick_index or 0),
                 exc_info=True,
             )

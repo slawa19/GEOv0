@@ -188,7 +188,7 @@ async def test_partial_clearing_is_finalized_before_failure_propagates(
     async def _apply_trust_growth(**kwargs):
         nonlocal trust_growth_calls
         trust_growth_calls += 1
-        assert kwargs["cleared_amount_per_edge"] == {("bob", "alice"): 5.0}
+        assert "cleared_amount_per_edge" not in kwargs  # 028 F-028-33: no float volume
         if failure_kind == "cancelled_finalize":
             raise asyncio.CancelledError
         return SimpleNamespace(updated_count=0)
@@ -353,7 +353,6 @@ async def test_cycle_edges_are_creditor_to_debtor_pids(monkeypatch, topology, ex
     # Trust growth sees the trust-line direction (creditor, debtor) whatever the topology cache says.
     [call] = growth
     assert call["touched_edges"] == {("bob", "alice")}
-    assert call["cleared_amount_per_edge"] == {("bob", "alice"): 1.0}
 
 
 # --- the runner's caller deadline is the tick's clearing budget, per equivalent --------------------------------

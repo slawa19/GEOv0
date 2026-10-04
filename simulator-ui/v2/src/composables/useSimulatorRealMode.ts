@@ -93,7 +93,6 @@ const DIAGNOSTIC_EVENT_TYPE_BUCKETS = new Set([
   'tx.failed',
   'clearing.done',
   'topology.changed',
-  'audit.drift',
 ])
 
 const REPLAY_GAP_BUFFER_MAX_MESSAGES = 512

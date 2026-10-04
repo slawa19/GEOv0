@@ -1154,7 +1154,6 @@ def test_run_status_schema_preserves_stop_and_counter_fields() -> None:
 
 def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> None:
     from app.schemas.simulator import (
-        SimulatorAuditDriftEvent,
         SimulatorEvent,
         SimulatorRunStatusEvent,
         SimulatorTxFailedEvent,
@@ -1175,7 +1174,6 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
         "#/components/schemas/SimulatorTxUpdatedEvent",
         "#/components/schemas/SimulatorTxFailedEvent",
         "#/components/schemas/SimulatorClearingDoneEvent",
-        "#/components/schemas/SimulatorAuditDriftEvent",
         "#/components/schemas/SimulatorTopologyChangedEvent",
         "#/components/schemas/SimulatorRunStatusEvent",
     ]
@@ -1190,20 +1188,7 @@ def test_simulator_event_union_tracks_producer_families_and_wire_aliases() -> No
     assert schemas["SimulatorEventEdgeRef"]["required"] == ["from", "to"]
     assert "from_" not in schemas["SimulatorEventEdgeRef"]["properties"]
 
-    assert set(schemas["SimulatorAuditDriftEvent"]["properties"]) == {
-        "event_id",
-        "ts",
-        "type",
-        "equivalent",
-        "tick_index",
-        "severity",
-        "total_drift",
-        "drifts",
-        "source",
-    }
-    assert set(SimulatorAuditDriftEvent.model_json_schema()["properties"]) == set(
-        schemas["SimulatorAuditDriftEvent"]["properties"]
-    )
+    assert "SimulatorAuditDriftEvent" not in schemas  # 028 F-028-35 (owner В-11): the event is removed
     assert set(schemas["SimulatorTopologyChangedEvent"]["properties"]) == {
         "event_id",
         "ts",

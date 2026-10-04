@@ -6251,6 +6251,8 @@ components:
       properties:
         operation_type:
           # The eight operation types. This value selects the shape of the three open objects below.
+          # SIMULATOR_AUDIT_DRIFT is HISTORICAL: its writer, the post-tick audit, was removed by 028
+          # `F-028-35` (2026-10-04); rows written before stay in the log and are served as they are.
           type: string
           enum:
             - TRUST_LINE_CREATE
@@ -7142,37 +7144,6 @@ components:
             $ref: '#/components/schemas/SimulatorGraphLinkPatch'
       additionalProperties: true
 
-    SimulatorAuditDriftEvent:
-      type: object
-      required: [event_id, ts, type, equivalent, tick_index, severity, total_drift, drifts, source]
-      properties:
-        event_id:
-          type: string
-        ts:
-          type: string
-          format: date-time
-        type:
-          type: string
-          enum: [audit.drift]
-        equivalent:
-          $ref: '#/components/schemas/EquivalentCode'
-        tick_index:
-          type: integer
-        severity:
-          type: string
-          enum: [warning, critical]
-        total_drift:
-          type: string
-        drifts:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-        source:
-          type: string
-          enum: [post_tick_audit, delta_check]
-      additionalProperties: true
-
     TopologyChangedNodeRef:
       type: object
       required: [pid]
@@ -7269,7 +7240,6 @@ components:
         - $ref: '#/components/schemas/SimulatorTxUpdatedEvent'
         - $ref: '#/components/schemas/SimulatorTxFailedEvent'
         - $ref: '#/components/schemas/SimulatorClearingDoneEvent'
-        - $ref: '#/components/schemas/SimulatorAuditDriftEvent'
         - $ref: '#/components/schemas/SimulatorTopologyChangedEvent'
         - $ref: '#/components/schemas/SimulatorRunStatusEvent'
 
@@ -8431,8 +8401,8 @@ components:
           type: string
 
     IntegrityAuditLogDriftItem:
-      # Built by audit_tick_balance (app/core/simulator/post_tick_audit.py:248-255) and copied
-      # verbatim into both affected_participants.drifts and error_details.drifts.
+      # Historical (SIMULATOR_AUDIT_DRIFT rows written before 028 `F-028-35`). Built by the removed
+      # post-tick audit and copied verbatim into both affected_participants.drifts and error_details.drifts.
       #
       # Four keys, not five: this is NOT the drift item declared inline under
       # PaymentError.details, which is built by the payment engine
@@ -8532,8 +8502,7 @@ components:
           type: integer
           minimum: 0
         source:
-          # The single literal the orchestrator passes. The SSE audit.drift event admits
-          # `delta_check` as well; this writer does not.
+          # The single literal the removed post-tick audit wrote (historical rows).
           type: string
           enum: [post_tick_audit]
 
@@ -8600,8 +8569,8 @@ components:
               enum: [null]
 
     IntegrityAuditLogPostTickBalance:
-      # SIMULATOR_AUDIT_DRIFT's own single-key vocabulary
-      # (app/core/simulator/real_tick_orchestrator.py:469-474). It shares no key name with the
+      # SIMULATOR_AUDIT_DRIFT's own single-key vocabulary (historical rows; the writer was removed
+      # by 028 `F-028-35`). It shares no key name with the
       # three protocol invariants.
       type: object
       required: [passed, total_drift]
@@ -8679,8 +8648,7 @@ components:
               $ref: '#/components/schemas/InvariantResult'
 
     IntegrityAuditLogDriftError:
-      # error_details as SIMULATOR_AUDIT_DRIFT writes it
-      # (app/core/simulator/real_tick_orchestrator.py:476-479).
+      # error_details as SIMULATOR_AUDIT_DRIFT wrote it (historical rows; writer removed by 028 `F-028-35`).
       type: object
       required: [drifts, severity]
       additionalProperties: true
@@ -8691,8 +8659,7 @@ components:
           items:
             $ref: '#/components/schemas/IntegrityAuditLogDriftItem'
         severity:
-          # `warning` when total_drift is under 1% of the tick volume, `critical` otherwise and
-          # whenever the ratio cannot be computed (app/core/simulator/real_tick_orchestrator.py
-          # :413-421).
+          # `warning` when total_drift was under 1% of the tick volume, `critical` otherwise and
+          # whenever the ratio could not be computed.
           type: string
           enum: [warning, critical]

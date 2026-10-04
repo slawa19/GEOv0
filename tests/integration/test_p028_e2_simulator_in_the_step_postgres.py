@@ -128,7 +128,7 @@ async def test_trust_growth_is_in_the_step_from_the_whole_original_limit(
     eqs, c, d = await _world(db_session, {"A": precision}, limit=limit)
     run, engine = _drift(eqs, c, d, limit=limit, original=limit, growth_rate=growth, max_growth=max_growth)
     await engine.apply_trust_growth(run=run, clearing_session=db_session, touched_edges={(c.pid, d.pid)},
-                                    eq_code=eqs["A"].code, tick_index=1, cleared_amount_per_edge={})
+                                    eq_code=eqs["A"].code, tick_index=1)
     assert await _limit(db_session, eqs["A"], c, d) == Decimal(expected)
 
 
