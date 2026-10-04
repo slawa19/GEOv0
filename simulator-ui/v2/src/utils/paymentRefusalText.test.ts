@@ -18,18 +18,13 @@ describe('F-028-51: the human text of a payment refusal', () => {
     const sendPayment = vi.fn(async () => {
       throw refusal('INSUFFICIENT_CAPACITY', { reason: 'insufficient_capacity', max_available: '0.5', equivalent: 'UAH' })
     })
-    const fail = async () => { throw new Error('x') }
-    const im = useInteractMode({
-      actions: { actionsDisabled: ref(false), sendPayment, createTrustline: fail, updateTrustline: fail, closeTrustline: fail,
-        runClearing: fail, fetchParticipants: async () => [], fetchTrustlines: async () => [],
-        fetchPaymentTargets: async () => [] } as never,
-      runId: computed(() => 'run_1'), equivalent: computed(() => 'UAH'), snapshot: ref(null),
-    })
+    const im = useInteractMode({ actions: { actionsDisabled: ref(false), sendPayment, fetchParticipants: async () => [],
+      fetchTrustlines: async () => [], fetchPaymentTargets: async () => [] } as never,
+    runId: computed(() => 'run_1'), equivalent: computed(() => 'UAH'), snapshot: ref(null) })
     im.startPaymentFlow(); im.selectNode('alice'); im.selectNode('bob')
     await im.confirmPayment('5.00')
     expect(im.state.error).toBe('Недостаточно ёмкости: сейчас можно отправить не больше 0.50 UAH.')
   })
-
   it('every reason of the server set has its own text in both languages (anti-vacuum: not the generic one)', () => {
     // The set of `app/core/payments/service.py` PAYMENT_REFUSAL_REASONS / openapi PaymentRefusalDetails.reason.
     expect([...PAYMENT_REFUSAL_REASONS].sort()).toEqual(['amount_not_positive', 'amount_precision_exceeded', 'busy',
@@ -43,7 +38,6 @@ describe('F-028-51: the human text of a payment refusal', () => {
       for (const t of texts) expect(t).not.toBe(generic)
     }
   })
-
   it('names the details: precision, no-route maximum; unknown reason -> the code text; no code -> the message', () => {
     expect(paymentRefusalText(refusal('INVALID_AMOUNT', { reason: 'amount_precision_exceeded', precision: 2,
       equivalent: 'HOUR' }), 'UAH', 'en')).toBe('HOUR allows at most 2 decimal places.')
@@ -63,7 +57,6 @@ describe('F-028-48: display and input at the equivalent precision', () => {
     expect(t.formatEdgeAmountText({ source: 'a', target: 'b', used: '0.005', trust_limit: '12345678901234567.10' }))
       .toBe('from: 0.005 / to: 12345678901234567.10 UAH')
   })
-
   it('the system balance bar shows fractions, in the equivalent of its numbers', () => {
     const host = document.createElement('div')
     createApp({ render: () => h(SystemBalanceBar, { balance: { totalUsed: '0.30', totalAvailable: '1234.5',
@@ -71,7 +64,6 @@ describe('F-028-48: display and input at the equivalent precision', () => {
     expect(host.textContent).toContain('0.30 HOUR')
     expect(host.textContent).toContain('1234.50 HOUR')
   })
-
   it('HOUR is 2 decimals (owner В-4), and an amount finer than the step is hinted, not rounded', () => {
     expect(equivalentPrecision('HOUR')).toBe(2)
     expect(amountStepHint('1.500', 'UAH')).toBeNull()
