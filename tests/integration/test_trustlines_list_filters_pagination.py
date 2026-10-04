@@ -128,6 +128,8 @@ async def test_trustlines_list_status_filter_and_pagination(client: AsyncClient,
     resp = await client.get("/api/v1/trustlines?direction=outgoing", headers=alice["headers"])
     assert resp.status_code == 200, resp.text
     items = resp.json()["items"]
+    # Anti-vacuum (028 F-028-21): the two `all(...)` below pass on an empty response, so the live line must be there.
+    assert active_id in [item["id"] for item in items]
     assert all(item["status"] == "active" for item in items)
     assert all(item["id"] != to_close_id for item in items)
 
