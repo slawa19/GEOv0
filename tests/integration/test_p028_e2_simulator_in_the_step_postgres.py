@@ -67,12 +67,14 @@ async def _inject(db_session, eqs, c, d, effects, *, max_total=None):
 # ------------------------------------------------------------------ F-028-30: inject
 
 
+@pytest.mark.parametrize("precision,amount", [(2, "1.239"), (8, "1.000000001")])
 @pytest.mark.asyncio
-async def test_an_inject_finer_than_the_step_is_skipped_with_a_reason_not_truncated(db_session) -> None:
-    """Base: `1.239` at precision 2 was stored as `1.23`."""
+async def test_an_inject_finer_than_the_step_is_skipped_with_a_reason_not_truncated(db_session, precision, amount) -> None:
+    """Base: `1.239` at precision 2 was stored as `1.23`. 028 E4 (`T2899.1` class 2): a value finer than 1E-8 was
+    skipped as unstorable BEFORE the step check, with a log line and no reason in the note."""
 
-    eqs, c, d = await _world(db_session, {"A": 2})
-    stats = await _inject(db_session, eqs, c, d, [("A", "1.239")])
+    eqs, c, d = await _world(db_session, {"A": precision})
+    stats = await _inject(db_session, eqs, c, d, [("A", amount)])
     assert await _debt(db_session, eqs["A"], c, d) is None
     assert stats["skipped"] == 1 and stats["skipped_reasons"] == {"amount_precision_exceeded": 1}, stats
 

@@ -37,7 +37,7 @@ class _PlannedAction:
 
 
 @pytest.mark.asyncio
-async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, db_session) -> None:
+async def test_delta_check_refusal_is_reported_as_tx_failed_only(monkeypatch, db_session) -> None:
     # MODE A (017 stage 3, slice S2a): the executor works on the ONE session it is handed and opens
     # none of its own, so the savepoint-wrapped `db_session` is enough, and cheaper than a clone.
     # Until then this test ran on a SQLite file of its own. `nullcontext` only keeps the body as it
@@ -151,5 +151,5 @@ async def test_delta_check_drift_emits_audit_drift_sse(monkeypatch, db_session) 
         assert result.deferred_effects is not None
         result.deferred_effects.apply_after_rollback()
 
-        drift_events = [e for e in captured if e.get("type") == "audit.drift" and e.get("source") == "delta_check"]
-        assert drift_events, f"Expected audit.drift(source=delta_check). Got types={[e.get('type') for e in captured]}"
+        # 028 F-028-35 (owner В-11): the refusal is reported as the payment's `tx.failed` only; `audit.drift` is gone.
+        assert [e.get("type") for e in captured] == ["tx.failed"], captured
