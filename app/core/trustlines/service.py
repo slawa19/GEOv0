@@ -376,8 +376,12 @@ class TrustLineService:
         *,
         require_signature: bool,
         flush: bool = True,
+        lock_timeout_ms: int | None = None,
     ) -> TrustLine:
         """Stage a new ACTIVE trust line in the caller's transaction and record it on `batch`.
+
+        `lock_timeout_ms` bounds the wait on the pair's line locks (`55P03` past it); the inject passes its
+        owner's budget (028 F-028-14). The public `create` passes none - its wait stays as before.
 
         `flush=False` (programme 021, stage 2) leaves the INSERT staged for the caller's next flush instead of
         sending it here. The inject executor needs it: an inject event's effects see each other only through
@@ -460,7 +464,8 @@ class TrustLineService:
 
         # 027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` first, so a creation waits for a money writer in
         # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
-        await MoneyBoundary(self.session).lock_pair_lines([(equivalent.id, from_participant_id, to_participant.id)])
+        await MoneyBoundary(self.session).lock_pair_lines(
+            [(equivalent.id, from_participant_id, to_participant.id)], timeout_ms=lock_timeout_ms)
 
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
