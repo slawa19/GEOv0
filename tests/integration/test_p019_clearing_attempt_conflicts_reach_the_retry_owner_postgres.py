@@ -55,13 +55,13 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 BARRIER = "p019_t1909_barrier"
 #: The checkpoint site left with the checkpoint (024 `T2413.2`: the clearing computes none in its transaction).
-SITES = ["policy", "metadata", "net_positions"]
+SITES = ["metadata", "net_positions"]  # 027: `trust_lines` is now first read by the line lock
 
 
 @pytest_asyncio.fixture
 async def stand(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=6, max_overflow=0, pool_timeout=20, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=6, max_overflow=0, pool_timeout=20, isolation_level="READ COMMITTED"
     )
     try:
         factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
@@ -86,9 +86,9 @@ def _instrument(monkeypatch, site: str) -> None:
     if site == "net_positions":
         original = InvariantChecker._calculate_net_position
 
-        async def net_position(self, participant_id, equivalent_id):
+        async def net_position(self, participant_id, equivalent_id, pairs=None):
             await barrier_read(self.session)
-            return await original(self, participant_id, equivalent_id)
+            return await original(self, participant_id, equivalent_id, pairs)
 
         monkeypatch.setattr(InvariantChecker, "_calculate_net_position", net_position)
 

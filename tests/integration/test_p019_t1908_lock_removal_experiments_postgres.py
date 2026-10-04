@@ -1,5 +1,7 @@
 """Programme 019 stage 5, `T1908`: the EXPERIMENTS that gate the removal of the advisory locks (`T1909`).
 
+027 STAGE 2 (`T2704`): one cell, `rc` (the code that ships); (c) refuses the snapshot levels.
+
 NOT A GATE OF THE CURRENT CODE - a measurement that decides a fork (spec, Verification plan: "эксперимент").
 Marked `slow`, so the default tier never runs it; re-run it with
 
@@ -57,14 +59,14 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
 from tests.integration.p019_interlock_support import _seed_interlock_case
-from tests.p019_locks_off import blocked_by, switch_money_boundary_locks_off
+from tests.p019_locks_off import blocked_by
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 pytestmark = [pytest.mark.slow]
 
-MODES = ["locks_on", "locks_off"]
+MODES = ["rc"]
 
 
 @pytest_asyncio.fixture
@@ -72,7 +74,7 @@ async def stand(committed_database):
     """A SERIALIZABLE engine over the clone with room for every concurrent writer and observer."""
 
     engine = create_async_engine(
-        committed_database.url, pool_size=12, max_overflow=0, pool_timeout=20, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=12, max_overflow=0, pool_timeout=20, isolation_level="READ COMMITTED"
     )
     try:
         yield async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
@@ -212,7 +214,7 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
     payment after its pre-state read, before its first debt write - and the other is let run into it.
     """
 
-    switch = switch_money_boundary_locks_off(monkeypatch) if mode == "locks_off" else None
+    switch = None
     conflicts = count_conflicts(monkeypatch)
     seed = await _seed_interlock_case()
     a_id, b_id, c_id = seed["participant_ids"]
@@ -326,7 +328,7 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
     assert invariants["over_limit"] == {} and invariants["both_directions"] == []
     assert len(clearings) == 1 and clearings[0].state == "COMMITTED"
     assert payment_row == "COMMITTED"
-    assert audits == [("CLEARING", True), ("PAYMENT", True)], audits
+    assert audits == [("CLEARING", None), ("PAYMENT", None)], audits  # 024 `T2413.2`: the audit row runs no check
     assert envelopes == [("CLEARING", "COMPLETED"), ("PAYMENT", "COMPLETED")], envelopes
 
 
@@ -427,7 +429,7 @@ async def test_b_opposing_directions_on_one_pair(mode, pair, stand, monkeypatch)
 
     from app.core.simulator.inject_executor import InjectExecutor
 
-    switch = switch_money_boundary_locks_off(monkeypatch) if mode == "locks_off" else None
+    switch = None
     conflicts = count_conflicts(monkeypatch)
     eq, x, y = await _seed_pair(stand, "PB")
     barrier = _Barrier()
@@ -523,7 +525,7 @@ async def test_the_bottleneck_loser_is_refused_after_admission(mode, stand, monk
     from app.db.models.participant import Participant
     from app.utils.exceptions import RoutingException
 
-    switch = switch_money_boundary_locks_off(monkeypatch) if mode == "locks_off" else None
+    switch = None
     conflicts = count_conflicts(monkeypatch)
     n = uuid.uuid4().hex[:8].upper()
     async with stand() as s:
@@ -616,20 +618,20 @@ async def test_c_an_unsuitable_isolation_is_refused_with_or_without_the_locks(
     from sqlalchemy.pool import NullPool
 
     from tests.integration.test_p019_money_writers_refuse_non_serializable_postgres import (
-        _at_read_committed,
+        _at_unsuitable,
         _refused,
         _run_writer,
         _state,
     )
 
-    switch = switch_money_boundary_locks_off(monkeypatch) if mode == "locks_off" else None
+    switch = None
     seed = await _seed_interlock_case()
     before = await _state(committed_database, seed)
-    engine = create_async_engine(committed_database.url, isolation_level="READ COMMITTED", poolclass=NullPool)
+    engine = create_async_engine(committed_database.url, isolation_level="REPEATABLE READ", poolclass=NullPool)
     try:
-        read_committed = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
-        async with read_committed() as session:
-            await _at_read_committed(session)
+        snapshot = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+        async with snapshot() as session:
+            await _at_unsuitable(session)
             outcome = await _run_writer(writer, session, seed, committed_database)
             await session.rollback()
     finally:
@@ -640,5 +642,5 @@ async def test_c_an_unsuitable_isolation_is_refused_with_or_without_the_locks(
         "c_isolation_refusal", mode=mode, writer=writer, refused=_refused(outcome), outcome=repr(outcome)[:160],
         switch=dict(switch.calls) if switch else None,
     )
-    assert _refused(outcome), f"{writer} ran at READ COMMITTED ({mode}): {outcome!r}"
+    assert _refused(outcome), f"{writer} ran at REPEATABLE READ ({mode}): {outcome!r}"
     assert after == before, f"{writer} refused but changed committed state ({mode})"

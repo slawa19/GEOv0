@@ -844,7 +844,7 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
 # ==============================================================================================
 
 
-def _collapse_the_route(monkeypatch, triangle: _Triangle) -> list[tuple[str, str]]:
+def _collapse_the_route(monkeypatch, triangle: _Triangle, bypass_delta: bool = True) -> list[tuple[str, str]]:
     """Make the book write ONE `A -> C` obligation for a payment routed `A -> B -> C`.
 
     The wrapper is the smallest wrong writer that gets past every barrier this system has: the
@@ -878,7 +878,31 @@ def _collapse_the_route(monkeypatch, triangle: _Triangle) -> list[tuple[str, str
         )
 
     monkeypatch.setattr(book, "_apply_payment_flow", _wrapper)
+    if bypass_delta:  # 027 stage 2: the pair-scoped delta check now REFUSES this writer (`A -> C` is outside the
+        # payment's pairs - `test_c6_the_pair_scoped_delta_check_refuses_it`); C6 needs the committed wrong state.
+        from app.core.money_boundary import MoneyBoundary
+
+        async def _passes(self, **_kwargs):
+            return None
+
+        monkeypatch.setattr(MoneyBoundary, "check_payment_delta", _passes)
     return calls
+
+
+@pytest.mark.asyncio
+async def test_c6_the_pair_scoped_delta_check_refuses_it(db_session, monkeypatch) -> None:
+    """027 stage 2 (anti-vacuum of the delta check over the operation's own rows): C6 without the bypass is refused
+    inside its transaction, `PAYMENT_DELTA_DRIFT`, and writes nothing."""
+    from tests.conftest import TestingSessionLocal as factory
+
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("c", "a", "100")])
+    _control_the_router(monkeypatch, triangle, forced=["a", "b", "c"])
+    calls = _collapse_the_route(monkeypatch, triangle, bypass_delta=False)
+    with pytest.raises(Exception) as refused:
+        await _pay(factory, triangle, sender="a", receiver="c", amount=Decimal("5"))
+    assert sorted(calls) == [("a", "b"), ("b", "c")], calls
+    assert "PAYMENT_DELTA_DRIFT" in repr(getattr(refused.value, "details", None)) + repr(refused.value), refused.value
+    assert await _edges(factory, triangle) == {}
 
 
 @pytest.mark.asyncio

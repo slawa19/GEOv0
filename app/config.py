@@ -82,28 +82,27 @@ def _require_postgresql_database_url(value: str) -> None:
         )
 
 
-#: The only transaction isolation the application runs PostgreSQL at (2026-09-25, programme 019 P1-A).
-REQUIRED_POSTGRES_ISOLATION_LEVEL = "SERIALIZABLE"
+#: The only transaction isolation the application runs PostgreSQL at: READ COMMITTED since 027 stage 2
+#: (`T2704`, 2026-10-03); SERIALIZABLE from 2026-09-25 (programme 019 P1-A) until then.
+REQUIRED_POSTGRES_ISOLATION_LEVEL = "READ COMMITTED"
 
 
-def _require_serializable_isolation(value: str) -> str:
-    """Refuse, at settings construction, any `DB_POSTGRES_ISOLATION_LEVEL` other than SERIALIZABLE.
+def _require_read_committed_isolation(value: str) -> str:
+    """Refuse, at settings construction, any `DB_POSTGRES_ISOLATION_LEVEL` other than READ COMMITTED.
 
-    Returns the canonical spelling. Several trust-limit writers are correct only at SERIALIZABLE: trust
-    decay and the trust-line reductions (simulator trustline update, creditor PATCH) read debt without
-    row locks and rely on SERIALIZABLE aborting the read-write dependency cycle with a payment; trust
-    growth never reads debt - it reads and rewrites the same trust-line row, and a concurrent raise is
-    stopped by the concurrent-update serialization failure (which REPEATABLE READ would also give).
-    Below SERIALIZABLE the first two schedules commit a trust limit under the debt it secures.
+    Returns the canonical spelling. The money writers lock the lines of every pair they check `FOR UPDATE` and
+    read after the lock (027 stage 2, `app/core/money_boundary.py`); that holds only if a read after a lock wait
+    sees what the holder committed. REPEATABLE READ and SERIALIZABLE take their snapshot before the wait - a
+    payment reading a fresh pair's opposite debt as absent writes the second direction - and SSI does not cover
+    a READ COMMITTED partner, so a mixed load is not serializable either.
     """
     normalised = " ".join(str(value or "").split()).upper()
     if normalised != REQUIRED_POSTGRES_ISOLATION_LEVEL:
         raise RuntimeError(
             f"DB_POSTGRES_ISOLATION_LEVEL is {value!r}; the application runs PostgreSQL at "
-            f"{REQUIRED_POSTGRES_ISOLATION_LEVEL} only. Trust decay, trust growth and trust-line "
-            "reductions read debt without row locks and rely on SERIALIZABLE to abort a concurrent "
-            "payment; a lower level lets a trust limit fall under the debt it secures. Unset the "
-            "setting or set it to SERIALIZABLE."
+            f"{REQUIRED_POSTGRES_ISOLATION_LEVEL} only. The money writers read after their row locks; a "
+            "snapshot taken before the lock wait (REPEATABLE READ, SERIALIZABLE) reads a debt the lock "
+            "holder has since changed. Unset the setting or set it to READ COMMITTED."
         )
     return REQUIRED_POSTGRES_ISOLATION_LEVEL
 
@@ -148,9 +147,9 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT_SECONDS: int = 30
     DB_POOL_RECYCLE_SECONDS: int = 1800
 
-    # Database transaction isolation. SERIALIZABLE ONLY (2026-09-25, programme 019 P1-A): any other
-    # value is refused at construction (`_require_serializable_isolation`). The name is kept so that
-    # deployments which set it to SERIALIZABLE keep starting; it is no longer a choice.
+    # Database transaction isolation. READ COMMITTED ONLY (027 stage 2, 2026-10-03; SERIALIZABLE only from
+    # 2026-09-25, 019 P1-A): any other value is refused at construction (`_require_read_committed_isolation`).
+    # The name is kept; it is no longer a choice.
     DB_POSTGRES_ISOLATION_LEVEL: str = REQUIRED_POSTGRES_ISOLATION_LEVEL
 
     # Redis
@@ -418,7 +417,7 @@ class Settings(BaseSettings):
         # Runs on every Settings() instantiation (including module-level `settings = Settings()`).
         self._resolve_environment_alias()
         _require_postgresql_database_url(self.DATABASE_URL)
-        self.DB_POSTGRES_ISOLATION_LEVEL = _require_serializable_isolation(
+        self.DB_POSTGRES_ISOLATION_LEVEL = _require_read_committed_isolation(
             self.DB_POSTGRES_ISOLATION_LEVEL
         )
         self._guardrail_default_secrets()

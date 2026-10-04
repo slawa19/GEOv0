@@ -7,12 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
 from sqlalchemy import bindparam, select, and_, text
-from sqlalchemy.ext.asyncio import (
-    AsyncConnection,
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -23,7 +18,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
-from app.core.money_boundary import IsolationNotSerializable, MoneyBoundary
+from app.core.money_boundary import IsolationNotReadCommitted, MoneyBoundary
 from app.core.invariants import InvariantChecker
 from app.core.ledger.book import Book, ClearingReduction, operation_for
 from app.db.journal_tables import CLEARING_INTENT_ENCODING_VERSION
@@ -180,9 +175,11 @@ class _ClearingAttemptConflict(Exception):
 class ClearingService:
     #: The v2 occurrence being executed (`execute_occurrence`); None outside it, and then the boundary refuses
     #: (024 `T2417`: execution without an occurrence is removed). Instance state on
-    #: purpose, like `self.session` during the interlock: every replay resolver reads it, so no path of the
+    #: purpose: every replay resolver reads it, so no path of the
     #: boundary can drop the descriptor the way a forgotten keyword would.
     _occurrence: ClearingOccurrence | None = None
+    #: The cycle's lines this attempt locked; its consent is read from them only (027 stage 2, §15 P1).
+    _locked_lines: list | None = None
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -233,13 +230,9 @@ class ClearingService:
         THE READ IS `FOR SHARE` (019 stage 5, `T1907`, `FORK-7`), in every attempt, and the row lock is
         held through the clearing's commit. That is what makes the cutoff observable: a deactivating
         `PATCH` or the reaction setting a hold `UPDATE`s this row, so it waits for a clearing that has
-        already read `active`; and a clearing that reads after such an update committed meets a row
-        changed since its snapshot - 40001 - and its retry (`_run_attempts`) reads the stop afresh and
-        refuses. Until stage 5 this was a plain read bound by the equivalent owner lock the PATCH also
-        took; since stage 5 (`T1909`) the PATCH takes no advisory lock, and SERIALIZABLE alone does not
-        give this order of completion (it may serialise "the clearing read `active` -> the PATCH answered
-        -> the clearing committed"). Order: the clearing's exclusive equivalent lock -> this row -> the
-        debt rows, the same as the payment's shared lock -> row -> debts.
+        already read `active`; and a clearing that reads while such an update is in flight waits for it
+        and, under READ COMMITTED (027 stage 2), reads the stop and refuses. Order: the cycle's pair lines
+        -> this row -> the debt rows, the same as the payment's.
         """
         try:
             await MoneyBoundary(self.session).refuse_inactive_equivalents(equivalent_ids)
@@ -311,75 +304,6 @@ class ClearingService:
         if surface_result:
             task.result()
         return caller_cancellation
-
-    @classmethod
-    async def _rollback_before_interlock(cls, session: AsyncSession) -> None:
-        rollback_task = asyncio.create_task(session.rollback())
-        caller_cancellation = await cls._drain_task(rollback_task)
-        if caller_cancellation is not None:
-            raise caller_cancellation
-
-    @classmethod
-    async def _close_checked_out_connection(
-        cls,
-        connection: AsyncConnection,
-    ) -> asyncio.CancelledError | None:
-        """Return a pre-lock connection to its pool despite caller cancellation."""
-
-        async def _cleanup() -> None:
-            try:
-                await connection.close()
-            except BaseException:
-                # No advisory lock exists at this stage, but a connection whose
-                # close status is unknown must still not return to the pool.
-                await connection.invalidate()
-                await connection.close()
-
-        return await cls._drain_task(asyncio.create_task(_cleanup()))
-
-    @classmethod
-    async def _release_interlock_session(
-        cls,
-        work_session: AsyncSession,
-        connection: AsyncConnection,
-        equivalent_id: uuid.UUID,
-        *,
-        lock_was_acquired: bool,
-    ) -> asyncio.CancelledError | None:
-        """Rollback work, release the session lock, then return the connection."""
-
-        async def _cleanup() -> None:
-            try:
-                await work_session.rollback()
-                unlocked = await MoneyBoundary(
-                    work_session
-                ).release_exclusive_equivalent_session_lock(equivalent_id)
-                if lock_was_acquired and not unlocked:
-                    logger.warning(
-                        "event=clearing.interlock_unlock_unconfirmed"
-                    )
-                    await connection.invalidate()
-                    return
-                remaining = await work_session.scalar(
-                    text(
-                        "SELECT count(*) FROM pg_locks "
-                        "WHERE pid = pg_backend_pid() "
-                        "AND locktype = 'advisory'"
-                    )
-                )
-                if int(remaining or 0) != 0:
-                    raise RuntimeError("Clearing connection retained advisory locks")
-            except BaseException:
-                # Never return a connection with uncertain session-lock state.
-                logger.exception("event=clearing.interlock_cleanup_invalidated")
-                await connection.invalidate()
-            finally:
-                try:
-                    await work_session.close()
-                finally:
-                    await connection.close()
-
-        return await cls._drain_task(asyncio.create_task(_cleanup()))
 
     @staticmethod
     async def _read_committed_execution_amount(
@@ -458,8 +382,7 @@ class ClearingService:
     def _postgres_error_codes(exc: BaseException) -> set[str]:
         """Codes carried by THIS failure: `orig` / `__cause__` only, never `__context__` (`app/db/sqlstate.py`).
 
-        The consumers are `_is_retryable_concurrency_error` and the `55P03` interlock branch; each
-        receives the `DBAPIError` itself. That a real `55P03` and a real `40001` are still found through
+        The consumer is `_is_retryable_concurrency_error`; it receives the `DBAPIError` itself. That a real `55P03` and a real `40001` are still found through
         the deliberate walk is measured by
         `tests/integration/test_p015_t1525_classification_reads_deliberate_wrapping_only_postgres.py`.
         """
@@ -1042,6 +965,11 @@ class ClearingService:
 
         from_ids = {p[0] for p in required_pairs}
         to_ids = {p[1] for p in required_pairs}
+        if self._locked_lines is not None:  # inside an attempt: ONLY the locked rows (027 stage 2, §15 P1)
+            tl_by_pair = {(r.from_participant_id, r.to_participant_id): r for r in self._locked_lines
+                          if r.equivalent_id == equivalent_id and r.status in _CLEARABLE_TRUSTLINE_STATUSES}
+            return all(pair in tl_by_pair and self._policy_flag(tl_by_pair[pair].policy, "auto_clearing", default=True)
+                       for pair in required_pairs)
 
         trustlines = (
             (
@@ -1562,12 +1490,10 @@ class ClearingService:
         Runs `_execute_clearing_with_amount` and, when an attempt meets a transaction-level conflict
         (40001/40P01) that no committed occurrence answers, runs the WHOLE execution again in a new
         transaction: the attempt has already been rolled back, its ORM state is dropped here
-        (`expunge_all`), and the next attempt re-reads the committed-occurrence row, the stop/hold, the
-        cycle rows `FOR UPDATE` and their amounts - never a savepoint rollback, which would keep the
-        stale SERIALIZABLE snapshot. On the PostgreSQL interlock path the attempts share the pinned
-        connection and its EXCLUSIVE equivalent session lock (019 stage 5, `T1909`), held from before the
-        first attempt's snapshot through the last attempt's commit resolution; each attempt is still its
-        own transaction and snapshot.
+        (`expunge_all`), and the next attempt re-reads the committed-occurrence row, the cycle's lines and
+        rows `FOR UPDATE`, the stop/hold and the amounts - never a savepoint rollback: a deadlock aborts the
+        whole transaction. Since 027 stage 2 there is no equivalent lock and no pinned connection: the attempts
+        run on the caller's session, each its own transaction.
 
         THE BUDGET is the one a payment has (no new setting): at most `COMMIT_RETRY_ATTEMPTS` attempts,
         with the same exponential backoff and jitter (`COMMIT_RETRY_BASE_DELAY_MS`,
@@ -1624,8 +1550,8 @@ class ClearingService:
     ) -> Decimal | None:
         """Execute one plan occurrence with its DECLARED amount (programme 023 slice (b), decisions 5-6).
 
-        The shared boundary `execute_clearing_with_amount`, not a copy of it: the exclusive equivalent session
-        lock, the retry owner `_run_attempts`, the stop/hold read `FOR SHARE`, the authoritative perimeter and
+        The shared boundary `execute_clearing_with_amount`, not a copy of it: the line locks of the
+        cycle's pairs (027 stage 2), the retry owner `_run_attempts`, the stop/hold read `FOR SHARE`, the authoritative perimeter and
         consent checks on the rows locked `FOR UPDATE`, the commit resolver and `ClearingCommittedAfterCancellation`
         all run unchanged. What the occurrence changes: the tx id is its occurrence id; a committed occurrence
         with that id is a replay only if its recorded descriptor is this one (else `ClearingOccurrenceRefused`);
@@ -1655,12 +1581,11 @@ class ClearingService:
         *,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
-        """Execute one clearing under the EXCLUSIVE equivalent lock, with its retry owner (019 stage 5, `T1909`).
+        """Execute one clearing with its retry owner, on the caller's session (027 stage 2, `T2704`).
 
-        The exclusive lock is taken on a pinned connection BEFORE the authoritative snapshot - it waits for
-        the payments, staged phases and injects holding the lock shared - then the acquisition transaction
-        is rolled back so the first attempt's snapshot is newer than everything it waited for, and the lock is
-        held through every attempt and released (or the connection invalidated) at the end.
+        No equivalent lock and no pinned connection any more (019 `T1909`'s exclusive session lock and its
+        interlock are gone): each attempt locks the lines of the cycle's pairs, reads the stop/hold, locks the
+        cycle's debt rows - in that order - and re-reads everything it decides on after those locks.
 
         `allowed_participant_pids` is the run perimeter (2026-08-22 / p010, `F-010-3`).  It is
         carried through EVERY path into `_execute_clearing_with_amount` on purpose: a single
@@ -1681,194 +1606,16 @@ class ClearingService:
             await self._raise_unexpected_execution(
                 RuntimeError("Clearing cycle escaped participant scope: empty perimeter")
             )
-
-        bind = getattr(self.session, "bind", None)
-        if isinstance(bind, AsyncConnection):
-            # PostgreSQL clearing owns a one-connection interlock boundary. An
-            # externally owned connection cannot be returned before the pinned
-            # work connection is acquired, so accepting it could exhaust even
-            # a valid single-connection pool.
-            await self._rollback_before_interlock(self.session)
-            logger.error("event=clearing.external_connection_bind_unsupported")
-            raise GeoException() from RuntimeError(
-                "PostgreSQL clearing requires an engine-bound AsyncSession"
-            )
-        if not isinstance(bind, AsyncEngine):
-            await self._raise_unexpected_execution(GeoException())
-        lock_bind = bind
-
-        debt_ids = list(occurrence.debt_ids)
-        execution_tx_id = occurrence.occurrence_id
-        try:
-            preflight_debts = (
-                (
-                    await self.session.execute(
-                        select(Debt).where(Debt.id.in_(debt_ids))
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        except asyncio.CancelledError:
-            await self._rollback_before_interlock(self.session)
-            raise
-        except Exception as exc:
-            await self._raise_unexpected_execution(exc)
-
-        if len(preflight_debts) != len(debt_ids):
-            try:
-                replay_amount = await self._reconcile_committed_execution(
-                    execution_tx_id,
-                    allowed_participant_pids=allowed_participant_pids,
-                )
-            except Exception as exc:
-                await self._raise_unexpected_execution(exc)
-            if replay_amount is not None:
-                return replay_amount
-            return await self._run_attempts(
-                cycle,
-                allowed_participant_ids=allowed_ids,
-                allowed_participant_pids=allowed_participant_pids,
-            )
-
-        equivalent_ids = {debt.equivalent_id for debt in preflight_debts}
-        if len(equivalent_ids) != 1:
-            await self._raise_unexpected_execution(
-                GeoException("Clearing cycle spans multiple equivalents")
-            )
-        equivalent_id = next(iter(equivalent_ids))
-
-        try:
-            caller_connection = await self.session.connection()
-            isolation_level = await caller_connection.get_isolation_level()
-        except asyncio.CancelledError:
-            await self._rollback_before_interlock(self.session)
-            raise
-        except Exception as exc:
-            await self._raise_unexpected_execution(exc)
-
-        try:
-            await self._rollback_before_interlock(self.session)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await self._raise_unexpected_execution(exc)
-
-        from app.config import settings
-
-        connection_budget_s = max(
-            0.001,
-            min(
-                float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10),
-                float(settings.COMMIT_TIMEOUT_SECONDS or 5),
-            ),
+        return await self._run_attempts(
+            cycle,
+            allowed_participant_ids=allowed_ids,
+            allowed_participant_pids=allowed_participant_pids,
         )
-        connection: AsyncConnection | None = None
-        try:
-            connection = await asyncio.wait_for(
-                lock_bind.connect(),
-                timeout=connection_budget_s,
-            )
-            connection = await connection.execution_options(
-                isolation_level=isolation_level,
-            )
-        except asyncio.TimeoutError as exc:
-            raise TimeoutException("Clearing interlock timed out") from exc
-        except asyncio.CancelledError as exc:
-            if connection is not None:
-                try:
-                    await self._close_checked_out_connection(connection)
-                except BaseException as cleanup_error:
-                    exc.add_note(
-                        "Clearing pre-lock connection cleanup failed: "
-                        f"{type(cleanup_error).__name__}: {cleanup_error}"
-                    )
-            raise
-        except Exception as exc:
-            if connection is not None:
-                await self._close_checked_out_connection(connection)
-            await self._raise_unexpected_execution(exc)
-
-        if connection is None:
-            await self._raise_unexpected_execution(GeoException())
-
-        work_session = AsyncSession(
-            bind=connection,
-            expire_on_commit=False,
-            autoflush=False,
-        )
-        lock_was_acquired = False
-        result: Decimal | None = None
-        result_available = False
-        primary_error: BaseException | None = None
-        original_session = self.session
-        try:
-            try:
-                await MoneyBoundary(
-                    work_session
-                ).acquire_exclusive_equivalent_session_lock(equivalent_id)
-                lock_was_acquired = True
-            except Exception as exc:
-                if "55P03" in self._postgres_error_codes(exc):
-                    raise TimeoutException("Clearing interlock timed out") from exc
-                logger.exception("event=clearing.interlock_acquire_failed")
-                raise GeoException() from exc
-
-            # The session lock survives this rollback, while the next statement
-            # gets a snapshot newer than the payment holder we may have awaited.
-            await self._rollback_before_interlock(work_session)
-            self.session = work_session
-            try:
-                # 019 stage 5 (`T1907`): the retry owner runs every attempt on this pinned connection.
-                result = await self._run_attempts(
-                    cycle,
-                    interlocked_equivalent_id=equivalent_id,
-                    allowed_participant_ids=allowed_ids,
-                    allowed_participant_pids=allowed_participant_pids,
-                )
-                result_available = True
-            finally:
-                self.session = original_session
-        except BaseException as exc:
-            primary_error = exc
-
-        try:
-            cleanup_cancellation = await self._release_interlock_session(
-                work_session,
-                connection,
-                equivalent_id,
-                lock_was_acquired=lock_was_acquired,
-            )
-        except asyncio.CancelledError as exc:
-            # The production helper drains cleanup and returns cancellation.
-            # Keep the outer boundary correct if cancellation is delivered in
-            # the final await after cleanup has already become terminal.
-            cleanup_cancellation = exc
-        except BaseException as cleanup_error:
-            if primary_error is not None:
-                primary_error.add_note(
-                    "Clearing interlock cleanup also failed: "
-                    f"{type(cleanup_error).__name__}: {cleanup_error}"
-                )
-                raise primary_error
-            raise
-
-        if primary_error is not None:
-            raise primary_error
-        if cleanup_cancellation is not None:
-            if result_available and result is not None:
-                raise ClearingCommittedAfterCancellation(
-                    tx_id=execution_tx_id,
-                    cleared_amount=result,
-                ) from cleanup_cancellation
-            raise cleanup_cancellation
-        return result
 
     async def _execute_clearing_with_amount(
         self,
         cycle: List[Dict],
         *,
-        interlocked_equivalent_id: uuid.UUID | None = None,
         allowed_participant_ids: "set[uuid.UUID] | None" = None,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
@@ -1893,6 +1640,7 @@ class ClearingService:
 
         debt_ids = list(occurrence.debt_ids)
         execution_tx_id = occurrence.occurrence_id
+        self._locked_lines = None
         try:
             replay_amount = await self._committed_execution_amount(
                 execution_tx_id, allowed_participant_pids=allowed_participant_pids
@@ -1905,12 +1653,12 @@ class ClearingService:
             await self._rollback_skipped_execution()
             return replay_amount
 
-        # 019 stage 5 (`T1907`, `FORK-2`): the re-read of the cycle below holds against concurrent
-        # money writers only at SERIALIZABLE. Checked on THIS attempt's transaction, before its first
-        # lock and its first write; the clearing ends the attempt, as it ends every attempt.
+        # 027 stage 2 (`T2704`): the re-read of the cycle below holds against concurrent money writers only at
+        # READ COMMITTED behind the line locks. Checked on THIS attempt's transaction, before its first lock and
+        # its first write; the clearing ends the attempt, as it ends every attempt.
         try:
-            await MoneyBoundary.require_serializable(self.session, writer="clearing")
-        except IsolationNotSerializable:
+            await MoneyBoundary.require_read_committed(self.session, writer="clearing")
+        except IsolationNotReadCommitted:
             await self._rollback_skipped_execution()
             raise
         except Exception as exc:
@@ -1918,17 +1666,37 @@ class ClearingService:
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
 
-        if interlocked_equivalent_id is not None:
-            # T1544, the binding read, `FOR SHARE` through the commit (see the method). After the
-            # committed-execution shortcut above (an already-durable clearing stays reported), before
-            # the Debt rows are locked and before any new execution work.
-            await self._refuse_if_equivalent_inactive({interlocked_equivalent_id})
+        # THE LOCK ORDER (027 stage 2): every non-closed line of every pair of the cycle `FOR UPDATE` (one
+        # statement, `trust_lines.id` order) BEFORE any amount of those pairs is read - the edges' identity
+        # columns read first are immutable; then the stop/hold `FOR SHARE`; then the cycle's debt rows
+        # `FOR UPDATE` (their `version` is checked by `Book`). The lines a requested close settles
+        # (`book.py`, `_settle_requested_closes`) are among those held.
+        try:
+            edges = (
+                await self.session.execute(
+                    select(Debt.equivalent_id, Debt.debtor_id, Debt.creditor_id).where(Debt.id.in_(debt_ids))
+                )
+            ).all()
+            self._locked_lines = await MoneyBoundary(self.session).lock_pair_lines(
+                edges, timeout_ms=MoneyBoundary.lock_budget_ms())
+        except Exception as exc:
+            if "55P03" in self._postgres_error_codes(exc):  # the bounded wait (019's interlock budget, restored)
+                await self._rollback_skipped_execution()
+                raise TimeoutException("Clearing lock timed out") from exc
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
+
+        # T1544, the binding read, `FOR SHARE` through the commit (see the method). After the
+        # committed-execution shortcut above (an already-durable clearing stays reported), before
+        # the Debt rows are locked and before any new execution work.
+        await self._refuse_if_equivalent_inactive({row.equivalent_id for row in edges} or {occurrence.equivalent_id})
 
         try:
             debts = (
                 (
                     await self.session.execute(
-                        select(Debt).where(Debt.id.in_(debt_ids)).with_for_update()
+                        select(Debt).where(Debt.id.in_(debt_ids)).order_by(Debt.id).with_for_update()
                     )
                 )
                 .scalars()
@@ -1957,26 +1725,12 @@ class ClearingService:
             await self._rollback_skipped_execution()
             return None
 
-        if interlocked_equivalent_id is not None and any(
-            debt.equivalent_id != interlocked_equivalent_id for debt in debts
-        ):
-            await self._raise_unexpected_execution(
-                GeoException("Clearing cycle identity changed after interlock")
-            )
-
-        if interlocked_equivalent_id is None and debts:
-            # T1544, the path without an interlock (PostgreSQL fallbacks that never took the owner
-            # lock; until 017 stage 3 also SQLite): the equivalent is known only from the rows.
-            # Still before any mutation.
-            await self._refuse_if_equivalent_inactive({debt.equivalent_id for debt in debts})
-
         # 2026-08-22 / p010 (`F-010-3`).  The authoritative perimeter check, and the only
         # one: it stands on the rows just re-read under FOR UPDATE, so it cannot be fooled
         # by a cycle that changed between detection and execution, and it runs before the
         # amount is computed and before any side effect.
         #
-        # Not the preflight read: that snapshot is discarded when the original transaction
-        # rolls back and a separate interlock connection opens a new one.  Not the later
+        # Not the edges' identity read before the locks.  Not the later
         # `participant_ids` assembly either: by then several more queries have run.
         #
         # A violation is a fail-closed internal refusal, not a `None`.  `None` is the
@@ -2055,6 +1809,9 @@ class ClearingService:
         for d in debts:
             participant_ids.add(d.debtor_id)
             participant_ids.add(d.creditor_id)
+        # 027 stage 2: neutrality over the cycle's own pairs - its locked rows - never every debt of a
+        # participant, which a neighbour's commit on another pair changes under READ COMMITTED.
+        cycle_pairs = {p for d in debts for p in ((d.debtor_id, d.creditor_id), (d.creditor_id, d.debtor_id))}
 
         # FIX-025: enrich CLEARING transaction payload for traceability.
         try:
@@ -2138,7 +1895,7 @@ class ClearingService:
             positions_before: Dict[uuid.UUID, Decimal] = {}
             for pid in participant_ids:
                 positions_before[pid] = await checker._calculate_net_position(
-                    pid, debts[0].equivalent_id
+                    pid, debts[0].equivalent_id, pairs=cycle_pairs
                 )
         except Exception as exc:
             return await self._end_attempt_on_error(
@@ -2269,6 +2026,7 @@ class ClearingService:
                     list(participant_ids),
                     debts[0].equivalent_id,
                     positions_before,
+                    pairs=cycle_pairs,
                 )
 
                 # 4. Commit

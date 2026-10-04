@@ -16,7 +16,8 @@ EXPORTS AND THEIR IMPORTERS (`git grep -n p019_interlock_support -- tests/`):
   payment makes one through `PaymentService`. Since 025 `T2508.1` it also returns `occurrence`, the declared
   plan occurrence of that cycle (amount 30, `tests/p023_support.py::occurrence_of`): the schedules execute it
   through `ClearingService.execute_occurrence`, never the execution without an occurrence.
-* `_use_serializable(session)` - pins the session's transaction to SERIALIZABLE, asserts it, and
+* `_use_read_committed(session)` - pins the session's transaction to READ COMMITTED (the application level since
+  027 stage 2; SERIALIZABLE until then), asserts it, and
   returns the backend pid.
 * `_no_advisory_lock_is_held(caplog)` - no advisory lock is held on THIS database (T1537: `pg_locks`
   is the whole server), and clearing's cleanup did not invalidate its connection. Still meaningful after
@@ -35,10 +36,10 @@ from tests.debt_setup import debt_fixture_setup
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
 
 
-async def _use_serializable(session) -> int:
-    await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+async def _use_read_committed(session) -> int:
+    await session.connection(execution_options={"isolation_level": "READ COMMITTED"})
     isolation = (await session.execute(text("SHOW transaction_isolation"))).scalar_one()
-    assert str(isolation).lower() == "serializable"
+    assert str(isolation).lower() == "read committed"
     return int(await session.scalar(text("SELECT pg_backend_pid()")))
 
 

@@ -275,10 +275,10 @@ async def test_a_freeze_committed_between_routing_and_binding(db_session, monkey
             outcome = result.status
         except RoutingException as exc:
             outcome = f"refused {exc}"
-    assert seen and seen[0] == "serializable", seen
+    assert seen and seen[0] == "read committed", seen
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()
     retried = [r.getMessage() for r in caplog.records if "payment.attempt_retry" in r.getMessage()]
     require_target(not outcome.startswith("COMMITTED"),
                    f"after the freeze: {outcome}, attempts {len(seen)}, debts {[str(a) for a in left]}")
     # The mechanism, not only the outcome: the lock failed with 40001, the fresh attempt refused (re-routing).
-    assert [m for m in retried if "pgcode=40001" in m] and left == [Decimal("50")], (outcome, retried, left)
+    assert not retried and left == [Decimal("50")], (outcome, retried, left)  # 027: read after the lock, no 40001

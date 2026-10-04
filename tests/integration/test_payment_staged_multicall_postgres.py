@@ -1,5 +1,7 @@
 """The staged payment path: a caller-owned transaction with several payments, and the staged owner lock.
 
+027 STAGE 2 (`T2704`): the 2nd and 3rd tests (the shared staged lock, its `lock_timeout`) are REMOVED with it.
+
 019 STAGE 4 (`T1906`; manifest `t1901-manifest.md` 5.1). The first test of this module,
 `test_staged_multicall_batches_do_not_exhaust_retry_on_retained_locks_postgres`, is DROPPED: it seeded four
 durable `PREPARED` payments with hand-written `PrepareLock` rows (CHECK `030` refuses the seed) and staged
@@ -24,14 +26,12 @@ disjoint equivalent is not serialised. The third test (the caller's `lock_timeou
 assertions, on the renamed entry.
 """
 
-import asyncio
 import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
-from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
 from app.core.payments.service import PaymentService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
@@ -165,7 +165,7 @@ async def test_a_staged_batch_writes_one_payment_audit_row_per_committed_payment
 
     async with TestingSessionLocal() as session:
         service = PaymentService(session)
-        await service.acquire_shared_equivalent_locks([seed["equivalent_code"]])
+        await service.lock_staged_lines([seed["equivalent_code"]], {seed[f"participant_{x}_id"] for x in "abc"})
         staged = []
         for sender_id, to_pid, amount, tx_id in batch:
             staged.append(
@@ -229,195 +229,3 @@ async def test_a_staged_batch_writes_one_payment_audit_row_per_committed_payment
     }, debts
     assert len(limits_before) == 2, limits_before
     assert limits_after == limits_before
-
-
-def _pg_key(key: int) -> int:
-    """A signed int4 key as `pg_locks` shows it (an `oid`, i.e. unsigned 32-bit)."""
-
-    return key & 0xFFFFFFFF
-
-
-async def _equivalent_lock_rows(observer, equivalent_ids) -> set[tuple[int, uuid.UUID, str, bool]]:
-    """(pid, equivalent, mode, granted) of every advisory lock of these equivalents on THIS database."""
-
-    by_key = {_pg_key(MoneyBoundary._equivalent_owner_lock_key(eq)): eq for eq in equivalent_ids}
-    rows = (
-        await observer.execute(
-            text(
-                "SELECT pid, objid::bigint, mode, granted FROM pg_locks "
-                "WHERE locktype = 'advisory' AND objsubid = 2 AND classid::bigint = :namespace "
-                "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
-            ),
-            {"namespace": _pg_key(_EQUIVALENT_OWNER_LOCK_NAMESPACE)},
-        )
-    ).all()
-    await observer.rollback()
-    return {
-        (int(pid), by_key[int(objid)], str(mode), bool(granted))
-        for pid, objid, mode, granted in rows
-        if int(objid) in by_key
-    }
-
-
-async def _blocking_pids(observer, pid: int) -> set[int]:
-    blockers = await observer.scalar(text("SELECT pg_blocking_pids(:pid)"), {"pid": pid})
-    await observer.rollback()
-    return {int(p) for p in (blockers or [])}
-
-
-@pytest.mark.asyncio
-async def test_staged_shared_sets_do_not_wait_for_each_other_and_hold_off_a_clearing_exclusive_lock_postgres(
-    db_session,
-) -> None:
-    """Two staged batches over {b, a} and {a, b}; a clearing's exclusive lock on `a`; a disjoint equivalent.
-
-    MECHANISM, read from `pg_locks`, not from task timing: after both staged entries returned, BOTH backends
-    hold a GRANTED `ShareLock` on BOTH equivalents at the same time. The exclusive request on `a` then
-    appears as a NOT granted `ExclusiveLock` whose `pg_blocking_pids` are exactly the two staged holders,
-    and it is still pending while they hold; an exclusive request on a disjoint equivalent is granted at
-    once. RESULT: when both staged transactions end, the exclusive lock is granted and its release is
-    confirmed.
-
-    MUTATIONS: the shared entry taking `pg_advisory_xact_lock` (exclusive) - the second batch waits, red at
-    "the second staged batch waited"; the clearing's lock taken shared - it does not wait, red at "the
-    exclusive request did not wait".
-    """
-
-    _require_postgres(db_session)
-
-    from tests.conftest import TestingSessionLocal
-
-    equivalent_a = uuid.uuid4()
-    equivalent_b = uuid.uuid4()
-    independent_equivalent = uuid.uuid4()
-    exclusive_task = None
-
-    async with (
-        TestingSessionLocal() as first_session,
-        TestingSessionLocal() as second_session,
-        TestingSessionLocal() as clearing_session,
-        TestingSessionLocal() as independent_session,
-        TestingSessionLocal() as observer,
-    ):
-        pids = {}
-        for name, session in (
-            ("first", first_session),
-            ("second", second_session),
-            ("clearing", clearing_session),
-            ("independent", independent_session),
-        ):
-            pids[name] = int(await session.scalar(text("SELECT pg_backend_pid()")))
-        clearing_boundary = MoneyBoundary(clearing_session)
-        clearing_boundary._advisory_lock_budget_s = 30
-        independent_boundary = MoneyBoundary(independent_session)
-        try:
-            await asyncio.wait_for(
-                MoneyBoundary(first_session).acquire_shared_equivalent_locks([equivalent_b, equivalent_a]),
-                timeout=5.0,
-            )
-            try:
-                await asyncio.wait_for(
-                    MoneyBoundary(second_session).acquire_shared_equivalent_locks([equivalent_a, equivalent_b]),
-                    timeout=3.0,
-                )
-            except asyncio.TimeoutError:
-                pytest.fail("the second staged batch waited for the first: shared holders must not exclude each other")
-
-            held = await _equivalent_lock_rows(observer, [equivalent_a, equivalent_b])
-            assert held == {
-                (pids[who], eq, "ShareLock", True)
-                for who in ("first", "second")
-                for eq in (equivalent_a, equivalent_b)
-            }, held
-
-            exclusive_task = asyncio.create_task(
-                clearing_boundary.acquire_exclusive_equivalent_session_lock(equivalent_a)
-            )
-            waiting = False
-            for _ in range(250):
-                rows = await _equivalent_lock_rows(observer, [equivalent_a])
-                if (pids["clearing"], equivalent_a, "ExclusiveLock", False) in rows:
-                    waiting = True
-                    break
-                if exclusive_task.done():
-                    break
-                await asyncio.sleep(0.02)
-            assert waiting, "the exclusive request did not wait for the staged shared holders"
-            assert await _blocking_pids(observer, pids["clearing"]) == {pids["first"], pids["second"]}
-            assert not exclusive_task.done()
-
-            # A disjoint equivalent is not serialised by this set.
-            await asyncio.wait_for(
-                independent_boundary.acquire_exclusive_equivalent_session_lock(independent_equivalent),
-                timeout=5.0,
-            )
-            assert await independent_boundary.release_exclusive_equivalent_session_lock(independent_equivalent)
-
-            await first_session.rollback()
-            await asyncio.sleep(0.2)
-            assert not exclusive_task.done(), "the exclusive lock was granted while a shared holder remained"
-            await second_session.rollback()
-            await asyncio.wait_for(exclusive_task, timeout=5.0)
-            rows = await _equivalent_lock_rows(observer, [equivalent_a, equivalent_b])
-            assert rows == {(pids["clearing"], equivalent_a, "ExclusiveLock", True)}, rows
-            assert await clearing_boundary.release_exclusive_equivalent_session_lock(equivalent_a) is True
-            assert await _equivalent_lock_rows(observer, [equivalent_a, equivalent_b]) == set()
-        finally:
-            if exclusive_task is not None and not exclusive_task.done():
-                exclusive_task.cancel()
-                await asyncio.gather(exclusive_task, return_exceptions=True)
-            # A session-level lock outlives a rollback, and a rollback hands the connection back to the
-            # tier pool: the two connections that took one are closed, never pooled (a failure path may have
-            # left the lock on them).
-            for session in (clearing_session, independent_session):
-                await (await session.connection()).invalidate()
-            for session in (first_session, second_session, clearing_session, independent_session):
-                await session.rollback()
-
-
-@pytest.mark.asyncio
-async def test_staged_owner_restores_outer_transaction_lock_timeout_postgres(
-    db_session,
-) -> None:
-    _require_postgres(db_session)
-
-    from tests.conftest import TestingSessionLocal
-
-    unrelated_lock_key = int.from_bytes(uuid.uuid4().bytes[:8], "big", signed=True)
-    blocked_task = None
-
-    async with (
-        TestingSessionLocal() as holder_session,
-        TestingSessionLocal() as staged_session,
-    ):
-        await holder_session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": unrelated_lock_key},
-        )
-        before = await staged_session.scalar(text("SHOW lock_timeout"))
-        assert before == "0"
-
-        engine = MoneyBoundary(staged_session)
-        engine._advisory_lock_budget_s = 0.05
-
-        try:
-            await engine.acquire_shared_equivalent_locks([uuid.uuid4()])
-            after = await staged_session.scalar(text("SHOW lock_timeout"))
-            assert after == before
-
-            blocked_task = asyncio.create_task(
-                staged_session.execute(
-                    text("SELECT pg_advisory_xact_lock(:key)"),
-                    {"key": unrelated_lock_key},
-                )
-            )
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(blocked_task), timeout=0.20)
-            assert not blocked_task.done()
-        finally:
-            if blocked_task is not None and not blocked_task.done():
-                blocked_task.cancel()
-            if blocked_task is not None:
-                await asyncio.gather(blocked_task, return_exceptions=True)
-            await staged_session.rollback()
-            await holder_session.rollback()

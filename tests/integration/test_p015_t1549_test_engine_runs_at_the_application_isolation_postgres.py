@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
@@ -30,23 +28,11 @@ def _normalised(level: str) -> str:
 
 @pytest.mark.asyncio
 async def test_the_shared_test_engine_connects_at_the_application_isolation(db_session) -> None:
-    from tests.conftest import TEST_DATABASE_URL, TestingSessionLocal, engine
+    from tests.conftest import TestingSessionLocal, engine
 
     expected = _normalised(settings.DB_POSTGRES_ISOLATION_LEVEL)
 
-    # NON-VACUITY: an engine that asks for nothing gets the server default, and it must differ from the
-    # application's level, or the assertions below cannot tell a configured engine from a bare one.
-    bare = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
-    try:
-        async with bare.connect() as conn:
-            server_default = _normalised((await conn.execute(text("SHOW transaction_isolation"))).scalar_one())
-    finally:
-        await bare.dispose()
-    assert server_default != expected, (
-        f"stand: the server default ({server_default!r}) already equals the application's level; "
-        f"this guard cannot detect a test engine that asks for nothing"
-    )
-
+    # 027 stage 2: the app level IS the server default; the test below (the setting moved) holds that half now.
     async with TestingSessionLocal() as session:
         fresh = _normalised((await session.execute(text("SHOW transaction_isolation"))).scalar_one())
     per_test = _normalised((await db_session.execute(text("SHOW transaction_isolation"))).scalar_one())

@@ -149,7 +149,7 @@ def test_a_postgresql_asyncpg_url_is_accepted_verbatim(monkeypatch) -> None:
     assert Settings(_env_file=None, ENV="dev").DATABASE_URL == url
 
 
-# DB_POSTGRES_ISOLATION_LEVEL: SERIALIZABLE ONLY (2026-09-25, programme 019 fix-delta P1-A).
+# DB_POSTGRES_ISOLATION_LEVEL: READ COMMITTED ONLY since 027 stage 2 (`T2704`); the text below is the 019 history.
 #
 # Until this fence the setting was free. Trust decay, trust growth against a concurrent raise and the
 # trust-line reductions (simulator update, creditor PATCH) read debt without row locks and are correct
@@ -161,45 +161,45 @@ def test_a_postgresql_asyncpg_url_is_accepted_verbatim(monkeypatch) -> None:
 @pytest.mark.parametrize(
     "level",
     [
-        "READ COMMITTED",
+        "SERIALIZABLE",
         "REPEATABLE READ",
         "READ UNCOMMITTED",
         "AUTOCOMMIT",
-        "read committed",
+        "serializable",
         "  Repeatable Read  ",
         "READ_COMMITTED",
         "",
         "   ",
     ],
 )
-def test_every_postgres_isolation_level_but_serializable_is_refused(level: str) -> None:
+def test_every_postgres_isolation_level_but_read_committed_is_refused(level: str) -> None:
     from app.config import Settings
 
     with pytest.raises(RuntimeError, match=r"DB_POSTGRES_ISOLATION_LEVEL") as refused:
         Settings(_env_file=None, ENV="dev", DB_POSTGRES_ISOLATION_LEVEL=level)
 
     message = str(refused.value)
-    assert "SERIALIZABLE" in message
+    assert "READ COMMITTED" in message
     assert repr(level) in message
 
 
 def test_an_isolation_level_from_the_environment_is_refused_too(monkeypatch) -> None:
     from app.config import Settings
 
-    monkeypatch.setenv("DB_POSTGRES_ISOLATION_LEVEL", "READ COMMITTED")
+    monkeypatch.setenv("DB_POSTGRES_ISOLATION_LEVEL", "SERIALIZABLE")
 
     with pytest.raises(RuntimeError, match=r"DB_POSTGRES_ISOLATION_LEVEL"):
         Settings(_env_file=None, ENV="dev")
 
 
-@pytest.mark.parametrize("level", ["SERIALIZABLE", "serializable", "  Serializable  ", None])
-def test_serializable_is_accepted_and_normalised(level: str | None) -> None:
-    """Counter-check: the refusal above is not a refusal of everything; the default is SERIALIZABLE."""
+@pytest.mark.parametrize("level", ["READ COMMITTED", "read committed", "  Read  Committed  ", None])
+def test_read_committed_is_accepted_and_normalised(level: str | None) -> None:
+    """Counter-check: the refusal above is not a refusal of everything; the default is READ COMMITTED."""
     from app.config import Settings
 
     overrides = {} if level is None else {"DB_POSTGRES_ISOLATION_LEVEL": level}
 
-    assert Settings(_env_file=None, ENV="dev", **overrides).DB_POSTGRES_ISOLATION_LEVEL == "SERIALIZABLE"
+    assert Settings(_env_file=None, ENV="dev", **overrides).DB_POSTGRES_ISOLATION_LEVEL == "READ COMMITTED"
 
 
 @pytest.mark.parametrize(
@@ -530,4 +530,3 @@ def test_non_dev_accepts_nonrepeating_secret_at_32_character_boundary(field: str
     configured = Settings(_env_file=None, ENV="prod", **values)
 
     assert getattr(configured, field) == boundary_secret
-

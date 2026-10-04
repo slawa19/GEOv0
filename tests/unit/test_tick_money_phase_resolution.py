@@ -309,7 +309,7 @@ def _run_with_phase(
     return run, phase, emitter, committed_effect
 
 
-async def _no_owner_locks(self, equivalent_codes) -> None:
+async def _no_owner_locks(self, equivalent_codes, participant_ids) -> None:
     return None
 
 
@@ -324,7 +324,7 @@ def _bind_session(monkeypatch, session: _Session) -> None:
     # explicitly. Owner locks are measured on PostgreSQL elsewhere, not by this module.
     monkeypatch.setattr(
         tick_module.PaymentService,
-        "acquire_shared_equivalent_locks",
+        "lock_staged_lines",
         _no_owner_locks,
     )
 

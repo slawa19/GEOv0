@@ -407,7 +407,7 @@ async def test_a_staged_timeout_that_leaves_the_tick_unusable_is_recorded_after_
     # ── controls ──────────────────────────────────────────────────────────────────────────────
     async with factory() as s:
         level = str((await s.execute(text("SHOW transaction_isolation"))).scalar_one())
-    assert level == "serializable", level
+    assert level == "read committed", level
     assert queued, f"premise: the second payment never waited on the edit's row lock {t.subject.guard}"
     first, second = t.calls
     assert first.get("status") == "COMMITTED" and "raised" not in first, first
@@ -567,12 +567,17 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
 
     lowered: list[int] = []
     inside_after_abort: list[str | None] = []
-    original_prepare = PaymentService._bind_payment  # the binding phase (019 stage 4; the engine's prepare before)
+    original_prepare = PaymentService.lock_staged_lines  # 027 stage 2: before the phase locks the lines
     original_record = PaymentService._record_refusal_in_transaction
 
-    async def prepare_after_the_creditor_lowers_the_line(self, tx_id, *args, **kwargs):
+    async def prepare_after_the_creditor_lowers_the_line(self, *args, **kwargs):
         if not lowered:
             lowered.append(1)
+            from app.core.payments.router import PaymentRouter  # 027: pin the pre-lowering route (cache)
+
+            monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
+            async with rc_factory() as warm:
+                await PaymentRouter(warm).build_graph(world.equivalent.code, use_shared_cache=True)
             # The creditor lowers the line to what is already owed: nothing is left to use.
             async with rc_factory() as other:
                 await other.execute(
@@ -585,7 +590,7 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
                     .values(limit=_OPENING)
                 )
                 await other.commit()
-        return await original_prepare(self, tx_id, *args, **kwargs)
+        return await original_prepare(self, *args, **kwargs)
 
     async def record_and_read_back(self, attempt, *args, **kwargs):
         result = await original_record(self, attempt, *args, **kwargs)
@@ -599,13 +604,13 @@ async def _recheck_refusal_in_a_tick(rc_factory, monkeypatch) -> _RecheckOutcome
         )
         return result
 
-    monkeypatch.setattr(PaymentService, "_bind_payment", prepare_after_the_creditor_lowers_the_line)
+    monkeypatch.setattr(PaymentService, "lock_staged_lines", prepare_after_the_creditor_lowers_the_line)
     monkeypatch.setattr(PaymentService, "_record_refusal_in_transaction", record_and_read_back)
     try:
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), 90.0)
     finally:
         _forget_the_route_cache(world)
-    monkeypatch.setattr(PaymentService, "_bind_payment", original_prepare)
+    monkeypatch.setattr(PaymentService, "lock_staged_lines", original_prepare)
     monkeypatch.setattr(PaymentService, "_record_refusal_in_transaction", original_record)
 
     # ── controls ──────────────────────────────────────────────────────────────────────────────

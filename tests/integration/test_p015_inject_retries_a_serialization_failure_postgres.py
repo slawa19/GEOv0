@@ -24,15 +24,17 @@ savepoint. The concurrent writer takes the pool's second connection.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.exc import DBAPIError
 
 from app.core.ledger.book import Book, operation_for
 from app.db.models.debt import Debt
+from app.db.models.trustline import TrustLine
 from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  # noqa: F401
     _Artifacts,
     _observations,
@@ -44,6 +46,7 @@ from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  
 )
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p019_support import deadlock_after_the_wait
 
 
 _EXISTING = Decimal("5.00")
@@ -105,38 +108,23 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
         nonlocal stage_calls
         stage_calls += 1
         staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
-        if stage_calls == 1:
-            # THE COMPETITOR WRITES INSIDE AN OPERATION OF ITS OWN (018 stage B1). Its statement is a
-            # Core `update(Debt)`, and it has to STAY a Core statement, because the observations
-            # counted at the end of this test are ORM debt flushes: routing the competitor through
-            # the ORM would add a third and the assertion "both debt flushes ran under the owner
-            # lock" would be counting a writer that is not the inject. Until B1 it wrote with the
-            # listener journal stood down; the journal is now the database's trigger, which refuses
-            # a write outside an operation (`GE001`) and cannot be stood down, so the competitor
-            # opens a fixture operation on its OWN session and connection - the book's ownership is
-            # per session, so the inject's open operation does not refuse it. It is the book's own
-            # operation and not a `debt_fixture_setup` block: a Core statement is not fixture setup
-            # (`tests/unit/test_p015_b4_fixture_blocks_contain_only_fixture_setup.py`), it is a
-            # writer. What this helper stands for is "somebody else committed the row", and that is
-            # what it still does.
-            async with observed_factory() as other:
-                async with Book.operation(
-                    other,
-                    operation_for(
-                        "TEST_FIXTURE", f"p015-concurrent-writer/{uuid.uuid4()}", {"competitor": True}
-                    ),
-                ):
-                    await other.execute(
-                        update(Debt)
-                        .where(
-                            Debt.debtor_id == world.debtor.id,
-                            Debt.creditor_id == world.creditor.id,
-                            Debt.equivalent_id == eq.id,
-                        )
-                        .values(amount=_CONCURRENT)
-                    )
-                await other.commit()
+        if stage_calls == 1:  # 027 stage 2: a real DEADLOCK (40P01) replaces the SSI 40001 - see `_competitor`
+            holding = asyncio.Event()
+            competitors.append(asyncio.create_task(_competitor(holding)))
+            await holding.wait()
         return staged
+
+    competitors: list[asyncio.Task] = []
+
+    async def _competitor(holding: asyncio.Event) -> None:
+        async with observed_factory() as other:
+            async with Book.operation(other, operation_for("TEST_FIXTURE", f"p027-competitor/{uuid.uuid4()}", {})):
+                mine = Debt.debtor_id == world.debtor.id, Debt.creditor_id == world.creditor.id, Debt.equivalent_id == eq.id
+                await other.execute(select(Debt.id).where(*mine).with_for_update())
+                await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
+                    TrustLine.equivalent_id == eq.id).with_for_update())
+                await other.execute(update(Debt).where(*mine).values(amount=_CONCURRENT))
+            await other.commit()
 
     runner._inject_executor.stage_inject_event = _stage_then_a_concurrent_writer_commits
 
@@ -164,7 +152,8 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
         )
         assert not session.in_transaction()
 
-    assert failures == [("flush", "40001")], (
+    await asyncio.gather(*competitors)
+    assert failures == [("flush", "40P01")], (
         f"non-vacuity: the stand must produce exactly one real serialization failure, at the "
         f"owner's explicit flush of the staged writes; observed {failures}"
     )

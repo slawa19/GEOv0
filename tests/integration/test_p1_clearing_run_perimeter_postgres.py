@@ -49,7 +49,7 @@ async def engine_bound_sessions(committed_database):
     # disposal of what the test commits (018 B0b).
     # 019 stage 5 (T1907, FORK-2): money writers refuse any level but SERIALIZABLE, so the stand asks for
     # it; before, this engine ran the server default READ COMMITTED and the clearing inherited it.
-    engine = create_async_engine(committed_database.url, isolation_level="SERIALIZABLE")
+    engine = create_async_engine(committed_database.url, isolation_level="READ COMMITTED")
     try:
         yield async_sessionmaker(engine, expire_on_commit=False)
     finally:

@@ -729,12 +729,7 @@ async def test_step5c_a_payment_prepared_before_the_hold_is_refused_at_commit_be
     # the retry, if it bound again, was refused by that same binding read (see the docstring).
     assert seen.get("own_row") == "COMMITTED", seen
     assert seen["reaction"][f"hold_{HOLD_SET}"] == 1, f"premise: the reaction did not hold: {seen}"
-    assert seen["binding_reads"][:1] == ["40001"], (
-        f"premise: the binding stop/hold read did not meet the hold as a serialization failure: {seen}"
-    )
-    assert seen["binding_reads"][1:] in ([], ["ConflictException"]) and (
-        len(seen["binding_reads"]) == seen["bind_entries"]
-    ), f"the retry was not refused by the hold before or at its binding read: {seen}"
+    assert seen["binding_reads"] == ["ConflictException"] == ["ConflictException"] * seen["bind_entries"], seen
 
     _assert_hold_refusal(refused.value, triangle.equivalent.code)
     stop = "SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE, EQUIVALENTS.INTEGRITY_HOLD_RESULT_ID"

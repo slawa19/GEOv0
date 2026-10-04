@@ -99,8 +99,6 @@ TYPED, CONSTRUCTED, DECLARED = _float_sites()
 #: by name would also admit a cache of amounts.  So each site is acknowledged individually - and
 #: the list is asserted EXHAUSTED, so an entry that stops matching fails rather than lingering.
 KNOWN_NON_MONEY_FLOAT_ATTRIBUTES = {
-    ("app/core/money_boundary.py", "self._advisory_lock_deadline"):
-        "an advisory-lock deadline in monotonic seconds",
     ("app/core/payments/router.py", "_graph_cache"):
         "the cache tuple's first slot is a monotonic timestamp; the amounts in it are Decimal",
     ("app/core/balance/service.py", "_summary_cache"):

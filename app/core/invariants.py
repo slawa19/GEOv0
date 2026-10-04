@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Dict, List, Mapping, Optional, Tuple
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -242,14 +242,20 @@ class InvariantChecker:
 
         return []
 
-    async def _calculate_net_position(self, participant_id: UUID, equivalent_id: UUID) -> Decimal:
-        """Compute participant net position = credits - debts."""
+    async def _calculate_net_position(
+        self, participant_id: UUID, equivalent_id: UUID, pairs: Optional[set] = None
+    ) -> Decimal:
+        """Compute participant net position = credits - debts; over the directed debts `pairs` (`(debtor,
+        creditor)`) only, when given - an operation's own rows, which its line locks hold (027 stage 2)."""
 
+        scope = [] if pairs is None else [or_(false(), *(and_(Debt.debtor_id == d, Debt.creditor_id == c)
+                                                         for d, c in pairs))]
         credits = (
             await self.session.execute(
                 select(func.coalesce(func.sum(Debt.amount), Decimal("0"))).where(
                     Debt.creditor_id == participant_id,
                     Debt.equivalent_id == equivalent_id,
+                    *scope,
                 )
             )
         ).scalar_one()
@@ -259,6 +265,7 @@ class InvariantChecker:
                 select(func.coalesce(func.sum(Debt.amount), Decimal("0"))).where(
                     Debt.debtor_id == participant_id,
                     Debt.equivalent_id == equivalent_id,
+                    *scope,
                 )
             )
         ).scalar_one()
@@ -270,12 +277,13 @@ class InvariantChecker:
         cycle_participant_ids: List[UUID],
         equivalent_id: UUID,
         positions_before: Dict[UUID, Decimal],
+        pairs: Optional[set] = None,
     ) -> bool:
-        """Verify that clearing didn't change net positions for cycle participants."""
+        """Verify that clearing didn't change net positions for cycle participants (over `pairs`, as read before)."""
 
         violations: List[dict] = []
         for pid in cycle_participant_ids:
-            position_after = await self._calculate_net_position(pid, equivalent_id)
+            position_after = await self._calculate_net_position(pid, equivalent_id, pairs)
             position_before = positions_before.get(pid, Decimal("0"))
 
             if position_before != position_after:

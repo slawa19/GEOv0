@@ -1,4 +1,7 @@
-"""The test-only switch of programme 019 stage 5 (`T1907`, `T1908`, `T1909`): the equivalent lock as a no-op.
+"""027 STAGE 2 (`T2704`, 2026-10-03): the switch below is REMOVED with the advisory locks it replaced; the
+module keeps the `pg_locks` probes (`advisory_locks_held`, `blocked_by`). The text is the 019 history.
+
+The test-only switch of programme 019 stage 5 (`T1907`, `T1908`, `T1909`): the equivalent lock as a no-op.
 
 NOT a test module, and NEVER app code. Stage 5 decided the coordination on MEASUREMENT with the lock absent
 while the rest of the code is the code that ships, so the switch replaces exactly the lock primitives of
@@ -25,46 +28,8 @@ held while its schedule is parked.
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass, field
 
 from sqlalchemy import text
-
-
-@dataclass
-class LocksOff:
-    calls: Counter = field(default_factory=Counter)
-
-    @property
-    def total(self) -> int:
-        return sum(self.calls.values())
-
-
-def switch_money_boundary_locks_off(monkeypatch) -> LocksOff:
-    """Replace every advisory-lock primitive of `MoneyBoundary` with a counted no-op, for one test."""
-
-    from app.core.money_boundary import MoneyBoundary
-
-    switch = LocksOff()
-
-    async def shared_in_order(self, equivalent_ids):
-        switch.calls["shared"] += 1
-
-    async def shared_staged(self, equivalent_ids):
-        switch.calls["shared_staged"] += 1
-
-    async def exclusive_session(self, equivalent_id):
-        switch.calls["exclusive_session"] += 1
-
-    async def release_exclusive_session(self, equivalent_id):
-        switch.calls["exclusive_session_release"] += 1
-        return True
-
-    monkeypatch.setattr(MoneyBoundary, "_acquire_shared_equivalent_locks_in_order", shared_in_order)
-    monkeypatch.setattr(MoneyBoundary, "acquire_shared_equivalent_locks", shared_staged)
-    monkeypatch.setattr(MoneyBoundary, "acquire_exclusive_equivalent_session_lock", exclusive_session)
-    monkeypatch.setattr(MoneyBoundary, "release_exclusive_equivalent_session_lock", release_exclusive_session)
-    return switch
 
 
 async def advisory_locks_held(session) -> int:

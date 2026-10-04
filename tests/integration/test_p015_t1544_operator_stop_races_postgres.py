@@ -48,7 +48,7 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
 
 from app.api.deps import get_db
 from app.config import settings
@@ -63,7 +63,7 @@ from app.utils.exceptions import ConflictException, RetryablePaymentConflictExce
 from tests.integration.p019_interlock_support import (
     _no_advisory_lock_is_held,
     _seed_interlock_case,
-    _use_serializable,
+    _use_read_committed,
 )
 from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401 - `factory` is a fixture
     _OPENING,
@@ -167,8 +167,7 @@ _ROW_WAITS = frozenset({"transactionid", "tuple"})
 
 _ADVISORY_MODES_SQL = text(
     "SELECT mode FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = :pid "
-    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
-    "AND classid = :namespace AND objid = :objid AND objsubid = 2 ORDER BY mode"
+    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) ORDER BY mode"
 )
 
 
@@ -204,16 +203,11 @@ def _assert_row_wait(waiting: list[tuple[int, str]], *, what: str, behind: str) 
 
 
 async def _advisory_modes(pid: int, equivalent_id) -> list[str]:
-    """The modes of the equivalent advisory lock `pid` holds right now: `ShareLock` for the shared holders
-    (payment, tick, inject), `ExclusiveLock` for the clearing, `[]` for everyone else (admin, reaction)."""
-    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE
+    """The advisory locks `pid` holds right now: `[]` for every writer since 027 stage 2 (`T2704`) - the row locks
+    are the whole protocol (until then `ShareLock` for payment, tick and inject, `ExclusiveLock` for the clearing)."""
     from tests.conftest import TestingSessionLocal
 
-    params = {
-        "pid": pid,
-        "namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-        "objid": MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF,
-    }
+    params = {"pid": pid}
     async with TestingSessionLocal() as observer:
         modes = (await observer.execute(_ADVISORY_MODES_SQL, params)).scalars().all()
         await observer.rollback()
@@ -330,7 +324,7 @@ async def test_a_stop_arriving_between_the_binding_and_the_money_phase_answers_f
             await asyncio.wait_for(prepared.wait(), timeout=20)
             # One transaction: nothing of the payment is visible to anyone else yet.
             assert await _transactions(factory, world) == {}, "premise: the payment is durable before its commit"
-            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(payment_pid[0], world.equivalent.id) == [], (
                 "premise: the parked payment does not hold the equivalent lock shared"
             )
 
@@ -347,9 +341,7 @@ async def test_a_stop_arriving_between_the_binding_and_the_money_phase_answers_f
 
         _assert_stop_refusal(refused_first.value, code)
         retries = _retries_on_40001(caplog, "payment.attempt_retry")
-        assert len(retries) == 1, (
-            f"premise: the refusal did not come through the payment's FOR SHARE 40001 and one retry: {retries}"
-        )
+        assert retries == [], f"027 stage 2: the FOR SHARE waits and reads the stop, no 40001: {retries}"
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         assert await _transactions(factory, world) == {tx_id: "ABORTED"}
         assert await _is_active(factory, world.equivalent.id) is False
@@ -402,7 +394,7 @@ async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_f
     clearing_pid: list[int] = []
     clearing = patch = None
     try:
-        await _use_serializable(clearing_session)
+        await _use_read_committed(clearing_session)
         service = ClearingService(clearing_session)
         original_policy = service._cycle_respects_auto_clearing
 
@@ -424,7 +416,7 @@ async def test_a_deactivating_patch_waits_for_a_clearing_that_already_read_the_f
 
         clearing = asyncio.create_task(service.execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(paused.wait(), timeout=20)
-        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == ["ExclusiveLock"], (
+        assert await _advisory_modes(clearing_pid[0], seed["equivalent_id"]) == [], (
             "premise: the parked clearing does not hold its exclusive equivalent lock"
         )
 
@@ -486,7 +478,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
     clearing_session = TestingSessionLocal()
     clearing = patch = None
     try:
-        await _use_serializable(clearing_session)
+        await _use_read_committed(clearing_session)
         with caplog.at_level(logging.WARNING):
             gate.armed = True
             patch = asyncio.create_task(_deactivate(client, seed["equivalent_code"]))
@@ -498,7 +490,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
             clearing_pid = _assert_row_wait(
                 await _waiters_behind(gate.pid), what="the clearing", behind="the PATCH"
             )
-            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == ["ExclusiveLock"], (
+            assert await _advisory_modes(clearing_pid, seed["equivalent_id"]) == [], (
                 "the backend queued on the PATCH's row does not hold the clearing's exclusive lock"
             )
             assert await _advisory_modes(gate.pid, seed["equivalent_id"]) == [], (
@@ -513,9 +505,7 @@ async def test_a_clearing_that_waited_behind_the_patch_refuses_in_its_fresh_snap
             with pytest.raises(ConflictException) as refused:
                 await asyncio.wait_for(clearing, timeout=20)
         _assert_stop_refusal(refused.value, seed["equivalent_code"])
-        assert _retries_on_40001(caplog, "clearing.attempt_retry"), (
-            "premise: the refusal did not come through the clearing's FOR SHARE 40001 and a fresh attempt"
-        )
+        assert not _retries_on_40001(caplog, "clearing.attempt_retry"), "027 stage 2: no 40001 at READ COMMITTED"
 
         async with factory() as verify:
             debts = {
@@ -616,7 +606,7 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
                 what="the tick's money attempt",
                 behind="the PATCH",
             )
-            assert await _advisory_modes(tick_pid, world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(tick_pid, world.equivalent.id) == [], (
                 "the tick's money attempt queued on the row without holding the equivalent lock shared"
             )
             assert not tick.done()
@@ -631,22 +621,17 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
             for r in caplog.records
             if "simulator.real.money_phase_replay " in r.getMessage()
         ]
-        assert len(replays) == 1, replays
-        assert "conflict=RETRYABLE_PAYMENT_CONFLICT" in replays[0], replays
-        assert len(plans) == 2 and len(plans[0]) >= 1, f"premise: no staged payment to race: {plans}"
-        assert outcomes == [
-            "RetryablePaymentConflictException",
-            f"ConflictException:{MoneyBoundary.EQUIVALENT_INACTIVE_REASON}",
-        ], outcomes
+        assert replays == [] and len(plans) == 1 and len(plans[0]) >= 1, (replays, plans)  # 027: refused, no replay
+        assert outcomes == ["result:ABORTED"], outcomes  # the staged definitive refusal, recorded
 
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-        assert await _transactions(factory, world) == {}
+        assert list((await _transactions(factory, world)).values()) == ["ABORTED"]
         # Nothing of the discarded attempt is published or counted; the replay's refusal is a rejection
         # of load, not an error of the run.
         assert sse.published("tx.updated") == 0
         assert run.committed_total == 0
         assert run.errors_total == 0
-        assert run._real_money_replays_total == 1
+        assert run._real_money_replays_total == 0  # 027 stage 2: no replay
         assert run._real_money_committed_ticks_total == 1
     finally:
         gate.release.set()
@@ -659,69 +644,6 @@ async def test_a_tick_that_waited_behind_the_patch_discards_its_attempt_and_the_
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.wait([task], timeout=5)
-        _forget_the_route_cache(world)
-
-
-@pytest.mark.asyncio
-async def test_a_commit_guard_conflict_on_every_attempt_exhausts_the_budget_without_money(
-    factory, monkeypatch, caplog
-) -> None:
-    """Boundedness: every attempt's staged commit meets `40001` on the `FOR SHARE` row lock.
-
-    After each attempt's debt snapshot, a competitor updates the equivalent row (a column other than
-    `is_active`, so the stop never becomes true). The replay must stop after exactly the configured
-    number of attempts and record a tick without progress. RED if another attempt is allowed.
-    """
-    world = await _seed(factory)
-    try:
-        sse = _Sse()
-        run = _run_record(world, f"t1544-pg-bound-{uuid.uuid4().hex[:8]}")
-        runner = _runner(run, _scenario(world), sse)
-        _install(monkeypatch, factory)
-        _record_plans(monkeypatch, runner)
-        outcomes = _record_staged_outcomes(monkeypatch)
-        attempts_allowed = int(runner._real_money_replay_attempts_limit)
-        assert attempts_allowed >= 2, f"premise: the replay is disabled ({attempts_allowed})"
-
-        touches: list[int] = []
-        original_snapshot = runner._load_debt_snapshot_by_pid
-
-        async def _snapshot_then_touch_the_equivalent(session, participants, equivalents):
-            snapshot = await original_snapshot(session, participants, equivalents)
-            async with factory() as other:
-                await other.execute(
-                    update(Equivalent)
-                    .where(Equivalent.id == world.equivalent.id)
-                    .values(description=f"t1544-touch-{len(touches)}")
-                )
-                await other.commit()
-            touches.append(1)
-            return snapshot
-
-        monkeypatch.setattr(
-            runner, "_load_debt_snapshot_by_pid", _snapshot_then_touch_the_equivalent
-        )
-
-        with caplog.at_level(logging.WARNING):
-            await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
-
-        assert len(touches) == attempts_allowed, (touches, attempts_allowed)
-        assert outcomes == ["RetryablePaymentConflictException"] * attempts_allowed, outcomes
-        exhausted = [
-            r.getMessage()
-            for r in caplog.records
-            if "simulator.real.money_phase_replay_exhausted" in r.getMessage()
-        ]
-        assert len(exhausted) == 1, exhausted
-        assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
-        assert await _transactions(factory, world) == {}
-        assert sse.published("tx.updated") == 0
-        assert run.errors_total == 0
-        assert run.last_error["code"] == "REAL_MODE_MONEY_CONFLICT_UNRESOLVED"
-        assert run._real_money_replay_exhausted_total == 1
-        assert run._real_consec_money_no_progress_ticks == 1
-        assert await _is_active(factory, world.equivalent.id) is True
-    finally:
         _forget_the_route_cache(world)
 
 
@@ -786,7 +708,7 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
         payment.add_done_callback(lambda _t: completed.append("payment"))
         await asyncio.wait_for(checked.wait(), timeout=20)
 
-        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == ["ShareLock"], (
+        assert await _advisory_modes(payment_pid[0], world.equivalent.id) == [], (
             "premise: the parked payment does not hold the equivalent lock shared"
         )
         patch = asyncio.create_task(_deactivate(client, code))
@@ -886,7 +808,7 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
             inject_pid = _assert_row_wait(
                 await _waiters_behind(gate.pid, timeout=30.0), what="the inject", behind="the PATCH"
             )
-            assert await _advisory_modes(inject_pid, world.equivalent.id) == ["ShareLock"], (
+            assert await _advisory_modes(inject_pid, world.equivalent.id) == [], (
                 "the inject queued on the row without holding the equivalent lock shared"
             )
             assert not task.done()
@@ -911,9 +833,7 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
             for r in caplog.records
             if "simulator.real.inject.transient_retry" in r.getMessage()
         ]
-        assert retries, (
-            "premise: the inject did not meet the FOR SHARE serialization failure before refusing"
-        )
+        assert not retries, "027 stage 2: the inject's FOR SHARE waits and reads the stop, no 40001"
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         async with factory() as fresh:
             envelopes = await fresh.scalar(

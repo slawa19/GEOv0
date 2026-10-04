@@ -96,7 +96,7 @@ class _Probe:
         self.errors: Counter = Counter()  # (who, sqlstate) -> n
         self.builds = 0
         self.attempts: Counter = Counter()  # who -> pay attempts
-        self.lock_wait: dict[str, list[float]] = defaultdict(list)  # who -> seconds waiting at the equivalent lock
+        self.lock_wait: dict[str, list[float]] = defaultdict(list)  # who -> seconds waiting at the line-lock statement
         self.causes: Counter = Counter()  # (who, classified conflict cause) -> attempts, at pay()'s retry point
         self.builds_by: Counter = Counter()  # attempt kind (first / retry / reroute / other) -> graph builds
         self.reroutes = 0  # requests re-routed (at most one each)
@@ -113,8 +113,8 @@ class _Probe:
 async def stand(committed_database, monkeypatch):
     url = committed_database.url
     engines = {
-        "seq_on": create_async_engine(url, pool_size=16, max_overflow=4, isolation_level="SERIALIZABLE"),
-        "seq_off": create_async_engine(url, pool_size=4, max_overflow=0, isolation_level="SERIALIZABLE",
+        "seq_on": create_async_engine(url, pool_size=16, max_overflow=4, isolation_level="READ COMMITTED"),
+        "seq_off": create_async_engine(url, pool_size=4, max_overflow=0, isolation_level="READ COMMITTED",
                                        connect_args={"server_settings": {"enable_seqscan": "off"}}),
     }
     observer = create_async_engine(url, pool_size=1, max_overflow=0, isolation_level="AUTOCOMMIT")
@@ -152,22 +152,17 @@ async def stand(committed_database, monkeypatch):
         return original_retry(self, exc, **k)
 
     monkeypatch.setattr(PaymentService, "_retry_or_none", classified_retry)
-    original_shared = MoneyBoundary._acquire_shared_equivalent_locks_in_order
-    original_exclusive = MoneyBoundary.acquire_exclusive_equivalent_session_lock
+    original_lines = MoneyBoundary.lock_pair_lines
 
-    async def timed_shared(self, *a, **k):
+    async def timed_lines(self, pairs, **kw):
+        """027 `T2704`: the wait at the row-lock statement (R-027-4); the "prelock" hold point is just before it."""
+        pairs = list(pairs)
+        await hold_here(self.session, "prelock")
         t = time.perf_counter()
         try:
-            return await original_shared(self, *a, **k)
+            return await original_lines(self, pairs, **kw)
         finally:
             probe.lock_wait[_who.get() or "?"].append(time.perf_counter() - t)
-
-    async def timed_exclusive(self, *a, **k):
-        t = time.perf_counter()
-        try:
-            return await original_exclusive(self, *a, **k)
-        finally:
-            probe.lock_wait["clearing_exclusive"].append(time.perf_counter() - t)
 
     async def hold_here(session, where: str) -> None:
         hold = _hold.get()
@@ -222,8 +217,7 @@ async def stand(committed_database, monkeypatch):
     monkeypatch.setattr(MoneyBoundary, "refuse_inactive_equivalents", held_refuse)
     monkeypatch.setattr(PaymentRouter, "_build_graph_impl", counted_build)
     monkeypatch.setattr(PaymentService, "_pay_attempt", counted_attempt)
-    monkeypatch.setattr(MoneyBoundary, "_acquire_shared_equivalent_locks_in_order", timed_shared)
-    monkeypatch.setattr(MoneyBoundary, "acquire_exclusive_equivalent_session_lock", timed_exclusive)
+    monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", timed_lines)
     monkeypatch.setattr(PaymentService, "_write_integrity_audit", held_audit)
     factories = {k: async_sessionmaker(bind=e, class_=AsyncSession, expire_on_commit=False, autoflush=False)
                  for k, e in engines.items()}
@@ -446,7 +440,7 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
     (s1, r1), (s2, r2) = world["routes"][0], world["routes"][2]  # two disjoint 1-hop routes
     # Hold point: "late" = after the last money statement (every read AND write done); "early" = after the stop/hold
     # read, before the first write (the R-024-11 position) - the same pair cannot meet "late": its second payment
-    # waits on the first one's debt row lock.
+    # waits on the first one's debt row lock; since 027 stage 2 it meets only at "prelock", before the line lock.
     cells = {
         "disjoint/ttl2/seq_on/late": ([(s1, r1), (s2, r2)], PROD_TTL, "seq_on", "late"),  # production
         "disjoint/ttl0/seq_on/late": ([(s1, r1), (s2, r2)], 0, "seq_on", "late"),
@@ -454,7 +448,7 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
         "disjoint/ttl0/seq_off_DIAG/late": ([(s1, r1), (s2, r2)], 0, "seq_off", "late"),
         "disjoint/warm/seq_off_DIAG/late": ([(s1, r1), (s2, r2)], 3600, "seq_off", "late"),
         "disjoint/ttl0/seq_on/early": ([(s1, r1), (s2, r2)], 0, "seq_on", "early"),
-        "same_pair/ttl0/seq_on/early": ([(s1, r1), (s1, r1)], 0, "seq_on", "early"),
+        "same_pair/ttl0/seq_on/prelock": ([(s1, r1), (s1, r1)], 0, "seq_on", "prelock"),  # 027 stage 2: before the lock
     }
     report: dict = {"filler": filler, "sizes": world["sizes"], "history": world["history"], "reps": Q1_REPS,
                     "pg": await _pg_settings(stand["observer"]), "cells": {}}
@@ -485,7 +479,8 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
                 "enable_seqscan": Counter(), "locks": Counter(), "conflict_candidates": Counter(),
                 "seq_scanned": Counter(), "latency_ms": [], "failures": [], "snap_ms": [], "shared_pages": Counter(),
                 "reps_with_classified_40001": 0, "classified_causes": Counter(), "reconciled_committed": 0,
-                "reconcile_mismatches": [], "builds": [], "ttl_seen": Counter()})
+                "reconcile_mismatches": [], "builds": [], "ttl_seen": Counter(), "reps_waited": 0})
+            row["reps_waited"] += max((w for k, v in probe.lock_wait.items() if k.startswith("p") for w in v), default=0) >= 0.002
             recon = await _reconcile(f, world, before)
             row["reconciled_committed"] += recon["committed"]
             row["reconcile_mismatches"] += [recon["mismatches"]] if recon["mismatches"] else []
@@ -547,7 +542,7 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
         # 500 ms routing budget) cannot meet the barrier; such reps are counted, not hidden, and the rest must meet.
         early_fail = sum(1 for f in row["failures"] if "Routing timed out" in f)
         assert row["overlap"] >= Q1_REPS // 2 and row["overlap"] + early_fail >= Q1_REPS - 1, ("M3", name, row)
-        assert set(row["isolation"]) == {"serializable"}, ("M1", name, row["isolation"])
+        assert set(row["isolation"]) == {"read committed"}, ("M1", name, row["isolation"])
         assert set(row["enable_seqscan"]) == ({"off"} if "seq_off" in name else {"on"}), ("M5", name, row)
         builds = row["builds"]  # M4 (027 stage 1): TTL 0 builds per attempt; a pinned cache only on the re-route
         if "/ttl0/" in name:
@@ -558,8 +553,8 @@ async def test_q1_siread_attribution(stand, filler, history, monkeypatch) -> Non
             assert sum(b["total"] for b in builds) > 0 and set(row["ttl_seen"]) == {2}, ("M4", name, row)
         assert sum(row["outcomes"].values()) == 2 * Q1_REPS, ("M6", name, row["outcomes"])
         assert not row["reconcile_mismatches"] and row["reconciled_committed"] > 0, ("reconcile", name, row)
-    control = report["cells"]["same_pair/ttl0/seq_on/early"]
-    assert control["reps_with_40001"] >= control["overlap"] - 1, ("M2", control)
+    control = report["cells"]["same_pair/ttl0/seq_on/prelock"]  # 027 stage 2: the same pair WAITS, never 40001
+    assert control["reps_waited"] >= control["overlap"] - 1 and control["reps_with_40001"] == 0, ("M2", control)
     assert prod["reps_with_classified_40001"] == 0, ("R-027-3", report["acceptance"])
 
 
@@ -633,8 +628,8 @@ async def _run_payers(f, world, probe: _Probe, n: int, *, clearing=None) -> dict
         "failure_reasons": dict(Counter(x.split(" | ")[0][:60] for x in _FAILURES)),
         "wall_s": round(wall, 2), "throughput_per_s": round(outcomes.get("COMMITTED", 0) / wall, 1),
         "lat_p50_ms": _pct(lat_ok, 0.5), "lat_p95_ms": _pct(lat_ok, 0.95), "lat_max_ms": _pct(lat_ok, 1.0),
-        "shared_lock_wait_p50_ms": _pct(payer_waits, 0.5), "shared_lock_wait_p95_ms": _pct(payer_waits, 0.95),
-        "shared_lock_wait_max_ms": _pct(payer_waits, 1.0), "shared_lock_wait_n": len(payer_waits),
+        "row_lock_wait_p50_ms": _pct(payer_waits, 0.5), "row_lock_wait_p95_ms": _pct(payer_waits, 0.95),
+        "row_lock_wait_max_ms": _pct(payer_waits, 1.0), "row_lock_wait_n": len(payer_waits),
         "payer_classified_causes": dict(sum((Counter({c: k}) for (w, c), k in probe.causes.items()
                                              if (w or "").startswith("payer")), Counter())),
         "E007": sum(v for k, v in outcomes.items() if "E007" in k),
@@ -644,9 +639,9 @@ async def _run_payers(f, world, probe: _Probe, n: int, *, clearing=None) -> dict
         row["clearing"] = {**clearing_out,
                            "clearing_40001": probe.count("40001", "clearing"),
                            "clearing_other": {c: k for (w, c), k in probe.errors.items() if w == "clearing" and c != "40001"},
-                           "exclusive_wait_ms": [round(w * 1000, 1) for w in probe.lock_wait.get("clearing_exclusive", [])][:5],
-                           "exclusive_waits_n": len(probe.lock_wait.get("clearing_exclusive", [])),
-                           "exclusive_wait_max_ms": _pct(probe.lock_wait.get("clearing_exclusive", []), 1.0)}
+                           "line_lock_wait_ms": [round(w * 1000, 1) for w in probe.lock_wait.get("clearing", [])][:5],
+                           "line_lock_waits_n": len(probe.lock_wait.get("clearing", [])),
+                           "line_lock_wait_max_ms": _pct(probe.lock_wait.get("clearing", []), 1.0)}
     return row
 
 
@@ -734,9 +729,8 @@ async def test_q3_clearing_against_payments(stand, monkeypatch) -> None:
             await s.rollback()
         row["ttl"] = ttl
         report["cells"][name] = row
-    waits = {k: (r["shared_lock_wait_p95_ms"], r["shared_lock_wait_n"]) for k, r in report["cells"].items()
+    waits = {k: (r["row_lock_wait_p95_ms"], r["row_lock_wait_n"]) for k, r in report["cells"].items()
              if "clearing_" in k and "DIAG" not in k and "CMP" not in k}
-    # Timed at the lock call (stage 1: the shared equivalent lock). Under 20 observations "не измерено", never a pass.
     verdict = {k: "не измерено" if n < 20 or p95 is None else "pass" if p95 <= 50 else "fail"
                for k, (p95, n) in waits.items()}
     report["acceptance"] = {"R-027-4": {"p95_ms_and_n": waits, "verdict": verdict,

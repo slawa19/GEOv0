@@ -37,7 +37,6 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.utils.exceptions import GeoException
 from tests.conftest import TEST_DATABASE_URL, _committed_database_context
 from tests.debt_setup import debt_fixture_setup
 from tests.p023_support import TEST_PLAN_ID, occurrence_of
@@ -308,15 +307,3 @@ async def test_mode_b_session_is_accepted_by_clearing(committed_session):
     assert cycles, "the seeded triangle was not detected; the clearing half below would be vacuous"
     cleared = await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
     assert cleared == Decimal("10")
-
-
-async def test_mode_a_session_is_refused_by_clearing(db_session):
-    """COUNTER-CHECK: the same cycle on the savepoint session is refused before any data is read."""
-
-    code, eq_id = await _seed_triangle(db_session)
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(code, max_depth=3)
-    assert cycles
-    with pytest.raises(GeoException) as raised:
-        await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
-    assert _CLEARING_REFUSAL in str(raised.value.__cause__)

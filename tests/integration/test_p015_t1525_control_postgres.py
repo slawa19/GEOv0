@@ -166,7 +166,7 @@ def _patch_delta_check_to_report_drift(monkeypatch, world: _World) -> list[Decim
 
     observed: list[Decimal | None] = []
 
-    async def _delta_check_reports_drift(self, *, equivalent_id, flows, net_positions_before):
+    async def _delta_check_reports_drift(self, *, equivalent_id, flows, net_positions_before, pairs=None):
         # `self` is the money boundary (since 019 stage 4 the service's own, not the engine).
         from app.core.ledger.book import _get_debt
 
@@ -521,7 +521,7 @@ async def serializable_factory(committed_database):
         pool_size=2,
         max_overflow=0,
         pool_timeout=10,
-        isolation_level="SERIALIZABLE",
+        isolation_level="READ COMMITTED",
     )
     assert eng.dialect.name == "postgresql", eng.dialect.name
     factory = async_sessionmaker(

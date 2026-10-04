@@ -225,12 +225,12 @@ async def test_real_runner_tick_real_mode_uses_nested_tx_and_survives_one_action
 
     # The dummy session has no database. Until 017 stage 3 (S5) the owner-lock acquisition was
     # skipped because it had no PostgreSQL bind; the call is now unconditional, so it is stubbed.
-    async def _no_owner_locks(self, equivalent_codes) -> None:
+    async def _no_owner_locks(self, equivalent_codes, participant_ids) -> None:
         return None
 
     monkeypatch.setattr(
         PaymentService,
-        "acquire_shared_equivalent_locks",
+        "lock_staged_lines",
         _no_owner_locks,
         raising=True,
     )

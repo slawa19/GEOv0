@@ -6,6 +6,7 @@ from typing import List, Literal, Sequence
 from sqlalchemy import event, func, select, and_, or_, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.money_boundary import MoneyBoundary
 from app.utils.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -457,6 +458,10 @@ class TrustLineService:
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
+        # 027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` first, so a creation waits for a money writer in
+        # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
+        await MoneyBoundary(self.session).lock_pair_lines([(equivalent.id, from_participant_id, to_participant.id)])
+
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
         # (docs/ru/02-protocol-spec.md:333) — and, since migration
@@ -540,11 +545,11 @@ class TrustLineService:
         limit cannot grow (the growth gate of `Book`/`PaymentService`) but can still be repaid.
 
         THE ROW LOCK (spec 026, fork 5): the line is read `FOR UPDATE` before any decision. It is the only lock
-        this path takes (no debt read, no equivalent lock), so it cannot close a cycle with the money path
-        (equivalent lock -> lines `FOR SHARE` -> equivalent row `FOR SHARE` -> debts): an in-flight payment makes
-        it wait; a payment that starts later waits for it or, on an older snapshot, fails its `FOR SHARE` with
-        40001 and retries on the new limit (024 `T2415.3`). A 40001/40P01 here is NOT retried: it propagates,
-        the caller rolls the whole transaction back (the public PATCH answers 500 `E010`), nothing is applied.
+        this path takes (no debt read), so it cannot close a cycle with the money path (lines `FOR UPDATE` in id
+        order -> equivalent row `FOR SHARE` -> debts, 027 stage 2): an in-flight payment over the pair makes it
+        wait; a payment that starts later waits for it and reads the new limit. A 40001/40P01 here is NOT
+        retried: it propagates, the caller rolls the whole transaction back (the public PATCH answers 500
+        `E010`), nothing is applied.
         """
 
         stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update()
@@ -656,8 +661,8 @@ class TrustLineService:
         changes nothing and writes no row.
 
         LOCKS, as `execute_update`: the line `FOR UPDATE` before any decision, the only lock taken; the debt is a
-        plain read in this snapshot. A payment that repaid after this snapshot makes SERIALIZABLE fail one side
-        with 40001 (not retried here: the caller rolls back, nothing is applied).
+        plain read after it (027 stage 2): every writer of the pair's debt holds this line too, so an in-flight
+        one is waited for and read, and a later one waits for this close.
         """
 
         stmt = select(TrustLine).where(TrustLine.id == trustline_id).with_for_update()

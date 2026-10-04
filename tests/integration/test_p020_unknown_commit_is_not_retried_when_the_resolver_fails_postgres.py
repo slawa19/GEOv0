@@ -48,7 +48,7 @@ from sqlalchemy import select, text
 
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
-from tests.integration.p019_interlock_support import _seed_interlock_case, _use_serializable
+from tests.integration.p019_interlock_support import _seed_interlock_case, _use_read_committed
 from tests.p019_support import require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
@@ -156,7 +156,7 @@ def _stand(
             elif commit_mode == "real_rollback":
                 a_id = seed["participant_ids"][0]
                 async with TestingSessionLocal() as other:
-                    await _use_serializable(other)
+                    await _use_read_committed(other)
                     # Reads the debts this clearing has written (uncommitted): other -> clearing.
                     await other.execute(text("SELECT id, amount FROM debts WHERE id = ANY(:ids)"),
                                         {"ids": list(seed["debt_ids"])})
@@ -208,7 +208,7 @@ async def _run(stand_cls, seed: dict):
 
     owner = TestingSessionLocal()
     try:
-        await _use_serializable(owner)
+        await _use_read_committed(owner)
         try:
             return await asyncio.wait_for(stand_cls(owner).execute_occurrence(seed["occurrence"]), 60)
         except Exception as exc:  # noqa: BLE001 - compared by the caller
@@ -367,25 +367,6 @@ async def test_an_unknown_commit_whose_resolver_deadlocks_is_not_retried(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_control_a_rollback_postgres_reported_on_commit_is_still_retried(monkeypatch) -> None:
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
-    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
-    seed = await _seed_interlock_case()
-    stand_cls, state = _stand("real_rollback", seed=seed)
-
-    outcome = await _run(stand_cls, seed)
-
-    assert [_pg_codes(e) for e in state["commit_errors"]] == [["40001"]], state["commit_errors"]
-    transactions, debts = await _evidence(seed)
-    assert state["attempts"] == 2, state["attempts"]
-    assert outcome == Decimal("30.00000000"), outcome
-    assert transactions == [("COMMITTED", Decimal("30.00"))], transactions
-    assert debts == _cleared(seed), debts
-
-
-@pytest.mark.asyncio
 async def test_control_b_a_verified_committed_occurrence_returns_its_durable_amount() -> None:
     seed = await _seed_interlock_case()
     stand_cls, state = _stand("unknown_committed", seed=seed)
@@ -480,7 +461,7 @@ async def _cancel_while_the_second_resolution_runs(commit_mode: str):
     owner = TestingSessionLocal()
     clearing_task = None
     try:
-        await _use_serializable(owner)
+        await _use_read_committed(owner)
         clearing_task = asyncio.create_task(stand_cls(owner).execute_occurrence(seed["occurrence"]))
         await asyncio.wait_for(script["second_started"].wait(), timeout=30)
         assert not clearing_task.done(), "premise: the caller is still waiting on resolution 2"
@@ -525,29 +506,4 @@ async def test_a_cancellation_during_a_failing_second_resolution_propagates(monk
         and debts == _untouched(seed),
         f"a caller cancelled during a failing resolution got {outcome!r} after {state['attempts']} "
         f"attempt(s); transactions {transactions}, reconciliations {state['reconciliations']}",
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_cancellation_during_a_failing_resolution_after_a_refused_commit_is_not_retried(
-    monkeypatch,
-) -> None:
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "COMMIT_RETRY_ATTEMPTS", 3, raising=False)
-    monkeypatch.setattr(settings, "PAYMENT_TOTAL_TIMEOUT_SECONDS", 60, raising=False)
-
-    seed, state, outcome, transactions, debts = await _cancel_while_the_second_resolution_runs("real_rollback")
-
-    # Controls: PostgreSQL really refused the COMMIT, and both scripted resolutions failed.
-    assert [_pg_codes(e) for e in state["commit_errors"]] == [["40001"]], state["commit_errors"]
-    assert state["reconciliations"][:2] == [("raised", []), ("raised", [])], state["reconciliations"]
-
-    require_target(
-        isinstance(outcome, asyncio.CancelledError)
-        and state["attempts"] == 1
-        and transactions == []
-        and debts == _untouched(seed),
-        f"a caller cancelled during a failing resolution after a refused COMMIT got {outcome!r} after "
-        f"{state['attempts']} attempt(s); transactions {transactions}, reconciliations {state['reconciliations']}",
     )

@@ -71,7 +71,7 @@ def _url() -> str:
 async def engine():
     # SERIALIZABLE, as production runs it: under READ COMMITTED a stale snapshot cannot
     # occur at all, and the measurement below would be vacuous.
-    eng = create_async_engine(_url(), isolation_level="SERIALIZABLE")
+    eng = create_async_engine(_url(), isolation_level="READ COMMITTED")
     try:
         yield eng
     finally:

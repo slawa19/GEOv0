@@ -64,7 +64,7 @@ async def factory(committed_database):
     if not url.startswith("postgresql"):
         raise RuntimeError(f"a mode-B clone must be PostgreSQL, got {url!r}")
     engine = create_async_engine(
-        url, pool_size=2, max_overflow=0, pool_timeout=10, isolation_level="SERIALIZABLE"
+        url, pool_size=2, max_overflow=0, pool_timeout=10, isolation_level="READ COMMITTED"
     )
     try:
         yield async_sessionmaker(

@@ -45,7 +45,7 @@ async def test_an_inject_does_not_grow_a_debt_past_a_lowering_committed_before_i
             original = session.execute
 
             async def execute(stmt, *args, **kwargs):
-                if str(stmt).startswith('SELECT trust_lines."limit", trust_lines.status'):
+                if str(stmt).startswith("SELECT trust_lines.id"):  # 027 stage 2: park BEFORE the line lock
                     line_reads.append(len(statements))
                     if not line_read.is_set():
                         line_read.set()  # the snapshot is taken (statements ran), the line is not read yet

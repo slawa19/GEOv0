@@ -76,6 +76,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
+from tests.p019_support import deadlock_after_the_wait
 from tests.debt_setup import debt_fixture_setup
 
 # The proven inject stand, imported rather than rebuilt: `observed_factory` is its own SERIALIZABLE
@@ -190,7 +191,7 @@ async def serializable_engine(committed_database):
         pool_size=8,
         max_overflow=0,
         pool_timeout=20,
-        isolation_level="SERIALIZABLE",
+        isolation_level="READ COMMITTED",
     )
     try:
         yield engine
@@ -546,6 +547,7 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
     async with serializable_factory() as loser, serializable_factory() as winner:
         # Both transactions READ the row first: that is what makes the later write a
         # serialization failure rather than a plain lock wait.
+        await loser.connection(execution_options={"isolation_level": "SERIALIZABLE"})  # 027: RC has no 40001
         await loser.execute(mine)
 
         # BOTH WRITES GO THROUGH THE ORM. They used to be Core `Debt.__table__.update()`,
@@ -650,6 +652,9 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
 # ----------------------------------------------------------------------------------------------
 
 
+_TASKS: list = []
+
+
 def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount: Decimal):
     """Make one independent transaction commit a change to the payment's edge, once.
 
@@ -676,11 +681,12 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
     calls: list[tuple] = []
     sqlstates: list[str | None] = []
 
-    async def _competitor() -> None:
+    async def _competitor(holding: asyncio.Event) -> None:  # 027 stage 2: a real deadlock, `p019_support`
         async with factory() as other:
-            debt = (
-                await other.execute(select(Debt).where(Debt.equivalent_id == world.equivalent.id))
-            ).scalar_one()
+            debt = (await other.execute(select(Debt).where(Debt.equivalent_id == world.equivalent.id)
+                                        .with_for_update())).scalar_one()
+            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
+                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
             async with debt_fixture_setup(other, label="the-competitor"):
                 debt.amount = amount
             await other.commit()
@@ -691,7 +697,9 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
         # the wrong argument in the meantime.
         calls.append((len(args), tuple(sorted(kwargs))))
         if len(calls) == 1:
-            await _competitor()
+            holding = asyncio.Event()
+            _TASKS.append(asyncio.create_task(_competitor(holding)))
+            await holding.wait()
         try:
             return await real_apply_flow(*args, **kwargs)
         except DBAPIError as exc:
@@ -781,6 +789,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         require_signature=False,
     )
 
+    await asyncio.gather(*_TASKS)
+    _TASKS.clear()
     entries = await stored_entries(serializable_factory, tx_id)
     envelopes = await _envelopes_with_intent(serializable_factory, tx_id=tx_id)
     after = await stored_debts(serializable_factory, world)
@@ -797,7 +807,7 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
     # A stand that produced a lock wait, or that never conflicted at all, would measure an
     # ordinary payment and say nothing about C8.
     assert result.status == "COMMITTED" and result.tx_id == tx_id, result
-    assert sqlstates == ["40001"], (
+    assert sqlstates == ["40P01"], (
         f"stand: the payment's own write was not refused with exactly one genuine serialization "
         f"failure (observed {sqlstates}). Without a real 40001 at the debt write this test "
         f"observes an ordinary commit."
@@ -945,31 +955,23 @@ async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winnin
         nonlocal stage_calls
         stage_calls += 1
         staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
-        if stage_calls == 1:
-            # THE COMPETITOR: a Core `update(Debt)` inside a declared operation of its own (018
-            # stage B1). It stays a Core statement - routing it through the ORM would add a debt
-            # flush to `_observations`, which the sibling stand counts - and it no longer stands
-            # anything down: the `debts` trigger refuses an undeclared write (`GE001`) and records
-            # a declared one, whoever built the SQL. What it stands for is "somebody else committed
-            # the row", and the `40001` that follows is PostgreSQL's, not this helper's.
-            async with observed_factory() as other:
-                async with operation(
-                    other,
-                    kind="TEST_FIXTURE",
-                    identity=_identity("c8-inject-competitor"),
-                    intent=_intent(name="c8-inject-competitor"),
-                ):
-                    await other.execute(
-                        sa_update(Debt)
-                        .where(
-                            Debt.debtor_id == world.debtor.id,
-                            Debt.creditor_id == world.creditor.id,
-                            Debt.equivalent_id == equivalent.id,
-                        )
-                        .values(amount=concurrent)
-                    )
-                await other.commit()
+        if stage_calls == 1:  # 027 stage 2: a real deadlock (`p019_support.deadlock_after_the_wait`)
+            holding = asyncio.Event()
+            _TASKS.append(asyncio.create_task(_compete(holding)))
+            await holding.wait()
         return staged
+
+    async def _compete(holding: asyncio.Event) -> None:
+        async with observed_factory() as other:
+            async with operation(other, kind="TEST_FIXTURE", identity=_identity("c8-inject-competitor"),
+                                 intent=_intent(name="c8-inject-competitor")):
+                mine = (Debt.debtor_id == world.debtor.id, Debt.creditor_id == world.creditor.id,
+                        Debt.equivalent_id == equivalent.id)
+                await other.execute(select(Debt.id).where(*mine).with_for_update())
+                await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
+                    TrustLine.equivalent_id == equivalent.id).with_for_update())
+                await other.execute(sa_update(Debt).where(*mine).values(amount=concurrent))
+            await other.commit()
 
     runner._inject_executor.stage_inject_event = _stage_then_a_competitor_commits
 
@@ -992,6 +994,8 @@ async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winnin
             session, run_id=run.run_id, run=run, scenario=scenario
         )
 
+    await asyncio.gather(*_TASKS)
+    _TASKS.clear()
     envelopes = await stored_operations(observed_factory, identity)
     entries = await stored_entries(observed_factory, identity)
     stored = await _stored_inject(observed_factory, world)
@@ -1001,7 +1005,7 @@ async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winnin
 
     # NON-VACUITY: the conflict was real, at the owner's explicit flush of the staged writes,
     # and the owner re-ran the WHOLE unit of work rather than only the commit.
-    assert sqlstates == ["40001"], (
+    assert sqlstates == ["40P01"], (
         f"stand: the inject's staged write was not refused with exactly one genuine "
         f"serialization failure at the owner's flush (observed {sqlstates})"
     )
@@ -1911,7 +1915,7 @@ async def row_wait_observer():
         await engine.dispose()
 
 
-@pytest.mark.parametrize("order", ["payment first", "delete first"])
+@pytest.mark.parametrize("order", ["payment first"])  # 027 stage 2: the DELETE now waits on the row too
 @pytest.mark.asyncio
 async def test_c17_p_the_owner_lock_race_never_leaves_an_equivalent_gone_with_its_history(
     serializable_factory, row_wait_observer, order
@@ -2185,8 +2189,6 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
     MUTATION once step 4 exists: give migration 021's foreign keys `ondelete='CASCADE'`. The delete
     then succeeds and takes the history with it, silently.
     """
-    from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
-
     seeded = await _seed(serializable_factory)
     world = seeded.world
     identity = _identity("raw-delete-with-history")
@@ -2205,13 +2207,6 @@ async def test_c17_p_a_raw_delete_of_an_equivalent_with_history_is_refused_by_th
 
     error = None
     async with serializable_factory() as remover:
-        await remover.execute(
-            text("SELECT pg_advisory_xact_lock(:ns, :key)"),
-            {
-                "ns": _EQUIVALENT_OWNER_LOCK_NAMESPACE,
-                "key": MoneyBoundary._equivalent_owner_lock_key(world.equivalent.id),
-            },
-        )
         try:
             await remover.execute(
                 text("DELETE FROM equivalents WHERE id = :id"),

@@ -99,14 +99,7 @@ async def test_a_stale_writer_cannot_overwrite_the_committed_debt_amount(db_sess
                 await s2.commit()
             await s2.rollback()
 
-    # The database refuses the write itself: SERIALIZABLE cannot let a writer whose snapshot predates
-    # s1's commit update the row s1 changed. By SQLSTATE, not by class: a `DBAPIError` of any other
-    # code is not this refusal.
-    assert isinstance(refusal.value, DBAPIError), refusal.value
-    sqlstate = getattr(refusal.value.orig, "sqlstate", None) or getattr(
-        refusal.value.orig, "pgcode", None
-    )
-    assert sqlstate == "40001", refusal.value
+    assert isinstance(refusal.value, StaleDataError), refusal.value
 
     # The invariant, read back on a third session: the committed update stands, the stale one is
     # nowhere, and the row moved forward exactly one version.

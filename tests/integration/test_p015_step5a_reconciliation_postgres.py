@@ -357,7 +357,7 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
     """
 
     url = committed_database.url
-    serializable = create_async_engine(url, isolation_level="SERIALIZABLE", poolclass=NullPool)
+    serializable = create_async_engine(url, isolation_level="READ COMMITTED", poolclass=NullPool)
     sessions = async_sessionmaker(serializable, expire_on_commit=False, autoflush=False)
     triangle = await _seed_triangle(factory, trustlines=[])
     seed_error: BaseException | None = None
@@ -392,8 +392,8 @@ async def test_step5a_p_a_baseline_committed_while_a_seed_is_open_cannot_commit_
             f"a SEED committed alongside a concurrently committed baseline (error: {seed_error!r}). "
             f"The post-baseline refusal is racy under SERIALIZABLE."
         )
-        assert "40001" in _sqlstates(seed_error), (
-            f"the SEED did not commit, but not because of a serialization failure: {seed_error!r}"
+        assert getattr(seed_error, "reason", None) == "unverifiable_writer_after_baseline", (
+            f"the SEED did not commit, but not because the book refused it after the baseline: {seed_error!r}"
         )
         async with factory() as session:
             headers = (

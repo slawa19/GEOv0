@@ -88,6 +88,7 @@ async def test_t1801_a_serialization_failure_inside_the_book_leaves_no_envelope_
 
         loser = session()
         try:
+            await loser.connection(execution_options={"isolation_level": "SERIALIZABLE"})  # 027: a 40001 needs a snapshot
             # The loser's snapshot: taken now, before the winner commits.
             seen = (
                 await loser.execute(

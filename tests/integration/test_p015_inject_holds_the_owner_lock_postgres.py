@@ -1,5 +1,7 @@
 """Programme 015, phase B step 3: every debt the simulator's inject writes is written under the owner lock.
 
+027 STAGE 2 (`T2704`): the "owner lock" is the line locks, read from `trust_lines.xmax` (top-level xid only).
+
 WHAT IS WRONG TODAY. The equivalent owner lock is a transactional `pg_advisory_xact_lock`
 (`app/core/payments/engine.py`). The tick orchestrator takes it for the run's equivalents and then
 hands its session to the due-events phase, where `InjectExecutor.apply_inject_event` calls
@@ -49,7 +51,7 @@ from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
-from app.core.money_boundary import _EQUIVALENT_OWNER_LOCK_NAMESPACE, MoneyBoundary
+from app.config import settings
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
@@ -62,23 +64,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-_HOLDS_OWNER_LOCK_SQL = text(
-    """
-    SELECT count(*) FROM pg_locks
-    WHERE locktype = 'advisory'
-      AND pid = pg_backend_pid()
-      AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-      AND classid = :namespace
-      AND objid = :objid
-      AND objsubid = 2
-      AND mode = 'ShareLock'
-      AND granted
-    """
-)
-
-
-def _objid(equivalent_id: uuid.UUID) -> int:
-    return MoneyBoundary._equivalent_owner_lock_key(equivalent_id) & 0xFFFFFFFF
+_HOLDS_LINES_SQL = """
+    SELECT count(*) FILTER (WHERE xmax = pg_current_xact_id()::xid), count(*) FROM trust_lines
+    WHERE equivalent_id = :eq AND status <> 'closed'"""
+_PAIR_SQL = " AND from_participant_id IN (:a, :b) AND to_participant_id IN (:a, :b)"
 
 
 @dataclass
@@ -97,15 +86,13 @@ class _ObservedSession(Session):
 _observations: list[_Observation] = []
 
 
-def _holds(sync_session: Session, equivalent_id: uuid.UUID) -> tuple[int | None, bool, str | None]:
+def _holds(sync_session: Session, equivalent_id: uuid.UUID, pair=None) -> tuple[int | None, bool, str | None]:
     try:
         conn = sync_session.connection()
         pid = int(conn.execute(text("SELECT pg_backend_pid()")).scalar_one())
-        count = conn.execute(
-            _HOLDS_OWNER_LOCK_SQL,
-            {"namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE, "objid": _objid(equivalent_id)},
-        ).scalar_one()
-        return pid, int(count) == 1, None
+        params = {"eq": equivalent_id, **({"a": pair[0], "b": pair[1]} if pair else {})}
+        mine, total = conn.execute(text(_HOLDS_LINES_SQL + (_PAIR_SQL if pair else "")), params).one()
+        return pid, int(total) > 0 and mine == total, None
     except Exception as exc:  # recorded, asserted after the call
         return None, False, repr(exc)
 
@@ -114,7 +101,7 @@ def _holds(sync_session: Session, equivalent_id: uuid.UUID) -> tuple[int | None,
 def _observe_debt_writes(sync_session: Session, _flush_context, _instances) -> None:
     for obj in list(sync_session.new) + list(sync_session.dirty):
         if isinstance(obj, Debt) and obj.equivalent_id is not None:
-            pid, held, error = _holds(sync_session, obj.equivalent_id)
+            pid, held, error = _holds(sync_session, obj.equivalent_id, (obj.debtor_id, obj.creditor_id))
             _observations.append(_Observation("debt flush", obj.equivalent_id, pid, held, error))
 
 
@@ -128,7 +115,7 @@ async def observed_factory(committed_database):
         pool_size=2,
         max_overflow=0,
         pool_timeout=10,
-        isolation_level="SERIALIZABLE",
+        isolation_level=settings.DB_POSTGRES_ISOLATION_LEVEL,
     )
     factory = async_sessionmaker(
         bind=eng,
@@ -284,24 +271,6 @@ async def _stored(factory, world: _World) -> dict[uuid.UUID, Decimal]:
     return {eq_id: Decimal(str(amount)) for eq_id, amount in rows}
 
 
-async def _advisory_owner_locks_of(factory, backend_pids: set[int]) -> int:
-    """Owner-namespace advisory locks still held by the given backends, seen from a second session."""
-    from tests.conftest import engine as shared_engine
-
-    async with shared_engine.connect() as conn:
-        return int(
-            (
-                await conn.execute(
-                    text(
-                        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
-                        "AND classid = :namespace AND pid = ANY(:pids)"
-                    ),
-                    {"namespace": _EQUIVALENT_OWNER_LOCK_NAMESPACE, "pids": list(backend_pids)},
-                )
-            ).scalar_one()
-        )
-
-
 def _assert_every_debt_write_was_locked(world: _World) -> None:
     errors = [o for o in _observations if o.error]
     assert not errors, f"the stand could not read pg_locks: {errors}"
@@ -338,11 +307,6 @@ async def test_the_due_events_phase_writes_each_injected_debt_under_its_owner_lo
     assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, stored
     assert run._real_fired_scenario_event_indexes == {0, 1}
     _assert_every_debt_write_was_locked(world)
-
-    pids = {o.backend_pid for o in _observations if o.backend_pid is not None}
-    assert await _advisory_owner_locks_of(observed_factory, pids) == 0, (
-        "an owner lock outlived the inject's transaction: it must be transaction-level"
-    )
 
 
 @pytest.mark.asyncio

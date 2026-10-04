@@ -86,7 +86,7 @@ class _Probe:
 @pytest_asyncio.fixture
 async def factory(committed_database):
     engine = create_async_engine(
-        committed_database.url, pool_size=6, max_overflow=0, isolation_level="SERIALIZABLE"
+        committed_database.url, pool_size=6, max_overflow=0, isolation_level="READ COMMITTED"
     )
     try:
         yield async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
@@ -282,7 +282,7 @@ async def test_r024_11_checkpoint_cost_and_ssi_conflicts(factory, monkeypatch) -
                 for outcome in outcomes:
                     row["outcomes"][outcome] = row["outcomes"].get(outcome, 0) + 1
                 # M1, on every attempt that reached the hold point.
-                assert probe.isolation and set(probe.isolation) == {"serializable"}, probe.isolation
+                assert probe.isolation and set(probe.isolation) == {"read committed"}, probe.isolation
     report["concurrent"] = table
 
     root = Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT") or ".local-run/test-runs/p024sh3/artifacts")
