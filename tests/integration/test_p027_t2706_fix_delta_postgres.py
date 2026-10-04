@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select, text, update
+from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
 from app.core.clearing.service import ClearingService
@@ -14,6 +15,7 @@ from app.core.money_boundary import MoneyBoundary
 from app.core.simulator import trust_drift_engine
 from app.core.trustlines.service import TrustLineService
 from app.db.models.debt import Debt
+from app.db.sqlstate import sqlstate
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from app.utils.exceptions import TimeoutException
@@ -110,28 +112,80 @@ async def test_trust_growth_never_overwrites_a_limit_patched_while_it_computed(c
         assert patching and await s.scalar(line) == Decimal("300")
 
 
+async def _blocked_by(stand, holder) -> bool:
+    """True once a session is waiting on `holder`'s row locks (`pg_blocking_pids`): the wait was reached."""
+    pid = await holder.scalar(text("SELECT pg_backend_pid()"))
+    async with stand() as w:
+        for _ in range(200):
+            if await w.scalar(text("SELECT count(*) FROM pg_stat_activity WHERE :p = ANY(pg_blocking_pids(pid))"),
+                              {"p": pid}):
+                return True
+            await w.rollback()
+            await asyncio.sleep(0.02)
+    return False
+
+
+def _inject_create(eq, x, y):
+    """028 F-028-14: an event whose only effect is `create_trustline` Y -> X (no `inject_debt`, no pre-lock)."""
+    runner, run, scenario, _ = _inject_runner(eq, [x, y], creditor=x, debtor=y, amount="10.00")
+    scenario["events"][0]["effects"] = [
+        {"op": "create_trustline", "from": y.pid, "to": x.pid, "equivalent": eq.code, "limit": "50"}]
+    return runner, run, scenario
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("owner", ["clearing", "inject"])
+@pytest.mark.parametrize("owner", ["clearing", "inject", "inject_create"])
 async def test_a_held_line_bounds_the_owner_wait(owner, stand, monkeypatch) -> None:  # noqa: F811
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 1)
     seed = await _seed_interlock_case() if owner == "clearing" else None
     eq, x, y = (None, None, None) if seed else await _seed_pair(stand, "BW")
+    if owner == "inject_create":  # Y -> X closed: the event creates it; X -> Y stays live and is held
+        async with stand() as s:
+            await s.execute(update(TrustLine).where(TrustLine.from_participant_id == y.id).values(status="closed"))
+            await s.commit()
     async with stand() as holder, stand() as s:
         await holder.execute(select(TrustLine.id).where(
             TrustLine.equivalent_id == (seed["equivalent_id"] if seed else eq.id)).with_for_update())
         if seed:
             call = ClearingService(s).execute_occurrence(seed["occurrence"])
-        else:
+        elif owner == "inject":
             runner, run, scenario, _ = _inject_runner(eq, [x, y], creditor=x, debtor=y, amount="10.00")
             call = runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
+        else:
+            runner, run, scenario = _inject_create(eq, x, y)
+            call = runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
+        task = asyncio.create_task(asyncio.wait_for(call, 8))
+        waited = await _blocked_by(stand, holder)
         try:
-            outcome = await asyncio.wait_for(call, 8)
+            outcome = await task
         except Exception as exc:  # noqa: BLE001 - compared below
             outcome = exc
         await holder.rollback()
+    assert waited, "the owner never waited on the held line"
     if seed:
         assert isinstance(outcome, TimeoutException), repr(outcome)
-    else:
-        assert not isinstance(outcome, asyncio.TimeoutError) and 0 not in run._real_fired_scenario_event_indexes, outcome
+    else:  # the inject's transient class: a real 55P03 within the budget, the event stays pending
+        assert isinstance(outcome, DBAPIError) and sqlstate(outcome.orig, walk=False) == "55P03", repr(outcome)
+        assert 0 not in run._real_fired_scenario_event_indexes
     async with stand() as s:
         assert not await s.scalar(text("SELECT count(*) FROM debt_operations WHERE kind IN ('CLEARING', 'INJECT')"))
+        if owner == "inject_create":
+            assert not await _live(stand, eq, y, x), "a line created past the refused wait"
+
+
+@pytest.mark.asyncio
+async def test_a_line_released_within_the_budget_lets_the_inject_create(stand) -> None:  # noqa: F811
+    """Positive control of F-028-14: the bounded wait is a wait, not a refusal - released in time, it succeeds."""
+    eq, x, y = await _seed_pair(stand, "BR")
+    async with stand() as s:
+        await s.execute(update(TrustLine).where(TrustLine.from_participant_id == y.id).values(status="closed"))
+        await s.commit()
+    runner, run, scenario = _inject_create(eq, x, y)
+    async with stand() as holder, stand() as s:
+        await holder.execute(select(TrustLine.id).where(TrustLine.equivalent_id == eq.id).with_for_update())
+        task = asyncio.create_task(asyncio.wait_for(
+            runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario), 8))
+        assert await _blocked_by(stand, holder), "the inject never waited on the held line"
+        await holder.rollback()
+        await task
+    assert 0 in run._real_fired_scenario_event_indexes and await _live(stand, eq, y, x)

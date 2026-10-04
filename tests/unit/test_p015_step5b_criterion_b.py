@@ -92,6 +92,31 @@ from tests.unit.test_p015_step5a_reconciliation import (
 # ==============================================================================================
 
 
+@pytest.fixture(autouse=True)
+def _routing_budget_is_not_under_test():
+    """The payments here are set up to be verified, not to race the router's wall-clock budget.
+
+    `PaymentService` takes its routing deadline from `settings.ROUTING_PATH_FINDING_TIMEOUT_MS` (500 ms by default) and
+    that deadline covers the whole routing step, so a slow shared runner turned an honest payment into `Routing timed
+    out` before criterion (b) was ever asked (programme 028, F-028-11; CI of PR #100, `intent_flow`). Raising the budget
+    here is the stand's, not the product's: the product value is untouched. Reproducer: `ROUTING_PATH_FINDING_TIMEOUT_MS=1`
+    in the environment failed every payment test of this module with `TimeoutException` before this fixture and passes
+    with it. It does not touch what the tests assert, which is the verifier's verdict on the recorded operation.
+
+    It sets and restores the value itself instead of using `monkeypatch`: one test here calls `monkeypatch.undo()`
+    between two payments, and an undo takes a fixture's patch away with the test's own.
+    """
+
+    from app.config import settings
+
+    original = settings.ROUTING_PATH_FINDING_TIMEOUT_MS
+    settings.ROUTING_PATH_FINDING_TIMEOUT_MS = 5000
+    try:
+        yield
+    finally:
+        settings.ROUTING_PATH_FINDING_TIMEOUT_MS = original
+
+
 def _a_findings(outcome) -> list[dict]:
     return [f for f in outcome.findings if not str(f["kind"]).startswith("b_")]
 

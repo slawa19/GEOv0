@@ -549,10 +549,20 @@ async def cmd_ready(url: URL, *, community: str) -> int:
         print(f"readiness {name}: {verdict} - {checks[name]['detail']}")
     failed = sorted(name for name, check in checks.items() if not check["passed"])
     if failed:
-        raise DevDatabaseRefusal(
+        refusal = (
             f"Database {url.database!r} holds a population of {community} that fails "
-            f"{len(failed)} readiness check(s): {failed}. Reset it: .\\scripts\\run_local.ps1 reset-db"
+            f"{len(failed)} readiness check(s): {failed}."
         )
+        if "reconciliation_passed" in failed:
+            # F-028-13: a failed reconciliation means the debts and the journal disagree, and the journal, the debts and
+            # the baseline are the only record of WHICH operation made them disagree. A reset destroys exactly that, so
+            # it is not advised here; the readiness lines printed above carry the finding to diagnose.
+            raise DevDatabaseRefusal(
+                f"{refusal} Do not reset or drop this database yet: its journal, debts and baseline are the only "
+                f"evidence of which operation made the money diverge. Keep it as it is and diagnose it from the "
+                f"readiness lines above first."
+            )
+        raise DevDatabaseRefusal(f"{refusal} Reset it: .\\scripts\\run_local.ps1 reset-db")
     print(f"population: {community}, ready")
     return 0
 
