@@ -1016,6 +1016,9 @@ class PaymentService:
             return
         ids = (await self.session.execute(select(Equivalent.id).where(Equivalent.code.in_(codes)))).scalars().all()
         try:
+            # 028 `F-028-28`: the perimeter's participants `FOR SHARE` first (the one order: participants -> lines);
+            # each payment of the phase reads their status again under these locks (`_bind_payment`).
+            await self._boundary.lock_participants(participant_ids, timeout_ms=MoneyBoundary.lock_budget_ms())
             await self._boundary.lock_lines_among(ids, participant_ids, timeout_ms=MoneyBoundary.lock_budget_ms())
         except DBAPIError as exc:
             if _payment_db_sqlstate(exc) == "55P03":  # the bounded wait (019's advisory budget, restored)
@@ -1756,6 +1759,9 @@ class PaymentService:
         }
         if len(participants) != len(pids):
             raise GeoException(f"Participants not found: {pids - set(participants)}")
+        # 028 `F-028-28` (owner В-1): every participant of every route - payer, payee, each hop - `FOR SHARE` BEFORE
+        # the lines, in `participants.id` order, its status read by that statement: a suspended one carries nothing.
+        await self._boundary.refuse_suspended_participants(participants.values())
         self._locked_lines = await self._boundary.lock_pair_lines(
             {(equivalent_id, participants[u], participants[v]) for path, _ in routes for u, v in zip(path, path[1:])}
         )
@@ -1840,9 +1846,9 @@ class PaymentService:
         if locked is None:  # a direct call outside the binding phase locks the pair itself
             locked = await self._boundary.lock_pair_lines([(equivalent_id, sender_id, receiver_id)])
         step = step if step is not None else money_step((await self._step(equivalent_id))[1])
-        rows = [row for row in locked if row.equivalent_id == equivalent_id and {row.from_participant_id, row.to_participant_id}
-                == pair and (row.status == "active" or (row.status == "frozen" and row.close_requested_at is not None))]
-        lines = [row for row in rows if row.status == "active"]
+        lines = [row for row in locked if row.equivalent_id == equivalent_id and row.status == "active"
+                 and {row.from_participant_id, row.to_participant_id} == pair]
+        rows = lines  # 028 `F-028-29`: a requested close leaves its line `active`, limit 0 (no `frozen` any more)
         receiver_owes = await self._debt_amount(receiver_id, sender_id, equivalent_id)
         sender_owes = await self._debt_amount(sender_id, receiver_id, equivalent_id)
         limit = next((limit for owner, limit, *_ in lines if owner == receiver_id), None)

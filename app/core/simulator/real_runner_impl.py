@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Callable
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.core.ledger.book import Book, operation_for
@@ -23,6 +23,7 @@ from app.core.simulator.inject_executor import (
     inject_event_equivalent_codes,
     inject_event_debt_participant_pids,
     inject_event_freeze_participant_pids,
+    inject_event_participant_pids,
     invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
 )
 from app.core.simulator.models import RunRecord, TrustDriftResult
@@ -38,7 +39,6 @@ from app.core.simulator.tick import RealTick
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.trustline import TrustLine
 from app.db.sqlstate import ROLLED_BACK_SQLSTATES, sqlstate
 
 # 40001 serialization_failure, 40P01 deadlock_detected: PostgreSQL has rolled the transaction back
@@ -377,10 +377,8 @@ class RealRunnerImpl:
     ) -> set[uuid.UUID]:
         """The run's equivalents and the event's own, as ids, in one read that is then committed.
 
-        "The event's own" includes the equivalents of the active trustlines incident to every
-        participant the event freezes: the event does not name them, and staging discovers them
-        one at a time, so leaving them to the bounded expansion made a multi-participant freeze
-        impossible to complete (external review of step 3).
+        A freeze names no equivalent: since 028 `F-028-29` it writes no trust line (until then the equivalents of
+        the frozen participant's lines were read here, external review of 015 step 3).
 
         The read is ended before the owner locks are taken, so the locks open the unit of work's
         transaction instead of joining a snapshot taken without them.
@@ -398,28 +396,6 @@ class RealRunnerImpl:
                 (
                     await session.execute(
                         select(Equivalent.id).where(Equivalent.code.in_(sorted(codes)))
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        freeze_pids = inject_event_freeze_participant_pids(event=event)
-        if freeze_pids:
-            lock_ids |= set(
-                (
-                    await session.execute(
-                        select(TrustLine.equivalent_id)
-                        .join(
-                            Participant,
-                            or_(
-                                TrustLine.from_participant_id == Participant.id,
-                                TrustLine.to_participant_id == Participant.id,
-                            ),
-                        )
-                        .where(
-                            Participant.pid.in_(sorted(freeze_pids)),
-                            TrustLine.status == "active",
-                        )
                     )
                 )
                 .scalars()
@@ -481,6 +457,14 @@ class RealRunnerImpl:
                 intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
                     session, scenario=scenario, event=event
                 )
+                # 028 `F-028-28`: the FIRST locks of the event - the rows of every participant its effects name, in
+                # `participants.id` order, `FOR UPDATE` for the targets of its freezes (taken now, never upgraded from
+                # `FOR SHARE` mid-event), `FOR SHARE` for the rest. Each effect reads the status under them.
+                event_ids = dict((await session.execute(select(Participant.pid, Participant.id).where(
+                    Participant.pid.in_(sorted(inject_event_participant_pids(event=event)))))).all())
+                await MoneyBoundary(session).lock_participants(
+                    event_ids.values(), exclusive=[event_ids[p] for p in inject_event_freeze_participant_pids(
+                        event=event) if p in event_ids], timeout_ms=MoneyBoundary.lock_budget_ms())
                 # 027 stage 2: the event's COMPLETE line set before its first debt read - every non-closed
                 # line among the participants its `inject_debt` effects name, in their equivalents,
                 # `FOR UPDATE` in `trust_lines.id` order. `lock_ids` stays the event's declared scope; it

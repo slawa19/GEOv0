@@ -51,7 +51,7 @@ class TrustLine(Base):
             unique=True,
             postgresql_where=text("status <> 'closed'"),
         ),
-        CheckConstraint("status IN ('active', 'frozen', 'closed')", name='chk_trust_line_status'),
+        CheckConstraint("status IN ('active', 'closed')", name='chk_trust_line_status'),  # 028 F-028-29, migration 035
         # T1526, the same three jobs as `chk_debt_amount_positive` (see the comment there and
         # `app/db/types.py::finite_money_clauses`): SIGN, MAGNITUDE, NOT A NUMBER. Only the sign
         # clause differs - zero stays legal, because a limit of zero is a real trust line with no

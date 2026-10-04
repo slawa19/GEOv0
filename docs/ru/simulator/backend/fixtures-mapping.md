@@ -93,10 +93,9 @@ TrustLine direction фиксирована:
 Поля `used`/`available` не входят в `scenario.json` (это состояние, не конфигурация).
 
 Фильтрация (MVP):
-- по умолчанию включаем trustlines со статусами `active` и `frozen` (если нужны для реализма)
-- если runner в MVP не умеет `frozen`, то конвертер может:
-  - либо исключить `status != active`
-  - либо проставить `policy.status` и оставить на runner
+- включаем trustlines со статусом `active`; статуса линии `frozen` нет с 2026-10-04 (028 `F-028-29`, миграция 035):
+  заморозка — у участника (`participants[].status`), его линии остаются `active`, а засев сценария со статусом линии
+  `frozen` отказывает (`trust_line_status_frozen`)
 
 #### 2.3.1 Примечание для realistic-v2 (UAH-only): как не потерять клиринг
 Генератор seed-сценариев (`scripts/generate_simulator_seed_scenarios.py`) для профиля `*-realistic-v2` отбрасывает non-UAH trustlines, чтобы сценарий был **UAH-only**.

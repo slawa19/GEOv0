@@ -67,6 +67,7 @@ from app.schemas.graph import (
 )
 from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
+from app.core.payments.router import PaymentRouter
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.trustlines.service import TrustLineService
 from app.core.ledger.reconciliation import take_baseline
@@ -890,8 +891,12 @@ async def _set_participant_status(
     request: Request,
     db: AsyncSession,
 ) -> dict:
+    # 028 `F-028-28` (owner В-1): the row `FOR UPDATE` - the freeze's whole lock. A money writer holds the rows of
+    # its participants `FOR SHARE` (`MoneyBoundary.lock_participants`): the freeze waits for one in flight, and one
+    # arriving after it waits for this commit and reads the new status.
     participant = (
-        await db.execute(select(Participant).where(Participant.pid == pid))
+        await db.execute(select(Participant).where(Participant.pid == pid).with_for_update()
+                         .execution_options(populate_existing=True))
     ).scalar_one_or_none()
     if participant is None:
         raise NotFoundException(f"Participant {pid} not found")
@@ -914,6 +919,8 @@ async def _set_participant_status(
     except BaseException:
         await db.rollback()
         raise
+    # The route graphs skip a suspended participant's lines (a hint; the core's refusal is the boundary).
+    PaymentRouter.invalidate_cache()
 
     return result
 
@@ -1571,7 +1578,7 @@ async def admin_list_trustlines(
     equivalent: str | None = None,
     creditor: str | None = Query(None, description="Creditor PID (trustline 'from')"),
     debtor: str | None = Query(None, description="Debtor PID (trustline 'to')"),
-    status: Literal["active", "frozen", "closed"] | None = Query(None),
+    status: Literal["active", "closed"] | None = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(deps.get_db),

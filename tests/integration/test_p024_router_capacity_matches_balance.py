@@ -22,7 +22,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.utils.exceptions import RoutingException
+from app.utils.exceptions import ConflictException, RoutingException
 from tests.debt_setup import debt_fixture_setup
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.p019_support import TargetMismatch, require_target
@@ -144,14 +144,6 @@ async def test_an_offset_hop_over_an_active_permissive_pair_is_a_transit_hop(db_
     assert _routable(router, people, "30", to="C")
 
 
-@pytest.mark.asyncio
-async def test_a_frozen_pair_carries_no_offset_direct_or_transit(db_session):
-    eq, people = await _seed(db_session, line_c_b="100", a_b_status="frozen")
-    assert await _core_and_balance(db_session, eq, people) == (Decimal("0"), Decimal("0"))
-    router = await _router(db_session, eq)
-    assert not _routable(router, people, "0.01") and not _routable(router, people, "0.01", to="C")
-
-
 async def _chain(session, lines, debts):
     """Lines creditor -> debtor (limit 100, given policy) and debts debtor -> creditor (50) among W..Z."""
     eq, _ = await _seed(session, debt_b_a=None)
@@ -218,12 +210,15 @@ async def test_a_line_changed_after_routing_is_refused_by_the_core(db_session, m
     eq, p = await _chain(db_session, [("W", "X", {}), ("X", "Y", {})], ["XW", "YX"])
     await PaymentRouter(db_session).build_graph(eq.code, use_shared_cache=True)
     line = (await db_session.execute(select(TrustLine).where(TrustLine.from_participant_id == p["X"].id))).scalar_one()
-    line.status, line.policy = ("frozen", {}) if change == "freeze" else ("active", {"can_be_intermediate": False})
+    if change == "freeze":  # 028 `F-028-28`/`F-028-29`: a freeze is the participant's (the line stays active)
+        p["X"].status = "suspended"
+    else:
+        line.policy = {"can_be_intermediate": False}
     await db_session.commit()
     stale = PaymentRouter(db_session)
     await stale.build_graph(eq.code, use_shared_cache=True)
     assert stale.find_flow_routes(p["W"].pid, p["Y"].pid, Decimal("30")), "control: the cached graph still routes"
-    with pytest.raises(RoutingException):
+    with pytest.raises((RoutingException, ConflictException)):
         await PaymentService(db_session).create_payment_internal(
             p["W"].id, to_pid=p["Y"].pid, equivalent=eq.code, amount="30"
         )
@@ -255,6 +250,7 @@ async def test_max_hop_usage_forbids_mediation_exactly_at_zero(db_session, hops,
 @pytest.mark.asyncio
 async def test_a_freeze_committed_between_routing_and_binding(db_session, monkeypatch, caplog):
     # §15 round 2, P2: P routes (its snapshot is taken), F freezes the pair's only line and COMMITS, then P binds.
+    # 028 `F-028-28`/`F-028-29`: F suspends the payee (no line is frozen any more); the core reads it under its lock.
     # Owner decision A (T2415.3): the core's FOR SHARE fails with 40001, the retry refuses on a fresh snapshot.
     eq, people = await _seed(db_session)
     bind, seen = PaymentService._bind_payment, []
@@ -262,7 +258,7 @@ async def test_a_freeze_committed_between_routing_and_binding(db_session, monkey
     async def freeze_then_bind(self, *args, **kwargs):
         if not seen:
             async with sessionmaker_of(db_session)() as other:
-                await other.execute(update(TrustLine).where(TrustLine.equivalent_id == eq.id).values(status="frozen"))
+                await other.execute(update(Participant).where(Participant.id == people["B"].id).values(status="suspended"))
                 await other.commit()
         seen.append(await self.session.scalar(text("SHOW transaction_isolation")))
         return await bind(self, *args, **kwargs)
@@ -273,7 +269,7 @@ async def test_a_freeze_committed_between_routing_and_binding(db_session, monkey
             result = await PaymentService(session).create_payment_internal(
                 people["A"].id, to_pid=people["B"].pid, equivalent=eq.code, amount="30")
             outcome = result.status
-        except RoutingException as exc:
+        except (RoutingException, ConflictException) as exc:
             outcome = f"refused {exc}"
     assert seen and seen[0] == "read committed", seen
     left = (await db_session.execute(select(Debt.amount).where(Debt.equivalent_id == eq.id))).scalars().all()

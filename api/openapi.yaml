@@ -835,7 +835,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [active, frozen, closed]
+            enum: [active, closed]
         - in: query
           name: page
           schema:
@@ -2536,7 +2536,7 @@ paths:
           name: status
           schema:
             type: string
-            enum: [active, frozen, closed]
+            enum: [active, closed]
         - in: query
           name: page
           schema:
@@ -2662,7 +2662,7 @@ paths:
       description: >-
         Closing is the creditor's trust going to 0 (026, owner 2026-09-29; protocol §5.3). The limit becomes 0
         and `close_requested_at` is set. Only the debt the line supports (`to` owes `from`) counts: at 0 the
-        line is closed now; otherwise it stays `active` (or `frozen`) until a payment or a clearing brings that
+        line is closed now; otherwise it stays `active` until a payment or a clearing brings that
         debt to exactly 0, and closes in that transaction. A debt the other way belongs to the other line and
         does not hold the close. Repeating the request while it is pending changes nothing. The answer is the
         line's factual state.
@@ -3831,7 +3831,7 @@ components:
         status:
           type: string
           description: >-
-            The line's actual state after the action (026 `T2603.2`): `closed`, or still live (`active`/`frozen`)
+            The line's actual state after the action (026 `T2603.2`): `closed`, or still live (`active`)
             with `close_requested_at` set - limit 0 until the debt it supports is 0.
         close_requested_at:
           type: string
@@ -5376,7 +5376,7 @@ components:
             Note: `daily_limit` is **informational only** and is **not enforced in MVP**.
         status:
           type: string
-          enum: [active, frozen, closed]
+          enum: [active, closed]
           description: TrustLine status
         created_at:
           type: string
@@ -6370,7 +6370,7 @@ components:
           enum: [check_withdrawn]
 
     OverLimitAllowedDebt:
-      # 026 `T2601` (owner, В3): a debt above the stored limit of its live (`active`/`frozen`) line -
+      # 026 `T2601` (owner, В3): a debt above the stored limit of its live (`active`) line -
       # allowed and reported, not alerted: no critical status, no freeze, no hold.
       type: object
       required: [debtor_id, creditor_id, equivalent_id, debt_amount, trust_limit, excess]

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import or_, select
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.simulator.cache_invalidator import (
@@ -42,6 +42,9 @@ from app.utils.exceptions import (
     NotFoundException,
 )
 from app.utils.validation import AMOUNT_PRECISION_EXCEEDED, is_storable_money, money_step
+
+#: `skipped_reasons` key of an effect refused over a participant that is not active (028 `F-028-28`).
+PARTICIPANT_SUSPENDED = MoneyBoundary.PARTICIPANT_SUSPENDED_REASON
 
 # How many effects of one inject event are processed. Shared by staging and by the lock-set
 # helper below, so the helper never names fewer equivalents than staging can reach.
@@ -171,34 +174,34 @@ def inject_event_debt_participant_pids(*, event: Mapping[str, Any] | None) -> se
 
 
 def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
-    """Participants whose incident trustlines a `freeze_participant` effect of the event will freeze.
+    """The targets of the event's `freeze_participant` effects: the owner takes their rows `FOR UPDATE` before the
+    event's first other lock (028 `F-028-28`), never upgrading a shared lock mid-event. Since `F-028-29` a freeze
+    writes no trust line, so `freeze_trustlines` no longer matters. Mirrors staging: an empty pid is skipped."""
 
-    Programme 015, phase B step 3, external review of the step. The equivalents of those trustlines
-    are not named by the event, so the owner reads them before locking. Without this read, staging
-    stopped at the FIRST equivalent it lacked: an event freezing two participants whose trustlines
-    live in two equivalents outside the run needed two expansions, exhausted the one allowed, and -
-    since every tick starts again from the run's set - never completed on a topology nobody was
-    changing. The bounded expansion is left as what it is meant to be: a backstop for a trustline
-    created between the owner's read and the staging.
-
-    Mirrors staging's own parsing: an empty pid is skipped there, and `freeze_trustlines=False`
-    freezes no trustline, so neither needs a lock.
-    """
-
-    pids: set[str] = set()
     effects = (event or {}).get("effects")
-    if not isinstance(effects, list):
-        return pids
-    for eff in effects[:_MAX_INJECT_EFFECTS]:
+    return {
+        pid
+        for eff in (effects if isinstance(effects, list) else [])[:_MAX_INJECT_EFFECTS]
+        if isinstance(eff, dict) and str(eff.get("op") or "").strip() == "freeze_participant"
+        for pid in (str(eff.get("participant_id") or "").strip(),)
+        if pid
+    }
+
+
+def inject_event_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
+    """Every participant an effect of the event names - debts, freezes, new lines (both ends) and the sponsors of a
+    new participant's lines: the owner locks their rows first, in `participants.id` order (028 `F-028-28`)."""
+
+    pids = inject_event_debt_participant_pids(event=event) | inject_event_freeze_participant_pids(event=event)
+    effects = (event or {}).get("effects")
+    for eff in (effects if isinstance(effects, list) else [])[:_MAX_INJECT_EFFECTS]:
         if not isinstance(eff, dict):
             continue
-        if str(eff.get("op") or "").strip() != "freeze_participant":
-            continue
-        if not bool(eff.get("freeze_trustlines", True)):
-            continue
-        pid = str(eff.get("participant_id") or "").strip()
-        if pid:
-            pids.add(pid)
+        op = str(eff.get("op") or "").strip()
+        named = [eff.get("from"), eff.get("to")] if op == "create_trustline" else []
+        if op == "add_participant" and isinstance(eff.get("initial_trustlines"), list):
+            named = [itl.get("sponsor") for itl in eff["initial_trustlines"] if isinstance(itl, dict)]
+        pids |= {str(pid).strip() for pid in named if str(pid or "").strip()}
     return pids
 
 
@@ -518,6 +521,8 @@ class InjectExecutor:
                     eq_code,
                     type(exc).__name__,
                 )
+                if (exc.details or {}).get("reason") == MoneyBoundary.PARTICIPANT_SUSPENDED_REASON:
+                    skipped_reasons[PARTICIPANT_SUSPENDED] = skipped_reasons.get(PARTICIPANT_SUSPENDED, 0) + 1
                 return False
             except SQLAlchemyError:
                 raise
@@ -583,6 +588,14 @@ class InjectExecutor:
                 return False
             # Programme 015, phase B step 3: the debt below belongs to this equivalent.
             require_owner_locks({eq_id})
+            # 028 `F-028-28` (owner В-1): both ends' status read under their row locks (the owner took them first;
+            # a participant this event added is its own row) - after any freeze of this event, which flushed.
+            ends = await MoneyBoundary(session).lock_participants([creditor_id, debtor_id])
+            if any(status != "active" for status, _pid in ends.values()):
+                self._logger.info("simulator.real.inject.inject_debt.participant_suspended equivalent=%s", eq)
+                skipped_reasons[PARTICIPANT_SUSPENDED] = skipped_reasons.get(PARTICIPANT_SUSPENDED, 0) + 1
+                skipped += 1
+                return False
 
             # 027 stage 2: BOTH non-closed lines of the pair `FOR UPDATE` before the book reads either debt (the
             # owner locked the event's set already; a pair it could not name - a participant this event adds -
@@ -977,16 +990,17 @@ class InjectExecutor:
 
             try:
                 freeze_pid = str(eff.get("participant_id") or "").strip()
-                freeze_tls = bool(eff.get("freeze_trustlines", True))
 
                 if not freeze_pid:
                     skipped += 1
                     return False
 
-                # Update participant status → suspended.
-                p_row = (
-                    await session.execute(select(Participant).where(Participant.pid == freeze_pid))
-                ).scalar_one_or_none()
+                # 028 `F-028-28`/`F-028-29`: the participant row only, `FOR UPDATE` (the owner took it first, with the
+                # event's other participants), its status read by the locking statement - never from an ORM object;
+                # no trust line is written (`frozen` is gone). The UPDATE is SENT here: the session runs with
+                # `autoflush=False`, and every later effect of the event must read `suspended`.
+                p_row = (await session.execute(select(Participant.id, Participant.public_key, Participant.status).where(
+                    Participant.pid == freeze_pid).with_for_update())).one_or_none()
                 if p_row is None:
                     self._logger.warning(
                         "simulator.real.inject.freeze_participant.not_found pid=%s",
@@ -1006,30 +1020,7 @@ class InjectExecutor:
                     skipped += 1
                     return False
 
-                incident_tls: list[TrustLine] = []
-                if freeze_tls:
-                    incident_tls = list(
-                        (
-                            await session.execute(
-                                select(TrustLine).where(
-                                    or_(
-                                        TrustLine.from_participant_id == p_row.id,
-                                        TrustLine.to_participant_id == p_row.id,
-                                    ),
-                                    TrustLine.status == "active",
-                                ).order_by(TrustLine.id).with_for_update()  # 027 stage 2
-                            )
-                        ).scalars().all()
-                    )
-                    # Programme 015, phase B step 3. This freezes EVERY active incident trustline,
-                    # whatever its equivalent, so the set of owner locks it needs is only known
-                    # here. Checked before anything of this effect is staged - the participant's
-                    # own status included - so a too-narrow set leaves nothing behind to roll back.
-                    require_owner_locks({tl.equivalent_id for tl in incident_tls})
-
-                p_row.status = "suspended"
-                for frozen_tl in incident_tls:
-                    frozen_tl.status = "frozen"
+                await session.execute(update(Participant).where(Participant.id == p_row.id).values(status="suspended"))
 
                 # Invalidate only incident equivalents (best-effort).
                 # Freezing a participant affects routing; avoid evicting all equivalents.

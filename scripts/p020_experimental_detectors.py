@@ -10,8 +10,8 @@ caller of `find_cycles` sees either.
 THE CONTRACT BOTH IMPLEMENT (spec "Решения" -> detector and selection rule):
 
 * one ELIGIBILITY RELATION over edges, `ELIGIBLE_EDGES_SQL` below - one equivalent; `amount > 0`; the
-  controlling trust line is creditor -> debtor (`from = creditor`, `to = debtor`); its status is active or
-  frozen; its `policy.auto_clearing` is effective consent with EXACTLY the semantics of
+  controlling trust line is creditor -> debtor (`from = creditor`, `to = debtor`); its status is active (`frozen`
+  until 028 `F-028-29`); its `policy.auto_clearing` is effective consent with EXACTLY the semantics of
   `ClearingService._policy_flag(..., default=True)` (the SQL may not widen consent: a JSON number is `<> 0`,
   a string is trimmed and lowered against `false/0/no/off`, an array or object is its non-emptiness, a
   missing key / JSON null / SQL NULL policy consents); with a perimeter, BOTH endpoints of every edge are in
@@ -46,7 +46,7 @@ from typing import AbstractSet, Sequence
 
 from sqlalchemy import text
 
-CLEARABLE_STATUSES = ("active", "frozen")
+CLEARABLE_STATUSES = ("active",)  # 028 `F-028-29`: `frozen` is no line status (production: `_CLEARABLE_TRUSTLINE_STATUSES`)
 DEFAULT_LIMIT = 100
 
 

@@ -1,6 +1,5 @@
 export const statuses = [
   { label: 'active', value: 'active' },
-  { label: 'frozen', value: 'frozen' },
   { label: 'closed', value: 'closed' },
 ] 
 

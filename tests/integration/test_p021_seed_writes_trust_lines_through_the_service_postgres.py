@@ -10,7 +10,7 @@ labelled as belonging to the caller's transaction, and exactly one before/after 
 equivalent for the whole seeding transaction.
 
 THE CHARACTERIZATION (green before and after, the half that must NOT move): the initial statuses
-`active`/`frozen`/`closed` and the fallback of anything else to `active`, the policy default, the skips (no
+`active`/`closed` (028 `F-028-29`: `frozen` is refused, below) and the fallback of anything else to `active`, the policy default, the skips (no
 equivalent, unknown participant, negative, non-numeric and unstorable limits, a live line already there) and
 repeated seeding - including the one surprising property found while pinning it: a `closed` scenario line is
 NOT found by the live-line lookup, so every repeated seeding imports it once more as a new closed row.
@@ -27,7 +27,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, ScenarioTrustLineRefused
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
@@ -58,7 +58,7 @@ def _world() -> dict:
             # applied
             {"from": pid["A"], "to": pid["B"], "equivalent": e1, "limit": "100", "status": "active",
              "policy": {"auto_clearing": False}},
-            {"from": pid["A"], "to": pid["C"], "equivalent": e1, "limit": "50.5", "status": "frozen"},
+            {"from": pid["A"], "to": pid["C"], "equivalent": e1, "limit": "50.5", "status": "active"},  # 028: was frozen
             {"from": pid["B"], "to": pid["C"], "equivalent": e1, "limit": "10", "status": "closed",
              "policy": "not-a-dict"},
             {"from": pid["B"], "to": pid["D"], "equivalent": e1, "limit": "7", "status": "weird"},
@@ -117,7 +117,7 @@ def _expected_first_seed(w) -> list:
     p, e1, e2 = w["pid"], w["e1"], w["e2"]
     return sorted([
         (p["A"], p["B"], e1, Decimal("100"), "active", {"auto_clearing": False}),
-        (p["A"], p["C"], e1, Decimal("50.5"), "frozen", DEFAULT_POLICY),
+        (p["A"], p["C"], e1, Decimal("50.5"), "active", DEFAULT_POLICY),
         (p["B"], p["C"], e1, Decimal("10"), "closed", DEFAULT_POLICY),
         (p["B"], p["D"], e1, Decimal("7"), "active", DEFAULT_POLICY),
         (p["C"], p["B"], e1, Decimal("33"), "active", {"auto_clearing": True}),  # pre-existing, untouched
@@ -173,7 +173,7 @@ async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session,
 
     p, e1, e2 = w["pid"], w["e1"], w["e2"]
     applied_first = sorted([
-        (p["A"], p["B"], e1, "active"), (p["A"], p["C"], e1, "frozen"), (p["B"], p["C"], e1, "closed"),
+        (p["A"], p["B"], e1, "active"), (p["A"], p["C"], e1, "active"), (p["B"], p["C"], e1, "closed"),
         (p["B"], p["D"], e1, "active"), (p["D"], p["B"], e2, "active"),
     ])
 
@@ -203,3 +203,16 @@ async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session,
         f"{first_seed_checkpoints} checkpoints; second seed: {len(second_rows)} rows, "
         f"{second_seed_checkpoints} checkpoints",
     )
+
+
+@pytest.mark.asyncio
+async def test_a_frozen_scenario_line_refuses_the_seed(db_session) -> None:
+    """028 `F-028-29` (owner В-2): `frozen` is no line status - the seed stops naming the line, nothing is written."""
+    w = _world()
+    w["scenario"]["trustlines"] = [{"from": w["pid"]["A"], "to": w["pid"]["B"], "equivalent": w["e1"], "limit": "5",
+                                    "status": "frozen"}]
+    with pytest.raises(ScenarioTrustLineRefused) as refused:
+        await _seed(db_session, w)
+    assert refused.value.details["reason"] == "trust_line_status_frozen", refused.value.details
+    await db_session.rollback()
+    assert await _lines(db_session, w) == []

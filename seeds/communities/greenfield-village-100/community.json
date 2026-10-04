@@ -1396,7 +1396,7 @@
       "from": "lucas_hayes",
       "to": "the_johnson_family",
       "limit": "5.00",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": false,
         "can_be_intermediate": false
@@ -1407,7 +1407,7 @@
       "from": "lucas_hayes",
       "to": "daniel_hughes",
       "limit": "5.00",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": false,
         "can_be_intermediate": true
@@ -2023,7 +2023,7 @@
       "from": "ryan_cooper",
       "to": "greenfield_cooperative",
       "limit": "5.00",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": false
@@ -4685,7 +4685,7 @@
       "from": "pharmacy_and_health_kiosk",
       "to": "greenfield_cooperative",
       "limit": "4791.05",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": true
@@ -4718,7 +4718,7 @@
       "from": "pharmacy_and_health_kiosk",
       "to": "the_edwards_family",
       "limit": "2728.19",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": true
@@ -4729,7 +4729,7 @@
       "from": "pharmacy_and_health_kiosk",
       "to": "the_miller_family",
       "limit": "1372.16",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": true
@@ -5389,7 +5389,7 @@
       "from": "lucas_hayes",
       "to": "village_transport_co_op",
       "limit": "1993.75",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": false
@@ -6115,7 +6115,7 @@
       "from": "the_quinn_family",
       "to": "the_robinson_family",
       "limit": "184.17",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": false
@@ -6126,7 +6126,7 @@
       "from": "the_quinn_family",
       "to": "the_walker_family",
       "limit": "240.02",
-      "status": "frozen",
+      "status": "active",
       "policy": {
         "auto_clearing": true,
         "can_be_intermediate": false

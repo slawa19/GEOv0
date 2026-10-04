@@ -8,7 +8,7 @@ Spec decision 1 and Verification plan §2 ("балансы только по д�
   policy table, `docs/ru/09-decisions-and-defaults.md`); a boolean is itself; a number is non-zero; a string is
   trimmed and lower-cased, {false,0,no,off} refuse, {true,1,yes,on} admit, anything else falls back to the
   default; any other JSON value (array, object) is its truthiness. The expected outcome of each encoding is
-  WRITTEN DOWN from that rule, not computed by the parser the snapshot calls. Statuses active/frozen only.
+  WRITTEN DOWN from that rule, not computed by the parser the snapshot calls. Statuses active only (028 `F-028-29`: `frozen` is gone).
 * BALANCES ON THE ELIGIBLE SUBGRAPH - a triangle and, attached to its vertices, excluded debts (closed line,
   refused consent, an endpoint outside the perimeter) that change every whole-equivalent balance. The plan
   clears exactly the triangle and names no excluded debt. Counter-check: were the excluded debts admitted,
@@ -52,10 +52,10 @@ async def test_the_snapshot_admits_consent_exactly_as_production(db_session, sco
         e = Edge(debt_uuid(0x2340, n), f"p023w{n:03d}a", f"p023w{n:03d}b", "5", consent=value)
         edges.append(e)
         (admitted if expected else refused).add(e.debt_id)
-    for n, status in enumerate(("frozen", "closed")):
+    for n, status in enumerate(("active", "closed")):  # 028 `F-028-29`: was `frozen` (admitted), no longer a status
         e = Edge(debt_uuid(0x2341, n), f"p023s{n}a", f"p023s{n}b", "5", status=status)
         edges.append(e)
-        (admitted if status == "frozen" else refused).add(e.debt_id)
+        (admitted if status == "active" else refused).add(e.debt_id)
     # Controls: the stand holds both classes in quantity.
     assert len(refused) == len(_PY_ONLY_WHITESPACE) + 12 and len(admitted) == 16
     await seed_graph(db_session, "PQW", edges)

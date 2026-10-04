@@ -5,7 +5,7 @@ Programme 017, `T1711`. Three groups, and the last is the one that makes the fir
 * the control - the Riverside recipe runs end to end on a freshly migrated database and every
   acceptance check passes; a second run of the same command is REFUSED rather than replayed;
 * the paths where it must NOT finish - a description declaring a state no operation reaches
-  (`greenfield-village-100`) is refused before the first write; a command that its validator accepts
+  (a frozen line planted in a copy of Riverside; greenfield until 028 `F-028-29`) is refused before the first write; a command that its validator accepts
   but a database cannot perform stops the run and names itself, leaving what came before it in
   place; an absent database and an empty one are named refusals rather than tracebacks or green
   verdicts;
@@ -259,11 +259,21 @@ async def test_the_recipe_runs_and_every_acceptance_check_passes(templates):
 
 
 async def test_a_community_declaring_an_unreachable_state_is_refused_before_anything_is_written(
-    template_name,
+    template_name, tmp_path
 ):
-    """`greenfield-village-100` declares nine frozen trust lines and no product path writes that
-    status. The refusal has to come BEFORE the first participant, or the database is left holding
-    half a community whose keys no longer exist."""
+    """A declared frozen line (no line status since 028 `F-028-29`; greenfield had nine until then, now `active`) is
+    refused BEFORE the first participant - the stand plants one in a copy of Riverside."""
+
+    import json
+    import shutil
+
+    root = tmp_path / "communities"
+    shutil.copytree(Path(__file__).resolve().parents[2] / "seeds" / "communities" / COMMUNITY, root / COMMUNITY)
+    described = json.loads((root / COMMUNITY / "community.json").read_text(encoding="utf-8"))
+    have, refs = {(t["from"], t["to"]) for t in described["trustlines"]}, [x["ref"] for x in described["participants"]]
+    x, y = next((x, y) for x in refs for y in refs if x != y and (x, y) not in have)  # an extra line: the recipe holds
+    described["trustlines"].append({**described["trustlines"][0], "from": x, "to": y, "status": "frozen"})
+    (root / COMMUNITY / "community.json").write_text(json.dumps(described), encoding="utf-8")
 
     async with cloned_database(
         _postgres_url(), template_name=template_name, suffix="p017t1711gf"
@@ -272,9 +282,9 @@ async def test_a_community_declaring_an_unreachable_state_is_refused_before_anyt
         try:
             with pytest.raises(SeedRefusal) as refusal:
                 await seed_community(
-                    factory, community_id="greenfield-village-100", env="test", allow_scratch_suffix=True
+                    factory, community_id=COMMUNITY, communities_root=root, env="test", allow_scratch_suffix=True
                 )
-            assert "9 state(s)" in str(refusal.value)
+            assert "1 state(s)" in str(refusal.value)
             assert "frozen" in str(refusal.value)
 
             for table in ("equivalents", "participants", "trust_lines", "debts", "debt_operations"):

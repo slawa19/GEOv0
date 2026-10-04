@@ -27,7 +27,11 @@ _ROW = ("INSERT INTO simulator_runs (run_id, scenario_id, mode, state, owner_id,
 async def test_034_widens_the_seed_and_goes_back_only_without_a_wide_one(committed_database) -> None:
     url = committed_database.url
     await committed_database.engine.dispose()
-    assert repository_head() == _AFTER and await _version(url) == [(_AFTER,)]
+    assert await _version(url) == [(repository_head(),)]
+    if repository_head() != _AFTER:  # a later head (035, 028 `T2832`): step down to the revision under test
+        stepped = _alembic(url, "downgrade", _AFTER)
+        assert stepped.returncode == 0, stepped.stderr
+    assert await _version(url) == [(_AFTER,)]
     assert _alembic(url, "downgrade", _BEFORE).returncode == 0
     await _exec(url, _ROW, id="p028-m034-legacy", seed=2**31 - 1)
 

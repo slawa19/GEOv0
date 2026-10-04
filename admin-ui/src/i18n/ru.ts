@@ -263,7 +263,6 @@ export const RU: Record<string, string> = {
   'trustlines.limit': 'Лимит',
   'trustlines.status.active': 'активный',
   'trustlines.status.closed': 'закрыт',
-  'trustlines.status.frozen': 'заморожен',
 
   'auditLog.action': 'Действие',
   'auditLog.actor': 'Актор',

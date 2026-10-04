@@ -1811,10 +1811,10 @@
       "trust_limit": "850.00",
       "used": "425.00",
       "available": "425.00",
-      "status": "frozen",
+      "status": "active",
       "viz_color_key": null,
       "viz_width_key": "thick",
-      "viz_alpha_key": "muted"
+      "viz_alpha_key": "active"
     },
     {
       "id": "PID_U0001_9e3779b1→PID_U0043_935170bb",
@@ -3047,10 +3047,10 @@
       "trust_limit": "400.00",
       "used": "20.00",
       "available": "380.00",
-      "status": "frozen",
+      "status": "active",
       "viz_color_key": null,
       "viz_width_key": "thin",
-      "viz_alpha_key": "muted"
+      "viz_alpha_key": "bg"
     },
     {
       "id": "PID_U0036_3fcd1ce4→PID_U0066_ca4d5fa2",
@@ -3287,10 +3287,10 @@
       "trust_limit": "400.00",
       "used": "280.00",
       "available": "120.00",
-      "status": "frozen",
+      "status": "active",
       "viz_color_key": null,
       "viz_width_key": "thin",
-      "viz_alpha_key": "muted"
+      "viz_alpha_key": "active"
     },
     {
       "id": "PID_U0036_3fcd1ce4→PID_U0074_bc092d2a",
@@ -4499,7 +4499,7 @@
       "trust_limit": "400.00",
       "used": "100.00",
       "available": "300.00",
-      "status": "frozen",
+      "status": "active",
       "viz_color_key": null,
       "viz_width_key": "thin",
       "viz_alpha_key": "muted"
@@ -4511,7 +4511,7 @@
       "trust_limit": "400.00",
       "used": "120.00",
       "available": "280.00",
-      "status": "frozen",
+      "status": "active",
       "viz_color_key": null,
       "viz_width_key": "thin",
       "viz_alpha_key": "muted"
@@ -5363,10 +5363,10 @@
       "trust_limit": "550.00",
       "used": "357.50",
       "available": "192.50",
-      "status": "frozen",
+      "status": "active",
       "viz_color_key": null,
       "viz_width_key": "mid",
-      "viz_alpha_key": "muted"
+      "viz_alpha_key": "active"
     },
     {
       "id": "PID_U0005_17156075→PID_U0055_fdeb2507",

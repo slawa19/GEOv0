@@ -10,7 +10,7 @@ from uuid import UUID
 
 from app.utils.observability import log_duration
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.payments.capacity import pair_capacity, pair_rules, pending_pair_capacity, route_breaks_policy
@@ -261,20 +261,14 @@ class PaymentRouter:
 
         # 2. Load all TrustLines for this equivalent
         # We need to join with Participant to get PIDs
-        # 026 `T2603.1`: plus the frozen lines with a requested close - they mark their pair pending (В2) and
-        # carry no capacity or policy (024 `T2415.2`).
+        # 026 `T2603.1`: a line with a requested close marks its pair pending (В2); since 028 `F-028-29` it is an
+        # `active` line with limit 0 (the `frozen` status is gone).
         stmt = select(TrustLine.from_participant_id, TrustLine.to_participant_id, TrustLine.limit, TrustLine.policy,
                       TrustLine.status, TrustLine.close_requested_at).where(
-            and_(
-                TrustLine.equivalent_id == equivalent_id,
-                or_(TrustLine.status == 'active',
-                    and_(TrustLine.status == 'frozen', TrustLine.close_requested_at.is_not(None))),
-            )
-        )
-        loaded = (await self.session.execute(stmt)).all()
+            and_(TrustLine.equivalent_id == equivalent_id, TrustLine.status == 'active'))
+        trustlines = (await self.session.execute(stmt)).all()
         requested = {frozenset((tl.from_participant_id, tl.to_participant_id))
-                     for tl in loaded if tl.close_requested_at is not None}
-        trustlines = [tl for tl in loaded if tl.status == 'active']
+                     for tl in trustlines if tl.close_requested_at is not None}
 
         # 3. Load all Debts for this equivalent
         stmt = select(Debt.debtor_id, Debt.creditor_id, Debt.amount).where(Debt.equivalent_id == equivalent_id)
@@ -302,9 +296,12 @@ class PaymentRouter:
             return
 
         from app.db.models.participant import Participant
-        stmt = select(Participant.id, Participant.pid).where(Participant.id.in_(all_participant_ids))
+        stmt = select(Participant.id, Participant.pid, Participant.status).where(Participant.id.in_(all_participant_ids))
         result = await self.session.execute(stmt)
         rows = result.all()
+        # 028 `F-028-28` (owner В-1): no hop to or from a participant that is not active - fewer refusals, not the
+        # boundary (the core reads the status under its row locks, `MoneyBoundary.lock_participants`).
+        out_of_circulation = {row.id for row in rows if row.status != "active"}
         
         self.pids = {row.id: row.pid for row in rows}
         self.uuids = {row.pid: row.id for row in rows}
@@ -326,7 +323,7 @@ class PaymentRouter:
         # is positive; a pair without one gets none (024 `T2415.2`, owner decision 2026-09-29, GEO).
         lines = {(tl.from_participant_id, tl.to_participant_id): tl for tl in trustlines}
         step = money_step(self.precision)
-        for x, y in {frozenset(k) for k in lines if k[0] != k[1]}:
+        for x, y in {frozenset(k) for k in lines if k[0] != k[1] and not out_of_circulation & set(k)}:
             pair = [lines[k] for k in ((x, y), (y, x)) if k in lines]
             forbid, blocked = pair_rules((self.pids.get(tl.from_participant_id), tl.policy) for tl in pair)
             pending = frozenset((x, y)) in requested  # 026 В2, `capacity.py` addendum

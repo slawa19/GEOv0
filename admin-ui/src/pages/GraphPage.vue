@@ -89,7 +89,7 @@ const seedLabel = computed(() => {
 })
 
 const eq = ref<string>('')  // Will be auto-selected to primary equivalent after loadData()
-const statusFilter = ref<string[]>(['active', 'frozen', 'closed'])
+const statusFilter = ref<string[]>(['active', 'closed'])
 const threshold = ref<string>(DEFAULT_THRESHOLD)
 
 function syncFromRouteQuery() {

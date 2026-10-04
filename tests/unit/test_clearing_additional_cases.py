@@ -293,57 +293,6 @@ async def test_no_trustline_means_no_consent(db_session):
 
 
 @pytest.mark.asyncio
-async def test_frozen_trustline_with_consent_does_not_block_clearing(db_session):
-    # T1551, 2026-09-13. This test was `test_frozen_trustline_blocks_clearing` and asserted
-    # `cycles == []`. That pinned a defect, not the protocol: `docs/ru/02-protocol-spec.md` §7.2
-    # searches cycles over `debts` alone, with no trust-line status, and §7.4 makes clearing depend
-    # only on `policy.auto_clearing`. Clearing subtracts one amount around a cycle and creates no new
-    # exposure, so excluding a frozen line meant the over-limit debt §11.5.2 freezes a line for could
-    # never be reduced by a cycle. Decided by Codex review `CLEARING-FROZEN: ALLOW-REDUCTION`. The
-    # actual debt reduction, and the control that consent is still required, are asserted in
-    # `tests/unit/test_p015_t1551_clearing_reduces_debt_on_a_frozen_line.py`.
-    eq = _mk_eq("Z")
-    a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")
-    db_session.add_all([eq, a, b, c])
-    await db_session.flush()
-
-    async with debt_fixture_setup(db_session, label="setup"):
-        db_session.add_all(
-            [
-                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-                Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-            ]
-        )
-
-    # Two active TLs + one frozen controlling TL, all with consent: the cycle is found.
-    await _add_controlling_trustlines(
-        db_session,
-        eq_id=eq.id,
-        edges=[(a, b), (b, c)],
-        policy={"auto_clearing": True},
-        status="active",
-    )
-    await _add_controlling_trustlines(
-        db_session,
-        eq_id=eq.id,
-        edges=[(c, a)],
-        policy={"auto_clearing": True},
-        status="frozen",
-    )
-    await db_session.commit()
-
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
-    assert len(cycles) == 1
-    assert {(e["debtor"], e["creditor"]) for e in cycles[0]} == {
-        (a.pid, b.pid),
-        (b.pid, c.pid),
-        (c.pid, a.pid),
-    }
-
-
-@pytest.mark.asyncio
 async def test_sql_and_dfs_produce_same_cycles(db_session, monkeypatch):
     eq = _mk_eq("S")
     a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")

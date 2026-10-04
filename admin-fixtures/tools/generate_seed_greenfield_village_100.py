@@ -279,11 +279,9 @@ def build_trustlines(participants: list[Participant]) -> list[dict[str, Any]]:
 
         precision = 2
         limit = _limit_for(eq, weight)
+        # 028 `F-028-29` (owner В-2, migration 035): a trust line is `active` or `closed`; a frozen participant's
+        # lines stay `active` - the freeze is the participant's (until then most of its outgoing links were `frozen`).
         status = "active"
-        # If a participant is frozen, freeze most of its outgoing links.
-        p_from = next(p for p in participants if p.pid == from_pid)
-        if p_from.status == "frozen" and (n % 3 != 0):
-            status = "frozen"
 
         if used_ratio is not None and limit != 0 and status == "active":
             used = (limit * used_ratio).quantize(Decimal("0.0000001"), rounding=ROUND_DOWN)
@@ -416,10 +414,7 @@ def build_trustlines(participants: list[Participant]) -> list[dict[str, Any]]:
             used = limit
         available = limit - used
 
-        status = "active"
-        p_from = next(p for p in participants if p.pid == from_pid)
-        if p_from.status == "frozen" and (n_local % 3 != 0):
-            status = "frozen"
+        status = "active"  # 028 `F-028-29`: no `frozen` line status (see above)
 
         created_at = _iso(BASE_TS - timedelta(days=(n_local % 90), minutes=n_local * 11))
 

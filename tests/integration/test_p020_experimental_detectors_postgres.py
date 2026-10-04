@@ -196,7 +196,7 @@ def _g_random(scoped: bool):
                 continue
             pairs.add((a, b))
             roll = rnd.random()
-            status = "closed" if roll < 0.08 else ("frozen" if roll < 0.2 else "active")
+            status = "closed" if roll < 0.08 else "active"  # 028 `F-028-29`: the 12 % `frozen` band is gone
             consent = True if rnd.random() < 0.6 else rnd.choice(_CONSENTS)
             edges.append(Edge(debt_uuid(0x20, rnd.randrange(1 << 40) * 64 + n), a, b, rnd.choice(["1", "2", "3", "5"]), status, consent))
             n += 1

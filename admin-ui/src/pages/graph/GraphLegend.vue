@@ -39,9 +39,6 @@ const props = defineProps<{
       <span class="swatch swatch--edge-active" /> {{ t('trustlines.status.active') }}
     </div>
     <div class="legend__row">
-      <span class="swatch swatch--edge-frozen" /> {{ t('trustlines.status.frozen') }}
-    </div>
-    <div class="legend__row">
       <span class="swatch swatch--edge-closed" /> {{ t('trustlines.status.closed') }}
     </div>
     <div class="legend__row">
@@ -150,10 +147,6 @@ const props = defineProps<{
 
 .swatch--edge-active {
   background: #409eff;
-}
-
-.swatch--edge-frozen {
-  background: #909399;
 }
 
 .swatch--edge-closed {

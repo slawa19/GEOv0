@@ -344,8 +344,12 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # scenario preview). The Interact close answer and `trustlines-list` gain fields on both sides and stay out of the
 # ledger. Measured with a per-entry dump of every ledger on `9faa6b3` and on this tree: error and security ledgers
 # identical; counts 62 / 51 / 66 on both.
+# 2026-10-04 / programme 028 `T2832` (F-028-29): count HOLDS at 62, digest moves. ELEVEN entries change content, none
+# enters or leaves: the canon's `TrustLine.status` enum loses `frozen` (`POST`, `PATCH`, `DELETE`, both `GET` of
+# `/trustlines`; the Admin trustline, bottleneck, liquidity, metrics and both graph reads); the generated side still
+# says `string`. Measured with a per-entry dump against the canon of `86742876` (its digest is the previous one).
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "b582467c679d9d2c185d06a5ced0bf4c3b6e8e81b65c3298f9c1af15a6660864"
+    "b1e3e778e9cf2ec150be255a4ff6911c1c8d8abe792dce911afde219cbbbcd88"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;

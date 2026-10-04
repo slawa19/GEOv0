@@ -75,12 +75,12 @@ _TRUSTLINE_KEYS_REQUIRED = ("equivalent", "from", "to", "limit", "status", "poli
 _PARTICIPANT_TYPES = frozenset({"person", "business", "hub"})
 # Demo statuses. A description may declare a frozen participant or a frozen
 # line, but only the participant is reachable: the recipe freezes a participant
-# through the admin freeze operation, and no service or API operation freezes a
-# trust line (only the simulator's own injector writes that status,
-# `app/core/simulator/inject_executor.py`). A description declaring a frozen line is valid
+# through the admin freeze operation, and nothing freezes a trust line - since 028
+# `F-028-29` (migration 035) `frozen` is not a trust-line status at all, and the
+# frozen participant's lines stay `active`. A description declaring a frozen line is valid
 # here and refused by the seed before its first write
-# (`scripts/seed_recipe.py::unreachable_declared_states`) - greenfield-village-100
-# is refused for exactly that.
+# (`scripts/seed_recipe.py::unreachable_declared_states`); no committed description
+# declares one since 028 (greenfield's nine became `active`).
 _PARTICIPANT_STATUSES = frozenset({"active", "frozen"})
 _TRUSTLINE_STATUSES = frozenset({"active", "frozen"})
 

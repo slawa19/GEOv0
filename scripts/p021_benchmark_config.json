@@ -36,7 +36,8 @@
   },
   "inputs": {
     "community": "seeds/communities/greenfield-village-100/community.json",
-    "community_sha256": "3378074e79a8518d0eeecf4a5862aee93d1b9fd817c97e1072934decfcc6a457",
+    "community_sha256": "585fe37adb195f36bd9744ab3710e83e56ec4c0a125dce1617af517094f30cbd",
+    "community_sha256_history": "2026-10-04, 028 F-028-29 (owner В-2, migration 035): the nine `frozen` lines of the description became `active` (their creditors are the frozen participants); measured on 3378074e79a8518d0eeecf4a5862aee93d1b9fd817c97e1072934decfcc6a457 until then",
     "community_expected": {"participants": 100, "trustlines": 523, "equivalents": ["EUR", "HOUR", "UAH"]},
     "scenario_mapping": "participants -> {id: pid, name, type, status}; trustlines -> {from: pid of ref, to: pid of ref, equivalent, limit, status, policy}; equivalents -> codes; list order kept",
     "workloads": {

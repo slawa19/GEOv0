@@ -7,9 +7,10 @@ WHAT IT PINS (spec, Problem item 1; "Решения" items 4, 11 and 12). In `ap
 1. no `TrustLine(...)` construction;
 2. no Core `insert(...)`/`update(...)`/`delete(...)` whose target mentions `TrustLine`;
 3. no raw SQL string that writes `trust_lines` (`INSERT INTO`/`UPDATE`/`DELETE FROM` naming the table);
-4. no assignment to `.limit`, `.status` or `.policy` except the NAMED ones below - the inject freeze
-   (`frozen_tl.status = "frozen"`, a hub operation the protocol does not know, "Решения" item 11) and three
-   assignments that are not trust-line rows at all (a participant's status, two snapshot DTOs);
+4. no assignment to `.limit`, `.status` or `.policy` except the NAMED ones below - two snapshot DTOs, which are
+   not trust-line rows at all. (The inject freeze `frozen_tl.status = "frozen"`, "Решения" item 11, was the one
+   trust-line exception; 028 `F-028-29` removed it with the status, and the participant's status is now a Core
+   UPDATE of `participants`.)
 5. no `Participant(...)`/`Equivalent(...)` construction outside the seeder and the inject executor
    ("Решения" item 12).
 
@@ -18,7 +19,7 @@ callers, and no request schema carries the flag - are
 `tests/unit/test_p021_unsigned_trust_line_path_is_never_request_controlled.py`, updated by the same stage.
 
 WHAT IT DOES NOT SEE. It reads syntax, not types: an assignment is identified by its exact source text, so a
-trust-line row bound to a name already on the allow-list (`p_row`, `link`, `node`, `frozen_tl`) would pass; a
+trust-line row bound to a name already on the allow-list (`link`, `node`) would pass; a
 write through `setattr(row, "limit", ...)`, through a helper outside the scanned files, or through SQL built at
 run time from fragments is invisible. A green run says the listed syntax is absent, not that no write exists -
 the behaviour tests (R-021-2/3/4/6) are what show the writes go through the service. The counter-checks at the
@@ -41,14 +42,10 @@ SCANNED_FILES = ("app/api/v1/simulator.py",)
 GUARDED_ATTRIBUTES = {"limit", "status", "policy"}
 
 #: Every assignment to `.limit`/`.status`/`.policy` the scanned code may keep, by module and source text (compared
-#: as `ast.unparse` spells it, so quoting and spacing do not matter). Exactly one of them writes a trust-line row:
-#: the named freeze exception.
+#: as `ast.unparse` spells it, so quoting and spacing do not matter). None of them writes a trust-line row since 028
+#: `F-028-29` removed the freeze exception.
 _ALLOWED_ASSIGNMENTS_AS_WRITTEN = {
-    # THE NAMED EXCEPTION (spec, "Решения" item 11): freezing a participant freezes its active lines - a hub
-    # operation with no protocol counterpart, kept outside the service.
-    ("app/core/simulator/inject_executor.py", 'frozen_tl.status = "frozen"'),
     # Not trust-line rows:
-    ("app/core/simulator/inject_executor.py", 'p_row.status = "suspended"'),  # a Participant
     ("app/core/simulator/snapshot_builder.py", "link.status = str(status)"),  # a snapshot DTO
     ("app/core/simulator/snapshot_builder.py", "node.status = str(rec.status)"),  # a snapshot DTO
 }
@@ -150,12 +147,9 @@ def test_counter_check_a_planted_constructor_is_seen() -> None:
 def test_counter_check_a_planted_policy_limit_or_second_status_write_is_seen() -> None:
     assert _breaches("tl.policy = {}\n")
     assert _breaches("tl.limit = new_limit\n", "app/api/v1/simulator.py")
-    # The freeze exception covers exactly its own construction: a second status write in the same module,
-    # even one that looks like it, is refused.
-    assert not _breaches('frozen_tl.status = "frozen"\n')
-    assert _breaches('frozen_tl.status = "closed"\n')
+    # 028 `F-028-29`: the former freeze exception is a breach like any other status write.
+    assert _breaches('frozen_tl.status = "frozen"\n')
     assert _breaches('tl.status = "frozen"\n')
-    # And the exception is not portable to another module.
     assert _breaches('frozen_tl.status = "frozen"\n', "app/api/v1/simulator.py")
 
 

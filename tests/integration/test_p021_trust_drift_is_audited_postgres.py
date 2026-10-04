@@ -9,8 +9,8 @@ the rows of one transaction sharing ONE before/after checksum pair, and exactly 
 touched equivalent per transaction (counted on the service's own binding, so the clearing's checkpoints are not
 in the count).
 
-WHAT MUST NOT MOVE, asserted as controls (green before and after): drift changes only the ACTIVE line (a frozen
-line with the same overload keeps its limit), the decay floor is the debt read in the decay's own transaction
+WHAT MUST NOT MOVE, asserted as controls (green before and after): drift changes only the ACTIVE line (the control of a frozen
+line was removed with the status, 028 `F-028-29`), the decay floor is the debt read in the decay's own transaction
 (a line cannot be decayed below it), growth only raises.
 
 The stand is a real `RealRunnerImpl.tick_real_mode` on a mode-B clone (`tests/simulator_tick_stand.py`), because
@@ -132,8 +132,6 @@ def scenario_for(eq: Equivalent, people: dict, lines, trust_drift: dict) -> dict
     return {
         "equivalents": [eq.code],
         "participants": [{"id": p.pid} for p in people.values()],
-        # The SCENARIO says every line is active: a frozen line in the database is what an inject leaves
-        # behind (`inject_executor.py:939`), and drift must still not touch it.
         "trustlines": [
             {"from": people[c].pid, "to": people[d].pid, "equivalent": eq.code, "limit": limit, "status": "active"}
             for c, d, limit, _status in lines
@@ -166,9 +164,9 @@ DECAY = {"enabled": True, "decay_rate": 0.02, "min_limit_ratio": 0.3, "overload_
 DECAY_LINES = [
     ("C", "D", "100.00", "active"),  # debt 90 -> ratio 0.9 -> 98.00
     ("C", "G", "100.00", "active"),  # debt 99 -> floor 99.00
-    ("C", "E", "100.00", "frozen"),  # debt 90, same overload, frozen -> untouched
+    # 028 `F-028-29`: the `frozen` control C -> E (debt 90, untouched) is gone with the status.
 ]
-DECAY_DEBTS = [("D", "C", "90.00"), ("G", "C", "99.00"), ("E", "C", "90.00")]
+DECAY_DEBTS = [("D", "C", "90.00"), ("G", "C", "99.00")]
 
 
 @pytest.mark.asyncio
@@ -187,7 +185,6 @@ async def test_decay_in_a_real_tick_is_audited_per_transaction(factory, monkeypa
     after = await limits(factory, eq, people)
     assert after[("C", "D")] == (Decimal("98.00"), "active"), after
     assert after[("C", "G")] == (Decimal("99.00"), "active"), after  # the debt floor
-    assert after[("C", "E")] == (Decimal("100.00"), "frozen"), after  # drift touches the active line only
 
     async with factory() as s:
         rows = await trust_line_audit_rows(s, equivalent_codes=[eq.code], operation_type="TRUST_LINE_UPDATE")

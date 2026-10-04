@@ -17,16 +17,17 @@ WHY THE ORDER IS LOAD-BEARING HERE, effect by effect (A and B have active lines 
 1. `add_participant` C: applied; flushes.
 2. `create_trustline` A->C, 50: applied; staged, NOT flushed.
 3. `inject_debt` A->C 4.00: SKIPPED - the trust-line read does not see the unflushed line of (2).
-4. `freeze_participant` B: applied; B and its lines are frozen IN THE SESSION only.
-5. `inject_debt` A->B 2.00: applied - the line read still sees `active` from the database; the
-   handler's own flush then sends (2) and (4). B owes A 5.00.
-6. `add_participant` D: applied.
+4. `freeze_participant` B: applied; B's row is UPDATEd at once (028 `F-028-28`), its lines stay `active`
+   (`F-028-29`).
+5. `inject_debt` A->B 2.00: SKIPPED, `participant_suspended` - the status is read under B's row lock.
+6. `add_participant` D: applied; flushes.
 7. `inject_debt` A->C 1.00: applied - the line of (2) is in the database now.
-8. `inject_debt` A->B 1.00: SKIPPED - the frozen line of (4) is in the database now.
+8. `inject_debt` A->B 1.00: SKIPPED, `participant_suspended`.
 
-Collecting the debt effects at the start of the event would apply (3) and (8) and skip nothing;
-collecting them at the end would skip (5); splitting them into their own operations changes the
-envelope count. Each of those is a failure of this test.
+INTENTIONAL CHANGE (028, owner В-1, 2026-10-04): until then (4) froze B's lines in the session only, so (5)
+was applied (B owed A 5.00) and only (8) was skipped. Collecting the debt effects at the start of the event
+would apply (3), (5) and (8); splitting them into their own operations changes the envelope count. Each of
+those is a failure of this test.
 """
 
 from __future__ import annotations
@@ -124,8 +125,9 @@ async def test_a_mixed_inject_event_is_one_operation_in_source_order(factory) ->
     notes = [p["scenario"] for p in artifacts.events if p.get("type") == "note"]
     assert [note["description"] for note in notes] == ["inject applied"], notes
 
-    # The counters: 9 effects, 7 applied (3 debts + 2 participants + 1 line + 1 freeze), 2 skipped.
-    assert notes[0]["stats"] == {"applied": 7, "skipped": 2, "total_amount": {eq.code: "6.00"}}, notes[0]  # INTENTIONAL, 028 F-028-30: the total is per equivalent
+    # The counters: 9 effects, 6 applied (2 debts + 2 participants + 1 line + 1 freeze), 3 skipped.
+    assert notes[0]["stats"] == {"applied": 6, "skipped": 3, "skipped_reasons": {"participant_suspended": 2},
+                                 "total_amount": {eq.code: "4.00"}}, notes[0]  # INTENTIONAL, 028 F-028-28/30
 
     async with factory() as s:
         ids = dict(
@@ -185,10 +187,10 @@ async def test_a_mixed_inject_event_is_one_operation_in_source_order(factory) ->
             )
         ).all()
 
-    # Per-effect acceptance, read from the ledger: (0)+(5) on A->B, (7) on A->C; (3) and (8) skipped.
-    assert debts == {("B", "A"): Decimal("5.00"), ("C", "A"): Decimal("1.00")}, debts
+    # Per-effect acceptance, read from the ledger: (0) on A->B, (7) on A->C; (3), (5) and (8) skipped.
+    assert debts == {("B", "A"): Decimal("3.00"), ("C", "A"): Decimal("1.00")}, debts  # INTENTIONAL, 028 F-028-28
     assert statuses == {b.pid: "suspended", c_pid: "active", d_pid: "active"}, statuses
-    assert line_ab == "frozen"
+    assert line_ab == "active"  # INTENTIONAL, 028 F-028-29
 
     # Exactly one envelope for the whole event, identity `run_id:event_index`.
     assert [(state,) for _id, state in envelopes] == [("COMPLETED",)], envelopes
@@ -196,12 +198,10 @@ async def test_a_mixed_inject_event_is_one_operation_in_source_order(factory) ->
         (names[d], names[cr], Decimal(str(before or 0)), Decimal(str(after or 0)))
         for d, cr, before, after in entries
     )
-    # One entry per edge per flush: A->B written by two flushes (0->3 at effect 5's flush, 3->5 at
-    # the envelope's completion flush), A->C once.
+    # One entry per edge per flush: A->B once (0->3), A->C once.
     assert recorded == sorted(
         [
             ("B", "A", Decimal("0"), Decimal("3.00")),
-            ("B", "A", Decimal("3.00"), Decimal("5.00")),
             ("C", "A", Decimal("0"), Decimal("1.00")),
         ]
     ), recorded

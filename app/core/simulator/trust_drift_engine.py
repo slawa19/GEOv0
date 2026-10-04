@@ -368,8 +368,8 @@ class TrustDriftEngine:
                 continue
 
             # Get current limit from DB.  Drift applies to the ACTIVE line only: a
-            # closed incarnation is history and a frozen one is quarantined, and since
-            # migration 019 both may coexist with the active row.
+            # closed incarnation is history, and since migration 019 it may coexist with
+            # the active row (028 `F-028-29`: no line is `frozen` any more).
             tl_row = (
                 await clearing_session.execute(
                     select(TrustLine.id, TrustLine.limit).where(
@@ -546,8 +546,8 @@ class TrustDriftEngine:
             if not eq_id:
                 continue
 
-            # Drift applies to the ACTIVE line only: a closed incarnation is history and a frozen one is
-            # quarantined (migration 019 lets both coexist with the active row). Before 021 the `UPDATE ...
+            # Drift applies to the ACTIVE line only: a closed incarnation is history (migration 019 lets it
+            # coexist with the active row; 028 `F-028-29`: no line is `frozen` any more). Before 021 the `UPDATE ...
             # WHERE status = 'active'` matched no row here and the edge was still counted and published as
             # decayed; now there is nothing to write, and the edge is not reported.
             #

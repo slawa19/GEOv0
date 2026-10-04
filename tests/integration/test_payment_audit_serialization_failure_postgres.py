@@ -12,9 +12,9 @@ is best-effort), and `pay()` owns the retries: the whole attempt re-runs on a fr
 holds the same property on that path (manifest `t1901`, 5.1, rows of the dropped engine module).
 
 THE CONFLICT IS REAL. At the first statement of the first attempt's audit write (since 024 `T2413.2` the
-audit computes no checkpoint; its own statement - the equivalent code lookup - is the site) the payment
-reads the sender's participant row, a competitor commits an update of that row, and the payment updates
-it too: PostgreSQL raises `40001` inside the audit's `try`; no DBAPI error is fabricated. The
+audit computes no checkpoint; its own statement - the equivalent code lookup - is the site) a competitor holds a
+bystander participant's row (not the sender's: since 028 `F-028-28` the payment holds the rows of its own
+participants `FOR SHARE`), and the payment updates that row too: PostgreSQL raises `40001` inside the audit's `try`; no DBAPI error is fabricated. The
 competitor's wait is bounded: if a future change row-locks that participant, the test goes red on
 `competitor_timed_out` instead of hanging. The countercheck: the same site of the RE-RUN raises a
 non-database error, which stays best-effort - the payment still commits, without its audit row, and the
@@ -72,15 +72,20 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
 ) -> None:
     world = await _seed(factory)
     sender_id = world.sender.id
+    async with factory() as s:  # the contended row: a participant the payment does not touch (028 `F-028-28`)
+        bystander = Participant(pid=f"BY-{uuid.uuid4().hex[:8]}", display_name="by", public_key=f"pk-by-{uuid.uuid4()}")
+        s.add(bystander)
+        await s.commit()
+    contended_id = bystander.id
     audit_calls = 0
 
     async def _competitor_updates_the_contended_row(holding) -> None:
         async with factory() as competitor:
-            await competitor.execute(select(Participant.id).where(Participant.id == sender_id).with_for_update(key_share=True))
+            await competitor.execute(select(Participant.id).where(Participant.id == contended_id).with_for_update(key_share=True))
             await deadlock_after_the_wait(competitor, holding, select(TrustLine.id).where(
                 TrustLine.equivalent_id == world.equivalent.id).with_for_update())
             await competitor.execute(
-                update(Participant).where(Participant.id == sender_id).values(display_name="competitor")
+                update(Participant).where(Participant.id == contended_id).values(display_name="competitor")
             )
             await competitor.commit()
 
@@ -88,7 +93,7 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
         holding = asyncio.Event()
         competitors.append(asyncio.create_task(_competitor_updates_the_contended_row(holding)))
         await asyncio.wait_for(holding.wait(), _COMPETITOR_TIMEOUT_S)
-        await session.execute(update(Participant).where(Participant.id == sender_id).values(display_name="payment"))
+        await session.execute(update(Participant).where(Participant.id == contended_id).values(display_name="payment"))
 
     competitors: list[asyncio.Task] = []
     original_audit = PaymentService._write_integrity_audit
@@ -143,7 +148,7 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
         audits = (
             await fresh.execute(select(IntegrityAuditLog).where(IntegrityAuditLog.tx_id == request.tx_id))
         ).scalars().all()
-        name = await fresh.scalar(select(Participant.display_name).where(Participant.id == sender_id))
+        name = await fresh.scalar(select(Participant.display_name).where(Participant.id == contended_id))
     assert state == "COMMITTED"
     assert audits == [], "the first attempt's row is gone, and the re-run skipped its own (best-effort)"
     # The failed first attempt's update of the contended row was rolled back with it.

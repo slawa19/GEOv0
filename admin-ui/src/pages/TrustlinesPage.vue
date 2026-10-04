@@ -228,7 +228,6 @@ watch(threshold, () => {
 const statusOptions = computed(() => [
   { label: t('common.any'), value: '' },
   { label: t('trustlines.status.active'), value: 'active' },
-  { label: t('trustlines.status.frozen'), value: 'frozen' },
   { label: t('trustlines.status.closed'), value: 'closed' },
 ])
 
@@ -570,7 +569,7 @@ const trustlinesAdviceItems = computed(() =>
         </el-descriptions-item>
         <el-descriptions-item :label="t('common.status')">
           <el-tag
-            :type="selected.status === 'active' ? 'success' : selected.status === 'frozen' ? 'warning' : 'info'"
+            :type="selected.status === 'active' ? 'success' : 'info'"
             size="small"
           >
             {{ labelTrustlineStatus(selected.status) }}

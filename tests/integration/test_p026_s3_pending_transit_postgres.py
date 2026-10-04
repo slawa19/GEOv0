@@ -16,18 +16,15 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy import select
 
 from app.core.ledger.book import Book, PaymentFlow
-from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.core.trustlines.service import TrustLineService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.db.sqlstate import sqlstate
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineUpdateRequest
 from app.utils.exceptions import GeoException, IntegrityViolationException
 from tests.conftest import MODE_B, sessionmaker_of
@@ -170,49 +167,3 @@ async def test_the_book_judges_the_whole_operation_not_each_flow(db_session) -> 
             "applied", ({}, "closed")),
         f"book: opposite flows {refused}; 50->0->20 {partial} {debts_partial}; final zero {closing} {final}")
 
-
-@pytest.mark.parametrize("amount", ["120", "50"])
-@MODE_B
-@pytest.mark.asyncio
-async def test_a_frozen_requested_line_still_bounds_and_locks_its_pair(db_session, monkeypatch, amount) -> None:
-    # S3 adversarial pass F1: the requested line A -> B is FROZEN, B -> A stays active. The router and the core must
-    # still see the request - A -> B bounded by B's debt 50, A -> B locked FOR UPDATE before any debt is written -
-    # while the frozen line itself carries no capacity or policy (024 `T2415.2`). 120 must be refused by routing,
-    # never by the book (E008); 50 closes the frozen line.
-    eq, p, factory, line_id = await _stand(db_session)
-    async with factory() as s:
-        await s.execute(update(TrustLine).where(TrustLine.id == line_id).values(status="frozen"))
-        await s.commit()
-    PaymentRouter.invalidate_cache(eq.code)
-    segment, probes = PaymentService._segment, []
-
-    async def segment_then_probe(self, *args):
-        result = await segment(self, *args)  # the pair's lines are locked; no debt is written yet
-        async with factory() as probe:
-            try:
-                await probe.execute(select(TrustLine.id).where(TrustLine.id == line_id).with_for_update(
-                    read=True, nowait=True))
-                probes.append("free")
-            except DBAPIError as exc:
-                probes.append(sqlstate(exc))
-            await probe.rollback()
-        return result
-
-    monkeypatch.setattr(PaymentService, "_segment", segment_then_probe)
-    async with factory() as s:
-        service = PaymentService(s)
-        try:
-            outcome = (await service.create_payment_internal(
-                p["A"].id, to_pid=p["B"].pid, equivalent=eq.code, amount=amount)).status
-        except GeoException as exc:
-            outcome = f"refused {type(exc).__name__}"
-    state = await _state(factory, eq, p, line_id)
-    # The router itself sees the pair pending - the core's bound and lock fallback must not be what saves it.
-    hinted = frozenset((p["A"].id, p["B"].id)) in service.router.pending_pairs
-    outcome += "" if hinted else " (router: pair not pending)"
-    if amount == "120":
-        ok = (hinted and outcome.startswith("refused") and "IntegrityViolation" not in outcome
-              and state == ({("B", "A"): Decimal("50")}, "frozen"))
-    else:
-        ok = hinted and outcome.startswith("COMMITTED") and state == ({}, "closed") and probes and set(probes) == {"55P03"}
-    require_target(ok, f"A pays B {amount} over a frozen requested A -> B: {outcome}; {state}; probes {probes}")
