@@ -349,7 +349,7 @@ async def test_an_inject_event_writes_one_audit_row_per_line_and_one_checkpoint_
     assert run._real_fired_scenario_event_indexes == {0}
     notes = [p["scenario"] for p in artifacts.events if p.get("type") == "note"]
     assert [note["description"] for note in notes] == ["inject applied"], notes
-    assert notes[0]["stats"] == {"applied": 3, "skipped": 0, "total_amount": "0"}, notes[0]
+    assert notes[0]["stats"] == {"applied": 3, "skipped": 0, "total_amount": {}}, notes[0]  # INTENTIONAL, 028 F-028-30: the total is per equivalent
     assert await _inject_lines(factory, w) == sorted([
         (w.a.pid, w.b.pid, w.e1.code, Decimal("10"), "active", DEFAULT_POLICY),
         (w.a.pid, w.b.pid, w.e2.code, Decimal("20"), "active", DEFAULT_POLICY),

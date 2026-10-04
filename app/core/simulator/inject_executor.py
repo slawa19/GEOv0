@@ -4,7 +4,7 @@ import logging
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import or_, select
@@ -41,7 +41,7 @@ from app.utils.exceptions import (
     ForbiddenException,
     NotFoundException,
 )
-from app.utils.validation import is_storable_money
+from app.utils.validation import AMOUNT_PRECISION_EXCEEDED, is_storable_money, money_step
 
 # How many effects of one inject event are processed. Shared by staging and by the lock-set
 # helper below, so the helper never names fewer equivalents than staging can reach.
@@ -115,7 +115,8 @@ class StagedInjectEvent:
     pid_additions: dict[str, uuid.UUID] = field(default_factory=dict)
     applied: int = 0
     skipped: int = 0
-    total_applied: Decimal = Decimal("0")
+    total_applied: dict[str, Decimal] = field(default_factory=dict)  # per equivalent (028 F-028-30, owner В-3)
+    skipped_reasons: dict[str, int] = field(default_factory=dict)
 
 
 def inject_event_equivalent_codes(
@@ -439,7 +440,8 @@ class InjectExecutor:
 
         applied = 0
         skipped = 0
-        total_applied = Decimal("0")
+        total_applied: dict[str, Decimal] = {}
+        skipped_reasons: dict[str, int] = {}
 
         # Resolve equivalents lazily.
         eq_id_by_code: dict[str, uuid.UUID] = {}
@@ -539,15 +541,13 @@ class InjectExecutor:
 
             try:
                 amount = Decimal(str(eff.get("amount")))
-                amount = amount.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
             except Exception:
                 skipped += 1
                 return False
-            if amount <= 0:
+            if not amount.is_finite() or amount <= 0:
                 skipped += 1
                 return False
-            # Storage-capacity door (012 / F-012-1).  The quantize above already bounds the
-            # fraction, but nothing bounded the magnitude: a `Debt.amount` of 1e12 or more
+            # Storage-capacity door (012 / F-012-1).  Nothing bounded the magnitude: a `Debt.amount` of 1e12 or more
             # does not fit Numeric(20, 8) and aborts the whole inject transaction with
             # `numeric field overflow`.  An inject entry that cannot be applied is skipped,
             # which is this executor's declared behaviour for every other unusable field.
@@ -559,10 +559,6 @@ class InjectExecutor:
                 skipped += 1
                 return False
 
-            if max_total_amount is not None and total_applied + amount > max_total_amount:
-                skipped += 1
-                return False
-
             debtor_id = pids.get(debtor_pid)
             creditor_id = pids.get(creditor_pid)
             if debtor_id is None or creditor_id is None:
@@ -571,6 +567,18 @@ class InjectExecutor:
 
             eq_id = await resolve_eq_id(eq)
             if eq_id is None:
+                skipped += 1
+                return False
+            # 028 `F-028-30` (owner В-4): in the equivalent's step or not at all - skipped with a reason, never
+            # truncated (the 0.01 truncation wrote 1.23 for 1.239 and nothing at precision 8 or 0 was right).
+            if amount % money_step(eq_precision(eq)) != 0:
+                self._logger.warning("simulator.real.inject.inject_debt.amount_precision_exceeded equivalent=%s "
+                                     "precision=%s", eq, eq_precision(eq))
+                skipped_reasons[AMOUNT_PRECISION_EXCEEDED] = skipped_reasons.get(AMOUNT_PRECISION_EXCEEDED, 0) + 1
+                skipped += 1
+                return False
+            # The event's total is bounded PER EQUIVALENT (owner В-3: no sum across equivalents).
+            if max_total_amount is not None and total_applied.get(eq, Decimal("0")) + amount > max_total_amount:
                 skipped += 1
                 return False
             # Programme 015, phase B step 3: the debt below belongs to this equivalent.
@@ -626,7 +634,7 @@ class InjectExecutor:
                 return False
 
             applied += 1
-            total_applied += amount
+            total_applied[eq] = total_applied.get(eq, Decimal("0")) + amount
             affected_equivalents.add(eq)
             inject_debt_equivalents.add(eq)
             inject_debt_edges_by_eq.setdefault(eq, set()).add((creditor_pid, debtor_pid))
@@ -1099,7 +1107,8 @@ class InjectExecutor:
             pid_additions=dict(pid_additions),
             applied=int(applied),
             skipped=int(skipped),
-            total_applied=total_applied,
+            total_applied=dict(total_applied),
+            skipped_reasons=dict(skipped_reasons),
         )
 
     async def publish_committed_inject(
@@ -1166,7 +1175,8 @@ class InjectExecutor:
             },
             applied=int(staged.applied),
             skipped=int(staged.skipped),
-            total_applied=staged.total_applied,
+            total_applied=dict(staged.total_applied),
+            skipped_reasons=dict(staged.skipped_reasons),
         )
 
         # ---- cache invalidation after successful commit -----------
@@ -1226,7 +1236,9 @@ class InjectExecutor:
             stats={
                 "applied": int(result.applied),
                 "skipped": int(result.skipped),
-                "total_amount": format(result.total_applied, "f"),
+                # per equivalent (028 F-028-30): the note names the equivalent of each total
+                "total_amount": {eq: format(total, "f") for eq, total in sorted(result.total_applied.items())},
+                **({"skipped_reasons": dict(result.skipped_reasons)} if result.skipped_reasons else {}),
             },
         )
 

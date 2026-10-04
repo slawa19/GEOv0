@@ -34,14 +34,14 @@ from app.config import Settings
         ("SIMULATOR_ACTIONS_ENABLE", "on", False),
         ("SIMULATOR_ACTIONS_ENABLE", "", False),
         ("SIMULATOR_REAL_AMOUNT_CAP", "500", Decimal("500.00")),
-        ("SIMULATOR_REAL_AMOUNT_CAP", "12.349", Decimal("12.34")),
+        ("SIMULATOR_REAL_AMOUNT_CAP", "12.349", Decimal("12.349")),  # INTENTIONAL, 028 F-028-32: applied in each step
         ("SIMULATOR_REAL_AMOUNT_CAP", "0", None),
         ("SIMULATOR_REAL_AMOUNT_CAP", "NaN", None),
         ("SIMULATOR_REAL_AMOUNT_CAP", "cap", None),
         # Values the quantization refuses (024 `T2414` §15 fix-delta, P2): the raw read caught those too.
         ("SIMULATOR_REAL_AMOUNT_CAP", "Infinity", None),
         ("SIMULATOR_REAL_AMOUNT_CAP", "-Infinity", None),
-        ("SIMULATOR_REAL_AMOUNT_CAP", "1e100", None),
+        ("SIMULATOR_REAL_AMOUNT_CAP", "1e100", Decimal("1e100")),  # INTENTIONAL, 028 F-028-32: no 0.01 quantize to refuse it
         ("SIMULATOR_REAL_AMOUNT_CAP", "sNaN", None),
         ("SIMULATOR_SCENARIO_ALLOWLIST", "all", "all"),
     ],

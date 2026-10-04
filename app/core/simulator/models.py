@@ -25,7 +25,8 @@ class InjectResult:
     inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
     applied: int = 0
     skipped: int = 0
-    total_applied: Decimal = Decimal("0")
+    total_applied: dict[str, Decimal] = field(default_factory=dict)  # per equivalent (028 F-028-30)
+    skipped_reasons: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

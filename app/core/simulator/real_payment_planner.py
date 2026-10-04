@@ -158,7 +158,9 @@ class RealPaymentPlanner:
         limit: Decimal,
         *,
         amount_model: dict[str, Any] | None = None,
+        precision: int = 2,
     ) -> str | None:
+        step = Decimal(1).scaleb(-int(precision))  # 028 `F-028-32`: the equivalent's step, not always cents
         cap = limit
         if self._amount_cap_limit is not None:
             cap = min(cap, self._amount_cap_limit)
@@ -241,9 +243,9 @@ class RealPaymentPlanner:
         else:
             raw = Decimal(str(0.1 + rng.random() * float(cap)))
 
-        amt = min(raw, cap).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        amt = min(raw, cap).quantize(step, rounding=ROUND_DOWN)
         if model_min is not None and amt < model_min:
-            amt = model_min.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            amt = model_min.quantize(step, rounding=ROUND_DOWN)
         if amt <= 0:
             return None
         return format(amt, "f")
@@ -254,6 +256,7 @@ class RealPaymentPlanner:
         scenario: dict[str, Any],
         *,
         debt_snapshot: dict[tuple[str, str, str], Decimal] | None = None,
+        precision_by_eq: dict[str, int] | None = None,
     ) -> list[Any]:
         """Deterministic planner for Real Mode payment actions.
 
@@ -668,7 +671,8 @@ class RealPaymentPlanner:
                 if isinstance(maybe, dict):
                     amount_model = maybe
 
-            amount = self.pick_amount(action_rng, limit, amount_model=amount_model)
+            amount = self.pick_amount(action_rng, limit, amount_model=amount_model,
+                                      precision=(precision_by_eq or {}).get(eq.strip().upper(), 2))
             if amount is None:
                 i += 1
                 continue

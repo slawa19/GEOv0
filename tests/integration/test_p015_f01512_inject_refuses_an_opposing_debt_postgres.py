@@ -194,7 +194,7 @@ async def test_an_inject_opposite_to_an_existing_debt_is_refused(factory) -> Non
     )
 
     assert await _debts(factory, world) == {("B", "A"): Decimal("5.00")}
-    assert stats == {"applied": 0, "skipped": 1, "total_amount": "0"}, stats
+    assert stats == {"applied": 0, "skipped": 1, "total_amount": {}}, stats  # INTENTIONAL, 028 F-028-30: the total is per equivalent
     await _assert_reconciled(factory, world)
 
 
@@ -216,7 +216,7 @@ async def test_an_opposing_effect_of_the_same_event_is_refused(factory) -> None:
     )
 
     assert await _debts(factory, world) == {("B", "A"): Decimal("3.00")}
-    assert stats == {"applied": 1, "skipped": 1, "total_amount": "3.00"}, stats
+    assert stats == {"applied": 1, "skipped": 1, "total_amount": {world.equivalents[0].code: "3.00"}}, stats  # INTENTIONAL, 028 F-028-30: the total is per equivalent
     await _assert_reconciled(factory, world)
 
 
@@ -235,7 +235,7 @@ async def test_counter_check_an_inject_in_the_same_direction_still_increases_the
     )
 
     assert await _debts(factory, world) == {("B", "A"): Decimal("8.00")}
-    assert stats == {"applied": 1, "skipped": 0, "total_amount": "3.00"}, stats
+    assert stats == {"applied": 1, "skipped": 0, "total_amount": {world.equivalents[0].code: "3.00"}}, stats  # INTENTIONAL, 028 F-028-30: the total is per equivalent
     await _assert_reconciled(factory, world)
 
 
@@ -251,5 +251,5 @@ async def test_counter_check_an_inject_on_a_pair_without_debt_still_creates_it(f
     )
 
     assert await _debts(factory, world) == {("A", "B"): Decimal("3.00")}
-    assert stats == {"applied": 1, "skipped": 0, "total_amount": "3.00"}, stats
+    assert stats == {"applied": 1, "skipped": 0, "total_amount": {world.equivalents[0].code: "3.00"}}, stats  # INTENTIONAL, 028 F-028-30: the total is per equivalent
     await _assert_reconciled(factory, world)

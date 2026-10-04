@@ -833,11 +833,13 @@ class RealRunnerImpl:
         scenario: dict[str, Any],
         *,
         debt_snapshot: dict[tuple[str, str, str], Decimal] | None = None,
+        precision_by_eq: dict[str, int] | None = None,
     ) -> list[_RealPaymentAction]:
         return self._real_payment_planner.plan_payments(
             run,
             scenario,
             debt_snapshot=debt_snapshot,
+            precision_by_eq=precision_by_eq,
         )
 
     def _sim_idempotency_key(
