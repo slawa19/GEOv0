@@ -300,7 +300,8 @@ async function getIncidentsDataset(): Promise<Incident[] | null> {
   return mockIncidents
 }
 
-async function getGraphAuditLogDataset(): Promise<AuditLogEntry[]> {
+/** The audit log as an OPTIONAL input (Graph snapshot, participant activity): silent, `[]` when unavailable. */
+async function getOptionalAuditLogDataset(): Promise<AuditLogEntry[]> {
   try {
     if (mockAuditLog) return mockAuditLog
     const decoded = decodeAdminResponse(
@@ -311,7 +312,7 @@ async function getGraphAuditLogDataset(): Promise<AuditLogEntry[]> {
     if (!mockAuditLog) mockAuditLog = decoded
     return mockAuditLog
   } catch {
-    // audit_log is an optional Graph snapshot component in fixture mode. The
+    // audit_log is an optional component here (Graph snapshot, participant activity). The
     // dedicated audit endpoint remains strict and reports malformed fixtures.
     return []
   }
@@ -530,7 +531,8 @@ export const mockApi = {
         loadOptionalJson<Incident[]>('datasets/incidents.json', []),
         loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
-      const auditLog = await getAuditLogDataset().catch(() => [] as AuditLogEntry[])
+      // Optional: the strict loader toasts (ElMessage) a missing fixture - wrong for a counter (028 E8, CI 37234751117).
+      const auditLog = await getOptionalAuditLogDataset()
 
       const pidToName = new Map(participants.map((p) => [p.pid, String(p.display_name || '').trim() || p.pid]))
       const precisionByEq = new Map(
@@ -1530,7 +1532,7 @@ export const mockApi = {
         getIncidentsDataset().then((items) => items ?? []),
         loadJson<Equivalent[]>('datasets/equivalents.json'),
         loadOptionalJson<Debt[]>('datasets/debts.json', []),
-        getGraphAuditLogDataset(),
+        getOptionalAuditLogDataset(),
         loadOptionalJson<Transaction[]>('datasets/transactions.json', []),
       ])
 
