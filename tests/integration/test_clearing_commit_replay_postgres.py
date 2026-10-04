@@ -170,19 +170,20 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
             assert str(isolation).lower() == "read committed"
         observer = TestingSessionLocal()
 
-        workers = [
-            asyncio.create_task(
-                ClearingService(session).execute_occurrence(
-                    replayed
-                )
-            )
-            for session, replayed in zip(
-                sessions,
-                (occurrence, dataclasses.replace(occurrence)),
-                strict=True,
-            )
-        ]
+        # Register-028 no. 270: the owner number is taken on entry to the patched acquisition, before its async
+        # PID read and lock wait, so two tasks started together could swap roles - the second took the row locks
+        # first, finished and released them, and the blocked-waiter probe below then looked for a waiter that no
+        # longer existed. The second owner therefore starts only after the first one's lock acquisition is
+        # confirmed; from then on call 1 is the holder and call 2 is the waiter by construction.
+        first_worker = asyncio.create_task(
+            ClearingService(sessions[0]).execute_occurrence(occurrence)
+        )
+        workers.append(first_worker)
         await asyncio.wait_for(first_owner_acquired.wait(), timeout=5.0)
+        second_worker = asyncio.create_task(
+            ClearingService(sessions[1]).execute_occurrence(dataclasses.replace(occurrence))
+        )
+        workers.append(second_worker)
         await asyncio.wait_for(second_owner_attempted.wait(), timeout=5.0)
         assert await _wait_until_blocked(
             observer,
