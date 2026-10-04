@@ -377,8 +377,12 @@ class TrustLineService:
         *,
         require_signature: bool,
         flush: bool = True,
+        lock_timeout_ms: int | None = None,
     ) -> TrustLine:
         """Stage a new ACTIVE trust line in the caller's transaction and record it on `batch`.
+
+        `lock_timeout_ms` bounds the wait on the pair's line locks (`55P03` past it); the inject passes its
+        owner's budget (028 F-028-14). The public `create` passes none - its wait stays as before.
 
         `flush=False` (programme 021, stage 2) leaves the INSERT staged for the caller's next flush instead of
         sending it here. The inject executor needs it: an inject event's effects see each other only through
@@ -461,9 +465,10 @@ class TrustLineService:
 
         # 027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` first, so a creation waits for a money writer in
         # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
-        await MoneyBoundary(self.session).lock_pair_lines([(equivalent.id, from_participant_id, to_participant.id)])
+        await MoneyBoundary(self.session).lock_pair_lines(
+            [(equivalent.id, from_participant_id, to_participant.id)], timeout_ms=lock_timeout_ms)
 
-        await self._require_step(equivalent.id, limit)
+        await self._require_step(equivalent.id, limit, timeout_ms=lock_timeout_ms)
 
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»
@@ -819,12 +824,13 @@ class TrustLineService:
             imported.append(trustline)
         return imported
 
-    async def _require_step(self, equivalent_id: UUID, limit: Decimal) -> None:
+    async def _require_step(self, equivalent_id: UUID, limit: Decimal, *, timeout_ms: int | None = None) -> None:
         """028 `F-028-23`/`F-028-25` (owner В-4): a limit finer than the equivalent's step is refused, never rounded.
         The step is read under the equivalent row `FOR SHARE`, held to commit, so a PATCH lowering the precision
         either waits for this write and then sees it, or commits first and this write reads the new step."""
 
-        code, precision = await MoneyBoundary(self.session).share_equivalent_step(equivalent_id) or ("?", 8)
+        step_of = await MoneyBoundary(self.session).share_equivalent_step(equivalent_id, timeout_ms=timeout_ms)
+        code, precision = step_of or ("?", 8)
         require_money_step(limit, precision=precision, equivalent=code, field="limit")
 
     async def _equivalent_code(self, equivalent_id: UUID) -> str:

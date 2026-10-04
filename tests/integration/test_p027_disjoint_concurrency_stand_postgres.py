@@ -741,6 +741,9 @@ async def test_q3_clearing_against_payments(stand, monkeypatch) -> None:
         assert not row["untagged_errors"], ("M6", name, row)
         assert not row["reconcile"]["mismatches"] and row["reconcile"]["committed"] == row["committed"], (name, row)
         assert set(row["ttl_seen"]) == {row["ttl"]}, ("M4: the cell ran its TTL", name, row["ttl_seen"])
-        if "clearing_" in name:
-            assert row["clearing"].get("committed", 0) >= 1, ("anti-vacuum: clearing executed nothing", name, row)
+        if "clearing_" in name:  # 027 contract (spec:272): 40/40 and no cycle debt left (028 F-028-15)
+            assert row["clearing"].get("committed", 0) == TRIANGLES, ("Q3: clearing 40/40", name, row["clearing"])
+            assert row["cycle_debts_left"] == 0, ("Q3: cycle debts left after clearing", name, row["cycle_debts_left"])
+        else:  # anti-vacuum of the count: without clearing every triangle debt is still there
+            assert row["cycle_debts_left"] == 3 * TRIANGLES, ("Q3: the cycle-debt count", name, row["cycle_debts_left"])
     assert set(verdict.values()) == {"pass"}, ("R-027-4", verdict, waits)

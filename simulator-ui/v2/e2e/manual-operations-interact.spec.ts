@@ -346,7 +346,15 @@ async function mockRealInteractApp(page: Page, o: {
       await route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify({ detail: 'boom' }) })
       return
     }
-    const items = Array.isArray(o.trustlinesList) ? o.trustlinesList : []
+    // The Simulator response decoder (`decodeTrustlinesList`) requires `from_name`, `to_name` and `reverse_used`
+    // on every row; a row without them is a contract violation and the panel shows the source as failed.
+    const nameOf = (pid: string) => o.participants.find((p) => p.pid === pid)?.name ?? pid
+    const items = (Array.isArray(o.trustlinesList) ? o.trustlinesList : []).map((it) => ({
+      from_name: nameOf(it.from_pid),
+      to_name: nameOf(it.to_pid),
+      reverse_used: '0.00',
+      ...it,
+    }))
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -376,7 +384,7 @@ async function mockRealInteractApp(page: Page, o: {
 
   await page.route(`**/simulator/runs/${encodeURIComponent(runId)}/actions/trustline-close`, async (route: Route) => {
     const req: TrustlineCloseReq = JSON.parse((await route.request().postData()) ?? '{}')
-    const resp = o.onTrustlineClose?.(req) ?? { status: 200, body: { ok: true, trustline_id: `${req.from_pid}→${req.to_pid}` } }
+    const resp = o.onTrustlineClose?.(req) ?? { status: 200, body: { ok: true, trustline_id: `${req.from_pid}→${req.to_pid}`, status: 'closed' } }
     await route.fulfill({ status: resp.status, contentType: 'application/json', body: JSON.stringify(resp.body) })
   })
 
@@ -581,7 +589,9 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await expect(page.getByLabel('Success notification')).not.toContainText('NO_ROUTE')
   })
 
-  test('E-3: Trustline panel — newLimit < used -> Update disabled + warning visible', async ({ page }) => {
+  // 026 (owner В1/F-026-1, `T2602`): a limit below the debt is a trust change, not a debt change, and is
+  // allowed. Until 2026-10-04 this scenario asserted the pre-026 block (`tl-limit-too-low`, Update disabled).
+  test('E-3: Trustline panel — newLimit < used -> Update stays enabled, no too-low warning (026)', async ({ page }) => {
     const participants: Participant[] = [
       { pid: 'alice', name: 'Alice' },
       { pid: 'bob', name: 'Bob' },
@@ -620,8 +630,8 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await expect(page.locator('#tl-new-limit')).toBeVisible()
     await page.locator('#tl-new-limit').fill('4.99')
 
-    await expect(page.locator('[data-testid="tl-limit-too-low"]')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Update' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Update' })).toBeEnabled()
+    await expect(page.locator('[data-testid="tl-limit-too-low"]')).toHaveCount(0)
   })
 
   test('E-4: Send Payment from EdgeDetailPopup -> pre-fills From/To and opens confirm step', async ({ page }) => {
@@ -699,14 +709,18 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await expect.poll(async () => await getSelectValue(page, '#mp-to')).toBe('alice')
   })
 
-  test('E-5: TL close with reverse_used > 0 -> backend 409 -> ErrorToast', async ({ page }) => {
+  // 026 (owner В1, `T2603.2`): the reverse debt belongs to the other line and neither blocks Close nor is
+  // announced, and the backend no longer refuses a close over debt (the pre-026 `TL_CLOSE_CONFLICT` 409 this
+  // scenario mocked is gone). What stays reachable and worth proving at the UI is a backend refusal of Close
+  // reaching the ErrorToast - here the line was closed elsewhere first (`TRUSTLINE_NOT_FOUND`, simulator.py).
+  // The list answers with a row: since 013 the panel will not offer Close without figures for the line, which is
+  // why the old "list fails, panel falls back to the snapshot" setup left the button disabled.
+  test('E-5: TL close -> backend refuses (404 TRUSTLINE_NOT_FOUND) -> ErrorToast; reverse debt does not block Close', async ({ page }) => {
     const participants: Participant[] = [
       { pid: 'alice', name: 'Alice' },
       { pid: 'bob', name: 'Bob' },
     ]
 
-    // IMPORTANT: snapshot does NOT contain reverse_used (known limitation),
-    // so UI close guard will not block, and backend 409 becomes the last barrier.
     const snapshot = makeSnapshot({
       eq: 'UAH',
       nodes: participants.map((p) => ({ id: p.pid, name: p.name })),
@@ -716,18 +730,28 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await mockRealInteractApp(page, {
       snapshot,
       participants,
-      // Make trustlines-list fail so the panel falls back to snapshot-derived trustlines (no reverse_used).
-      trustlinesListStatus: 500,
+      trustlinesList: [
+        {
+          from_pid: 'alice',
+          to_pid: 'bob',
+          equivalent: 'UAH',
+          limit: '10.00',
+          used: '0.00',
+          reverse_used: '0.01',
+          available: '10.00',
+          status: 'active',
+        },
+      ],
       paymentTargetsByFromPid: {},
       onTrustlineClose: (req) => {
         expect(req.from_pid).toBe('alice')
         expect(req.to_pid).toBe('bob')
         return {
-          status: 409,
+          status: 404,
           body: {
-            code: 'TL_CLOSE_CONFLICT',
-            message: 'Cannot close trustline: reverse_used > 0',
-            details: { reverse_used: '0.01' },
+            code: 'TRUSTLINE_NOT_FOUND',
+            message: 'Trustline not found',
+            details: { from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH' },
           },
         }
       },
@@ -748,7 +772,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
     await closeBtn.click()
 
     await expect(page.getByLabel('Error notification')).toBeVisible()
-    await expect(page.getByLabel('Error notification')).toContainText('Cannot close trustline: reverse_used > 0')
+    await expect(page.getByLabel('Error notification')).toContainText('Trustline not found')
   })
 })
 
