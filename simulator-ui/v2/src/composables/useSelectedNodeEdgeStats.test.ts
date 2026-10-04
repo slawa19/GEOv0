@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GraphSnapshot } from '../types'
+import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 import { computeNodeEdgeStats, useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
 
 /**
@@ -47,8 +48,11 @@ describe('useSelectedNodeEdgeStats', () => {
   })
 
   it('reacts to the equivalent: the same links must not render identically under UAH and HOUR', () => {
+    // 028 В-4: HOUR ships at 2 like UAH, so the catalogue answers 1 here to keep two precisions apart.
+    setEquivalentPrecisions([{ code: 'HOUR', precision: 1 }])
     const asUah = computeNodeEdgeStats(makeSnapshot('UAH'), 'A')
     const asHour = computeNodeEdgeStats(makeSnapshot('HOUR'), 'A')
+    resetEquivalentPrecisions()
 
     expect(
       asHour.outLimitText,

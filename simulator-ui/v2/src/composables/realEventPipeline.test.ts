@@ -400,6 +400,7 @@ describe('realEventPipeline state-before-effect ordering', () => {
           throttleMs: 0,
           delayMs: 10,
           runId: 'run_1',
+          equivalent: 'EUR',
         },
         { type: 'clearing-fx', event: clearing },
         { type: 'wake' },

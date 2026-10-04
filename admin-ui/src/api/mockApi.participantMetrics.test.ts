@@ -120,7 +120,8 @@ describe('mockApi.participantMetrics', () => {
         tx_id: 'T1',
         type: 'PAYMENT',
         initiator_pid: 'PID_A',
-        payload: { equivalent: 'GEO' },
+        // 028 F-028-49: the mock attributes a payment by its parties, as the server does.
+        payload: { equivalent: 'GEO', from: 'PID_A', to: 'PID_B' },
         state: 'COMMITTED',
         created_at: isoRecent,
         updated_at: isoRecent,
@@ -136,6 +137,12 @@ describe('mockApi.participantMetrics', () => {
       },
     ]
 
+    // 028 F-028-49: `participant_ops` are the participant's audit actions (server `metrics.py`), not transactions.
+    const auditLog = ['admin.participants.freeze', 'admin.participants.unfreeze', 'admin.config.patch'].map((action, i) => ({
+      id: `00000000-0000-4000-8000-00000000000${i}`, timestamp: isoRecent, action, object_type: 'participant',
+      object_id: action === 'admin.config.patch' ? 'X' : 'PID_A', actor_id: null, actor_role: 'admin', reason: null,
+      before_state: null, after_state: null, request_id: null, ip_address: null, user_agent: null,
+    }))
     const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -147,6 +154,7 @@ describe('mockApi.participantMetrics', () => {
         if (u.includes('/admin-fixtures/v1/datasets/debts.json')) return jsonResponse(debts)
         if (u.includes('/admin-fixtures/v1/datasets/incidents.json')) return jsonResponse(incidents)
         if (u.includes('/admin-fixtures/v1/datasets/transactions.json')) return jsonResponse(transactions)
+        if (u.includes('/admin-fixtures/v1/datasets/audit-log.json')) return jsonResponse(auditLog)
         return new Response('Not Found', { status: 404, statusText: 'Not Found' })
       })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)

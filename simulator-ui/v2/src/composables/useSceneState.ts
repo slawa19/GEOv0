@@ -171,7 +171,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // Detect if this is an "incremental" update (same node IDs) vs. a full scene change.
       // Incremental: skip camera reset, overlay clear, and layout cache invalidation.
       // This prevents "explosion" animations when transitioning preview → run with the same graph.
-      const nodeIdsMatch = snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
+      // 028 F-028-47 (B4): the same participants in another equivalent are a new scene, not an increment.
+      const sameEquivalent =
+        String(deps.state.snapshot?.equivalent ?? '').trim().toUpperCase() ===
+        String(snapshot.equivalent ?? '').trim().toUpperCase()
+      const nodeIdsMatch = sameEquivalent && snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
       const isIncrementalUpdate =
         hasLoadedOnce &&
         deps.state.snapshot !== null &&

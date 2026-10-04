@@ -74,6 +74,16 @@ export function compareDecimalStrings(a: string, b: string): number {
   return ai < bi ? -1 : 1
 }
 
+/** Exact order of two shares `aNum/aDen` and `bNum/bDen` (positive denominators); 0 when unreadable. */
+export function compareDecimalRatios(aNum: string, aDen: string, bNum: string, bDen: string): number {
+  const [an, ad, bn, bd] = [aNum, aDen, bNum, bDen].map((v) => parseDecimal(String(v ?? '')))
+  if (!an || !ad || !bn || !bd || ad.i <= 0n || bd.i <= 0n) return 0
+  // a/b with scales: (an.i/10^an.s)/(ad.i/10^ad.s) vs ..., cross-multiplied with every scale cleared.
+  const left = an.i * pow10(ad.scale + bn.scale) * bd.i
+  const right = bn.i * pow10(bd.scale + an.scale) * ad.i
+  return left === right ? 0 : left < right ? -1 : 1
+}
+
 export function isUnitIntervalDecimalString(value: unknown): boolean {
   const dec = parseDecimal(String(value ?? ''))
   if (!dec || dec.i < 0n) return false

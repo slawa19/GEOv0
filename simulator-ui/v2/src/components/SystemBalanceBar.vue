@@ -2,12 +2,15 @@
 import { computed, unref, type ComputedRef } from 'vue'
 
 import type { SystemBalance } from '../composables/useSystemBalance'
+import { equivalentPrecision } from '../config/equivalentPrecision'
+import { formatMoney } from '../utils/money'
 import HudBar from './common/HudBar.vue'
 
 type Props = {
   /** Accepts either a raw SystemBalance object or a computed ref (as returned by useSystemBalance(...).balance). */
   balance: SystemBalance | ComputedRef<SystemBalance>
-  equivalent: string
+  /** Fallback only: the unit is the balance's own equivalent (028 F-028-47, B6). */
+  equivalent?: string
   /** Compact mode: shows only the most important metrics (for Auto-Run overlay). */
   compact?: boolean
 }
@@ -22,11 +25,9 @@ const utilPct = computed(() => {
   return Math.max(0, Math.min(100, Math.round(u * 100)))
 })
 
-function fmt(n: number): string {
-  const v = Number(n ?? 0)
-  if (!Number.isFinite(v)) return '0'
-  return v.toLocaleString(undefined, { maximumFractionDigits: 0 })
-}
+const unit = computed(() => b.value?.equivalent || props.equivalent || '')
+// 028 F-028-48: money at the equivalent's precision (was: a float with 0 fraction digits).
+const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
 </script>
 
 <template>
@@ -39,22 +40,22 @@ function fmt(n: number): string {
 
       <div class="ds-panel ds-ov-metric">
         <span class="ds-label">Total Debt</span>
-        <span class="ds-value ds-mono">{{ fmt(b.totalUsed) }} {{ equivalent }}</span>
+        <span class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 
       <div v-if="!compact" class="ds-panel ds-ov-metric">
         <span class="ds-label">Available Capacity</span>
-        <span class="ds-value ds-mono">{{ fmt(b.totalAvailable) }} {{ equivalent }}</span>
+        <span class="ds-value ds-mono">{{ money(b.totalAvailable) }} {{ unit }}</span>
       </div>
 
       <div v-if="!compact" class="ds-panel ds-ov-metric">
         <span class="ds-label">Trustlines</span>
-        <span class="ds-value ds-mono">{{ fmt(b.activeTrustlines) }}</span>
+        <span class="ds-value ds-mono">{{ b.activeTrustlines }}</span>
       </div>
 
       <div v-if="!compact" class="ds-panel ds-ov-metric">
         <span class="ds-label">Participants</span>
-        <span class="ds-value ds-mono">{{ fmt(b.activeParticipants) }}</span>
+        <span class="ds-value ds-mono">{{ b.activeParticipants }}</span>
       </div>
 
       <div class="ds-panel ds-ov-metric sbb-util">

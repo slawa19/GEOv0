@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import { amountStepHint } from '../config/equivalentPrecision'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
@@ -105,6 +106,9 @@ const exceedsCapacity = computed(() => {
 
 const confirmInlineWarning = computed<string | null>(() => {
   if (props.busy) return null
+  // 028 F-028-48: a client hint of the equivalent's step; the server decides (F-028-23).
+  const stepHint = amountStepHint(amountNormalized.value, props.unit)
+  if (stepHint) return stepHint
   if (!exceedsCapacity.value) return null
   // Non-blocking warning: allow confirm, but set expectations.
   return `Amount may exceed direct trustline capacity (${props.availableCapacity ?? '—'} ${props.unit}). Multi-hop may still succeed; backend will validate.`

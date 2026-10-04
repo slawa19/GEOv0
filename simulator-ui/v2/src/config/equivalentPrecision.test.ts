@@ -19,20 +19,20 @@ afterEach(() => {
 describe('equivalentPrecision', () => {
   it('prefers what the equivalents catalogue answered over the shipped default', () => {
     // A precision the shipped table does NOT hold, so a pass cannot come from the table.
-    expect(SHIPPED_EQUIVALENT_PRECISION.HOUR).toBe(1)
+    expect(SHIPPED_EQUIVALENT_PRECISION.HOUR).toBe(2)
 
     setEquivalentPrecisions([{ code: 'HOUR', precision: 6 }])
     expect(equivalentPrecision('HOUR')).toBe(6)
 
     resetEquivalentPrecisions()
-    expect(equivalentPrecision('HOUR')).toBe(1)
+    expect(equivalentPrecision('HOUR')).toBe(2)
   })
 
   it('reads the shipped fixture equivalents, which is the only source demo mode has', () => {
     // Demo/fast-mock mode never talks to a backend, and the fixtures under
     // public/simulator-fixtures/v1/ are atoms at these precisions.
     expect(equivalentPrecision('UAH')).toBe(2)
-    expect(equivalentPrecision('HOUR')).toBe(1)
+    expect(equivalentPrecision('HOUR')).toBe(2) // owner В-4 (028)
   })
 
   it('falls back to 2 for an equivalent nobody declared, matching to_money_str', () => {

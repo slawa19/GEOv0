@@ -5,6 +5,7 @@ import type { InteractPhase, InteractState } from '../composables/useInteractMod
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
+import { amountStepHint } from '../config/equivalentPrecision'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
@@ -146,6 +147,9 @@ const createLimitNum = computed(() => parseAmountNumber(createLimitNormalized.va
 
 const updateLimitNormalized = computed(() => parseAmountStringOrNull(newLimit.value))
 const newLimitNum = computed(() => parseAmountNumber(updateLimitNormalized.value))
+// 028 F-028-48: a client hint of the equivalent's step; the server decides (F-028-23).
+const limitStepHint = computed(() =>
+  amountStepHint(isEdit.value ? updateLimitNormalized.value : createLimitNormalized.value, props.unit))
 
 // 026 (owner В1): a close with the debt this line supports (`used`) is a REQUEST - limit 0, the line closes when
 // that debt is repaid. The reverse debt belongs to the other line and does not hold the close.
@@ -451,6 +455,7 @@ defineExpose({
       <div v-if="isEdit && newLimit.trim() && updateLimitNormalized === null" class="ds-help tl-pick-help">
         Invalid amount format. Use digits and '.' for decimals.
       </div>
+      <div v-else-if="limitStepHint" class="ds-help tl-pick-help" data-testid="tl-step-hint">{{ limitStepHint }}</div>
 
       <div
         v-if="sourceUnavailableText"

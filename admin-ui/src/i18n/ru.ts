@@ -501,6 +501,8 @@ export const RU: Record<string, string> = {
   'graph.toolbar.navigateTab': 'Навигация',
 
   'graph.filters.equivalent': 'Эквивалент',
+  'graph.filters.equivalentAuto': 'авто',
+  'graph.filters.equivalentAutoHint': 'Выбран автоматически: эквивалент с наибольшим числом активных линий доверия. Граф показывает один эквивалент; выберите другой, чтобы переключить.',
   'graph.filters.equivalentNetVizHint': 'Выбери эквивалент (не ALL), чтобы включить размер ∝ |net| и подсветку должников.',
   'graph.filters.status': 'Статус',
   'graph.filters.bottleneck': 'Узкое место',

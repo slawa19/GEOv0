@@ -501,6 +501,8 @@ export const EN: Record<string, string> = {
   'graph.toolbar.navigateTab': 'Navigate',
 
   'graph.filters.equivalent': 'Equivalent',
+  'graph.filters.equivalentAuto': 'auto',
+  'graph.filters.equivalentAutoHint': 'Chosen automatically: the equivalent with the most active trust lines. The graph shows one equivalent; pick another to switch.',
   'graph.filters.equivalentNetVizHint': 'Pick an equivalent (not ALL) to enable net-based size & debtor coloring.',
   'graph.filters.status': 'Status',
   'graph.filters.bottleneck': 'Bottleneck',

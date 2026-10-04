@@ -133,6 +133,13 @@ export function addMoney(a: unknown, b: unknown): string {
   return render({ value: sum, scale }, scale)
 }
 
+/** Exact `a - b`; `null` when either is not an amount (028 F-028-48: no float difference). */
+export function subMoney(a: unknown, b: unknown): string | null {
+  const tb = moneyText(b)
+  if (moneyText(a) === null || tb === null) return null
+  return addMoney(a, tb.startsWith('-') ? tb.slice(1) : `-${tb.replace(/^\+/, '')}`)
+}
+
 /**
  * Signed atoms -> major units, exactly, at `precision` fraction digits.
  *

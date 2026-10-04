@@ -55,6 +55,8 @@ import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { FX_CONFIG, intensityScale } from '../config/fxConfig'
+import { EQUIVALENT_CODE_RE, equivalentOptions as listEquivalentOptions } from '../config/equivalents'
+import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
 
@@ -165,6 +167,10 @@ export type SimulatorAppApi = {
   labelsLod: Ref<LabelsLod>
 
   effectiveEq: ComputedRef<string>
+  /** 028 F-028-47: the equivalent of the snapshot on screen (its numbers, units and actions). */
+  sceneEq: ComputedRef<string>
+  /** 028 F-028-47 (C1): the EQ selector's codes, from the API. */
+  equivalentOptions: ComputedRef<string[]>
 
   isInteractPickingPhase: ComputedRef<boolean>
   isInteractCanvasNodePickPhase: ComputedRef<boolean>
@@ -512,8 +518,6 @@ export function useSimulatorApp(opts?: {
 
   const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100-realistic-v2'
 
-  const ALLOWED_EQS = new Set(['UAH', 'HOUR', 'EUR'])
-
   function lsGet(key: string, fallback = ''): string {
     try {
       const v = localStorage.getItem(key)
@@ -760,6 +764,15 @@ export function useSimulatorApp(opts?: {
   })
 
   const effectiveEq = uiDerived.effectiveEq
+  // 028 F-028-47 (B6): while a new equivalent loads, or after its load failed, the old snapshot stays on
+  // screen - its numbers, units and interact actions are of ITS equivalent, not of the selector's.
+  const sceneEq = computed(() => String(state.snapshot?.equivalent ?? '').trim().toUpperCase() || effectiveEq.value)
+  const equivalentOptions = computed(() => listEquivalentOptions({
+    apiMode: apiMode.value,
+    scenario: real.scenarios.find((x) => x.scenario_id === real.selectedScenarioId)?.equivalents,
+    catalogue: catalogueEquivalentCodes(),
+    current: eq.value,
+  }))
   const dprClamp = uiDerived.dprClamp
   const showResetView = uiDerived.showResetView
   const overlayLabelScale = uiDerived.overlayLabelScale
@@ -811,7 +824,7 @@ export function useSimulatorApp(opts?: {
   const interactMode = useInteractMode({
     actions: interactActions,
     runId: interactRunId,
-    equivalent: effectiveEq,
+    equivalent: sceneEq,
     snapshot: snapshotRef,
     // Keep node selection highlight in sync with picking-driven flows.
     onNodeClick: (id) => {
@@ -830,7 +843,7 @@ export function useSimulatorApp(opts?: {
       runClearingFx({
         edges,
         totalAmount: res.total_cleared_amount ?? '0',
-        equivalent: res.equivalent ?? effectiveEq.value,
+        equivalent: res.equivalent ?? sceneEq.value,
       })
     },
   })
@@ -1523,7 +1536,7 @@ export function useSimulatorApp(opts?: {
     effectiveEq,
     state,
     isTestMode: () => isTestMode.value,
-    isEqAllowed: (v) => ALLOWED_EQS.has(String(v ?? '').toUpperCase()),
+    isEqAllowed: (v) => EQUIVALENT_CODE_RE.test(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
     loadRecoverySnapshot: ({ runId, equivalent }) => loadStrictRunRecoverySnapshot({
       apiBase: real.apiBase,
@@ -1854,6 +1867,8 @@ export function useSimulatorApp(opts?: {
     labelsLod,
 
     effectiveEq,
+    sceneEq,
+    equivalentOptions,
 
     // derived interact UI helpers
     isInteractPickingPhase,

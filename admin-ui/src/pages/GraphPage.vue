@@ -180,6 +180,7 @@ const {
   included,
   truncated,
   availableEquivalents,
+  eqAutoSelected,
   filteredTrustlines,
   precisionByEq,
   incidentRatioByPid: incidentRatioByPidAll,
@@ -650,6 +651,7 @@ const graphLiveAnnouncement = computed(() => {
       v-model:focus-mode="focusMode"
       v-model:focus-depth="focusDepth"
       :available-equivalents="availableEquivalents"
+      :eq-auto-selected="eqAutoSelected"
       :statuses="statuses"
       :layout-options="layoutOptions"
       :fetch-suggestions="graphViz.querySearchParticipants"

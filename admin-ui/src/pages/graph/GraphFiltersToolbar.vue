@@ -28,6 +28,8 @@ type Props = {
   // Filters
   eq: string
   availableEquivalents: string[]
+  /** 028 F-028-49 (C2): the equivalent was chosen by the page (most active trust lines), not by the operator. */
+  eqAutoSelected?: boolean
   statusFilter: string[]
   statuses: Option[]
   threshold: string
@@ -307,6 +309,15 @@ const focusDepthFieldWidth = computed(() =>
                 :value="c"
               />
             </el-select>
+                <el-tag
+                  v-if="eqAutoSelected"
+                  size="small"
+                  type="info"
+                  :title="t('graph.filters.equivalentAutoHint')"
+                  data-testid="graph-eq-auto"
+                >
+                  {{ t('graph.filters.equivalentAuto') }}
+                </el-tag>
               </div>
 
               <div class="ctl">

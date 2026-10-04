@@ -351,31 +351,41 @@ function money(v: string, equivalent: unknown): string {
 
     <el-divider />
 
+    <!-- 028 F-028-48: money as text at the equivalent's precision; `el-statistic` takes a float. -->
     <el-row
       v-if="showMoneyKpis"
       data-testid="liquidity-money-kpis"
       :gutter="12"
     >
       <el-col :span="8">
-        <el-statistic
-          :title="t('liquidity.kpi.totalLimit')"
-          :value="Number(totalLimit)"
-          :precision="selectedPrecision"
-        />
+        <div class="el-statistic">
+          <div class="el-statistic__head">
+            {{ t('liquidity.kpi.totalLimit') }}
+          </div>
+          <div class="el-statistic__content">
+            <span class="el-statistic__number">{{ money(totalLimit ?? '', selectedEq) }}</span>
+          </div>
+        </div>
       </el-col>
       <el-col :span="8">
-        <el-statistic
-          :title="t('liquidity.kpi.totalUsed')"
-          :value="Number(totalUsed)"
-          :precision="selectedPrecision"
-        />
+        <div class="el-statistic">
+          <div class="el-statistic__head">
+            {{ t('liquidity.kpi.totalUsed') }}
+          </div>
+          <div class="el-statistic__content">
+            <span class="el-statistic__number">{{ money(totalUsed ?? '', selectedEq) }}</span>
+          </div>
+        </div>
       </el-col>
       <el-col :span="8">
-        <el-statistic
-          :title="t('liquidity.kpi.totalAvailable')"
-          :value="Number(totalAvailable)"
-          :precision="selectedPrecision"
-        />
+        <div class="el-statistic">
+          <div class="el-statistic__head">
+            {{ t('liquidity.kpi.totalAvailable') }}
+          </div>
+          <div class="el-statistic__content">
+            <span class="el-statistic__number">{{ money(totalAvailable ?? '', selectedEq) }}</span>
+          </div>
+        </div>
       </el-col>
     </el-row>
 

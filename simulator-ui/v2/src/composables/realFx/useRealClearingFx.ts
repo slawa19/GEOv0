@@ -155,7 +155,8 @@ export function useRealClearingFx(deps: {
   function runClearingFx(params: ClearingFxParams, opts: ClearingFxOptions = {}) {
     const { edges: edgesAll, totalAmount, equivalent, planId } = params
 
-    const edgeSig = edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')
+    // 028 F-028-47 (B5): the same edges cleared in another equivalent are another clearing.
+    const edgeSig = `${String(equivalent ?? '').trim().toUpperCase()}#${edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')}`
     const now = nowEpochMs()
 
     if (planId) {

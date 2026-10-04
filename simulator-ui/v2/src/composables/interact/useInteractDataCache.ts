@@ -1,6 +1,8 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../../types'
+import { extractErrorMessage } from '../../utils/errorMessage'
+import { subMoney } from '../../utils/money'
 import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
 import type { useInteractActions } from '../useInteractActions'
@@ -10,10 +12,9 @@ function normalizeEq(v: unknown): string {
   return String(v ?? '').trim().toUpperCase()
 }
 
+// Register 271: an `InteractActionError` is a plain object, not an `Error` - read its `message` too.
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message
-  const message = String(error ?? '').trim()
-  return message || fallback
+  return (error == null ? '' : extractErrorMessage(error).trim()) || fallback
 }
 
 export function useInteractDataCache(opts: {
@@ -126,8 +127,10 @@ export function useInteractDataCache(opts: {
     return fetchedOk ? fetchedTrustlines.value : null
   })
 
+  // 028 F-028-47 (B2): the snapshot fallback is of the snapshot's equivalent, so it serves only that one.
+  const snapshotIsCurrentEq = () => normalizeEq(opts.snapshot.value?.equivalent) === normalizeEq(opts.equivalent.value)
   const trustlines = computed(() => {
-    return answeredTrustlines.value ?? snapshotTrustlines.value
+    return answeredTrustlines.value ?? (snapshotIsCurrentEq() ? snapshotTrustlines.value : [])
   })
 
   /**
@@ -165,10 +168,7 @@ export function useInteractDataCache(opts: {
   }
 
   function recomputeAvailable(used: string | null | undefined, limit: string): string | null {
-    const usedNum = Number(used ?? NaN)
-    const limitNum = Number(limit ?? NaN)
-    if (!Number.isFinite(usedNum) || !Number.isFinite(limitNum)) return null
-    return opts.parseAmountStringOrNull(limitNum - usedNum)
+    return subMoney(limit, used)
   }
 
   function patchList(items: TrustlineInfo[] | null, from: string, to: string, limit: string): TrustlineInfo[] | null {
@@ -205,7 +205,8 @@ export function useInteractDataCache(opts: {
       fetchedTrustlines.value = patchList(fetchedTrustlines.value, fromPid, toPid, limit)
     }
 
-    // Patch snapshot-derived list (used as fallback).
+    // Patch snapshot-derived list (used as fallback) - only when it is of the same equivalent (B2).
+    if (normalizeEq(opts.snapshot.value?.equivalent) !== targetEq) return
     snapshotTrustlines.value = (patchList(snapshotTrustlines.value, fromPid, toPid, limit) ?? snapshotTrustlines.value) as TrustlineInfo[]
   }
 

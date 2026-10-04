@@ -156,6 +156,7 @@ export type RealEventIntent =
       throttleMs: number
       delayMs: number
       runId: string
+      equivalent: string
     }
   | { type: 'clearing-fx'; event: ClearingDoneEvent }
   | {
@@ -343,9 +344,15 @@ export function applyAcceptedRealEvent(
     return intents
   }
 
+  // 028 F-028-47 (B3): a patch of another equivalent than the snapshot's never reaches it - the
+  // connection may already be on the new equivalent while the old snapshot is still on screen.
+  const snapshotEq = String(draft.state.snapshot?.equivalent ?? '').trim().toUpperCase()
+  const otherEquivalent = 'equivalent' in event && !!snapshotEq && snapshotEq !== event.equivalent.trim().toUpperCase()
+
   if (isTxUpdatedEvent(event)) {
     draft.real.runStats.attempts += 1
     draft.real.runStats.committed += 1
+    if (otherEquivalent) return intents
     deps.patchApplier.applyNodePatches(event.node_patch)
     deps.patchApplier.applyEdgePatches(event.edge_patch)
 
@@ -388,6 +395,7 @@ export function applyAcceptedRealEvent(
         throttleMs,
         delayMs: event.ttl_ms ?? 1200,
         runId: connectionRunId,
+        equivalent: event.equivalent,
       })
     }
     return intents
@@ -411,6 +419,7 @@ export function applyAcceptedRealEvent(
   }
 
   if (event.type === 'clearing.done') {
+    if (otherEquivalent) return intents
     deps.patchApplier.applyNodePatches(event.node_patch)
     deps.patchApplier.applyEdgePatches(event.edge_patch)
     intents.push({ type: 'clearing-fx', event }, { type: 'wake' })
@@ -425,6 +434,8 @@ export function executeRealEventIntents(
   intents: readonly RealEventIntent[],
   deps: {
     getActiveRunId: () => string | null
+    /** The equivalent of the snapshot on screen; a delayed label of another one is dropped (028 B5). */
+    getSceneEquivalent?: () => string | null
     optionalFxEnabled?: () => boolean
     onAnySseEvent?: () => void
     refreshSnapshot: () => void
@@ -456,7 +467,8 @@ export function executeRealEventIntents(
     } else if (intent.type === 'tx-label-delayed') {
       deps.scheduleTimeout(
         () => {
-          if (deps.getActiveRunId() !== intent.runId) {
+          const sceneEq = String(deps.getSceneEquivalent?.() ?? intent.equivalent).trim().toUpperCase()
+          if (deps.getActiveRunId() !== intent.runId || sceneEq !== intent.equivalent.trim().toUpperCase()) {
             deps.onReceiverGuardDropped?.()
             return
           }

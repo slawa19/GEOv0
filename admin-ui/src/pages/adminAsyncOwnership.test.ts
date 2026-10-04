@@ -107,7 +107,7 @@ function mountPage(
         ElAlert: true,
         ElButton: true,
         ElCard: renderCardContent ? { template: '<div><slot /></div>' } : true,
-        ElCol: true,
+        ElCol: renderCardContent ? { template: '<div><slot /></div>' } : true,
         ElDescriptions: true,
         ElDescriptionsItem: true,
         ElDialog: true,
@@ -121,7 +121,7 @@ function mountPage(
         ElLink: true,
         ElOption: true,
         ElPagination: true,
-        ElRow: true,
+        ElRow: renderCardContent ? { template: '<div><slot /></div>' } : true,
         ElSelect: true,
         ElSkeleton: true,
         ElStatistic: true,
@@ -462,6 +462,21 @@ describe('mounted non-Graph list request ownership', () => {
     expect(state.showMoneyKpis).toBe(false)
     expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="liquidity-money-kpis"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('028 F-028-48: Liquidity money totals are text at the precision, never a float', async () => {
+    apiMock.listEquivalents.mockResolvedValue(ok({ items: [{ code: 'UAH', precision: 2, description: '', is_active: true }] }))
+    apiMock.liquiditySummary.mockResolvedValue(ok({ equivalent: 'UAH', updated_at: '2026-10-04T00:00:00Z',
+      active_trustlines: 1, bottlenecks: 0, incidents_over_sla: 0, total_limit: '12345678901234567.89',
+      total_used: '0.1', total_available: '12345678901234567.79', top_creditors: [], top_debtors: [],
+      top_by_abs_net: [], top_bottleneck_edges: [] }))
+    const wrapper = mountPage(LiquidityPage, '/liquidity', { equivalent: 'UAH' }, true)
+    await settle()
+    await settle()
+    const text = wrapper.find('[data-testid="liquidity-money-kpis"]').text().replace(/\s+/g, ' ')
+    expect(text).toContain('12345678901234567.89')
+    expect(text).toContain('0.10')
     wrapper.unmount()
   })
 
