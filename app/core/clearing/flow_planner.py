@@ -1,7 +1,8 @@
-"""Programme 023: the clearing planner - maximum total debt reduction on a snapshot (MTCS). NOT WIRED.
+"""Programme 023: the clearing planner - maximum total debt reduction on a snapshot (MTCS).
 
-Slice (a) of `specs/023-clearing-as-flow/spec.md`. No production entrypoint calls this module: `/clearing/auto`,
-the periodic runner and both simulator callers are switched in slice (d). It reads, it never writes.
+Slice (a) of `specs/023-clearing-as-flow/spec.md`; since slice (d) it is the production planner: the common
+clearing runner (`app/core/clearing/runner.py`, which `/clearing/auto`, the periodic runner and the simulator call)
+plans every clearing pass with `load_snapshot` and `plan_clearing`. This module reads, it never writes.
 
 THE PROBLEM (decision 1). On the ELIGIBLE subgraph of one equivalent - `amount > 0`; the controlling trust line
 creditor -> debtor is active or frozen; consent is exactly `ClearingService._policy_flag(policy, "auto_clearing",

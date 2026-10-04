@@ -222,8 +222,8 @@ High‑level roadmap (subject to change):
    - [x] Database Schema
    - [x] API
    - [x] Basic Clearing
-3. **Phase 2 — Client applications**
-   - Flutter‑based client for end‑users (mobile/desktop/web)
+3. **Phase 2 — Client applications** (the mobile end‑user app starts only after the backend and core are finished and verified — owner decision 2026‑10‑04, see [`docs/ru/00-overview.md`](docs/ru/00-overview.md), "Порядок работ")
+   - End‑user mobile app: PWA blueprint in [`docs/ru/pwa/`](docs/ru/pwa/README.md) (Flutter remains an unselected option)
    - Admin UI
 4. **Phase 3 — Behavior simulator**
    - Stress‑testing protocol and implementation

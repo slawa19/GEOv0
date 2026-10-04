@@ -1738,12 +1738,14 @@ class ParticipantRecoveryService:
     "message": "Trust line limit exceeded",
     "details": {
       "trust_line_id": "uuid",
-      "limit": 1000.00,
-      "requested": 1500.00
+      "limit": "1000.00",
+      "requested": "1500.00"
     }
   }
 }
 ```
+
+Денежные значения в `details` — строки (десятичные строки, как и во всех остальных сообщениях протокола), а не JSON-числа.
 
 ---
 
