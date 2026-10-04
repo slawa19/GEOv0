@@ -208,6 +208,8 @@ async def _submit_signed_payment(
         body = response.json()
     except ValueError:  # pragma: no cover - defensive
         body = {"_raw": response.text}
+    if isinstance(body, dict):
+        body["_tx_id"] = tx_id  # to read the stored row, which keeps what the public answer filters (028 `T2899.4`)
     return response.status_code, body
 
 
@@ -479,10 +481,16 @@ async def test_rt_012_1_counter_check_widening_the_door_reproduces_the_finding_e
         f"{status_code} {body!r}. If it committed, the barrier has been loosened again and "
         f"`T1522` is undone."
     )
-    error = (body or {}).get("error") or {}
-    details = error.get("details") or {}
-    assert details.get("invariant") == "PAYMENT_DELTA_DRIFT", body
-    assert Decimal(str(details.get("total_drift"))) == Decimal("1E-9"), body
+    # 028 `T2899.4` #1: the drift is the admin's diagnostic - read from the stored ABORTED row, not the public answer.
+    from tests.conftest import TestingSessionLocal
+
+    async with TestingSessionLocal() as session:
+        stored = (await session.execute(text("SELECT error FROM transactions WHERE tx_id = :t"),
+                                        {"t": body["_tx_id"]})).scalar_one()
+    details = stored.get("details") or {}
+    assert details.get("invariant") == "PAYMENT_DELTA_DRIFT", stored
+    assert Decimal(str(details.get("total_drift"))) == Decimal("1E-9"), stored
+    assert "total_drift" not in str(body), body
 
     # Now widen the barrier too, and the finding returns exactly as it was before T1522.
     monkeypatch.setattr(money_boundary_module, "_DELTA_DRIFT_TOLERANCE", Decimal("0.00000001"))
