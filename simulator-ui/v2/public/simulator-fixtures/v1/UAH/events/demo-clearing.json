@@ -172,18 +172,18 @@
     "node_patch": [
       {
         "id": "PID_U0001_9e3779b1",
-        "net_balance_atoms": "4615",
+        "net_balance_atoms": "46827",
         "net_sign": -1,
-        "viz_color_key": "debt-2",
+        "viz_color_key": "debt-5",
         "viz_shape_key": "rounded-rect",
         "viz_size": {
-          "w": 33,
-          "h": 28
+          "w": 42,
+          "h": 36
         }
       },
       {
         "id": "PID_U0003_daa66d13",
-        "net_balance_atoms": "807403",
+        "net_balance_atoms": "807523",
         "net_sign": -1,
         "viz_color_key": "debt-8",
         "viz_shape_key": "rounded-rect",
@@ -194,18 +194,18 @@
       },
       {
         "id": "PID_U0004_78dde6c4",
-        "net_balance_atoms": "32845",
+        "net_balance_atoms": "32485",
         "net_sign": 1,
         "viz_color_key": "business",
         "viz_shape_key": "rounded-rect",
         "viz_size": {
-          "w": 40,
-          "h": 34
+          "w": 39,
+          "h": 33
         }
       },
       {
         "id": "PID_U0006_b54cda26",
-        "net_balance_atoms": "81334",
+        "net_balance_atoms": "81436",
         "net_sign": -1,
         "viz_color_key": "debt-7",
         "viz_shape_key": "rounded-rect",
@@ -216,18 +216,18 @@
       },
       {
         "id": "PID_U0011_cc623a9b",
-        "net_balance_atoms": "102600",
+        "net_balance_atoms": "103212",
         "net_sign": 1,
         "viz_color_key": "person",
         "viz_shape_key": "circle",
         "viz_size": {
-          "w": 29,
-          "h": 29
+          "w": 30,
+          "h": 30
         }
       },
       {
         "id": "PID_U0012_6a99b44c",
-        "net_balance_atoms": "28626",
+        "net_balance_atoms": "28848",
         "net_sign": 1,
         "viz_color_key": "person",
         "viz_shape_key": "circle",
@@ -238,18 +238,18 @@
       },
       {
         "id": "PID_U0017_81af14c1",
-        "net_balance_atoms": "43709",
+        "net_balance_atoms": "44021",
         "net_sign": 1,
         "viz_color_key": "person",
         "viz_shape_key": "circle",
         "viz_size": {
-          "w": 26,
-          "h": 26
+          "w": 25,
+          "h": 25
         }
       },
       {
         "id": "PID_U0036_3fcd1ce4",
-        "net_balance_atoms": "720474",
+        "net_balance_atoms": "720246",
         "net_sign": 1,
         "viz_color_key": "business",
         "viz_shape_key": "rounded-rect",
@@ -260,9 +260,9 @@
       },
       {
         "id": "PID_U0039_1a7389f7",
-        "net_balance_atoms": "74301",
+        "net_balance_atoms": "74487",
         "net_sign": -1,
-        "viz_color_key": "debt-7",
+        "viz_color_key": "debt-6",
         "viz_shape_key": "rounded-rect",
         "viz_size": {
           "w": 45,
@@ -271,7 +271,7 @@
       },
       {
         "id": "PID_U0061_b337ff2d",
-        "net_balance_atoms": "8876",
+        "net_balance_atoms": "9248",
         "net_sign": -1,
         "viz_color_key": "debt-2",
         "viz_shape_key": "circle",
@@ -282,7 +282,7 @@
       },
       {
         "id": "PID_U0071_e162c017",
-        "net_balance_atoms": "10834",
+        "net_balance_atoms": "11194",
         "net_sign": -1,
         "viz_color_key": "debt-3",
         "viz_shape_key": "circle",
@@ -293,7 +293,7 @@
       },
       {
         "id": "PID_U0091_3db841eb",
-        "net_balance_atoms": "4709",
+        "net_balance_atoms": "5003",
         "net_sign": 1,
         "viz_color_key": "person",
         "viz_shape_key": "circle",

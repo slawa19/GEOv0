@@ -61,19 +61,25 @@ try {
         exit 0
     }
 
-    Write-Host "Syncing demo fixtures (UAH) via: $python $script" -ForegroundColor Cyan
+    # Every equivalent of the canonical Admin pack gets its demo snapshot from the same generator
+    # (EUR and HOUR used to be left at an older form: signed `net_balance_atoms` and frozen lines).
+    $equivalents = @('UAH', 'EUR', 'HOUR')
 
-    if ($python -like '* *') {
-        $parts = $python.Split(' ', 2)
-        & $parts[0] $parts[1] $script --eq UAH
-    } else {
-        & $python $script --eq UAH
-    }
+    foreach ($eq in $equivalents) {
+        Write-Host "Syncing demo fixtures ($eq) via: $python $script" -ForegroundColor Cyan
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning 'Demo fixtures sync failed (non-zero exit). Using cached.'
-        if ($Strict) { exit 1 }
-        exit 0
+        if ($python -like '* *') {
+            $parts = $python.Split(' ', 2)
+            & $parts[0] $parts[1] $script --eq $eq
+        } else {
+            & $python $script --eq $eq
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Demo fixtures sync failed for $eq (non-zero exit). Using cached."
+            if ($Strict) { exit 1 }
+            exit 0
+        }
     }
 } catch {
     Write-Warning "Demo fixtures sync failed: $($_.Exception.Message). Using cached."

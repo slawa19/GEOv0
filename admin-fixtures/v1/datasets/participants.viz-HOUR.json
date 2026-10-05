@@ -4,12 +4,12 @@
     "display_name": "GreenField Cooperative (Co-op)",
     "type": "business",
     "status": "active",
-    "net_balance_atoms": "-150",
+    "net_balance_atoms": "-300",
     "net_sign": -1,
-    "viz_color_key": "debt-2",
+    "viz_color_key": "debt-6",
     "viz_size": {
-      "w": 43,
-      "h": 36
+      "w": 46,
+      "h": 39
     }
   },
   {
@@ -706,12 +706,12 @@
     "display_name": "Lucas Hayes (Tutor)",
     "type": "person",
     "status": "frozen",
-    "net_balance_atoms": "0",
-    "net_sign": 0,
+    "net_balance_atoms": "275",
+    "net_sign": 1,
     "viz_color_key": "suspended",
     "viz_size": {
-      "w": 24,
-      "h": 24
+      "w": 28,
+      "h": 28
     }
   },
   {
@@ -825,7 +825,7 @@
     "status": "active",
     "net_balance_atoms": "-595",
     "net_sign": -1,
-    "viz_color_key": "debt-7",
+    "viz_color_key": "debt-8",
     "viz_size": {
       "w": 30,
       "h": 30
@@ -901,12 +901,12 @@
     "display_name": "The Johnson Family (Household)",
     "type": "person",
     "status": "active",
-    "net_balance_atoms": "-220",
+    "net_balance_atoms": "-295",
     "net_sign": -1,
-    "viz_color_key": "debt-4",
+    "viz_color_key": "debt-6",
     "viz_size": {
-      "w": 27,
-      "h": 27
+      "w": 28,
+      "h": 28
     }
   },
   {
@@ -916,10 +916,10 @@
     "status": "active",
     "net_balance_atoms": "-235",
     "net_sign": -1,
-    "viz_color_key": "debt-5",
+    "viz_color_key": "debt-4",
     "viz_size": {
-      "w": 28,
-      "h": 28
+      "w": 27,
+      "h": 27
     }
   },
   {
@@ -981,10 +981,10 @@
     "status": "active",
     "net_balance_atoms": "-240",
     "net_sign": -1,
-    "viz_color_key": "debt-5",
+    "viz_color_key": "debt-4",
     "viz_size": {
-      "w": 28,
-      "h": 28
+      "w": 27,
+      "h": 27
     }
   },
   {
@@ -1048,8 +1048,8 @@
     "net_sign": -1,
     "viz_color_key": "debt-5",
     "viz_size": {
-      "w": 28,
-      "h": 28
+      "w": 27,
+      "h": 27
     }
   },
   {
@@ -1096,9 +1096,9 @@
     "display_name": "Daniel Hughes (Garden Help)",
     "type": "person",
     "status": "active",
-    "net_balance_atoms": "120",
-    "net_sign": 1,
-    "viz_color_key": "person",
+    "net_balance_atoms": "-80",
+    "net_sign": -1,
+    "viz_color_key": "debt-2",
     "viz_size": {
       "w": 26,
       "h": 26
@@ -1215,7 +1215,7 @@
     "status": "active",
     "net_balance_atoms": "-55",
     "net_sign": -1,
-    "viz_color_key": "debt-1",
+    "viz_color_key": "debt-2",
     "viz_size": {
       "w": 25,
       "h": 25
@@ -1278,12 +1278,12 @@
     "display_name": "Ryan Cooper (Operations Lead)",
     "type": "person",
     "status": "frozen",
-    "net_balance_atoms": "-175",
+    "net_balance_atoms": "-25",
     "net_sign": -1,
     "viz_color_key": "suspended",
     "viz_size": {
-      "w": 27,
-      "h": 27
+      "w": 24,
+      "h": 24
     }
   },
   {

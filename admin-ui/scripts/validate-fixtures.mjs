@@ -4,13 +4,12 @@ import process from 'node:process'
 
 const repoRoot = path.resolve(process.cwd(), '..')
 const defaultCanonicalV1Dir = path.join(repoRoot, 'admin-fixtures', 'v1')
-const defaultCanonicalDir = path.join(repoRoot, 'admin-fixtures', 'v1', 'datasets')
 const defaultPublicV1Dir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1')
-const defaultPublicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'datasets')
 
 function parseArgs(argv) {
   const out = {
     v1Dir: null,
+    publicV1Dir: null,
     onlyPack: false,
   }
 
@@ -22,6 +21,12 @@ function parseArgs(argv) {
       const v = argv[i + 1]
       if (!v) throw new Error('Missing value for --v1-dir')
       out.v1Dir = path.resolve(process.cwd(), v)
+      i += 1
+    } else if (a === '--public-v1-dir') {
+      // With --v1-dir (and without --only-pack): the full canonical-vs-public check on two other trees, for tests.
+      const v = argv[i + 1]
+      if (!v) throw new Error('Missing value for --public-v1-dir')
+      out.publicV1Dir = path.resolve(process.cwd(), v)
       i += 1
     } else if (typeof a === 'string' && a.length > 0 && !a.startsWith('-')) {
       // Convenience / robustness: allow passing a v1 dir as positional arg.
@@ -139,9 +144,18 @@ function validateTrustlines(trustlines, label) {
   }
 }
 
-function validateDebts(debts, label) {
+// A debt row is refused, never skipped: a row the net check silently left out would let a wrong file pass as "no effect".
+// Besides the shape: a known equivalent, two known participants, a positive amount that is a whole number of the
+// equivalent's step (precision 2 -> 0.01) - the step is the unit of account, a finer amount is not money here.
+function validateDebts(debts, label, participants, equivalents) {
   if (debts == null) return
   assert(Array.isArray(debts), `${label} debts must be an array`)
+
+  const precisionByCode = new Map()
+  for (const e of equivalents) {
+    if (e && typeof e === 'object' && typeof e.code === 'string') precisionByCode.set(e.code, Number(e.precision))
+  }
+  const pidSet = new Set(participants.map((p) => p?.pid).filter((x) => typeof x === 'string'))
 
   const bad = []
   for (let i = 0; i < debts.length; i += 1) {
@@ -155,11 +169,33 @@ function validateDebts(debts, label) {
     if (typeof d.creditor !== 'string' || d.creditor.length === 0) bad.push({ i, reason: 'missing creditor' })
     if (typeof d.equivalent !== 'string' || d.equivalent.length === 0) bad.push({ i, reason: 'missing equivalent' })
     if (typeof d.amount !== 'string' || d.amount.length === 0) bad.push({ i, reason: 'missing amount' })
+
+    const precision = precisionByCode.get(d.equivalent)
+    if (typeof d.equivalent === 'string' && d.equivalent.length > 0 && precision === undefined) {
+      bad.push({ i, reason: `unknown equivalent ${d.equivalent}` })
+    }
+    for (const side of ['debtor', 'creditor']) {
+      if (typeof d[side] === 'string' && d[side].length > 0 && !pidSet.has(d[side])) {
+        bad.push({ i, reason: `unknown ${side} ${d[side]}` })
+      }
+    }
+    if (typeof d.amount === 'string' && d.amount.length > 0) {
+      const amount = d.amount.trim()
+      const m = /^(\d+)(?:\.(\d+))?$/.exec(amount)
+      if (!m) {
+        bad.push({ i, reason: `amount ${d.amount} is not a positive decimal string` })
+      } else if (/^0+(?:\.0*)?$/.test(amount)) {
+        bad.push({ i, reason: `amount ${d.amount} is not positive` })
+      } else if (precision !== undefined && (m[2] ?? '').replace(/0+$/, '').length > precision) {
+        const step = precision === 0 ? '1' : `0.${'0'.repeat(precision - 1)}1`
+        bad.push({ i, reason: `amount ${d.amount} is not a multiple of the ${step} step of ${d.equivalent}` })
+      }
+    }
   }
 
   if (bad.length > 0) {
     const sample = bad.slice(0, 8).map((x) => `#${x.i}(${x.reason})`).join(', ')
-    throw new Error(`${label} debts invalid entries: ${bad.length}. Sample: ${sample}`)
+    throw new Error(`${label} debts.json invalid entries: ${bad.length}. Sample: ${sample}`)
   }
 }
 
@@ -188,6 +224,41 @@ function validateClearingCycles(cyclesDoc, label) {
       }
     }
   }
+}
+
+// `sync:fixtures` copies the whole v1 tree, so the public copy is compared as a tree: the same files, the same bytes (line
+// endings aside). A file only the public copy has is a deleted one that the copy never pruned.
+async function listFiles(dir, base = dir) {
+  const out = []
+  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...(await listFiles(full, base)))
+    else out.push(path.relative(base, full).split(path.sep).join('/'))
+  }
+  return out.sort()
+}
+
+async function validateCopyIsCanonical(canonicalV1Dir, publicV1Dir) {
+  const canonicalFiles = await listFiles(canonicalV1Dir)
+  const publicFiles = await listFiles(publicV1Dir)
+  const publicSet = new Set(publicFiles)
+  const canonicalSet = new Set(canonicalFiles)
+  const problems = []
+  for (const f of canonicalFiles) if (!publicSet.has(f)) problems.push(`${f}: missing in PUBLIC`)
+  for (const f of publicFiles) {
+    if (!canonicalSet.has(f)) problems.push(`${f}: only in PUBLIC (a deleted file the copy did not prune)`)
+  }
+  for (const f of canonicalFiles) {
+    if (!publicSet.has(f)) continue
+    const a = (await fs.readFile(path.join(canonicalV1Dir, f), 'utf8')).replace(/\r\n/g, '\n')
+    const b = (await fs.readFile(path.join(publicV1Dir, f), 'utf8')).replace(/\r\n/g, '\n')
+    if (a !== b) problems.push(`${f}: differs from CANONICAL`)
+  }
+  assert(
+    problems.length === 0,
+    `PUBLIC fixtures differ from CANONICAL in ${problems.length} file(s): ${problems.slice(0, 8).join('; ')}. ` +
+      'Run `npm run sync:fixtures` in admin-ui (it does not delete files: remove a stale one by hand).',
+  )
 }
 
 function validateMeta(meta, label) {
@@ -251,7 +322,13 @@ function validateTransactions(transactions, label, participants, equivalents) {
     if (typeof t.tx_id !== 'string' || t.tx_id.length === 0) bad.push({ i, reason: 'missing tx_id' })
     if (typeof t.type !== 'string' || !allowedTypes.has(t.type)) bad.push({ i, reason: 'invalid type' })
     if (typeof t.state !== 'string' || !allowedStates.has(t.state)) bad.push({ i, reason: 'invalid state' })
-    if (typeof t.initiator_pid !== 'string' || !pidSet.has(t.initiator_pid)) bad.push({ i, reason: 'invalid initiator_pid' })
+    // 028 F-028-45: a clearing is nobody's act - it records no initiator, so `null` is required there and only there.
+    // A payment or a trust-line operation always names one, and it must be a participant of the pack.
+    if (t.type === 'CLEARING') {
+      if (t.initiator_pid !== null) bad.push({ i, reason: 'CLEARING must have initiator_pid null' })
+    } else if (typeof t.initiator_pid !== 'string' || !pidSet.has(t.initiator_pid)) {
+      bad.push({ i, reason: 'invalid initiator_pid' })
+    }
     if (!t.payload || typeof t.payload !== 'object' || Array.isArray(t.payload)) bad.push({ i, reason: 'invalid payload' })
     if (!isIsoDateString(t.created_at)) bad.push({ i, reason: 'invalid created_at' })
     if (!isIsoDateString(t.updated_at)) bad.push({ i, reason: 'invalid updated_at' })
@@ -263,6 +340,75 @@ function validateTransactions(transactions, label, participants, equivalents) {
   if (bad.length > 0) {
     const sample = bad.slice(0, 8).map((x) => `#${x.i}(${x.reason})`).join(', ')
     throw new Error(`${label} transactions invalid entries: ${bad.length}. Sample: ${sample}`)
+  }
+}
+
+// Exact decimal arithmetic for the net check: BigInt at a fixed scale, never Number (money is a decimal string).
+const NET_SCALE = 18
+
+function decimalToScaled(text, where) {
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(text).trim())
+  if (!m) throw new Error(`${where}: not a decimal string: ${JSON.stringify(text)}`)
+  const frac = m[3] ?? ''
+  if (frac.length > NET_SCALE) throw new Error(`${where}: more than ${NET_SCALE} fractional digits: ${JSON.stringify(text)}`)
+  const value = BigInt(m[2] + frac.padEnd(NET_SCALE, '0'))
+  return m[1] === '-' ? -value : value
+}
+
+// Exact: `validateDebts` has already refused every amount that is not a whole number of the step, so a net is a whole
+// number of atoms and there is nothing to round (the generator's HALF_UP / sign-keeping rule for a sub-atomic net never
+// applies to a valid file, and this check does not reproduce it: an amount that needed it is refused instead).
+function netToAtoms(net, precision) {
+  const divisor = 10n ** BigInt(NET_SCALE - precision)
+  assert(net % divisor === 0n, 'internal: a net that is not a whole number of atoms - validateDebts should have refused it')
+  return String(net / divisor)
+}
+
+// F-029-18. `participants.viz-<EQ>.json` stands in for a backend-computed net (Admin mock, simulator demo snapshots), so
+// each participant's `net_balance_atoms` must be what `debts.json` says: credits minus debts, **per equivalent** - one
+// equivalent's net is never added to another's (owner principle). The disagreeing participants are counted per
+// equivalent, so a dataset that is wrong in one of them cannot hide behind the others.
+function validateVizNets(participants, equivalents, debts, vizByCode, label) {
+  const precisionByCode = new Map()
+  for (const e of equivalents) {
+    if (e && typeof e === 'object' && typeof e.code === 'string') precisionByCode.set(e.code, Number(e.precision))
+  }
+  const pids = participants.map((p) => p?.pid).filter((x) => typeof x === 'string')
+  const pidSet = new Set(pids)
+
+  const failures = []
+  for (const [code, viz] of vizByCode) {
+    const precision = precisionByCode.get(code)
+    assert(Number.isInteger(precision) && precision >= 0 && precision <= NET_SCALE, `${label} equivalent ${code} has no usable precision`)
+    assert(Array.isArray(viz), `${label} participants.viz-${code} must be an array`)
+
+    const net = new Map(pids.map((pid) => [pid, 0n]))
+    for (const d of Array.isArray(debts) ? debts : []) {
+      if (d.equivalent !== code) continue
+      const amount = decimalToScaled(d.amount, `${label} debts[${code}] amount`)
+      net.set(d.creditor, net.get(d.creditor) + amount)
+      net.set(d.debtor, net.get(d.debtor) - amount)
+    }
+
+    const vizByPid = new Map(viz.map((r) => [r?.pid, r]))
+    const wrong = []
+    for (const pid of pids) {
+      const expected = netToAtoms(net.get(pid), precision)
+      const row = vizByPid.get(pid)
+      const actual = row == null ? '(no row)' : String(row.net_balance_atoms)
+      if (actual !== expected) wrong.push(`${pid}: viz ${actual}, debts ${expected}`)
+    }
+    for (const pid of vizByPid.keys()) if (!pidSet.has(pid)) wrong.push(`${String(pid)}: viz row of an unknown participant`)
+    failures.push({ code, wrong })
+  }
+
+  if (failures.some((f) => f.wrong.length > 0)) {
+    const summary = failures.map((f) => `${f.code} ${f.wrong.length}`).join(', ')
+    const sample = failures.flatMap((f) => f.wrong.slice(0, 2).map((w) => `${f.code} ${w}`)).slice(0, 6).join('; ')
+    throw new Error(
+      `${label} participants.viz-* net_balance_atoms disagree with debts.json (participants per equivalent: ${summary}). ` +
+        `Sample: ${sample}. Regenerate: python admin-fixtures/tools/generate_participants_viz_datasets.py, then \`npm run sync:fixtures\`.`,
+    )
   }
 }
 
@@ -319,7 +465,7 @@ function validateAuditLog(auditLog, label) {
   }
 }
 
-async function validateSide(label, dir) {
+async function validateSide(label, dir, { requireViz }) {
   const equivalents = await readJson(path.join(dir, 'equivalents.json'))
   const participants = await readJson(path.join(dir, 'participants.json'))
   const trustlines = await readJson(path.join(dir, 'trustlines.json'))
@@ -375,13 +521,24 @@ async function validateSide(label, dir) {
   const incidentItems = getIncidentItems(incidents, label)
   assert(Array.isArray(incidentItems), `${label} incidents items must be an array`)
 
-  validateDebts(debts, label)
+  validateDebts(debts, label, participants, equivalents)
+
+  // The canonical pack and its public copy carry one viz dataset per equivalent (the mock reads them); a pack built
+  // elsewhere (--only-pack) may not, and is checked when it does. A missing file is not a passing one.
+  const vizByCode = new Map()
+  for (const code of uniqueCodes) {
+    const vizPath = path.join(dir, `participants.viz-${code}.json`)
+    if (await exists(vizPath)) vizByCode.set(code, await readJson(vizPath))
+    else assert(!requireViz, `${label} is missing participants.viz-${code}.json`)
+  }
+  validateVizNets(participants, equivalents, debts, vizByCode, label)
+
   validateClearingCycles(clearingCycles, label)
   validateTransactions(transactions, label, participants, equivalents)
   validateAdminConfig(config, label)
   validateAuditLog(auditLog, label)
 
-  return { equivalents, participants, trustlines, incidents, incidentItems, debts, clearingCycles, transactions, config, auditLog }
+  return { equivalents, participants, trustlines, incidents, incidentItems, debts, clearingCycles, transactions, config, auditLog, vizByCode: Object.fromEntries(vizByCode) }
 }
 
 async function main() {
@@ -393,7 +550,7 @@ async function main() {
 
     const meta = await readJson(path.join(v1Dir, '_meta.json'))
     validateMeta(meta, 'PACK')
-    const pack = await validateSide('PACK', datasetsDir)
+    const pack = await validateSide('PACK', datasetsDir, { requireViz: false })
 
     console.log('Fixtures OK (pack)')
     console.log(`- v1Dir: ${v1Dir}`)
@@ -408,10 +565,10 @@ async function main() {
     return
   }
 
-  const canonicalV1Dir = defaultCanonicalV1Dir
-  const canonicalDir = defaultCanonicalDir
-  const publicV1Dir = defaultPublicV1Dir
-  const publicDir = defaultPublicDir
+  const canonicalV1Dir = opts.v1Dir ?? defaultCanonicalV1Dir
+  const canonicalDir = path.join(canonicalV1Dir, 'datasets')
+  const publicV1Dir = opts.publicV1Dir ?? defaultPublicV1Dir
+  const publicDir = path.join(publicV1Dir, 'datasets')
 
   const canonicalMeta = await readJson(path.join(canonicalV1Dir, '_meta.json'))
   const publicMeta = await readJson(path.join(publicV1Dir, '_meta.json'))
@@ -422,8 +579,8 @@ async function main() {
     'PUBLIC _meta.json differs from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
   )
 
-  const canonical = await validateSide('CANONICAL', canonicalDir)
-  const publicSide = await validateSide('PUBLIC', publicDir)
+  const canonical = await validateSide('CANONICAL', canonicalDir, { requireViz: true })
+  const publicSide = await validateSide('PUBLIC', publicDir, { requireViz: true })
 
   assert(
     deepEqual(canonical.equivalents, publicSide.equivalents) &&
@@ -434,9 +591,11 @@ async function main() {
       deepEqual(canonical.clearingCycles, publicSide.clearingCycles) &&
       deepEqual(canonical.transactions, publicSide.transactions) &&
       deepEqual(canonical.config, publicSide.config) &&
-      deepEqual(canonical.auditLog, publicSide.auditLog),
+      deepEqual(canonical.auditLog, publicSide.auditLog) &&
+      deepEqual(canonical.vizByCode, publicSide.vizByCode),
     'PUBLIC fixtures differ from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
   )
+  await validateCopyIsCanonical(canonicalV1Dir, publicV1Dir)
 
   console.log('Fixtures OK')
   console.log(`- seed_id: ${publicMeta.seed_id}`)

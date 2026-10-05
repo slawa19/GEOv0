@@ -10,6 +10,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0096_54cda260"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "357",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 47,
+          "h": 40
+        }
+      },
+      {
+        "id": "PID_U0096_54cda260",
+        "net_balance_atoms": "32",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 25,
+          "h": 25
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0096_54cda260",
+        "viz_alpha_key": "hi",
+        "used": 4.45,
+        "available": 0.5499999999999998
+      }
     ]
   },
   {
@@ -22,6 +55,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0097_f3051c11"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "416",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 47,
+          "h": 40
+        }
+      },
+      {
+        "id": "PID_U0097_f3051c11",
+        "net_balance_atoms": "459",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0097_f3051c11",
+        "viz_alpha_key": "bg",
+        "used": 0.7,
+        "available": 4.3
       }
     ]
   },
@@ -36,6 +102,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0098_913c95c2"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "466",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 47,
+          "h": 40
+        }
+      },
+      {
+        "id": "PID_U0098_913c95c2",
+        "net_balance_atoms": "25",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 24,
+          "h": 24
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0098_913c95c2",
+        "viz_alpha_key": "muted",
+        "used": 1.55,
+        "available": 3.45
+      }
     ]
   },
   {
@@ -48,6 +147,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0099_2f740f73"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "527",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 48,
+          "h": 40
+        }
+      },
+      {
+        "id": "PID_U0099_2f740f73",
+        "net_balance_atoms": "36",
+        "net_sign": 1,
+        "viz_color_key": "suspended",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 25,
+          "h": 25
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0099_2f740f73",
+        "viz_alpha_key": "active",
+        "used": 2.3,
+        "available": 2.7
       }
     ]
   },
@@ -62,6 +194,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0100_cdab8924"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "579",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 48,
+          "h": 41
+        }
+      },
+      {
+        "id": "PID_U0100_cdab8924",
+        "net_balance_atoms": "27",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 24,
+          "h": 24
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0100_cdab8924",
+        "viz_alpha_key": "active",
+        "used": 3.15,
+        "available": 1.85
+      }
     ]
   },
   {
@@ -74,6 +239,39 @@
       {
         "from": "PID_U0046_6df7ddce",
         "to": "PID_U0061_b337ff2d"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0046_6df7ddce",
+        "net_balance_atoms": "8",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 24,
+          "h": 24
+        }
+      },
+      {
+        "id": "PID_U0061_b337ff2d",
+        "net_balance_atoms": "117",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0046_6df7ddce",
+        "target": "PID_U0061_b337ff2d",
+        "viz_alpha_key": "muted",
+        "used": 1.45,
+        "available": 3.55
       }
     ]
   },
@@ -88,6 +286,39 @@
         "from": "PID_U0046_6df7ddce",
         "to": "PID_U0076_f878208c"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0046_6df7ddce",
+        "net_balance_atoms": "55",
+        "net_sign": -1,
+        "viz_color_key": "debt-1",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 25,
+          "h": 25
+        }
+      },
+      {
+        "id": "PID_U0076_f878208c",
+        "net_balance_atoms": "177",
+        "net_sign": -1,
+        "viz_color_key": "debt-3",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 27,
+          "h": 27
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0046_6df7ddce",
+        "target": "PID_U0076_f878208c",
+        "viz_alpha_key": "active",
+        "used": 2.5,
+        "available": 2.5
+      }
     ]
   },
   {
@@ -100,6 +331,39 @@
       {
         "from": "PID_U0046_6df7ddce",
         "to": "PID_U0091_3db841eb"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0046_6df7ddce",
+        "net_balance_atoms": "124",
+        "net_sign": -1,
+        "viz_color_key": "debt-1",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      },
+      {
+        "id": "PID_U0091_3db841eb",
+        "net_balance_atoms": "144",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0046_6df7ddce",
+        "target": "PID_U0091_3db841eb",
+        "viz_alpha_key": "active",
+        "used": 3.7,
+        "available": 1.2999999999999998
       }
     ]
   },
@@ -114,6 +378,39 @@
         "from": "PID_U0047_0c2f577f",
         "to": "PID_U0062_516f78de"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0047_0c2f577f",
+        "net_balance_atoms": "888",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0062_516f78de",
+        "net_balance_atoms": "78",
+        "net_sign": -1,
+        "viz_color_key": "debt-1",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 25,
+          "h": 25
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0047_0c2f577f",
+        "target": "PID_U0062_516f78de",
+        "viz_alpha_key": "active",
+        "used": 2.35,
+        "available": 2.65
+      }
     ]
   },
   {
@@ -126,6 +423,39 @@
       {
         "from": "PID_U0047_0c2f577f",
         "to": "PID_U0077_96af9a3d"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0047_0c2f577f",
+        "net_balance_atoms": "833",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0077_96af9a3d",
+        "net_balance_atoms": "150",
+        "net_sign": -1,
+        "viz_color_key": "suspended",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0047_0c2f577f",
+        "target": "PID_U0077_96af9a3d",
+        "viz_alpha_key": "active",
+        "used": 3.55,
+        "available": 1.4500000000000002
       }
     ]
   },
@@ -140,6 +470,39 @@
         "from": "PID_U0047_0c2f577f",
         "to": "PID_U0092_dbefbb9c"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0047_0c2f577f",
+        "net_balance_atoms": "763",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0092_dbefbb9c",
+        "net_balance_atoms": "575",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0047_0c2f577f",
+        "target": "PID_U0092_dbefbb9c",
+        "viz_alpha_key": "hi",
+        "used": 4.7,
+        "available": 0.2999999999999998
+      }
     ]
   },
   {
@@ -152,6 +515,39 @@
       {
         "from": "PID_U0048_aa66d130",
         "to": "PID_U0063_efa6f28f"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0048_aa66d130",
+        "net_balance_atoms": "732",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0063_efa6f28f",
+        "net_balance_atoms": "112",
+        "net_sign": -1,
+        "viz_color_key": "debt-2",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0048_aa66d130",
+        "target": "PID_U0063_efa6f28f",
+        "viz_alpha_key": "active",
+        "used": 3.6,
+        "available": 1.4
       }
     ]
   },
@@ -166,6 +562,39 @@
         "from": "PID_U0048_aa66d130",
         "to": "PID_U0078_34e713ee"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0048_aa66d130",
+        "net_balance_atoms": "671",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0078_34e713ee",
+        "net_balance_atoms": "219",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 27,
+          "h": 27
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0048_aa66d130",
+        "target": "PID_U0078_34e713ee",
+        "viz_alpha_key": "hi",
+        "used": 4.5,
+        "available": 0.5
+      }
     ]
   },
   {
@@ -178,6 +607,39 @@
       {
         "from": "PID_U0048_aa66d130",
         "to": "PID_U0093_7a27354d"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0048_aa66d130",
+        "net_balance_atoms": "605",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0093_7a27354d",
+        "net_balance_atoms": "254",
+        "net_sign": -1,
+        "viz_color_key": "debt-5",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 28,
+          "h": 28
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0048_aa66d130",
+        "target": "PID_U0093_7a27354d",
+        "viz_alpha_key": "muted",
+        "used": 1.35,
+        "available": 3.65
       }
     ]
   },
@@ -192,6 +654,39 @@
         "from": "PID_U0049_489e4ae1",
         "to": "PID_U0064_8dde6c40"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0049_489e4ae1",
+        "net_balance_atoms": "561",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      },
+      {
+        "id": "PID_U0064_8dde6c40",
+        "net_balance_atoms": "531",
+        "net_sign": -1,
+        "viz_color_key": "debt-7",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0049_489e4ae1",
+        "target": "PID_U0064_8dde6c40",
+        "viz_alpha_key": "hi",
+        "used": 4.1,
+        "available": 0.9000000000000004
+      }
     ]
   },
   {
@@ -204,6 +699,39 @@
       {
         "from": "PID_U0049_489e4ae1",
         "to": "PID_U0079_d31e8d9f"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0049_489e4ae1",
+        "net_balance_atoms": "510",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      },
+      {
+        "id": "PID_U0079_d31e8d9f",
+        "net_balance_atoms": "96",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 26,
+          "h": 26
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0049_489e4ae1",
+        "target": "PID_U0079_d31e8d9f",
+        "viz_alpha_key": "muted",
+        "used": 1.35,
+        "available": 3.65
       }
     ]
   },
@@ -218,6 +746,39 @@
         "from": "PID_U0049_489e4ae1",
         "to": "PID_U0094_185eaefe"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0049_489e4ae1",
+        "net_balance_atoms": "452",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      },
+      {
+        "id": "PID_U0094_185eaefe",
+        "net_balance_atoms": "3",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 24,
+          "h": 24
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0049_489e4ae1",
+        "target": "PID_U0094_185eaefe",
+        "viz_alpha_key": "active",
+        "used": 2.15,
+        "available": 2.85
+      }
     ]
   },
   {
@@ -230,6 +791,39 @@
       {
         "from": "PID_U0050_e6d5c492",
         "to": "PID_U0065_2c15e5f1"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0050_e6d5c492",
+        "net_balance_atoms": "423",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      },
+      {
+        "id": "PID_U0065_2c15e5f1",
+        "net_balance_atoms": "218",
+        "net_sign": -1,
+        "viz_color_key": "debt-4",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 27,
+          "h": 27
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0050_e6d5c492",
+        "target": "PID_U0065_2c15e5f1",
+        "viz_alpha_key": "muted",
+        "used": 1.15,
+        "available": 3.85
       }
     ]
   },
@@ -244,6 +838,39 @@
         "from": "PID_U0050_e6d5c492",
         "to": "PID_U0080_71560750"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0050_e6d5c492",
+        "net_balance_atoms": "362",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 29,
+          "h": 29
+        }
+      },
+      {
+        "id": "PID_U0080_71560750",
+        "net_balance_atoms": "31",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 24,
+          "h": 24
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0050_e6d5c492",
+        "target": "PID_U0080_71560750",
+        "viz_alpha_key": "active",
+        "used": 2.15,
+        "available": 2.85
+      }
     ]
   },
   {
@@ -256,6 +883,39 @@
       {
         "from": "PID_U0050_e6d5c492",
         "to": "PID_U0095_b69628af"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0050_e6d5c492",
+        "net_balance_atoms": "292",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 28,
+          "h": 28
+        }
+      },
+      {
+        "id": "PID_U0095_b69628af",
+        "net_balance_atoms": "85",
+        "net_sign": -1,
+        "viz_color_key": "debt-1",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 25,
+          "h": 25
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0050_e6d5c492",
+        "target": "PID_U0095_b69628af",
+        "viz_alpha_key": "active",
+        "used": 3.05,
+        "available": 1.9500000000000002
       }
     ]
   }

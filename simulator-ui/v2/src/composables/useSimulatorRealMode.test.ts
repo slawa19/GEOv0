@@ -305,7 +305,15 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
     vi.useRealTimers()
   })
 
-  it('stale run context (runId changed) prevents pending debounce timer from triggering loadScene()', async () => {
+  // 029 F-029-21. The name used to say that a stale run CONTEXT stops the timer. Two independent things
+  // drop the pending refresh when `real.runId` changes, and this case does not tell them apart:
+  //   1. the runId watcher restarts the SSE loop, whose first step is `stopSse()` ->
+  //      `cancelPendingRefreshSnapshotDebounce()`: the timer is cleared before it fires (the real mechanism here);
+  //   2. had the timer survived, its callback asks `isContextStillValid()`, which compares `real.runId` with
+  //      the run the refresh started for (`runIdAtStart`).
+  // Measured 2026-10-05: with either removed on its own this case stays green; with both removed it is red.
+  // So it checks the outcome - nothing loads for a run the operator has left - and not either guard.
+  it('a run change drops the pending debounced refresh: loadScene() is not called again for the left run', async () => {
     vi.useFakeTimers()
 
     const isRealModeRef = ref(true)
