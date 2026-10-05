@@ -18,8 +18,9 @@ error, `constraint_name` on the asyncpg error it chains); `code` - a driver erro
 Row: shape carrier code | payment sqlstate, flags, money-phase name, clearing codes, conflict cause,
 constraint. Flags in order, `.` for false: R payment retryable, D debt-pair collision, X tx_id
 collision, C clearing retryable, L clearing 55P03 interlock, I inject transient, T live trust-line clash.
-`~` in T marks the one cell that changes on purpose (`orig_ctx`: the trust-line classifier walked
-`__context__`, F-024-10) - its test is `test_trustline_classifier_does_not_read_context`.
+The `orig_ctx` rows carried `~` in T while that cell changed on purpose (the trust-line classifier
+walked `__context__`, F-024-10). The mask left with 029 F-029-25: it hid the classifier's answer in all
+16 rows while the dedicated test pins only the two `23505/live` ones, so the other 14 were unpinned.
 
 Synthetic by design: the real-driver shapes are exercised by the integration suites
 (`test_p015_t1525_classification_reads_deliberate_wrapping_only_postgres.py`,
@@ -126,8 +127,6 @@ def _row(name: str, exc: BaseException) -> str:
         _is_live_trustline_uniqueness_violation(exc),
     ]
     marks = "".join(letter if flag else "." for letter, flag in zip("RDXCLIT", flags))
-    if name.startswith("orig_ctx"):
-        marks = marks[:-1] + "~"
     clearing = ",".join(sorted(ClearingService._postgres_error_codes(exc))) or "-"
     return (
         f"{name} | {_payment_db_sqlstate(exc)} {marks} {money_conflict_name(exc)} {clearing}"
@@ -228,22 +227,22 @@ masked code 23505/tx | 23502 ....... None 23502,gkpj 23502 None
 masked code 23505/live | 23502 ....... None 23502,gkpj 23502 None
 masked code 23503 | 23502 ....... None 23502,gkpj 23502 None
 masked code none | 23502 ....... None 23502,gkpj 23502 None
-orig_ctx asyncpg 40001 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg 40P01 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg 55P03 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg 23505/debt | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg 23505/tx | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg 23505/live | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg 23503 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx asyncpg none | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 40001 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 40P01 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 55P03 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 23505/debt | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 23505/tx | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 23505/live | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code 23503 | 23502 ......~ None 23502,gkpj 23502 None
-orig_ctx code none | 23502 ......~ None 23502,gkpj 23502 None
+orig_ctx asyncpg 40001 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg 40P01 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg 55P03 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg 23505/debt | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg 23505/tx | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg 23505/live | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg 23503 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx asyncpg none | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 40001 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 40P01 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 55P03 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 23505/debt | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 23505/tx | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 23505/live | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code 23503 | 23502 ....... None 23502,gkpj 23502 None
+orig_ctx code none | 23502 ....... None 23502,gkpj 23502 None
 nested asyncpg 40001 | 40001 R..C... None 40001,dbapi 40001 None
 nested asyncpg 40P01 | 40P01 R..C... None 40P01,dbapi 40P01 None
 nested asyncpg 55P03 | 55P03 ....L.. None 55P03,dbapi 55P03 None
