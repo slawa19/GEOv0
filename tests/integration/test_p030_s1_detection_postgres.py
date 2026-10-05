@@ -6,6 +6,7 @@ on a clone. Only the call whose failure is the subject is replaced, and each tes
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import timedelta
 
@@ -72,7 +73,7 @@ async def test_f030_7_a_checkpoint_error_does_not_cancel_the_reconciliation(monk
         "status": "failed", "event": "periodic_checkpoints_error", "error_type": "RuntimeError"
     }, app.state.background_jobs
     assert app.completed is False
-    assert maintenance_jobs.debt_reconciliation_run_failed(app) is False, "a checkpoint-only error flags the verdict"
+    assert maintenance_jobs.debt_reconciliation_run_problem(app, eq) is None, "a checkpoint-only error flags the verdict"
 
 
 @MODE_B
@@ -168,21 +169,19 @@ async def test_f030_9_the_simulator_seeder_baselines_a_new_equivalent_and_leaves
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_t3091_an_error_on_one_equivalent_warns_only_that_one_and_a_restart_is_not_healthy(
+async def test_t3091_an_error_on_one_equivalent_warns_only_that_one_also_after_a_restart(
     client, db_session, monkeypatch
 ) -> None:
     """§15 `T3091`, findings 2 and 1. A verifier error on A: A `warning`, fresh B `healthy` (MUTATION: one
-    process-wide flag again - B `warning`, red). After a restart, until the startup run records a result, nothing
-    is verified in this process: `warning`, not `healthy` (MUTATION: drop the `starting` branch - red)."""
-
-    import asyncio
+    process-wide flag again - B `warning`, red). After a restart this process knows nothing of that run, and the
+    stored rows still say it: A's checkpoint is newer than its result (MUTATION: drop the checkpoint branch of
+    `_reconciliation_view` - A `healthy`, red). The run allowance is set to zero: the time a run may take, elapsed."""
 
     from app.main import app as main_app
-    from app.utils.background_jobs import _start_supervised_background_task
 
     factory = sessionmaker_of(db_session)
     monkeypatch.setattr(main_app.state, "background_jobs", {}, raising=False)
-    a, b = await _baselined(factory, "P30TA"), await _baselined(factory, "P30TB")
+    a, _b = await _baselined(factory, "P30TA"), await _baselined(factory, "P30TB")
 
     async def statuses() -> dict:
         response = await client.get("/api/v1/integrity/summary", headers=ADMIN)
@@ -197,18 +196,18 @@ async def test_t3091_an_error_on_one_equivalent_warns_only_that_one_and_a_restar
         return await original(session, equivalent_id)
 
     await maintenance_jobs._run_integrity_checkpoints_once(main_app, reason="periodic")
+    await asyncio.sleep(0.05)  # the second run's checkpoints are strictly newer than the first run's results
     with monkeypatch.context() as scoped:
         scoped.setattr(reconciliation, "verify_journal_equals_change", verify)
         await maintenance_jobs._run_integrity_checkpoints_once(main_app, reason="periodic")
     assert main_app.state.background_jobs["integrity"]["status"] == "failed"
     assert await statuses() == {"P30TA": "warning", "P30TB": "healthy"}
 
+    main_app.state.background_jobs = {}  # a restart: the process-local flag is gone
+    assert await statuses() == {"P30TA": "healthy", "P30TB": "healthy"}, "control: within the run allowance"
+    monkeypatch.setattr(reconciliation, "RESULT_RUN_ALLOWANCE", timedelta(0))
+    monkeypatch.setattr(reconciliation, "RESULT_CLOCK_TOLERANCE", timedelta(0))
+    assert await statuses() == {"P30TA": "warning", "P30TB": "healthy"}
+
     await maintenance_jobs._run_integrity_checkpoints_once(main_app, reason="periodic")
     assert await statuses() == {"P30TA": "healthy", "P30TB": "healthy"}, "control: the clean run"
-
-    started = asyncio.Event()
-    task = _start_supervised_background_task(main_app, name="integrity", coroutine_factory=started.wait)
-    assert main_app.state.background_jobs["integrity"]["status"] == "starting"
-    assert await statuses() == {"P30TA": "warning", "P30TB": "warning"}
-    started.set()
-    await task

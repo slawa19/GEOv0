@@ -1099,6 +1099,9 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
 
 #: 030 F-030-8: the run allowance of the freshness policy below - one run of the checkpoints and the verifier.
 RESULT_RUN_ALLOWANCE = timedelta(minutes=5)
+#: 030 `T3091`: how far the application's clock (`last_checked_at`) may lag the database's (a checkpoint's
+#: `created_at`) before a result reads as older than the checkpoints of its own run.
+RESULT_CLOCK_TOLERANCE = timedelta(seconds=60)
 
 
 def result_freshness_threshold() -> timedelta:
@@ -1360,7 +1363,7 @@ async def run_scheduled_reconciliation(
     session_factory: Callable[[], Any],
     *,
     equivalent_ids: Iterable[uuid.UUID] | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Verify every equivalent in its own fresh session and transaction, persisting each result.
 
     Called only from the scheduled integrity loop, after the checkpoints have committed
@@ -1396,6 +1399,7 @@ async def run_scheduled_reconciliation(
         f"hold_{HOLD_NOT_CONFIRMED}": 0,
         f"hold_{HOLD_EQUIVALENT_GONE}": 0,
         "hold_errors": 0,
+        "errored_equivalents": [],
     }
     for equivalent_id in list(equivalent_ids):
         try:
@@ -1410,6 +1414,7 @@ async def run_scheduled_reconciliation(
                 await session.commit()
         except Exception:  # noqa: BLE001 - classified: an error, recorded as one, no result substituted
             counts["error"] += 1
+            counts["errored_equivalents"].append(str(equivalent_id))  # 030 T3091: whose verdict is unknown
             logger.exception("debt_reconciliation.error equivalent_id=%s", equivalent_id)
             continue
         counts[outcome.status] += 1
@@ -1421,6 +1426,7 @@ async def run_scheduled_reconciliation(
             decision = await react_to_failed(session_factory, equivalent_id)
         except Exception:  # noqa: BLE001 - classified: an error of this reaction only; the loop goes on
             counts["hold_errors"] += 1
+            counts["errored_equivalents"].append(str(equivalent_id))
             logger.exception("debt_reconciliation.integrity_hold_error equivalent_id=%s", equivalent_id)
             continue
         counts[f"hold_{decision.decision}"] += 1

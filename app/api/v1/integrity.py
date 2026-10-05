@@ -4,14 +4,15 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
+from app.core.ledger import reconciliation as _reconciliation
 from app.core.ledger.reconciliation import FAILED, UNVERIFIABLE, result_freshness_threshold
-from app.core.maintenance_jobs import debt_reconciliation_run_failed
+from app.core.maintenance_jobs import debt_reconciliation_run_problem
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
@@ -86,20 +87,27 @@ def _worse(a: str, b: str) -> str:
 
 async def _latest_reconciliation_results(db: AsyncSession) -> dict:
     """The stored latest result per equivalent, by the `is_latest` marker (one row each, partial unique
-    index). ONE bounded read of stored rows: nothing is reconciled here."""
+    index). ONE bounded read of stored rows: nothing is reconciled here. 030 `T3091`: with the time of the
+    equivalent's latest integrity checkpoint - the stored trace of the last integrity run, in any process."""
 
     columns = debt_reconciliation_results.c
+    checkpoint_at = (
+        select(func.max(IntegrityCheckpoint.created_at))
+        .where(IntegrityCheckpoint.equivalent_id == columns.equivalent_id)
+        .scalar_subquery()
+    )
     rows = (
         await db.execute(
-            select(columns.equivalent_id, columns.id, columns.status, columns.detail, columns.last_checked_at).where(
-                columns.is_latest.is_(True)
-            )
+            select(
+                columns.equivalent_id, columns.id, columns.status, columns.detail, columns.last_checked_at,
+                checkpoint_at.label("checkpoint_at"),
+            ).where(columns.is_latest.is_(True))
         )
     ).all()
     return {row.equivalent_id: row for row in rows}
 
 
-def _reconciliation_view(eq: Equivalent, latest, *, run_failed: bool = False) -> tuple[str, list[str]]:
+def _reconciliation_view(eq: Equivalent, latest, *, run_problem: str | None = None) -> tuple[str, list[str]]:
     """What the integrity hold and the latest stored reconciliation result add to one equivalent's status.
 
     024 `T2412.1`, mapping decided by the Sh2 consultation (2026-09-29). The hold and the verdict are
@@ -108,7 +116,7 @@ def _reconciliation_view(eq: Equivalent, latest, *, run_failed: bool = False) ->
     error leaves none - so it is a warning, never a pass and never a stored verdict.
 
     030 F-030-8: a result older than `result_freshness_threshold()`, or a last scheduled run that ended in an error
-    (`run_failed`), is a warning with its reason - a stale PASSED is not `healthy`. Neither holds money.
+    (`run_problem`), or - 030 `T3091` - a checkpoint of the equivalent newer than its result by more than a run allowance, is a warning with its reason - a stale PASSED is not `healthy`. Neither holds money.
     """
 
     severity = "healthy"
@@ -123,9 +131,20 @@ def _reconciliation_view(eq: Equivalent, latest, *, run_failed: bool = False) ->
     if latest is None:
         return _worse(severity, "warning"), alerts + [f"Debt reconciliation result missing for {eq.code}"]
 
-    if run_failed:
+    if run_problem:
         severity = _worse(severity, "warning")
-        alerts.append(f"Debt reconciliation of {eq.code}: the last scheduled run ended in an error")
+        alerts.append(f"Debt reconciliation of {eq.code}: {run_problem}")
+    # `T3091`: a run that wrote this equivalent's checkpoint and, a run allowance later, has not published its
+    # result - its verification erred (or still runs). Seen from the stored rows, so by any process, after a restart.
+    checkpoint_at = getattr(latest, "checkpoint_at", None)
+    if (
+        checkpoint_at is not None
+        and checkpoint_at - latest.last_checked_at > _reconciliation.RESULT_CLOCK_TOLERANCE
+        and _now() - checkpoint_at > _reconciliation.RESULT_RUN_ALLOWANCE
+    ):
+        severity = _worse(severity, "warning")
+        alerts.append(f"Debt reconciliation of {eq.code} published no result after the integrity run of "
+                      f"{checkpoint_at.isoformat()}")
     if _now() - latest.last_checked_at > result_freshness_threshold():
         severity = _worse(severity, "warning")
         alerts.append(f"Debt reconciliation result of {eq.code} is older than the freshness policy "
@@ -162,12 +181,13 @@ async def get_integrity_summary(
     """
 
     latest = await _latest_reconciliation_results(db)
-    run_failed = debt_reconciliation_run_failed(request.app)
     equivalents = (await db.execute(select(Equivalent).order_by(Equivalent.code))).scalars().all()
     return IntegritySummaryResponse(equivalents=[
         EquivalentIntegritySummary(
             equivalent=eq.code,
-            status=_reconciliation_view(eq, latest.get(eq.id), run_failed=run_failed)[0],
+            status=_reconciliation_view(
+                eq, latest.get(eq.id), run_problem=debt_reconciliation_run_problem(request.app, eq.id)
+            )[0],
             checked_at=getattr(latest.get(eq.id), "last_checked_at", None),
             hold=eq.integrity_hold_result_id is not None,
         )
@@ -228,7 +248,7 @@ async def get_integrity_status(
             alerts.append(f"Debt symmetry violations in {eq.code}: {len(violations)}")
 
         reconciliation_severity, reconciliation_alerts = _reconciliation_view(
-            eq, latest_results.get(eq.id), run_failed=debt_reconciliation_run_failed(request.app)
+            eq, latest_results.get(eq.id), run_problem=debt_reconciliation_run_problem(request.app, eq.id)
         )
         status = _worse(status, reconciliation_severity)
         overall_status = _worse(overall_status, status)
