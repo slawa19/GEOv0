@@ -484,7 +484,7 @@ class PaymentTransactionUnusable(Exception):
         )
         self.refusal = refusal
         self.cause = cause
-        self.publish_refusal: Callable[[], Any] | None = None
+        self.publish_refusal: Callable[..., Any] | None = None
 
 
 def _public_error_of_stored(result: PaymentResult) -> GeoException | None:

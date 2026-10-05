@@ -72,6 +72,7 @@ from app.core.ledger.book import DebtVersionConflict
 from app.core.payments.service import (
     _COMMIT_REFUSED_SQLSTATE_CLASSES,
     DefinitiveRefusal,
+    _public_error_of_stored,
     PaymentTransactionUnusable,
     _drain_call,
     collect_admitted_refusals,
@@ -495,7 +496,12 @@ async def _settle_unusable_phase(
     )
     if error.publish_refusal is not None:
         try:
-            error.publish_refusal()
+            # 030 `T3094` #1: a stored `ABORTED` of the same request it yielded to is the outcome - published as such.
+            yielded = stored is not None and stored.status == "ABORTED" and stored.error is not None
+            if yielded:
+                error.publish_refusal(_public_error_of_stored(stored))
+            else:
+                error.publish_refusal()
         except Exception:
             logger.warning(
                 "simulator.real.staged_refusal_publish_failed run_id=%s tx_id=%s",
