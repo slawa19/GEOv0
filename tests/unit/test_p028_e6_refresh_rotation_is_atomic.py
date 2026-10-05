@@ -21,13 +21,16 @@ from app.utils.exceptions import UnauthorizedException
 
 class _Redis:
     def __init__(self) -> None:
-        self.keys: set[str] = set()
+        self.keys: dict[str, str] = {}
 
     async def set(self, key, value, ex=None, nx=False):
         if nx and key in self.keys:
             return None
-        self.keys.add(key)
+        self.keys[key] = value
         return True
+
+    async def get(self, key):
+        return self.keys.get(key)
 
     async def exists(self, key):
         return int(key in self.keys)
@@ -65,14 +68,14 @@ async def _refresh(db, token):
 
 @pytest.mark.asyncio
 async def test_two_simultaneous_refreshes_with_one_token_yield_one_session(store) -> None:
-    token, db = security.create_refresh_token(subject="alice"), _Db(parties=2)
+    token, db = await security.create_refresh_token(subject="alice"), _Db(parties=2)
     results = await asyncio.gather(_refresh(db, token), _refresh(db, token))
     assert sum(r is not None for r in results) == 1, f"{store}: {results}"
 
 
 @pytest.mark.asyncio
 async def test_a_single_refresh_rotates_and_the_used_token_is_refused(store) -> None:
-    token = security.create_refresh_token(subject="alice")
+    token = await security.create_refresh_token(subject="alice")
     first = await _refresh(_Db(parties=1), token)
     assert first is not None and first["refresh_token"] != token
     assert await _refresh(_Db(parties=1), token) is None

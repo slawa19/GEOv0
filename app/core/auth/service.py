@@ -2,12 +2,14 @@ import base64
 import secrets
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 
 from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
-from app.utils.security import claim_jti, decode_token, create_access_token, create_refresh_token
+from app.utils.security import (
+    claim_jti, decode_token, create_access_token, create_refresh_token, refresh_store_id,
+)
 from app.utils.exceptions import UnauthorizedException, NotFoundException
 from app.config import settings
 
@@ -83,13 +85,21 @@ class AuthService:
         except Exception:
             raise UnauthorizedException("Invalid signature")
 
-        # 4. Mark challenge as used
-        auth_challenge.used = True
+        # 4. Use the challenge - only if nobody has since step 1 (029 `F-029-1`): two logins presenting one
+        # challenge and signature at once both pass the read above; exactly one of them wins this UPDATE.
+        claimed = await self.db.execute(
+            update(AuthChallenge)
+            .where(AuthChallenge.id == auth_challenge.id, AuthChallenge.used.is_(False))
+            .values(used=True)
+            .returning(AuthChallenge.id)
+        )
+        if claimed.scalar_one_or_none() is None:
+            raise UnauthorizedException("Invalid or expired challenge")
         await self.db.commit()
 
         # 5. Issue tokens
         access_token = create_access_token(subject=pid)
-        refresh_token = create_refresh_token(subject=pid)
+        refresh_token = await create_refresh_token(subject=pid)
 
         expires_in = int(settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60
 
@@ -114,6 +124,11 @@ class AuthService:
         if not isinstance(jti, str) or not jti:
             raise UnauthorizedException("Invalid refresh token")
 
+        # 029 `F-029-31`: issued by another process, another Redis, the other kind of store or before 029 - the
+        # store asked below cannot tell whether it was already used.
+        if payload.get("rsm") != await refresh_store_id():
+            raise UnauthorizedException("Invalid refresh token")
+
         pid = payload.get("sub")
         if not isinstance(pid, str) or not pid:
             raise UnauthorizedException("Invalid refresh token")
@@ -127,9 +142,13 @@ class AuthService:
         # 028 `F-028-22`: the token is used once - a concurrent second use of it loses the claim.
         if not await claim_jti(jti, exp=payload.get("exp")):
             raise UnauthorizedException("Invalid refresh token")
+        # 029 `T2991`: a claim can succeed for a second presenter only if the store lost the first claim since
+        # the check above - and a store that lost its data has lost its id too. Ask again before issuing.
+        if payload.get("rsm") != await refresh_store_id():
+            raise UnauthorizedException("Invalid refresh token")
 
         access_token = create_access_token(subject=pid)
-        new_refresh_token = create_refresh_token(subject=pid)
+        new_refresh_token = await create_refresh_token(subject=pid)
 
         expires_in = int(settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60
 
