@@ -1,11 +1,8 @@
 """029 S1, F-029-31 (BACKLOG № 240) and F-029-1 (№ 286): a used refresh token stays used across a restart.
 
-Without Redis the revocation store is process memory. THE RESTART IS A REAL NEW PROCESS (`python -c`, the same
-`JWT_SECRET`): its store is empty by construction, nothing is left over from this one. In-process `_restart` is the
-same event for the controls - a new start marker AND an empty memory store together, never the marker alone.
+THE RESTART IS A REAL NEW PROCESS (`python -c`, the same `JWT_SECRET`): its memory store is empty by construction.
+In-process `_restart` is the same event for the controls - a new marker AND an empty store, never the marker alone.
 """
-
-from __future__ import annotations
 
 import os
 import subprocess
@@ -28,21 +25,18 @@ from types import SimpleNamespace
 from app.core.auth.service import AuthService
 from app.utils.exceptions import UnauthorizedException
 from app.utils.security import decode_token
-
 class Db:
     async def execute(self, _stmt):
         alice = SimpleNamespace(pid="alice", display_name="A", status="active")
         return SimpleNamespace(scalar_one_or_none=lambda: alice)
-
 async def main():
-    # Control: same secret, valid token, and this process's store does not know it - a refusal is not a bad signature.
+    # Control: same secret, valid token, unknown to this process's store - a refusal is not a bad signature.
     assert await decode_token(sys.argv[1], expected_type="refresh") is not None
     try:
         await AuthService(Db()).refresh_tokens(sys.argv[1])
         print("ACCEPTED")
     except UnauthorizedException:
         print("REFUSED")
-
 asyncio.run(main())
 """
 
@@ -75,20 +69,13 @@ async def test_a_used_refresh_token_is_refused_by_the_next_process(memory_store)
     assert child.stdout.split() == ["REFUSED"], child.stdout
 
 
-async def test_without_a_restart_the_new_token_works_exactly_once(memory_store) -> None:
-    first = await _refresh(security.create_refresh_token(subject="alice"))
-    assert first is not None
-    assert await _refresh(first["refresh_token"]) is not None
-    assert await _refresh(first["refresh_token"]) is None
-
-
 async def test_a_restart_refuses_refresh_tokens_but_not_access_tokens(memory_store, monkeypatch) -> None:
+    rotated = await _refresh(security.create_refresh_token(subject="alice"))
+    assert rotated is not None and await _refresh(rotated["refresh_token"]) is not None  # no restart: works,
+    assert await _refresh(rotated["refresh_token"]) is None  # ... and exactly once
     access, unused = security.create_access_token("alice"), security.create_refresh_token(subject="alice")
-    unmarked = jwt.encode(
-        {"exp": int(time.time()) + 600, "sub": "alice", "type": "refresh", "jti": uuid.uuid4().hex},
-        settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
-    )  # what a release before 029 issued
+    claims = {"exp": int(time.time()) + 600, "sub": "alice", "type": "refresh", "jti": uuid.uuid4().hex}
+    unmarked = jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)  # issued before 029
     _restart(monkeypatch)
     assert await _refresh(unused) is None and await _refresh(unmarked) is None
     assert (await security.decode_token(access))["sub"] == "alice"
@@ -101,8 +88,7 @@ async def test_with_redis_an_unused_token_survives_a_restart_and_a_used_one_does
     used, unused = (security.create_refresh_token(subject="alice") for _ in range(2))
     assert await _refresh(used) is not None
     _restart(monkeypatch)
-    assert await _refresh(unused) is not None
-    assert await _refresh(used) is None
+    assert await _refresh(unused) is not None and await _refresh(used) is None
 
 
 async def test_a_token_is_refused_by_the_other_kind_of_store(monkeypatch) -> None:

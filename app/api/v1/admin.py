@@ -318,8 +318,8 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
 
 
 def _runtime_config_items() -> list[tuple[str, bool]]:
-    # (key, mutable). 029 `F-029-4`: a key is mutable only if something reads it after start. LOG_LEVEL and the
-    # two INTEGRITY_CHECKPOINT_* are read once at start; the three recovery keys have no reader since 019.
+    # (key, mutable). 029 `F-029-4`: a key is mutable only if changing it at runtime does what its name says.
+    # LOG_LEVEL and the integrity job's switch and period are taken once at start; the recovery three have no reader.
     return [
         ("LOG_LEVEL", False),
         ("RATE_LIMIT_ENABLED", True),

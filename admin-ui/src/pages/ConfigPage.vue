@@ -407,14 +407,15 @@ watch(
                     style="width: 160px"
                   />
 
-                  <el-input
-                    v-else-if="scope.row.kind === 'string'"
-                    v-model="scope.row.value"
-                    :disabled="isKeyReadOnly(scope.row.key)"
-                    size="small"
-                    :placeholder="t('common.valuePlaceholder')"
-                    class="cfgText"
-                  />
+                  <template v-else-if="scope.row.kind === 'string'">
+                    <el-input
+                      v-model="scope.row.value"
+                      :disabled="isKeyReadOnly(scope.row.key)"
+                      size="small"
+                      :placeholder="t('common.valuePlaceholder')"
+                      class="cfgText"
+                    />
+                  </template>
 
                   <el-input
                     v-else

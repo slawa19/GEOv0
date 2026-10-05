@@ -1,12 +1,8 @@
 """029 S1, F-029-1 (BACKLOG № 237): a login challenge is used once, also by two logins presenting it together.
 
-REAL SCHEDULE on PostgreSQL, nothing injected into the driver and no stand-in session: two `AuthService.login`
-calls on two real sessions of a mode-B clone, each held right after its participant read - past the `used = false`
-read, before the write - until both are there. Controls: both logins were held; a single login succeeds; the used
-challenge is then refused.
+REAL SCHEDULE on PostgreSQL, no injection and no stand-in session: two `AuthService.login` calls on two real sessions
+of a mode-B clone, each held right after its participant read - past the `used = false` read, before the write.
 """
-
-from __future__ import annotations
 
 import asyncio
 import base64
@@ -61,11 +57,4 @@ async def test_two_simultaneous_logins_with_one_challenge_yield_one_session(comm
     )
     assert len(held) == 2 and held[0] is not held[1], held  # control: both were past the read before either wrote
     assert sum(r is not None for r in results) == 1, results
-
-
-async def test_a_single_login_succeeds_and_the_used_challenge_is_refused(committed_database) -> None:
-    sessionmaker = committed_database.sessionmaker
-    pid, challenge, signature = await _signed_challenge(sessionmaker)
-    first = await _login(sessionmaker, pid, challenge, signature)
-    assert first is not None and first["access_token"] and first["refresh_token"]
-    assert await _login(sessionmaker, pid, challenge, signature) is None
+    assert await _login(sessionmaker, pid, challenge, signature) is None  # and the used challenge stays refused

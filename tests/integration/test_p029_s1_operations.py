@@ -1,11 +1,8 @@
-"""029 S1: checkpoint retention (F-029-2, № 87), logging at start (F-029-3, № 60) and what `/admin/config` lets an
-admin change (F-029-4, № 61).
+"""029 S1: checkpoint retention (F-029-2, № 87), logging at start (F-029-3, № 60), `/admin/config` (F-029-4, № 61).
 
-Limits: the logging test reads a child process, because pytest hangs its own handlers on the root logger; it shows
-that `app.main` configures logging, not what a deployment's `--log-config` then does to it.
+The logging test reads a child process, because pytest hangs its own handlers on the root logger; it shows that
+`app.main` configures logging, not what a deployment's `--log-config` then does to it.
 """
-
-from __future__ import annotations
 
 import os
 import re
@@ -22,14 +19,9 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
-NOT_RUNTIME = {  # no reader after start: four have none at all, the two INTEGRITY_* are read once by the job's start
-    "LOG_LEVEL": "DEBUG",
-    "RECOVERY_ENABLED": False,
-    "RECOVERY_INTERVAL_SECONDS": 61,
-    "PAYMENT_TX_STUCK_TIMEOUT_SECONDS": 121,
-    "INTEGRITY_CHECKPOINT_ENABLED": True,
-    "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS": 301,
-}
+# LOG_LEVEL and the integrity job's switch and period are taken once at start; the other three have no reader.
+NOT_RUNTIME = ("LOG_LEVEL", "RECOVERY_ENABLED", "RECOVERY_INTERVAL_SECONDS", "PAYMENT_TX_STUCK_TIMEOUT_SECONDS")
+NOT_RUNTIME += ("INTEGRITY_CHECKPOINT_ENABLED", "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS")
 
 
 async def _rows_per_equivalent(db_session) -> dict:
@@ -47,7 +39,6 @@ async def test_checkpoints_past_the_term_are_deleted_and_the_latest_of_each_equi
     assert await integrity.compute_and_store_integrity_checkpoints(db_session) >= 2
     kept = await _rows_per_equivalent(db_session)
     assert set(kept.values()) == {2}, kept  # control: within the real term nothing is deleted
-
     monkeypatch.setattr(integrity, "INTEGRITY_CHECKPOINT_TTL", timedelta(seconds=ttl_seconds), raising=False)
     written = await integrity.compute_and_store_integrity_checkpoints(db_session)
     after = await _rows_per_equivalent(db_session)
@@ -73,17 +64,16 @@ def test_the_application_configures_logging_at_start_from_log_level(level, info_
 
 
 async def test_admin_config_refuses_the_keys_nothing_reads_after_start(client, monkeypatch) -> None:
-    before = {key: getattr(settings, key) for key in NOT_RUNTIME}
-    for key, value in NOT_RUNTIME.items():
+    for key in NOT_RUNTIME:
+        before = getattr(settings, key)
+        value = "DEBUG" if key == "LOG_LEVEL" else (not before if isinstance(before, bool) else before + 1)
         response = await client.patch("/api/v1/admin/config", headers=ADMIN, json={"updates": {key: value}})
         assert response.status_code == 400, (key, response.text)
         assert response.json()["error"]["message"] == f"Config key not mutable: {key}"
-    assert {key: getattr(settings, key) for key in NOT_RUNTIME} == before
-
+        assert getattr(settings, key) == before
     listed = (await client.get("/api/v1/admin/config", headers=ADMIN)).json()["items"]
     assert {item["key"] for item in listed if not item["mutable"]} == set(NOT_RUNTIME)
     assert sum(item["mutable"] for item in listed) == 6
-
     # Positive control: a live key is still changed, and the change is in force.
     monkeypatch.setattr(settings, "CLEARING_ENABLED", True)
     response = await client.patch("/api/v1/admin/config", headers=ADMIN, json={"updates": {"CLEARING_ENABLED": False}})
