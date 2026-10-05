@@ -85,7 +85,6 @@ if TYPE_CHECKING:
 class TickPaymentsPhase:
     """What one attempt of the money phase produced (was `RealTickPaymentsPhaseResult`)."""
 
-    debt_snapshot: dict[tuple[str, str, str], Decimal]
     planned: list[Any]
     per_eq_metric_values: dict[str, dict[str, Any]]
 
@@ -296,7 +295,6 @@ class RealTick:
                         session=session,
                         run_id=run_id,
                         run=run,
-                        debt_snapshot=payments_phase.debt_snapshot,
                         scenario=scenario,
                         payments_result=payments_phase,
                     )
@@ -593,7 +591,6 @@ class RealTick:
             should_stop = True
 
         res = TickPaymentsPhase(
-            debt_snapshot=debt_snapshot,
             planned=planned,
             per_eq_metric_values=per_eq_metric_values,
             committed=int(payments_res.committed),
@@ -1299,7 +1296,6 @@ class RealTick:
         session: Any,
         run_id: str,
         run: RunRecord,
-        debt_snapshot: dict[tuple[str, str, str], Any],
         scenario: dict[str, Any],
         payments_result: Any | None = None,
     ) -> None:
@@ -1311,7 +1307,6 @@ class RealTick:
                 run=run,
                 session=session,
                 tick_index=tick_index,
-                debt_snapshot=debt_snapshot,
                 scenario=scenario,
             )
         except asyncio.CancelledError:

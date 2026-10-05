@@ -289,7 +289,6 @@ def _run_with_phase(
         ],
     )
     phase = TickPaymentsPhase(
-        debt_snapshot={},
         planned=[],
         per_eq_metric_values={},
         committed=1,

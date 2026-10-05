@@ -52,17 +52,16 @@ async def _stand(factory, lines=LINES, debts=DEBTS, roles="ABCD"):  # noqa: F811
     run._trust_drift_config = TrustDriftConfig(**CFG)
     run._edge_clearing_history = {f"{people[c].pid}:{people[d].pid}:{eq.code}": EdgeClearingHistory(
         original_limit=Decimal(limit)) for c, d, limit, _ in lines}
-    snapshot = {(people[d].pid, people[c].pid, eq.code): Decimal(a) for d, c, a in debts}
-    return eq, people, run, scenario, snapshot
+    return eq, people, run, scenario
 
 
-async def _drift(factory, run, scenario, snapshot, eq, *, kind="decay", pid=None):  # noqa: F811
+async def _drift(factory, run, scenario, eq, *, kind="decay", pid=None):  # noqa: F811
     """One drift transaction, as its owner runs it: the engine's call, then the commit. `pid` receives the backend."""
     async with factory() as s:
         if pid is not None:
             pid.append(await s.scalar(text("SELECT pg_backend_pid()")))
         if kind == "decay":
-            res = await ENGINE.apply_trust_decay(run, s, 7, snapshot, scenario)
+            res = await ENGINE.apply_trust_decay(run, s, 7, scenario)
             await s.commit()
             return res
         edges = {(t["from"], t["to"]) for t in scenario["trustlines"]}
@@ -102,7 +101,7 @@ _IS_BLOCKED = "SELECT cardinality(pg_blocking_pids(:p))"
 @pytest.mark.asyncio
 async def test_a_decay_does_not_overwrite_a_limit_patched_since_the_scenario_read(factory) -> None:  # noqa: F811
     """(а) № 273: the scenario holds 100 at debt 90; the creditor's PATCH to 200 holds the line; the decay waits for it."""
-    eq, p, run, scenario, snapshot = await _stand(factory)
+    eq, p, run, scenario = await _stand(factory)
     async with factory() as patch:
         line = await patch.scalar(select(TrustLine.id).where(TrustLine.from_participant_id == p["A"].id,
                                                              TrustLine.to_participant_id == p["B"].id))
@@ -111,7 +110,7 @@ async def test_a_decay_does_not_overwrite_a_limit_patched_since_the_scenario_rea
         await service.execute_update(batch, line, p["A"].id, TrustLineUpdateRequest(limit="200.00", signature="-"),
                                      require_signature=False)
         await batch.finish()
-        decay = asyncio.create_task(_drift(factory, run, scenario, snapshot, eq))
+        decay = asyncio.create_task(_drift(factory, run, scenario, eq))
         holder = await patch.scalar(text("SELECT pg_backend_pid()"))
         assert await _waits(factory, _BLOCKS_SOMEONE, holder, decay), "premise: the decay did not wait for the PATCH"
         await patch.commit()
@@ -125,10 +124,10 @@ async def test_a_decay_does_not_overwrite_a_limit_patched_since_the_scenario_rea
 @pytest.mark.asyncio
 async def test_drift_leaves_the_lines_of_a_suspended_participant_alone(factory, kind, moved) -> None:  # noqa: F811
     """(б) № 272, sequential. Anti-vacuum of the status rule: A -> C, both active, still drifts while B is frozen."""
-    eq, p, run, scenario, snapshot = await _stand(factory)
+    eq, p, run, scenario = await _stand(factory)
     async with factory() as s:
         await _admin_status(s, p["B"].pid)
-    await _drift(factory, run, scenario, snapshot, eq, kind=kind)
+    await _drift(factory, run, scenario, eq, kind=kind)
     after = await limits(factory, eq, p)
     assert after[("A", "C")] == (Decimal(moved), "active"), after
     assert after[("A", "B")] == (Decimal("100.00"), "active"), f"{kind} changed the line of suspended B: {after}"
@@ -138,7 +137,7 @@ async def test_drift_leaves_the_lines_of_a_suspended_participant_alone(factory, 
 @pytest.mark.asyncio
 async def test_no_drift_write_lands_on_a_line_after_its_participant_froze(factory, monkeypatch, order) -> None:  # noqa: F811
     """(б′) concurrent, both arrival orders: the freeze and the drift MEET on B's participant row."""
-    eq, p, run, scenario, snapshot = await _stand(factory)
+    eq, p, run, scenario = await _stand(factory)
     paused, go, pid = asyncio.Event(), asyncio.Event(), []
     write = trust_drift_engine._set_limit_internally
 
@@ -150,7 +149,7 @@ async def test_no_drift_write_lands_on_a_line_after_its_participant_froze(factor
 
     monkeypatch.setattr(trust_drift_engine, "_set_limit_internally", pause_then_write)
     if order == "drift_first":
-        drifting = asyncio.create_task(_drift(factory, run, scenario, snapshot, eq, pid=pid))
+        drifting = asyncio.create_task(_drift(factory, run, scenario, eq, pid=pid))
         await asyncio.wait_for(paused.wait(), 20)
         freezing = asyncio.create_task(_freeze(factory, p["B"].pid))
         met = await _waits(factory, _BLOCKS_SOMEONE, pid[0], freezing)
@@ -160,7 +159,7 @@ async def test_no_drift_write_lands_on_a_line_after_its_participant_froze(factor
         reached, hold = asyncio.Event(), asyncio.Event()
         freezing = asyncio.create_task(_freeze(factory, p["B"].pid, reached, hold))
         await asyncio.wait_for(reached.wait(), 20)
-        drifting = asyncio.create_task(_drift(factory, run, scenario, snapshot, eq, pid=pid))
+        drifting = asyncio.create_task(_drift(factory, run, scenario, eq, pid=pid))
         while not pid and not drifting.done():
             await asyncio.sleep(0.01)
         met = await _waits(factory, _IS_BLOCKED, pid[0], drifting)
@@ -180,7 +179,7 @@ async def test_a_decay_takes_its_lines_in_the_order_of_a_payment(factory, monkey
     """(в) № 49: A pays C through B over both lines (id order) while the decay holds the scenario's FIRST line - the
     one with the higher id - and then goes for the other."""
     lines = [("B", "A", "100.00", "active"), ("C", "B", "100.00", "active")]
-    eq, p, run, scenario, snapshot = await _stand(factory, lines, [("A", "B", "90.00"), ("B", "C", "90.00")], "ABC")
+    eq, p, run, scenario = await _stand(factory, lines, [("A", "B", "90.00"), ("B", "C", "90.00")], "ABC")
     async with factory() as s:
         ids = {(f, t): i for i, f, t in (await s.execute(select(
             TrustLine.id, TrustLine.from_participant_id, TrustLine.to_participant_id).where(
@@ -201,7 +200,7 @@ async def test_a_decay_takes_its_lines_in_the_order_of_a_payment(factory, monkey
             return (await _pay(s, eq, p, "ABC")).status
 
     monkeypatch.setattr(trust_drift_engine, "_set_limit_internally", pause_then_write)
-    decaying = asyncio.create_task(_drift(factory, run, scenario, snapshot, eq, pid=pid))
+    decaying = asyncio.create_task(_drift(factory, run, scenario, eq, pid=pid))
     await asyncio.wait_for(paused.wait(), 20)
     paying = asyncio.create_task(pay())
     assert await _waits(factory, _BLOCKS_SOMEONE, pid[0], paying), "premise: the payment did not wait for the decay"
@@ -211,17 +210,17 @@ async def test_a_decay_takes_its_lines_in_the_order_of_a_payment(factory, monkey
         f"decay and payment over the same two lines: {outcome!r}, payment conflicts {conflicts.payment}")
 
 
-@pytest.mark.parametrize("debt, snapshot", [("10.00", "90.00"), ("60.00", "60.00")])
+@pytest.mark.parametrize("debt", ["10.00", "60.00"])
 @pytest.mark.asyncio
-async def test_a_decay_never_raises_a_limit(factory, debt, snapshot) -> None:  # noqa: F811
-    """§15 review of S3 (`T2993`, P2). The creditor lowered A -> B to 50 (original 100). Case 1: the tick's snapshot
-    still says 90, the debt was repaid to 10 - `max(49, 30, 90)` wrote 90. Case 2: the debt (60) is above the lowered
-    limit, which 026 allows - `max(49, 30, 60)` wrote 60. A decay lowers a limit or leaves it."""
+async def test_a_decay_never_raises_a_limit(factory, debt) -> None:  # noqa: F811
+    """§15 review of S3 (`T2993`, P2). The creditor lowered A -> B to 50 (original 100). Debt 10: repaid from 90 since
+    the tick's money phase - while the decay still took the tick's debt snapshot (90), `max(49, 30, 90)` wrote 90;
+    the snapshot is no input any more. Debt 60: above the lowered limit, which 026 allows - `max(49, 30, 60)` wrote
+    60. A decay lowers a limit or leaves it."""
     lines = [("A", "B", "50.00", "active"), ("A", "C", "100.00", "active")]
-    eq, p, run, scenario, stale = await _stand(factory, lines, [("B", "A", debt), ("C", "A", "90.00")])
+    eq, p, run, scenario = await _stand(factory, lines, [("B", "A", debt), ("C", "A", "90.00")])
     run._edge_clearing_history[f"{p['A'].pid}:{p['B'].pid}:{eq.code}"].original_limit = Decimal("100.00")
-    stale[(p["B"].pid, p["A"].pid, eq.code)] = Decimal(snapshot)
-    await _drift(factory, run, scenario, stale, eq)
+    await _drift(factory, run, scenario, eq)
     after = await limits(factory, eq, p)
     assert after[("A", "C")] == (Decimal("98.00"), "active"), after  # positive control: an overloaded line decays
     assert after[("A", "B")] == (Decimal("50.00"), "active"), f"the decay RAISED the creditor's limit of 50: {after}"
@@ -231,8 +230,8 @@ async def test_a_decay_never_raises_a_limit(factory, debt, snapshot) -> None:  #
 async def test_a_decay_multiplier_is_not_computed_in_binary_floating_point(factory) -> None:  # noqa: F811
     """`F-030-4` (handed over from programme 030): `Decimal(str(1 - 0.07))` is `0.9299999999999999`, and 100.00
     decayed to 92.99 - a cent the configured rate never asked for."""
-    eq, p, run, scenario, snapshot = await _stand(factory)
+    eq, p, run, scenario = await _stand(factory)
     run._trust_drift_config = TrustDriftConfig(**{**CFG, "decay_rate": 0.07})
-    await _drift(factory, run, scenario, snapshot, eq)
+    await _drift(factory, run, scenario, eq)
     after = await limits(factory, eq, p)
     assert after[("A", "B")] == (Decimal("93.00"), "active"), after

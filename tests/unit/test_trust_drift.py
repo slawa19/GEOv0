@@ -559,19 +559,13 @@ class TestApplyTrustDecay:
         run = _make_run()
         runner._init_trust_drift(run, scenario)
 
-        # Debt of 850 on limit 1000 → ratio 0.85 ≥ 0.8
-        # Note: debt key is (debtor_pid, creditor_pid, eq_code)
-        debt_snapshot: dict[tuple[str, str, str], Decimal] = {
-            ("bob", "alice", "UAH"): Decimal("850"),
-        }
 
         session = await _drift_session(db_session)
         await _owes_alice(session, "850")
         PaymentRouter._graph_cache["UAH"] = object()
 
         res = await runner._apply_trust_decay(
-            run, session, tick_index=10, debt_snapshot=debt_snapshot,
-            scenario=scenario,
+            run, session, tick_index=10, scenario=scenario,
         )
 
         assert res.updated_count == 1
@@ -627,17 +621,12 @@ class TestApplyTrustDecay:
             "alice:bob:UAH": EdgeClearingHistory(original_limit=1000.0),
         }
 
-        # Debt high enough to trigger decay (280/350 = 0.8)
-        debt_snapshot: dict[tuple[str, str, str], Decimal] = {
-            ("bob", "alice", "UAH"): Decimal("280"),
-        }
 
         session = await _drift_session(db_session, alice_bob_limit=350.0)
         await _owes_alice(session, "280")
 
         res = await runner._apply_trust_decay(
-            run, session, tick_index=10, debt_snapshot=debt_snapshot,
-            scenario=scenario,
+            run, session, tick_index=10, scenario=scenario,
         )
 
         assert res.updated_count == 1
@@ -667,17 +656,12 @@ class TestApplyTrustDecay:
 
         original_limit = scenario["trustlines"][0]["limit"]
 
-        # Debt of 500 on limit 1000 → ratio 0.5 < 0.8, should skip
-        debt_snapshot: dict[tuple[str, str, str], Decimal] = {
-            ("bob", "alice", "UAH"): Decimal("500"),
-        }
 
         session = await _drift_session(db_session)
         await _owes_alice(session, "500")
 
         res = await runner._apply_trust_decay(
-            run, session, tick_index=10, debt_snapshot=debt_snapshot,
-            scenario=scenario,
+            run, session, tick_index=10, scenario=scenario,
         )
 
         assert res.updated_count == 0
@@ -705,18 +689,13 @@ class TestApplyTrustDecay:
         hist = run._edge_clearing_history["alice:bob:UAH"]
         hist.last_clearing_tick = 10
 
-        # Debt high enough to normally trigger decay
-        debt_snapshot: dict[tuple[str, str, str], Decimal] = {
-            ("bob", "alice", "UAH"): Decimal("850"),
-        }
 
         session = await _drift_session(db_session)
         await _owes_alice(session, "850")
 
         # Call with tick_index = 10 (same as last_clearing_tick)
         res = await runner._apply_trust_decay(
-            run, session, tick_index=10, debt_snapshot=debt_snapshot,
-            scenario=scenario,
+            run, session, tick_index=10, scenario=scenario,
         )
 
         assert res.updated_count == 0

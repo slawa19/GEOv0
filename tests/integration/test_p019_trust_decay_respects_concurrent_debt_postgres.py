@@ -119,7 +119,7 @@ async def test_a_decay_from_a_stale_snapshot_never_leaves_debt_above_the_limit(f
         # The tick tail's decay, on its own transaction, with the debt snapshot the tick retained.
         async with factory() as tail:
             decayed = await engine.apply_trust_decay(
-                run, tail, 7, {(sender.pid, receiver.pid, eq.code): Decimal("90.00")}, scenario
+                run, tail, 7, scenario
             )
             await tail.commit()
         release.set()
@@ -162,7 +162,7 @@ async def test_a_decay_after_a_committed_payment_floors_at_the_current_debt(fact
         paid = await PaymentService.pay(factory, sender.id, request, require_signature=False)
         async with factory() as tail:
             await engine.apply_trust_decay(
-                run, tail, 7, {(sender.pid, receiver.pid, eq.code): Decimal("90.00")}, scenario
+                run, tail, 7, scenario
             )
             await tail.commit()
     finally:

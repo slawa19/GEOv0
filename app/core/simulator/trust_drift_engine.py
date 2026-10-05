@@ -437,7 +437,6 @@ class TrustDriftEngine:
         run: RunRecord,
         session,
         tick_index: int,
-        debt_snapshot: dict[tuple[str, str, str], Decimal],
         scenario: dict[str, Any],
     ) -> TrustDriftResult:
         """Apply trust decay to overloaded edges that didn't get cleared.
@@ -446,9 +445,8 @@ class TrustDriftEngine:
         failure (`tick.py::RealTick.apply_trust_decay_and_broadcast`). Programme 021, stage 1: the limit changes go through the
         trust-line service's internal path and this method finishes its batch - one audit row per changed line,
         one checkpoint pair per touched equivalent - so the caller's commit carries them together.
-        Returns count of decayed edges. `debt_snapshot` is NOT read any more (§15 review of 029 S3, `T2993`): the
-        debt is the row read behind the line lock. The parameter stays only because its pass-through,
-        `real_runner_impl.py::_apply_trust_decay`, is outside that stage's owner surface.
+        Returns count of decayed edges. The debt is the row read behind the line lock; the tick's debt snapshot is
+        not an input any more (§15 review of 029 S3, `T2993`).
         """
 
         cfg = run._trust_drift_config

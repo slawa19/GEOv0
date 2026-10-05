@@ -142,8 +142,7 @@ async def test_trust_decay_is_in_the_step(db_session) -> None:
     async with debt_fixture_setup(db_session, label="p028-e2"):  # 029 `T2993`: the decay reads the debt row
         db_session.add(Debt(debtor_id=d.id, creditor_id=c.id, equivalent_id=eqs["A"].id, amount=Decimal("60")))
     await db_session.commit()
-    res = await engine.apply_trust_decay(run=run, session=db_session, tick_index=1, scenario=run._scenario_raw,
-                                         debt_snapshot={(d.pid, c.pid, eqs["A"].code): Decimal("60")})
+    res = await engine.apply_trust_decay(run=run, session=db_session, tick_index=1, scenario=run._scenario_raw)
     assert (res.updated_count, await _limit(db_session, eqs["A"], c, d)) == (1, Decimal("90.29"))
 
 

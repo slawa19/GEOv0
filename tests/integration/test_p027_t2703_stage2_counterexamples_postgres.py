@@ -382,8 +382,7 @@ async def test_trust_decay_during_a_payment_never_floors_below_its_debt(rig: Rig
 
     async def run_decay():
         async with rig.sessions() as tail:
-            decayed = await engine.apply_trust_decay(run, tail, 7, {(sender.pid, receiver.pid, eq.code): Decimal("90.00")},
-                                                     scenario)
+            decayed = await engine.apply_trust_decay(run, tail, 7, scenario)
             await tail.commit()
             return decayed
 

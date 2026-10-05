@@ -111,13 +111,10 @@ async def test_trust_drift_decay_never_shrinks_below_used_debt(db_session):
     )
     engine.init_trust_drift(run, scenario)
 
-    debt_snapshot = {(debtor.pid, creditor.pid, eq_code): Decimal("99.00000001")}
-
     res = await engine.apply_trust_decay(
         run=run,
         session=db_session,
         tick_index=123,
-        debt_snapshot=debt_snapshot,
         scenario=scenario,
     )
 
