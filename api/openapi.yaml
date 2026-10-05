@@ -5927,6 +5927,8 @@ components:
         max_available:
           # `no_route` / `insufficient_capacity` found by routing: what the payer can send the payee now (the
           # max-flow of `GET /payments/max-flow`), at the equivalent's precision. `"0.00"`-like for `no_route`.
+          # 029 S2: the code agrees with the reason - `no_route` is `E001`, `insufficient_capacity` is `E002`
+          # (a `no_route` refusal stored before 2026-10-05 replays with the `E002` it was stored with).
           type: string
         retryable:
           # `busy`: the same request may be sent again.

@@ -1423,7 +1423,8 @@ class PaymentService:
                         self.router.calculate_max_flow, sender_pid, receiver_pid)).max_amount)
                     raise RoutingException(
                         "No route found with sufficient capacity",
-                        insufficient_capacity=True,
+                        # §15 review `T2992` #4: the code agrees with the reason - nothing can be sent is `E001`.
+                        insufficient_capacity=available > 0,
                         details={"reason": "insufficient_capacity" if available > 0 else "no_route",
                                  "max_available": to_money_str(available, equivalent_precision)},
                     )
