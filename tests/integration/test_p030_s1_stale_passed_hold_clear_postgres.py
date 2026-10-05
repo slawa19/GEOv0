@@ -79,5 +79,7 @@ async def test_f030_10_a_stale_passed_published_after_a_hold_does_not_clear_it(c
         json={"reason": "p030 F-030-10 stand"}, headers={"X-Admin-Token": settings.ADMIN_TOKEN},
     )
     assert response.status_code == 409, f"a stale PASSED cleared a hold on a FAILED equivalent: {response.text}"
-    assert response.json()["error"]["details"]["reason"] == "no_later_passed_reconciliation_result"
+    assert response.json()["error"]["details"] == {
+        "reason": "no_later_passed_reconciliation_result", "latest_status": PASSED, "recheck_status": FAILED,
+    }, response.json()  # the shape of `IntegrityHoldClearRefusalDetails` in api/openapi.yaml
     assert await _hold_of(factory, eq) == hold

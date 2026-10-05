@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
-from pydantic import TypeAdapter, ValidationError, WithJsonSchema
+from pydantic import BaseModel, TypeAdapter, ValidationError, WithJsonSchema
 from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
 from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1334,14 +1334,41 @@ async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[s
     }
 
 
+_ResultStatus = Literal["PASSED", "FAILED", "UNVERIFIABLE"]
+# The null is IN the enum, as the canon requires beside `nullable` (`test_p011_nullable_needs_a_sibling_type`).
+_NullableResultStatus = Annotated[
+    _ResultStatus | None,
+    WithJsonSchema({"type": "string", "nullable": True, "enum": ["PASSED", "FAILED", "UNVERIFIABLE", None]}),
+]
+
+
+class IntegrityHoldClearRefusalDetails(BaseModel):
+    """Documentation only (030 F-030-10): the `details` of the clear's 409, as the handler writes them below."""
+
+    reason: Literal["no_integrity_hold", "no_later_passed_reconciliation_result"]
+    latest_status: _NullableResultStatus = None
+    recheck_status: _NullableResultStatus = None
+
+
+class IntegrityHoldClearRefusalError(BaseModel):
+    code: str
+    message: str
+    details: IntegrityHoldClearRefusalDetails  # both refusals below carry it
+    request_id: str | None = None
+
+
+class IntegrityHoldClearRefusal(BaseModel):
+    error: IntegrityHoldClearRefusalError
+
+
 @router.post(
     "/equivalents/{code}/integrity-hold/clear",
     response_model=EquivalentSchema,
     responses={
         404: {"model": ErrorEnvelope, "description": "Equivalent not found"},
         409: {
-            "model": ErrorEnvelope,
-            "description": "Not held, or no PASSED reconciliation result later than the one it was held on",
+            "model": IntegrityHoldClearRefusal,
+            "description": "Not held, or no PASSED reconciliation result later than the hold's, or the re-verification is not PASSED",
         },
     },
 )
