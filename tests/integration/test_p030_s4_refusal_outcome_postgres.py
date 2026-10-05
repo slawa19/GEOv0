@@ -1,23 +1,12 @@
-"""030 S4 (`T3004`, `F-030-11`): a refused request answers the outcome the database keeps, or says it is not established.
+"""030 S4 (`T3004`, `F-030-11`): a refusal answers the stored outcome, or says the outcome is not established.
 
-Owner rule 028 В-6 (`specs/028-backlog-rework/spec.md:30`): a repeated payment after a refusal returns the SAME
-stored result. The two schedules of R2-2 (`specs/030-zero-sum-protection/evidence-2026-10-05/final-r2b.md`), run on
-the real API path (`PaymentService.pay`, the no-Redis path) with barriers - nothing is injected into the driver, no
-exception is constructed:
-
-1. ABORTED WINNER. A is admitted, times out waiting for a line a holder keeps locked, rolls back, and pauses right
-   before recording its timeout refusal. B - the same request, the same `tx_id` - starts after that, routes through
-   the transit participant and pauses before its participant locks; the admin freezes the transit participant; B
-   refuses `participant_suspended` and records it. A resumes: its insert yields to B's row. Before S4 the recorder
-   returned a winner only when `COMMITTED`, so A answered its own timeout while the database - and every replay -
-   says `participant_suspended`.
-2. REFUSAL WRITE TIMES OUT. B holds its successful, uncommitted row (paused between its write and its COMMIT). A,
-   the same request, is admitted, times out on the line B holds, and its refusal insert queues on B's row until the
-   recording's bounded lock wait gives up (`55P03`). Before S4 A answered its original timeout although nothing was
-   recorded and B then committed success.
-
-Each stand asserts its mechanism - who waited for whom (`pg_blocking_pids`) and in which order the rows appeared -
-before the outcome, so a broken barrier cannot pass as the expected result.
+Owner rule 028 В-6: a repeated payment after a refusal returns the SAME stored result. The two R2-2 schedules
+(`specs/030-zero-sum-protection/evidence-2026-10-05/final-r2b.md`) on `PaymentService.pay` (the no-Redis path), with
+barriers only - nothing injected into the driver. Each asserts its mechanism (`pg_blocking_pids`, the order of the
+rows) before the outcome: (1) A times out on a held line and pauses before recording; B, the same request, refuses
+`participant_suspended` (the transit frozen mid-flight) and records it; A must answer B's stored row, not its own
+timeout. (2) B holds its successful row uncommitted; A's refusal insert queues on it until the bounded wait gives up;
+A must answer "not established" (the retryable 409), not its original timeout.
 """
 
 from __future__ import annotations

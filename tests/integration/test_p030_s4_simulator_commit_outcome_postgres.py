@@ -1,15 +1,8 @@
-"""030 S4 (`T3004`, `F-030-12`): a COMMIT that failed is not a rollback because the rollback after it succeeded.
+"""030 S4 (`T3004`, `F-030-12`): a failed money COMMIT is not a rollback because the rollback after it succeeded.
 
-The tick's money phase commits through `resolve_commit_under_cancellation`. Before S4 a COMMIT that raised, followed
-by a `ROLLBACK` that succeeded, was resolved as `rolled_back` - the identity resolver of the phase
-(`money_replay._attempt_landed`) was never asked - so a commit that LANDED and only lost its acknowledgement was
-reported as failed payments (`tx.failed`) while the database kept them `COMMITTED`.
-
-THE FAILURE IS THE ONE THE CLEARING STAND ALREADY USES (`test_clearing_commit_replay_postgres.py`, boundary
-`ack_loss`): the real `COMMIT` runs against PostgreSQL and lands, and only its acknowledgement is lost - the error is
-raised after it. What is decided is the database's real state, read on a new session; the only constructed thing is
-the lost acknowledgement, which is the failure under test. The control is the same boundary losing the connection
-BEFORE the `COMMIT` is sent: nothing lands, and the rollback is then a real one.
+The failure is the clearing stand's `ack_loss` boundary (`test_clearing_commit_replay_postgres.py`): the real COMMIT
+lands in PostgreSQL and only its acknowledgement is lost. The database's real state decides; the only constructed
+thing is the lost acknowledgement - the failure under test. Control: the connection is lost BEFORE the COMMIT is sent.
 """
 
 from __future__ import annotations
