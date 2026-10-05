@@ -66,7 +66,7 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
     const dir = copyPack()
     const debts = readDebts(dir)
     const row = debts.findIndex((d) => d.equivalent === 'UAH')
-    debts[row].amount = `${debts[row].amount}1`
+    debts[row]!.amount = `${debts[row]!.amount}1`
     writeDebts(dir, debts)
 
     const r = validatePack(dir)
@@ -79,7 +79,7 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
   it('a debt to an unknown participant is refused, not dropped from the net', () => {
     const dir = copyPack()
     const debts = readDebts(dir)
-    debts.push({ equivalent: 'UAH', debtor: debts[0].debtor, creditor: 'PID_NOBODY', amount: '1.00' })
+    debts.push({ equivalent: 'UAH', debtor: debts[0]!.debtor, creditor: 'PID_NOBODY', amount: '1.00' })
     writeDebts(dir, debts)
 
     const r = validatePack(dir)
@@ -92,7 +92,7 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
   it('a debt in an unknown equivalent is refused', () => {
     const dir = copyPack()
     const debts = readDebts(dir)
-    debts[3].equivalent = 'XYZ'
+    debts[3]!.equivalent = 'XYZ'
     writeDebts(dir, debts)
 
     const r = validatePack(dir)
@@ -104,7 +104,7 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
   it.each(['0.00', '-5.00'])('a debt of %s is refused, not skipped', (amount) => {
     const dir = copyPack()
     const debts = readDebts(dir)
-    debts[5].amount = amount
+    debts[5]!.amount = amount
     writeDebts(dir, debts)
 
     const r = validatePack(dir)
@@ -117,7 +117,7 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
     const dir = copyPack()
     const file = path.join(dir, 'datasets', 'participants.viz-UAH.json')
     const viz = JSON.parse(readFileSync(file, 'utf8')) as Array<{ net_balance_atoms: string }>
-    viz[0].net_balance_atoms = String(BigInt(viz[0].net_balance_atoms) + 1n)
+    viz[0]!.net_balance_atoms = String(BigInt(viz[0]!.net_balance_atoms) + 1n)
     writeFileSync(file, JSON.stringify(viz, null, 2) + '\n')
 
     const r = validatePack(dir)
