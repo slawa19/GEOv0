@@ -22,6 +22,7 @@ from app.core.clearing.service import ClearingService
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
+from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, simulated_public_key
 from app.core.trustlines.service import TrustLineService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -45,8 +46,8 @@ async def _world(stand, *, lines=None, debts=()):  # noqa: F811
     n = uuid.uuid4().hex[:8].upper()
     async with stand() as s:
         eq = Equivalent(code=f"FZ{n}", precision=2, is_active=True)
-        p = {k: Participant(pid=f"{k}_FZ_{n}", display_name=k, public_key=f"pk_{k}_{n}", type="person",
-                            status="active") for k in "ABCD"}
+        p = {k: Participant(pid=f"{k}_FZ_{n}", display_name=k, public_key=simulated_public_key(f"{k}_FZ_{n}"),
+                            type="person", status="active") for k in "ABCD"}
         s.add_all([eq, *p.values()])
         await s.flush()
         for cr, dr in lines if lines is not None else [(x, y) for x in "ABC" for y in "ABC" if x != y]:
@@ -204,6 +205,11 @@ async def _writer(kind, stand, eq, p, debt_ids):  # noqa: F811
         if kind == "inject":
             runner, run, scenario, _ = _inject(eq, p, [_debt(eq, p["B"], p["A"])])
             return await runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
+        if kind == "seed":  # 030 S3b (F-030-19): the seeder's line goes through the same entry
+            await RealScenarioSeeder().seed_scenario_into_db(session=s, scenario={
+                "equivalents": [eq.code], "participants": [{"id": p[k].pid} for k in "BD"],
+                "trustlines": [{"from": p["B"].pid, "to": p["D"].pid, "equivalent": eq.code, "limit": "10"}]})
+            return await s.commit()
         service = TrustLineService(s)
         batch = service.begin_internal_batch()
         await service.execute_create(batch, p["B"].id, TrustLineCreateRequest(
@@ -242,7 +248,7 @@ async def _settle(*tasks):
 
 
 @pytest.mark.parametrize("order", ["writer_first", "freeze_first"])
-@pytest.mark.parametrize("writer", ["payment", "clearing", "inject", "create"])
+@pytest.mark.parametrize("writer", ["payment", "clearing", "inject", "create", "seed"])
 @pytest.mark.parametrize("freezer", ["admin", "inject_event"])
 @pytest.mark.asyncio
 async def test_no_money_write_lands_after_a_committed_freeze(stand, monkeypatch, generous_budgets,  # noqa: F811
