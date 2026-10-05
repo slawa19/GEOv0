@@ -35,7 +35,14 @@ async def main() -> None:
     )
     parser.add_argument(
         "--community",
-        choices=["greenfield-village-100", "riverside-town-50"],
+        # The two `-v2` pack ids have no recipe; they stay offered so the recipe refuses them by name and lists the
+        # communities that can be seeded (`scripts/seed_recipe.py::seed_community`).
+        choices=[
+            "greenfield-village-100",
+            "riverside-town-50",
+            "greenfield-village-100-v2",
+            "riverside-town-50-v2",
+        ],
         default=None,
         help="The community whose description and recipe under seeds/communities/ are executed; required.",
     )
