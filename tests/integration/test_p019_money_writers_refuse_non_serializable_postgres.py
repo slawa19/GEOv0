@@ -208,7 +208,7 @@ async def _run_writer(name: str, session, seed, committed_database):
         )
         if name == "trust_decay":
             return await _call(
-                engine.apply_trust_decay(run, session, 7, {(a_pid, b_pid, code): Decimal("100.00")}, scenario)
+                engine.apply_trust_decay(run, session, 7, scenario)
             )
         return await _call(
             engine.apply_trust_growth(run, session, {(b_pid, a_pid)}, code, 7)
