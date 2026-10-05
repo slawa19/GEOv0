@@ -559,7 +559,9 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'bob', /Bob/)
     await page.getByLabel('Amount').fill('2.00')
     await page.getByLabel('Amount').press('Enter')
-    await expect(page.getByLabel('Error notification')).toContainText('No route between selected participants')
+    // 028 F-028-51 (T2884): a payment refusal reads as the client's text of its code (here the mock's legacy
+    // `NO_ROUTE`), not as the server's `message`; the same pair is pinned in useInteractMode.test.ts.
+    await expect(page.getByLabel('Error notification')).toContainText('No payment route between these participants')
     await activateButton(page, 'Cancel')
     await expect(page.getByLabel('Manual payment panel')).toBeHidden()
 
