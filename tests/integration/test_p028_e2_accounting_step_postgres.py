@@ -226,6 +226,7 @@ def _scenario(policy=None, limit="10") -> dict:
     ({"can_be_intermediate": "false"}, "10", "invalid_policy"),
     ({"max_hop_usage": "NaN"}, "10", "invalid_policy"),
     (None, "10.005", STEP),
+    (None, "0.015", STEP),  # 030 S2 (F-030-1): the named initial-state input refuses the R-1 amount
     (None, "10.000000001", STEP),  # 028 E4 (T2899.1 class 2): unstorable, was skipped silently before the step
 ])
 @pytest.mark.asyncio
