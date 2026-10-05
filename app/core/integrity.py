@@ -148,6 +148,21 @@ async def compute_integrity_checkpoint_for_equivalent(
     )
 
 
+async def create_equivalent(session: AsyncSession, **fields) -> Equivalent:
+    """THE creation of an equivalent (030 F-030-9, F-030-19): the row and its reconciliation baseline, in the caller's
+    transaction; the caller commits. A new equivalent has no debt and no journal entry, so the baseline adopts nothing
+    and every later change is checkable. Only NEW equivalents: an existing one is never baselined here (024 `T2412`).
+    Callers: `POST /admin/equivalents` and the simulator's scenario seeder."""
+
+    from app.core.ledger.reconciliation import take_baseline
+
+    equivalent = Equivalent(**fields)
+    session.add(equivalent)
+    await session.flush()
+    await take_baseline(session, equivalent.id)
+    return equivalent
+
+
 async def compute_and_store_integrity_checkpoints(session: AsyncSession) -> int:
     equivalents = (await session.execute(select(Equivalent.id))).scalars().all()
     if not equivalents:

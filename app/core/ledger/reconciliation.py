@@ -100,7 +100,7 @@ import logging
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
 
@@ -1095,6 +1095,22 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
         )
     )
     return "inserted"
+
+
+#: 030 F-030-8: the run allowance of the freshness policy below - one run of the checkpoints and the verifier.
+RESULT_RUN_ALLOWANCE = timedelta(minutes=5)
+
+
+def result_freshness_threshold() -> timedelta:
+    """How old a latest result (`last_checked_at`) may be before its equivalent stops reading healthy (030 F-030-8).
+
+    POLICY, not a deadline: the integrity loop waits its interval AFTER a run completes, so two intervals plus one
+    run. An error leaves no row and does not advance `last_checked_at`, so a lasting error shows here too.
+    """
+
+    from app.config import settings
+
+    return 2 * timedelta(seconds=int(settings.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS or 300)) + RESULT_RUN_ALLOWANCE
 
 
 async def open_verification_snapshot(session: Any) -> None:

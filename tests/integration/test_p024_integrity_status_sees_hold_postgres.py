@@ -479,4 +479,4 @@ async def test_p2_1_a_locked_skip_keeps_a_checkpoint_failure(monkeypatch) -> Non
 
     stand = _Stand(monkeypatch)
     stand.checkpoint_error = True
-    await _fail_skip_clean(stand, "periodic_error")
+    await _fail_skip_clean(stand, "periodic_checkpoints_error")  # 030 F-030-7: named apart

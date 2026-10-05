@@ -634,6 +634,8 @@ async def test_step5c_p_the_admin_clear_waits_for_a_holder_of_the_row(factory, a
         hold_id = await hold_directly(factory, world.equivalent.id)
         now = datetime.now(timezone.utc)
         async with factory() as session:
+            # 030 F-030-10: the clear re-verifies the equivalent, so the later PASSED must be a true one.
+            await take_baseline(session, world.equivalent.id)
             await session.execute(
                 update(debt_reconciliation_results)
                 .where(debt_reconciliation_results.c.id == hold_id)

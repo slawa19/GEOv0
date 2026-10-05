@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
+from app.core.integrity import create_equivalent
 from app.db.models.participant import Participant
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
@@ -160,7 +161,7 @@ class RealScenarioSeeder:
             for code in eq_codes:
                 if code in have:
                     continue
-                session.add(Equivalent(code=code, is_active=True, metadata_={}))
+                await create_equivalent(session, code=code, is_active=True, metadata_={})  # with its baseline
 
         # Participants
         participants = scenario.get("participants") or []

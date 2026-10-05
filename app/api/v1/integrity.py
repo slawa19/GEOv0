@@ -3,14 +3,15 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
-from app.core.ledger.reconciliation import FAILED, UNVERIFIABLE
+from app.core.ledger.reconciliation import FAILED, UNVERIFIABLE, result_freshness_threshold
+from app.core.maintenance_jobs import debt_reconciliation_run_failed
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
@@ -98,13 +99,16 @@ async def _latest_reconciliation_results(db: AsyncSession) -> dict:
     return {row.equivalent_id: row for row in rows}
 
 
-def _reconciliation_view(eq: Equivalent, latest) -> tuple[str, list[str]]:
+def _reconciliation_view(eq: Equivalent, latest, *, run_failed: bool = False) -> tuple[str, list[str]]:
     """What the integrity hold and the latest stored reconciliation result add to one equivalent's status.
 
     024 `T2412.1`, mapping decided by the Sh2 consultation (2026-09-29). The hold and the verdict are
     reported independently: a later PASSED does not cancel a hold (only an admin clears it), and a FAILED
     without a hold does not claim that money is refused. No row at all is a gap of the check - a verifier
     error leaves none - so it is a warning, never a pass and never a stored verdict.
+
+    030 F-030-8: a result older than `result_freshness_threshold()`, or a last scheduled run that ended in an error
+    (`run_failed`), is a warning with its reason - a stale PASSED is not `healthy`. Neither holds money.
     """
 
     severity = "healthy"
@@ -119,6 +123,13 @@ def _reconciliation_view(eq: Equivalent, latest) -> tuple[str, list[str]]:
     if latest is None:
         return _worse(severity, "warning"), alerts + [f"Debt reconciliation result missing for {eq.code}"]
 
+    if run_failed:
+        severity = _worse(severity, "warning")
+        alerts.append(f"Debt reconciliation of {eq.code}: the last scheduled run ended in an error")
+    if _now() - latest.last_checked_at > result_freshness_threshold():
+        severity = _worse(severity, "warning")
+        alerts.append(f"Debt reconciliation result of {eq.code} is older than the freshness policy "
+                      f"(last_checked_at={latest.last_checked_at.isoformat()})")
     if latest.status == FAILED:
         severity = "critical"
         alerts.append(f"Debt reconciliation FAILED in {eq.code} (result_id={latest.id})")
@@ -139,22 +150,24 @@ def _reconciliation_view(eq: Equivalent, latest) -> tuple[str, list[str]]:
 
 @router.get("/summary", response_model=IntegritySummaryResponse)
 async def get_integrity_summary(
+    request: Request,
     db: AsyncSession = Depends(deps.get_db),
     _actor=Depends(deps.require_participant_or_admin),
 ) -> IntegritySummaryResponse:
     """028 `F-028-44` (owner В-7): per equivalent, the verdict of the LAST STORED check and whether money is held.
 
-    Reads stored rows only - the equivalent's hold and its latest reconciliation result (`_reconciliation_view`), so a
-    call checks nothing and writes nothing. No stored result is `warning` with `checked_at = null`, never `healthy`.
+    Reads stored rows only - the equivalent's hold and its latest reconciliation result (`_reconciliation_view`) - and,
+    since 030 F-030-8, the integrity job's last-run state of this process, so a call checks nothing and writes nothing. No stored result is `warning` with `checked_at = null`, never `healthy`.
     The checks themselves, their details and the log are the admin's (`status`, `verify`, `checksum`, `audit-log`).
     """
 
     latest = await _latest_reconciliation_results(db)
+    run_failed = debt_reconciliation_run_failed(request.app)
     equivalents = (await db.execute(select(Equivalent).order_by(Equivalent.code))).scalars().all()
     return IntegritySummaryResponse(equivalents=[
         EquivalentIntegritySummary(
             equivalent=eq.code,
-            status=_reconciliation_view(eq, latest.get(eq.id))[0],
+            status=_reconciliation_view(eq, latest.get(eq.id), run_failed=run_failed)[0],
             checked_at=getattr(latest.get(eq.id), "last_checked_at", None),
             hold=eq.integrity_hold_result_id is not None,
         )
@@ -164,6 +177,7 @@ async def get_integrity_summary(
 
 @router.get("/status", response_model=IntegrityStatusResponse)
 async def get_integrity_status(
+    request: Request,
     db: AsyncSession = Depends(deps.get_db),
     _actor=Depends(deps.require_admin),
 ) -> IntegrityStatusResponse:
@@ -213,7 +227,9 @@ async def get_integrity_status(
                 overall_status = "warning"
             alerts.append(f"Debt symmetry violations in {eq.code}: {len(violations)}")
 
-        reconciliation_severity, reconciliation_alerts = _reconciliation_view(eq, latest_results.get(eq.id))
+        reconciliation_severity, reconciliation_alerts = _reconciliation_view(
+            eq, latest_results.get(eq.id), run_failed=debt_reconciliation_run_failed(request.app)
+        )
         status = _worse(status, reconciliation_severity)
         overall_status = _worse(overall_status, status)
         alerts.extend(reconciliation_alerts)

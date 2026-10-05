@@ -40,8 +40,8 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool
     around the application, and of a recorded change that disagrees with its recorded intent.
 
     THE ONLY HOST. Not `POST /integrity/verify`, which participants can call, and not the payment or
-    clearing checkpoints, which run inside the money transaction. It runs after the checkpoints have
-    committed, in fresh transactions of its own, and its result is its own row: it never enters a
+    clearing checkpoints, which run inside the money transaction. It runs after the checkpoints - and since
+    030 F-030-7 also after they failed - in fresh transactions of its own, and its result is its own row: it never enters a
     checkpoint's `checks`, `passed`, `status` or `alerts`, and never an audit row.
 
     Returns False on any ERROR - the run itself, an equivalent the verifier could not verify, or a FAILED
@@ -88,6 +88,7 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
         lock_ttl_seconds = max(30, interval)
 
     _emit_integrity_metric(f"{reason}_start")
+    checkpoint_error: Exception | None = None
     try:
         async with redis_distributed_lock(
             getattr(app.state, "redis", None),
@@ -95,9 +96,14 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             ttl_seconds=lock_ttl_seconds,
             wait_timeout_seconds=0.0,
         ):
-            async with AsyncSessionLocal() as session:
-                await compute_and_store_integrity_checkpoints(session)
-            # After the checkpoints have COMMITTED, and under the same distributed lock.
+            try:  # 030 F-030-7: an error of the checkpoints does not cancel the reconciliation; both are recorded
+                async with AsyncSessionLocal() as session:
+                    await compute_and_store_integrity_checkpoints(session)
+            except Exception as error:  # noqa: BLE001 - recorded below as the job's error, never as a success
+                checkpoint_error = error
+                logger.exception("integrity.checkpoints_failed reason=%s", reason)
+                _emit_integrity_metric(f"{reason}_error")
+            # After the checkpoints (committed or failed), and under the same distributed lock.
             reconciled = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
     except ConflictException:
         _emit_integrity_metric(f"{reason}_skipped_locked")
@@ -124,12 +130,11 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
         )
         return False
 
-    if not reconciled:
+    if checkpoint_error is not None or not reconciled:
+        failed = "checkpoints" if reconciled else "debt_reconciliation"
+        failed = f"checkpoints_and_{failed}" if checkpoint_error and not reconciled else failed
         _record_background_job_event(
-            app,
-            name="integrity",
-            status="failed",
-            event=f"{reason}_debt_reconciliation_error",
+            app, name="integrity", status="failed", event=f"{reason}_{failed}_error", error=checkpoint_error
         )
         return False
 
@@ -202,6 +207,14 @@ async def _clearing_loop(app: FastAPI) -> None:
             break
         except asyncio.TimeoutError:
             continue
+
+
+def debt_reconciliation_run_failed(app: FastAPI) -> bool:
+    """030 F-030-8: the integrity job's last run did not complete the reconciliation cleanly - any recorded failure
+    of the job except one of the checkpoints alone. A process-local signal; the stored result's age covers the rest."""
+
+    state = _background_job_states(app).get("integrity", {})
+    return state.get("status") == "failed" and not str(state.get("event", "")).endswith("_checkpoints_error")
 
 
 def _start_configured_background_tasks(app: FastAPI) -> None:
