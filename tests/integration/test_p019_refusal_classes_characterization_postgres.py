@@ -419,8 +419,9 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
             "replay": (200, "COMMITTED", None), "replay_moved": True,
         },
         "recheck_after_new": {
-            "first": (400, "E002", "no_route"), "stored": ("ABORTED", "E002"),
-            "replay": (200, "ABORTED", "E002"), "replay_moved": False,
+            # INTENTIONAL, 029 S2 (§15 review `T2992` #4): the code agrees with the reason - was `E002` thrice.
+            "first": (400, "E001", "no_route"), "stored": ("ABORTED", "E001"),
+            "replay": (200, "ABORTED", "E001"), "replay_moved": False,
         },
         "stop_before_new": {
             "first": (409, "E008", inactive), "stored": None,

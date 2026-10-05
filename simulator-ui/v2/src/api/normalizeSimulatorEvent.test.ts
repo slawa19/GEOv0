@@ -130,6 +130,17 @@ describe('normalizeSimulatorEvent', () => {
     })
   })
 
+  it('029 F-029-5: topology.changed keeps the added edge limit as the string the server wrote', () => {
+    const edge = { from_pid: 'alice', to_pid: 'bob', equivalent_code: 'UAH', limit: '10.00' }
+    const raw = { event_id: 'e', ts: '2026-01-01T00:00:01Z', type: 'topology.changed', equivalent: 'UAH' }
+    const evt = requireEventType(normalizeSimulatorEvent({ ...raw, payload: { added_edges: [edge] } }), 'topology.changed')
+    expect(evt.payload.added_edges).toEqual([edge])
+    expect(evt.payload.added_edges?.[0]?.limit).toBe('10.00')
+    // The limit stays a string on the wire: a number is refused, not coerced.
+    const bad = normalizeSimulatorEvent({ ...raw, payload: { added_edges: [{ ...edge, limit: 10 }] } })
+    expect(bad.status).toBe('ignored')
+  })
+
   it('026 S4: an edge patch keeps the close request; a malformed one is refused', () => {
     const patch = { source: 'A', target: 'B', trust_limit: '0.00', close_requested_at: '2026-10-02T08:00:00Z' }
     const raw = { event_id: 'e', ts: '2026-01-01T00:00:01Z', type: 'clearing.done', equivalent: 'UAH', plan_id: 'p' }

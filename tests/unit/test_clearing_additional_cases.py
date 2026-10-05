@@ -572,9 +572,7 @@ async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects
     monkeypatch.setattr(service, "_cycle_respects_auto_clearing", _fail_policy_lookup)
     monkeypatch.setattr(db_session, "rollback", _track_rollback)
     stale_graph_entry = (0.0, {}, {}, {}, {}, {})
-    stale_topology_entry = {"sentinel": {"neighbor"}}
     PaymentRouter._graph_cache[eq_code] = stale_graph_entry
-    PaymentRouter._topology_cache[eq_code] = stale_topology_entry
 
     try:
         with pytest.raises(GeoException) as exc_info:
@@ -612,7 +610,6 @@ async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects
             == 0
         )
         assert PaymentRouter._graph_cache[eq_code] is stale_graph_entry
-        assert PaymentRouter._topology_cache[eq_code] is stale_topology_entry
     finally:
         PaymentRouter.invalidate_cache(eq_code)
 

@@ -1,9 +1,15 @@
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Annotated, Optional, List, Dict, Any
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer, field_serializer
 from pydantic.config import ConfigDict
+
+from app.utils.money import to_money_str
+
+# 029 F-029-5, matrix row 9: an Admin API amount keeps its stored scale and is plain decimal text - pydantic's own
+# `str(Decimal)` wrote a zero column or sum as `0E-8` (measured: `/admin/trustlines`, `/admin/liquidity/summary`).
+PlainDecimal = Annotated[Decimal, PlainSerializer(lambda v: format(v, "f"), return_type=str, when_used="json")]
 
 class TrustLineBase(BaseModel):
     policy: Optional[Dict[str, Any]] = None
@@ -18,6 +24,8 @@ class TrustLine(TrustLineBase):
     limit: Decimal
     used: Decimal
     available: Decimal
+    # 029 F-029-5: the equivalent's precision when the producer attaches it (the participant routes); never sent.
+    equivalent_precision: Optional[int] = Field(default=None, exclude=True)
     status: str
     created_at: datetime
     updated_at: datetime
@@ -25,6 +33,17 @@ class TrustLine(TrustLineBase):
     close_requested_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_serializer("limit", "used", "available", when_used="json")
+    def _money(self, value: Decimal) -> str:
+        """One amount - one spelling (029 F-029-5): the equivalent's step, as `/balance` writes the same quantity.
+
+        Without a precision (the Admin API, matrix row 9) the stored scale stays, as `PlainDecimal` writes it.
+        """
+
+        if self.equivalent_precision is None:
+            return format(value, "f")
+        return to_money_str(value, self.equivalent_precision)
 
 class TrustLineCreateRequest(BaseModel):
     to: str

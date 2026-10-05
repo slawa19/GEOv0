@@ -236,15 +236,15 @@ UNVALIDATED_2XX_ALLOWANCE: dict[str, Allowance] = {
         "declared-with-no-json-media-type "
         "GET /simulator/runs/{run_id}/artifacts/{name} 200"
     ): Allowance(
-        media_types=("text/plain", "application/zip", "application/x-zip-compressed"),
+        media_types=("application/x-ndjson", "application/zip"),
         reason=(
             "the two artifacts this suite really downloads, and neither has a JSON body. "
-            "`events.ndjson` arrives as `text/plain` (mimetypes knows no `.ndjson`, so the "
-            "`FileResponse` at app/api/v1/simulator.py:2938 falls back) and `bundle.zip` as "
-            "`application/zip` or `application/x-zip-compressed` depending on the host's "
-            "mimetypes database. All three are now DECLARED in the canon for this operation, so "
+            "INTENTIONAL, 029 F-029-7 (2026-10-05): the handler now passes the media type the "
+            "artifacts index names, so `events.ndjson` arrives as `application/x-ndjson` (was "
+            "`text/plain`) and `bundle.zip` as `application/zip` on every host (was that or "
+            "`application/x-zip-compressed`). Both are DECLARED in the canon for this operation, so "
             "this row means what it says: the canon describes the media type that arrived, and "
-            "that media type has no schema to validate against. What it no longer covers is the "
+            "that media type has no schema to validate against. What it does not cover is the "
             "rest of the route: `status.json`, `summary.json` and `last_tick.json` arrive as "
             "`application/json`, the canon declares that too, and their bodies are VALIDATED. "
             "A JSON body can no longer reach this row - the engine will not put it here and "
@@ -998,7 +998,8 @@ def test_counter_check_a_streamed_body_nobody_read_is_a_category_and_not_a_crash
 def test_counter_check_a_non_json_media_declaration_is_named_rather_than_skipped() -> None:
     """The legitimate case, and the proof that "legitimate" still has to be written down.
 
-    `GET /simulator/runs/{run_id}/artifacts/{name}` declares `text/plain` for `events.ndjson`.
+    `GET /simulator/runs/{run_id}/artifacts/{name}` declares `application/x-ndjson` for `events.ndjson`
+    (029 F-029-7; it was `text/plain` while the handler passed no media type).
     Nothing can be validated against a `type: string`, so the row exists, is allowed by name in
     UNVALIDATED_2XX_ALLOWANCE, and does NOT count as coverage.
 
@@ -1017,7 +1018,7 @@ def test_counter_check_a_non_json_media_declaration_is_named_rather_than_skipped
             "GET",
             "/api/v1/simulator/runs/r1/artifacts/events.ndjson",
             content=b'{"type":"tick"}\n',
-            content_type="text/plain; charset=utf-8",
+            content_type="application/x-ndjson; charset=utf-8",
         ),
     )
 
@@ -1032,7 +1033,7 @@ def test_counter_check_a_non_json_media_declaration_is_named_rather_than_skipped
         "failure and this test would be asserting the wrong thing"
     )
     # The charset parameter must not defeat the allowance's media-type check.
-    assert harness.report()["unvalidated_2xx_detail"][0]["media_types"] == ["text/plain"]
+    assert harness.report()["unvalidated_2xx_detail"][0]["media_types"] == ["application/x-ndjson"]
     # ... and being allowed, it does not fail the aggregate.
     _assert_the_session_is_conformant(harness.report())
 
@@ -1297,19 +1298,19 @@ def test_counter_check_a_row_records_every_media_type_that_arrived_under_it() ->
             "GET",
             "/api/v1/simulator/runs/r1/artifacts/events.ndjson",
             content=b'{"type":"tick"}\n',
-            content_type="text/plain; charset=utf-8",
+            content_type="application/x-ndjson",
         ),
         _response(
             "GET",
             "/api/v1/simulator/runs/r1/artifacts/bundle.zip",
             content=b"PK\x03\x04",
-            content_type="application/x-zip-compressed",
+            content_type="application/zip",
         ),
     )
 
     assert harness.unvalidated_keys() == [_ARTIFACT_ALLOWANCE_KEY]
     row = harness.report()["unvalidated_2xx_detail"][0]
-    assert row["media_types"] == ["application/x-zip-compressed", "text/plain"], row
+    assert row["media_types"] == ["application/x-ndjson", "application/zip"], row
     _assert_the_session_is_conformant(harness.report())
 
 
@@ -1326,10 +1327,16 @@ async def test_counter_check_every_artifact_the_app_writes_arrives_under_a_decla
     directory is driven through a real `FileResponse` and its media type has to be one the canon
     declares for the download operation. If mimetypes ever answers differently, or a new artifact
     is added, this fails and the canon gets updated - which is the whole of what T1110 is about.
+
+    029 F-029-7: the handler now passes `media_type=artifact_content_type(name)`, and so does this
+    stand - the first paragraph is the history. The route itself is driven by
+    `tests/integration/test_simulator_artifacts_events_ndjson.py`.
     """
 
     from starlette.applications import Starlette
     from starlette.responses import FileResponse
+
+    from app.core.simulator.helpers import artifact_content_type
     from starlette.routing import Route
 
     # app/core/simulator/artifacts.py: :64 :67 :84 (init), :343 :344 (finalize), :333 (bundle),
@@ -1345,7 +1352,8 @@ async def test_counter_check_every_artifact_the_app_writes_arrives_under_a_decla
         (tmp_path / name).write_bytes(payload)
 
     async def download(request: Any) -> Any:
-        return FileResponse(tmp_path / request.path_params["name"])
+        name = request.path_params["name"]
+        return FileResponse(tmp_path / name, media_type=artifact_content_type(name))
 
     app = Starlette(
         routes=[Route("/api/v1/simulator/runs/{run_id}/artifacts/{name}", download)]
