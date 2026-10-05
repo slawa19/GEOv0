@@ -52,17 +52,12 @@ class MetricsBottlenecks:
         lock,
         runs: dict[str, RunRecord],
         scenarios: dict[str, ScenarioRecord],
-        utc_now,
         db_enabled,
         logger: logging.Logger,
     ) -> None:
         self._lock = lock
         self._runs = runs
         self._scenarios = scenarios
-        # Unused since T714 removed the write-on-GET (2026-08-20). The parameter
-        # stays because the only construction site is runtime_impl.py, which is
-        # outside this slice's owner surface; dropping it is a separate change.
-        self._utc_now = utc_now
         self._db_enabled = db_enabled
         self._logger = logger
         self._traceback_last_at: dict[str, float] = {}

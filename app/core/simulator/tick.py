@@ -85,7 +85,6 @@ if TYPE_CHECKING:
 class TickPaymentsPhase:
     """What one attempt of the money phase produced (was `RealTickPaymentsPhaseResult`)."""
 
-    debt_snapshot: dict[tuple[str, str, str], Decimal]
     planned: list[Any]
     per_eq_metric_values: dict[str, dict[str, Any]]
 
@@ -296,10 +295,11 @@ class RealTick:
                         session=session,
                         run_id=run_id,
                         run=run,
-                        debt_snapshot=payments_phase.debt_snapshot,
                         scenario=scenario,
                         payments_result=payments_phase,
                     )
+
+                    await self.drop_closed_trustlines(run_id=run_id, run=run, equivalents=equivalents)
 
                     await self.populate_per_eq_metric_values(
                         session=session,
@@ -591,7 +591,6 @@ class RealTick:
             should_stop = True
 
         res = TickPaymentsPhase(
-            debt_snapshot=debt_snapshot,
             planned=planned,
             per_eq_metric_values=per_eq_metric_values,
             committed=int(payments_res.committed),
@@ -1297,7 +1296,6 @@ class RealTick:
         session: Any,
         run_id: str,
         run: RunRecord,
-        debt_snapshot: dict[tuple[str, str, str], Any],
         scenario: dict[str, Any],
         payments_result: Any | None = None,
     ) -> None:
@@ -1309,7 +1307,6 @@ class RealTick:
                 run=run,
                 session=session,
                 tick_index=tick_index,
-                debt_snapshot=debt_snapshot,
                 scenario=scenario,
             )
         except asyncio.CancelledError:
@@ -1381,6 +1378,21 @@ class RealTick:
             )
 
     # ── metrics and the persistence tail: their own commit ────────────────────────────────────────────
+
+    async def drop_closed_trustlines(self, *, run_id: str, run: RunRecord, equivalents: list[str]) -> None:
+        """029 `F-029-11`: once a tick, per equivalent, the pairs the run's edge cache holds are re-read and those
+        with no live line leave the run (`publish_closed_trustlines`: cache, scenario, one `removed_edges`). A
+        line the ledger closed past every patch of this run - another session's payment, an API close - was
+        otherwise counted by `active_trustlines` and offered to the planner until a patch happened to cover it.
+        One SELECT per equivalent; never raises (a failed re-read removes nothing and is logged there)."""
+
+        rr = self._runner
+        emitter = SseEventEmitter(sse=rr._sse, utc_now=rr._utc_now, logger=rr._logger)
+        with rr._lock:
+            held = {str(eq): list((run._edges_by_equivalent or {}).get(str(eq)) or ()) for eq in equivalents}
+        for eq, pairs in held.items():
+            await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run, equivalent=eq,
+                                            pairs=pairs)
 
     async def populate_per_eq_metric_values(
         self,
@@ -1608,11 +1620,13 @@ class RealTick:
         if not isinstance(payload, dict):
             return
 
-        last_tick = int(payload.get("tick_index", -1) or -1)
+        # 029 `F-029-12`: `is None`, not `or -1` - tick 0 is a tick, and a mark of 0 says it was flushed.
+        raw_tick, raw_flushed = payload.get("tick_index"), run._real_last_tick_storage_flushed_tick
+        last_tick = -1 if raw_tick is None else int(raw_tick)
         if last_tick < 0:
             return
 
-        flushed_tick = int(run._real_last_tick_storage_flushed_tick or -1)
+        flushed_tick = -1 if raw_flushed is None else int(raw_flushed)
         if flushed_tick >= last_tick:
             return
 

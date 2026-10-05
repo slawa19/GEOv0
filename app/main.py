@@ -22,7 +22,25 @@ from app.utils.request_id import new_request_id, request_id_var, validate_reques
 from app.core.maintenance_jobs import _start_configured_background_tasks
 
 
+# 029 `F-029-3`: the one logging configuration of the application - level from `LOG_LEVEL`, one format with time,
+# level and logger name. A no-op when the root logger already has handlers (a deployment's own `--log-config`).
+logging.basicConfig(level=settings.LOG_LEVEL.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+async def _require_redis_noeviction(client) -> None:
+    """029 `T2991`: refuse a Redis that may evict keys. Under a `volatile-*` or `allkeys-*` policy the revocation
+    of a used refresh token (a key with a TTL) can be evicted while the store id stays, and the token works again.
+    Checks the policy at start only; where CONFIG is not permitted (managed Redis) the operator guarantees it."""
+    from redis.exceptions import ResponseError
+
+    try:
+        policy = (await client.config_get("maxmemory-policy")).get("maxmemory-policy")
+    except ResponseError:
+        logger.error("lifespan.redis_eviction_policy_unverified CONFIG GET refused; maxmemory-policy must be noeviction")
+        return
+    if policy != "noeviction":
+        raise RuntimeError(f"Redis maxmemory-policy must be noeviction (used refresh tokens would revive), got {policy!r}")
 
 
 @asynccontextmanager
@@ -57,6 +75,11 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             await client.aclose()
             raise RuntimeError("Redis enabled but unavailable") from exc
+        try:
+            await _require_redis_noeviction(client)
+        except BaseException:
+            await client.aclose()
+            raise
 
         app.state.redis = client
         security.set_redis_client(client)

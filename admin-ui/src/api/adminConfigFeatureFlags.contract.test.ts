@@ -27,15 +27,9 @@ function useRealApiEnv() {
 
 function runtimeConfig(overrides: Record<string, unknown> = {}) {
   return {
-    LOG_LEVEL: 'INFO',
     RATE_LIMIT_ENABLED: true,
     ROUTING_MAX_HOPS: 6,
     ROUTING_MAX_PATHS: 3,
-    INTEGRITY_CHECKPOINT_ENABLED: true,
-    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: 300,
-    RECOVERY_ENABLED: true,
-    RECOVERY_INTERVAL_SECONDS: 60,
-    PAYMENT_TX_STUCK_TIMEOUT_SECONDS: 120,
     FEATURE_FLAGS_MULTIPATH_ENABLED: true,
     FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: false,
     CLEARING_ENABLED: true,
@@ -68,18 +62,14 @@ afterEach(() => {
 })
 
 describe('Admin config and feature-flag contracts', () => {
-  it('preserves the real config flattening facade after validating the wire response', async () => {
+  it('flattens the wire response to the keys the backend lets an admin change', async () => {
     useRealApiEnv()
+    const items = Object.entries<unknown>(runtimeConfig()).map(([key, value]) => ({ key, value, mutable: true }))
+    // 029 F-029-4: a key read only at start comes with `mutable: false` and is not offered for editing.
+    items.push({ key: 'LOG_LEVEL', value: 'INFO', mutable: false }, { key: 'RECOVERY_ENABLED', value: true, mutable: false })
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        jsonResponse({
-          success: true,
-          data: {
-            items: Object.entries(runtimeConfig()).map(([key, value]) => ({ key, value, mutable: true })),
-          },
-        }),
-      ) as unknown as typeof fetch,
+      vi.fn(async () => jsonResponse({ success: true, data: { items } })) as unknown as typeof fetch,
     )
 
     await expect(realApi.getConfig()).resolves.toEqual({
@@ -161,6 +151,7 @@ describe('Admin config and feature-flag contracts', () => {
 
   it.each([
     ['unknown key', { ROUTING_MAX_PATHS: 4, routing: { max_paths: 4 } }],
+    ['key read only at start', { ROUTING_MAX_PATHS: 4, LOG_LEVEL: 'DEBUG' }],
     ['wrong value type', { ROUTING_MAX_PATHS: '4' }],
   ])('rejects a mock config patch with an %s', async (_label, patch) => {
     useMockApiEnv({ config: runtimeConfig(), featureFlags: undefined })

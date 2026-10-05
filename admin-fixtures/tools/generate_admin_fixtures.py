@@ -298,15 +298,9 @@ def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
 
 def generate_config() -> dict[str, Any]:
     return {
-        "LOG_LEVEL": "INFO",
         "RATE_LIMIT_ENABLED": True,
         "ROUTING_MAX_HOPS": 6,
         "ROUTING_MAX_PATHS": 3,
-        "INTEGRITY_CHECKPOINT_ENABLED": True,
-        "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS": 300,
-        "RECOVERY_ENABLED": True,
-        "RECOVERY_INTERVAL_SECONDS": 60,
-        "PAYMENT_TX_STUCK_TIMEOUT_SECONDS": 120,
         "FEATURE_FLAGS_MULTIPATH_ENABLED": True,
         "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED": False,
         "CLEARING_ENABLED": True,
