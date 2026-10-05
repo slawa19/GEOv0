@@ -446,7 +446,9 @@ class TrustDriftEngine:
         failure (`tick.py::RealTick.apply_trust_decay_and_broadcast`). Programme 021, stage 1: the limit changes go through the
         trust-line service's internal path and this method finishes its batch - one audit row per changed line,
         one checkpoint pair per touched equivalent - so the caller's commit carries them together.
-        Returns count of decayed edges.
+        Returns count of decayed edges. `debt_snapshot` is NOT read any more (§15 review of 029 S3, `T2993`): the
+        debt is the row read behind the line lock. The parameter stays only because its pass-through,
+        `real_runner_impl.py::_apply_trust_decay`, is outside that stage's owner surface.
         """
 
         cfg = run._trust_drift_config
@@ -524,10 +526,11 @@ class TrustDriftEngine:
             if current_limit <= 0:
                 continue
 
-            # 019 stage-3 review (P1, class 1): THE FLOOR IS THE DEBT IN THIS TRANSACTION, read after the line lock,
-            # not the tick's Python snapshot alone (read by a money phase that has committed; a payment since then
-            # raised the debt). A payment committed before the lock raises the floor. Snapshot key: (debtor, creditor, eq).
-            debt_amount = debt_snapshot.get((debtor_pid, creditor_pid, eq_code), Decimal("0"))
+            # 019 stage-3 review (P1, class 1): THE DEBT IS THE ONE IN THIS TRANSACTION, read after the line lock - for
+            # the threshold and for the floor. §15 review of 029 S3 (`T2993`, P2): the tick's Python snapshot is no
+            # longer part of it. Every writer of this debt holds the line, so the row read here is the truth and no
+            # row is a debt of 0; a snapshot above it (the debt was repaid since) made the floor win over a limit the
+            # creditor had lowered meanwhile and RAISED it.
             current_debt = (
                 await session.execute(
                     select(Debt.amount).where(
@@ -537,13 +540,12 @@ class TrustDriftEngine:
                     )
                 )
             ).scalar_one_or_none()
-            if current_debt is not None:
-                debt_amount = max(Decimal(str(debt_amount)), Decimal(str(current_debt)))
+            debt_amount = Decimal(str(current_debt or 0))
 
             ratio = debt_amount / current_limit
             if ratio < Decimal(str(cfg.overload_threshold)):
                 continue
-            decay_mult = Decimal(str(1 - cfg.decay_rate))
+            decay_mult = Decimal("1") - Decimal(str(cfg.decay_rate))  # `F-030-4`: not `1 - rate` in binary float
             min_ratio = Decimal(str(cfg.min_limit_ratio))
 
             # Guardrail: trust drift must never shrink limit below already-used debt,
@@ -566,7 +568,10 @@ class TrustDriftEngine:
                 debt_floor,
             ).quantize(step, rounding=ROUND_DOWN)
 
-            if new_limit == current_limit:
+            # A DECAY ONLY LOWERS (`T2993`, P2; the mirror of growth's "only raises"): a floor above the limit - debt above
+            # a limit the creditor lowered (026 `T2602`), or a limit set below `original * min_limit_ratio` - is no
+            # reason to write a higher one.
+            if new_limit >= current_limit:
                 continue
 
             if not isolation_checked:

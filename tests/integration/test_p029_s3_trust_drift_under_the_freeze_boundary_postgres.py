@@ -225,3 +225,14 @@ async def test_a_decay_never_raises_a_limit(factory, debt, snapshot) -> None:  #
     after = await limits(factory, eq, p)
     assert after[("A", "C")] == (Decimal("98.00"), "active"), after  # positive control: an overloaded line decays
     assert after[("A", "B")] == (Decimal("50.00"), "active"), f"the decay RAISED the creditor's limit of 50: {after}"
+
+
+@pytest.mark.asyncio
+async def test_a_decay_multiplier_is_not_computed_in_binary_floating_point(factory) -> None:  # noqa: F811
+    """`F-030-4` (handed over from programme 030): `Decimal(str(1 - 0.07))` is `0.9299999999999999`, and 100.00
+    decayed to 92.99 - a cent the configured rate never asked for."""
+    eq, p, run, scenario, snapshot = await _stand(factory)
+    run._trust_drift_config = TrustDriftConfig(**{**CFG, "decay_rate": 0.07})
+    await _drift(factory, run, scenario, snapshot, eq)
+    after = await limits(factory, eq, p)
+    assert after[("A", "B")] == (Decimal("93.00"), "active"), after

@@ -23,6 +23,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
 
 
@@ -138,6 +139,9 @@ async def test_trust_decay_is_in_the_step(db_session) -> None:
 
     eqs, c, d = await _world(db_session, {"A": 2}, limit="100.33")
     run, engine = _drift(eqs, c, d, limit="100.33", original="100.33", decay_rate=0.1, overload_threshold=0.5)
+    async with debt_fixture_setup(db_session, label="p028-e2"):  # 029 `T2993`: the decay reads the debt row
+        db_session.add(Debt(debtor_id=d.id, creditor_id=c.id, equivalent_id=eqs["A"].id, amount=Decimal("60")))
+    await db_session.commit()
     res = await engine.apply_trust_decay(run=run, session=db_session, tick_index=1, scenario=run._scenario_raw,
                                          debt_snapshot={(d.pid, c.pid, eqs["A"].code): Decimal("60")})
     assert (res.updated_count, await _limit(db_session, eqs["A"], c, d)) == (1, Decimal("90.29"))
