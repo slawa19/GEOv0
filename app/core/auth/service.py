@@ -99,7 +99,7 @@ class AuthService:
 
         # 5. Issue tokens
         access_token = create_access_token(subject=pid)
-        refresh_token = create_refresh_token(subject=pid)
+        refresh_token = await create_refresh_token(subject=pid)
 
         expires_in = int(settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60
 
@@ -144,7 +144,7 @@ class AuthService:
             raise UnauthorizedException("Invalid refresh token")
 
         access_token = create_access_token(subject=pid)
-        new_refresh_token = create_refresh_token(subject=pid)
+        new_refresh_token = await create_refresh_token(subject=pid)
 
         expires_in = int(settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES) * 60
 

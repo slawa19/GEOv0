@@ -1,6 +1,8 @@
 """029 S1, F-029-31 (BACKLOG № 240) and F-029-1 (№ 286): a used refresh token stays used across a restart.
 
-THE RESTART IS A REAL NEW PROCESS (`python -c`, the same `JWT_SECRET`): its memory store is empty by construction.
+§15 review T2991 (fix-delta): every refresh token names the store that will know it was used - the process marker
+in memory, an id kept IN Redis with Redis - so a legacy token without the claim and a token of a Redis that lost its
+data are refused too. THE RESTART IS A REAL NEW PROCESS (`python -c`, the same `JWT_SECRET`): its memory store is empty by construction.
 In-process `_restart` is the same event for the controls - a new marker AND an empty store, never the marker alone.
 """
 
@@ -61,7 +63,7 @@ def memory_store(monkeypatch) -> None:
 
 
 async def test_a_used_refresh_token_is_refused_by_the_next_process(memory_store) -> None:
-    used = security.create_refresh_token(subject="alice")
+    used = await security.create_refresh_token(subject="alice")
     assert await _refresh(used) is not None  # control: it worked once, in this process
     env = {**os.environ, "JWT_SECRET": settings.JWT_SECRET, "REDIS_ENABLED": "false"}
     child = subprocess.run([sys.executable, "-c", _CHILD, used], env=env, capture_output=True, text=True, timeout=120)
@@ -70,22 +72,22 @@ async def test_a_used_refresh_token_is_refused_by_the_next_process(memory_store)
 
 
 async def test_a_restart_refuses_refresh_tokens_but_not_access_tokens(memory_store, monkeypatch) -> None:
-    rotated = await _refresh(security.create_refresh_token(subject="alice"))
+    rotated = await _refresh(await security.create_refresh_token(subject="alice"))
     assert rotated is not None and await _refresh(rotated["refresh_token"]) is not None  # no restart: works,
     assert await _refresh(rotated["refresh_token"]) is None  # ... and exactly once
-    access, unused = security.create_access_token("alice"), security.create_refresh_token(subject="alice")
+    access, unused = security.create_access_token("alice"), await security.create_refresh_token(subject="alice")
     claims = {"exp": int(time.time()) + 600, "sub": "alice", "type": "refresh", "jti": uuid.uuid4().hex}
     unmarked = jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)  # issued before 029
     _restart(monkeypatch)
     assert await _refresh(unused) is None and await _refresh(unmarked) is None
     assert (await security.decode_token(access))["sub"] == "alice"
-    assert await _refresh(security.create_refresh_token(subject="alice")) is not None  # a new login is served
+    assert await _refresh(await security.create_refresh_token(subject="alice")) is not None  # a new login is served
 
 
 async def test_with_redis_an_unused_token_survives_a_restart_and_a_used_one_does_not(monkeypatch) -> None:
     monkeypatch.setattr(settings, "REDIS_ENABLED", True, raising=False)
     monkeypatch.setattr(security, "_redis_client", _Redis())  # the Redis keys outlive the restart below
-    used, unused = (security.create_refresh_token(subject="alice") for _ in range(2))
+    used, unused = [await security.create_refresh_token(subject="alice") for _ in range(2)]
     assert await _refresh(used) is not None
     _restart(monkeypatch)
     assert await _refresh(unused) is not None and await _refresh(used) is None
@@ -96,9 +98,9 @@ async def test_a_token_is_refused_by_the_other_kind_of_store(monkeypatch) -> Non
     monkeypatch.setattr(security, "_revoked_jti", {})
     monkeypatch.setattr(security, "_redis_client", _Redis())
     monkeypatch.setattr(settings, "REDIS_ENABLED", False, raising=False)
-    from_memory = security.create_refresh_token(subject="alice")
+    from_memory = await security.create_refresh_token(subject="alice")
     monkeypatch.setattr(settings, "REDIS_ENABLED", True)
-    from_redis = security.create_refresh_token(subject="alice")
+    from_redis = await security.create_refresh_token(subject="alice")
     assert await _refresh(from_memory) is None
     monkeypatch.setattr(security, "_redis_client", None)  # enabled, but no client: memory - and the marker is checked
     assert await _refresh(from_redis) is None
@@ -110,3 +112,39 @@ async def test_expired_revocations_leave_the_memory_store_and_live_ones_stay(mem
     assert await security.claim_jti("new", exp=now + 600) is True
     assert set(security._revoked_jti) == {"live", "new"}
     assert await security.is_jti_revoked("live") is True and await security.claim_jti("live", exp=now + 600) is False
+
+
+def _legacy_refresh() -> str:
+    """What every release before 029 issued: no `rsm` claim."""
+    claims = {"exp": int(time.time()) + 600, "sub": "alice", "type": "refresh", "jti": uuid.uuid4().hex}
+    return jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+@pytest.fixture
+def redis_store(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "REDIS_ENABLED", True, raising=False)
+    monkeypatch.setattr(security, "_redis_client", _Redis())
+    monkeypatch.setattr(security, "_revoked_jti", {})
+
+
+async def test_a_legacy_refresh_token_is_refused_after_an_upgrade_that_turns_redis_on(redis_store) -> None:
+    """T2991 finding 1: used under the old backend without Redis, then replayed - this Redis never heard of it."""
+    assert await _refresh(_legacy_refresh()) is None
+    assert await _refresh(await security.create_refresh_token(subject="alice")) is not None  # control: Redis serves
+
+
+async def test_a_used_refresh_token_is_refused_by_a_redis_that_lost_its_data(redis_store, monkeypatch) -> None:
+    """T2991 finding 2: Redis recreated empty under the same JWT secret - the revocation is gone, and so is the id."""
+    used, unused = [await security.create_refresh_token(subject="alice") for _ in range(2)]
+    assert await _refresh(used) is not None
+    monkeypatch.setattr(security, "_redis_client", _Redis())  # the same deployment, an empty store
+    assert await _refresh(used) is None and await _refresh(unused) is None
+    assert await _refresh(await security.create_refresh_token(subject="alice")) is not None  # a new login is served
+
+
+async def test_two_workers_on_one_redis_share_the_store_id(redis_store, monkeypatch) -> None:
+    issued_by_one = await security.create_refresh_token(subject="alice")
+    _restart(monkeypatch)  # the other worker: its own marker and memory, the same Redis
+    rotated = await _refresh(issued_by_one)
+    assert rotated is not None and await _refresh(issued_by_one) is None
+    assert await _refresh(rotated["refresh_token"]) is not None
