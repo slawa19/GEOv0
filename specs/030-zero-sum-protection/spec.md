@@ -360,3 +360,19 @@ Milestone перед слиянием каждой стадии — `.\scripts\v
     - Длительность прогона сверки на больших базах против `RESULT_RUN_ALLOWANCE`.
     - Исправление критерия (б) по runbook на живой базе.
   - Прочее: строка 3 `specs/README.md` («030 специфицирована, не авторизована») вне разрешённой правки S1 и оставлена получателю `T3009`.
+- **2026-10-05 — S1, доработка по решению оркестратора до §15-ревью.** (1) **P3-3 внутри S1:** поле `details.recheck_status` в 409 снятия удержания — изменение формы ответа (§8), поэтому оно описано тем же срезом. `api/openapi.yaml` **добавлен в owner surface S1 решением оркестратора 2026-10-05.** Изменено:
+  - 409 у `/admin/equivalents/{code}/integrity-hold/clear` теперь ссылается на схемы `IntegrityHoldClearRefusal` и `IntegrityHoldClearRefusalDetails` (`api/openapi.yaml:5922-5964`). Поля: `reason ∈ {no_integrity_hold, no_later_passed_reconciliation_result}`, `latest_status` и `recheck_status ∈ {PASSED, FAILED, UNVERIFIABLE, null}`. Проза операции дополнена условием перепроверки.
+  - Проза `/integrity/summary` (`:3083-3092`) называет второй путь к `warning`: несвежий или ошибочный вердикт.
+  - Генерируемая сторона описывает то же модель-документация на маршруте (`app/api/v1/admin.py:1336-1361`, `responses={409: {"model": IntegrityHoldClearRefusal}}`, не `response_model`). Поэтому сгенерированная схема 409 совпадает с каноном, и храповик дрейфа ошибочных ответов **не сдвинулся** (51). Первая попытка без модели давала `expected=51; actual=52`.
+  - Стенд F-030-10 теперь утверждает `details == {reason, latest_status: PASSED, recheck_status: FAILED}`.
+
+  (2) Строка 3 `specs/README.md` исправлена: 030 авторизована. (3) Слит `origin/main` `9ba0bf7d` (029 S2, S3, S4, S5) — без конфликтов. Пересечений в `app/` с файлами S1 нет. Новых создателей эквивалента в `app/` после слияния нет: `Equivalent(` встречается только в `create_equivalent`.
+
+  **Гейты на слитом дереве `7d31d77b` + этот коммит:**
+  - Целевые селекторы — `verify_local.ps1 -TaskSlug p030s1 -BackendOnly -BackendSelector <…>`: `354 passed, 1 xfailed`, exit 0. Охват: четыре репродьюсера S1, 11 селекторов §3, `tests/contract` целиком, `test_p029_s1_checkpoint_cleanup_failure_postgres.py`, integrity/admin/hold-тесты, тесты сидера и снимка, `test_p029_s2_wire_contracts.py`. Alembic head — один (`036_clearing_records_no_initiator`).
+  - `tests/contract` отдельно — `124 passed`, exit 0.
+  - Тир инструментов `-TaskSlug p030s1t -ToolingOnly` — `422 passed`, exit 0.
+  - `ruff check app migrations --no-cache` — exit 0.
+  - Полный тир повторно не гонялся: его прогонит CI.
+
+  **Строки ветки против `origin/main`:** продукт +130/−42 (из них модель-документация 409 ≈ 30), тесты +275/−10, OpenAPI +57/−4.
