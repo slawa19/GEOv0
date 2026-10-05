@@ -265,7 +265,7 @@ async def test_action_trustline_create_happy_and_conflict(client, db_session, in
     assert p1["from_pid"] == "alice"
     assert p1["to_pid"] == "bob"
     assert p1["equivalent"] == "UAH"
-    assert p1["limit"] == "10"
+    assert p1["limit"] == "10.00"  # 029 F-029-5: the equivalent's step (UAH, precision 2), was "10"
 
     # Act 2: error path (duplicate create)
     r2 = await client.post(
@@ -349,9 +349,8 @@ async def test_action_trustline_update_happy_and_below_used(
     p1 = r1.json()
     assert p1["ok"] is True
     assert p1["trustline_id"] == trustline_id
-    # Stored trustline.limit is Numeric(20, 8) -> DB returns a scaled Decimal.
-    assert p1["old_limit"] == "100.00000000"
-    assert p1["new_limit"] == "150"
+    # 029 F-029-5: both in the equivalent's step; were "100.00000000" (the raw column) beside "150" (the input).
+    assert (p1["old_limit"], p1["new_limit"]) == ("100.00", "150.00")
 
     # Arrange used debt (used amount is debt from `to` -> `from`)
     async with debt_fixture_setup(db_session, label="setup"):
@@ -379,7 +378,7 @@ async def test_action_trustline_update_happy_and_below_used(
         },
     )
     assert r2.status_code == 200, r2.text
-    assert (r2.json()["old_limit"], r2.json()["new_limit"]) == ("150.00000000", "40")
+    assert (r2.json()["old_limit"], r2.json()["new_limit"]) == ("150.00", "40.00")
 
 
 @pytest.mark.asyncio
@@ -623,8 +622,9 @@ async def test_action_trustlines_list_is_run_scoped_and_filters_by_participant_p
     # Assert: schema includes reverse_used and it matches close-guard reverse debt.
     assert all("reverse_used" in x for x in items_all)
     by_key = {(x["from_pid"], x["to_pid"]): x for x in items_all}
-    assert Decimal(str(by_key[("alice", "bob")]["reverse_used"])) == Decimal("2")
-    assert Decimal(str(by_key[("bob", "alice")]["reverse_used"])) == Decimal("0")
+    # 029 F-029-5: a debt read from the database is written in the equivalent's step (was "2.00000000" and "0").
+    assert by_key[("alice", "bob")]["reverse_used"] == "2.00"
+    assert by_key[("bob", "alice")]["reverse_used"] == "0.00"
 
     # Act 2: filter by participant_pid should include incoming+outgoing
     r_f = await client.get(
@@ -931,6 +931,71 @@ async def test_action_payment_real_insufficient_capacity_when_topology_path_exis
 
 
 @pytest.mark.asyncio
+async def test_action_payment_real_code_follows_the_core_reason_not_the_topology(
+    client, db_session, interact_actions_enabled, monkeypatch
+):
+    """029 F-029-8: lines join alice to carol through bob, but bob may not mediate - the core answers `no_route`.
+
+    The removed topology pre-check saw the lines and answered `INSUFFICIENT_CAPACITY` beside `reason: no_route`.
+    Nothing is mocked: the refusal is the payment core's own. Control: with mediation allowed the same payment
+    passes, so the refusal is the policy's and not a broken setup.
+    """
+
+    from app.core.payments.router import PaymentRouter
+
+    alice, bob, uah = await _seed_alice_bob_uah(db_session)
+    carol = Participant(pid="carol", display_name="Carol", public_key="C" * 64, type="person", status="active", profile={})
+    db_session.add(carol)
+    await db_session.flush()
+    lines = [
+        TrustLine(from_participant_id=bob.id, to_participant_id=alice.id, equivalent_id=uah.id, status="active",
+                  limit=Decimal("10"), policy={"can_be_intermediate": False}),
+        TrustLine(from_participant_id=carol.id, to_participant_id=bob.id, equivalent_id=uah.id, status="active",
+                  limit=Decimal("10"), policy={"can_be_intermediate": False}),
+    ]
+    db_session.add_all(lines)
+    await db_session.commit()
+    PaymentRouter.invalidate_cache("UAH")
+    _register_run_perimeter(interact_actions_enabled, monkeypatch, [
+        {"id": pid, "name": pid, "type": "person", "status": "active"} for pid in ("alice", "bob", "carol")])
+    request = {"from_pid": "alice", "to_pid": "carol", "equivalent": "UAH", "amount": "1"}
+    url, headers = "/api/v1/simulator/runs/test-run/actions/payment-real", {"X-Admin-Token": settings.ADMIN_TOKEN}
+
+    refused = await client.post(url, headers=headers, json=request)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["details"]["reason"] == "no_route", refused.text
+    assert refused.json()["code"] == "NO_ROUTE", refused.text
+
+    for line in lines:
+        line.policy = {"can_be_intermediate": True}
+    await db_session.commit()
+    PaymentRouter.invalidate_cache("UAH")
+    assert (await client.post(url, headers=headers, json=request)).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reason", "insufficient", "code"), [
+    ("no_route", True, "NO_ROUTE"), ("insufficient_capacity", False, "INSUFFICIENT_CAPACITY"),
+    ("policy", False, "NO_ROUTE"), (None, False, "NO_ROUTE"), (None, True, "INSUFFICIENT_CAPACITY"),
+])
+async def test_action_payment_real_every_routing_reason_has_a_code(
+    client, db_session, interact_actions_enabled, monkeypatch, reason, insufficient, code
+):
+    """029 F-029-8, anti-vacuum: `no_route` and `insufficient_capacity` name their code whatever the exception's
+    own code says; a routing refusal with another reason, or none, answers by that code as before (E002 or E001)."""
+
+    await _seed_alice_bob_uah(db_session)
+
+    async def _refuse(self, *_args, **_kwargs):
+        raise RoutingException("refused", insufficient_capacity=insufficient, details={"reason": reason} if reason else None)
+
+    monkeypatch.setattr(interact_actions_enabled.PaymentService, "create_payment_internal", _refuse)
+    r = await client.post("/api/v1/simulator/runs/test-run/actions/payment-real", headers={"X-Admin-Token": settings.ADMIN_TOKEN},
+                          json={"from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "amount": "1"})
+    assert (r.status_code, r.json()["code"]) == (409, code), r.text
+
+
+@pytest.mark.asyncio
 async def test_action_payment_real_amount_manual_validation_stays_invalid_amount(
     client, db_session, interact_actions_enabled
 ):
@@ -1053,6 +1118,11 @@ async def test_payment_targets_multihop_returns_backend_reachable_to_pid_list(
     by_pid = {x.get("to_pid"): x for x in payload["items"]}
     assert "bob" in by_pid
     assert int(by_pid["bob"]["hops"]) == 2
+
+    # 029 F-029-5: the capacity is written in the equivalent's step (was "10.00000000").
+    r = await client.get("/api/v1/simulator/runs/test-run/payment-targets", headers=headers,
+                         params={"equivalent": "UAH", "from_pid": "alice", "include_max_available": "true"})
+    assert {x["to_pid"]: x["max_available"] for x in r.json()["items"]}["bob"] == "10.00", r.text
 
 
 @pytest.mark.asyncio
@@ -1181,9 +1251,10 @@ async def test_action_clearing_real_total_cleared_amount_is_actual_not_precalc(
     payload = r.json()
     assert payload["ok"] is True
     assert payload["cleared_cycles"] == 1
-    assert Decimal(str(payload["total_cleared_amount"])) == Decimal("5")
+    # 029 F-029-5: in the equivalent's step (UAH, precision 2); was "5.00000000".
+    assert payload["total_cleared_amount"] == "5.00"
     assert isinstance(payload.get("cycles"), list)
-    assert Decimal(str(payload["cycles"][0]["cleared_amount"])) == Decimal("5")
+    assert payload["cycles"][0]["cleared_amount"] == "5.00"
 
 
 def _alice_bob_occurrence(ids, *, after_cancellation=False):
@@ -1305,7 +1376,7 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
 
     expected_details = {
         "partial_cleared_cycles": 1,
-        "partial_cleared_amount": "2.50000000",
+        "partial_cleared_amount": "2.50",  # 029 F-029-5
     }
     if failure_kind == "geo":
         expected_details = {
@@ -1325,7 +1396,8 @@ async def test_action_clearing_real_emits_durable_partial_done_before_sanitized_
     assert emitted[0]["type"] == "clearing.done"
     assert emitted[0]["equivalent"] == "UAH"
     assert emitted[0]["cleared_cycles"] == 1
-    assert Decimal(emitted[0]["cleared_amount"]) == Decimal("2.5")
+    # 029 F-029-5: the event's value is spelled in the equivalent's step, as the tick spells it (was "2.50000000").
+    assert emitted[0]["cleared_amount"] == "2.50"
     # The runner's debtor -> creditor edges reach SSE as trust-line direction creditor -> debtor by PID.
     assert {(e["from"], e["to"]) for e in emitted[0]["cycle_edges"]} == {("bob", "alice"), ("alice", "bob")}
     assert "raw clearing failure secret" not in str(emitted[0])
