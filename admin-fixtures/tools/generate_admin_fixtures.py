@@ -6,7 +6,6 @@ No external dependencies.
 
 Outputs (by default, non-canonical):
 - admin-fixtures/v1-synthetic/datasets/*.json
-- admin-fixtures/v1-synthetic/api-snapshots/*.json (optional: precomputed pages)
 
 Run (safe default):
     python admin-fixtures/tools/generate_admin_fixtures.py
@@ -30,7 +29,6 @@ from typing import Any
 BASE_DIR = Path(__file__).resolve().parents[1]
 V1_DIR = BASE_DIR / "v1"
 DATASETS_DIR = V1_DIR / "datasets"
-SNAPSHOTS_DIR = V1_DIR / "api-snapshots"
 
 BASE_TS = datetime(2026, 1, 11, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -204,18 +202,6 @@ def generate_trustlines(
         )
 
     return out
-
-
-def _paginate(items: list[dict[str, Any]], page: int, per_page: int) -> dict[str, Any]:
-    total = len(items)
-    start = (page - 1) * per_page
-    end = start + per_page
-    return {
-        "items": items[start:end],
-        "page": page,
-        "per_page": per_page,
-        "total": total,
-    }
 
 
 def generate_audit_log(total: int = 180) -> list[dict[str, Any]]:
@@ -602,7 +588,6 @@ def main() -> None:
         )
 
     datasets_dir = out_v1 / "datasets"
-    snapshots_dir = out_v1 / "api-snapshots"
 
     participants_total = max(1, int(args.participants))
     trustlines_total = max(0, int(args.trustlines))
@@ -663,68 +648,6 @@ def main() -> None:
     _write_json(datasets_dir / "debts.json", datasets["debts"])
     _write_json(datasets_dir / "clearing-cycles.json", datasets["clearing_cycles"])
     _write_json(datasets_dir / "transactions.json", datasets["transactions"])
-
-    # A few precomputed snapshots for quick prototypes.
-    trust_items = datasets["trustlines"]
-    audit_items = datasets["audit_log"]
-    participant_items = datasets["participants"]
-
-    _write_json(
-        snapshots_dir / "health.get.json",
-        {"success": True, "data": datasets["health"]},
-    )
-    _write_json(
-        snapshots_dir / "health.db.get.json",
-        {"success": True, "data": datasets["health_db"]},
-    )
-    _write_json(
-        snapshots_dir / "admin.migrations.get.json",
-        {"success": True, "data": datasets["migrations"]},
-    )
-    _write_json(
-        snapshots_dir / "admin.config.get.json",
-        {"success": True, "data": datasets["config"]},
-    )
-    _write_json(
-        snapshots_dir / "admin.feature-flags.get.json",
-        {"success": True, "data": datasets["feature_flags"]},
-    )
-    _write_json(
-        snapshots_dir / "integrity.status.get.json",
-        {"success": True, "data": datasets["integrity_status"]},
-    )
-
-    _write_json(
-        snapshots_dir / "admin.participants.page1.per20.json",
-        {"success": True, "data": _paginate(participant_items, page=1, per_page=20)},
-    )
-    _write_json(
-        snapshots_dir / "admin.participants.page2.per20.json",
-        {"success": True, "data": _paginate(participant_items, page=2, per_page=20)},
-    )
-
-    _write_json(
-        snapshots_dir / "admin.trustlines.page1.per20.json",
-        {"success": True, "data": _paginate(trust_items, page=1, per_page=20)},
-    )
-    _write_json(
-        snapshots_dir / "admin.trustlines.page2.per20.json",
-        {"success": True, "data": _paginate(trust_items, page=2, per_page=20)},
-    )
-    _write_json(
-        snapshots_dir / "admin.audit-log.page1.per20.json",
-        {"success": True, "data": _paginate(audit_items, page=1, per_page=20)},
-    )
-    _write_json(
-        snapshots_dir / "admin.audit-log.page2.per20.json",
-        {"success": True, "data": _paginate(audit_items, page=2, per_page=20)},
-    )
-
-    incident_items = datasets["incidents"]["items"]
-    _write_json(
-        snapshots_dir / "admin.incidents.page1.per20.json",
-        {"success": True, "data": _paginate(incident_items, page=1, per_page=20)},
-    )
 
     meta = {
         "version": "v1",
