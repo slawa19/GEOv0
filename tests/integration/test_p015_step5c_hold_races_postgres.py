@@ -353,6 +353,10 @@ async def test_step5c_p_a_reaction_arriving_while_a_payment_holds_its_check_wait
         counts = await asyncio.wait_for(reconcile, timeout=30)
 
         assert result.status == "COMMITTED", result
+        assert counts["hold_errors"] == 0, (
+            f"hold_errors: the reaction RAISED - here that is this stand's own probe failing inside it "
+            f"(the reaction swallows and counts it), not a hold that was not set: {counts}"
+        )
         assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
         assert seen_at_hold == [{tx_id: "COMMITTED"}], (
             f"the hold got the row before the payment's commit was visible: {seen_at_hold}"
@@ -581,6 +585,10 @@ async def test_step5c_p_a_reaction_waits_for_a_clearing_that_already_read_the_ho
         counts = await asyncio.wait_for(reconcile, timeout=30)
 
         assert amount == Decimal("30.00000000"), "premise: the clearing did not run to its commit"
+        assert counts["hold_errors"] == 0, (
+            f"hold_errors: the reaction RAISED - here that is this stand's own probe failing inside it "
+            f"(the reaction swallows and counts it), not a hold that was not set: {counts}"
+        )
         assert (counts[FAILED], counts[f"hold_{HOLD_SET}"]) == (1, 1), counts
         order = ["clearing", "reaction"] if seen_at_hold == [1] else ["reaction", "clearing"]
         assert order == ["clearing", "reaction"], (

@@ -25,22 +25,20 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 
 
-async def _a_backend_waits_on_a_transaction(*, timeout: float = 5.0) -> bool:
-    """Some backend waits (not granted) on a transaction lock - an insert behind an uncommitted key."""
-
+async def _a_backend_waits_on_a_transaction(blocker_pid: int, *, timeout: float = 5.0) -> bool:
+    """A backend waits (not granted) on a transaction lock `blocker_pid` holds - an insert behind its
+    uncommitted key."""
+    # 029 (`T2994`): behind `blocker_pid`, in this database. The query used to ask for ANY ungranted
+    # `transactionid` lock of the server, so another tier's waiter (`-TaskSlug` runs in parallel)
+    # satisfied the premise and the winner was released before the subject had queued.
     from tests.conftest import TestingSessionLocal
+    from tests.p019_locks_off import blocked_by
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     async with TestingSessionLocal() as observer:
         while True:
-            waiting = await observer.scalar(
-                text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted "
-                    "AND locktype = 'transactionid')"
-                )
-            )
-            await observer.rollback()
+            waiting = any(kind == "transactionid" for _pid, kind in await blocked_by(observer, blocker_pid))
             if waiting:
                 return True
             if loop.time() > deadline:
@@ -101,6 +99,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
     release_loser = asyncio.Event()
     winner_row_inserted = asyncio.Event()
     release_winner = asyncio.Event()
+    winner_pid: list[int] = []
     loser_task = None
     winner_task = None
     loser_session = None
@@ -170,6 +169,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
 
         async def _hold_winner_after_its_row_is_inserted(*args, **kwargs):
             # Since stage 3 the row is inserted - not committed - inside the payment's transaction.
+            winner_pid.append(int(await winner_session.scalar(text("SELECT pg_backend_pid()"))))
             winner_row_inserted.set()
             await release_winner.wait()
             return await winner_prepare(*args, **kwargs)
@@ -210,7 +210,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
         # The loser's insert queues on the winner's uncommitted unique-index entry - it is neither
         # answered "in progress" nor allowed through.
         release_loser.set()
-        assert await _a_backend_waits_on_a_transaction(), (
+        assert await _a_backend_waits_on_a_transaction(winner_pid[0]), (
             "premise: the second request did not wait on the first one's uncommitted row"
         )
         assert not loser_task.done()

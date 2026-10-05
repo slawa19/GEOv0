@@ -48,15 +48,17 @@ from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401
 from tests.p019_support import require_target
 
 
-async def _transactionid_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
+async def _transactionid_waiter_exists(factory, blocker_pid: int, *, timeout: float = 10.0) -> bool:  # noqa: F811
+    # 029 (`T2994`): behind `blocker_pid`, in this database. The query used to ask for ANY ungranted
+    # `transactionid` lock of the server, so another tier's waiter (`-TaskSlug` runs in parallel)
+    # satisfied the premise and the winner was released before the subject had queued.
+    from tests.p019_locks_off import blocked_by
+
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     async with factory() as observer:
         while True:
-            waiting = await observer.scalar(
-                text("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND locktype = 'transactionid')")
-            )
-            await observer.rollback()
+            waiting = any(kind == "transactionid" for _pid, kind in await blocked_by(observer, blocker_pid))
             if waiting:
                 return True
             if loop.time() > deadline:
@@ -92,6 +94,7 @@ async def _race(factory, world, *, winner, b_amount: str, b_sender=None) -> _Rac
     async with factory() as a:
         async with a.begin_nested():
             await winner(a, tx_id)
+        a_pid = int(await a.scalar(text("SELECT pg_backend_pid()")))
 
         async def b_side() -> tuple[tuple[str, Any], bool]:
             async with factory() as b:
@@ -116,7 +119,7 @@ async def _race(factory, world, *, winner, b_amount: str, b_sender=None) -> _Rac
 
         b_task = asyncio.create_task(b_side())
         try:
-            queued = await _transactionid_waiter_exists(factory)
+            queued = await _transactionid_waiter_exists(factory, a_pid)
             await a.commit()
             b_outcome, b_committed = await asyncio.wait_for(b_task, timeout=30)
         finally:

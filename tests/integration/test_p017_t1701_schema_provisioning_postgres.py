@@ -25,6 +25,8 @@ and nothing here mutates it.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -405,6 +407,13 @@ async def test_disconnecting_reports_what_it_terminated() -> None:
             "a session was connected to the template and nothing was terminated, so the step that "
             "makes the copy possible did not run."
         )
+        # 029 F-029-24: the helper counts the SIGNALS it sent, and a signalled backend stays listed in
+        # `pg_stat_activity` until it exits. Asking again at once is a race with that exit (seen once
+        # as `assert 1 == 0`), so the second call is made after the sessions are gone. A wait on the
+        # condition itself: no retry of the assertion, and a session that never exits fails loudly.
+        async with asyncio.timeout(30):
+            while await _backends_on(template):
+                await asyncio.sleep(0.02)
         assert await disconnect_everyone_from(connection, template) == 0
     finally:
         await _release(held)
