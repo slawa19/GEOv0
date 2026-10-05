@@ -8,7 +8,7 @@ from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
 from app.utils.security import (
-    claim_jti, decode_token, create_access_token, create_refresh_token, refresh_store_marker,
+    claim_jti, decode_token, create_access_token, create_refresh_token, refresh_store_id,
 )
 from app.utils.exceptions import UnauthorizedException, NotFoundException
 from app.config import settings
@@ -124,9 +124,9 @@ class AuthService:
         if not isinstance(jti, str) or not jti:
             raise UnauthorizedException("Invalid refresh token")
 
-        # 029 `F-029-31`: issued by another process, or under the other kind of revocation store - nothing here
-        # can tell whether it was already used.
-        if payload.get("rsm") != refresh_store_marker():
+        # 029 `F-029-31`: issued by another process, another Redis, the other kind of store or before 029 - the
+        # store asked below cannot tell whether it was already used.
+        if payload.get("rsm") != await refresh_store_id():
             raise UnauthorizedException("Invalid refresh token")
 
         pid = payload.get("sub")

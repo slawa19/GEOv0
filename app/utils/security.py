@@ -24,17 +24,28 @@ _revoked_jti: dict[str, int] = {}
 # 029 `F-029-31`: drawn once per process. The memory store above dies with the process, so a refresh token is
 # honoured only by the process that issued it - a used one cannot come back to life after a restart.
 _process_start_marker = uuid.uuid4().hex
+_REFRESH_STORE_ID_KEY = "geo:refresh_store_id"
 
 
 def _revocations_live_in_redis() -> bool:
     return bool(settings.REDIS_ENABLED and _redis_client is not None)
 
 
-def refresh_store_marker() -> str | None:
-    """The `rsm` claim a refresh token must carry now: this process's marker while revocations live in its memory
-    (also with Redis enabled but no client), no claim with Redis. A token of the other kind of store is refused too.
-    Detects a replay by an outside holder of a token; no barrier against code inside the process (029 `F-029-31`)."""
-    return None if _revocations_live_in_redis() else _process_start_marker
+async def refresh_store_id() -> str:
+    """The `rsm` claim every refresh token carries and must present: the id of the store that will know it was used.
+
+    In memory (also with Redis enabled but no client) - this process's marker. With Redis - an id kept IN Redis,
+    drawn once by `SET NX` and shared by every worker: a Redis recreated empty has a new id, so the tokens whose
+    revocations it lost are refused instead of revived. A token without the claim (issued before 029) is refused
+    by both. Detects a replay by an outside holder of a token; no barrier against code inside the process.
+    """
+    if not _revocations_live_in_redis():
+        return _process_start_marker
+    await _redis_client.set(_REFRESH_STORE_ID_KEY, uuid.uuid4().hex, nx=True)
+    stored = await _redis_client.get(_REFRESH_STORE_ID_KEY)
+    if not stored:  # lost between the two commands: refuse loudly rather than issue or accept on a guess
+        raise RuntimeError("Redis did not return the refresh store id")
+    return stored.decode() if isinstance(stored, bytes) else str(stored)
 
 
 def _exp_to_epoch_seconds(exp: Any) -> int:
@@ -50,7 +61,7 @@ async def claim_jti(jti: str, *, exp: Any) -> bool:
 
     A refresh token is used once: of two requests presenting it at the same time exactly one claims it - `SET NX`
     in Redis, the check and the write under one lock in memory. The in-memory store is per process and bounded:
-    expired entries leave it on every write (029 `F-029-1`); for restarts see `refresh_store_marker`.
+    expired entries leave it on every write (029 `F-029-1`); for restarts see `refresh_store_id`.
     """
 
     exp_epoch = _exp_to_epoch_seconds(exp)
@@ -108,10 +119,8 @@ async def create_refresh_token(subject: str | Any) -> str:
         "sub": str(subject),
         "type": "refresh",
         "jti": uuid.uuid4().hex,
+        "rsm": await refresh_store_id(),
     }
-    marker = refresh_store_marker()
-    if marker is not None:
-        payload["rsm"] = marker
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
