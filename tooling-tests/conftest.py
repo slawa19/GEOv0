@@ -77,8 +77,12 @@ _HERE = Path(__file__).resolve().parent
 #: powershell +1) and the bootstrap guard's new scanned directory `tooling-tests` (portable +1).
 #: The `powershell` value assumes both PowerShell hosts (`_missing_powershell_hosts`): the launcher
 #: module runs most of its cases once per host it finds.
+#:
+#: 2026-10-05, 029 S4 F-029-20: portable 198 -> 199. One case added,
+#: `portable/test_p029_s4_demo_fixtures_of_every_equivalent_are_current.py`: the committed Simulator
+#: demo snapshots of every equivalent carry no signed `net_balance_atoms` and no `frozen` trust line.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 198,
+    "portable": 199,
     "powershell": 223,
 }
 

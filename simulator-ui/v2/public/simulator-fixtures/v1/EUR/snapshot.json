@@ -7,7 +7,7 @@
       "name": "GreenField Cooperative (Co-op)",
       "type": "business",
       "status": "active",
-      "net_balance_atoms": "-7250",
+      "net_balance_atoms": "7250",
       "net_sign": -1,
       "viz_color_key": "debt-0",
       "viz_shape_key": "rounded-rect",
