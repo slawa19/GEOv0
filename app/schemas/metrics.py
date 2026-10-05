@@ -1,35 +1,34 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from app.schemas.trustline import TrustLine as TrustLineSchema
+from app.schemas.trustline import PlainDecimal, TrustLine as TrustLineSchema
 
 
 class AdminParticipantBalanceRow(BaseModel):
     equivalent: str
-    outgoing_limit: Decimal
-    outgoing_used: Decimal
-    incoming_limit: Decimal
-    incoming_used: Decimal
-    total_debt: Decimal
-    total_credit: Decimal
-    net: Decimal
+    outgoing_limit: PlainDecimal
+    outgoing_used: PlainDecimal
+    incoming_limit: PlainDecimal
+    incoming_used: PlainDecimal
+    total_debt: PlainDecimal
+    total_credit: PlainDecimal
+    net: PlainDecimal
 
 
 class AdminParticipantCounterpartySplitRow(BaseModel):
     pid: str
     display_name: str
-    amount: Decimal
+    amount: PlainDecimal
     share: float
 
 
 class AdminParticipantCounterpartySplit(BaseModel):
     eq: str
-    total_debt: Decimal = Field(serialization_alias="totalDebt")
-    total_credit: Decimal = Field(serialization_alias="totalCredit")
+    total_debt: PlainDecimal = Field(serialization_alias="totalDebt")
+    total_credit: PlainDecimal = Field(serialization_alias="totalCredit")
     creditors: list[AdminParticipantCounterpartySplitRow]
     debtors: list[AdminParticipantCounterpartySplitRow]
 
@@ -64,12 +63,12 @@ class AdminParticipantRank(BaseModel):
     rank: int
     n: int
     percentile: float
-    net: Decimal
+    net: PlainDecimal
 
 
 class AdminParticipantCapacitySide(BaseModel):
-    limit: Decimal
-    used: Decimal
+    limit: PlainDecimal
+    used: PlainDecimal
     pct: float
 
 

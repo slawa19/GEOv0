@@ -20,6 +20,7 @@ from app.db.models.equivalent import Equivalent
 from app.schemas.payment import CapacityResponse, MaxFlowResponse, MaxFlowPath
 from app.config import settings
 from app.utils.metrics import ROUTING_FAILURES_TOTAL
+from app.utils.money import to_money_str
 from app.utils.validation import floor_to_step, money_step, validate_equivalent_code
 from app.utils.exceptions import BadRequestException, TimeoutException
 
@@ -557,11 +558,17 @@ class PaymentRouter:
         
         return CapacityResponse(
             can_pay=can_pay,
-            max_amount=str(amount) if can_pay else "0", # Circular in MVP; use /max-flow for estimate
+            # Circular in MVP; use /max-flow for estimate. 029 F-029-5: in the equivalent's step.
+            max_amount=self._money(amount if can_pay else Decimal("0")),
             routes_count=len(routes),
             estimated_hops=(len(routes[0][0]) - 1) if routes else 0,
         )
     
+    def _money(self, value: Decimal) -> str:
+        """029 F-029-5: a capacity as the line's `available` is written - the step of the graph's equivalent."""
+
+        return to_money_str(value, self.precision or 0)
+
     def calculate_max_flow(self, from_pid: str, to_pid: str) -> MaxFlowResponse:
         """
         Edmonds-Karp or similar to find max flow.
@@ -608,7 +615,7 @@ class PaymentRouter:
                 
             path, flow = path_found
             max_flow += flow
-            paths.append(MaxFlowPath(path=path, capacity=str(flow)))
+            paths.append(MaxFlowPath(path=path, capacity=self._money(flow)))
             
             # Update residuals
             for i in range(len(path) - 1):
@@ -631,7 +638,7 @@ class PaymentRouter:
         include_metadata = settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED
 
         return MaxFlowResponse(
-            max_amount=str(max_flow),
+            max_amount=self._money(max_flow),
             paths=paths if include_metadata else [],
             bottlenecks=[],
             algorithm="Edmonds-Karp (BFS)",

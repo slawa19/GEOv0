@@ -111,11 +111,11 @@ async def test_create_update_close_answer_and_publish_as_before(client, stand) -
     body = created.json()
     trustline_id = body.pop("trustline_id")
     assert trustline_id
-    assert body == {"ok": True, "from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "limit": "10", "client_action_id": "c1"}
+    assert body == {"ok": True, "from_pid": "alice", "to_pid": "bob", "equivalent": "UAH", "limit": "10.00", "client_action_id": "c1"}
     [event] = _Recorder.events
     assert (event["run_id"], event["equivalent"], event["reason"]) == ("wire-run", "UAH", "interact.trustline_create")
     payload = event["payload"]
-    assert payload["added_edges"] == [{"from_pid": "alice", "to_pid": "bob", "equivalent_code": "UAH", "limit": "10"}]
+    assert payload["added_edges"] == [{"from_pid": "alice", "to_pid": "bob", "equivalent_code": "UAH", "limit": "10.00"}]  # 029 F-029-5: the equivalent step; the event shape is unchanged
     assert payload.get("removed_edges") in (None, [])
     assert payload["node_patch"] is None
     assert [(p["source"], p["target"]) for p in payload["edge_patch"]] == [("alice", "bob")]
@@ -130,8 +130,8 @@ async def test_create_update_close_answer_and_publish_as_before(client, stand) -
     assert updated.json() == {
         "ok": True,
         "trustline_id": trustline_id,
-        "old_limit": "10.00000000",
-        "new_limit": "15",
+        "old_limit": "10.00",
+        "new_limit": "15.00",
         "client_action_id": "c2",
     }
     [event] = _Recorder.events
@@ -165,7 +165,7 @@ async def test_without_an_edge_patch_create_still_publishes_and_update_does_not(
     [event] = _Recorder.events
     assert event["reason"] == "interact.trustline_create"
     assert event["payload"]["edge_patch"] is None
-    assert event["payload"]["added_edges"] == [{"from_pid": "alice", "to_pid": "bob", "equivalent_code": "UAH", "limit": "10"}]
+    assert event["payload"]["added_edges"] == [{"from_pid": "alice", "to_pid": "bob", "equivalent_code": "UAH", "limit": "10.00"}]
 
     _Recorder.events.clear()
     updated = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "12"})
@@ -197,7 +197,7 @@ async def test_refusal_bodies_of_the_trust_line_actions(client, stand) -> None:
         _error(
             "USED_EXCEEDS_NEW_LIMIT",
             "Limit is below current used amount",
-            {**triple_details, "used": "7.00000000", "limit": "5"},
+            {**triple_details, "used": "7.00", "limit": "5.00"},
         ),
     )
 

@@ -21,12 +21,12 @@ from httpx import AsyncClient
 from nacl.signing import SigningKey
 
 from app.config import settings
+from app.utils.exceptions import RoutingException
 from tests.conftest import MODE_B
 from tests.integration.test_p011_money_is_a_decimal_string_on_the_wire import money_scenario  # noqa: F401 (fixture)
 from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_close_request,
-    register_and_login,
 )
 
 _EXPONENT = re.compile(r"^-?\d+(\.\d+)?[eE][+-]?\d+$")
@@ -121,18 +121,8 @@ async def test_not_found_is_e009_and_only_routing_answers_e001(client: AsyncClie
     assert missing.json()["error"]["code"] == "E009", missing.text
     assert missing.json()["error"]["message"] == "Trustline not found"
 
-    # Positive control: a routing refusal still answers E001.
-    carol = await register_and_login(client, "Carol_P029_NoRoute")
-    tx_id = str(uuid.uuid4())
-    refused = await client.post("/api/v1/payments", headers=alice["headers"], json={
-        "tx_id": tx_id, "to": carol["pid"], "equivalent": "USD", "amount": "1.00",
-        "signature": _sign_payment_request(
-            signing_key=SigningKey(base64.b64decode(alice["priv"])), tx_id=tx_id, from_pid=alice["pid"],
-            to_pid=carol["pid"], equivalent="USD", amount="1.00"),
-    })
-    assert refused.status_code == 400, refused.text
-    assert refused.json()["error"]["code"] == "E001", refused.text
-    assert refused.json()["error"]["details"]["reason"] == "no_route", refused.text
+    # `E001` stays the routing code (its real-path control: `tests/unit/test_p1_payment_run_perimeter.py`).
+    assert (RoutingException().code, RoutingException(insufficient_capacity=True).code) == ("E001", "E002")
 
 
 @MODE_B
@@ -143,7 +133,7 @@ async def test_the_admin_api_never_writes_an_exponent(client: AsyncClient, money
     await _request_close(client, money_scenario)  # a live line with limit zero, and zero-valued sums
     admin = {"X-Admin-Token": settings.ADMIN_TOKEN}
     bob_pid = money_scenario["bob"]["pid"]
-    seen = 0
+    seen, hits = 0, []
     for path, params in (
         ("/api/v1/admin/trustlines", {}),
         ("/api/v1/admin/graph/snapshot", {}),
@@ -152,7 +142,8 @@ async def test_the_admin_api_never_writes_an_exponent(client: AsyncClient, money
     ):
         response = await client.get(path, headers=admin, params=params)
         assert response.status_code == 200, (path, response.text)
-        assert _exponent_strings(response.json()) == [], path
+        hits += [(path, *hit) for hit in _exponent_strings(response.json())]
         seen += '"0.00000000"' in response.text or '"0"' in response.text
+    assert hits == []
     assert _exponent_strings({"a": [{"limit": "0E-8"}]}) == [("$.a[0].limit", "0E-8")]  # the scanner can fail
     assert seen, "anti-vacuum: no Admin answer carried a zero amount, so the measurement saw nothing"

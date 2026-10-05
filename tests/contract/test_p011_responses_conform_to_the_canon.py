@@ -236,15 +236,15 @@ UNVALIDATED_2XX_ALLOWANCE: dict[str, Allowance] = {
         "declared-with-no-json-media-type "
         "GET /simulator/runs/{run_id}/artifacts/{name} 200"
     ): Allowance(
-        media_types=("text/plain", "application/zip", "application/x-zip-compressed"),
+        media_types=("application/x-ndjson", "application/zip"),
         reason=(
             "the two artifacts this suite really downloads, and neither has a JSON body. "
-            "`events.ndjson` arrives as `text/plain` (mimetypes knows no `.ndjson`, so the "
-            "`FileResponse` at app/api/v1/simulator.py:2938 falls back) and `bundle.zip` as "
-            "`application/zip` or `application/x-zip-compressed` depending on the host's "
-            "mimetypes database. All three are now DECLARED in the canon for this operation, so "
+            "INTENTIONAL, 029 F-029-7 (2026-10-05): the handler now passes the media type the "
+            "artifacts index names, so `events.ndjson` arrives as `application/x-ndjson` (was "
+            "`text/plain`) and `bundle.zip` as `application/zip` on every host (was that or "
+            "`application/x-zip-compressed`). Both are DECLARED in the canon for this operation, so "
             "this row means what it says: the canon describes the media type that arrived, and "
-            "that media type has no schema to validate against. What it no longer covers is the "
+            "that media type has no schema to validate against. What it does not cover is the "
             "rest of the route: `status.json`, `summary.json` and `last_tick.json` arrive as "
             "`application/json`, the canon declares that too, and their bodies are VALIDATED. "
             "A JSON body can no longer reach this row - the engine will not put it here and "

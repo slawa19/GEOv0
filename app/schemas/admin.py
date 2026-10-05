@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.types import StrictInt
 
-from app.schemas.trustline import TrustLine as TrustLineSchema
+from app.schemas.trustline import PlainDecimal, TrustLine as TrustLineSchema
 
 
 class AdminConfigItem(BaseModel):
@@ -163,7 +162,7 @@ class AdminTrustLinesBottlenecksResponse(BaseModel):
 class AdminLiquidityNetRow(BaseModel):
     pid: str
     display_name: str
-    net: Decimal
+    net: PlainDecimal
 
 
 class AdminLiquiditySummaryResponse(BaseModel):
@@ -176,9 +175,9 @@ class AdminLiquiditySummaryResponse(BaseModel):
     incidents_over_sla: StrictInt = Field(0, ge=0)
 
     # 028 F-028-37 (owner В-3): null without an equivalent - money is never summed across them.
-    total_limit: Optional[Decimal] = None
-    total_used: Optional[Decimal] = None
-    total_available: Optional[Decimal] = None
+    total_limit: Optional[PlainDecimal] = None
+    total_used: Optional[PlainDecimal] = None
+    total_available: Optional[PlainDecimal] = None
 
     top_creditors: list[AdminLiquidityNetRow] = Field(default_factory=list)
     top_debtors: list[AdminLiquidityNetRow] = Field(default_factory=list)

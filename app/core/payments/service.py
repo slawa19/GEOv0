@@ -1822,9 +1822,10 @@ class PaymentService:
                         insufficient_capacity=True,
                         details={
                             "reason": "insufficient_capacity",
-                            "available": str(available),
-                            "needed": str(route_amount),
-                            "reserved": str(reserved),
+                            # 029 F-029-5: the equivalent's step, as `max_available` of the routing refusal.
+                            "available": to_money_str(available, precision),
+                            "needed": to_money_str(route_amount, precision),
+                            "reserved": to_money_str(reserved, precision),
                             "from": sender_pid,
                             "to": receiver_pid,
                         },
