@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.debt import Debt
@@ -159,12 +160,16 @@ async def compute_and_store_integrity_checkpoints(session: AsyncSession) -> int:
             session.add(cp)
             written.append(cp)
         await session.flush()
-        await session.execute(
-            delete(IntegrityCheckpoint).where(
-                IntegrityCheckpoint.created_at < datetime.now(timezone.utc) - INTEGRITY_CHECKPOINT_TTL,
-                IntegrityCheckpoint.id.notin_([cp.id for cp in written]),
-            )
-        )
+        try:  # a failed cleanup must not undo the checkpoints just written (AGENTS.md section 12): own savepoint
+            async with session.begin_nested():
+                await session.execute(
+                    delete(IntegrityCheckpoint).where(
+                        IntegrityCheckpoint.created_at < datetime.now(timezone.utc) - INTEGRITY_CHECKPOINT_TTL,
+                        IntegrityCheckpoint.id.notin_([cp.id for cp in written]),
+                    )
+                )
+        except SQLAlchemyError:
+            logger.error("integrity.checkpoint_cleanup_failed", exc_info=True)
         await session.commit()
         return len(written)
     except BaseException:
