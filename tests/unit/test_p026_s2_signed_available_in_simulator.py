@@ -45,7 +45,7 @@ async def test_update_below_used_is_accepted_and_every_projection_is_signed(clie
 
     r = await _post(client, "trustline-update", {**TRIPLE, "new_limit": "5"})
     require_target(r.status_code == 200, f"Interact update 10 -> 5 below used 7 was refused: {r.status_code} {r.text}")
-    assert (r.json()["old_limit"], r.json()["new_limit"]) == ("10.00000000", "5")
+    assert (r.json()["old_limit"], r.json()["new_limit"]) == ("10.00", "5.00")  # 029 F-029-5
 
     [event] = _Recorder.events
     [patch] = event["payload"]["edge_patch"]
