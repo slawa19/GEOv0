@@ -164,3 +164,51 @@ async def test_f030_9_the_simulator_seeder_baselines_a_new_equivalent_and_leaves
     counts = await run_scheduled_reconciliation(factory, equivalent_ids=[ids[new_code], ids[old_code]])
     assert counts[PASSED] == 1 and counts[UNVERIFIABLE] == 1 and counts["error"] == 0, counts
     assert (await _latest(factory, ids[new_code])).status == PASSED
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_t3091_an_error_on_one_equivalent_warns_only_that_one_and_a_restart_is_not_healthy(
+    client, db_session, monkeypatch
+) -> None:
+    """§15 `T3091`, findings 2 and 1. A verifier error on A: A `warning`, fresh B `healthy` (MUTATION: one
+    process-wide flag again - B `warning`, red). After a restart, until the startup run records a result, nothing
+    is verified in this process: `warning`, not `healthy` (MUTATION: drop the `starting` branch - red)."""
+
+    import asyncio
+
+    from app.main import app as main_app
+    from app.utils.background_jobs import _start_supervised_background_task
+
+    factory = sessionmaker_of(db_session)
+    monkeypatch.setattr(main_app.state, "background_jobs", {}, raising=False)
+    a, b = await _baselined(factory, "P30TA"), await _baselined(factory, "P30TB")
+
+    async def statuses() -> dict:
+        response = await client.get("/api/v1/integrity/summary", headers=ADMIN)
+        assert response.status_code == 200, response.text
+        return {i["equivalent"]: i["status"] for i in response.json()["equivalents"]}
+
+    original = reconciliation.verify_journal_equals_change
+
+    async def verify(session, equivalent_id):
+        if equivalent_id == a:
+            raise RuntimeError("p030 T3091: the verifier fails on A only")
+        return await original(session, equivalent_id)
+
+    await maintenance_jobs._run_integrity_checkpoints_once(main_app, reason="periodic")
+    with monkeypatch.context() as scoped:
+        scoped.setattr(reconciliation, "verify_journal_equals_change", verify)
+        await maintenance_jobs._run_integrity_checkpoints_once(main_app, reason="periodic")
+    assert main_app.state.background_jobs["integrity"]["status"] == "failed"
+    assert await statuses() == {"P30TA": "warning", "P30TB": "healthy"}
+
+    await maintenance_jobs._run_integrity_checkpoints_once(main_app, reason="periodic")
+    assert await statuses() == {"P30TA": "healthy", "P30TB": "healthy"}, "control: the clean run"
+
+    started = asyncio.Event()
+    task = _start_supervised_background_task(main_app, name="integrity", coroutine_factory=started.wait)
+    assert main_app.state.background_jobs["integrity"]["status"] == "starting"
+    assert await statuses() == {"P30TA": "warning", "P30TB": "warning"}
+    started.set()
+    await task
