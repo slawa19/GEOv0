@@ -4,13 +4,12 @@ import process from 'node:process'
 
 const repoRoot = path.resolve(process.cwd(), '..')
 const defaultCanonicalV1Dir = path.join(repoRoot, 'admin-fixtures', 'v1')
-const defaultCanonicalDir = path.join(repoRoot, 'admin-fixtures', 'v1', 'datasets')
 const defaultPublicV1Dir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1')
-const defaultPublicDir = path.join(process.cwd(), 'public', 'admin-fixtures', 'v1', 'datasets')
 
 function parseArgs(argv) {
   const out = {
     v1Dir: null,
+    publicV1Dir: null,
     onlyPack: false,
   }
 
@@ -22,6 +21,12 @@ function parseArgs(argv) {
       const v = argv[i + 1]
       if (!v) throw new Error('Missing value for --v1-dir')
       out.v1Dir = path.resolve(process.cwd(), v)
+      i += 1
+    } else if (a === '--public-v1-dir') {
+      // With --v1-dir (and without --only-pack): the full canonical-vs-public check on two other trees, for tests.
+      const v = argv[i + 1]
+      if (!v) throw new Error('Missing value for --public-v1-dir')
+      out.publicV1Dir = path.resolve(process.cwd(), v)
       i += 1
     } else if (typeof a === 'string' && a.length > 0 && !a.startsWith('-')) {
       // Convenience / robustness: allow passing a v1 dir as positional arg.
@@ -498,10 +503,10 @@ async function main() {
     return
   }
 
-  const canonicalV1Dir = defaultCanonicalV1Dir
-  const canonicalDir = defaultCanonicalDir
-  const publicV1Dir = defaultPublicV1Dir
-  const publicDir = defaultPublicDir
+  const canonicalV1Dir = opts.v1Dir ?? defaultCanonicalV1Dir
+  const canonicalDir = path.join(canonicalV1Dir, 'datasets')
+  const publicV1Dir = opts.publicV1Dir ?? defaultPublicV1Dir
+  const publicDir = path.join(publicV1Dir, 'datasets')
 
   const canonicalMeta = await readJson(path.join(canonicalV1Dir, '_meta.json'))
   const publicMeta = await readJson(path.join(publicV1Dir, '_meta.json'))
