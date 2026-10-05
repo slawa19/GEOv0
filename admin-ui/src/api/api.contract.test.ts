@@ -4,6 +4,12 @@ import type { ClearingCycles, GraphSnapshot } from '../types/domain'
 import { mockApi, __resetMockApiForTests } from './mockApi'
 import { realApi } from './realApi'
 
+// The schema-drift tests below make realApi reject on purpose, and a rejection calls toastApiError, which mounts a real
+// ElMessage. Its transition runs on a later animation frame - inside whichever test is running by then; the test that
+// stubs `window` with a spread copy has no getComputedStyle, and a shuffled order throws it as an unhandled error
+// (029 F-029-15). The toast is not what these tests check, so it does not get to outlive them.
+vi.mock('./errorToast', () => ({ toastApiError: vi.fn(async () => {}) }))
+
 function jsonResponse(obj: unknown): Response {
   return new Response(JSON.stringify(obj), { status: 200, statusText: 'OK', headers: { 'Content-Type': 'application/json' } })
 }
