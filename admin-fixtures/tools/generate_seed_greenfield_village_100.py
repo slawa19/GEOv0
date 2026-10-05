@@ -638,7 +638,6 @@ def build_transactions(
                 continue
 
             # Derive participants from edges.
-            initiator = str(cycle[0].get("debtor") or pick_pid(clearing_idx, 9))
             clear_amount = str(cycle[0].get("amount") or "1.00")
 
             created_at = BASE_TS - timedelta(days=(clearing_idx % 60), hours=(clearing_idx % 12), minutes=(clearing_idx * 19) % 60)
@@ -665,7 +664,7 @@ def build_transactions(
                     "tx_id": tx_id,
                     "idempotency_key": None,
                     "type": "CLEARING",
-                    "initiator_pid": initiator,
+                    "initiator_pid": None,  # 028 F-028-45: a clearing records no initiator
                     "payload": {
                         "cycle": [f"debt_{clearing_idx:04d}_{j:02d}" for j in range(len(edges_payload))],
                         "amount": clear_amount,

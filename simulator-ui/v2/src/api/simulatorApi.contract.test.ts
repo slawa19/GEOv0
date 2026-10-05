@@ -208,8 +208,8 @@ const uncheckedActionCases = [
     payload: {
       ok: true,
       trustline_id: 'tl-1',
-      old_limit: '100.00000000',
-      new_limit: '125.00000000',
+      old_limit: '100.00',
+      new_limit: '125.00',
       client_action_id: null,
     },
     call: () =>
@@ -266,10 +266,10 @@ const uncheckedActionCases = [
           to_pid: 'bob',
           to_name: 'Bob',
           equivalent: 'UAH',
-          limit: '100.00000000',
-          used: '5.00000000',
-          reverse_used: '0',
-          available: '95.00000000',
+          limit: '100.00',
+          used: '5.00',
+          reverse_used: '0.00',
+          available: '95.00',
           status: 'active',
           close_requested_at: '2026-10-02T08:00:00Z',
         },
@@ -279,7 +279,7 @@ const uncheckedActionCases = [
   },
   {
     label: 'payment-targets',
-    payload: { items: [{ to_pid: 'bob', hops: 2, max_available: '95.00000000' }] },
+    payload: { items: [{ to_pid: 'bob', hops: 2, max_available: '95.00' }] },
     call: () => getPaymentTargets(cfg, 'run-1', 'UAH', 'alice'),
   },
 ] as const

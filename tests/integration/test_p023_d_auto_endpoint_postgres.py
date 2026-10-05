@@ -105,6 +105,8 @@ async def test_a_complete_pass_answers_the_exact_committed_progress_shape(db_ses
         # Money: exact decimal strings; V_edge = Σ|C|·c = 3·2 + 3·3, V_cyc = Σc = 2 + 3.
         and all(isinstance(body[key], str) for key in ("v_edge", "v_cyc", "remaining_v_edge"))
         and (Decimal(body["v_edge"]), Decimal(body["v_cyc"])) == (Decimal(15), Decimal(5))
+        # 029 F-029-5, matrix row 7: this report keeps scale 8 - the named exception to the step spelling.
+        and (body["v_edge"], body["v_cyc"], body["remaining_v_edge"]) == ("15.00000000", "5.00000000", "0.00000000")
         and body["remaining_cycles"] == 0
         and Decimal(body["remaining_v_edge"]) == 0
     )

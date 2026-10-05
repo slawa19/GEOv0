@@ -974,8 +974,8 @@ describe('F-013-R5: a notice for every caveat on screen, and none without one', 
    * не переживёт переписывания блока на другую форму вызова. Осознанная цена — до тех пор, пока
    * шаблон нельзя проверить поведением, не заводя рендер-тест на две карточки сразу.
    */
-  it('sentinel: both cards render the notices from the one helper, with no conditions of their own', () => {
-    const FILES = ['src/pages/graph/GraphAnalyticsDrawer.vue', 'src/pages/graph/tabs/RiskTab.vue']
+  it('sentinel: the card renders the notices from the one helper, with no conditions of their own', () => {
+    const FILES = ['src/pages/graph/GraphAnalyticsDrawer.vue'] // 029 F-029-16: tabs/RiskTab.vue, the second copy, is deleted
     for (const file of FILES) {
       const source = readFileSync(resolve(process.cwd(), file), 'utf8')
       expect(

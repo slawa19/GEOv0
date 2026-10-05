@@ -105,7 +105,9 @@ async def test_every_refusal_before_admission_names_its_reason(client, db_sessio
     assert seen["no_route"]["details"]["max_available"] == "0.00", seen["no_route"]
     assert seen["insufficient_capacity"]["details"]["max_available"] == "90.00", seen["insufficient_capacity"]
     assert seen["busy"]["details"].get("retryable") is True and "lock_key" not in seen["busy"]["details"], seen
-    assert seen["no_route"]["code"] == "E002" and seen["other"]["code"] == "E009", seen
+    # INTENTIONAL, 029 S2 (§15 review `T2992` #4): `no_route` answers `E001`; it was `E002` beside that reason.
+    assert seen["no_route"]["code"] == "E001" and seen["other"]["code"] == "E009", seen
+    assert seen["insufficient_capacity"]["code"] == "E002", seen
 
     reached = set(seen) | REACHED_ELSEWHERE | {"timeout", "policy", "participant_suspended"}  # the admitted test
     assert reached == set(PAYMENT_REFUSAL_REASONS), (reached ^ set(PAYMENT_REFUSAL_REASONS))

@@ -1404,6 +1404,11 @@ class PaymentService:
                     # A cached graph may understate a capacity freed since (no money commit drops it): one
                     # re-route on a fresh graph is `pay()`'s to take (027 stage 1); a fresh "no route" is final.
                     attempt.reroutable = self.router.from_cache
+                    # 028 `F-028-42`: how much this payer can send the payee now, for the client's text (owner В-6).
+                    available = Decimal((await asyncio.to_thread(
+                        self.router.calculate_max_flow, sender_pid, receiver_pid)).max_amount)
+                    # §15 review `T2992`: code, reason and the metric label agree - nothing can be sent is `E001`.
+                    reason = "insufficient_capacity" if available > 0 else "no_route"
                     try:
                         from app.utils.metrics import (
                             PAYMENT_EVENTS_TOTAL,
@@ -1413,19 +1418,13 @@ class PaymentService:
                         PAYMENT_EVENTS_TOTAL.labels(
                             event="create", result="routing_failed"
                         ).inc()
-                        ROUTING_FAILURES_TOTAL.labels(
-                            reason="insufficient_capacity"
-                        ).inc()
+                        ROUTING_FAILURES_TOTAL.labels(reason=reason).inc()
                     except Exception:
                         pass
-                    # 028 `F-028-42`: how much this payer can send the payee now, for the client's text (owner В-6).
-                    available = Decimal((await asyncio.to_thread(
-                        self.router.calculate_max_flow, sender_pid, receiver_pid)).max_amount)
                     raise RoutingException(
                         "No route found with sufficient capacity",
-                        insufficient_capacity=True,
-                        details={"reason": "insufficient_capacity" if available > 0 else "no_route",
-                                 "max_available": to_money_str(available, equivalent_precision)},
+                        insufficient_capacity=available > 0,
+                        details={"reason": reason, "max_available": to_money_str(available, equivalent_precision)},
                     )
 
                 # Postcondition, and not a formality: the narrowing above and this check
@@ -1822,9 +1821,10 @@ class PaymentService:
                         insufficient_capacity=True,
                         details={
                             "reason": "insufficient_capacity",
-                            "available": str(available),
-                            "needed": str(route_amount),
-                            "reserved": str(reserved),
+                            # 029 F-029-5: the equivalent's step, as `max_available` of the routing refusal.
+                            "available": to_money_str(available, precision),
+                            "needed": to_money_str(route_amount, precision),
+                            "reserved": to_money_str(reserved, precision),
                             "from": sender_pid,
                             "to": receiver_pid,
                         },

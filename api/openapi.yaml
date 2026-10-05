@@ -2092,38 +2092,23 @@ paths:
         - $ref: '#/components/parameters/ArtifactNamePath'
       responses:
         '200':
-          # 011/T1110 (2026-08-24): this declared ONE media type, `application/octet-stream`, for
-          # an operation that is not binary and never sends that type at all. The handler
-          # (app/api/v1/simulator.py:2938) is `return FileResponse(path)` with no `media_type`, so
-          # starlette sets it from `mimetypes.guess_type(name)` with `text/plain` as the fallback,
-          # and `get_artifact_path` (app/core/simulator/artifacts.py:189) serves any file in the
-          # run's artifacts directory. Everything the application writes there is listed below,
-          # with the writer and the media type each one really arrives under - measured by driving
-          # real `FileResponse` objects, not read off the helper.
+          # 029 F-029-7 (2026-10-05): the handler passes `media_type=artifact_content_type(name)`
+          # (app/core/simulator/helpers.py), the very function the artifacts INDEX takes
+          # `ArtifactItem.content_type` from, so the download and the index name one type:
           #
-          #   status.json     artifacts.py:67 (init) and :343 (finalize)   application/json
-          #   summary.json    artifacts.py:344                             application/json
-          #   last_tick.json  artifacts.py:64 (init) and :361 (real tick)  application/json
-          #   events.ndjson   artifacts.py:84, appended by the writer loop text/plain
-          #   bundle.zip      artifacts.py:333 (on stop)                   application/zip
-          #                                                                or application/x-zip-compressed
+          #   status.json, summary.json, last_tick.json   application/json
+          #   events.ndjson                                application/x-ndjson
+          #   bundle.zip                                   application/zip
           #
-          # Two of those deserve saying out loud, because they are the service disagreeing with
-          # itself and the canon's job is to report that rather than tidy it away:
-          #
-          # * `events.ndjson` arrives as `text/plain`. `mimetypes` knows no `.ndjson`, so
-          #   starlette falls back. The artifacts INDEX advertises `application/x-ndjson` for the
-          #   same file (app/core/simulator/helpers.py:8, surfaced through ArtifactItem.content_type),
-          #   so the index and the download do not agree. Declaring `application/x-ndjson` here
-          #   would describe the index instead of this operation.
-          # * `bundle.zip` arrives as `application/zip` or `application/x-zip-compressed`
-          #   depending on the host's mimetypes database - the latter is what a Windows registry
-          #   lookup returns, and it is what this repository's own test run produced. Both are
-          #   declared because both really occur; the handler passing an explicit `media_type`
-          #   would remove the fork, and that is an application change, not a canon one.
+          # History (011/T1110, 2026-08-24): with no `media_type` starlette guessed from the file
+          # name - `events.ndjson` arrived as `text/plain` against the index's
+          # `application/x-ndjson`, and `bundle.zip` as `application/zip` or
+          # `application/x-zip-compressed` depending on the host's mimetypes database. Both forks
+          # are gone. A file with another extension (the application writes none) would still get
+          # starlette's guess.
           description: |
-            Artifact content. The media type follows the artifact's file name, because the
-            handler returns a `FileResponse` with no explicit `media_type`.
+            Artifact content, under the media type the artifacts index names for it
+            (`ArtifactItem.content_type`).
           content:
             # status.json, summary.json and last_tick.json - and `oneOf` rather than
             # `type: object`, because "some object" is exactly the thing
@@ -2145,15 +2130,11 @@ paths:
                   - $ref: '#/components/schemas/RunStatus'
                   - $ref: '#/components/schemas/SimulatorArtifactSummary'
                   - $ref: '#/components/schemas/SimulatorArtifactLastTick'
-            # events.ndjson, and any artifact whose extension mimetypes cannot guess.
-            text/plain:
+            # events.ndjson: one JSON document per line.
+            application/x-ndjson:
               schema:
                 type: string
             application/zip:
-              schema:
-                type: string
-                format: binary
-            application/x-zip-compressed:
               schema:
                 type: string
                 format: binary
@@ -3722,6 +3703,7 @@ components:
                   detail:
                     type: string
     NotFound:
+      # 029 F-029-6: `error.code` is `E009`. `E001` means a routing refusal and is never a 404.
       description: Not found
       content:
         application/json:
@@ -3812,6 +3794,10 @@ components:
     # Interact Mode control plane payloads (011/T1101, added 2026-08-23).
     # Money-carrying fields (limit, used, available, amount, cleared amounts) are exact
     # decimal strings, per AGENTS.md section 8 - never floats.
+    # 029 F-029-5: a STATE amount in a response or in `details` (limit, old_limit, new_limit, used,
+    # reverse_used, cleared amounts, partial_cleared_amount, max_available) is written in the
+    # equivalent's step - at least `precision` fraction digits, as the run snapshot writes it. A request
+    # amount is echoed as sent. `remaining_v_edge` keeps scale 8, as in `ClearingAutoResponse`.
     SimulatorActionTrustlineCreateRequest:
       type: object
       additionalProperties: false
@@ -4327,9 +4313,13 @@ components:
             - type: boolean
             - type: integer
         mutable:
-          # All twelve are currently mutable; the flag is per item so a read-only setting can join
-          # the list without a schema change.
+          # 029 `F-029-4` (stage S1): six of the twelve are mutable - RATE_LIMIT_ENABLED, ROUTING_MAX_HOPS,
+          # ROUTING_MAX_PATHS, FEATURE_FLAGS_MULTIPATH_ENABLED, FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
+          # CLEARING_ENABLED. The other six are listed read-only: a runtime change would not do what the key says.
           type: boolean
+          description: >-
+            Whether `PATCH /admin/config` accepts this key. A key with `mutable: false` is refused there
+            (400 `E009`, "Config key not mutable").
 
     AdminConfigResponse:
       type: object
@@ -4602,10 +4592,11 @@ components:
                 type: string
         created_at:
           # Deliberately NOT `format: date-time` - see `F-011-9`. These values are copied raw from
-          # the column into a list[Any] field, so the UTC-attaching validator never runs, and
-          # under SQLite they carry no offset. The same row served by GET /admin/incidents does
-          # carry one. Declaring a format the service does not guarantee is the defect this
-          # program exists to remove.
+          # the column into a list[Any] field, so the UTC-attaching validator never runs. The same
+          # row served by GET /admin/incidents goes through it. Declaring a format the service does
+          # not guarantee is the defect this program exists to remove. (The offset-less value was
+          # observed in 011 on an engine the service no longer supports; the columns are
+          # `timezone=True` and PostgreSQL returns them aware - not re-measured here, 029 F-029-9.)
           type: string
         updated_at:
           type: string
@@ -4715,10 +4706,11 @@ components:
       # keys, but served through the graph reads - and one field differs on the wire.
       # `_graph_fetch_incidents` puts `tx.created_at` into a plain dict (app/api/v1/admin.py:217)
       # which lands in a `list[Any]` field (app/schemas/graph.py:39), so the UTC-attaching
-      # validator on AdminIncidentItem never runs. Under SQLite the column comes back naive and
-      # the value goes out with no offset, while GET /admin/incidents serves the same row with a
-      # trailing Z. Proved by running the production models on one naive datetime: the item model
-      # yields `2026-08-23T12:00:00Z`, the graph response `2026-08-23T12:00:00`.
+      # validator on AdminIncidentItem never runs. For a NAIVE datetime the production models
+      # differ: the item model yields `2026-08-23T12:00:00Z`, the graph response
+      # `2026-08-23T12:00:00` (proved in 011 by running both on one naive value). PostgreSQL, the
+      # only engine (017), returns this `timezone=True` column aware; the naive case was the old
+      # second engine's and is not re-measured (029 F-029-9).
       #
       # Hence no `format: date-time` here. Declaring one would make authority number one promise
       # something the service does not deliver, which is the defect this programme removes. The
@@ -4880,7 +4872,7 @@ components:
           required: [dialect, reachable, latency_ms]
           properties:
             dialect:
-              # SQLAlchemy backend name, e.g. `sqlite` or `postgresql`.
+              # SQLAlchemy backend name: `postgresql`, the only engine since 017.
               type: string
             reachable:
               type: boolean
@@ -5435,7 +5427,9 @@ components:
           description: >-
             The creditor's trust in the debtor (decimal string): the ceiling the debt may GROW to. It may be
             below `used` - lowering trust below the current debt is accepted (026 `T2602`); the debt above it
-            cannot grow and can still be repaid.
+            cannot grow and can still be repaid. 029 F-029-5: `limit`, `used` and `available` are written in
+            the equivalent's step (at least `precision` fraction digits, as `/balance`) on the participant
+            routes; the Admin reads keep the stored scale 8. Never exponent notation.
         used:
           type: string
           description: Current debt against this line (decimal string)
@@ -5445,7 +5439,7 @@ components:
             Unused trust, `limit - used`, a SIGNED decimal string. Negative when the limit was lowered below the
             current debt: the debt's excess over trust, not an amount that can be paid. Not the payment capacity
             of the pair, which also counts the reverse debt.
-          example: '-30.00000000'
+          example: '-30.00'
         policy:
           type: object
           additionalProperties: true
@@ -5697,6 +5691,8 @@ components:
 
     # Programme 023 slice (d), decision R3 (2026-09-28): every field present, nullable ones as an explicit null.
     # Money is an exact decimal string (scale 8, no exponent); atoms stay inside the hub.
+    # 029 F-029-5: this operator report is the named exception to "a state amount is written in the
+    # equivalent's step" - decision R3 stands; the values are multiples of the step.
     ClearingAutoResponse:
       type: object
       required: [equivalent, cleared_cycles, status, reason, v_edge, v_cyc, remaining_cycles, remaining_v_edge, committed, error]
@@ -5788,6 +5784,8 @@ components:
           type: string
 
 
+    # 029 F-029-5: `max_amount` and `MaxFlowPath.capacity` are written in the equivalent's step - the same string
+    # as the `available` of a line that is the whole capacity.
     CapacityResponse:
       type: object
       required: [can_pay, max_amount, routes_count, estimated_hops]
@@ -5982,6 +5980,8 @@ components:
         max_available:
           # `no_route` / `insufficient_capacity` found by routing: what the payer can send the payee now (the
           # max-flow of `GET /payments/max-flow`), at the equivalent's precision. `"0.00"`-like for `no_route`.
+          # 029 S2: the code agrees with the reason - `no_route` is `E001`, `insufficient_capacity` is `E002`
+          # (a `no_route` refusal stored before 2026-10-05 replays with the `E002` it was stored with).
           type: string
         retryable:
           # `busy`: the same request may be sent again.
@@ -5994,6 +5994,7 @@ components:
         # check's `drifts`) or an internal id (the Redis lock key) never reaches a participant (§15 review `T2899.4`).
         conflict_kind: {type: string}
         path: {type: array, items: {type: string}}
+        # 029 F-029-5: these three in the equivalent's step, as `max_available`; a STORED refusal replays verbatim.
         available: {type: string}
         needed: {type: string}
         reserved: {type: string}
@@ -7204,6 +7205,7 @@ components:
           type: integer
           nullable: true
         cleared_amount:
+          # 029 F-029-5: in the equivalent's step from every producer (the Interact route wrote scale 8).
           type: string
           nullable: true
         cycle_edges:
@@ -7898,7 +7900,8 @@ components:
     # 011/T1102 (2026-08-23): the five remaining admin reads, whose 200 bodies the canon declared
     # as a bare object. Every key below was read off the response models (app/schemas/admin.py,
     # app/schemas/metrics.py, app/schemas/trustline.py) AND observed on the wire by calling the
-    # five routes against a seeded SQLite database.
+    # five routes against a seeded database (historical: 2026-08-23, on the second engine the
+    # tier ran then; not re-observed on PostgreSQL by 029).
     #
     # A note that applies to all of them: none of these routes sets response_model_exclude_none or
     # response_model_exclude_unset, so FastAPI emits EVERY declared field on every response. A

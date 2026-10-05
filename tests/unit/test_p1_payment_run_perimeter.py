@@ -62,8 +62,7 @@ def _register_run(monkeypatch, *, run_id: str, pids: list[str]):
         "trustlines": [],
     }
     monkeypatch.setitem(simulator_module.runtime._runs, run_id, run)
-    # `_topology_cache` has no TTL and no autouse reset, so a neighbouring test's topology
-    # would otherwise decide NO_ROUTE vs INSUFFICIENT_CAPACITY here.
+    # A neighbouring test's cached routing graph must not decide this one.
     PaymentRouter.invalidate_cache()
     return simulator_module
 

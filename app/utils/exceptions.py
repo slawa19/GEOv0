@@ -56,7 +56,9 @@ class UnauthorizedException(GeoException):
 
 class NotFoundException(GeoException):
     def __init__(self, message: str | None = None, *, details: Optional[dict[str, Any]] = None):
-        super().__init__(message or "Not Found", code=ErrorCode.E001, details=details, status_code=404)
+        # 029 F-029-6: `E009`, not `E001` - that code means a routing refusal (`RoutingException`), and a client
+        # telling refusals apart by code read "participant not found" as "no route". HTTP 404 and the text stay.
+        super().__init__(message or "Not Found", code=ErrorCode.E009, details=details, status_code=404)
 
 
 class ForbiddenException(GeoException):

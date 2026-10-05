@@ -985,7 +985,8 @@ class TrustLineService:
 
         result = await self.session.execute(query)
         trustlines = result.scalars().all()
-        return [await self._hydrate_trustline(tl) for tl in trustlines]
+        # 029 F-029-5, matrix row 9: the Admin API (this method's only caller) keeps the stored scale.
+        return [await self._hydrate_trustline(tl, in_step=False) for tl in trustlines]
 
     async def count_all(
         self,
@@ -1032,7 +1033,7 @@ class TrustLineService:
 
         return int((await self.session.execute(query)).scalar_one())
 
-    async def _hydrate_trustline(self, trustline: TrustLine) -> TrustLine:
+    async def _hydrate_trustline(self, trustline: TrustLine, *, in_step: bool = True) -> TrustLine:
         state = sa_inspect(trustline)
 
         # Fetch equivalent code (avoid triggering async lazy-load)
@@ -1062,6 +1063,8 @@ class TrustLineService:
         # schema.TrustLine: equivalent_code, used, available.
         
         trustline.equivalent_code = trustline.equivalent.code
+        # 029 F-029-5: the schema writes limit/used/available in this step; None = the stored scale.
+        trustline.equivalent_precision = int(trustline.equivalent.precision) if in_step else None
         trustline.from_pid = trustline.from_participant.pid
         trustline.to_pid = trustline.to_participant.pid
         trustline.from_display_name = trustline.from_participant.display_name

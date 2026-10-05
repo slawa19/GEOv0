@@ -66,7 +66,7 @@
 
 #### 2.3.1 UAH-only realistic-v2: стратегия увеличения клиринга (routing capacity)
 В realistic-v2 мы обычно делаем `equivalents=["UAH"]`, а генератор seed-сценариев отбрасывает non-UAH trustlines.
-Это означает: если UAH-граф недостаточно связный или маршруты не могут использовать intermediates, то почти все попытки платежей будут падать как `tx.failed: ROUTING_NO_CAPACITY`, а клиринг будет редким.
+Это означает: если UAH-граф недостаточно связный или маршруты не могут использовать intermediates, то почти все попытки платежей будут падать как `tx.failed: ROUTING_NO_ROUTE` (отправить нельзя ничего: нулевой max-flow, в том числе из-за запрета посредников) или `ROUTING_NO_CAPACITY` (отправить можно, но меньше запрошенного), а клиринг будет редким. До 2026-10-05 (029 S2) оба случая приходили как `ROUTING_NO_CAPACITY`.
 
 Практическая стратегия, которая показала рост клиринга в realistic-v2:
 
@@ -92,7 +92,7 @@
 Результат зафиксирован в описании сообщества `seeds/communities/<id>/community.json`, откуда его читает генератор сценариев (`T1712`, 2026-09-21). Исходная реализация — функция `_add_extra_uah_service_links` в `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py`; она по-прежнему собирает канонические admin-фикстуры, но входом сценария больше не является.
 
 Минимальный sanity-check результата:
-- `tx_failed_by_code.ROUTING_NO_CAPACITY` должен падать (а не расти) после усиления UAH-графа.
+- сумма `tx_failed_by_code.ROUTING_NO_ROUTE + tx_failed_by_code.ROUTING_NO_CAPACITY` должна падать (а не расти) после усиления UAH-графа. Смотреть нужно оба кода вместе: появление частично доступного маршрута переводит отказ из `ROUTING_NO_ROUTE` в `ROUTING_NO_CAPACITY`, и один этот счётчик при улучшении может вырасти.
 - `cleared_amount_total` и/или `cleared_cycles_total` должны расти при сравнимых параметрах прогона.
 
 ### 2.4 Суммы в real mode

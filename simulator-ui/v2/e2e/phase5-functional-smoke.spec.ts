@@ -331,7 +331,20 @@ async function installRealMocks(
       paymentRequests.push(body)
       if (rejectNextPayment) {
         rejectNextPayment = false
-        await fulfillJson(route, 422, { code: 'NO_ROUTE', message: 'No route between selected participants' })
+        // The wire of the real `/actions/payment-real` on a routing refusal (`app/api/v1/simulator.py`, RoutingException
+        // branch): 409, the action's own code, and `details` with the payment's context and the core's machine reason.
+        await fulfillJson(route, 409, {
+          code: 'NO_ROUTE',
+          message: 'No route between selected participants',
+          details: {
+            equivalent: 'UAH',
+            from_pid: body.from_pid,
+            to_pid: body.to_pid,
+            requested: body.amount,
+            reason: 'no_route',
+            max_available: '0.00',
+          },
+        })
         return
       }
       await fulfillJson(route, 200, {
@@ -559,7 +572,10 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'bob', /Bob/)
     await page.getByLabel('Amount').fill('2.00')
     await page.getByLabel('Amount').press('Enter')
-    await expect(page.getByLabel('Error notification')).toContainText('No route between selected participants')
+    // 028 F-028-51 (T2884): a payment refusal reads as the client's text, not the server's `message`. The "(available now:
+    // 0.00 UAH)" part comes only from the answer's `details.max_available`, so this fails if the mock's `details` are lost
+    // and the text would otherwise be reached through the code alone (029 T2990, finding 4).
+    await expect(page.getByLabel('Error notification')).toContainText('No payment route between these participants (available now: 0.00 UAH).')
     await activateButton(page, 'Cancel')
     await expect(page.getByLabel('Manual payment panel')).toBeHidden()
 

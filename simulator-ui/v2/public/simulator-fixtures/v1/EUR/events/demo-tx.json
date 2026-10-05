@@ -10,6 +10,39 @@
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0053_c17c31a5"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "7306",
+        "net_sign": -1,
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0053_c17c31a5",
+        "net_balance_atoms": "4056",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0053_c17c31a5",
+        "viz_alpha_key": "active",
+        "used": 313.5,
+        "available": 236.5
+      }
     ]
   },
   {
@@ -22,6 +55,39 @@
       {
         "from": "PID_U0001_9e3779b1",
         "to": "PID_U0060_1500857c"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "7370",
+        "net_sign": -1,
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0060_1500857c",
+        "net_balance_atoms": "3314",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0001_9e3779b1",
+        "target": "PID_U0060_1500857c",
+        "viz_alpha_key": "active",
+        "used": 324.5,
+        "available": 225.5
       }
     ]
   },
@@ -36,6 +102,39 @@
         "from": "PID_U0053_c17c31a5",
         "to": "PID_U0001_9e3779b1"
       }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "7307",
+        "net_sign": -1,
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0053_c17c31a5",
+        "net_balance_atoms": "3993",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0053_c17c31a5",
+        "target": "PID_U0001_9e3779b1",
+        "viz_alpha_key": "active",
+        "used": 406.0,
+        "available": 294.0
+      }
     ]
   },
   {
@@ -48,6 +147,39 @@
       {
         "from": "PID_U0060_1500857c",
         "to": "PID_U0001_9e3779b1"
+      }
+    ],
+    "node_patch": [
+      {
+        "id": "PID_U0001_9e3779b1",
+        "net_balance_atoms": "7246",
+        "net_sign": -1,
+        "viz_color_key": "debt-0",
+        "viz_shape_key": "rounded-rect",
+        "viz_size": {
+          "w": 49,
+          "h": 42
+        }
+      },
+      {
+        "id": "PID_U0060_1500857c",
+        "net_balance_atoms": "3253",
+        "net_sign": 1,
+        "viz_color_key": "person",
+        "viz_shape_key": "circle",
+        "viz_size": {
+          "w": 30,
+          "h": 30
+        }
+      }
+    ],
+    "edge_patch": [
+      {
+        "source": "PID_U0060_1500857c",
+        "target": "PID_U0001_9e3779b1",
+        "viz_alpha_key": "active",
+        "used": 329.0,
+        "available": 371.0
       }
     ]
   }

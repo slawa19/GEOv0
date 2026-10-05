@@ -7,13 +7,13 @@
       "name": "GreenField Cooperative (Co-op)",
       "type": "business",
       "status": "active",
-      "net_balance_atoms": "4450",
+      "net_balance_atoms": "46950",
       "net_sign": -1,
-      "viz_color_key": "debt-2",
+      "viz_color_key": "debt-5",
       "viz_shape_key": "rounded-rect",
       "viz_size": {
-        "w": 33,
-        "h": 28
+        "w": 42,
+        "h": 36
       },
       "viz_badge_key": null
     },
@@ -67,13 +67,13 @@
       "name": "Village Transport Co-op",
       "type": "business",
       "status": "active",
-      "net_balance_atoms": "115750",
+      "net_balance_atoms": "80000",
       "net_sign": 1,
       "viz_color_key": "business",
       "viz_shape_key": "rounded-rect",
       "viz_size": {
-        "w": 48,
-        "h": 41
+        "w": 46,
+        "h": 39
       },
       "viz_badge_key": null
     },
@@ -162,8 +162,8 @@
       "viz_color_key": "person",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 29,
-        "h": 29
+        "w": 30,
+        "h": 30
       },
       "viz_badge_key": null
     },
@@ -252,8 +252,8 @@
       "viz_color_key": "person",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 26,
-        "h": 26
+        "w": 25,
+        "h": 25
       },
       "viz_badge_key": null
     },
@@ -417,8 +417,8 @@
       "viz_color_key": "person",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 28,
-        "h": 28
+        "w": 27,
+        "h": 27
       },
       "viz_badge_key": null
     },
@@ -579,7 +579,7 @@
       "status": "active",
       "net_balance_atoms": "74500",
       "net_sign": -1,
-      "viz_color_key": "debt-7",
+      "viz_color_key": "debt-6",
       "viz_shape_key": "rounded-rect",
       "viz_size": {
         "w": 45,
@@ -622,13 +622,13 @@
       "name": "Pharmacy & Health Kiosk",
       "type": "business",
       "status": "frozen",
-      "net_balance_atoms": "31000",
-      "net_sign": -1,
+      "net_balance_atoms": "41500",
+      "net_sign": 1,
       "viz_color_key": "suspended",
       "viz_shape_key": "rounded-rect",
       "viz_size": {
-        "w": 39,
-        "h": 33
+        "w": 41,
+        "h": 35
       },
       "viz_badge_key": null
     },
@@ -817,13 +817,13 @@
       "name": "Lucas Hayes (Tutor)",
       "type": "person",
       "status": "frozen",
-      "net_balance_atoms": "38500",
+      "net_balance_atoms": "2750",
       "net_sign": -1,
       "viz_color_key": "suspended",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 25,
-        "h": 25
+        "w": 20,
+        "h": 20
       },
       "viz_badge_key": null
     },
@@ -939,7 +939,7 @@
       "status": "active",
       "net_balance_atoms": "42750",
       "net_sign": -1,
-      "viz_color_key": "debt-5",
+      "viz_color_key": "debt-4",
       "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
@@ -967,7 +967,7 @@
       "name": "The Edwards Family (Household)",
       "type": "person",
       "status": "active",
-      "net_balance_atoms": "120000",
+      "net_balance_atoms": "122000",
       "net_sign": -1,
       "viz_color_key": "debt-8",
       "viz_shape_key": "circle",
@@ -1032,8 +1032,8 @@
       "viz_color_key": "debt-8",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 29,
-        "h": 29
+        "w": 30,
+        "h": 30
       },
       "viz_badge_key": null
     },
@@ -1087,13 +1087,13 @@
       "name": "The Miller Family (Household)",
       "type": "person",
       "status": "active",
-      "net_balance_atoms": "71000",
+      "net_balance_atoms": "99000",
       "net_sign": -1,
-      "viz_color_key": "debt-6",
+      "viz_color_key": "debt-8",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 28,
-        "h": 28
+        "w": 29,
+        "h": 29
       },
       "viz_badge_key": null
     },
@@ -1134,7 +1134,7 @@
       "status": "active",
       "net_balance_atoms": "40500",
       "net_sign": -1,
-      "viz_color_key": "debt-5",
+      "viz_color_key": "debt-4",
       "viz_shape_key": "circle",
       "viz_size": {
         "w": 25,
@@ -1147,13 +1147,13 @@
       "name": "The Quinn Family (Household)",
       "type": "person",
       "status": "frozen",
-      "net_balance_atoms": "109500",
+      "net_balance_atoms": "87500",
       "net_sign": -1,
       "viz_color_key": "suspended",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 30,
-        "h": 30
+        "w": 29,
+        "h": 29
       },
       "viz_badge_key": null
     },
@@ -1162,13 +1162,13 @@
       "name": "The Robinson Family (Household)",
       "type": "person",
       "status": "active",
-      "net_balance_atoms": "62500",
+      "net_balance_atoms": "72500",
       "net_sign": -1,
       "viz_color_key": "debt-6",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 27,
-        "h": 27
+        "w": 28,
+        "h": 28
       },
       "viz_badge_key": null
     },
@@ -1207,13 +1207,13 @@
       "name": "The Walker Family (Household)",
       "type": "person",
       "status": "active",
-      "net_balance_atoms": "27250",
+      "net_balance_atoms": "39250",
       "net_sign": -1,
       "viz_color_key": "debt-4",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 24,
-        "h": 24
+        "w": 25,
+        "h": 25
       },
       "viz_badge_key": null
     },
@@ -1314,7 +1314,7 @@
       "status": "active",
       "net_balance_atoms": "18750",
       "net_sign": -1,
-      "viz_color_key": "debt-3",
+      "viz_color_key": "debt-4",
       "viz_shape_key": "circle",
       "viz_size": {
         "w": 23,
@@ -1347,8 +1347,8 @@
       "viz_color_key": "debt-4",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 25,
-        "h": 25
+        "w": 24,
+        "h": 24
       },
       "viz_badge_key": null
     },
@@ -1437,8 +1437,8 @@
       "viz_color_key": "person",
       "viz_shape_key": "circle",
       "viz_size": {
-        "w": 25,
-        "h": 25
+        "w": 24,
+        "h": 24
       },
       "viz_badge_key": null
     },

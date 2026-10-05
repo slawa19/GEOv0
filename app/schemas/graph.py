@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.equivalents import StoredEquivalent
-from app.schemas.trustline import TrustLine as TrustLineSchema
+from app.schemas.trustline import PlainDecimal, TrustLine as TrustLineSchema
 
 
 class AdminGraphParticipant(BaseModel):
@@ -26,7 +25,7 @@ class AdminGraphDebt(BaseModel):
     equivalent: str
     debtor: str
     creditor: str
-    amount: Decimal
+    amount: PlainDecimal
 
 
 #: The optional collections a graph read can carry, as a CLOSED set.
@@ -77,7 +76,7 @@ class AdminClearingCycleEdge(BaseModel):
     equivalent: str
     debtor: str
     creditor: str
-    amount: Decimal
+    amount: PlainDecimal
 
 
 class AdminClearingCyclesForEquivalent(BaseModel):

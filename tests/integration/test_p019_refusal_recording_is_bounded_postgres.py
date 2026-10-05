@@ -21,6 +21,7 @@ import asyncio
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 from app.config import settings
 from app.core.payments.router import PaymentRouter
@@ -65,9 +66,10 @@ async def test_recording_a_timeout_refusal_does_not_outlive_the_deadline(factory
                 amount="1.00", idempotency_key=tx_id,
             )
         assert staged.result.status == "COMMITTED", staged.result
+        holder_pid = int(await holder.scalar(text("SELECT pg_backend_pid()")))  # 029 `T2994`: the wait is behind THIS backend
         api = asyncio.create_task(api_payment())
         try:
-            queued = await _transactionid_waiter_exists(factory)
+            queued = await _transactionid_waiter_exists(factory, holder_pid)
             done, _pending = await asyncio.wait([api], timeout=_HOLD_SECONDS)
             ended_while_held = api in done
         finally:
