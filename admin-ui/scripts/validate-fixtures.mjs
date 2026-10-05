@@ -266,6 +266,79 @@ function validateTransactions(transactions, label, participants, equivalents) {
   }
 }
 
+// Exact decimal arithmetic for the net check: BigInt at a fixed scale, never Number (money is a decimal string).
+const NET_SCALE = 18
+
+function decimalToScaled(text, where) {
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(text).trim())
+  if (!m) throw new Error(`${where}: not a decimal string: ${JSON.stringify(text)}`)
+  const frac = m[3] ?? ''
+  if (frac.length > NET_SCALE) throw new Error(`${where}: more than ${NET_SCALE} fractional digits: ${JSON.stringify(text)}`)
+  const value = BigInt(m[2] + frac.padEnd(NET_SCALE, '0'))
+  return m[1] === '-' ? -value : value
+}
+
+// The rule of `net_decimal_to_atoms` (app/core/simulator/net_balance_utils.py) as the generator mirrors it: HALF_UP away
+// from zero, and a net that is not zero never becomes zero atoms - a sub-quantum net keeps its sign.
+function netToAtoms(net, precision) {
+  const divisor = 10n ** BigInt(NET_SCALE - precision)
+  const sign = net < 0n ? -1n : 1n
+  const abs = net < 0n ? -net : net
+  let atoms = abs / divisor
+  if (2n * (abs % divisor) >= divisor) atoms += 1n
+  if (atoms === 0n && net !== 0n) atoms = 1n
+  return String(sign * atoms)
+}
+
+// F-029-18. `participants.viz-<EQ>.json` stands in for a backend-computed net (Admin mock, simulator demo snapshots), so
+// each participant's `net_balance_atoms` must be what `debts.json` says: credits minus debts, **per equivalent** - one
+// equivalent's net is never added to another's (owner principle). The disagreeing participants are counted per
+// equivalent, so a dataset that is wrong in one of them cannot hide behind the others.
+function validateVizNets(participants, equivalents, debts, vizByCode, label) {
+  const precisionByCode = new Map()
+  for (const e of equivalents) {
+    if (e && typeof e === 'object' && typeof e.code === 'string') precisionByCode.set(e.code, Number(e.precision))
+  }
+  const pids = participants.map((p) => p?.pid).filter((x) => typeof x === 'string')
+  const pidSet = new Set(pids)
+
+  const failures = []
+  for (const [code, viz] of vizByCode) {
+    const precision = precisionByCode.get(code)
+    assert(Number.isInteger(precision) && precision >= 0 && precision <= NET_SCALE, `${label} equivalent ${code} has no usable precision`)
+    assert(Array.isArray(viz), `${label} participants.viz-${code} must be an array`)
+
+    const net = new Map(pids.map((pid) => [pid, 0n]))
+    for (const d of Array.isArray(debts) ? debts : []) {
+      if (!d || d.equivalent !== code || !pidSet.has(d.debtor) || !pidSet.has(d.creditor)) continue
+      const amount = decimalToScaled(d.amount, `${label} debts[${code}] amount`)
+      if (amount <= 0n) continue
+      net.set(d.creditor, net.get(d.creditor) + amount)
+      net.set(d.debtor, net.get(d.debtor) - amount)
+    }
+
+    const vizByPid = new Map(viz.map((r) => [r?.pid, r]))
+    const wrong = []
+    for (const pid of pids) {
+      const expected = netToAtoms(net.get(pid), precision)
+      const row = vizByPid.get(pid)
+      const actual = row == null ? '(no row)' : String(row.net_balance_atoms)
+      if (actual !== expected) wrong.push(`${pid}: viz ${actual}, debts ${expected}`)
+    }
+    for (const pid of vizByPid.keys()) if (!pidSet.has(pid)) wrong.push(`${String(pid)}: viz row of an unknown participant`)
+    failures.push({ code, wrong })
+  }
+
+  if (failures.some((f) => f.wrong.length > 0)) {
+    const summary = failures.map((f) => `${f.code} ${f.wrong.length}`).join(', ')
+    const sample = failures.flatMap((f) => f.wrong.slice(0, 2).map((w) => `${f.code} ${w}`)).slice(0, 6).join('; ')
+    throw new Error(
+      `${label} participants.viz-* net_balance_atoms disagree with debts.json (participants per equivalent: ${summary}). ` +
+        `Sample: ${sample}. Regenerate: python admin-fixtures/tools/generate_participants_viz_datasets.py, then \`npm run sync:fixtures\`.`,
+    )
+  }
+}
+
 function getIncidentItems(incidents, label) {
   if (Array.isArray(incidents)) return incidents
   if (incidents && typeof incidents === 'object' && Array.isArray(incidents.items)) return incidents.items
@@ -319,7 +392,7 @@ function validateAuditLog(auditLog, label) {
   }
 }
 
-async function validateSide(label, dir) {
+async function validateSide(label, dir, { requireViz }) {
   const equivalents = await readJson(path.join(dir, 'equivalents.json'))
   const participants = await readJson(path.join(dir, 'participants.json'))
   const trustlines = await readJson(path.join(dir, 'trustlines.json'))
@@ -376,12 +449,23 @@ async function validateSide(label, dir) {
   assert(Array.isArray(incidentItems), `${label} incidents items must be an array`)
 
   validateDebts(debts, label)
+
+  // The canonical pack and its public copy carry one viz dataset per equivalent (the mock reads them); a pack built
+  // elsewhere (--only-pack) may not, and is checked when it does. A missing file is not a passing one.
+  const vizByCode = new Map()
+  for (const code of uniqueCodes) {
+    const vizPath = path.join(dir, `participants.viz-${code}.json`)
+    if (await exists(vizPath)) vizByCode.set(code, await readJson(vizPath))
+    else assert(!requireViz, `${label} is missing participants.viz-${code}.json`)
+  }
+  validateVizNets(participants, equivalents, debts, vizByCode, label)
+
   validateClearingCycles(clearingCycles, label)
   validateTransactions(transactions, label, participants, equivalents)
   validateAdminConfig(config, label)
   validateAuditLog(auditLog, label)
 
-  return { equivalents, participants, trustlines, incidents, incidentItems, debts, clearingCycles, transactions, config, auditLog }
+  return { equivalents, participants, trustlines, incidents, incidentItems, debts, clearingCycles, transactions, config, auditLog, vizByCode: Object.fromEntries(vizByCode) }
 }
 
 async function main() {
@@ -393,7 +477,7 @@ async function main() {
 
     const meta = await readJson(path.join(v1Dir, '_meta.json'))
     validateMeta(meta, 'PACK')
-    const pack = await validateSide('PACK', datasetsDir)
+    const pack = await validateSide('PACK', datasetsDir, { requireViz: false })
 
     console.log('Fixtures OK (pack)')
     console.log(`- v1Dir: ${v1Dir}`)
@@ -422,8 +506,8 @@ async function main() {
     'PUBLIC _meta.json differs from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
   )
 
-  const canonical = await validateSide('CANONICAL', canonicalDir)
-  const publicSide = await validateSide('PUBLIC', publicDir)
+  const canonical = await validateSide('CANONICAL', canonicalDir, { requireViz: true })
+  const publicSide = await validateSide('PUBLIC', publicDir, { requireViz: true })
 
   assert(
     deepEqual(canonical.equivalents, publicSide.equivalents) &&
@@ -434,7 +518,8 @@ async function main() {
       deepEqual(canonical.clearingCycles, publicSide.clearingCycles) &&
       deepEqual(canonical.transactions, publicSide.transactions) &&
       deepEqual(canonical.config, publicSide.config) &&
-      deepEqual(canonical.auditLog, publicSide.auditLog),
+      deepEqual(canonical.auditLog, publicSide.auditLog) &&
+      deepEqual(canonical.vizByCode, publicSide.vizByCode),
     'PUBLIC fixtures differ from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
   )
 
