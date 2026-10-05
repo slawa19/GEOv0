@@ -235,6 +235,7 @@ async def test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_po
     stand = _Stand("P3")
     reached_commit = asyncio.Event()
     release_commit = asyncio.Event()
+    winner_pid: list[int] = []
     winner_task = second_task = None
     winner_session = second_session = None
     classified: list[tuple[str, str | None]] = []
@@ -256,6 +257,7 @@ async def test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_po
 
         # 019 stage 4: held at the entry of the winner's money phase (the engine's commit before).
         async def _hold_after_prepare(declaration, **kwargs):
+            winner_pid.append(int(await winner_session.scalar(text("SELECT pg_backend_pid()"))))
             reached_commit.set()
             await release_commit.wait()
             return await original_commit(declaration, **kwargs)
@@ -284,7 +286,7 @@ async def test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_po
 
         second_task = asyncio.create_task(_pay(PaymentService(second_session)))
         # PREMISE: the second request's insert queues on the first one's uncommitted key.
-        assert await _a_backend_waits_on_a_transaction(TestingSessionLocal), (
+        assert await _a_backend_waits_on_a_transaction(TestingSessionLocal, winner_pid[0]), (
             "the second request did not wait on the first one's uncommitted row"
         )
         assert not second_task.done()
@@ -331,18 +333,17 @@ async def test_a_concurrent_duplicate_waits_for_the_first_and_gets_its_result_po
             )
 
 
-async def _a_backend_waits_on_a_transaction(sessionmaker, *, timeout: float = 10.0) -> bool:
+async def _a_backend_waits_on_a_transaction(sessionmaker, blocker_pid: int, *, timeout: float = 10.0) -> bool:
+    # 029 (`T2994`): behind `blocker_pid`, in this database. The query used to ask for ANY ungranted
+    # `transactionid` lock of the server, so another tier's waiter (`-TaskSlug` runs in parallel)
+    # satisfied the premise and the winner was released before the subject had queued.
+    from tests.p019_locks_off import blocked_by
+
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     async with sessionmaker() as observer:
         while True:
-            waiting = await observer.scalar(
-                text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted "
-                    "AND locktype = 'transactionid')"
-                )
-            )
-            await observer.rollback()
+            waiting = any(kind == "transactionid" for _pid, kind in await blocked_by(observer, blocker_pid))
             if waiting:
                 return True
             if loop.time() > deadline:
