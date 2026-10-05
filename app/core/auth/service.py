@@ -142,6 +142,10 @@ class AuthService:
         # 028 `F-028-22`: the token is used once - a concurrent second use of it loses the claim.
         if not await claim_jti(jti, exp=payload.get("exp")):
             raise UnauthorizedException("Invalid refresh token")
+        # 029 `T2991`: a claim can succeed for a second presenter only if the store lost the first claim since
+        # the check above - and a store that lost its data has lost its id too. Ask again before issuing.
+        if payload.get("rsm") != await refresh_store_id():
+            raise UnauthorizedException("Invalid refresh token")
 
         access_token = create_access_token(subject=pid)
         new_refresh_token = await create_refresh_token(subject=pid)
