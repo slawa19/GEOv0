@@ -3,15 +3,9 @@ import { z, type ZodType } from 'zod'
 import { ApiException } from './envelope'
 
 export const ADMIN_CONFIG_KEYS = [
-  'LOG_LEVEL',
   'RATE_LIMIT_ENABLED',
   'ROUTING_MAX_HOPS',
   'ROUTING_MAX_PATHS',
-  'INTEGRITY_CHECKPOINT_ENABLED',
-  'INTEGRITY_CHECKPOINT_INTERVAL_SECONDS',
-  'RECOVERY_ENABLED',
-  'RECOVERY_INTERVAL_SECONDS',
-  'PAYMENT_TX_STUCK_TIMEOUT_SECONDS',
   'FEATURE_FLAGS_MULTIPATH_ENABLED',
   'FEATURE_FLAGS_FULL_MULTIPATH_ENABLED',
   'CLEARING_ENABLED',
@@ -21,15 +15,9 @@ export const AdminConfigKeySchema = z.enum(ADMIN_CONFIG_KEYS)
 
 export const AdminConfigSchema = z
   .object({
-    LOG_LEVEL: z.string(),
     RATE_LIMIT_ENABLED: z.boolean(),
     ROUTING_MAX_HOPS: z.number().int(),
     ROUTING_MAX_PATHS: z.number().int(),
-    INTEGRITY_CHECKPOINT_ENABLED: z.boolean(),
-    INTEGRITY_CHECKPOINT_INTERVAL_SECONDS: z.number().int(),
-    RECOVERY_ENABLED: z.boolean(),
-    RECOVERY_INTERVAL_SECONDS: z.number().int(),
-    PAYMENT_TX_STUCK_TIMEOUT_SECONDS: z.number().int(),
     FEATURE_FLAGS_MULTIPATH_ENABLED: z.boolean(),
     FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: z.boolean(),
     CLEARING_ENABLED: z.boolean(),
@@ -250,7 +238,8 @@ export function decodeAdminResponse<T>(schema: ZodType<T>, value: unknown, opera
 }
 
 export function flattenAdminConfig(response: AdminConfigResponse): Record<string, unknown> {
+  // 029 F-029-4: only what the backend lets an admin change; a key read once at start is not offered for editing.
   const config: Record<string, unknown> = {}
-  for (const item of response.items) config[item.key] = item.value
+  for (const item of response.items) if (item.mutable) config[item.key] = item.value
   return decodeAdminResponse(AdminConfigSchema, config, 'admin config facade')
 }

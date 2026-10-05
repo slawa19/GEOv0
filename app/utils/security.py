@@ -21,6 +21,20 @@ def set_redis_client(client) -> None:
 
 _revoked_jti_lock = asyncio.Lock()
 _revoked_jti: dict[str, int] = {}
+# 029 `F-029-31`: drawn once per process. The memory store above dies with the process, so a refresh token is
+# honoured only by the process that issued it - a used one cannot come back to life after a restart.
+_process_start_marker = uuid.uuid4().hex
+
+
+def _revocations_live_in_redis() -> bool:
+    return bool(settings.REDIS_ENABLED and _redis_client is not None)
+
+
+def refresh_store_marker() -> str | None:
+    """The `rsm` claim a refresh token must carry now: this process's marker while revocations live in its memory
+    (also with Redis enabled but no client), no claim with Redis. A token of the other kind of store is refused too.
+    Detects a replay by an outside holder of a token; no barrier against code inside the process (029 `F-029-31`)."""
+    return None if _revocations_live_in_redis() else _process_start_marker
 
 
 def _exp_to_epoch_seconds(exp: Any) -> int:
@@ -35,21 +49,23 @@ async def claim_jti(jti: str, *, exp: Any) -> bool:
     """Revoke `jti` only if it is not revoked yet; True for the one caller that revoked it (028 `F-028-22`).
 
     A refresh token is used once: of two requests presenting it at the same time exactly one claims it - `SET NX`
-    in Redis, the check and the write under one lock in memory. The in-memory store is per process (a multi-process
-    deployment without Redis is BACKLOG № 240).
+    in Redis, the check and the write under one lock in memory. The in-memory store is per process and bounded:
+    expired entries leave it on every write (029 `F-029-1`); for restarts see `refresh_store_marker`.
     """
 
     exp_epoch = _exp_to_epoch_seconds(exp)
     now_epoch = int(time.time())
     if not jti or (exp_epoch and exp_epoch <= now_epoch):
         return False
-    if settings.REDIS_ENABLED and _redis_client is not None:
+    if _revocations_live_in_redis():
         ttl = exp_epoch - now_epoch if exp_epoch else int(settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600)
         return bool(await _redis_client.set(f"jwt:jti:revoked:{jti}", "1", ex=max(1, int(ttl)), nx=True))
     async with _revoked_jti_lock:
         known = _revoked_jti.get(jti)
         if known is not None and (not known or known > now_epoch):
             return False
+        for stale in [key for key, until in _revoked_jti.items() if until and until <= now_epoch]:
+            del _revoked_jti[stale]
         _revoked_jti[jti] = exp_epoch
         return True
 
@@ -58,7 +74,7 @@ async def is_jti_revoked(jti: str) -> bool:
     if not jti:
         return False
 
-    if settings.REDIS_ENABLED and _redis_client is not None:
+    if _revocations_live_in_redis():
         return bool(await _redis_client.exists(f"jwt:jti:revoked:{jti}"))
 
     now_epoch = int(time.time())
@@ -93,6 +109,9 @@ def create_refresh_token(subject: str | Any) -> str:
         "type": "refresh",
         "jti": uuid.uuid4().hex,
     }
+    marker = refresh_store_marker()
+    if marker is not None:
+        payload["rsm"] = marker
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

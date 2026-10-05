@@ -275,15 +275,9 @@ function getIncidentItems(incidents, label) {
 }
 
 const adminConfigTypes = new Map([
-  ['LOG_LEVEL', 'string'],
   ['RATE_LIMIT_ENABLED', 'boolean'],
   ['ROUTING_MAX_HOPS', 'number'],
   ['ROUTING_MAX_PATHS', 'number'],
-  ['INTEGRITY_CHECKPOINT_ENABLED', 'boolean'],
-  ['INTEGRITY_CHECKPOINT_INTERVAL_SECONDS', 'number'],
-  ['RECOVERY_ENABLED', 'boolean'],
-  ['RECOVERY_INTERVAL_SECONDS', 'number'],
-  ['PAYMENT_TX_STUCK_TIMEOUT_SECONDS', 'number'],
   ['FEATURE_FLAGS_MULTIPATH_ENABLED', 'boolean'],
   ['FEATURE_FLAGS_FULL_MULTIPATH_ENABLED', 'boolean'],
   ['CLEARING_ENABLED', 'boolean'],

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.debt import Debt
@@ -14,6 +14,10 @@ from app.db.models.trustline import TrustLine
 from app.schemas.integrity import ZERO_SUM_WITHDRAWN
 
 logger = logging.getLogger(__name__)
+
+# 029 `F-029-2`: how long a checkpoint row is kept. Readers take the latest row of an equivalent; older rows are
+# history for a person. The rows written by the current run are never deleted, whatever the term.
+INTEGRITY_CHECKPOINT_TTL = timedelta(days=7)
 
 
 async def compute_integrity_checkpoint_for_equivalent(
@@ -149,13 +153,20 @@ async def compute_and_store_integrity_checkpoints(session: AsyncSession) -> int:
         return 0
 
     try:
-        created = 0
+        written = []
         for eq_id in equivalents:
             cp = await compute_integrity_checkpoint_for_equivalent(session, equivalent_id=eq_id)
             session.add(cp)
-            created += 1
+            written.append(cp)
+        await session.flush()
+        await session.execute(
+            delete(IntegrityCheckpoint).where(
+                IntegrityCheckpoint.created_at < datetime.now(timezone.utc) - INTEGRITY_CHECKPOINT_TTL,
+                IntegrityCheckpoint.id.notin_([cp.id for cp in written]),
+            )
+        )
         await session.commit()
-        return created
+        return len(written)
     except BaseException:
         await session.rollback()
         raise

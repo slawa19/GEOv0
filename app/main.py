@@ -22,6 +22,9 @@ from app.utils.request_id import new_request_id, request_id_var, validate_reques
 from app.core.maintenance_jobs import _start_configured_background_tasks
 
 
+# 029 `F-029-3`: the one logging configuration of the application - level from `LOG_LEVEL`, one format with time,
+# level and logger name. A no-op when the root logger already has handlers (a deployment's own `--log-config`).
+logging.basicConfig(level=settings.LOG_LEVEL.upper(), format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
 

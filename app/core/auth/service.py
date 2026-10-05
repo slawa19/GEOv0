@@ -2,12 +2,14 @@ import base64
 import secrets
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 
 from app.db.models.auth_challenge import AuthChallenge
 from app.db.models.participant import Participant
 from app.core.auth.crypto import verify_signature
-from app.utils.security import claim_jti, decode_token, create_access_token, create_refresh_token
+from app.utils.security import (
+    claim_jti, decode_token, create_access_token, create_refresh_token, refresh_store_marker,
+)
 from app.utils.exceptions import UnauthorizedException, NotFoundException
 from app.config import settings
 
@@ -83,8 +85,16 @@ class AuthService:
         except Exception:
             raise UnauthorizedException("Invalid signature")
 
-        # 4. Mark challenge as used
-        auth_challenge.used = True
+        # 4. Use the challenge - only if nobody has since step 1 (029 `F-029-1`): two logins presenting one
+        # challenge and signature at once both pass the read above; exactly one of them wins this UPDATE.
+        claimed = await self.db.execute(
+            update(AuthChallenge)
+            .where(AuthChallenge.id == auth_challenge.id, AuthChallenge.used.is_(False))
+            .values(used=True)
+            .returning(AuthChallenge.id)
+        )
+        if claimed.scalar_one_or_none() is None:
+            raise UnauthorizedException("Invalid or expired challenge")
         await self.db.commit()
 
         # 5. Issue tokens
@@ -112,6 +122,11 @@ class AuthService:
 
         jti = payload.get("jti")
         if not isinstance(jti, str) or not jti:
+            raise UnauthorizedException("Invalid refresh token")
+
+        # 029 `F-029-31`: issued by another process, or under the other kind of revocation store - nothing here
+        # can tell whether it was already used.
+        if payload.get("rsm") != refresh_store_marker():
             raise UnauthorizedException("Invalid refresh token")
 
         pid = payload.get("sub")
