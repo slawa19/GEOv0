@@ -90,7 +90,9 @@ async def test_r4_routes_that_do_not_carry_the_request_are_refused(api, factory,
     assert not (resp.status_code == 200 and resp.json().get("status") == "COMMITTED"), f"committed: {facts}"
     assert facts["debts_after"] == {}, f"debts changed: {facts}"
     assert facts["envelopes"] == [], f"an operation was recorded: {facts}"
-    assert facts["tx_state"] is None or facts["tx_state"][0] != "COMMITTED", f"a COMMITTED row: {facts}"
+    # 030 S2, §15 `T3092` finding 2: the admitted request's refusal is stored as the idempotent `ABORTED` row of the
+    # stored-refusal contract - that row, if any, and nothing else: no money effect, no envelope, no `COMMITTED`.
+    assert facts["tx_state"] is None or facts["tx_state"][0] == "ABORTED", f"a row other than ABORTED: {facts}"
 
 
 @pytest.mark.asyncio

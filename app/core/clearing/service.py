@@ -59,6 +59,11 @@ class ClearingCommittedAfterCancellation(asyncio.CancelledError):
 _CLEARING_OCCURRENCE_V2_NAMESPACE = uuid.UUID("5f3c2e7a-0d6b-4a53-9e8f-023b00000002")
 
 
+#: `details.reason` of the executor's refusal of an amount that is not a multiple of the equivalent's step (030
+#: `F-030-1`): a database holding debts finer than the step, to be reseeded. Not a money stop (`MONEY_STOP_REASONS`).
+OCCURRENCE_AMOUNT_NOT_IN_STEP = "occurrence_amount_not_in_step"
+
+
 class ClearingOccurrenceRefused(ConflictException):
     """A v2 plan occurrence that cannot run as declared, or whose id is already committed with another descriptor.
 
@@ -1716,7 +1721,7 @@ class ClearingService:
                 exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
             )
         if step_of is None or occurrence.amount % money_step(step_of[1]) != 0:
-            await self._raise_unexpected_execution(ClearingOccurrenceRefused("occurrence_amount_not_in_step"))
+            await self._raise_unexpected_execution(ClearingOccurrenceRefused(OCCURRENCE_AMOUNT_NOT_IN_STEP))
 
         try:
             debts = (
