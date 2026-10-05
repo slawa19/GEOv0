@@ -24,7 +24,6 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.trustlines.service import TrustLineService, TrustLineWriteBatch
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.trustline import TrustLine
 from app.schemas.simulator import TopologyChangedPayload
 from app.schemas.trustline import TrustLineUpdateRequest
 
@@ -338,6 +337,7 @@ class TrustDriftEngine:
         committed_limit_updates: list[TrustDriftLimitUpdate],
     ) -> None:
         isolation_checked = False
+        candidates: dict[tuple, tuple] = {}
         for creditor_pid, debtor_pid in touched_edges:
             key = f"{creditor_pid}:{debtor_pid}:{eq_upper}"
             hist = run._edge_clearing_history.get(key)
@@ -357,34 +357,13 @@ class TrustDriftEngine:
             debtor_uuid = pid_to_uuid.get(debtor_pid)
             if not creditor_uuid or not debtor_uuid:
                 continue
+            candidates[(eq_id, creditor_uuid, debtor_uuid)] = (creditor_pid, debtor_pid, key, original_limit)
 
-            # Get current limit from DB.  Drift applies to the ACTIVE line only: a
-            # closed incarnation is history, and since migration 019 it may coexist with
-            # the active row (028 `F-028-29`: no line is `frozen` any more).
-            tl_row = (
-                await clearing_session.execute(
-                    select(TrustLine.id, TrustLine.limit).where(
-                        TrustLine.from_participant_id == creditor_uuid,
-                        TrustLine.to_participant_id == debtor_uuid,
-                        TrustLine.equivalent_id == eq_id,
-                        TrustLine.status == "active",
-                        # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
-                        TrustLine.close_requested_at.is_(None),
-                    ).with_for_update()  # 027 (§15 P2): read and grow under ONE lock - a PATCH waits, never overwritten
-                )
-            ).one_or_none()
-            if tl_row is None:
-                continue
-            tl_id, tl_limit_row = tl_row
-
-            try:
-                # T1514: read the stored limit AS STORED. Truncating it to cents here was the
-                # first half of the walk - the multiplication below then started from a number
-                # the database never held.
-                current_limit = Decimal(str(tl_limit_row))
-            except Exception:
-                continue
-
+        # 027 (§15 P2): read and grow under ONE lock - a PATCH waits, never overwritten. T1514: the stored limit AS
+        # STORED. 029 `F-029-10`: the locks in the writers' order, the limit from the locked row.
+        for line, tl_id, current_limit in await self._lock_drift_lines(clearing_session, candidates):
+            creditor_pid, debtor_pid, key, original_limit = candidates[line]
+            creditor_uuid = line[1]
             rate_mult = (Decimal("1") + Decimal(str(cfg.growth_rate))).quantize(
                 Decimal("0.0000001")
             )
@@ -433,6 +412,26 @@ class TrustDriftEngine:
                 )
                 updated_edges.add((creditor_pid, debtor_pid))
 
+    @staticmethod
+    async def _lock_drift_lines(session, candidates) -> list[tuple[tuple, uuid.UUID, Decimal]]:
+        """029 `F-029-10`: drift's locks, in the one order of the money writers (028 `F-028-28`) - the rows of both
+        ends of every candidate `(equivalent_id, creditor_id, debtor_id)` `FOR SHARE`, their status read by that
+        statement; then the lines of the candidates whose ends are both `active`, `FOR UPDATE` in `trust_lines.id`
+        order, in one statement. Returns `(candidate, line id, limit)` of each ACTIVE line with no close requested
+        (026 `T2603.1`; a closed incarnation is history, migration 019), as the lock returned it. A freeze (the
+        participant row `FOR UPDATE`) that came first is waited for and its line left out; one that comes later
+        waits for the drift's commit. Both waits are bounded (`55P03` past the budget: the owner rolls back)."""
+
+        boundary, budget = MoneyBoundary(session), MoneyBoundary.lock_budget_ms()
+        ends = await boundary.lock_participants({p for _e, a, b in candidates for p in (a, b)}, timeout_ms=budget)
+        live = {c for c in candidates if all(ends.get(p, ("", ""))[0] == "active" for p in c[1:])}
+        return [
+            (line, row.id, Decimal(str(row.limit)))
+            for row in await boundary.lock_pair_lines(live, timeout_ms=budget)
+            if (line := (row.equivalent_id, row.from_participant_id, row.to_participant_id)) in live
+            and str(row.status) == "active" and row.close_requested_at is None
+        ]
+
     async def apply_trust_decay(
         self,
         run: RunRecord,
@@ -467,6 +466,7 @@ class TrustDriftEngine:
         trustlines = scenario.get("trustlines") or []
         service = TrustLineService(session)
         batch = service.begin_internal_batch()
+        candidates: dict[tuple, tuple] = {}
 
         for tl in trustlines:
             eq_code = str(effective_equivalent(scenario, tl) or "").strip().upper()
@@ -488,36 +488,11 @@ class TrustDriftEngine:
             if hist.last_clearing_tick == tick_index:
                 continue
 
-            # Get current limit from scenario (in-memory, kept in sync by growth).
-            #
-            # T1514: no re-quantisation. This entry is the DB limit round-tripped through
-            # `apply_committed_effects`, so truncating it here is the same rewrite as on the
-            # growth side, one hop removed - and the value computed from it IS written back to
-            # `trust_lines.limit` below.
-            try:
-                current_limit = Decimal(str(tl.get("limit", 0)))
-            except Exception:
-                continue
-            if current_limit <= 0:
-                continue
-
-            # Debt for this edge: debt_snapshot key is (debtor_pid, creditor_pid, eq_code)
-            debt_amount = debt_snapshot.get((debtor_pid, creditor_pid, eq_code), Decimal("0"))
-
-            ratio = (debt_amount / current_limit) if current_limit > 0 else Decimal("0")
-            if ratio < Decimal(str(cfg.overload_threshold)):
-                continue
-
-            # Calculate new limit
-            decay_mult = Decimal(str(1 - cfg.decay_rate))
-            min_ratio = Decimal(str(cfg.min_limit_ratio))
-
             try:  # 028 `F-028-31`: whole, not truncated to cents
                 original_limit = Decimal(str(hist.original_limit))
             except Exception:
                 continue
 
-            # Resolve UUIDs (before the floor: the floor reads the CURRENT debt row).
             creditor_uuid = pid_to_uuid.get(creditor_pid)
             debtor_uuid = pid_to_uuid.get(debtor_pid)
             if not creditor_uuid or not debtor_uuid:
@@ -536,33 +511,23 @@ class TrustDriftEngine:
             eq_id, step = eq_id_cache.get(eq_code) or (None, None)
             if not eq_id:
                 continue
+            candidates[(eq_id, creditor_uuid, debtor_uuid)] = (eq_code, creditor_pid, debtor_pid, original_limit, step)
 
-            # Drift applies to the ACTIVE line only: a closed incarnation is history (migration 019 lets it
-            # coexist with the active row; 028 `F-028-29`: no line is `frozen` any more). Before 021 the `UPDATE ...
-            # WHERE status = 'active'` matched no row here and the edge was still counted and published as
-            # decayed; now there is nothing to write, and the edge is not reported.
-            #
-            # 027 stage 2: the line `FOR UPDATE` BEFORE the floor is read. A payment over the pair holds this line
-            # (it locks every non-closed line of the pair): one in flight makes the decay wait and is then read;
-            # one that starts later waits for the decay and reads the lowered limit.
-            tl_id = (
-                await session.execute(
-                    select(TrustLine.id).where(
-                        TrustLine.from_participant_id == creditor_uuid,
-                        TrustLine.to_participant_id == debtor_uuid,
-                        TrustLine.equivalent_id == eq_id,
-                        TrustLine.status == "active",
-                        # 026 `T2603.1`: a line whose close is requested keeps limit 0 - drift skips it.
-                        TrustLine.close_requested_at.is_(None),
-                    ).with_for_update()
-                )
-            ).scalar_one_or_none()
-            if tl_id is None:
+        # 027 stage 2: the line `FOR UPDATE` BEFORE the floor is read - a payment over the pair holds it: one in
+        # flight makes the decay wait and is then read; one that starts later reads the lowered limit. 029
+        # `F-029-10`: the LIMIT is the locked row's too, never the scenario's copy (a PATCH since the last tick
+        # was overwritten from it), and every line is taken before the first write, in the writers' order.
+        for line, tl_id, current_limit in await self._lock_drift_lines(session, candidates):
+            eq_code, creditor_pid, debtor_pid, original_limit, step = candidates[line]
+            eq_id, creditor_uuid, debtor_uuid = line
+            key = f"{creditor_pid}:{debtor_pid}:{eq_code}"
+            if current_limit <= 0:
                 continue
 
             # 019 stage-3 review (P1, class 1): THE FLOOR IS THE DEBT IN THIS TRANSACTION, read after the line lock,
-            # not the tick's Python snapshot (read by a money phase that has committed; a payment since then
-            # raised the debt). A payment committed before the lock raises the floor.
+            # not the tick's Python snapshot alone (read by a money phase that has committed; a payment since then
+            # raised the debt). A payment committed before the lock raises the floor. Snapshot key: (debtor, creditor, eq).
+            debt_amount = debt_snapshot.get((debtor_pid, creditor_pid, eq_code), Decimal("0"))
             current_debt = (
                 await session.execute(
                     select(Debt.amount).where(
@@ -574,6 +539,12 @@ class TrustDriftEngine:
             ).scalar_one_or_none()
             if current_debt is not None:
                 debt_amount = max(Decimal(str(debt_amount)), Decimal(str(current_debt)))
+
+            ratio = debt_amount / current_limit
+            if ratio < Decimal(str(cfg.overload_threshold)):
+                continue
+            decay_mult = Decimal(str(1 - cfg.decay_rate))
+            min_ratio = Decimal(str(cfg.min_limit_ratio))
 
             # Guardrail: trust drift must never shrink limit below already-used debt,
             # otherwise we can create a TRUST_LIMIT_VIOLATION without any new payment.
