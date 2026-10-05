@@ -672,7 +672,9 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
 
     async with TestingSessionLocal() as setup:
         setup.add(
-            Equivalent(id=equivalent_id, code=code, symbol="PZ", precision=2)
+            # Precision 8: one atom is then one whole step. At precision 2 the executor refuses it since 030 S2
+            # (`F-030-1`, `occurrence_amount_not_in_step`) - the stored form of 1E-8 is still the question here.
+            Equivalent(id=equivalent_id, code=code, symbol="PZ", precision=8)
         )
         setup.add_all(
             [
