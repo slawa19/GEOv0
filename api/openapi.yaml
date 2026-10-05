@@ -4301,9 +4301,13 @@ components:
             - type: boolean
             - type: integer
         mutable:
-          # All twelve are currently mutable; the flag is per item so a read-only setting can join
-          # the list without a schema change.
+          # 029 `F-029-4` (stage S1): six of the twelve are mutable - RATE_LIMIT_ENABLED, ROUTING_MAX_HOPS,
+          # ROUTING_MAX_PATHS, FEATURE_FLAGS_MULTIPATH_ENABLED, FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
+          # CLEARING_ENABLED. The other six are listed read-only: a runtime change would not do what the key says.
           type: boolean
+          description: >-
+            Whether `PATCH /admin/config` accepts this key. A key with `mutable: false` is refused there
+            (400 `E009`, "Config key not mutable").
 
     AdminConfigResponse:
       type: object
