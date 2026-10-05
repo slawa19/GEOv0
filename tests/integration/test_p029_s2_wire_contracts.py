@@ -27,6 +27,7 @@ from tests.integration.test_p011_money_is_a_decimal_string_on_the_wire import mo
 from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_close_request,
+    register_and_login,
 )
 
 _EXPONENT = re.compile(r"^-?\d+(\.\d+)?[eE][+-]?\d+$")
@@ -123,6 +124,34 @@ async def test_not_found_is_e009_and_only_routing_answers_e001(client: AsyncClie
 
     # `E001` stays the routing code (its real-path control: `tests/unit/test_p1_payment_run_perimeter.py`).
     assert (RoutingException().code, RoutingException(insufficient_capacity=True).code) == ("E001", "E002")
+
+
+async def _refused(client: AsyncClient, payer: dict, to_pid: str, amount: str) -> dict:
+    tx_id = str(uuid.uuid4())
+    response = await client.post("/api/v1/payments", headers=payer["headers"], json={
+        "tx_id": tx_id, "to": to_pid, "equivalent": "USD", "amount": amount,
+        "signature": _sign_payment_request(
+            signing_key=SigningKey(base64.b64decode(payer["priv"])), tx_id=tx_id, from_pid=payer["pid"],
+            to_pid=to_pid, equivalent="USD", amount=amount),
+    })
+    assert response.status_code == 400, response.text
+    return response.json()["error"]
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_routing_refusal_code_agrees_with_its_reason(client: AsyncClient, money_scenario) -> None:  # noqa: F811
+    """§15 review `T2992` #4: nothing can be sent -> `E001` + `no_route` (was `E002` beside `no_route`); something
+    can, but less than asked -> `E002` + `insufficient_capacity` (the control, unchanged)."""
+
+    alice, bob = money_scenario["alice"], money_scenario["bob"]
+    carol = await register_and_login(client, "Carol_P029_NoRoute")
+    nothing = await _refused(client, alice, carol["pid"], "1.00")
+    assert (nothing["code"], nothing["details"]["reason"], nothing["details"]["max_available"]) == (
+        "E001", "no_route", "0.00"), nothing
+    short = await _refused(client, alice, bob["pid"], "500.00")
+    assert (short["code"], short["details"]["reason"], short["details"]["max_available"]) == (
+        "E002", "insufficient_capacity", "90.25"), short
 
 
 @MODE_B
