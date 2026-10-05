@@ -256,7 +256,7 @@ ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128);
 не обещается:
 
 1. остановить всех писателей: backend (`run_local.ps1 stop` / `run_full_stack.ps1 stop` или
-   контейнер), симулятор, любые сидеры (`scripts/seed_db.py`);
+   контейнер), симулятор, любые сидеры (`scripts/seed_db.py --source recipe`);
 2. применить миграцию: `alembic -c migrations/alembic.ini upgrade head`. Миграция **отказывает**,
    если в базе есть конверт в состоянии `OPEN` (операция, прерванная остановкой, — её надо разобрать
    до перехода, а не обойти);

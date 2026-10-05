@@ -309,13 +309,10 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 # If you want to run them manually:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app alembic -c migrations/alembic.ini upgrade head
 
-# 4. Seed initial data (optional)
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py
-
-# 4b. Right after seeding, before any client traffic or simulator run: take the debt reconciliation
-#     baseline. The API container is already up here (seeding runs inside it); an idle API is not a
-#     writer. See "Debt reconciliation baseline" below.
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/take_reconciliation_baseline.py --all
+# 4. The Compose database `geov0` is not seeded: the recipe (`scripts/seed_db.py --source recipe`) seeds
+#    only an empty, disposable `geov0_dev_<slug>` / `geov0_test_<slug>` database on a loopback host and
+#    refuses any other. For a seeded stack use the no-Docker path below or `scripts/run_local.ps1`.
+#    Seeding by importing fixtures into the database was removed by programme 030 S2 (F-030-3).
 
 # 5. API is now available at:
 # - default: http://localhost:8000
@@ -587,9 +584,7 @@ Manual (Docker):
 # 1) Start backend + DB
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-# Optional seed, then the reconciliation baseline right after it (see "Debt reconciliation baseline")
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/take_reconciliation_baseline.py --all
+# No seed here: the recipe refuses the Compose database `geov0` (see the no-Docker quickstart below)
 
 # 2) Run Admin UI
 npm --prefix admin-ui install
@@ -624,7 +619,8 @@ npm --prefix admin-ui run dev
 ```
 
 **Seeding by performing the operations instead of inserting their result** (programme 017, `T1711`).
-The fixture paths above insert debts and transactions a generator invented; this one runs the
+The fixture import paths that inserted debts and transactions a generator invented were removed by
+programme 030 S2 (`F-030-3`); the recipe is the one source. It runs the
 community's hand-written recipe (`seeds/communities/<id>/recipe.json`) through
 `ParticipantService` / `TrustLineService` / `PaymentService` / `ClearingService` and the admin freeze
 handler, with a key pair generated per participant per run and kept only in memory:
