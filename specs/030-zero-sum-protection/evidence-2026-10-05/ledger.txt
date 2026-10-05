@@ -1,0 +1,11 @@
+target=main head=46d2d934 kind=findings-review rounds=r1(verify),r2(extended-hunt) model_requested=gpt-6-astra effort=high sandbox=read-only frozen=2026-10-05T05:09:54Z untracked_inputs=test_p029_adv_concurrency_postgres.py,_review_inputs/029-{spec,register}.md
+r1 started=2026-10-05T05:15:54Z
+r2 started=2026-10-05T05:15:54Z
+r2 exit=1 finished=2026-10-05T05:18:38Z
+r1 exit=0 finished=2026-10-05T05:23:21Z
+r2 UNVERIFIED: provider refused the prompt (content flag), no review produced; ONE recorded fallback r2b = same content, neutral wording, prompt-r2b.txt sha256=91CFDE32F48A6731
+r2b started=2026-10-05T05:24:17Z
+r2b exit=0 finished=2026-10-05T05:45:58Z
+r1 accepted: exit 0, markers present, model line gpt-6-astra: VERDICT-REVIEW-FINDINGS WEAK, HEADLINE-CLAIM-HOLDS PARTLY, Z1-VS-029-269 OWNER-DECIDES, Z3-VS-029-77 SEEDER-GAP-IS-REAL, class1 0, confirmed 17, refuted 1, P1 2 / P2 13 / P3 8
+r2b accepted: exit 0, markers present, model line gpt-6-astra: ON-WRITE GAPS, CONCURRENT GAPS, DETECTION-AND-REACTION BROKEN, new findings 4, class1 1, P1 1 / P2 3, owner decisions 3
+limits: reviewer ran nothing (read-only); gates and stands are orchestrator/agent evidence only; clone removed 2026-10-05T05:49:08Z
