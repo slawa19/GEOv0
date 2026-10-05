@@ -6,6 +6,8 @@ data are refused too. THE RESTART IS A REAL NEW PROCESS (`python -c`, the same `
 In-process `_restart` is the same event for the controls - a new marker AND an empty store, never the marker alone.
 """
 
+import asyncio
+import logging
 import os
 import subprocess
 import sys
@@ -14,7 +16,10 @@ import uuid
 
 import jwt
 import pytest
+import redis.asyncio as redis_asyncio
+from fastapi import FastAPI
 
+import app.main as main_module
 import app.utils.security as security
 from app.config import settings
 from app.core.auth.service import AuthService
@@ -148,3 +153,66 @@ async def test_two_workers_on_one_redis_share_the_store_id(redis_store, monkeypa
     rotated = await _refresh(issued_by_one)
     assert rotated is not None and await _refresh(issued_by_one) is None
     assert await _refresh(rotated["refresh_token"]) is not None
+
+
+async def test_a_refresh_parked_across_a_redis_flush_does_not_become_a_second_session(redis_store, monkeypatch) -> None:
+    """T2991 fix-delta review, finding 1. REAL SCHEDULE: A and B present one unused token and both pass the `rsm`
+    check; B is parked at its participant read; A completes; Redis is flushed; B resumes into an empty store."""
+    token, parked, release = await security.create_refresh_token(subject="alice"), asyncio.Event(), asyncio.Event()
+
+    class _ParkedDb(_Db):
+        async def execute(self, statement):
+            parked.set()
+            await asyncio.wait_for(release.wait(), timeout=20)
+            return await super().execute(statement)
+
+    async def present_b():
+        try:
+            return await AuthService(_ParkedDb(parties=1)).refresh_tokens(token)
+        except UnauthorizedException:
+            return None
+
+    b = asyncio.create_task(present_b())
+    await asyncio.wait_for(parked.wait(), timeout=20)  # control: B is past the check, before its claim
+    assert await _refresh(token) is not None  # A used the token
+    monkeypatch.setattr(security, "_redis_client", _Redis())  # FLUSHALL
+    release.set()
+    assert await asyncio.wait_for(b, timeout=20) is None
+
+
+class _PolicyRedis:
+    def __init__(self, policy) -> None:
+        self.policy, self.closed = policy, False
+
+    async def ping(self) -> None:
+        return None
+
+    async def config_get(self, name):
+        if isinstance(self.policy, Exception):
+            raise self.policy
+        return {name: self.policy}
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def test_startup_refuses_a_redis_that_may_evict_revocations(monkeypatch) -> None:
+    """Finding 2: under `volatile-*` a used token's revocation key (it has a TTL) is evicted and the store id stays."""
+    client = _PolicyRedis("volatile-lru")
+    monkeypatch.setattr(settings, "REDIS_ENABLED", True, raising=False)
+    monkeypatch.setattr(redis_asyncio, "from_url", lambda *args, **kwargs: client)
+    monkeypatch.setattr("app.core.simulator.storage.reconcile_stale_runs", lambda: asyncio.sleep(0, 0))
+    with pytest.raises(RuntimeError, match="noeviction"):
+        async with main_module.lifespan(FastAPI()):
+            pytest.fail("the application started")
+    assert client.closed and security._redis_client is None
+
+
+async def test_startup_accepts_noeviction_and_names_the_requirement_when_config_is_forbidden(caplog) -> None:
+    with caplog.at_level(logging.ERROR, logger="app.main"):
+        await main_module._require_redis_noeviction(_PolicyRedis("noeviction"))
+        assert caplog.records == []  # anti-vacuum: the line below is not logged on every start
+        await main_module._require_redis_noeviction(_PolicyRedis(redis_asyncio.ResponseError("unknown command")))
+    assert [r.levelname for r in caplog.records] == ["ERROR"] and "noeviction" in caplog.text
+    with pytest.raises(ConnectionError):  # only a refusal of CONFIG is tolerated, not a lost connection
+        await main_module._require_redis_noeviction(_PolicyRedis(ConnectionError("gone")))
