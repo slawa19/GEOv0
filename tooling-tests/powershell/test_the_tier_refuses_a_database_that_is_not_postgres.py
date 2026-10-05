@@ -182,7 +182,7 @@ def test_a_url_handed_to_the_runner_still_needs_its_own_opt_in() -> None:
         cwd=_ROOT,
         env=env,
         capture_output=True,
-        text=True, encoding="utf-8",  # 029 F-029-27: pwsh writes UTF-8; the locale codec is not it
+        text=True, encoding="utf-8", errors="replace",  # 029 F-029-27, form of `aa2353b`: not the locale codec
         check=False,
         timeout=120,
     )
