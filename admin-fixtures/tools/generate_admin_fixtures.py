@@ -512,7 +512,7 @@ def generate_transactions(
                 "tx_id": f"TX_{(i * 104729) % 10**8:08d}",
                 "type": tx_type,
                 "state": state,
-                "initiator_pid": initiator_pid,
+                "initiator_pid": None if tx_type == "CLEARING" else initiator_pid,  # 028 F-028-45: a clearing records no initiator
                 "payload": payload,
                 "created_at": _iso(created_at),
                 "updated_at": _iso(updated_at),

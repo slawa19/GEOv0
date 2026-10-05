@@ -5203,7 +5203,7 @@
     "tx_id": "b9e945ff-f220-5e42-a46f-bfddfe53d2f0",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0001_9e3779b1",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0000_00",
@@ -5241,7 +5241,7 @@
     "tx_id": "45ee6705-3dcb-5659-a853-34cbf56e07a2",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0001_9e3779b1",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0001_00",
@@ -5279,7 +5279,7 @@
     "tx_id": "bcf318a7-f2e7-5c35-ac7c-8ea67a747c36",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0001_9e3779b1",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0002_00",
@@ -5317,7 +5317,7 @@
     "tx_id": "1c1a0fc3-b4ae-5b5e-96f4-184f13bb8c0f",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0003_daa66d13",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0003_00",
@@ -5355,7 +5355,7 @@
     "tx_id": "fc94ab7e-df7b-5db2-ba1a-787b5c18aff3",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0004_00",
@@ -5393,7 +5393,7 @@
     "tx_id": "4df8aa5b-5b3f-591a-97bd-648a8e37dcf4",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0005_00",
@@ -5431,7 +5431,7 @@
     "tx_id": "85de872c-3a2c-5f3f-820f-5c8215b91942",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0006_00",
@@ -5469,7 +5469,7 @@
     "tx_id": "c4fcacf4-8ded-5ccf-b0f6-99e6df3dcc9e",
     "idempotency_key": null,
     "type": "CLEARING",
-    "initiator_pid": "PID_U0004_78dde6c4",
+    "initiator_pid": null,
     "payload": {
       "cycle": [
         "debt_0007_00",

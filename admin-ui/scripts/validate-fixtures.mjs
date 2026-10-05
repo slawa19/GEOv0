@@ -251,7 +251,13 @@ function validateTransactions(transactions, label, participants, equivalents) {
     if (typeof t.tx_id !== 'string' || t.tx_id.length === 0) bad.push({ i, reason: 'missing tx_id' })
     if (typeof t.type !== 'string' || !allowedTypes.has(t.type)) bad.push({ i, reason: 'invalid type' })
     if (typeof t.state !== 'string' || !allowedStates.has(t.state)) bad.push({ i, reason: 'invalid state' })
-    if (typeof t.initiator_pid !== 'string' || !pidSet.has(t.initiator_pid)) bad.push({ i, reason: 'invalid initiator_pid' })
+    // 028 F-028-45: a clearing is nobody's act - it records no initiator, so `null` is required there and only there.
+    // A payment or a trust-line operation always names one, and it must be a participant of the pack.
+    if (t.type === 'CLEARING') {
+      if (t.initiator_pid !== null) bad.push({ i, reason: 'CLEARING must have initiator_pid null' })
+    } else if (typeof t.initiator_pid !== 'string' || !pidSet.has(t.initiator_pid)) {
+      bad.push({ i, reason: 'invalid initiator_pid' })
+    }
     if (!t.payload || typeof t.payload !== 'object' || Array.isArray(t.payload)) bad.push({ i, reason: 'invalid payload' })
     if (!isIsoDateString(t.created_at)) bad.push({ i, reason: 'invalid created_at' })
     if (!isIsoDateString(t.updated_at)) bad.push({ i, reason: 'invalid updated_at' })
