@@ -209,3 +209,19 @@ async def test_a_decay_takes_its_lines_in_the_order_of_a_payment(factory, monkey
     outcome = await asyncio.wait_for(asyncio.gather(decaying, paying, return_exceptions=True), 60)
     assert not isinstance(outcome[0], BaseException) and outcome[1] == "COMMITTED" and "40P01" not in conflicts.payment, (
         f"decay and payment over the same two lines: {outcome!r}, payment conflicts {conflicts.payment}")
+
+
+@pytest.mark.parametrize("debt, snapshot", [("10.00", "90.00"), ("60.00", "60.00")])
+@pytest.mark.asyncio
+async def test_a_decay_never_raises_a_limit(factory, debt, snapshot) -> None:  # noqa: F811
+    """§15 review of S3 (`T2993`, P2). The creditor lowered A -> B to 50 (original 100). Case 1: the tick's snapshot
+    still says 90, the debt was repaid to 10 - `max(49, 30, 90)` wrote 90. Case 2: the debt (60) is above the lowered
+    limit, which 026 allows - `max(49, 30, 60)` wrote 60. A decay lowers a limit or leaves it."""
+    lines = [("A", "B", "50.00", "active"), ("A", "C", "100.00", "active")]
+    eq, p, run, scenario, stale = await _stand(factory, lines, [("B", "A", debt), ("C", "A", "90.00")])
+    run._edge_clearing_history[f"{p['A'].pid}:{p['B'].pid}:{eq.code}"].original_limit = Decimal("100.00")
+    stale[(p["B"].pid, p["A"].pid, eq.code)] = Decimal(snapshot)
+    await _drift(factory, run, scenario, stale, eq)
+    after = await limits(factory, eq, p)
+    assert after[("A", "C")] == (Decimal("98.00"), "active"), after  # positive control: an overloaded line decays
+    assert after[("A", "B")] == (Decimal("50.00"), "active"), f"the decay RAISED the creditor's limit of 50: {after}"
