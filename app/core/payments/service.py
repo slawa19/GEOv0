@@ -334,6 +334,28 @@ def is_debt_pair_collision(exc: BaseException) -> bool:
     return False
 
 
+def routes_do_not_carry(routes, *, payer: str, payee: str, amount: Decimal) -> str | None:
+    """Why `routes` do not carry the request `payer -> payee, amount`, or None (030 `F-030-2`).
+
+    Every route starts at the payer and ends at the payee, and the net flow of all routes together is `-amount` at
+    the payer, `+amount` at the payee and zero at everyone else - which is "the parts sum to the request" and
+    "transit is neutral" in one rule, and holds for a part handed over twice as for a part missing."""
+
+    for path, _route_amount in routes:
+        if str(path[0]) != payer or str(path[-1]) != payee:
+            return f"a route runs {path[0]} -> {path[-1]}, the request {payer} -> {payee}"
+    net: dict[str, Decimal] = {}
+    for path, route_amount in routes:
+        for sender, receiver in zip(path, path[1:]):
+            net[str(sender)] = net.get(str(sender), Decimal("0")) - Decimal(route_amount)
+            net[str(receiver)] = net.get(str(receiver), Decimal("0")) + Decimal(route_amount)
+    expected = {payer: -amount, payee: amount}
+    off = {pid: value for pid, value in net.items() if value != expected.get(pid, Decimal("0"))}
+    if off:
+        return f"the routes move {-net.get(payer, Decimal('0'))} of the requested {amount}; net off at {sorted(off)}"
+    return None
+
+
 @dataclass
 class _PaymentAttempt:
     """What one `execute()` established, for the owner of its transaction to act on (019 stage 3).
@@ -1705,7 +1727,10 @@ class PaymentService:
         # 1. The binding phase.
         try:
             declaration = await asyncio.wait_for(
-                self._bind_payment(tx_id_str, routes, equivalent_id),
+                self._bind_payment(
+                    tx_id_str, routes, equivalent_id, payer=attempt.row["payload"]["from"],
+                    payee=attempt.row["payload"]["to"], amount=Decimal(amount),
+                ),
                 timeout=prepare_timeout_s,
             )
         except asyncio.TimeoutError:
@@ -1753,6 +1778,10 @@ class PaymentService:
         tx_id: str,
         routes: "list[tuple[list[str], Decimal]]",
         equivalent_id: uuid.UUID,
+        *,
+        payer: str,
+        payee: str,
+        amount: Decimal,
     ) -> "PaymentDeclaration":
         """The binding phase: the line locks of every pair of every route, then the capacity of every segment.
 
@@ -1765,6 +1794,11 @@ class PaymentService:
 
         Refused with `RoutingException` (`E002`, `details` with `available`, `needed`, `reserved`) when a
         segment cannot carry its amount - after admission, so a definitive refusal (spec, "Допуск").
+
+        THE ROUTES CARRY THE REQUEST (030 `F-030-2`), checked first, before any lock or write: every route runs
+        from `payer` to `payee`, and the routes together move exactly `amount` out of the payer, into the payee
+        and through nobody else. Routes that do not are a router defect - the core does not trust what it was
+        handed - and refused as an internal error, never executed as declared.
         """
 
         pids: set[str] = set()
@@ -1774,6 +1808,9 @@ class PaymentService:
             if len(path) < 2:
                 raise GeoException("Route path must include at least 2 participants")
             pids.update(path)
+        if why := routes_do_not_carry(routes, payer=payer, payee=payee, amount=amount):
+            logger.error("event=payment.routes_do_not_carry_the_request tx_id=%s why=%s", tx_id, why)
+            raise GeoException(f"Routes do not carry the payment request: {why}")
         participants = {
             str(pid): participant_id
             for participant_id, pid in (

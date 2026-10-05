@@ -115,6 +115,7 @@ async def test_a_single_route_refusal_reports_the_capacity_and_the_need(
         f"single-fits-{uuid.uuid4()}",
         [(["CAP-S", "CAP-R"], Decimal("80"))],
         equivalent_id,
+        payer="CAP-S", payee="CAP-R", amount=Decimal("80"),
     )
 
     with pytest.raises(RoutingException) as error:
@@ -122,6 +123,7 @@ async def test_a_single_route_refusal_reports_the_capacity_and_the_need(
             f"single-{uuid.uuid4()}",
             [(["CAP-S", "CAP-R"], Decimal("80.01"))],
             equivalent_id,
+            payer="CAP-S", payee="CAP-R", amount=Decimal("80.01"),
         )
 
     # 029 F-029-5 (row 3): written in the equivalent's step (CAP, precision 2); were "80.00000000", "80.01", "0".
@@ -146,6 +148,7 @@ async def test_multipath_counts_its_own_earlier_routes_over_one_segment(
                 (["CAP-S", "CAP-R"], Decimal("50")),
             ],
             equivalent_id,
+            payer="CAP-S", payee="CAP-R", amount=Decimal("100"),
         )
 
     # Each route alone fits (50 <= 80); the second is refused only because the first route of the

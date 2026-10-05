@@ -51,6 +51,7 @@ import app.core.clearing.runner as clearing_runner
 import app.core.simulator.storage as simulator_storage
 import app.db.session as db_session
 from app.config import settings
+from app.core.clearing.service import OCCURRENCE_AMOUNT_NOT_IN_STEP
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import PaymentService
 from app.core.simulator.commit_resolution import (
@@ -1034,9 +1035,12 @@ class RealTick:
                     cutoff = time.time() - 60.0
                     while run._error_timestamps and run._error_timestamps[0] < cutoff:
                         run._error_timestamps.popleft()
+                    # 030 S2 (§15 `T3092`): the executor's step refusal keeps its name - the run's database holds debts
+                    # finer than the step and is reseeded; every other failure stays sanitised.
+                    step_refused = refusal_reason == OCCURRENCE_AMOUNT_NOT_IN_STEP
                     run.last_error = {
-                        "code": "CLEARING_ERROR",
-                        "message": GeoException().message,
+                        "code": "CLEARING_REFUSED" if step_refused else "CLEARING_ERROR",
+                        "message": exc.message if step_refused else GeoException().message,
                         "at": rr._utc_now().isoformat(),
                     }
                     run.current_phase = None

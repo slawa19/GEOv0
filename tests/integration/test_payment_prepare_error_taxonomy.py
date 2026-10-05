@@ -97,7 +97,7 @@ def _install_routes_and_prepare_failure(
         per_route = amount / Decimal(route_count)
         return [([from_pid, to_pid], per_route) for _ in range(route_count)]
 
-    async def fail_binding(self, tx_id, routes, equivalent_id):
+    async def fail_binding(self, tx_id, routes, equivalent_id, **_request):  # 030 S2: payer, payee, amount
         # 019 stage 4: the binding phase of the direct execution replaced the engine's
         # `prepare` (one route) and `prepare_routes` (several); the route count still tells them apart.
         calls.append("single" if len(routes) == 1 else "multipath")

@@ -5,7 +5,7 @@
 .DESCRIPTION
   Brings up everything needed to test the real simulator via simulator-ui/v2:
   - Postgres + Redis + API (Docker Compose)
-  - Optional DB seeding (admin fixtures -> rich demo dataset)
+  - Optional DB seeding (a community's recipe run through the domain services; off by default)
   - Simulator UI v2 in Real Mode (Vite dev server with /api/v1 proxy)
 
   Designed for Windows PowerShell 5.1+ / PowerShell 7+.
@@ -14,7 +14,7 @@
   ./scripts/run_real_simulator.ps1
 
 .EXAMPLE
-  ./scripts/run_real_simulator.ps1 -Community riverside-town-50 -RegenerateFixtures
+  ./scripts/run_real_simulator.ps1 -Community riverside-town-50
 
 .EXAMPLE
   ./scripts/run_real_simulator.ps1 -Action doctor
@@ -31,12 +31,13 @@ param(
   [int]$ApiPort = 8000,
   [int]$SimulatorUiPort = 5176,
 
-  # Community fixture pack to seed into DB for real-mode runs.
-  # 'none' disables seeding.
-  [ValidateSet('greenfield-village-100', 'riverside-town-50', 'greenfield-village-100-v2', 'riverside-town-50-v2', 'none')]
-  [string]$Community = 'greenfield-village-100',
+  # Community whose recipe seeds the DB (scripts/seed_db.py --source recipe). 'none' (the default) disables
+  # seeding: the real simulator seeds its own scenario at run start. Programme 030 S2 (F-030-3) deleted the
+  # direct import of fixture packs; the recipe seeds only an EMPTY, disposable database by name
+  # (geov0_dev_<slug> / geov0_test_<slug> on a loopback host) and refuses the Compose database `geov0`.
+  [ValidateSet('greenfield-village-100', 'riverside-town-50', 'none')]
+  [string]$Community = 'none',
 
-  [switch]$RegenerateFixtures,
   [switch]$NoSimulatorUi,
 
   # Host port to publish Redis on (Docker Compose uses GEO_REDIS_PORT).
@@ -512,12 +513,9 @@ function Seed-DbIfRequested() {
     return
   }
 
-  $args = @('python', 'scripts/seed_db.py', '--source', 'fixtures', '--community', $Community)
-  if ($RegenerateFixtures) {
-    $args += '--regenerate-fixtures'
-  }
+  $args = @('python', 'scripts/seed_db.py', '--source', 'recipe', '--community', $Community)
 
-  Write-Host "Seeding DB from fixtures: community=${Community} ..."
+  Write-Host "Seeding DB by the community recipe: community=${Community} ..."
   Invoke-Docker (@('exec','geov0-app') + $args) | Out-Host
 }
 

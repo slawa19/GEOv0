@@ -18,6 +18,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.utils.exceptions import ConflictException, GeoException, TimeoutException
 from app.utils.metrics import CLEARING_EVENTS_TOTAL
 from app.utils.money import to_money_str
+from app.utils.validation import money_step
 from app.core.money_boundary import IsolationNotReadCommitted, MoneyBoundary
 from app.core.invariants import InvariantChecker
 from app.core.ledger.book import Book, ClearingReduction, operation_for
@@ -56,6 +57,11 @@ class ClearingCommittedAfterCancellation(asyncio.CancelledError):
 #: historical v1 rows are read, never written). `app/core/ledger/reconciliation.py` holds an independent copy and
 #: derives the id itself.
 _CLEARING_OCCURRENCE_V2_NAMESPACE = uuid.UUID("5f3c2e7a-0d6b-4a53-9e8f-023b00000002")
+
+
+#: `details.reason` of the executor's refusal of an amount that is not a multiple of the equivalent's step (030
+#: `F-030-1`): a database holding debts finer than the step, to be reseeded. Not a money stop (`MONEY_STOP_REASONS`).
+OCCURRENCE_AMOUNT_NOT_IN_STEP = "occurrence_amount_not_in_step"
 
 
 class ClearingOccurrenceRefused(ConflictException):
@@ -1703,6 +1709,19 @@ class ClearingService:
         # committed-execution shortcut above (an already-durable clearing stays reported), before
         # the Debt rows are locked and before any new execution work.
         await self._refuse_if_equivalent_inactive({row.equivalent_id for row in edges} or {occurrence.equivalent_id})
+
+        # 030 `F-030-1` (owner В-4 of 028, В2 of 030): `c` is a multiple of the equivalent's step, the step read
+        # under the row lock just taken - the one the stop and the hold were read under, held to commit, so a PATCH
+        # of the precision either waits for this clearing or committed before it. Refused, never rounded: debts
+        # finer than the step mean a database to reseed (runbook of S1), and this refusal is what notices it.
+        try:
+            step_of = await MoneyBoundary(self.session).share_equivalent_step(occurrence.equivalent_id)
+        except Exception as exc:
+            return await self._end_attempt_on_error(
+                exc, execution_tx_id, allowed_participant_pids=allowed_participant_pids
+            )
+        if step_of is None or occurrence.amount % money_step(step_of[1]) != 0:
+            await self._raise_unexpected_execution(ClearingOccurrenceRefused(OCCURRENCE_AMOUNT_NOT_IN_STEP))
 
         try:
             debts = (

@@ -88,6 +88,7 @@ from app.core.ledger.book import Book, NewDebt, Posting, operation_for  # noqa: 
 from app.db.models.equivalent import Equivalent  # noqa: E402
 from app.db.models.participant import Participant  # noqa: E402
 from app.db.models.trustline import TrustLine  # noqa: E402
+from app.utils.validation import require_money_step  # noqa: E402
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 from tests.migrated_schema import run_alembic_upgrade_head, scratch_databases  # noqa: E402
 
@@ -198,10 +199,16 @@ async def _edge(
     """One debt plus the active trust line the detector requires to accept it.
 
     The debt goes through the book (programme 018 stage A, the single writer of `debts`) inside
-    one `SEED` operation for the whole graph. Before that it was a bare `session.add(Debt(...))`,
+    one `TEST_FIXTURE` operation for the whole graph. Before that it was a bare `session.add(Debt(...))`,
     which the debt journal refuses at flush (`no_operation`) since 015 armed it - measured
     2026-09-24: the script could no longer build its graph at all.
+
+    030 S2 (`F-030-1`): the amount is a multiple of the equivalent's step or the graph is not built - the
+    measurement graph is an initial state like any other, and an amount finer than the step is refused, never
+    rounded. The kind is `TEST_FIXTURE` since the same stage (it was `SEED`, the last script writing it): the graph
+    is a synthetic population in a scratch database this run creates and drops, which is what that kind names.
     """
+    require_money_step(amount, precision=int(equivalent.precision), equivalent=str(equivalent.code))
     await posting.apply(
         NewDebt(
             debtor_id=debtor.id,
@@ -257,7 +264,7 @@ async def build_graph(session: AsyncSession) -> Equivalent:
     async with Book.operation(
         session,
         operation_for(
-            "SEED",
+            "TEST_FIXTURE",
             f"measure_clearing_min_amount_plan:{uuid.uuid4()}",
             {"script": "measure_clearing_min_amount_plan", "edges": N_EDGES},
             scope_equivalent_ids=None,

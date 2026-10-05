@@ -67,6 +67,13 @@ Codex, дельта `4f83b090..3d10147b`, `VERDICT-029-S4-FD: WEAK`, `CLASS-1-CO
   - **Что закрыло бы окно:** хранимый исход последнего прогона по эквиваленту. Это столбец или таблица, то есть новая сущность (§19.1); в 030 она запрещена (§19.5).
   - **Деньги** окно не двигает: удержание ставит только подтверждённый `FAILED`.
 
+### S2 — исполнение `T3002` и §15-ревью `T3092`, внесено 2026-10-05
+
+- **`seeds/participants.json` и `seeds/trustlines.json` без читателей** (P3). Единственный читатель — `--source seeds` `scripts/seed_db.py` — удалён 030 S2 (`7f913b6b`); `git grep` вне `specs/` и архивов — 0. Кандидат на удаление отдельным cleanup-срезом со сканом ссылок по §14 (package scripts, документы, генераторы, история). `seeds/equivalents.json` не кандидат: на него ссылаются тесты p012 и объявления точности обоих UI. Получатель — владелец `seeds/`.
+- **`validate_equivalent_metadata` (`app/utils/validation.py:62`) вызывается только тестами** (P3). Последний вызывающий вне тестов — прямой импорт `scripts/seed_db.py` — удалён 030 S2; админский путь хранит `metadata` без валидатора (`tests/contract/test_p011_success_responses_describe_their_content.py`, `ACCEPTED_FREE_FORM`). Получатель — владелец `app/utils/validation.py`.
+- **EN/PL `docs/{en,pl}/05-deployment.md:105`, `:189-190` советуют голую `python scripts/seed_db.py`** (P3). С 030 S2 команда отвечает `--source recipe needs --community`, exit 2. Переводы заморожены (`docs/README.md`, Translation freeze) — правятся при размораживании.
+- **Устаревший докстринг `scripts/seed_recipe.py:3`** («The other seeding paths in `scripts/seed_db.py` insert rows») (P3). Других путей нет с 030 S2. Получатель — 030 S5 (файл в её поверхности).
+
 ## Передано в программу 030
 
 Решения — раздел [«Корректировка 2026-10-05»](029-backlog-closure/spec.md#корректировка-2026-10-05-по-решениям-владельца-и-программе-030) спеки 029 и решения владельца В1–В4 ([спека 030](030-zero-sum-protection/spec.md#решения-владельца-2026-10-05-в1в4)). Строка снимается коммитом 030, исполнившим находку.

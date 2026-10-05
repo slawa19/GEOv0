@@ -129,15 +129,16 @@ Note: `run_local.ps1 start` writes/updates `admin-ui/.env.local` with:
 - `VITE_API_MODE=real`
 - `VITE_API_BASE_URL=http://127.0.0.1:<backendPort>` (default `18000`)
 
-Pick a full community dataset (recommended for graph testing):
+Pick a community (its recipe is run through the domain services; `riverside-town-50` is the default):
 
 ```powershell
-.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity greenfield-village-100 -RegenerateFixtures
-.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity greenfield-village-100
-
-.\scripts\run_local.ps1 reset-db -SeedSource fixtures -FixturesCommunity riverside-town-50 -RegenerateFixtures
-.\scripts\run_local.ps1 start -SeedSource fixtures -FixturesCommunity riverside-town-50
+.\scripts\run_local.ps1 reset-db -SeedCommunity greenfield-village-100
+.\scripts\run_local.ps1 start -SeedCommunity greenfield-village-100
 ```
+
+Seeding by importing fixture packs into the database (`seed_db.py --source fixtures` / `--source seeds`) was
+removed by programme 030 S2 (`F-030-3`): demo data goes through the real API with the same checks. The
+`admin-fixtures/` datasets stay the mock-mode data of Admin UI.
 
 ### 7.1 Start backend + DB (Docker Compose)
 From repo root:
@@ -151,9 +152,9 @@ From repo root:
 
 Migrations run automatically on container start (see `docker/docker-entrypoint.sh`).
 
-Optional seed:
-- Local dev stack:
-  `docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app python scripts/seed_db.py`
+Seeding: the Compose database `geov0` is not seeded. The recipe (`scripts/seed_db.py --source recipe`) seeds only
+an empty, disposable database named by contract (`geov0_dev_<slug>` / `geov0_test_<slug>` on a loopback host) and
+refuses any other; for a seeded stack use `run_local.ps1` (above) or 7.1b.
 
 ### 7.1b Start backend locally (no Docker)
 
@@ -165,14 +166,10 @@ By hand, with `DATABASE_URL` set:
 
 - Initialize DB schema:
   - `python -m alembic -c migrations/alembic.ini upgrade head`
-- Seed demo data:
-  - Recommended for Admin UI testing (fixtures-like rich dataset): `python scripts/seed_db.py --source fixtures`
-  - Choose a full community pack without modifying tracked fixtures (writes to `.local-run/fixture-packs`):
-    - `python scripts/seed_db.py --source fixtures --community greenfield-village-100`
-    - `python scripts/seed_db.py --source fixtures --community riverside-town-50`
-  - Validate a generated pack (example: Riverside):
-    - `cd admin-ui && node scripts/validate-fixtures.mjs --only-pack --v1-dir ..\.local-run\fixture-packs\riverside-town-50\v1`
-  - Legacy small seed set: `python scripts/seed_db.py --source seeds`
+- Seed demo data (into an empty `geov0_dev_<slug>` database) by running a community's recipe:
+  - `python scripts/seed_db.py --source recipe --community riverside-town-50`
+  - `python scripts/seed_db.py --source recipe --community greenfield-village-100`
+  - then `python scripts/dev_database.py adopt --community <the same community>`
 
 Note on Windows terminals:
 - Python code snippets (e.g. DB checks) must be run with `python` / `.venv\Scripts\python.exe`.

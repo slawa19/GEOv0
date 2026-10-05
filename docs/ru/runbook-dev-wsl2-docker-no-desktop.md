@@ -139,12 +139,12 @@ guardrail, не запустившись с небезопасным placeholder
 
 - `docker compose exec app alembic -c migrations/alembic.ini upgrade head`
 
-3) (Опционально) залить начальные данные:
-- `docker compose exec app python scripts/seed_db.py`
-
-4) Сразу после заливки, до любого клиентского трафика и запуска симулятора, снять baseline сверки долгов
-(контейнер `app` здесь уже запущен — заливка идёт внутри него; простаивающий API писателем не является):
-- `docker compose exec app python scripts/take_reconciliation_baseline.py --all`
+3) Начальные данные в базу Compose (`geov0`) не заливаются. Импорт наборов в базу
+(`seed_db.py --source fixtures` / `--source seeds`) удалён программой 030, стадия S2 (`F-030-3`): демо-данные
+идут через реальный API с теми же проверками. Рецепт (`scripts/seed_db.py --source recipe --community <id>`)
+засевает только пустую одноразовую базу с именем по контракту (`geov0_dev_<slug>` / `geov0_test_<slug>` на
+loopback-хосте) и отказывает любой другой — засеянный стенд даёт `scripts/run_local.ps1`. Эквивалент,
+созданный через `POST /admin/equivalents`, получает baseline сверки при создании.
 
 **Baseline сверки долгов (программа 015, критерий (а)).** Плановый цикл целостности сверяет `debts`
 каждого эквивалента с журналом долгов — это обнаружение изменений в обход приложения. Сверке нужен один

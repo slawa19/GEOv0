@@ -137,7 +137,8 @@ async def test_an_offset_hop_over_an_active_permissive_pair_is_a_transit_hop(db_
     # GEO transit (owner decision (2), 2026-09-29): A -> B offsets B's debt over A's active line.
     eq, people = await _seed(db_session, line_c_b="100")
     await PaymentService(db_session)._bind_payment(
-        f"hop-{uuid.uuid4()}", [([people[n].pid for n in "ABC"], Decimal("30"))], eq.id
+        f"hop-{uuid.uuid4()}", [([people[n].pid for n in "ABC"], Decimal("30"))], eq.id,
+        payer=people["A"].pid, payee=people["C"].pid, amount=Decimal("30"),
     )
     router = await _router(db_session, eq)
     assert not _routable(router, people, "50.01", to="C")
