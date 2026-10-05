@@ -291,9 +291,9 @@ Milestone перед слиянием каждой стадии — `.\scripts\v
 | `T3006` | S6 · F-030-16, 17; перенос стенда конкурентности | `[!]` |
 | `T3007` | S7 · F-030-18 и декомпозиция без денег — авторизуется отдельно | `[!]` |
 | `T3091` | §15-ревью S1 | `[x]` круг 1 на `f9a82d55` — `WEAK`, класс 1 — 0, класс 2 — 3; fix-delta `f9a82d55..de94bf88` — `WEAK`, закрыто 2/3, класс 1 — 0, класс 2 — 1 (в BACKLOG), `READY-TO-MERGE: YES` |
-| `T3092` | §15-ревью S2 | `[ ]` круг 1 на `db2d1ddd` — `WEAK`, класс 1 = 0; fix-delta исполнена, ждёт ревью fix-delta (Changelog «§15-ревью S2 `T3092`») |
+| `T3092` | §15-ревью S2 | `[x]` круг 1 на `db2d1ddd` — `WEAK`, класс 1 = 0; fix-delta — `FINDINGS-CLOSED: 2/2`, класс 1 — 0, класс 2 — 1, `READY-TO-MERGE: YES`; слита PR #134 `f77e83b0` |
 | `T3093` | §15-ревью S3 | `[!]` |
-| `T3094` | §15-ревью S4 | `[!]` |
+| `T3094` | §15-ревью S4 | `[ ]` круг 1 на `54004981` — `WEAK`, класс 1 = 0, класс 2 = 3; находка 1 исправлена, ждёт ревью fix-delta (Changelog «§15-ревью S4 `T3094`») |
 | `T3095` | §15-ревью S5 | `[!]` |
 | `T3096` | §15-ревью S6 | `[!]` |
 | `T3008` | Закрывающее ревью §19.5 | `[!]` |
@@ -539,3 +539,20 @@ Milestone перед слиянием каждой стадии — `.\scripts\v
 
     Простой целевой прогон двух новых файлов после сокращения докстрингов вошёл в повтор (`16 passed` вместе с двумя флейками выше). simulator-ui и OpenAPI не менялись, их гейты не запускались.
   7. **Не проверено:** исчерпание повторов `40001` внутри записи отказа (новая ветка `:2937`) стендом не воспроизводилось. Не воспроизводилось и расписание, где регистратор отказа под отменой встречает `RefusalNotRecorded`: ветка не менялась. Состав `phase.staged_tx_ids` для фазы, где есть только отказы без проведённых платежей (резолвер идентичности тогда отвечает «ничего не сохранено»), — до S4 так же, правкой не затронут. CI по ветке не запускался — PR не открывался.
+
+- **2026-10-05 — §15-ревью S4 `T3094`, круг 1, и fix-delta.** Ревьюер — Codex на `54004981`, read-only, тестов не запускал. Вывод — `.local-run/codex-review/2026-10-05-030-s4/final.md` (не коммитится). Маркеры: `VERDICT-030-S4: WEAK`, `LOSER-GETS-OWN-REFUSAL: YES`, `UNKNOWN-TREATED-AS-ROLLBACK: YES`, `CLASS-1-COUNT: 0`, `CLASS-2-COUNT: 3`, `READY-TO-MERGE: NO`. Ревьюер подтвердил, что оба расписания R2-2 в `pay()` устранены, fingerprint проверяется до возврата победителя, а COMMIT фазы денег разрешается по идентичности. Решения оркестратора:
+  1. **Находка 1 — исправлена.** Staged-путь, ветка непригодной транзакции (`money_replay._settle_unusable_phase`), получал разрешённого победителя, но отдельно обрабатывал только `COMMITTED`. При сохранённом `ABORTED` того же запроса он публиковал `tx.failed` из собственной ошибки попытки: её захватил callback `real_payments_executor._refusal_publisher`. Теперь callback принимает ошибку сохранённого отказа, и владелец передаёт её через `_public_error_of_stored` — тот же источник, что у повтора. `app/core/simulator/real_payments_executor.py` вошёл в owner surface S4 решением оркестратора. **Репродьюсер** `tests/integration/test_p030_s4_staged_refusal_publishes_the_winner_postgres.py` использует реальное расписание `T1912` из `test_p019_staged_refusal_is_durable_postgres.py`: seq 1 упирается в тайм-аут за медленной правкой оператора. Барьер стоит перед реальным регистратором, как в `test_the_owner_yields_to_...`. В барьере тот же запрос исполняется staged-путём после закоммиченного `UPDATE` лимита до 0 и отказывает `insufficient_capacity`. **Выбор инъекции:** маршрут передаётся ядру в обход роутера — стиль `test_p028_e3_freeze_boundary_postgres.py`. Иначе роутер отказал бы до допуска и строки `ABORTED` не было бы. Отказ ядра, запись, конфликт и разрешение победителя идут реальными путями. Красный на `4650fae4^` (`f0c80f30`): `E   assert 'PAYMENT_TIMEOUT' != 'PAYMENT_TIMEOUT'` (`1 failed`); премиссы (ожидание guard, `PaymentTransactionUnusable`, победитель `ABORTED insufficient_capacity`) прошли. Исправление — `4650fae4`.
+  2. **Находка 2** (спад доверия: «COMMIT упал, rollback прошёл» — откат) — не чинится, строка в `specs/BACKLOG.md`, раздел «S4 — §15-ревью `T3094`».
+  3. **Находка 3** (стенд не отличает вставку платежа от вставки отказа) — не чинится, строка там же. Там же записаны гипотеза о `40003 statement_completion_unknown` в классе `40` у `_commit_refused` и остаток ревью S2: отказ клиринга «сумма мельче шага» без понятного текста в simulator-ui.
+  - **Строки fix-delta:** продукт +22/−5 (`real_payments_executor.py` +14/−3, `money_replay.py` +7/−1, `service.py` +1/−1), тесты +71. Итог S4 против `f77e83b0`: продукт +76/−19 (потолок 60 превышен на 16 из-за находки 1), тесты +362 (потолок 200 превышен на 162).
+  - **Гейты fix-delta** (worktree):
+
+    | Гейт | Дерево | Итог | exit |
+    |---|---|---|---|
+    | Репродьюсер находки 1 (красный прогон) | `f0c80f30` | `1 failed` | 1 |
+    | Целевые: три файла S4, `test_p019_staged_refusal_is_durable`, `_money_phase_landing_evidence`, `test_p015_p1_money_replay_postgres`, `test_p015_p1_money_phase_replay`, `test_tick_commit_cancellation`, `test_tick_money_phase_resolution`, `test_p015_t1523_the_commit_landed_then_the_caller_failed`, `test_payment_prepare_error_taxonomy`, `test_p019_refusal_recording_is_bounded`, `_refusal_classes_characterization`, `_staged_tx_id_race_is_a_declared_conflict`, `test_payment_idempotency_postgres`, `test_payments_idempotency`, два `test_p028_e6` | рабочее дерево = `4650fae4` | `124 passed` | 0 |
+    | Целевые, остальные потребители исполнителя: `test_real_payments_ordered_journal`, `test_tick_money_paths_carry_the_run_perimeter`, `test_p015_p1_money_conflict_predicate`, `test_p026_s4_tick_close_publication_postgres`, `test_p015_t1525_control_postgres`, `test_p015_step5b_criterion_b_postgres`, `test_audit_drift_delta_check_sse_integration`, `test_p015_t1544_operator_stop_through_the_tick_sqlite`, `test_p021_unsigned_trust_line_path_is_never_request_controlled` | `4650fae4` | `69 passed` | 0 |
+    | `-TaskSlug p030s4t -ToolingOnly` | `4650fae4` + спека/BACKLOG | `422 passed` | 0 |
+    | `python -m ruff check app migrations --no-cache` | `4650fae4` | — | 0 |
+
+    Полный тир на fix-delta не перезапускался — его прогоняет CI PR #135.
