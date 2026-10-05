@@ -654,7 +654,7 @@ export const realApi = {
   },
 
   async getConfig(): Promise<ApiEnvelope<Record<string, unknown>>> {
-    // Backend returns { items: [{ key, value, mutable }] }. UI currently expects a flat object.
+    // Backend returns { items: [{ key, value, mutable }] }. The UI works with a flat object of the mutable keys.
     const raw = await requestJson<AdminConfigResponse>('/api/v1/admin/config', {
       admin: true,
       schema: AdminConfigResponseSchema,

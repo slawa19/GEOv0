@@ -621,7 +621,7 @@ sequenceDiagram
     "details": {
       "exc": "RoutingException",
       "geo_code": "E001",
-      "status_code": 404,
+      "status_code": 400,
       "message": "No route"
     }
   }

@@ -85,6 +85,8 @@ async def test_simulator_artifacts_include_events_ndjson(
     dl_url = events_item["url"]
     dl = await client.get(dl_url, headers=auth_headers)
     assert dl.status_code == 200, dl.text
+    # 029 F-029-7: the download answers the media type its index entry names (was `text/plain`).
+    assert dl.headers["content-type"].split(";")[0] == events_item["content_type"]
 
     lines = [ln for ln in dl.text.splitlines() if ln.strip()]
     assert len(lines) >= 1
@@ -102,4 +104,5 @@ async def test_simulator_artifacts_include_events_ndjson(
         f"/api/v1/simulator/runs/{run_id}/artifacts/bundle.zip", headers=auth_headers
     )
     assert bundle.status_code == 200
+    assert bundle.headers["content-type"] == "application/zip"
     assert bundle.content.startswith(b"PK")

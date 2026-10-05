@@ -115,6 +115,9 @@ from app.schemas.trustline import (
     TrustLineCreateRequest,
     TrustLineUpdateRequest,
 )
+from app.core.simulator.helpers import artifact_content_type
+from app.utils.error_codes import ErrorCode
+from app.utils.money import to_money_str
 from app.utils.validation import parse_money_amount, require_money_step
 
 router = APIRouter(prefix="/simulator")
@@ -207,6 +210,7 @@ async def _emit_interact_clearing_done_best_effort(
     executed: list[SimulatorActionClearingCycle],
     cleared_count: int,
     total: Decimal,
+    precision: int,
 ) -> None:
     if cleared_count <= 0:
         return
@@ -241,7 +245,7 @@ async def _emit_interact_clearing_done_best_effort(
             equivalent=equivalent_code,
             plan_id=f"plan_interact_{secrets.token_hex(6)}",
             cleared_cycles=int(cleared_count),
-            cleared_amount=_fmt_decimal_for_api(total),
+            cleared_amount=_fmt_decimal_for_api(total, precision),
             cycle_edges=cycle_edges_payload,
             node_patch=node_patch,
             edge_patch=edge_patch,
@@ -270,6 +274,7 @@ def _emit_interact_clearing_done_without_patches_best_effort(
     executed: list[SimulatorActionClearingCycle],
     cleared_count: int,
     total: Decimal,
+    precision: int,
 ) -> None:
     """Publish durable clearing progress without entering another await."""
     if cleared_count <= 0:
@@ -287,7 +292,7 @@ def _emit_interact_clearing_done_without_patches_best_effort(
             equivalent=equivalent_code,
             plan_id=f"plan_interact_{secrets.token_hex(6)}",
             cleared_cycles=int(cleared_count),
-            cleared_amount=_fmt_decimal_for_api(total),
+            cleared_amount=_fmt_decimal_for_api(total, precision),
             cycle_edges=_build_clearing_done_cycle_edges_payload(executed),
             node_patch=None,
             edge_patch=None,
@@ -850,9 +855,12 @@ async def _trustline_reverse_used_amount(
         return Decimal("0")
 
 
-def _fmt_decimal_for_api(v: Decimal) -> str:
-    # Preserve plain decimal string without scientific notation.
-    return format(v, "f")
+_INTERACT_ROUTING_CODE = {"no_route": "NO_ROUTE", "insufficient_capacity": "INSUFFICIENT_CAPACITY"}
+
+
+def _fmt_decimal_for_api(v: Decimal, precision: int) -> str:
+    # 029 F-029-5: a state amount is written in its equivalent's step, as the snapshot and the tick write it.
+    return to_money_str(v, precision)
 
 
 def _norm_pid(v: object) -> str:
@@ -1212,7 +1220,7 @@ async def _publish_trustline_change_best_effort(
                         from_pid=from_pid,
                         to_pid=to_pid,
                         equivalent_code=eq_code,
-                        limit=_fmt_decimal_for_api(limit_dec),
+                        limit=_fmt_decimal_for_api(limit_dec, parties.eq.precision),
                     )
                 ],
                 node_patch=None,
@@ -1311,8 +1319,8 @@ async def action_trustline_create(
                 "equivalent": eq.code,
                 "from_pid": from_p.pid,
                 "to_pid": to_p.pid,
-                "used": _fmt_decimal_for_api(used_now),
-                "limit": _fmt_decimal_for_api(limit_dec),
+                "used": _fmt_decimal_for_api(used_now, eq.precision),
+                "limit": _fmt_decimal_for_api(limit_dec, eq.precision),
             },
         )
 
@@ -1405,7 +1413,7 @@ async def action_trustline_create(
         from_pid=from_p.pid,
         to_pid=to_p.pid,
         equivalent=eq.code,
-        limit=_fmt_decimal_for_api(limit_dec),
+        limit=_fmt_decimal_for_api(limit_dec, eq.precision),
         client_action_id=req.client_action_id,
     )
 
@@ -1510,8 +1518,8 @@ async def action_trustline_update(
 
     return SimulatorActionTrustlineUpdateResponse(
         trustline_id=str(tl.id),
-        old_limit=_fmt_decimal_for_api(old_limit_dec),
-        new_limit=_fmt_decimal_for_api(new_limit_dec),
+        old_limit=_fmt_decimal_for_api(old_limit_dec, parties.eq.precision),
+        new_limit=_fmt_decimal_for_api(new_limit_dec, parties.eq.precision),
         client_action_id=req.client_action_id,
     )
 
@@ -1647,32 +1655,6 @@ async def action_payment_real(
     if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
         return err
 
-    # Best-effort pre-check to distinguish NO_ROUTE vs INSUFFICIENT_CAPACITY.
-    # Use cached trustline-only topology via PaymentRouter (ignores remaining capacity), so
-    # fully-saturated edges don't get misclassified as NO_ROUTE.
-    any_path_exists: Optional[bool] = None
-    try:
-        router = PaymentRouter(db)
-        await router.build_topology(eq.code)
-        if scoped_pids is not None:
-            # 2026-08-22 / p010 (`F-010-3`).  The pre-check must see the SAME perimeter the
-            # routing will use.  Left global, it would answer "a path exists" on a route
-            # that runs through another run, scoped routing would rightly find none, and the
-            # endpoint would report INSUFFICIENT_CAPACITY for something that is really
-            # NO_ROUTE -- an answer that disagrees with the fact.
-            router.topology_adj = {
-                u: (vs & scoped_pids)
-                for u, vs in router.topology_adj.items()
-                if u in scoped_pids
-            }
-        any_path_exists = router.has_topology_path(
-            str(from_p.pid),
-            str(to_p.pid),
-            max_hops=int(settings.ROUTING_MAX_HOPS or 6),
-        )
-    except Exception:
-        any_path_exists = None
-
     try:
         service = PaymentService(db)
         res = await service.create_payment_internal(
@@ -1694,23 +1676,14 @@ async def action_payment_real(
         # 028 `F-028-42`: the refusal's machine reason (and `max_available`) beside the action's own fields.
         reason = {k: v for k, v in public_refusal_details(exc.details, exc.code).items()
                   if k in ("reason", "max_available")}
-        if any_path_exists is False:
-            return _action_error(
-                status_code=409,
-                code="NO_ROUTE",
-                message=str(getattr(exc, "message", None) or "No route"),
-                details={
-                    "equivalent": eq.code,
-                    "from_pid": from_p.pid,
-                    "to_pid": to_p.pid,
-                    "requested": req.amount,
-                    **reason,
-                },
-            )
+        # 029 F-029-8: the code is a function of the core's reason - one source for one fact. A routing refusal
+        # with another reason answers by its own code (`E002` is capacity, `E001` is no route).
+        code = _INTERACT_ROUTING_CODE.get(reason.get("reason")) or (
+            "INSUFFICIENT_CAPACITY" if exc.code == ErrorCode.E002.value else "NO_ROUTE")
         return _action_error(
             status_code=409,
-            code="INSUFFICIENT_CAPACITY",
-            message=str(getattr(exc, "message", None) or "Insufficient capacity"),
+            code=code,
+            message=exc.message,
             details={
                 "equivalent": eq.code,
                 "from_pid": from_p.pid,
@@ -1840,7 +1813,7 @@ async def action_clearing_real(
     assert eq is not None
     # A skipped clearing rolls back its service-owned attempt, which expires ORM
     # instances. Keep the wire identifier independent of that session state.
-    eq_code = str(eq.code)
+    eq_code, eq_precision = str(eq.code), int(eq.precision)
 
     # 2026-08-22 / p010 (`F-010-3`).  This route used to hand `ClearingService` an
     # equivalent code and nothing else, so a run could clear a cycle made entirely of
@@ -1876,7 +1849,7 @@ async def action_clearing_real(
         cleared_count += 1
 
     def _shape() -> None:
-        executed[:] = [_interact_cycle_of(occurrence, pid_by_id) for occurrence in committed]
+        executed[:] = [_interact_cycle_of(occurrence, pid_by_id, eq_precision) for occurrence in committed]
 
     async def _emit_known_progress() -> None:
         _shape()
@@ -1889,6 +1862,7 @@ async def action_clearing_real(
                 executed=executed,
                 cleared_count=cleared_count,
                 total=total,
+                precision=eq_precision,
             )
         except asyncio.CancelledError:
             # Cancellation may arrive while patches are being computed, before
@@ -1901,13 +1875,14 @@ async def action_clearing_real(
                 executed=executed,
                 cleared_count=cleared_count,
                 total=total,
+                precision=eq_precision,
             )
             raise
 
     def _progress_details() -> dict[str, Any]:
         return {
             "partial_cleared_cycles": int(cleared_count),
-            "partial_cleared_amount": _fmt_decimal_for_api(total),
+            "partial_cleared_amount": _fmt_decimal_for_api(total, eq_precision),
         }
 
     try:
@@ -1927,6 +1902,7 @@ async def action_clearing_real(
                 executed=executed,
                 cleared_count=cleared_count,
                 total=total,
+                precision=eq_precision,
             )
         raise
     except ClearingPassError as failed:
@@ -1987,7 +1963,7 @@ async def action_clearing_real(
     return SimulatorActionClearingRealResponse(
         equivalent=eq_code,
         cleared_cycles=int(cleared_count),
-        total_cleared_amount=_fmt_decimal_for_api(total),
+        total_cleared_amount=_fmt_decimal_for_api(total, eq_precision),
         cycles=executed,
         client_action_id=req.client_action_id,
     )
@@ -2004,7 +1980,7 @@ async def _perimeter_pid_by_id(db, scoped_pids) -> dict:
     return {participant_id: str(pid) for participant_id, pid in rows}
 
 
-def _interact_cycle_of(occurrence, pid_by_id: dict) -> SimulatorActionClearingCycle:
+def _interact_cycle_of(occurrence, pid_by_id: dict, precision: int) -> SimulatorActionClearingCycle:
     """One committed occurrence on the wire: its amount and its edges in the trust-line direction creditor -> debtor.
 
     The runner's progress edge is debtor -> creditor by participant UUID (decision R3); the Interact wire and
@@ -2017,7 +1993,7 @@ def _interact_cycle_of(occurrence, pid_by_id: dict) -> SimulatorActionClearingCy
         debtor = pid_by_id.get(edge.debtor_id)
         if creditor and debtor and creditor != debtor:
             edges.append(SimulatorActionEdgeRef(from_=creditor, to=debtor))
-    return SimulatorActionClearingCycle(cleared_amount=_fmt_decimal_for_api(occurrence.amount), edges=edges)
+    return SimulatorActionClearingCycle(cleared_amount=_fmt_decimal_for_api(occurrence.amount, precision), edges=edges)
 
 
 @router.get(
@@ -2149,7 +2125,7 @@ async def action_trustlines_list(
         if v is None:
             return "0"
         if isinstance(v, Decimal):
-            return _fmt_decimal_for_api(v)
+            return _fmt_decimal_for_api(v, eq.precision)
         if isinstance(v, (int, float)):
             # Avoid scientific notation for most typical values.
             try:
@@ -2988,7 +2964,8 @@ async def artifacts_download(
 ):
     _check_run_access(runtime.get_run(run_id), actor, run_id)
     path = runtime.get_artifact_path(run_id=run_id, name=name)
-    return FileResponse(path)
+    # 029 F-029-7: the type the index names for this artifact; None leaves the file response's own guess.
+    return FileResponse(path, media_type=artifact_content_type(name))
 
 
 # ---------------------------------------------------------------------------

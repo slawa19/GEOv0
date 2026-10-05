@@ -160,11 +160,11 @@ async def test_interact_actions_write_one_audit_row_and_one_checkpoint_pair_each
     assert r1.status_code == 200, r1.text
     p1 = r1.json()
     assert (p1["ok"], p1["from_pid"], p1["to_pid"], p1["equivalent"], p1["limit"], p1["client_action_id"]) == (
-        True, w.a, w.b, w.eq, "100", "c1"), p1
+        True, w.a, w.b, w.eq, "100.00", "c1"), p1  # 029 F-029-5: the equivalent's step
     assert r2.status_code == 200, r2.text
     p2 = r2.json()
     assert (p2["trustline_id"], p2["old_limit"], p2["new_limit"], p2["client_action_id"]) == (
-        p1["trustline_id"], "100.00000000", "150", "c2"), p2
+        p1["trustline_id"], "100.00", "150.00", "c2"), p2
     assert r3.status_code == 200, r3.text
     # INTENTIONAL, 026 `T2603.2`: the close answer carries the line's state (no debt here: closed at once).
     closed = r3.json()

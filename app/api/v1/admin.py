@@ -318,17 +318,18 @@ async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dic
 
 
 def _runtime_config_items() -> list[tuple[str, bool]]:
-    # (key, mutable)
+    # (key, mutable). 029 `F-029-4`: a key is mutable only if changing it at runtime does what its name says.
+    # LOG_LEVEL and the integrity job's switch and period are taken once at start; the recovery three have no reader.
     return [
-        ("LOG_LEVEL", True),
+        ("LOG_LEVEL", False),
         ("RATE_LIMIT_ENABLED", True),
         ("ROUTING_MAX_HOPS", True),
         ("ROUTING_MAX_PATHS", True),
-        ("INTEGRITY_CHECKPOINT_ENABLED", True),
-        ("INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", True),
-        ("RECOVERY_ENABLED", True),
-        ("RECOVERY_INTERVAL_SECONDS", True),
-        ("PAYMENT_TX_STUCK_TIMEOUT_SECONDS", True),
+        ("INTEGRITY_CHECKPOINT_ENABLED", False),
+        ("INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", False),
+        ("RECOVERY_ENABLED", False),
+        ("RECOVERY_INTERVAL_SECONDS", False),
+        ("PAYMENT_TX_STUCK_TIMEOUT_SECONDS", False),
         ("FEATURE_FLAGS_MULTIPATH_ENABLED", True),
         ("FEATURE_FLAGS_FULL_MULTIPATH_ENABLED", True),
         ("CLEARING_ENABLED", True),

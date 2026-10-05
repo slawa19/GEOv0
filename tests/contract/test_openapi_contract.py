@@ -374,8 +374,13 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # payments operations change content: `PaymentRefusalDetails` becomes a CLOSED set of keys (the code's allow-list);
 # the generated side stays `Dict[str, Any]`. Measured with a per-entry dump of every ledger on `da7c7adc` and on this
 # tree: no other entry of any ledger differs.
+# 2026-10-05 / programme 029 S2 (`F-029-7`): count HOLDS at 63, digest moves. ONE entry changes content:
+# `GET /simulator/runs/{run_id}/artifacts/{name}` - the canon declares `application/x-ndjson` and `application/zip`
+# where it declared `text/plain`, `application/zip` and `application/x-zip-compressed` (the handler now passes the
+# index's media type). Measured with a per-entry dump of every ledger on `8552c989` and on this tree
+# (`.local-run/dump_ledgers.py`, not committed): no other entry of any ledger differs.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "326ba6cf1f4793d1e688cfbae04eeb510beb3174a35f4365503b4c6def6dcf39"
+    "7cb1684ef988f79756dd9e5b1b1d3e25b2e94487e5cf0395879cb531ac7a62b6"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # 2026-08-11 / T501: public DB health no longer declares exception details;

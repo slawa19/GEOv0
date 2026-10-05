@@ -138,6 +138,9 @@ async def test_lifespan_stops_supervised_tasks_before_closing_resources(
         async def ping(self) -> None:
             events.append("redis_ping")
 
+        async def config_get(self, name):
+            return {name: "noeviction"}
+
         async def aclose(self) -> None:
             self.closed = True
             events.append("redis_close")

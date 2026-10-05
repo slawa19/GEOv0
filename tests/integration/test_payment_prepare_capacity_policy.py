@@ -124,10 +124,11 @@ async def test_a_single_route_refusal_reports_the_capacity_and_the_need(
             equivalent_id,
         )
 
-    assert Decimal(error.value.details["available"]) == Decimal("80")
-    assert Decimal(error.value.details["needed"]) == Decimal("80.01")
+    # 029 F-029-5 (row 3): written in the equivalent's step (CAP, precision 2); were "80.00000000", "80.01", "0".
+    assert error.value.details["available"] == "80.00"
+    assert error.value.details["needed"] == "80.01"
     # No other transaction reserves anything, and a single route has no earlier route of its own.
-    assert Decimal(error.value.details["reserved"]) == Decimal("0")
+    assert error.value.details["reserved"] == "0.00"
     assert (error.value.details["from"], error.value.details["to"]) == ("CAP-S", "CAP-R")
 
 
@@ -150,6 +151,6 @@ async def test_multipath_counts_its_own_earlier_routes_over_one_segment(
     # Each route alone fits (50 <= 80); the second is refused only because the first route of the
     # SAME payment already claims 50 of the segment: routing may not spend more capacity than the
     # segment has (AGENTS §8).
-    assert Decimal(error.value.details["available"]) == Decimal("80")
-    assert Decimal(error.value.details["needed"]) == Decimal("50")
-    assert Decimal(error.value.details["reserved"]) == Decimal("50")
+    assert error.value.details["available"] == "80.00"
+    assert error.value.details["needed"] == "50.00"
+    assert error.value.details["reserved"] == "50.00"

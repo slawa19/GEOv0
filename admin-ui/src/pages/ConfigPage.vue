@@ -13,12 +13,6 @@ import { t, te } from '../i18n'
 type RowKind = 'boolean' | 'number' | 'string' | 'json'
 type Row = { key: string; kind: RowKind; value: unknown }
 
-const LOG_LEVEL_OPTIONS = ['CRITICAL', 'ERROR', 'WARNING', 'WARN', 'INFO', 'DEBUG', 'TRACE'] as const
-
-function isLogLevelKey(key: string): boolean {
-  return String(key || '').trim().toUpperCase() === 'LOG_LEVEL'
-}
-
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -160,8 +154,7 @@ function configTooltipTextForRow(row: Row): string {
 }
 
 function appliesForKey(key: string): ScopeTag[] {
-  // /admin/config currently only exposes runtime-mutable items.
-  // Keep the function for future expansion and UI consistency.
+  // The API facade hands this page only the keys the backend marks `mutable` (029 F-029-4).
   void key
   return ['runtime']
 }
@@ -415,27 +408,7 @@ watch(
                   />
 
                   <template v-else-if="scope.row.kind === 'string'">
-                    <el-select
-                      v-if="isLogLevelKey(scope.row.key)"
-                      v-model="scope.row.value"
-                      :disabled="isKeyReadOnly(scope.row.key)"
-                      filterable
-                      allow-create
-                      default-first-option
-                      class="cfgSelect"
-                      popper-class="geoSelectPopper geoSelectPopper--configValue"
-                      :placeholder="t('config.logLevelPlaceholder')"
-                    >
-                      <el-option
-                        v-for="opt in LOG_LEVEL_OPTIONS"
-                        :key="opt"
-                        :label="opt"
-                        :value="opt"
-                      />
-                    </el-select>
-
                     <el-input
-                      v-else
                       v-model="scope.row.value"
                       :disabled="isKeyReadOnly(scope.row.key)"
                       size="small"
@@ -551,27 +524,6 @@ watch(
 .cfgNumber {
   width: 160px;
   flex: 0 0 auto;
-}
-
-.cfgSelect {
-  width: 160px;
-}
-
-/* geoTable enforces label font size; restore standard size for select input and dropdown options */
-.cfgSelect :deep(.el-input__wrapper) {
-  font-size: var(--el-font-size-base);
-}
-
-.cfgSelect :deep(.el-input__inner) {
-  font-size: var(--el-font-size-base);
-}
-
-:global(.geoSelectPopper--configValue) {
-  font-size: var(--el-font-size-base);
-}
-
-:global(.geoSelectPopper--configValue .el-select-dropdown__item) {
-  font-size: var(--el-font-size-base);
 }
 
 .cfgText {

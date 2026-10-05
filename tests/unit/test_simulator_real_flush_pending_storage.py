@@ -94,3 +94,30 @@ async def test_real_flush_pending_storage_writes_once(monkeypatch) -> None:
     assert calls[0][1]["run_id"] == "r1"
     assert calls[0][1]["t_ms"] == 2000
     assert calls[1][1]["equivalent"] == "HOUR"
+
+
+async def test_the_final_flush_does_not_lose_tick_zero(monkeypatch) -> None:
+    """029 `F-029-12` (№ 56): tick 0 is a tick. `tick_index or -1` read it as "no data" and the final flush
+    skipped it; a flushed mark of 0 was read as "nothing flushed" and tick 0 was written again."""
+    import app.core.simulator.storage as simulator_storage
+    import app.db.session as db_session
+    from tests.simulator_tick_stand import unit_tick
+
+    run = RunRecord(run_id="r0", scenario_id="s1", mode="real", state="running")
+    run._real_last_tick_storage_payload = {"run_id": "r0", "tick_index": 0, "t_ms": 0, "per_equivalent": {},
+                                           "metric_values_by_eq": {"HOUR": {"avg_route_length": 1.0}}}
+    run._real_last_tick_storage_flushed_tick = -1
+    calls: list[int] = []
+
+    async def _write_tick_metrics(**kwargs):
+        calls.append(kwargs["t_ms"])
+
+    monkeypatch.setattr(db_session, "AsyncSessionLocal", lambda: _DummySessionCtx())
+    monkeypatch.setattr(simulator_storage, "write_tick_metrics", _write_tick_metrics)
+    tick = unit_tick(_get_run=lambda _run_id: run)
+
+    await tick.flush_pending_storage("r0")
+    assert calls == [0], "tick 0 was not flushed"
+    assert run._real_last_tick_storage_flushed_tick == 0
+    await tick.flush_pending_storage("r0")
+    assert calls == [0], "tick 0, already flushed, was written again"

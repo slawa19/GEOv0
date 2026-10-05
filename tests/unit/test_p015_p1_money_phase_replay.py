@@ -175,7 +175,6 @@ def _phase(
         ],
     )
     return TickPaymentsPhase(
-        debt_snapshot={},
         planned=[],
         per_eq_metric_values={},
         committed=committed,
