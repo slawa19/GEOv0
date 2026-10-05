@@ -740,8 +740,12 @@ paths:
       description: |
         Programme 015 step 5c. Lifts the integrity hold that the scheduled reconciliation set on a
         confirmed FAILED result. Permitted only while the equivalent is held AND its latest
-        reconciliation result is PASSED and is not the result the hold was set on; otherwise 409.
-        Audited with the required reason. Never automatic.
+        reconciliation result is PASSED and is not the result the hold was set on AND a verification
+        of the equivalent run by this request, under the lock of its row that every money writer waits
+        on, is PASSED too (030 F-030-10: a stored PASSED can predate the hold); otherwise 409 with
+        `details.reason`, and for `no_later_passed_reconciliation_result` also `details.latest_status`
+        and `details.recheck_status` (`IntegrityHoldClearRefusalDetails`). Audited with the required
+        reason. Never automatic.
       security: []
       parameters:
         - in: header
@@ -768,7 +772,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Equivalent'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: Not held, or no PASSED reconciliation result later than the hold's, or the re-verification is not PASSED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrityHoldClearRefusal'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -3077,7 +3085,11 @@ paths:
         028 `F-028-44` (owner decision 2026-10-04, В-7): per equivalent, the verdict of the LAST STORED check - the
         equivalent's integrity hold and its latest debt reconciliation result - and nothing more. Nothing is
         recomputed and nothing is written by the call. No stored result is `warning` with `checked_at: null`, never
-        `healthy`. The checks themselves, their details and the audit log are admin-only.
+        `healthy`. Since 030 `F-030-8` a stored verdict that is not fresh is `warning` too, never `healthy`: its
+        `checked_at` older than the freshness policy (two integrity intervals plus one run), or the last scheduled
+        reconciliation run of the answering process ended in an error. Neither holds money; the reason is named in
+        the admin's `GET /integrity/status` `alerts`. The checks themselves, their details and the audit log are
+        admin-only.
       responses:
         '200':
           description: The summary
@@ -5906,6 +5918,47 @@ components:
           type: string
         details:
           $ref: '#/components/schemas/PaymentRefusalDetails'
+
+    IntegrityHoldClearRefusal:
+      # 030 F-030-10: the 409 of `POST /admin/equivalents/{code}/integrity-hold/clear` (`app/api/v1/admin.py`,
+      # `admin_clear_equivalent_integrity_hold`) - the ErrorEnvelope with its `details` named.
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              $ref: '#/components/schemas/IntegrityHoldClearRefusalDetails'
+            request_id:
+              type: string
+              nullable: true
+
+    IntegrityHoldClearRefusalDetails:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          # `no_integrity_hold` - nothing is held (only `reason`); `no_later_passed_reconciliation_result` - the
+          # latest stored result is missing, not PASSED or the hold's own, or the re-verification is not PASSED.
+          type: string
+          enum: [no_integrity_hold, no_later_passed_reconciliation_result]
+        latest_status:
+          # The latest stored result's status; null - none stored.
+          type: string
+          nullable: true
+          enum: [PASSED, FAILED, UNVERIFIABLE, null]
+        recheck_status:
+          # 030 F-030-10: the verdict of the verification run by this request under the row lock; null - not run,
+          # because the stored result already refused.
+          type: string
+          nullable: true
+          enum: [PASSED, FAILED, UNVERIFIABLE, null]
 
     PaymentRefusalDetails:
       # 028 `F-028-42` (owner decision 2026-10-04, В-6). The `details` of every payment refusal as its participant

@@ -35,13 +35,13 @@ def _emit_integrity_metric(result: str) -> None:
         )
 
 
-async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool:
+async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> tuple[bool, str | None]:
     """Programme 015 steps 5a and 5b: debt reconciliation, criteria (a) and (b) - detection of change made
     around the application, and of a recorded change that disagrees with its recorded intent.
 
     THE ONLY HOST. Not `POST /integrity/verify`, which participants can call, and not the payment or
-    clearing checkpoints, which run inside the money transaction. It runs after the checkpoints have
-    committed, in fresh transactions of its own, and its result is its own row: it never enters a
+    clearing checkpoints, which run inside the money transaction. It runs after the checkpoints - and since
+    030 F-030-7 also after they failed - in fresh transactions of its own, and its result is its own row: it never enters a
     checkpoint's `checks`, `passed`, `status` or `alerts`, and never an audit row.
 
     Returns False on any ERROR - the run itself, an equivalent the verifier could not verify, or a FAILED
@@ -50,6 +50,9 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool
     result, and never turns the committed checkpoints into something else. A verdict (`FAILED`,
     `UNVERIFIABLE`) is not an error of the job. It reads every equivalent, active or not - the T1544
     operator stop is a refusal to MOVE money.
+
+    030 `T3091`: also returns the equivalents whose verification erred, comma-joined - None when the run itself
+    failed (or did not name them), so every equivalent's verdict is unknown.
     """
 
     from app.core.ledger.reconciliation import run_scheduled_reconciliation
@@ -59,7 +62,7 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool
     except Exception:  # noqa: BLE001 - an error is recorded as an error; no result is substituted
         logger.exception("integrity.debt_reconciliation_failed reason=%s", reason)
         _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
-        return False
+        return False, None
     if counts["error"] or counts["hold_errors"]:
         logger.error(
             "integrity.debt_reconciliation_errors reason=%s errors=%d hold_errors=%d",
@@ -68,8 +71,8 @@ async def _run_debt_reconciliation_once(session_factory, *, reason: str) -> bool
             counts["hold_errors"],
         )
         _emit_integrity_metric(f"{reason}_debt_reconciliation_error")
-        return False
-    return True
+        return False, ",".join(counts.get("errored_equivalents") or ()) or None
+    return True, None
 
 
 async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
@@ -88,6 +91,7 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
         lock_ttl_seconds = max(30, interval)
 
     _emit_integrity_metric(f"{reason}_start")
+    checkpoint_error: Exception | None = None
     try:
         async with redis_distributed_lock(
             getattr(app.state, "redis", None),
@@ -95,10 +99,15 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
             ttl_seconds=lock_ttl_seconds,
             wait_timeout_seconds=0.0,
         ):
-            async with AsyncSessionLocal() as session:
-                await compute_and_store_integrity_checkpoints(session)
-            # After the checkpoints have COMMITTED, and under the same distributed lock.
-            reconciled = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
+            try:  # 030 F-030-7: an error of the checkpoints does not cancel the reconciliation; both are recorded
+                async with AsyncSessionLocal() as session:
+                    await compute_and_store_integrity_checkpoints(session)
+            except Exception as error:  # noqa: BLE001 - recorded below as the job's error, never as a success
+                checkpoint_error = error
+                logger.exception("integrity.checkpoints_failed reason=%s", reason)
+                _emit_integrity_metric(f"{reason}_error")
+            # After the checkpoints (committed or failed), and under the same distributed lock.
+            reconciled, errored = await _run_debt_reconciliation_once(AsyncSessionLocal, reason=reason)
     except ConflictException:
         _emit_integrity_metric(f"{reason}_skipped_locked")
         # A skipped run proves nothing: a recorded failure (checkpoints or reconciliation) is kept, with its
@@ -124,13 +133,14 @@ async def _run_integrity_checkpoints_once(app: FastAPI, *, reason: str) -> bool:
         )
         return False
 
-    if not reconciled:
+    if checkpoint_error is not None or not reconciled:
+        failed = "checkpoints" if reconciled else "debt_reconciliation"
+        failed = f"checkpoints_and_{failed}" if checkpoint_error and not reconciled else failed
         _record_background_job_event(
-            app,
-            name="integrity",
-            status="failed",
-            event=f"{reason}_debt_reconciliation_error",
+            app, name="integrity", status="failed", event=f"{reason}_{failed}_error", error=checkpoint_error
         )
+        if errored:  # 030 T3091: the equivalents whose verdict is unknown; absent - the whole run's
+            _background_job_states(app)["integrity"]["errored_equivalents"] = errored
         return False
 
     _emit_integrity_metric(f"{reason}_success")
@@ -202,6 +212,22 @@ async def _clearing_loop(app: FastAPI) -> None:
             break
         except asyncio.TimeoutError:
             continue
+
+
+def debt_reconciliation_run_problem(app: FastAPI, equivalent_id) -> str | None:
+    """030 F-030-8, `T3091`: why this process cannot vouch for the equivalent's stored verdict, or None.
+
+    A failed run - any recorded failure except one of the checkpoints alone, narrowed to the equivalents it names
+    when it names them. IMMEDIATE BUT PROCESS-LOCAL: a restart or another worker does not see it; the stored rows do,
+    after the run allowance (`app/api/v1/integrity.py`, `_reconciliation_view`)."""
+
+    state = _background_job_states(app).get("integrity", {})
+    if state.get("status") != "failed" or str(state.get("event", "")).endswith("_checkpoints_error"):
+        return None
+    errored = state.get("errored_equivalents")
+    if errored is not None and str(equivalent_id) not in errored.split(","):
+        return None
+    return "the last scheduled run ended in an error"
 
 
 def _start_configured_background_tasks(app: FastAPI) -> None:

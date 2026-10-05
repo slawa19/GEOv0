@@ -55,6 +55,11 @@ async def stopped_runs(client, auth_headers):
 async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     client, auth_headers, db_session, stopped_runs
 ):
+    # 030 F-030-9: the seeder now gives a NEW equivalent its baseline, after which the fixture debt below is refused.
+    # The subject here is the snapshot of a debt, not how it arises: `UAH` pre-exists, so the seeder leaves it unbaselined.
+    db_session.add(Equivalent(code="UAH", precision=2, is_active=True, metadata_={}))
+    await db_session.commit()
+
     # Start a real-mode run from fixture scenario.
     resp = await client.post(
         "/api/v1/simulator/runs",
@@ -79,7 +84,10 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
         eq = (
             await db_session.execute(select(Equivalent).where(Equivalent.code == "UAH"))
         ).scalar_one_or_none()
-        if eq is not None:
+        # `UAH` pre-exists (above), so the seeding has landed when its lines have.
+        if eq is not None and (await db_session.execute(
+            select(TrustLine.id).where(TrustLine.equivalent_id == eq.id).limit(1)
+        )).first() is not None:
             break
         await asyncio.sleep(0.2)
     assert eq is not None

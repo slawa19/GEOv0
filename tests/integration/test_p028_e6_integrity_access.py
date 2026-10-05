@@ -22,20 +22,23 @@ from tests.integration.test_scenarios import register_and_login
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
 CLOSED = [("get", "/api/v1/integrity/status", None), ("get", "/api/v1/integrity/audit-log", None),
           ("post", "/api/v1/integrity/verify", {}), ("get", "/api/v1/integrity/checksum/E6A", None)]
-AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
 
-async def hold(db_session, code: str, status: str = FAILED, held: bool = True) -> None:
-    """The equivalent's latest stored reconciliation result (`status` at `AT`), and the hold on it."""
+async def hold(db_session, code: str, status: str = FAILED, held: bool = True) -> datetime:
+    """The equivalent's latest stored reconciliation result (`status`, checked now), and the hold on it. Now, not a
+    fixed date: since 030 F-030-8 a result older than the freshness policy reads `warning`."""
+
+    at = datetime.now(timezone.utc).replace(microsecond=0)
 
     eq_id = (await db_session.execute(select(Equivalent.id).where(Equivalent.code == code))).scalar_one()
     rid = uuid.uuid4()
     await db_session.execute(insert(debt_reconciliation_results).values(
-        id=rid, equivalent_id=eq_id, status=status, fingerprint="e" * 64, detail={}, checked_at=AT,
-        last_checked_at=AT, is_latest=True))
+        id=rid, equivalent_id=eq_id, status=status, fingerprint="e" * 64, detail={}, checked_at=at,
+        last_checked_at=at, is_latest=True))
     if held:
         await db_session.execute(update(Equivalent).where(Equivalent.id == eq_id).values(integrity_hold_result_id=rid))
     await db_session.commit()
+    return at
 
 
 async def _equivalents(db_session, *codes: str) -> None:
@@ -57,7 +60,7 @@ async def test_a_participant_is_refused_the_checks_and_the_admin_is_not(client, 
 @pytest.mark.asyncio
 async def test_the_summary_reads_the_last_stored_check_and_writes_nothing(client, db_session) -> None:
     await _equivalents(db_session, "E6U", "E6P", "E6H")
-    await hold(db_session, "E6P", PASSED, held=False)
+    at = await hold(db_session, "E6P", PASSED, held=False)
     await hold(db_session, "E6H")
     user = await register_and_login(client, "E6SummaryUser")
 
@@ -77,6 +80,6 @@ async def test_the_summary_reads_the_last_stored_check_and_writes_nothing(client
     rows = {row["equivalent"]: row for row in first.json()["equivalents"]}
     assert rows["E6U"] == {"equivalent": "E6U", "status": "warning", "checked_at": None, "hold": False}, rows
     assert (rows["E6P"]["status"], rows["E6P"]["hold"]) == ("healthy", False), rows
-    assert datetime.fromisoformat(rows["E6P"]["checked_at"].replace("Z", "+00:00")) == AT, rows
+    assert datetime.fromisoformat(rows["E6P"]["checked_at"].replace("Z", "+00:00")) == at, rows
     assert (rows["E6H"]["status"], rows["E6H"]["hold"]) == ("critical", True), rows
     assert statements and set(statements) <= {"SELECT"}, f"the summary wrote or recomputed: {statements}"

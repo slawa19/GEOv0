@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
-from pydantic import TypeAdapter, ValidationError, WithJsonSchema
+from pydantic import BaseModel, TypeAdapter, ValidationError, WithJsonSchema
 from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
 from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +71,7 @@ from app.core.payments.router import PaymentRouter
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.simulator.net_balance_utils import net_decimal_to_atoms
 from app.core.trustlines.service import TrustLineService
-from app.core.ledger.reconciliation import take_baseline
+from app.core.integrity import create_equivalent
 from app.db.reconciliation_tables import debt_reconciliation_baselines
 from sqlalchemy.exc import IntegrityError
 from app.utils.exceptions import (
@@ -1161,22 +1161,17 @@ async def admin_create_equivalent(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> EquivalentSchema:
-    eq = EquivalentModel(
-        code=body.code,
-        symbol=body.symbol,
-        description=body.description,
-        precision=body.precision,
-        metadata_=body.metadata,
-        is_active=body.is_active,
-    )
-    db.add(eq)
     try:
-        await db.flush()
-        # 024 `T2412.2`: the reconciliation baseline, in the creating transaction. A new equivalent has no
-        # debt and no journal entry, so the baseline adopts nothing (zero offsets) and every later change is
-        # checkable; without it criterion (a) stayed UNVERIFIABLE for good. Existing equivalents without a
-        # baseline are NOT backfilled here - that is an operator's decision (spec 024, T2412).
-        await take_baseline(db, eq.id)
+        # 024 `T2412.2`, 030 F-030-9: the row and its baseline in this transaction, by the one core function.
+        eq = await create_equivalent(
+            db,
+            code=body.code,
+            symbol=body.symbol,
+            description=body.description,
+            precision=body.precision,
+            metadata_=body.metadata,
+            is_active=body.is_active,
+        )
         await db.refresh(eq)
         result = EquivalentSchema.model_validate(eq)
         _add_audit_entry(
@@ -1339,14 +1334,41 @@ async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[s
     }
 
 
+_ResultStatus = Literal["PASSED", "FAILED", "UNVERIFIABLE"]
+# The null is IN the enum, as the canon requires beside `nullable` (`test_p011_nullable_needs_a_sibling_type`).
+_NullableResultStatus = Annotated[
+    _ResultStatus | None,
+    WithJsonSchema({"type": "string", "nullable": True, "enum": ["PASSED", "FAILED", "UNVERIFIABLE", None]}),
+]
+
+
+class IntegrityHoldClearRefusalDetails(BaseModel):
+    """Documentation only (030 F-030-10): the `details` of the clear's 409, as the handler writes them below."""
+
+    reason: Literal["no_integrity_hold", "no_later_passed_reconciliation_result"]
+    latest_status: _NullableResultStatus = None
+    recheck_status: _NullableResultStatus = None
+
+
+class IntegrityHoldClearRefusalError(BaseModel):
+    code: str
+    message: str
+    details: IntegrityHoldClearRefusalDetails  # both refusals below carry it
+    request_id: str | None = None
+
+
+class IntegrityHoldClearRefusal(BaseModel):
+    error: IntegrityHoldClearRefusalError
+
+
 @router.post(
     "/equivalents/{code}/integrity-hold/clear",
     response_model=EquivalentSchema,
     responses={
         404: {"model": ErrorEnvelope, "description": "Equivalent not found"},
         409: {
-            "model": ErrorEnvelope,
-            "description": "Not held, or no PASSED reconciliation result later than the one it was held on",
+            "model": IntegrityHoldClearRefusal,
+            "description": "Not held, or no PASSED reconciliation result later than the hold's, or the re-verification is not PASSED",
         },
     },
 )
@@ -1361,8 +1383,9 @@ async def admin_clear_equivalent_integrity_hold(
     """Programme 015 step 5c (`T1546`): lift an integrity hold, explicitly, with audit.
 
     PREDICATE, NO CLOCKS: the equivalent is held AND its latest reconciliation result is `PASSED` AND that
-    result is not the one the hold points at. Result transitions give the causal order: the reaction makes
-    the FAILED row latest, and any later transition demotes it before inserting the new latest.
+    result is not the one the hold points at AND a verification here, under the row lock, is `PASSED` too.
+    Result transitions alone do not give the causal order: two overlapping verifier runs can publish an older
+    PASSED after a newer hold (030 F-030-10, `tests/integration/test_p030_s1_stale_passed_hold_clear_postgres.py`).
 
     The two predicate reads take row locks (`FOR UPDATE` on the equivalent, `FOR SHARE` on the latest
     result) held through commit, like the deactivating PATCH, so a scheduled reaction confirming a new FAILED
@@ -1371,7 +1394,7 @@ async def admin_clear_equivalent_integrity_hold(
 
     from sqlalchemy import update as sql_update
 
-    from app.core.ledger.reconciliation import PASSED
+    from app.core.ledger.reconciliation import PASSED, verify_journal_equals_change
     from app.db.reconciliation_tables import debt_reconciliation_results
 
     eq = (
@@ -1404,12 +1427,16 @@ async def admin_clear_equivalent_integrity_hold(
                 .with_for_update(read=True)
             )
         ).first()
-        if latest is None or latest.status != PASSED or latest.id == hold_result_id:
+        # 030 F-030-10: publication order is open (`record_outcome`), so a stored PASSED may predate the hold. The
+        # equivalent is re-verified here, after the row lock every money writer of it waits on.
+        recheck = None if latest is None or latest.status != PASSED else await verify_journal_equals_change(db, eq.id)
+        if recheck is None or recheck.status != PASSED or latest.id == hold_result_id:
             raise ConflictException(
                 f"Equivalent {eq.code} can be cleared only after a later PASSED reconciliation result",
                 details={
                     "reason": "no_later_passed_reconciliation_result",
                     "latest_status": None if latest is None else str(latest.status),
+                    "recheck_status": None if recheck is None else recheck.status,
                 },
             )
     except BaseException:
