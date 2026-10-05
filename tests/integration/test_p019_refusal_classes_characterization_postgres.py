@@ -93,6 +93,7 @@ from tests.integration.test_p015_p1_money_replay_postgres import (
     _scenario,
     _seed,
 )
+from tests.integration.test_p019_staged_refusal_is_durable_postgres import _Subject
 
 
 def _answer(resp) -> tuple[Any, ...]:
@@ -176,25 +177,6 @@ class _CommitGate:
             await original()
 
         session.commit = gated_commit
-
-
-async def _row_lock_waiter_exists(factory, *, timeout: float = 10.0) -> bool:  # noqa: F811
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    async with factory() as observer:
-        while True:
-            waiting = await observer.scalar(
-                text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted "
-                    "AND locktype IN ('transactionid', 'tuple'))"
-                )
-            )
-            await observer.rollback()
-            if waiting:
-                return True
-            if loop.time() > deadline:
-                return False
-            await asyncio.sleep(0.02)
 
 
 @pytest.mark.asyncio
@@ -329,6 +311,11 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
     w = await build_api_world(api, factory, people=people)
     body = payment_body(w, w.alice, w.bob, "10.00")
     gate = _CommitGate()
+    # 029 F-029-26, by the stand of `test_p019_staged_refusal_is_durable_postgres.py`: the premise is READ
+    # from the payment's own guard statement and the short commit budget is that payment's alone. It was
+    # a poll of `pg_locks` for ANY waiter of the server (row-lock waits carry no database, so another
+    # tier's waiter made it true) under a process-wide 0.5 s budget (which the poll itself could outlast).
+    subject = _Subject(w.equivalent_id, gate)
     patch_task = None
 
     async def slow_patch_then_pay(b, w=w):
@@ -342,9 +329,7 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
                 )
             )
         await asyncio.wait_for(gate.reached.wait(), timeout=20)
-        pay = asyncio.create_task(post(w, b))
-        premises["timeout_confirmed_rollback"] = await _row_lock_waiter_exists(factory)
-        return await asyncio.wait_for(pay, timeout=30)
+        return await asyncio.wait_for(post(w, b), timeout=30)
 
     async def release_patch():
         gate.release.set()
@@ -353,11 +338,12 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
 
     try:
         with monkeypatch.context() as m:
-            m.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 0.5)
+            subject.install(m)
             await run_class(
                 "timeout_confirmed_rollback", w, body,
                 cause=slow_patch_then_pay, lift=release_patch, amount="10.00",
             )
+        premises["timeout_confirmed_rollback"] = subject.guard
     finally:
         gate.release.set()
         await finish(patch_task)
@@ -406,8 +392,9 @@ async def test_the_api_path_refusal_table(api, factory, monkeypatch, caplog) -> 
         "stop_at_commit_patch_answered_in_flight": 200,
         "stop_at_commit_retried": [],  # 027 stage 2: the FOR SHARE waits and reads the change - no 40001, no retry
         "hold_at_commit_retried": [],
-        # the payment really waited on the PATCH's row lock
-        "timeout_confirmed_rollback": True,
+        # the payment's own guard statement was issued and ended by the commit timeout, the PATCH
+        # holding the row uncommitted throughout: it waited on that row lock and on nothing else
+        "timeout_confirmed_rollback": {"held_at_issue": True, "ended": "CancelledError", "held_at_end": True},
     }, premises
 
     # ── the table ─────────────────────────────────────────────────────────────────────────────
