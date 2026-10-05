@@ -72,6 +72,7 @@ async def test_f030_7_a_checkpoint_error_does_not_cancel_the_reconciliation(monk
         "status": "failed", "event": "periodic_checkpoints_error", "error_type": "RuntimeError"
     }, app.state.background_jobs
     assert app.completed is False
+    assert maintenance_jobs.debt_reconciliation_run_failed(app) is False, "a checkpoint-only error flags the verdict"
 
 
 @MODE_B
