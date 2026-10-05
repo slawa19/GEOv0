@@ -190,7 +190,6 @@ def _build(
         lock=threading.RLock(),
         runs={"run-1": run},
         scenarios={"scn-1": scenario},
-        utc_now=lambda: None,
         db_enabled=lambda: db_enabled,
         logger=logger or logging.getLogger(LOGGER_NAME),
     )

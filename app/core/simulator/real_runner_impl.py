@@ -789,14 +789,12 @@ class RealRunnerImpl:
         run: RunRecord,
         session,
         tick_index: int,
-        debt_snapshot: dict[tuple[str, str, str], Decimal],
         scenario: dict[str, Any],
     ) -> TrustDriftResult:
         return await self._trust_drift_engine.apply_trust_decay(
             run,
             session,
             tick_index,
-            debt_snapshot,
             scenario,
         )
 

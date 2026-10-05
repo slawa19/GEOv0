@@ -149,7 +149,6 @@ def _public_commit_path(
             session=session,
             run_id="commit-cancellation",
             run=_run(),
-            debt_snapshot={},
             scenario={},
             payments_result=resolution,
         )
@@ -377,7 +376,6 @@ async def test_trust_drift_cancellation_waits_for_commit_and_resolves_commit():
             session=session,
             run_id="commit-cancellation",
             run=_run(),
-            debt_snapshot={},
             scenario={},
             payments_result=resolution,
         )
@@ -406,7 +404,6 @@ async def test_trust_drift_commit_failure_does_not_apply_staged_effects():
             session=session,
             run_id="commit-failure",
             run=_run(),
-            debt_snapshot={},
             scenario={},
             payments_result=resolution,
         )

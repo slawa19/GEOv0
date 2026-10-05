@@ -120,7 +120,6 @@ class _SimulatorRuntimeBase:
             lock=self._lock,
             runs=self._runs,
             scenarios=self._scenarios,
-            utc_now=_utc_now,
             db_enabled=simulator_storage.db_enabled,
             logger=logger,
         )

@@ -41,7 +41,7 @@ from app.utils.exceptions import (
     ForbiddenException,
     NotFoundException,
 )
-from app.utils.validation import (AMOUNT_PRECISION_EXCEEDED, MONEY_QUANTIZATION, is_storable_money, money_step,
+from app.utils.validation import (AMOUNT_PRECISION_EXCEEDED, MONEY_QUANTIZATION, money_step,
                                   money_storability_violation)
 
 #: `skipped_reasons` key of an effect refused over a participant that is not active (028 `F-028-28`).
@@ -522,8 +522,9 @@ class InjectExecutor:
                     eq_code,
                     type(exc).__name__,
                 )
-                if (exc.details or {}).get("reason") == MoneyBoundary.PARTICIPANT_SUSPENDED_REASON:
-                    skipped_reasons[PARTICIPANT_SUSPENDED] = skipped_reasons.get(PARTICIPANT_SUSPENDED, 0) + 1
+                # 029 `F-029-13`: the service's own reason, whichever it is (028: only `participant_suspended` was).
+                if reason := (exc.details or {}).get("reason"):
+                    skipped_reasons[str(reason)] = skipped_reasons.get(str(reason), 0) + 1
                 return False
             except SQLAlchemyError:
                 raise
@@ -532,6 +533,13 @@ class InjectExecutor:
                     f"inject trust-line write failed: {type(exc).__name__}: {exc}"
                 ) from exc
             return True
+
+        def unstorable_limit(limit: Decimal) -> bool:
+            """029 `F-029-13`: a limit the column cannot hold is skipped, and the note says by which predicate."""
+            reason = money_storability_violation(limit)
+            if reason is not None:
+                skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+            return reason is not None
 
         async def op_inject_debt(eff: dict[str, Any]) -> bool:
             nonlocal applied, skipped, total_applied
@@ -743,13 +751,14 @@ class InjectExecutor:
                         if tl_limit_val <= 0:
                             continue
                         # Storage-capacity door (012 / F-012-1) - see op_inject_debt.
-                        if not is_storable_money(tl_limit_val):
+                        if unstorable_limit(tl_limit_val):
                             self._logger.warning(
                                 "simulator.real.inject.add_participant.limit_unstorable "
                                 "sponsor=%s limit=%s",
                                 sponsor_pid,
                                 tl_limit_val,
                             )
+                            skipped += 1  # 029 `F-029-13`: a line of this effect that did not land is counted
                             continue
 
                         # Resolve sponsor participant ID.
@@ -811,6 +820,7 @@ class InjectExecutor:
                         if not await write_trustline(
                             from_id=from_id, to_pid=to_pid_str, eq_code=eq_code, limit=tl_limit_val
                         ):
+                            skipped += 1
                             continue
                         affected_equivalents.add(eq_code)
                         new_trustlines_for_scenario.append(
@@ -871,7 +881,7 @@ class InjectExecutor:
                     skipped += 1
                     return False
                 # Storage-capacity door (012 / F-012-1) - see op_inject_debt.
-                if not is_storable_money(tl_limit_val):
+                if unstorable_limit(tl_limit_val):
                     self._logger.warning(
                         "simulator.real.inject.create_trustline.limit_unstorable "
                         "from=%s to=%s limit=%s",
