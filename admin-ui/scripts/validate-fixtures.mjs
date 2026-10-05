@@ -144,9 +144,18 @@ function validateTrustlines(trustlines, label) {
   }
 }
 
-function validateDebts(debts, label) {
+// A debt row is refused, never skipped: a row the net check silently left out would let a wrong file pass as "no effect".
+// Besides the shape: a known equivalent, two known participants, a positive amount that is a whole number of the
+// equivalent's step (precision 2 -> 0.01) - the step is the unit of account, a finer amount is not money here.
+function validateDebts(debts, label, participants, equivalents) {
   if (debts == null) return
   assert(Array.isArray(debts), `${label} debts must be an array`)
+
+  const precisionByCode = new Map()
+  for (const e of equivalents) {
+    if (e && typeof e === 'object' && typeof e.code === 'string') precisionByCode.set(e.code, Number(e.precision))
+  }
+  const pidSet = new Set(participants.map((p) => p?.pid).filter((x) => typeof x === 'string'))
 
   const bad = []
   for (let i = 0; i < debts.length; i += 1) {
@@ -160,11 +169,33 @@ function validateDebts(debts, label) {
     if (typeof d.creditor !== 'string' || d.creditor.length === 0) bad.push({ i, reason: 'missing creditor' })
     if (typeof d.equivalent !== 'string' || d.equivalent.length === 0) bad.push({ i, reason: 'missing equivalent' })
     if (typeof d.amount !== 'string' || d.amount.length === 0) bad.push({ i, reason: 'missing amount' })
+
+    const precision = precisionByCode.get(d.equivalent)
+    if (typeof d.equivalent === 'string' && d.equivalent.length > 0 && precision === undefined) {
+      bad.push({ i, reason: `unknown equivalent ${d.equivalent}` })
+    }
+    for (const side of ['debtor', 'creditor']) {
+      if (typeof d[side] === 'string' && d[side].length > 0 && !pidSet.has(d[side])) {
+        bad.push({ i, reason: `unknown ${side} ${d[side]}` })
+      }
+    }
+    if (typeof d.amount === 'string' && d.amount.length > 0) {
+      const amount = d.amount.trim()
+      const m = /^(\d+)(?:\.(\d+))?$/.exec(amount)
+      if (!m) {
+        bad.push({ i, reason: `amount ${d.amount} is not a positive decimal string` })
+      } else if (/^0+(?:\.0*)?$/.test(amount)) {
+        bad.push({ i, reason: `amount ${d.amount} is not positive` })
+      } else if (precision !== undefined && (m[2] ?? '').replace(/0+$/, '').length > precision) {
+        const step = precision === 0 ? '1' : `0.${'0'.repeat(precision - 1)}1`
+        bad.push({ i, reason: `amount ${d.amount} is not a multiple of the ${step} step of ${d.equivalent}` })
+      }
+    }
   }
 
   if (bad.length > 0) {
     const sample = bad.slice(0, 8).map((x) => `#${x.i}(${x.reason})`).join(', ')
-    throw new Error(`${label} debts invalid entries: ${bad.length}. Sample: ${sample}`)
+    throw new Error(`${label} debts.json invalid entries: ${bad.length}. Sample: ${sample}`)
   }
 }
 
@@ -193,6 +224,41 @@ function validateClearingCycles(cyclesDoc, label) {
       }
     }
   }
+}
+
+// `sync:fixtures` copies the whole v1 tree, so the public copy is compared as a tree: the same files, the same bytes (line
+// endings aside). A file only the public copy has is a deleted one that the copy never pruned.
+async function listFiles(dir, base = dir) {
+  const out = []
+  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...(await listFiles(full, base)))
+    else out.push(path.relative(base, full).split(path.sep).join('/'))
+  }
+  return out.sort()
+}
+
+async function validateCopyIsCanonical(canonicalV1Dir, publicV1Dir) {
+  const canonicalFiles = await listFiles(canonicalV1Dir)
+  const publicFiles = await listFiles(publicV1Dir)
+  const publicSet = new Set(publicFiles)
+  const canonicalSet = new Set(canonicalFiles)
+  const problems = []
+  for (const f of canonicalFiles) if (!publicSet.has(f)) problems.push(`${f}: missing in PUBLIC`)
+  for (const f of publicFiles) {
+    if (!canonicalSet.has(f)) problems.push(`${f}: only in PUBLIC (a deleted file the copy did not prune)`)
+  }
+  for (const f of canonicalFiles) {
+    if (!publicSet.has(f)) continue
+    const a = (await fs.readFile(path.join(canonicalV1Dir, f), 'utf8')).replace(/\r\n/g, '\n')
+    const b = (await fs.readFile(path.join(publicV1Dir, f), 'utf8')).replace(/\r\n/g, '\n')
+    if (a !== b) problems.push(`${f}: differs from CANONICAL`)
+  }
+  assert(
+    problems.length === 0,
+    `PUBLIC fixtures differ from CANONICAL in ${problems.length} file(s): ${problems.slice(0, 8).join('; ')}. ` +
+      'Run `npm run sync:fixtures` in admin-ui (it does not delete files: remove a stale one by hand).',
+  )
 }
 
 function validateMeta(meta, label) {
@@ -289,16 +355,13 @@ function decimalToScaled(text, where) {
   return m[1] === '-' ? -value : value
 }
 
-// The rule of `net_decimal_to_atoms` (app/core/simulator/net_balance_utils.py) as the generator mirrors it: HALF_UP away
-// from zero, and a net that is not zero never becomes zero atoms - a sub-quantum net keeps its sign.
+// Exact: `validateDebts` has already refused every amount that is not a whole number of the step, so a net is a whole
+// number of atoms and there is nothing to round (the generator's HALF_UP / sign-keeping rule for a sub-atomic net never
+// applies to a valid file, and this check does not reproduce it: an amount that needed it is refused instead).
 function netToAtoms(net, precision) {
   const divisor = 10n ** BigInt(NET_SCALE - precision)
-  const sign = net < 0n ? -1n : 1n
-  const abs = net < 0n ? -net : net
-  let atoms = abs / divisor
-  if (2n * (abs % divisor) >= divisor) atoms += 1n
-  if (atoms === 0n && net !== 0n) atoms = 1n
-  return String(sign * atoms)
+  assert(net % divisor === 0n, 'internal: a net that is not a whole number of atoms - validateDebts should have refused it')
+  return String(net / divisor)
 }
 
 // F-029-18. `participants.viz-<EQ>.json` stands in for a backend-computed net (Admin mock, simulator demo snapshots), so
@@ -321,9 +384,8 @@ function validateVizNets(participants, equivalents, debts, vizByCode, label) {
 
     const net = new Map(pids.map((pid) => [pid, 0n]))
     for (const d of Array.isArray(debts) ? debts : []) {
-      if (!d || d.equivalent !== code || !pidSet.has(d.debtor) || !pidSet.has(d.creditor)) continue
+      if (d.equivalent !== code) continue
       const amount = decimalToScaled(d.amount, `${label} debts[${code}] amount`)
-      if (amount <= 0n) continue
       net.set(d.creditor, net.get(d.creditor) + amount)
       net.set(d.debtor, net.get(d.debtor) - amount)
     }
@@ -459,7 +521,7 @@ async function validateSide(label, dir, { requireViz }) {
   const incidentItems = getIncidentItems(incidents, label)
   assert(Array.isArray(incidentItems), `${label} incidents items must be an array`)
 
-  validateDebts(debts, label)
+  validateDebts(debts, label, participants, equivalents)
 
   // The canonical pack and its public copy carry one viz dataset per equivalent (the mock reads them); a pack built
   // elsewhere (--only-pack) may not, and is checked when it does. A missing file is not a passing one.
@@ -533,6 +595,7 @@ async function main() {
       deepEqual(canonical.vizByCode, publicSide.vizByCode),
     'PUBLIC fixtures differ from CANONICAL. Run `npm run sync:fixtures` in admin-ui.',
   )
+  await validateCopyIsCanonical(canonicalV1Dir, publicV1Dir)
 
   console.log('Fixtures OK')
   console.log(`- seed_id: ${publicMeta.seed_id}`)
