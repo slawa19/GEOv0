@@ -277,9 +277,12 @@ _REFUSAL_RECORD_LOCK_GRACE_MS = 500
 
 
 class RefusalNotRecorded(Exception):
-    """The refusal recording gave up on its bounded lock wait (`55P03`): the refusal is NOT durable, and
-    its outcome is left unrecorded - a later submission of the same `tx_id` reads whatever the other
-    transaction left, or executes. Never a 500: the caller answers the original error."""
+    """The refusal recording could not establish the outcome: its bounded lock wait gave up (`55P03`) behind an
+    uncommitted row of the same `tx_id`, or its transient retries ran out. The refusal is NOT durable and the outcome
+    is NOT established - the other transaction may still commit success. So the caller does NOT answer its original
+    error (030 `F-030-11`): `_record_refusal` answers "not established, send the same request again" - the retryable
+    `409/E008` (`busy`), whose resubmission of the same `tx_id` reads whatever the other transaction left, or
+    executes. Never a 500."""
 
 
 def _constraint_name(exc: BaseException) -> str | None:
@@ -481,7 +484,7 @@ class PaymentTransactionUnusable(Exception):
         )
         self.refusal = refusal
         self.cause = cause
-        self.publish_refusal: Callable[[], Any] | None = None
+        self.publish_refusal: Callable[..., Any] | None = None
 
 
 def _public_error_of_stored(result: PaymentResult) -> GeoException | None:
@@ -2307,7 +2310,10 @@ class PaymentService:
         * refused AFTER admission - by this attempt, or by an earlier one of the same request
           (`_Admission`, in-process memory of this call) - a capacity, stop, hold, non-retryable
           internal or terminal-timeout refusal: recorded `ABORTED` with its error, after the attempt's
-          rollback is confirmed, in a short transaction of its own; the same identity replays it;
+          rollback is confirmed, in a short transaction of its own; the same identity replays it. A
+          concurrent row of the same request found there - `COMMITTED` or `ABORTED` - is answered
+          instead of this refusal; a recording that cannot establish the outcome answers the
+          retryable `409/E008`, never this refusal (030 `F-030-11`);
         * a transaction-level conflict, including an exhausted retry budget on prepare or commit -
           nothing recorded, `409/E008` with `retryable: true`;
         * an identity collision on `transactions_tx_id_key` - the winner read on a new transaction:
@@ -2682,7 +2688,9 @@ class PaymentService:
         before stage 3 used for its `engine.abort`) and answered with a safe 500 - the original error
         is not answered after a refusal that could not be recorded - except under a cancellation,
         which stays the caller's signal (`cancelled`). A cancellation that arrives while recording is
-        re-raised once the recording has finished.
+        re-raised once the recording has finished. A recording that could not establish the outcome
+        (`RefusalNotRecorded`) answers the retryable `409/E008` - "send the same request again" - and
+        a winner in either terminal state is returned as the stored result (030 `F-030-11`).
         """
 
         stored, failure = await _drain_call(
@@ -2693,12 +2701,15 @@ class PaymentService:
         if isinstance(failure, asyncio.CancelledError):
             raise failure
         if isinstance(failure, RefusalNotRecorded):
+            cause = _payment_db_sqlstate(failure.__cause__) if failure.__cause__ is not None else None
             logger.warning(
-                "event=payment.refusal_not_recorded tx_id=%s reason=lock_timeout", refusal.tx_id
+                "event=payment.refusal_not_recorded tx_id=%s pgcode=%s", refusal.tx_id, cause
             )
             if cancelled is not None:
                 raise cancelled
-            return None
+            # 030 `F-030-11`: the outcome is NOT established - not this request's refusal (another transaction
+            # of the same `tx_id` may still commit). The existing answer for that: retryable, send it again.
+            raise RetryablePaymentConflictException() from failure
         logger.error(
             "event=payment.%s_failed tx_id=%s error_type=%s",
             refusal.event_prefix.replace("_nested", ""),
@@ -2853,9 +2864,12 @@ async def record_definitive_refusal(
 
     RESOLVES A CONCURRENT WINNER, NEVER OVERWRITES. The insert yields to a row of the same `tx_id` that
     already exists (`ON CONFLICT DO NOTHING`); that row is then read and its identity checked - type,
-    initiator, fingerprint (`_resolve_existing_payment`, a `409` for another request). A `COMMITTED`
-    winner of the same request is returned - it always wins, as it did in `engine.abort`. Returns None
-    when the refusal was recorded, or when an `ABORTED` row of the same request already stood.
+    initiator, fingerprint (`_resolve_existing_payment`, a `409` for another request). The winner of the
+    same request is returned IN EITHER TERMINAL STATE (030 `F-030-11`, owner rule 028 В-6): a `COMMITTED`
+    one always wins, as it did in `engine.abort`, and an `ABORTED` one - another attempt's refusal - is the
+    outcome every replay answers, so this request answers it too instead of its own error. Returns None
+    only when THIS refusal was recorded. An outcome it cannot establish - the bounded lock wait gave up,
+    or the transient retries ran out - is `RefusalNotRecorded`, never a recorded refusal.
     """
 
     values = dict(refusal.row)
@@ -2891,13 +2905,13 @@ async def record_definitive_refusal(
                     ).scalar_one_or_none()
                 await session.commit()
             except DBAPIError as exc:
-                last_error = exc
                 await session.rollback()
                 if _payment_db_sqlstate(exc) == "55P03":
                     raise RefusalNotRecorded(refusal.tx_id) from exc
                 if _payment_db_sqlstate(exc) in _RETRYABLE_PAYMENT_SQLSTATES:
+                    last_error = exc  # rolled back by the server: the whole short transaction again
                     continue
-                break
+                raise
             except BaseException:
                 await session.rollback()
                 raise
@@ -2918,5 +2932,6 @@ async def record_definitive_refusal(
             request_fingerprint=refusal.fingerprint,
             allowed_participant_pids=refusal.allowed_participant_pids,
         )
-        return resolved if resolved.status == "COMMITTED" else None
-    raise last_error if last_error is not None else GeoException()
+        return resolved
+    # Out of tries on transient conflicts, or the row yielded to vanished each time: nothing established.
+    raise RefusalNotRecorded(refusal.tx_id) from last_error

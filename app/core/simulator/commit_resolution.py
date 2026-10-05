@@ -162,6 +162,8 @@ async def resolve_commit_under_cancellation(
             if not rollback_terminal:
                 on_unknown()
             elif rollback_error is None and not commit_cancelled:
+                # The ROLLBACK succeeded; that alone does not prove the failed COMMIT did not land (030
+                # `F-030-12`). The money phase resolves it by identity (`money_replay._commit_money`).
                 on_rollback()
             else:
                 if rollback_error is not None:

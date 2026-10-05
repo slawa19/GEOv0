@@ -70,7 +70,9 @@ from sqlalchemy.exc import DBAPIError
 
 from app.core.ledger.book import DebtVersionConflict
 from app.core.payments.service import (
+    _COMMIT_REFUSED_SQLSTATE_CLASSES,
     DefinitiveRefusal,
+    _public_error_of_stored,
     PaymentTransactionUnusable,
     _drain_call,
     collect_admitted_refusals,
@@ -161,6 +163,20 @@ class MoneyPhaseOutcome:
 class _CommitResolution:
     state: Literal["committed", "rolled_back", "unknown"]
     error: BaseException | None
+    #: The COMMIT failed without the server refusing it and the ROLLBACK after it succeeded: the outcome is the
+    #: identity resolver's to establish, and "nothing of it stored" then IS the rollback (030 `F-030-12`).
+    rollback_after_unproven_commit: bool = False
+
+
+def _commit_refused(error: BaseException | None) -> bool:
+    """The COMMIT's failure itself proves nothing landed: the server answered it with a refusal - a conflict the
+    replay owns, or an error of the classes PostgreSQL rolls the transaction back with (`23`, `40`, `P0`, the
+    payment owner's `_COMMIT_REFUSED_SQLSTATE_CLASSES`). Anything else - a lost connection, a lost acknowledgement,
+    a timeout - leaves the commit possibly landed, whatever the rollback after it says."""
+    if money_conflict_name(error) is not None:
+        return True
+    code = sqlstate(error)
+    return code is not None and code[:2] in _COMMIT_REFUSED_SQLSTATE_CLASSES
 
 
 @dataclass(frozen=True)
@@ -266,6 +282,11 @@ async def _commit_money(
         raise
     except BaseException as exc:  # noqa: BLE001 - classified by the caller, never swallowed
         error = exc
+    if state == "rolled_back" and error is not None and not _commit_refused(error):
+        # 030 `F-030-12`: a ROLLBACK that succeeds after a failed COMMIT does not refute the COMMIT - it may have
+        # landed and only lost its answer. The rollback has drained the connection, so the attempt's own `tx_id`s,
+        # read on a new session, now settle it (`_attempt_landed`).
+        return _CommitResolution(state="unknown", error=error, rollback_after_unproven_commit=True)
     return _CommitResolution(state=state, error=error)
 
 
@@ -475,7 +496,12 @@ async def _settle_unusable_phase(
     )
     if error.publish_refusal is not None:
         try:
-            error.publish_refusal()
+            # 030 `T3094` #1: a stored `ABORTED` of the same request it yielded to is the outcome - published as such.
+            yielded = stored is not None and stored.status == "ABORTED" and stored.error is not None
+            if yielded:
+                error.publish_refusal(_public_error_of_stored(stored))
+            else:
+                error.publish_refusal()
         except Exception:
             logger.warning(
                 "simulator.real.staged_refusal_publish_failed run_id=%s tx_id=%s",
@@ -608,6 +634,9 @@ async def run_money_phase_with_bounded_replay(
                             "the money commit landed but reported no outcome"
                         )
                     )
+                if landed is False and resolution.rollback_after_unproven_commit:
+                    # Established by identity: nothing landed, and the rollback was real.
+                    state = "rolled_back"
             else:
                 landed = False
 

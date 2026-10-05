@@ -903,16 +903,27 @@ class RealPaymentsExecutor:
         emitter: SseEventEmitter,
         action: Any,
         unusable: PaymentTransactionUnusable,
-    ) -> Callable[[], bool]:
+    ) -> Callable[..., bool]:
         """The one observation of a refusal that left the tick's transaction unusable (`T1912`).
 
         Built here, where the observation rules live, and published by the money-phase owner - once,
         and only after the refusal's outcome is established. It is the observation a raised refusal of
         the same class has always produced: `tx.failed` with the same code and the same run counters.
+        The owner passes `stored` - the public error of a stored refusal it yielded to (030 `T3094` #1) - and the
+        observation is then THAT refusal, the outcome every replay answers, not this attempt's own.
         """
 
         refusal = unusable.refusal
-        cause: BaseException = refusal.public_error if refusal is not None else unusable.cause
+        own: BaseException = refusal.public_error if refusal is not None else unusable.cause
+
+        def publish(stored: BaseException | None = None) -> bool:
+            return self._refusal_observation(run_id=run_id, run=run, emitter=emitter, action=action,
+                                             cause=stored if stored is not None else own).apply_after_rollback()
+
+        return publish
+
+    def _refusal_observation(self, *, run_id: str, run: RunRecord, emitter: SseEventEmitter, action: Any,
+                             cause: BaseException) -> "DeferredRealPaymentEffects":
         _status, code, err_details = _classify_refusal(cause)
         if code is not None:
             outcome: Literal["committed", "rejected", "error"] = "error"
@@ -944,4 +955,4 @@ class RealPaymentsExecutor:
                 )
             ],
         )
-        return buffer.apply_after_rollback
+        return buffer
