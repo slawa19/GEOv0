@@ -22,6 +22,7 @@ from nacl.signing import SigningKey
 
 from app.config import settings
 from app.utils.exceptions import RoutingException
+from app.utils.metrics import ROUTING_FAILURES_TOTAL
 from tests.conftest import MODE_B
 from tests.integration.test_p011_money_is_a_decimal_string_on_the_wire import money_scenario  # noqa: F401 (fixture)
 from tests.integration.test_scenarios import (
@@ -146,10 +147,18 @@ async def test_a_routing_refusal_code_agrees_with_its_reason(client: AsyncClient
 
     alice, bob = money_scenario["alice"], money_scenario["bob"]
     carol = await register_and_login(client, "Carol_P029_NoRoute")
+
+    def counted() -> tuple[float, float]:  # the Prometheus label names the same reason as the answer
+        return tuple(ROUTING_FAILURES_TOTAL.labels(reason=r)._value.get() for r in ("no_route", "insufficient_capacity"))
+
+    before = counted()
     nothing = await _refused(client, alice, carol["pid"], "1.00")
+    after = counted()  # an attempt on a cached graph is re-routed once and counted again: more than, not plus one
+    assert after[0] > before[0] and after[1] == before[1], f"`no_route` counted under another reason: {before} -> {after}"
     assert (nothing["code"], nothing["details"]["reason"], nothing["details"]["max_available"]) == (
         "E001", "no_route", "0.00"), nothing
     short = await _refused(client, alice, bob["pid"], "500.00")
+    assert counted()[0] == after[0] and counted()[1] > after[1]
     assert (short["code"], short["details"]["reason"], short["details"]["max_available"]) == (
         "E002", "insufficient_capacity", "90.25"), short
 
