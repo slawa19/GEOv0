@@ -112,8 +112,9 @@ ACCEPTED_FREE_FORM: dict[tuple[str, str], str] = {
     ("Equivalent", "metadata"): (
         "admin-supplied JSON stored verbatim (app/api/v1/admin.py:1157 on create, :1243 on patch; "
         "the anchors first written here pointed four and seven lines short). A validator exists "
-        "- validate_equivalent_metadata - but is called only from scripts/seed_db.py and tests, "
-        "never from app/, so the API path accepts any object"
+        "- validate_equivalent_metadata - but is called only from tests (its last script caller, "
+        "the direct import of scripts/seed_db.py, was deleted by 030 S2), never from app/, so the "
+        "API path accepts any object"
     ),
     ("StoredEquivalent", "metadata"): "same column and writers as Equivalent.metadata",
     ("AdminAuditLogItem", "before_state"): (

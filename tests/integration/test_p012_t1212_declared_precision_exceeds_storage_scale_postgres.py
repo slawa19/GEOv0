@@ -199,8 +199,8 @@ async def test_the_equivalent_door_refuses_a_precision_the_ledger_cannot_keep(
     Both entrances are probed, because they are two different pieces of code and either one
     left at 18 re-opens the finding: the HTTP door (`AdminEquivalentCreateRequest`, and the
     canon it is checked against) and the ORM writer (`Equivalent.validate_precision` ->
-    `validate_equivalent_precision`, which is what scenario seeding and `scripts/seed_db.py`
-    go through).
+    `validate_equivalent_precision`, which is what scenario seeding goes through, and what the
+    direct import of `scripts/seed_db.py` went through until 030 S2 deleted it).
 
     The counter-check is the half that keeps this from being "refuse everything": 8 must still
     be accepted at both entrances, so the test reacts to the BOUND being moved rather than to
