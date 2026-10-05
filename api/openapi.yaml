@@ -3423,7 +3423,9 @@ paths:
         CLEARING_INTERRUPTED with `details.reason`, the committed progress (`partial_cleared_cycles`,
         `partial_cleared_amount`) and the remainder of the last known plan (`remaining_cycles`,
         `remaining_v_edge`, null when not known); the operator stop is 409 CONFLICT, with the partial progress
-        when some occurred. Cycle edges are PIDs in the trust-line direction (`from` = creditor, `to` = debtor).
+        when some occurred; an occurrence whose amount is not a multiple of the equivalent's step is 409
+        CLEARING_REFUSED with `details.reason` `occurrence_amount_not_in_step` (the database holds debts finer than
+        the step and is reseeded; programme 030 S2). Cycle edges are PIDs in the trust-line direction (`from` = creditor, `to` = debtor).
       parameters:
         - $ref: '#/components/parameters/RunIdPath'
       requestBody:

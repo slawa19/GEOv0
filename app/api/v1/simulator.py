@@ -26,6 +26,7 @@ from app.core.trustlines.service import (
 from app.api import deps
 from app.config import settings
 from app.core.simulator.runtime import runtime
+from app.core.clearing.service import OCCURRENCE_AMOUNT_NOT_IN_STEP
 from app.core.clearing.runner import (
     ClearingPassCancelled,
     ClearingPassError,
@@ -1931,6 +1932,15 @@ async def action_clearing_real(
             return _action_error(
                 status_code=409,
                 code="CONFLICT",
+                message=exc.message,
+                details=details or None,
+            )
+        if isinstance(exc, ConflictException) and (exc.details or {}).get("reason") == OCCURRENCE_AMOUNT_NOT_IN_STEP:
+            # 030 S2 (`F-030-1`, §15 `T3092`): the executor refused an amount finer than the step - debts finer than the
+            # step are in the database, which is reseeded. A logical refusal, not a failed execution; not a money stop.
+            return _action_error(
+                status_code=409,
+                code="CLEARING_REFUSED",
                 message=exc.message,
                 details=details or None,
             )
