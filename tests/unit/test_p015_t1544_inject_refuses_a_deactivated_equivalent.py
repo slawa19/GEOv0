@@ -1,64 +1,97 @@
-"""T1544: the real-mode inject writer refuses money in an equivalent the operator has deactivated.
+"""T1544: the real-mode inject writer creates no line in an equivalent the operator has deactivated.
 
-Protocol §11.5.1 blocks OPERATIONS in the equivalent, and `inject_debt` writes the shared `debts`
-table in real mode. The guard is the same helper the payment commit uses
-(`PaymentEngine.refuse_inactive_equivalents`). It sits in the inject owner
-(`RealRunnerImpl._apply_due_scenario_events`) after the owner locks and BEFORE the operation envelope
-is opened - owner lock -> `FOR SHARE` -> envelope -> debt write.
+Protocol §11.5.1 blocks OPERATIONS in the equivalent. Since 030 S3b the inject has no money effect
+(`inject_debt` is deleted); what it can still write into a stopped equivalent is a trust line
+(`create_trustline`), and the stop check is the one inside the line creation itself
+(`TrustLineService.execute_create` -> `MoneyBoundary.refuse_inactive_equivalents`), shared with every
+other caller of that entrance.
 
-THE REFUSAL IS A REJECTION OF THAT INJECT, NOT AN ERROR OF THE RUN - the rule the payments phase
-already applies to a refused payment. The event is consumed with a visible note, writes no debt and
-no envelope, and is not retried: reactivating the equivalent later does not re-apply it.
+THE REFUSAL IS A SKIP OF THAT EFFECT, NOT AN ERROR OF THE RUN - the rule the payments phase already applies
+to a refused payment. The event is consumed with a visible note (`skipped_reasons == {equivalent_inactive: 1}`),
+writes no line, no debt and no envelope, and is not retried: reactivating the equivalent later does not
+re-apply it.
 
-This is the plain refusal, on the tier database (PostgreSQL, mode A). Its sharpest assert - no
-`INSERT INTO debt_operations` is SENT for the refused inject, read from the statements the engine
-executed rather than from the table afterwards - is the one an external review found to catch a
-misplaced guard that the table-level asserts missed (015 `spec.md:1748`); since 017 stage 2 it runs on
-PostgreSQL, the form 017 promised to keep. The race binding (`FOR SHARE` against a deactivating PATCH)
-is held in `test_p015_t1544_operator_stop_races_postgres.py`; the tick lifecycle in
-`test_p015_t1544_operator_stop_through_the_tick_sqlite.py` (a mode-B PostgreSQL clone since 017
-stage 3, whatever its file name says).
+This is the plain refusal, on the tier database (PostgreSQL, mode A). The race binding (`FOR SHARE` against a
+deactivating PATCH) is held in `test_p015_t1544_operator_stop_races_postgres.py`; the tick lifecycle in
+`test_p015_t1544_operator_stop_through_the_tick_sqlite.py` (a mode-B PostgreSQL clone since 017 stage 3,
+whatever its file name says); the same skip for a held equivalent, and the seeder's lines, in
+`tests/integration/test_p030_s3b_simulator_through_the_services_postgres.py`.
+
+What this module no longer asserts (the old `inject_debt` form): that no `INSERT INTO debt_operations` is sent
+BEFORE the refusal. There is no inject envelope any more, so that ORDER (owner lock -> `FOR SHARE` -> envelope)
+does not exist; the statement recorder instead shows that no line and no envelope is SENT for the refused
+event, with a control that the recorder does see both for an applied one.
 """
 
 from __future__ import annotations
 
 import copy
+import uuid
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import event, select, update
 
-from app.db.models.debt import Debt
+from app.core.money_boundary import MoneyBoundary
+from app.core.simulator.real_scenario_seeder import simulated_public_key
 from app.db.models.equivalent import Equivalent
-from tests.unit.test_p015_t1514_simulator_must_not_requantise_stored_money import (
-    _scenario,
-    _seed,
-)
+from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
 
-_REFUSED_NOTE = "inject refused (equivalent inactive)"
+
+async def _seed(db_session):
+    """An active equivalent and three simulator participants, no line anywhere."""
+    n = uuid.uuid4().hex[:8].upper()
+    eq = Equivalent(code=f"T44{n}"[:16], precision=2, is_active=True)
+    people = [
+        Participant(
+            pid=f"T44_{role}_{n}", display_name=role, public_key=simulated_public_key(f"T44_{role}_{n}"),
+            type="person", status="active",
+        )
+        for role in ("C", "D", "E")
+    ]
+    db_session.add_all([eq, *people])
+    await db_session.flush()
+    return (eq, *people)
 
 
-async def _debt_amount(db_session, *, debtor_id, creditor_id, equivalent_id) -> Decimal:
-    """A column read by plain ids: the owner rolls the session back and expires every instance."""
-    amount = (
+def _scenario(eq, creditor, debtor) -> dict:
+    return {
+        "equivalents": [eq.code],
+        "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
+        "trustlines": [],
+        "events": [
+            {
+                "type": "inject",
+                "time": 0,
+                "effects": [
+                    {"op": "create_trustline", "from": creditor.pid, "to": debtor.pid,
+                     "equivalent": eq.code, "limit": "100.00"}
+                ],
+            }
+        ],
+    }
+
+
+async def _lines(db_session, equivalent_id) -> set[tuple[uuid.UUID, uuid.UUID]]:
+    """Plain id columns: the owner rolls the session back and expires every instance."""
+    rows = (
         await db_session.execute(
-            select(Debt.amount).where(
-                Debt.debtor_id == debtor_id,
-                Debt.creditor_id == creditor_id,
-                Debt.equivalent_id == equivalent_id,
+            select(TrustLine.from_participant_id, TrustLine.to_participant_id, TrustLine.limit).where(
+                TrustLine.equivalent_id == equivalent_id
             )
         )
-    ).scalar_one()
-    return Decimal(str(amount))
+    ).all()
+    assert all(Decimal(str(limit)) == Decimal("100.00") for _f, _t, limit in rows), rows
+    return {(f, t) for f, t, _limit in rows}
 
 
 class _StatementRecorder:
-    """Every SQL statement sent on the engine, as sent - to see ORDER, not just outcome.
+    """Every SQL statement sent on the engine, as sent - what was actually written, not what remained.
 
-    The refused attempt is rolled back, so a check placed after the envelope would leave no row behind
-    either; only the statements actually sent can tell "refused before the envelope" from "refused
-    after it".
+    The refused attempt is rolled back, so the tables show nothing either way; only the statements sent
+    can tell "never wrote" from "wrote and rolled back".
     """
 
     def __init__(self) -> None:
@@ -86,64 +119,64 @@ async def _apply_recorded(db_session, runner, *, run, scenario) -> _StatementRec
     return recorder
 
 
+def _inject_notes(artifacts) -> list[dict]:
+    return [
+        p["scenario"] for p in artifacts.payloads
+        if p.get("type") == "note" and (p.get("scenario") or {}).get("event_index") is not None
+    ]
+
+
 @pytest.mark.asyncio
-async def test_an_inject_into_a_deactivated_equivalent_is_consumed_without_debt_or_envelope(
+async def test_an_inject_line_into_a_deactivated_equivalent_is_skipped_and_consumed_without_line_or_envelope(
     db_session,
 ) -> None:
-    """RED before the guard: the injected 1.00 was added to the stored debt after the stop."""
-    eq, creditor, debtor = await _seed(
-        db_session, existing_amount=Decimal("5.00000000"), limit=Decimal("100.00")
-    )
-    ids = {"debtor_id": debtor.id, "creditor_id": creditor.id, "equivalent_id": eq.id}
+    """RED before the stop check in the line creation: the line is created after the stop."""
+    eq, creditor, debtor, third = await _seed(db_session)
+    eq_id, creditor_id, debtor_id, third_id, third_pid = eq.id, creditor.id, debtor.id, third.id, third.pid
     run = _make_run(
-        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
+        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid), (third.id, third.pid)],
         equivalents=[str(eq.code)],
     )
-    scenario = _scenario(eq, creditor, debtor, inject_amount="1.00", limit="100.00")
-    await db_session.execute(
-        update(Equivalent).where(Equivalent.id == ids["equivalent_id"]).values(is_active=False)
-    )
+    scenario = _scenario(eq, creditor, debtor)
+    await db_session.execute(update(Equivalent).where(Equivalent.id == eq_id).values(is_active=False))
     await db_session.commit()
 
     runner, artifacts = _make_runner(inject_enabled=True)
     refused_attempt = await _apply_recorded(db_session, runner, run=run, scenario=scenario)
 
-    # A rejection of the inject, consumed and visible - not an exception for the tick to count.
-    notes = [
-        p for p in artifacts.payloads
-        if p.get("type") == "note" and (p.get("scenario") or {}).get("description") == _REFUSED_NOTE
-    ]
-    assert len(notes) == 1 and notes[0]["scenario"]["event_index"] == 0, artifacts.payloads
+    # A skip of the effect, consumed and visible - not an exception for the tick to count.
+    notes = _inject_notes(artifacts)
+    assert len(notes) == 1 and notes[0]["event_index"] == 0, artifacts.payloads
+    assert notes[0]["stats"]["applied"] == 0, notes
+    assert notes[0]["stats"]["skipped_reasons"] == {MoneyBoundary.EQUIVALENT_INACTIVE_REASON: 1}, notes
     assert 0 in run._real_fired_scenario_event_indexes, "the refused event was left pending"
-    assert await _debt_amount(db_session, **ids) == Decimal("5.00000000")
+    assert await _lines(db_session, eq_id) == set()
 
-    # ORDER: the refusal came before the envelope. Premise first - the recorder saw the guard's own
-    # read, so an empty envelope list is a measurement and not a listener that heard nothing.
+    # Statements SENT. Premise first - the recorder saw the guard's own read, so an empty list is a
+    # measurement and not a listener that heard nothing.
     assert refused_attempt.sent("SELECT EQUIVALENTS.CODE, EQUIVALENTS.IS_ACTIVE"), (
         "premise: the statement recorder did not see the guard's read; it recorded "
         f"{len(refused_attempt.statements)} statement(s): {refused_attempt.statements[:12]}"
     )
-    assert refused_attempt.sent("INSERT INTO DEBT_OPERATIONS") == [], (
-        "the inject opened its operation envelope before refusing the stop: the order must be owner "
-        "lock -> FOR SHARE -> envelope -> debt write"
-    )
+    assert refused_attempt.sent("INSERT INTO TRUST_LINES") == [], "a line INSERT was sent into a stopped equivalent"
+    assert refused_attempt.sent("INSERT INTO DEBT_OPERATIONS") == [], "the inject opened an envelope"
 
-    # Reactivated, the CONSUMED event must not come back. A second event, new to the scenario, does
-    # apply - which proves this call really ran, and that the recorder does see an envelope.
-    await db_session.execute(
-        update(Equivalent).where(Equivalent.id == ids["equivalent_id"]).values(is_active=True)
-    )
+    # Reactivated, the CONSUMED event must not come back. A second event, new to the scenario and naming
+    # another debtor, does apply - which proves this call really ran, that the recorder does see a line
+    # INSERT, and (by the absence of creditor -> debtor) that the refused effect was not re-applied.
+    await db_session.execute(update(Equivalent).where(Equivalent.id == eq_id).values(is_active=True))
     await db_session.commit()
     second = copy.deepcopy(scenario["events"][0])
-    second["effects"][0]["amount"] = "2.00"
+    second["effects"][0]["to"] = third_pid
     scenario["events"].append(second)
     applied_attempt = await _apply_recorded(db_session, runner, run=run, scenario=scenario)
 
-    assert await _debt_amount(db_session, **ids) == Decimal("7.00000000"), (
-        "expected 5.00 plus only the NEW event's 2.00; 8.00 would mean the refused event was re-applied"
+    assert await _lines(db_session, eq_id) == {(creditor_id, third_id)}, (
+        "expected only the NEW event's line; a creditor -> debtor line would mean the refused event was re-applied"
     )
     assert run._real_fired_scenario_event_indexes >= {0, 1}
-    assert applied_attempt.sent("INSERT INTO DEBT_OPERATIONS"), (
-        "control: the recorder did not see the envelope of an inject that was applied, so its "
+    assert applied_attempt.sent("INSERT INTO TRUST_LINES"), (
+        "control: the recorder did not see the line INSERT of an inject that was applied, so its "
         "silence above proves nothing"
     )
+    assert applied_attempt.sent("INSERT INTO DEBT_OPERATIONS") == [], "an inject opened an envelope"

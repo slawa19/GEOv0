@@ -38,7 +38,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.core.ledger.reconciliation import take_baseline
@@ -49,9 +51,6 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import _Artifacts, _runner
-from tests.integration.test_p018_mixed_inject_event_is_one_operation_postgres import (  # noqa: F401 - fixture
-    factory,
-)
 from tests.p021_support import (
     TrustLineBatchPoints,
     is_transaction_scoped,
@@ -59,6 +58,25 @@ from tests.p021_support import (
     trust_line_audit_rows,
 )
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - opt-in fixture of the inject tests
+
+
+@pytest_asyncio.fixture
+async def factory(committed_database):
+    """Sessions of the inject stand: a real two-connection pool on the mode-B clone, READ COMMITTED (the level
+    `MoneyBoundary.require_read_committed(writer="inject")` demands), `autoflush=False` like the application."""
+    url = committed_database.url
+    if not url.startswith("postgresql"):
+        raise RuntimeError(f"a mode-B clone must be PostgreSQL, got {url!r}")
+    engine = create_async_engine(
+        url, pool_size=2, max_overflow=0, pool_timeout=10, isolation_level="READ COMMITTED"
+    )
+    try:
+        yield async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+        )
+    finally:
+        await engine.dispose()
+
 
 #: The model's default policy (`app/db/models/trustline.py`): what an Interact create stored before 021.
 DEFAULT_POLICY = {
@@ -349,7 +367,7 @@ async def test_an_inject_event_writes_one_audit_row_per_line_and_one_checkpoint_
     assert run._real_fired_scenario_event_indexes == {0}
     notes = [p["scenario"] for p in artifacts.events if p.get("type") == "note"]
     assert [note["description"] for note in notes] == ["inject applied"], notes
-    assert notes[0]["stats"] == {"applied": 3, "skipped": 0, "total_amount": {}}, notes[0]  # INTENTIONAL, 028 F-028-30: the total is per equivalent
+    assert notes[0]["stats"] == {"applied": 3, "skipped": 0}, notes[0]  # INTENTIONAL, 030 S3b: the note has no `total_amount` (no debt is injected)
     assert await _inject_lines(factory, w) == sorted([
         (w.a.pid, w.b.pid, w.e1.code, Decimal("10"), "active", DEFAULT_POLICY),
         (w.a.pid, w.b.pid, w.e2.code, Decimal("20"), "active", DEFAULT_POLICY),

@@ -39,7 +39,6 @@ from app.core.ledger.book import (
     APPLIED,
     Book,
     BookMoneyError,
-    InjectIncrease,
     PaymentFlow,
 )
 from app.db.models.debt import Debt
@@ -89,27 +88,11 @@ async def _debts(session, eq) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
 async def test_the_book_refuses_a_scale_9_input_before_any_debt_changes(db_session) -> None:
     eq, a, b = await _world(db_session, debt_b_owes_a="5.00")
     with pytest.raises(BookMoneyError) as refused:
-        async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
+        async with writer_operation(db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=b.id):
             await Book.current(db_session).apply(
-                InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                               amount=SCALE_9, ceiling=Decimal("100"))
+                PaymentFlow(from_id=b.id, to_id=a.id, amount=SCALE_9, equivalent_id=eq.id)
             )
     assert refused.value.reason == "money_quantization", refused.value
-    await db_session.rollback()
-
-
-@pytest.mark.asyncio
-async def test_the_book_refuses_an_inject_sum_that_overflows_the_column(db_session) -> None:
-    """The input `1` is storable; the SUM is not. Only a check on the calculated amount sees it."""
-
-    eq, a, b = await _world(db_session, debt_b_owes_a="999999999999.5")
-    with pytest.raises(BookMoneyError) as refused:
-        async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
-            await Book.current(db_session).apply(
-                InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                               amount=Decimal("1"), ceiling=Decimal("1E13"))
-            )
-    assert refused.value.reason == "money_magnitude", refused.value
     await db_session.rollback()
 
 
@@ -138,20 +121,18 @@ async def test_the_book_accepts_trailing_zeros_and_the_full_width(db_session) ->
 
     eq, a, b = await _world(db_session, debt_b_owes_a="1.00")
     # 026 `T2601`: the book refuses growth past the REAL limit, so the full width needs a line of A
-    # that wide; the ceiling alone no longer licenses it.
+    # that wide (030 S3b: the counter-check runs on the payment algebra, the inject effect is gone).
     db_session.add(TrustLine(from_participant_id=a.id, to_participant_id=b.id, equivalent_id=eq.id,
                              limit=FULL_WIDTH, status="active"))
-    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
+    async with writer_operation(db_session, kind="PAYMENT", equivalent_ids=[eq.id], initiator_id=b.id):
         posting = Book.current(db_session)
         # Ten fraction digits, the last two zero: the same number as 0.10000000.
         trailing = await posting.apply(
-            InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                           amount=Decimal("0.1000000000"), ceiling=Decimal("1E13"))
+            PaymentFlow(from_id=b.id, to_id=a.id, amount=Decimal("0.1000000000"), equivalent_id=eq.id)
         )
         # Grow to exactly the column's maximum.
         full = await posting.apply(
-            InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                           amount=FULL_WIDTH - Decimal("1.1"), ceiling=Decimal("1E13"))
+            PaymentFlow(from_id=b.id, to_id=a.id, amount=FULL_WIDTH - Decimal("1.1"), equivalent_id=eq.id)
         )
     await db_session.flush()
     assert (trailing, full) == (APPLIED, APPLIED)

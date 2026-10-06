@@ -254,7 +254,7 @@
         },
         "op": {
           "type": "string",
-          "description": "Operation subtype for inject events (e.g. add_participant, create_trustline, freeze_participant, inject_debt)"
+          "description": "Operation subtype for inject events (e.g. add_participant, create_trustline, freeze_participant)"
         },
         "label": {
           "type": "string",
@@ -287,8 +287,7 @@
                   "oneOf": [
                     { "$ref": "#/$defs/injectEffectAddParticipant" },
                     { "$ref": "#/$defs/injectEffectCreateTrustline" },
-                    { "$ref": "#/$defs/injectEffectFreezeParticipant" },
-                    { "$ref": "#/$defs/injectEffectInjectDebt" }
+                    { "$ref": "#/$defs/injectEffectFreezeParticipant" }
                   ]
                 }
               }
@@ -402,37 +401,6 @@
           "type": "boolean",
           "default": true,
           "description": "Whether to also freeze all trustlines of this participant"
-        }
-      }
-    },
-
-    "injectEffectInjectDebt": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["op", "from", "to", "equivalent", "amount"],
-      "properties": {
-        "op": { "const": "inject_debt" },
-        "from": {
-          "type": "string",
-          "minLength": 1,
-          "description": "PID of the creditor"
-        },
-        "to": {
-          "type": "string",
-          "minLength": 1,
-          "description": "PID of the debtor"
-        },
-        "equivalent": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Equivalent code"
-        },
-        "amount": {
-          "anyOf": [
-            { "type": "number" },
-            { "type": "string" }
-          ],
-          "description": "Debt amount to inject"
         }
       }
     }

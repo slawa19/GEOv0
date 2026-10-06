@@ -1,7 +1,7 @@
 """The book keeps each operation kind to its own semantics (018 stage A, `T1802`).
 
 The semantics are preserved per kind and NOT unified (spec 018, stage A): `CLEARING` only decreases,
-`INJECT` only increases or refuses - an opposing debt is refused and returned, never netted - and an
+`INJECT` takes no effect at all since 030 S3b (the simulator's `inject_debt` is deleted) - and an
 effect reaches `debts` only through a posting that is open. Each rule is checked on the real database
 through the same envelope the application uses (`writer_operation` opens a `Book` operation).
 """
@@ -16,18 +16,15 @@ from sqlalchemy import select
 
 from app.core.ledger.book import (
     APPLIED,
-    REFUSED_OPPOSING_DEBT,
-    REFUSED_OVER_CEILING,
     Book,
     BookError,
     ClearingReduction,
-    InjectIncrease,
+    NewDebt,
     PaymentFlow,
 )
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
@@ -61,44 +58,6 @@ async def _debts(session, eq) -> dict[tuple[uuid.UUID, uuid.UUID], Decimal]:
 
 
 @pytest.mark.asyncio
-async def test_inject_refuses_an_opposing_debt_and_never_nets(db_session) -> None:
-    eq, a, b, _ = await _world(db_session, debt_b_owes_a="5.00")
-    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
-        posting = Book.current(db_session)
-        # A owes B 3.00 would be the opposite direction of the existing B owes A 5.00.
-        outcome = await posting.apply(
-            InjectIncrease(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id,
-                           amount=Decimal("3.00"), ceiling=Decimal("100"))
-        )
-    await db_session.flush()
-    assert outcome == REFUSED_OPPOSING_DEBT
-    assert await _debts(db_session, eq) == {(b.id, a.id): Decimal("5.00")}
-
-
-@pytest.mark.asyncio
-async def test_inject_refuses_a_result_over_its_ceiling(db_session) -> None:
-    eq, a, b, _ = await _world(db_session, debt_b_owes_a="5.00")
-    # 026 `T2601`: the book refuses growth past the REAL limit whatever the ceiling says, so the
-    # ceiling of 10 is backed by A's line of 10 - as the inject executor always passes it.
-    db_session.add(TrustLine(from_participant_id=a.id, to_participant_id=b.id, equivalent_id=eq.id,
-                             limit=Decimal("10"), status="active"))
-    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
-        posting = Book.current(db_session)
-        over = await posting.apply(
-            InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                           amount=Decimal("6.00"), ceiling=Decimal("10"))
-        )
-        within = await posting.apply(
-            InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                           amount=Decimal("5.00"), ceiling=Decimal("10"))
-        )
-    await db_session.flush()
-    # Counter-check: the same direction within the ceiling still increases.
-    assert (over, within) == (REFUSED_OVER_CEILING, APPLIED)
-    assert await _debts(db_session, eq) == {(b.id, a.id): Decimal("10.00")}
-
-
-@pytest.mark.asyncio
 async def test_clearing_refuses_to_grow_a_debt(db_session) -> None:
     eq, a, b, debt = await _world(db_session, debt_b_owes_a="5.00")
     with pytest.raises(BookError, match="CLEARING only decreases"):
@@ -125,8 +84,13 @@ async def test_clearing_decreases_and_deletes_at_zero(db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_a_kind_takes_only_its_own_effect(db_session) -> None:
-    """An INJECT operation cannot be handed a payment flow - the netting path is not reachable."""
+    """An INJECT operation takes no effect - not a payment flow (the netting path), not a new debt (030 S3b)."""
     eq, a, b, _ = await _world(db_session, debt_b_owes_a="5.00")
+    with pytest.raises(BookError, match="INJECT operation does not take NewDebt; it takes nothing"):
+        async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
+            await Book.current(db_session).apply(
+                NewDebt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("1")))
+    await db_session.rollback()
     with pytest.raises(BookError, match="INJECT operation does not take PaymentFlow"):
         async with writer_operation(db_session, kind="INJECT", equivalent_ids=[eq.id]):
             await Book.current(db_session).apply(
@@ -144,8 +108,5 @@ async def test_no_effect_moves_outside_an_open_posting(db_session) -> None:
         posting = Book.current(db_session)
     await db_session.flush()
     with pytest.raises(BookError, match="is closed"):
-        await posting.apply(
-            InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id,
-                           amount=Decimal("1.00"), ceiling=Decimal("10"))
-        )
+        await posting.apply(PaymentFlow(from_id=b.id, to_id=a.id, amount=Decimal("1.00"), equivalent_id=eq.id))
     assert await _debts(db_session, eq) == {}

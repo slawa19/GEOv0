@@ -1,7 +1,8 @@
 """028 F-028-30/31/32, pulled into E2 (orchestrator 2026-10-04): the simulator's own writers in the equivalent's step.
 
 E2 made every door refuse an amount finer than `10**-precision` (owner В-4). The simulator wrote such amounts itself:
-the inject truncated a debt to 0.01, trust drift grew and decayed limits at the storage grain 1E-8, and the payment
+the inject truncated a debt to 0.01 (that effect, `inject_debt`, is gone - 030 S3b; an inject line limit is
+refused in the step by the line door), trust drift grew and decayed limits at the storage grain 1E-8, and the payment
 planner always picked cents. Each test names what the base did. Mode A, except where it says otherwise.
 """
 
@@ -15,7 +16,6 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.core.ledger.reconciliation import verify_journal_equals_change
 from app.core.simulator.models import EdgeClearingHistory, RunRecord, TrustDriftConfig
 from app.core.simulator.real_payment_planner import RealPaymentPlanner
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
@@ -27,14 +27,14 @@ from tests.debt_setup import debt_fixture_setup
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
 
 
-async def _world(db_session, precisions: dict[str, int], limit: str = "100"):
+async def _world(db_session, precisions: dict[str, int], limit: str = "100", *, with_lines: bool = True):
     n = uuid.uuid4().hex[:6].upper()
     eqs = {name: Equivalent(code=f"S{name}{n}", precision=p, is_active=True) for name, p in precisions.items()}
     c = Participant(pid=f"C_{n}", display_name="C", public_key=f"pk_c_{n}", type="person", status="active")
     d = Participant(pid=f"D_{n}", display_name="D", public_key=f"pk_d_{n}", type="person", status="active")
     db_session.add_all([*eqs.values(), c, d])
     await db_session.flush()
-    for eq in eqs.values():
+    for eq in eqs.values() if with_lines else ():
         db_session.add(TrustLine(from_participant_id=c.id, to_participant_id=d.id, equivalent_id=eq.id,
                                  limit=Decimal(limit), status="active", policy={}))
     await db_session.commit()
@@ -46,19 +46,23 @@ async def _limit(db_session, eq, c, d) -> Decimal:
         TrustLine.equivalent_id == eq.id, TrustLine.from_participant_id == c.id))).scalar_one()
 
 
-async def _debt(db_session, eq, c, d) -> Decimal | None:
-    return (await db_session.execute(select(Debt.amount).where(
-        Debt.equivalent_id == eq.id, Debt.creditor_id == c.id, Debt.debtor_id == d.id))).scalar_one_or_none()
+async def _lines(db_session, eq, c, d) -> list[Decimal]:
+    """The limits of every line c -> d of the equivalent (a `create_trustline` inject that landed leaves one)."""
+    return list((await db_session.execute(select(TrustLine.limit).where(
+        TrustLine.equivalent_id == eq.id, TrustLine.from_participant_id == c.id,
+        TrustLine.to_participant_id == d.id))).scalars().all())
 
 
-async def _inject(db_session, eqs, c, d, effects, *, max_total=None):
+async def _inject(db_session, eqs, c, d, effects):
+    """Run one inject event. An effect is a dict (used as is) or a legacy `(eq key, amount)` pair, which is an
+    `inject_debt` effect: the op no longer exists, so such an effect is skipped (kept for the importer
+    `test_p028_e4_inject_criterion_b_postgres.py`)."""
     runner, artifacts = _make_runner(inject_enabled=True)
     event = {"type": "inject", "time": 0, "effects": [
-        {"op": "inject_debt", "from": c.pid, "to": d.pid, "equivalent": eqs[k].code, "amount": a} for k, a in effects]}
-    if max_total is not None:
-        event["metadata"] = {"max_total_amount": max_total}
-    scenario = {"participants": [{"id": c.pid}, {"id": d.pid}], "events": [event], "trustlines": [
-        {"from": c.pid, "to": d.pid, "equivalent": eq.code, "limit": "100", "status": "active"} for eq in eqs.values()]}
+        e if isinstance(e, dict) else
+        {"op": "inject_debt", "from": c.pid, "to": d.pid, "equivalent": eqs[e[0]].code, "amount": e[1]}
+        for e in effects]}
+    scenario = {"participants": [{"id": c.pid}, {"id": d.pid}], "events": [event], "trustlines": []}
     await runner._apply_due_scenario_events(db_session, run_id="r-028-inject", scenario=scenario, run=_make_run(
         participants=[(c.id, c.pid), (d.id, d.pid)], equivalents=[eq.code for eq in eqs.values()]))
     [note] = [p for p in artifacts.payloads if p.get("type") == "note"]
@@ -68,39 +72,29 @@ async def _inject(db_session, eqs, c, d, effects, *, max_total=None):
 # ------------------------------------------------------------------ F-028-30: inject
 
 
-@pytest.mark.parametrize("precision,amount", [(2, "1.239"), (8, "1.000000001")])
+# At precision 8 the step IS the column's grain, so a value finer than it never reaches the step door: the money door
+# refuses it as unstorable, under its own reason.
+@pytest.mark.parametrize("precision,limit,in_step,reason", [
+    (2, "1.239", "1.24", "amount_precision_exceeded"), (8, "1.000000001", "1.00000001", "money_quantization")])
 @pytest.mark.asyncio
-async def test_an_inject_finer_than_the_step_is_skipped_with_a_reason_not_truncated(db_session, precision, amount) -> None:
-    """Base: `1.239` at precision 2 was stored as `1.23`. 028 E4 (`T2899.1` class 2): a value finer than 1E-8 was
-    skipped as unstorable BEFORE the step check, with a log line and no reason in the note."""
+async def test_an_inject_line_limit_finer_than_the_step_is_skipped_with_a_reason_not_truncated(
+        db_session, precision, limit, in_step, reason) -> None:
+    """The inject writes lines only (030 S3b: `inject_debt` is gone). A limit finer than the equivalent's step is
+    skipped with its reason in the note and no line is written - never truncated to `1.23` - and the same
+    effect with a limit in the step lands whole (control: the skip is the step, not a refusal of the effect)."""
 
-    eqs, c, d = await _world(db_session, {"A": precision})
-    stats = await _inject(db_session, eqs, c, d, [("A", amount)])
-    assert await _debt(db_session, eqs["A"], c, d) is None
-    assert stats["skipped"] == 1 and stats["skipped_reasons"] == {"amount_precision_exceeded": 1}, stats
+    def line(lim):
+        return {"op": "create_trustline", "from": c.pid, "to": d.pid, "equivalent": eqs["A"].code, "limit": lim}
 
+    eqs, c, d = await _world(db_session, {"A": precision}, with_lines=False)  # the inject creates the line under test
+    stats = await _inject(db_session, eqs, c, d, [line(limit)])
+    assert await _lines(db_session, eqs["A"], c, d) == []
+    assert stats["applied"] == 0 and stats["skipped"] == 1, stats
+    assert stats["skipped_reasons"] == {reason: 1}, stats
 
-@pytest.mark.asyncio
-async def test_an_inject_at_precision_8_is_written_whole_and_the_verifier_agrees(db_session) -> None:
-    """Base: `1.239` at precision 8 was stored as `1.23` (the 0.01 truncation). The criterion (b) subset must
-    accept the whole amount: it quantized the intent to 0.01 and demanded whole cents."""
-
-    eqs, c, d = await _world(db_session, {"A": 8})
-    await _inject(db_session, eqs, c, d, [("A", "1.239")])
-    assert await _debt(db_session, eqs["A"], c, d) == Decimal("1.239")
-    outcome = await verify_journal_equals_change(db_session, eqs["A"].id)
-    assert [f for f in outcome.findings if f["kind"].startswith("b_")] == [], outcome.findings
-
-
-@pytest.mark.asyncio
-async def test_the_inject_total_is_bounded_per_equivalent(db_session) -> None:
-    """Base: two effects of different equivalents, each under `max_total_amount`, summed across them - the
-    second was refused (owner В-3: equivalents are independent)."""
-
-    eqs, c, d = await _world(db_session, {"A": 2, "B": 2})
-    stats = await _inject(db_session, eqs, c, d, [("A", "6"), ("B", "6")], max_total="10")
-    assert (await _debt(db_session, eqs["A"], c, d), await _debt(db_session, eqs["B"], c, d)) == (6, 6), stats
-    assert stats["total_amount"] == {eqs["A"].code: "6", eqs["B"].code: "6"}, stats
+    stats = await _inject(db_session, eqs, c, d, [line(in_step)])
+    assert stats["applied"] == 1 and stats["skipped"] == 0, stats
+    assert await _lines(db_session, eqs["A"], c, d) == [Decimal(in_step)]
 
 
 # ------------------------------------------------------------------ F-028-31: trust drift

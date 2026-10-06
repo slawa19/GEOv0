@@ -33,7 +33,7 @@ from sqlalchemy import select, text
 import app.core.payments.service as payment_service
 from app.core.integrity import compute_integrity_checkpoint_for_equivalent
 from app.core.invariants import InvariantChecker
-from app.core.ledger.book import Book, InjectIncrease, PaymentFlow
+from app.core.ledger.book import Book, PaymentFlow
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
@@ -189,16 +189,6 @@ async def test_a_direct_book_payment_cannot_create_a_reverse_debt_without_a_line
     refused = await _book_refusal(db_session, "PAYMENT", eq, PaymentFlow(a.id, b.id, Decimal("80"), eq.id))
     require_target(refused is not None, "the book created A->B 30 against a limit of 0")
     assert await _debts(db_session, eq.id) == {(b.id, a.id): Decimal("50")}
-
-
-@pytest.mark.asyncio
-async def test_inject_cannot_pass_the_real_limit_with_a_larger_ceiling(db_session) -> None:
-    eq, a, b = await _parties(db_session, ("A", "B", "10"))
-    effect = InjectIncrease(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("20"),
-                            ceiling=Decimal("100"))
-    refused = await _book_refusal(db_session, "INJECT", eq, effect)
-    require_target(refused is not None, "INJECT wrote B->A 20 against A's limit of 10 because its ceiling said 100")
-    assert await _debts(db_session, eq.id) == {}
 
 
 @MODE_B

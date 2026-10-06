@@ -27,8 +27,8 @@ Every run of a schedule appends one JSON line to `p019_t1908_results.jsonl` unde
 the numbers recorded in the spec are read from that file, with the command and the date.
 
 (c), the refusal of an unsuitable isolation: the per-boundary refusal is `T1907`'s
-`tests/integration/test_p019_money_writers_refuse_non_serializable_postgres.py`; here the three debt writers
-are refused again with the locks on and off, to show the refusal does not lean on them. (d), clearing
+`tests/integration/test_p019_money_writers_refuse_non_serializable_postgres.py`; here the two debt writers
+(payment, clearing; the inject writes no debt since 030 S3b) are refused again with the locks on and off, to show the refusal does not lean on them. (d), clearing
 starvation, is the probe `tests/integration/test_p019_t1908_clearing_starvation_probe_postgres.py`.
 """
 
@@ -333,7 +333,7 @@ async def test_a_lost_update_payment_vs_clearing(mode, parked, stand, monkeypatc
     assert envelopes == [("CLEARING", "COMPLETED"), ("PAYMENT", "COMPLETED")], envelopes
 
 
-# ── (b) one direction per pair: payment/inject and inject/inject ──────────────────────────────
+# ── seeds and runners shared with the importers ──────────────────────────────────────────────
 
 
 async def _seed_pair(stand, code_prefix: str):
@@ -361,7 +361,10 @@ async def _seed_pair(stand, code_prefix: str):
     return eq, x, y
 
 
-def _inject_runner(eq, participants, *, creditor, debtor, amount: str):
+def _inject_runner(eq, participants, effects):
+    """A runner and a run for ONE due inject event made of `effects` (`add_participant`, `create_trustline`,
+    `freeze_participant`: the inject writes no debt since 030 S3b)."""
+
     from app.core.simulator.models import RunRecord
     from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import _Artifacts, _runner
 
@@ -370,15 +373,7 @@ def _inject_runner(eq, participants, *, creditor, debtor, amount: str):
         "participants": [{"id": p.pid} for p in participants],
         "trustlines": [],
         "behaviorProfiles": [],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {"op": "inject_debt", "from": creditor.pid, "to": debtor.pid, "equivalent": eq.code, "amount": amount}
-                ],
-            }
-        ],
+        "events": [{"type": "inject", "time": 0, "effects": effects}],
     }
     run = RunRecord(run_id=f"p019-t1908-{uuid.uuid4().hex[:8]}", scenario_id="p019-t1908", mode="real", state="running")
     run.seed = 7
@@ -413,98 +408,6 @@ class _Barrier:
             await asyncio.wait_for(self.met.wait(), timeout=self.timeout)
         except asyncio.TimeoutError:
             self.timed_out += 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("pair", ["inject_inject", "payment_inject"])
-@pytest.mark.parametrize("mode", MODES)
-async def test_b_opposing_directions_on_one_pair(mode, pair, stand, monkeypatch) -> None:
-    """Two writers create OPPOSITE debts on one pair at once; at most one direction may survive.
-
-    inject/inject: `inject_debt` X->Y (Y owes X) and Y->X (X owes Y), two runs, two sessions.
-    payment/inject: X pays Y 10 (X owes Y) and `inject_debt` X->Y (Y owes X).
-    Each writer is held at a two-party barrier AFTER it has read the opposite edge and BEFORE it writes, so
-    with the locks off both read "no opposite debt" in their snapshots - the design's counterexample
-    (spec, item 5: "проектный, не воспроизведённая потеря"). SSI must break the read-write cycle.
-    """
-
-    from app.core.simulator.inject_executor import InjectExecutor
-
-    switch = None
-    conflicts = count_conflicts(monkeypatch)
-    eq, x, y = await _seed_pair(stand, "PB")
-    barrier = _Barrier()
-
-    original_stage = InjectExecutor.stage_inject_event
-
-    async def stage_then_meet(self, session, **kwargs):
-        staged = await original_stage(self, session, **kwargs)
-        if barrier.arrived < barrier.parties:
-            await barrier.wait()
-        return staged
-
-    monkeypatch.setattr(InjectExecutor, "stage_inject_event", stage_then_meet)
-
-    original_prestate = payment_service_module._read_payment_prestate
-
-    async def prestate_then_meet(session, declared_flows):
-        result = await original_prestate(session, declared_flows)
-        if barrier.arrived < barrier.parties:
-            await barrier.wait()
-        return result
-
-    monkeypatch.setattr(payment_service_module, "_read_payment_prestate", prestate_then_meet)
-
-    async def inject(creditor, debtor):
-        runner, run, scenario, artifacts = _inject_runner(eq, [x, y], creditor=creditor, debtor=debtor, amount="10.00")
-        async with stand() as session:
-            await runner._apply_due_scenario_events(session, run_id=run.run_id, run=run, scenario=scenario)
-        return [e.get("description") or e.get("type") for e in artifacts.events]
-
-    async def pay_x_to_y():
-        request = PaymentCreateRequest(
-            tx_id=str(uuid.uuid4()), to=y.pid, equivalent=eq.code, amount="10.00", signature="__internal__"
-        )
-        return await PaymentService.pay(stand, x.id, request, require_signature=False)
-
-    if pair == "inject_inject":
-        writers = [inject(x, y), inject(y, x)]
-    else:
-        writers = [pay_x_to_y(), inject(x, y)]
-    tasks = [asyncio.create_task(w) for w in writers]
-    try:
-        outcomes = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=60)
-    finally:
-        await _finish(*tasks)
-        PaymentRouter.invalidate_cache(eq.code)
-
-    invariants = await _ledger_invariants(stand, eq.id)
-    _report(
-        "b_opposing_directions", mode=mode, pair=pair, barrier_met=barrier.met.is_set(), barrier_timeouts=barrier.timed_out,
-        conflicts_payment=conflicts.payment, conflicts_inject=conflicts.inject,
-        outcomes=[repr(o)[:160] for o in outcomes], switch=dict(switch.calls) if switch else None,
-        debts={f"{k[0]}>{k[1]}": v for k, v in invariants["debts"].items()},
-    )
-
-    assert not [o for o in outcomes if isinstance(o, BaseException)], outcomes
-    if switch is not None:
-        assert switch.total > 0, "the lock switch was never on the measured path"
-        assert barrier.met.is_set(), "both writers must have read the opposite edge before either wrote"
-        assert conflicts.serialization_failures > 0, (
-            f"no 40001 was counted ({conflicts}): SSI never had to intervene, the race is vacuous"
-        )
-    assert invariants["both_directions"] == [], f"both directions of one pair exist: {invariants['debts']}"
-    assert invariants["over_limit"] == {}, invariants["over_limit"]
-    # The result is one of the SERIAL results, and the writers that ran are accounted for.
-    ten = Decimal("10.00000000")
-    if pair == "inject_inject":
-        # Whichever inject ran first is applied; the other finds the opposite debt and is refused.
-        assert invariants["debts"] in ({(y.id, x.id): ten}, {(x.id, y.id): ten}), invariants["debts"]
-    else:
-        # payment first: X owes Y 10, the inject then meets it and is refused -> {X->Y: 10};
-        # inject first: Y owes X 10, the payment then nets it away -> {} (both applied).
-        assert outcomes[0].status == "COMMITTED", outcomes[0]
-        assert invariants["debts"] in ({}, {(x.id, y.id): ten}), invariants["debts"]
 
 
 # ── the bottleneck loser: its outcome by admission (T1908, `FORK-5`) ──────────────────────────
@@ -606,12 +509,12 @@ async def test_the_bottleneck_loser_is_refused_after_admission(mode, stand, monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("writer", ["payment_staged", "clearing", "inject"])
+@pytest.mark.parametrize("writer", ["payment_staged", "clearing"])
 @pytest.mark.parametrize("mode", MODES)
 async def test_c_an_unsuitable_isolation_is_refused_with_or_without_the_locks(
     mode, writer, committed_database, monkeypatch
 ) -> None:
-    """The three debt writers refuse a READ COMMITTED transaction before their first write, and the refusal
+    """The two debt writers refuse a snapshot-level transaction before their first write, and the refusal
     does not lean on the locks: with the lock primitives switched off it is the same refusal and nothing is
     written. (The full per-boundary refusal, with the caller's transaction untouched, is `T1907`'s
     `test_p019_money_writers_refuse_non_serializable_postgres.py`; this is the lock-independence half.)"""

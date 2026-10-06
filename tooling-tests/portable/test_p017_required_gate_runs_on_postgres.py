@@ -77,8 +77,6 @@ _CONCURRENCY_SELECTORS = (
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
     "::test_opposite_payments_on_a_fresh_pair_keep_one_direction",
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
-    "::test_opposing_injects_and_payments_keep_one_direction",
-    "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
     "::test_clearing_and_payment_on_a_shared_edge",
     "tests/integration/test_p027_t2703_stage2_counterexamples_postgres.py"
     "::test_seed_never_commits_after_a_baseline_that_missed_it",

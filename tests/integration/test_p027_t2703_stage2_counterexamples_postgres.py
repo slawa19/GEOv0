@@ -35,7 +35,6 @@ from app.core.money_boundary import MoneyBoundary
 from app.core.payments import service as payment_service_module
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService
-from app.core.simulator.inject_executor import InjectExecutor
 from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
@@ -44,7 +43,6 @@ from tests.integration.p019_interlock_support import _seed_interlock_case
 from tests.integration.test_p019_t1908_lock_removal_experiments_postgres import (
     _Barrier,
     _finish,
-    _inject_runner,
     _ledger_invariants,
     _seed_pair,
     count_conflicts,
@@ -146,50 +144,6 @@ async def test_opposite_payments_on_a_fresh_pair_keep_one_direction(rig: Rig, mo
     _overlapped(rig, barrier)
     assert all(getattr(o, "status", None) == "COMMITTED" for o in outcomes), outcomes
     require_target(debts == {} and not await _criterion_b(rig, eq.id), f"both payments committed, debts {debts}")
-
-
-# ── 2. opposing inject/inject and payment/inject on a fresh pair ──────────────────────────────
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("pair", ["inject_inject", "payment_inject"])
-@pytest.mark.parametrize("rig", CELLS, indirect=True)
-async def test_opposing_injects_and_payments_keep_one_direction(rig: Rig, pair, monkeypatch) -> None:
-    """`test_b_opposing_directions_on_one_pair` (019 `T1908`) on the cells; the inject meets AFTER staging
-    (it has read the opposite edge), the payment after its writes - both before their commits."""
-    eq, x, y = await _seed_pair(rig.sessions, "OI")
-    barrier = _Barrier()
-    _meet_before_commit(monkeypatch, barrier)
-    original_stage = InjectExecutor.stage_inject_event
-
-    async def stage_then_meet(self, session, **kwargs):
-        staged = await original_stage(self, session, **kwargs)
-        if barrier.arrived < barrier.parties:
-            await barrier.wait()
-        return staged
-
-    monkeypatch.setattr(InjectExecutor, "stage_inject_event", stage_then_meet)
-
-    async def inject(creditor, debtor):
-        runner, run, scenario, _artifacts = _inject_runner(eq, [x, y], creditor=creditor, debtor=debtor, amount="10.00")
-        async with rig.sessions() as session:
-            await runner._apply_due_scenario_events(session, run_id=run.run_id, run=run, scenario=scenario)
-
-    first = inject(x, y) if pair == "inject_inject" else _pay(rig, x.id, y.pid, eq.code, "10.00")
-    tasks = [asyncio.create_task(first), asyncio.create_task(inject(y, x) if pair == "inject_inject" else inject(x, y))]
-    try:
-        outcomes = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=60)
-    finally:
-        await _finish(*tasks)
-        PaymentRouter.invalidate_cache(eq.code)
-    invariants = await _ledger_invariants(rig.sessions, eq.id)
-    rig.ran_at_the_cell_level()
-    _overlapped(rig, barrier)
-    assert not [o for o in outcomes if isinstance(o, BaseException)], outcomes
-    ten = Decimal("10.00000000")
-    serial = ({(y.id, x.id): ten}, {(x.id, y.id): ten}) if pair == "inject_inject" else ({}, {(x.id, y.id): ten})
-    require_target(invariants["both_directions"] == [] and invariants["debts"] in serial,
-                   f"{pair}: debts {invariants['debts']}")
 
 
 # ── 3. the first debt of a pair: capacity read before a concurrent insert committed ───────────
