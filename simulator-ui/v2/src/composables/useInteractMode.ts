@@ -2,7 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 
 
 import type { GraphSnapshot } from '../types'
 import { extractErrorMessage } from '../utils/errorMessage'
-import { paymentRefusalText } from '../utils/paymentRefusalText'
+import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
 import { useInteractActions } from './useInteractActions'
@@ -662,7 +662,10 @@ export function useInteractMode(opts: {
       // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
       fsm.enterClearingPreview()
 
-      const res = await opts.actions.runClearing(eq, { signal })
+      // 031 item 17: the step refusal (409 CLEARING_REFUSED, 030 S2) is shown as the client's text, not the server hint.
+      const res = await opts.actions.runClearing(eq, { signal }).catch((e: unknown) => {
+        throw new Error(clearingRefusalText(e, eq))
+      })
       if (!isCurrent()) return
       fsm.setLastClearing(res)
 

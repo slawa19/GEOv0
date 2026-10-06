@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AcceptedSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import type { GraphSnapshot } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
+import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -451,5 +452,27 @@ describe('realEventPipeline state-before-effect ordering', () => {
       'tx.updated amount_flyout contract violated (missing amount/endpoints)',
       { event_id: event.event_id, amount: '', from: undefined, to: undefined, edges_len: 0 },
     )
+  })
+})
+
+describe('031 item 17: the tick step refusal reaches the run error line', () => {
+  const statusWith = (last_error: { code: string; message: string; at: string } | null): AcceptedSimulatorEvent => ({
+    event_id: 'evt_run_1_3', ts: TS, type: 'run_status', run_id: 'run_1', scenario_id: 'scenario_1', state: 'running',
+    attempts_total: 1, last_error,
+  })
+  const apply = (event: AcceptedSimulatorEvent) => {
+    const trace: string[] = []
+    const draft = createDraft()
+    const deps = { ...createStateDeps(trace, draft), isUserFacingRunError: isUserFacingRunErrorCode }
+    applyAcceptedRealEvent(event, 'run_1', draft, deps)
+    return draft.real.lastError
+  }
+
+  it('CLEARING_REFUSED is shown as the human text; the sanitised CLEARING_ERROR is still not shown', () => {
+    document.documentElement.lang = 'en'
+    expect(apply(statusWith({ code: 'CLEARING_REFUSED', message: 'server hint', at: TS })))
+      .toBe('Clearing refused: the database holds debts finer than the accounting step of the equivalent. Reseed the database.')
+    expect(apply(statusWith({ code: 'CLEARING_ERROR', message: 'Internal error', at: TS }))).toBe('')
+    expect(apply(statusWith({ code: 'INTERNAL_ERROR', message: 'boom', at: TS }))).toBe('INTERNAL_ERROR: boom')
   })
 })
