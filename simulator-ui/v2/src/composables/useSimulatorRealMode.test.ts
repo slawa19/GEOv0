@@ -6,6 +6,7 @@ import { ApiError } from '../api/http'
 import { connectSse, type SseConnectOpts } from '../api/sse'
 import { createRun, getActiveRun, getRun, stopRun } from '../api/simulatorApi'
 import type { ActiveRunResponse } from '../api/simulatorTypes'
+import { isUserFacingRunErrorCode, runErrorText } from '../utils/runErrorClassification'
 
 function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -2159,3 +2160,57 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
   })
 })
 
+
+describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1)', () => {
+  it('a CLEARING_REFUSED run error read by REST status is the human step text, not the raw server message', async () => {
+    const real = createRealState()
+    const getRunMock = vi.mocked(getRun)
+    const prevGetRunImpl = getRunMock.getMockImplementation()
+    if (!prevGetRunImpl) throw new Error('expected getRun mock implementation')
+    const refused = { code: 'CLEARING_REFUSED', message: 'occurrence amount is not a multiple of the step', at: 't' }
+    getRunMock.mockImplementation(async () => ({
+      ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
+      state: 'error',
+      last_error: refused,
+    }))
+    try {
+      const h = useSimulatorRealMode({
+        isRealMode: computed(() => false),
+        isLocalhost: false,
+        effectiveEq: computed(() => 'EUR'),
+        state: { loading: false, error: '', sourcePath: '', snapshot: null, selectedNodeId: null, flash: 0 },
+        real,
+        ensureScenarioSelectionValid: () => undefined,
+        resetRunStats: () => undefined,
+        cleanupRealRunFxAndTimers: () => undefined,
+        // the production predicate: CLEARING_REFUSED is user-facing (031 item 17)
+        isUserFacingRunError: isUserFacingRunErrorCode,
+        inc: () => undefined,
+        loadScene: async () => undefined,
+        realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+        pushTxAmountLabel: () => undefined,
+        clampRealTxTtlMs: () => 0,
+        scheduleTimeout: () => undefined,
+        runRealTxFx: () => undefined,
+        runRealClearingDoneFx: () => undefined,
+        wakeUp: () => undefined,
+      })
+
+      // attach is one of the three REST status paths (reconnect, stop, attach) sharing one refresh
+      await h.attachToRun('r1')
+      expect(real.lastError).toBe(runErrorText(refused))
+      expect(real.lastError).not.toContain(refused.message)
+
+      // anti-vacuum: another user-facing code still keeps CODE: message on the same path
+      getRunMock.mockImplementation(async () => ({
+        ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
+        state: 'error',
+        last_error: { code: 'INTERNAL_ERROR', message: 'boom', at: 't' },
+      }))
+      await h.refreshRunStatus()
+      expect(real.lastError).toBe('INTERNAL_ERROR: boom')
+    } finally {
+      getRunMock.mockImplementation(prevGetRunImpl)
+    }
+  })
+})
