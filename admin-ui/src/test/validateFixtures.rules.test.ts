@@ -76,6 +76,54 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
     expect(r.out).toContain('multiple of the 0.01 step of UAH')
   })
 
+  // 031 slice C (item 6): a missing precision was `Number(undefined)` = NaN, and `length > NaN` is always false, so the
+  // step check passed vacuously. A debt off the step is the case that proves the step check ran at all.
+  function breakPrecision(dir: string, mutate: (e: Record<string, unknown>) => void) {
+    const file = path.join(dir, 'datasets', 'equivalents.json')
+    const eqs = JSON.parse(readFileSync(file, 'utf8')) as Array<Record<string, unknown>>
+    mutate(eqs.find((e) => e.code === 'UAH')!)
+    writeFileSync(file, JSON.stringify(eqs, null, 2) + '\n')
+  }
+
+  it('a pack without viz datasets and without precision is refused before debts are walked (a debt off the step cannot pass vacuously)', () => {
+    const dir = copyPack()
+    // `--only-pack` may carry no participants.viz-<EQ>.json; the viz walk is the only other place precision was checked.
+    for (const code of ['UAH', 'EUR', 'HOUR']) rmSync(path.join(dir, 'datasets', `participants.viz-${code}.json`))
+    breakPrecision(dir, (e) => { delete e.precision })
+    const debts = readDebts(dir)
+    const row = debts.findIndex((d) => d.equivalent === 'UAH')
+    debts[row]!.amount = `${debts[row]!.amount}1`
+    writeDebts(dir, debts)
+
+    const r = validatePack(dir)
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('equivalent UAH has no usable precision')
+  })
+
+  it.each([
+    ['a missing precision', (e: Record<string, unknown>) => { delete e.precision }],
+    ['a non-integer precision', (e: Record<string, unknown>) => { e.precision = 2.5 }],
+    ['a string precision', (e: Record<string, unknown>) => { e.precision = '2' }],
+    ['a negative precision', (e: Record<string, unknown>) => { e.precision = -1 }],
+    ['a precision above the storage scale 8', (e: Record<string, unknown>) => { e.precision = 9 }],
+  ])('%s is refused on its own, with debts untouched', (_name, mutate) => {
+    const dir = copyPack()
+    breakPrecision(dir, mutate)
+
+    const r = validatePack(dir)
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('equivalent UAH has no usable precision')
+  })
+
+  it.each([0, 8])('a precision of %s (the ends of the allowed range 0..8) is not refused by the precision rule', (precision) => {
+    const dir = copyPack()
+    breakPrecision(dir, (e) => { e.precision = precision })
+
+    const r = validatePack(dir)
+    // Other rules may fire on the changed step (the debts and viz nets were generated at 2); this one must not.
+    expect(r.out).not.toContain('has no usable precision')
+  })
+
   it('a debt to an unknown participant is refused, not dropped from the net', () => {
     const dir = copyPack()
     const debts = readDebts(dir)
@@ -150,7 +198,8 @@ describe('validate-fixtures: the public copy must be the canonical pack, every f
 
     const r = validateCopy(canonical, publicDir)
     expect(r.status).toBe(1)
-    expect(r.out).toContain(relative)
+    // The reason, not only the file: exit 1 on the same file could also be a parse error or a failed sibling rule.
+    expect(r.out).toContain(`${relative}: differs from CANONICAL`)
   })
 
   it('a file only the public copy has (a deleted file that sync does not prune) is refused', () => {
@@ -161,7 +210,7 @@ describe('validate-fixtures: the public copy must be the canonical pack, every f
 
     const r = validateCopy(canonical, publicDir)
     expect(r.status).toBe(1)
-    expect(r.out).toContain('api-snapshots/health.get.json')
+    expect(r.out).toContain('api-snapshots/health.get.json: only in PUBLIC')
   })
 
   it('a file only the canonical pack has is refused', () => {
@@ -171,6 +220,6 @@ describe('validate-fixtures: the public copy must be the canonical pack, every f
 
     const r = validateCopy(canonical, publicDir)
     expect(r.status).toBe(1)
-    expect(r.out).toContain('datasets/health-db.json')
+    expect(r.out).toContain('datasets/health-db.json: missing in PUBLIC')
   })
 })
