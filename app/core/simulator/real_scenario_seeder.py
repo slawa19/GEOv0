@@ -9,10 +9,8 @@ from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
 from app.core.integrity import create_equivalent
-from app.core.money_boundary import MoneyBoundary
 from app.core.participants.service import ParticipantService
 from app.db.models.participant import Participant
-from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
@@ -306,21 +304,22 @@ class RealScenarioSeeder:
 
             # 030 S3b (F-030-19, `T3000` item 3): the lines go through `TrustLineService.execute_create`, the entrance of
             # every creation, with its checks - a suspended end, a stopped or held equivalent, the step, a self-line.
-            # The order is the writers' one: every participant row first, then the lines in one sorted pair order
-            # (a concurrent inject or payment meets them in the same order); the equivalent row is the service's third
-            # lock. A refusal fails the whole seeding by name; the CALLER rolls back, and nothing of it stays.
-            def pair_order(item):
-                return (sorted((str(item[0].id), str(item[1].id))), item[2], item[0].pid, item[1].pid)
-
-            initial.sort(key=pair_order)
-            await MoneyBoundary(session).lock_participants({x.id for item in initial for x in item[:2]})
+            # A refusal fails the whole seeding by name; the CALLER rolls back, and nothing of it stays.
+            # 030 S6b (`T3093` #1): the batch takes its locks ONCE up front, in the writers' one order - every
+            # participant `FOR SHARE`, every live line of every pair `FOR UPDATE` in one statement by `trust_lines.id`
+            # (a payment's own statement) - so a payment over these pairs meets the seeding on one side only; the
+            # equivalent row is the service's third lock. Pair by pair in participant order, it deadlocked with one.
+            # The locked rows are the pairs' live lines: a triple one of them occupies is re-seeded as nothing
+            # (migration 019).
+            initial.sort(key=lambda item: (item[0].pid, item[1].pid, item[2]))
             service = TrustLineService(session)
             batch = service.begin_internal_batch()
+            held = {(row.equivalent_id, row.from_participant_id, row.to_participant_id) for row in await batch.lock(
+                {x.id for item in initial for x in item[:2]},
+                {(eq_by_code[item[2]].id, item[0].id, item[1].id) for item in initial})}
             for p_from, p_to, eq, limit, status, policy, line in initial:
-                if (await session.execute(select(TrustLine.id).where(
-                    TrustLine.from_participant_id == p_from.id, TrustLine.to_participant_id == p_to.id,
-                    TrustLine.equivalent_id == eq_by_code[eq].id, TrustLine.status != "closed"))).first():
-                    continue  # a LIVE line occupies the triple (migration 019): re-seeding a scenario adds nothing
+                if (eq_by_code[eq].id, p_from.id, p_to.id) in held:
+                    continue
                 try:
                     created = await service.execute_create(
                         batch, p_from.id,
