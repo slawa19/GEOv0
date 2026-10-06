@@ -1999,10 +1999,10 @@ class ClearingService:
         self.session.add(new_tx)
 
         try:
-            # 3. Apply changes (Decrease debts)
-            # We must lock rows? Or just update.
-            # Since we are in a transaction, we should select for update ideally.
-            # For MVP, we just update.
+            # 3. Apply changes (Decrease debts). The rows are already held, in the one order (027 stage 2, 028
+            # `F-028-28`): the cycle's participants `FOR SHARE`, every non-closed line of its pairs `FOR UPDATE`, the
+            # cycle's debt rows `FOR UPDATE` (their `version` is checked by `Book`). READ COMMITTED reads the
+            # committed state behind those locks, so nothing here is a plain update of rows another writer may change.
 
             # THE OPERATION ENVELOPE (programme 015, phase B step 4). The clearing's declared
             # intent, opened after the cycle has been read FOR UPDATE and before a single edge is

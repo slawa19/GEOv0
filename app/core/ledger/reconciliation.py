@@ -1354,8 +1354,9 @@ async def react_to_failed(session_factory: Callable[[], Any], equivalent_id: uui
 
     WHAT BINDS THE HOLD: every money writer - payment, tick, inject, clearing in every attempt - reads
     the equivalent row `FOR SHARE` through its commit, so the hold's `UPDATE` waits for a writer that
-    already read "not held", and a writer reading after the hold committed meets 40001 and refuses on its
-    retry. Either it commits before this hold or it refuses.
+    already read "not held", and a writer reading after the hold committed reads the committed hold and
+    refuses (READ COMMITTED, 027 stage 2; the 40001 of this reaction's own REPEATABLE READ is another
+    matter). Either it commits before this hold or it refuses.
 
     Any exception propagates to the caller, which records it as an error of this reaction; nothing is
     announced.

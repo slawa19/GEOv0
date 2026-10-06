@@ -1894,7 +1894,7 @@ class PaymentService:
         receiver_id: uuid.UUID,
         equivalent_id: uuid.UUID,
     ) -> Decimal:
-        """The available capacity of one flow edge, read in this attempt's snapshot."""
+        """The available capacity of one flow edge, read on the committed state behind the pair's line locks."""
 
         return (await self._segment(sender_id, receiver_id, equivalent_id))[0]
 
@@ -1956,8 +1956,9 @@ class PaymentService:
 
         WHERE THE STOP IS READ. After every lock of the binding phase and immediately before the
         pre-state and the envelope - the place the engine's commit read it. `FOR SHARE` holds through
-        the caller's commit, so a deactivating PATCH either waits for this payment or makes this read
-        fail with 40001 and the owner's next attempt refuse (`MoneyBoundary.refuse_inactive_equivalents`).
+        the caller's commit, so a deactivating PATCH either waits for this payment or this read waits for
+        the PATCH, reads the committed row (READ COMMITTED, 027 stage 2: no snapshot older than the lock, so
+        no 40001 on this path) and the payment refuses (`MoneyBoundary.refuse_inactive_equivalents`).
 
         THE ENVELOPE AND ITS INTENT (`FORK-8`). `Book.operation` INSERTs and flushes the envelope at open,
         so it is on this connection before `Book` writes the first debt: a payment's statement of what it
