@@ -189,3 +189,49 @@ async def test_a_growth_whose_commit_acknowledgement_is_lost_is_resolved_by_the_
         assert stored == Decimal("100.00"), stored
         assert isinstance(raised, ConnectionError), raised
         assert held == Decimal("100.00"), held
+
+
+@pytest.mark.asyncio
+async def test_control_a_commit_the_server_refused_is_a_rollback_without_a_read(monkeypatch) -> None:
+    """Counter-check of the classification: a COMMIT the server answered with a refusal (`40001`) proves nothing
+    landed, so the persisted limits are not read and the outcome is the rollback - exactly once."""
+
+    import app.db.session as app_db_session
+    from sqlalchemy.exc import DBAPIError
+
+    from app.core.simulator.models import TrustDriftLimitUpdate, TrustDriftResult
+
+    class _Refused(Exception):
+        sqlstate = "40001"
+
+    class _Session:
+        rollbacks = 0
+
+        async def commit(self):
+            raise DBAPIError("COMMIT", None, _Refused("could not serialize access"))
+
+        async def rollback(self):
+            self.rollbacks += 1
+
+    def _no_read():
+        raise AssertionError("a refused COMMIT must not be resolved by reading the limits")
+
+    monkeypatch.setattr(app_db_session, "AsyncSessionLocal", _no_read)
+    outcomes: list[str] = []
+    session = _Session()
+    result = TrustDriftResult(
+        updated_count=1,
+        committed_limit_updates=(TrustDriftLimitUpdate("A", "B", "UAH", Decimal("105")),),
+    )
+
+    with pytest.raises(DBAPIError):
+        await drift_module.commit_trust_drift(
+            session=session,
+            result=result,
+            on_commit=lambda: outcomes.append("commit"),
+            on_rollback=lambda: outcomes.append("rollback"),
+            on_unknown=lambda: outcomes.append("unknown"),
+            logger=logging.getLogger("tests.p031.refused"),
+        )
+
+    assert (session.rollbacks, outcomes) == (1, ["rollback"])

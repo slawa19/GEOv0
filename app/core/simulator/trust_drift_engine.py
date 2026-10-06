@@ -6,10 +6,14 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import Any, Callable
 
 from sqlalchemy import select
+from sqlalchemy.orm import aliased
+
+import app.db.session as db_session
 
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.simulator.commit_resolution import resolve_commit_under_cancellation
+from app.core.simulator.money_replay import _commit_refused
 from app.utils.validation import money_step
 
 from app.core.simulator.models import (
@@ -24,6 +28,8 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.trustlines.service import TrustLineService, TrustLineWriteBatch
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
 from app.schemas.simulator import TopologyChangedPayload
 from app.schemas.trustline import TrustLineUpdateRequest
 
@@ -131,6 +137,108 @@ def broadcast_trust_drift_changed(
             reason,
             exc_info=True,
         )
+
+
+async def commit_trust_drift(
+    *,
+    session: Any,
+    result: TrustDriftResult,
+    on_commit: Callable[[], Any],
+    on_rollback: Callable[[], Any],
+    on_unknown: Callable[[], Any],
+    logger: logging.Logger,
+) -> None:
+    """Commit a drift transaction and resolve its outcome ONCE.
+
+    031 (BACKLOG item 14): a COMMIT that failed without the server refusing it (`money_replay._commit_refused`,
+    the classification the money phase uses), followed by a ROLLBACK that succeeded, does not prove the COMMIT
+    did not land - it may have landed and lost only its acknowledgement. The money phase settles that by its
+    `tx_id`s (030 `F-030-12`); the drift has none, so it reads the persisted limits of the lines it wrote on a
+    NEW session: all equal to the intended new limits -> committed (`on_commit`, and the failure is not raised:
+    the drift is durable and is reported like any other); none -> rolled back, as before; a mixed or unreadable
+    answer -> unknown. Every outcome but an established commit re-raises the failure.
+    """
+
+    rolled_back = False
+
+    def _defer_rollback() -> None:
+        nonlocal rolled_back
+        rolled_back = True
+
+    try:
+        await resolve_commit_under_cancellation(
+            commit=session.commit,
+            rollback=session.rollback,
+            on_commit=on_commit,
+            on_rollback=_defer_rollback,
+            on_unknown=on_unknown,
+            logger=logger,
+        )
+    except Exception as exc:
+        if not rolled_back:
+            raise
+        try:
+            landed = False if _commit_refused(exc) else await _limits_landed(result, logger)
+        except BaseException:  # a cancellation of the read: the outcome stays unknown, resolved once
+            on_unknown()
+            raise
+        if landed is True:
+            logger.warning(
+                "simulator.real.trust_drift.commit_landed_ack_lost lines=%d error=%s",
+                len(getattr(result, "committed_limit_updates", None) or ()),
+                type(exc).__name__,
+            )
+            on_commit()
+            return
+        if landed is False:
+            on_rollback()
+        else:
+            on_unknown()
+        raise
+    except BaseException:
+        # A caller cancellation after a failed COMMIT: no read is attempted and the outcome stays the rollback the
+        # resolver reported, as before 031 (this path is not covered by the ack-loss stand).
+        if rolled_back:
+            on_rollback()
+        raise
+
+
+async def _limits_landed(result: TrustDriftResult, logger: logging.Logger) -> bool | None:
+    """Are the drift's intended limits the persisted ones? Read on a new session: the drift's own session is the
+    one whose outcome is in doubt. True: all are; False: none is; None: mixed, or the read failed."""
+
+    updates = tuple(getattr(result, "committed_limit_updates", None) or ())
+    if not updates:
+        return False
+    creditor, debtor = aliased(Participant), aliased(Participant)
+    matches: list[bool] = []
+    try:
+        async with db_session.AsyncSessionLocal() as session:
+            for update in updates:
+                stored = await session.scalar(
+                    select(TrustLine.limit)
+                    .join(creditor, creditor.id == TrustLine.from_participant_id)
+                    .join(debtor, debtor.id == TrustLine.to_participant_id)
+                    .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+                    .where(
+                        creditor.pid == update.creditor_pid,
+                        debtor.pid == update.debtor_pid,
+                        Equivalent.code == update.equivalent,
+                        TrustLine.status == "active",
+                    )
+                )
+                matches.append(stored is not None and Decimal(str(stored)) == update.new_limit)
+    except Exception:
+        logger.warning("simulator.real.trust_drift.commit_outcome_unresolved", exc_info=True)
+        return None
+    if all(matches):
+        return True
+    if not any(matches):
+        return False
+    logger.warning(
+        "simulator.real.trust_drift.commit_outcome_mixed lines=%d landed=%d", len(matches), sum(matches)
+    )
+    return None
 
 
 class TrustDriftEngine:
@@ -306,9 +414,9 @@ class TrustDriftEngine:
             committed_limit_updates=tuple(committed_limit_updates),
         )
         if updated:
-            await resolve_commit_under_cancellation(
-                commit=clearing_session.commit,
-                rollback=clearing_session.rollback,
+            await commit_trust_drift(
+                session=clearing_session,
+                result=result,
                 on_commit=lambda: self.apply_committed_effects(
                     scenario=scenario,
                     result=result,
