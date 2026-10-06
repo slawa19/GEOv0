@@ -267,6 +267,21 @@ TX_ID_UNIQUE_CONSTRAINT = "transactions_tx_id_key"
 #: may have landed, and nothing may be terminalized before the identity is read.
 _COMMIT_REFUSED_SQLSTATE_CLASSES = frozenset({"23", "40", "P0"})
 
+#: The one code of a refusing class that is NOT a refusal: `40003 statement_completion_unknown` says the
+#: outcome is unknown, so a COMMIT failing with it may have landed (031, BACKLOG item 16). No source of it
+#: after a COMMIT is known in the current stack; the exclusion is about classifying it correctly.
+_COMMIT_OUTCOME_UNKNOWN_SQLSTATES = frozenset({"40003"})
+
+
+def commit_refused_by_server(sqlstate: str | None) -> bool:
+    """The server ANSWERED the failed COMMIT with a refusal after rolling the transaction back, so nothing of it
+    is stored. Shared by the payment owner and the simulator money phase (`money_replay._commit_refused`)."""
+    return (
+        sqlstate is not None
+        and sqlstate[:2] in _COMMIT_REFUSED_SQLSTATE_CLASSES
+        and sqlstate not in _COMMIT_OUTCOME_UNKNOWN_SQLSTATES
+    )
+
 #: The least lock wait a refusal recording is granted (019 stage-3 review, P2 #5). The recording is ONE
 #: insert that can only wait on a row lock - an uncommitted row of the same `tx_id` in another
 #: transaction - and it runs AFTER the attempt, often after its deadline has already expired (a timeout
@@ -2573,7 +2588,7 @@ class PaymentService:
         sqlstate = _payment_db_sqlstate(exc) if isinstance(exc, DBAPIError) else None
         await self._rollback_attempt()
 
-        if sqlstate is not None and sqlstate[:2] in _COMMIT_REFUSED_SQLSTATE_CLASSES:
+        if commit_refused_by_server(sqlstate):
             # The server ANSWERED the COMMIT with an error: it rolled the transaction back, nothing
             # landed - the rollback is confirmed.
             if sqlstate in _RETRYABLE_PAYMENT_SQLSTATES:
