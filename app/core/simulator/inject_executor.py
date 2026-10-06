@@ -5,16 +5,16 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.simulator.cache_invalidator import (
     invalidate_caches_after_inject as _invalidate_caches_after_inject,
 )
-from app.core.ledger.book import APPLIED, REFUSED_OPPOSING_DEBT, Book, InjectIncrease
 from app.core.money_boundary import MoneyBoundary
+from app.core.participants.service import ParticipantService
 from app.core.trustlines.service import TrustLineService
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import InjectResult, RunRecord
@@ -41,8 +41,7 @@ from app.utils.exceptions import (
     ForbiddenException,
     NotFoundException,
 )
-from app.utils.validation import (AMOUNT_PRECISION_EXCEEDED, MONEY_QUANTIZATION, money_step,
-                                  money_storability_violation)
+from app.utils.validation import money_storability_violation
 
 #: `skipped_reasons` key of an effect refused over a participant that is not active (028 `F-028-28`).
 PARTICIPANT_SUSPENDED = MoneyBoundary.PARTICIPANT_SUSPENDED_REASON
@@ -114,12 +113,9 @@ class StagedInjectEvent:
     new_participants_scenario: list[dict[str, Any]] = field(default_factory=list)
     new_trustlines_scenario: list[dict[str, Any]] = field(default_factory=list)
     frozen_participant_pids: list[str] = field(default_factory=list)
-    inject_debt_equivalents: set[str] = field(default_factory=set)
-    inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
     pid_additions: dict[str, uuid.UUID] = field(default_factory=dict)
     applied: int = 0
     skipped: int = 0
-    total_applied: dict[str, Decimal] = field(default_factory=dict)  # per equivalent (028 F-028-30, owner В-3)
     skipped_reasons: dict[str, int] = field(default_factory=dict)
 
 
@@ -129,7 +125,7 @@ def inject_event_equivalent_codes(
     """Equivalent codes an inject event names by itself, before touching the database.
 
     Programme 015, phase B step 3: the owner locks these together with the run's equivalents
-    before staging. `inject_debt` and `create_trustline` name one equivalent each; the initial
+    before staging. `create_trustline` names one equivalent; the initial
     trustlines of `add_participant` name theirs, falling back to the scenario default exactly as
     staging does. `freeze_participant` names none - its trustlines are discovered while staging,
     which raises `InjectOwnerLockSetTooNarrow` if they fall outside the held set.
@@ -143,7 +139,7 @@ def inject_event_equivalent_codes(
         if not isinstance(eff, dict):
             continue
         op = str(eff.get("op") or "").strip()
-        if op in {"inject_debt", "create_trustline"}:
+        if op == "create_trustline":
             eq = effective_equivalent(scenario=scenario, payload=eff)
             if eq:
                 codes.add(eq)
@@ -158,20 +154,6 @@ def inject_event_equivalent_codes(
                 if eq:
                     codes.add(eq)
     return codes
-
-
-def inject_event_debt_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
-    """Participants an `inject_debt` effect of the event names (creditor and debtor, staging's own keys): the owner
-    locks the lines among them before staging (027 stage 2)."""
-
-    effects = (event or {}).get("effects")
-    return {
-        pid
-        for eff in (effects if isinstance(effects, list) else [])[:_MAX_INJECT_EFFECTS]
-        if isinstance(eff, dict) and str(eff.get("op") or "").strip() == "inject_debt"
-        for pid in (str(eff.get(a) or eff.get(b) or "").strip() for a, b in (("creditor", "from"), ("debtor", "to")))
-        if pid
-    }
 
 
 def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
@@ -190,10 +172,10 @@ def inject_event_freeze_participant_pids(*, event: Mapping[str, Any] | None) -> 
 
 
 def inject_event_participant_pids(*, event: Mapping[str, Any] | None) -> set[str]:
-    """Every participant an effect of the event names - debts, freezes, new lines (both ends) and the sponsors of a
+    """Every participant an effect of the event names - freezes, new lines (both ends) and the sponsors of a
     new participant's lines: the owner locks their rows first, in `participants.id` order (028 `F-028-28`)."""
 
-    pids = inject_event_debt_participant_pids(event=event) | inject_event_freeze_participant_pids(event=event)
+    pids = inject_event_freeze_participant_pids(event=event)
     effects = (event or {}).get("effects")
     for eff in (effects if isinstance(effects, list) else [])[:_MAX_INJECT_EFFECTS]:
         if not isinstance(eff, dict):
@@ -432,19 +414,9 @@ class InjectExecutor:
             effects = []
 
         max_edges = _MAX_INJECT_EFFECTS
-        max_total_amount: Decimal | None = None
-        try:
-            md = (event or {}).get("metadata")
-            if isinstance(md, dict) and md.get("max_total_amount") is not None:
-                max_total_amount = Decimal(str(md.get("max_total_amount")))
-        except Exception:
-            max_total_amount = None
-        if max_total_amount is not None and max_total_amount <= 0:
-            max_total_amount = None
 
         applied = 0
         skipped = 0
-        total_applied: dict[str, Decimal] = {}
         skipped_reasons: dict[str, int] = {}
 
         # Resolve equivalents lazily.
@@ -460,8 +432,6 @@ class InjectExecutor:
         new_participants_for_scenario: list[dict[str, Any]] = []
         new_trustlines_for_scenario: list[dict[str, Any]] = []
         frozen_participant_pids: list[str] = []
-        inject_debt_equivalents: set[str] = set()
-        inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = {}
 
         async def resolve_eq_id(eq_code: str) -> uuid.UUID | None:
             """Lazily resolve equivalent code → UUID (and cache its precision) from DB."""
@@ -541,128 +511,6 @@ class InjectExecutor:
                 skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
             return reason is not None
 
-        async def op_inject_debt(eff: dict[str, Any]) -> bool:
-            nonlocal applied, skipped, total_applied
-
-            eq = effective_equivalent(scenario=scenario, payload=(eff or {}))
-            # Contract: prefer from/to (creditor->debtor), but keep
-            # backward-compatible debtor/creditor keys.
-            creditor_pid = str(eff.get("creditor") or eff.get("from") or "").strip()
-            debtor_pid = str(eff.get("debtor") or eff.get("to") or "").strip()
-            if not eq or not debtor_pid or not creditor_pid:
-                skipped += 1
-                return False
-
-            try:
-                amount = Decimal(str(eff.get("amount")))
-            except Exception:
-                skipped += 1
-                return False
-            if not amount.is_finite() or amount <= 0:
-                skipped += 1
-                return False
-            # Storage-capacity door (012 / F-012-1).  Nothing bounded the magnitude: a `Debt.amount` of 1e12 or more
-            # does not fit Numeric(20, 8) and aborts the whole inject transaction with
-            # `numeric field overflow`.  An inject entry that cannot be applied is skipped,
-            # which is this executor's declared behaviour for every other unusable field. A value finer than 1E-8
-            # is finer than any step: it goes on to the step check below and is skipped with its reason (028 E4).
-            if money_storability_violation(amount) not in (None, MONEY_QUANTIZATION):
-                self._logger.warning(
-                    "simulator.real.inject.inject_debt.amount_unstorable amount=%s",
-                    amount,
-                )
-                skipped += 1
-                return False
-
-            debtor_id = pids.get(debtor_pid)
-            creditor_id = pids.get(creditor_pid)
-            if debtor_id is None or creditor_id is None:
-                skipped += 1
-                return False
-
-            eq_id = await resolve_eq_id(eq)
-            if eq_id is None:
-                skipped += 1
-                return False
-            # 028 `F-028-30` (owner В-4): in the equivalent's step or not at all - skipped with a reason, never
-            # truncated (the 0.01 truncation wrote 1.23 for 1.239 and nothing at precision 8 or 0 was right).
-            if amount % money_step(eq_precision(eq)) != 0:
-                self._logger.warning("simulator.real.inject.inject_debt.amount_precision_exceeded equivalent=%s "
-                                     "precision=%s", eq, eq_precision(eq))
-                skipped_reasons[AMOUNT_PRECISION_EXCEEDED] = skipped_reasons.get(AMOUNT_PRECISION_EXCEEDED, 0) + 1
-                skipped += 1
-                return False
-            # The event's total is bounded PER EQUIVALENT (owner В-3: no sum across equivalents).
-            if max_total_amount is not None and total_applied.get(eq, Decimal("0")) + amount > max_total_amount:
-                skipped += 1
-                return False
-            # Programme 015, phase B step 3: the debt below belongs to this equivalent.
-            require_owner_locks({eq_id})
-            # 028 `F-028-28` (owner В-1): both ends' status read under their row locks (the owner took them first;
-            # a participant this event added is its own row) - after any freeze of this event, which flushed.
-            ends = await MoneyBoundary(session).lock_participants([creditor_id, debtor_id])
-            if any(status != "active" for status, _pid in ends.values()):
-                self._logger.info("simulator.real.inject.inject_debt.participant_suspended equivalent=%s", eq)
-                skipped_reasons[PARTICIPANT_SUSPENDED] = skipped_reasons.get(PARTICIPANT_SUSPENDED, 0) + 1
-                skipped += 1
-                return False
-
-            # 027 stage 2: BOTH non-closed lines of the pair `FOR UPDATE` before the book reads either debt (the
-            # owner locked the event's set already; a pair it could not name - a participant this event adds -
-            # is locked here), and the line is taken ONLY from the rows locked (§15 P1): a line created after
-            # the lock does not exist for this inject. Live rows only (migration 019: a closed one may coexist).
-            locked = await MoneyBoundary(session).lock_pair_lines(
-                [(eq_id, creditor_id, debtor_id)], timeout_ms=MoneyBoundary.lock_budget_ms())
-            tl = next(((row.limit, row.status) for row in locked
-                       if row.from_participant_id == creditor_id and row.to_participant_id == debtor_id), None)
-            if tl is None:
-                skipped += 1
-                return False
-            tl_limit, tl_status = tl
-            if str(tl_status or "").strip().lower() != "active":
-                skipped += 1
-                return False
-            try:
-                tl_limit_amt = Decimal(str(tl_limit))
-            except Exception:
-                skipped += 1
-                return False
-            if tl_limit_amt <= 0:
-                skipped += 1
-                return False
-
-            # THE WRITE IS THE BOOK'S (018 stage A): increase or refuse. An effect opposite to an
-            # existing debt (F-015-12, protocol §11.2.4) and an effect whose result would exceed the
-            # trust limit are both REFUSED and counted as skipped; neither nets. The book flushes
-            # before its reads, so an effect staged earlier in this event is seen - the rule and its
-            # concurrency argument are documented at `_apply_inject_increase`.
-            outcome = await Book.current(session).apply(
-                InjectIncrease(
-                    debtor_id=debtor_id,
-                    creditor_id=creditor_id,
-                    equivalent_id=eq_id,
-                    amount=amount,
-                    ceiling=tl_limit_amt,
-                )
-            )
-            if outcome == REFUSED_OPPOSING_DEBT:
-                self._logger.warning(
-                    "simulator.real.inject.inject_debt.opposing_debt_exists equivalent=%s",
-                    eq,
-                )
-                skipped += 1
-                return False
-            if outcome != APPLIED:
-                skipped += 1
-                return False
-
-            applied += 1
-            total_applied[eq] = total_applied.get(eq, Decimal("0")) + amount
-            affected_equivalents.add(eq)
-            inject_debt_equivalents.add(eq)
-            inject_debt_edges_by_eq.setdefault(eq, set()).add((creditor_pid, debtor_pid))
-            return True
-
         async def op_add_participant(eff: dict[str, Any]) -> bool:
             nonlocal applied, skipped
 
@@ -707,16 +555,10 @@ class InjectExecutor:
                     status = "active"
                 public_key = simulated_public_key(pid)
 
-                new_p = Participant(
-                    pid=pid,
-                    display_name=name,
-                    public_key=public_key,
-                    type=p_type,
-                    status=status,
-                    profile={},
-                )
-                session.add(new_p)
-                await session.flush()  # materialise new_p.id
+                # Inserted ACTIVE through the participant service (030 S3b, F-030-19): the lines below are created by
+                # the trust-line service, which refuses a suspended end, so any other status is set AFTER them.
+                new_p = await ParticipantService(session).insert_participant(
+                    pid=pid, display_name=name, public_key=public_key, type=p_type, profile={})
 
                 new_participants_for_cache.append((new_p.id, pid))
                 new_participants_for_scenario.append(
@@ -750,7 +592,7 @@ class InjectExecutor:
                             continue
                         if tl_limit_val <= 0:
                             continue
-                        # Storage-capacity door (012 / F-012-1) - see op_inject_debt.
+                        # Storage-capacity door (012 / F-012-1).
                         if unstorable_limit(tl_limit_val):
                             self._logger.warning(
                                 "simulator.real.inject.add_participant.limit_unstorable "
@@ -838,6 +680,8 @@ class InjectExecutor:
                             }
                         )
 
+                if status != "active":
+                    await ParticipantService(session).set_status(pid, status)
                 applied += 1
                 return True
             except (
@@ -880,7 +724,7 @@ class InjectExecutor:
                 if tl_limit_val <= 0:
                     skipped += 1
                     return False
-                # Storage-capacity door (012 / F-012-1) - see op_inject_debt.
+                # Storage-capacity door (012 / F-012-1).
                 if unstorable_limit(tl_limit_val):
                     self._logger.warning(
                         "simulator.real.inject.create_trustline.limit_unstorable "
@@ -1009,8 +853,9 @@ class InjectExecutor:
 
                 # 028 `F-028-28`/`F-028-29`: the participant row only, `FOR UPDATE` (the owner took it first, with the
                 # event's other participants), its status read by the locking statement - never from an ORM object;
-                # no trust line is written (`frozen` is gone). The UPDATE is SENT here: the session runs with
-                # `autoflush=False`, and every later effect of the event must read `suspended`.
+                # no trust line is written (`frozen` is gone). The mutation is the participant service's, the one the
+                # admin freeze calls (030 S3b), and it is SENT here: the session runs with `autoflush=False`, and every
+                # later effect of the event must read `suspended`.
                 p_row = (await session.execute(select(Participant.id, Participant.public_key, Participant.status).where(
                     Participant.pid == freeze_pid).with_for_update())).one_or_none()
                 if p_row is None:
@@ -1032,7 +877,7 @@ class InjectExecutor:
                     skipped += 1
                     return False
 
-                await session.execute(update(Participant).where(Participant.id == p_row.id).values(status="suspended"))
+                await ParticipantService(session).set_status(freeze_pid, "suspended")
 
                 # Invalidate only incident equivalents (best-effort).
                 # Freezing a participant affects routing; avoid evicting all equivalents.
@@ -1080,10 +925,6 @@ class InjectExecutor:
 
             op = str(eff.get("op") or "").strip()
 
-            # Unknown inject op — skip silently.
-            if op == "inject_debt":
-                await op_inject_debt(eff)
-                continue
             if op == "add_participant":
                 await op_add_participant(eff)
                 continue
@@ -1093,6 +934,7 @@ class InjectExecutor:
             if op == "freeze_participant":
                 await op_freeze_participant(eff)
                 continue
+            skipped += 1  # an op this executor does not have (the scenario schema refuses it; `inject_debt` is gone)
 
         # Programme 021, stage 2: flush, the after-checkpoint of each touched equivalent, the audit rows. A failure
         # here propagates to the owner, which rolls the event back.
@@ -1105,18 +947,14 @@ class InjectExecutor:
             new_participants_scenario=list(new_participants_for_scenario),
             new_trustlines_scenario=list(new_trustlines_for_scenario),
             frozen_participant_pids=list(frozen_participant_pids),
-            inject_debt_equivalents=set(inject_debt_equivalents),
-            inject_debt_edges_by_eq={k: set(v) for k, v in inject_debt_edges_by_eq.items()},
             pid_additions=dict(pid_additions),
             applied=int(applied),
             skipped=int(skipped),
-            total_applied=dict(total_applied),
             skipped_reasons=dict(skipped_reasons),
         )
 
     async def publish_committed_inject(
         self,
-        session,
         *,
         run_id: str,
         run: RunRecord,
@@ -1124,19 +962,12 @@ class InjectExecutor:
         event_index: int,
         event_time_ms: int,
         staged: StagedInjectEvent,
-        build_edge_patch_for_equivalent: Callable[
-            ..., Awaitable[list[dict[str, Any]]]
-        ],
-        broadcast_topology_edge_patch: Callable[
-            ..., None
-        ],
     ) -> InjectResult:
         """Publish an inject event whose staged effects the owner has committed.
 
         Programme 015, phase B step 3. Called only after a confirmed commit: it mutates the
-        run's caches and the in-memory scenario, emits `topology.changed` and the inject edge
-        patch, and records the "inject applied" note. It reads through `session` for the edge
-        patch and leaves that read transaction for the owner to end. It does not mark the event
+        run's caches and the in-memory scenario, emits `topology.changed` and records the "inject
+        applied" note. It does not mark the event
         fired - the owner did that before its commit - and a failure here must never undo,
         retry or re-stage a commit that already happened.
         """
@@ -1172,13 +1003,8 @@ class InjectExecutor:
             new_trustlines_scenario=list(staged.new_trustlines_scenario),
             frozen_participant_pids=list(frozen_participant_pids),
             frozen_edges=list(frozen_edges_for_sse),
-            inject_debt_equivalents=set(staged.inject_debt_equivalents),
-            inject_debt_edges_by_eq={
-                k: set(v) for k, v in staged.inject_debt_edges_by_eq.items()
-            },
             applied=int(staged.applied),
             skipped=int(staged.skipped),
-            total_applied=dict(staged.total_applied),
             skipped_reasons=dict(staged.skipped_reasons),
         )
 
@@ -1204,32 +1030,6 @@ class InjectExecutor:
             frozen_edges=result.frozen_edges,
         )
 
-        # inject_debt affects DB debts and therefore routing capacity; emit an
-        # edge_patch so the frontend updates used/available/viz without refresh.
-        if result.inject_debt_equivalents:
-            try:
-                for eq in result.inject_debt_equivalents:
-                    edges = result.inject_debt_edges_by_eq.get(eq) or set()
-                    edge_patch = await build_edge_patch_for_equivalent(
-                        session=session,
-                        run=run,
-                        equivalent_code=str(eq),
-                        only_edges=edges,
-                        include_width_keys=False,
-                    )
-                    broadcast_topology_edge_patch(
-                        run_id=run_id,
-                        run=run,
-                        equivalent=str(eq),
-                        edge_patch=edge_patch,
-                        reason="inject_debt",
-                    )
-            except Exception:
-                self._logger.warning(
-                    "simulator.real.inject.inject_debt_edge_patch_failed",
-                    exc_info=True,
-                )
-
         self.enqueue_inject_note(
             run_id,
             run=run,
@@ -1239,8 +1039,6 @@ class InjectExecutor:
             stats={
                 "applied": int(result.applied),
                 "skipped": int(result.skipped),
-                # per equivalent (028 F-028-30): the note names the equivalent of each total
-                "total_amount": {eq: format(total, "f") for eq, total in sorted(result.total_applied.items())},
                 **({"skipped_reasons": dict(result.skipped_reasons)} if result.skipped_reasons else {}),
             },
         )

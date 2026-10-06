@@ -1,9 +1,8 @@
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 from decimal import Decimal
-from typing import List, Literal, Sequence
-from sqlalchemy import event, func, select, and_, or_, tuple_
+from typing import List, Literal
+from sqlalchemy import event, func, select, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money_boundary import MoneyBoundary
@@ -31,7 +30,6 @@ from app.db.sqlstate import deliberate_chain, sqlstate
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from sqlalchemy import inspect as sa_inspect
 from app.utils.validation import (
-    is_storable_money,
     parse_money_amount,
     require_money_step,
     validate_equivalent_code,
@@ -118,11 +116,9 @@ def _matches_live_triple(text: str) -> bool:
 CHECKPOINT_SCOPE_KEY = "checkpoint_scope"
 CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
 
-#: The statuses a scenario may give a trust line it imports (`TrustLine.status`).
+#: The statuses the audit rows written before 030 S3b carry in `initial_status` (the seeder imported a scenario's
+#: line with its status; since S3b a closed initial line is a CREATE and a CLOSE). Kept for the wire enum only.
 INITIAL_STATUSES = frozenset({"active", "closed"})  # 028 `F-028-29`: no `frozen`
-
-#: Triples per live-line lookup of `import_initial_trustlines` (3 bind parameters each).
-_IMPORT_LOOKUP_CHUNK = 1000
 
 
 class TrustLineWriteBatch:
@@ -244,18 +240,6 @@ class TrustLineWriteBatch:
             )
 
 
-@dataclass(frozen=True)
-class InitialTrustLine:
-    """One trust line of a scenario's INITIAL STATE, as the simulator's seeder imports it."""
-
-    from_participant: Participant
-    to_participant: Participant
-    equivalent: Equivalent
-    limit: Decimal
-    status: str
-    policy: dict
-
-
 class TrustLineService:
     """Trust-line operations: one implementation of validation, mutation and audit.
 
@@ -273,12 +257,6 @@ class TrustLineService:
     What unsigned execution gives up is exactly proof of key possession and binding the request to a signature.
     Everything else holds on both entrances: owner matching, the money door (`parse_money_amount`), live-line
     uniqueness, the debt check of a close, status rules and audit.
-
-    `import_initial_trustlines` is a THIRD, narrower operation: the simulator seeder's import of a scenario's
-    initial state, statuses `active`/`closed` included. It is not a participant's operation and carries no
-    signature at all. No PUBLIC PARTICIPANT operation reaches it; an AUTHORIZED simulator request does, transitively
-    (upload a scenario, start a run, an action triggers lazy seeding: `app/api/v1/simulator.py` -> the seeder),
-    under the simulator's action authorization and run access, and the seeder refuses real participants' pids.
     """
 
     def __init__(self, session: AsyncSession):
@@ -386,9 +364,7 @@ class TrustLineService:
 
         `flush=False` (programme 021, stage 2) leaves the INSERT staged for the caller's next flush instead of
         sending it here. The inject executor needs it: an inject event's effects see each other only through
-        the event's own flush points (the session runs with `autoflush=False`), and an extra flush here would
-        let a later `inject_debt` of the same event see a line it did not see before 021
-        (`tests/integration/test_p018_mixed_inject_event_is_one_operation_postgres.py`). A uniqueness clash
+        the event's own flush points (the session runs with `autoflush=False`). A uniqueness clash
         then surfaces as a raw `IntegrityError` at that later flush - which is what the inject owner already
         classifies - and `batch.finish()` flushes before it stages the audit rows either way.
         """
@@ -472,6 +448,10 @@ class TrustLineService:
         await MoneyBoundary(self.session).lock_pair_lines(
             [(equivalent.id, from_participant_id, to_participant.id)], timeout_ms=lock_timeout_ms)
 
+        # 030 S3b (F-030-19): no new line in an equivalent the operator stopped or the integrity hold stands over -
+        # the writers' one order, third lock (participants -> pair lines -> the equivalent row -> debts), `FOR SHARE`
+        # to commit. Every entrance of a creation passes here: the public one, the inject's, the seeder's.
+        await MoneyBoundary(self.session).refuse_inactive_equivalents([equivalent.id])
         await self._require_step(equivalent.id, limit, timeout_ms=lock_timeout_ms)
 
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
@@ -743,96 +723,6 @@ class TrustLineService:
         batch._record(TRUST_LINE_CLOSE, trustline.equivalent_id,
                       trust_line_close_completed(*parties, str(trustline_id), "request"))
         return trustline
-
-    async def import_initial_trustlines(
-        self,
-        batch: TrustLineWriteBatch,
-        lines: Sequence[InitialTrustLine],
-    ) -> list[TrustLine]:
-        """Import a scenario's INITIAL trust lines, statuses included, into the caller's transaction.
-
-        Programme 021, stage 1 (spec, "Решения" item 6; `T2100` P2-3). The simulator seeder's operation and no
-        one else's: not a participant's TRUST_LINE_CREATE, so no signature is involved and no signed history is
-        written - each row's audit entry says `initial_status` and belongs to the seeding transaction. The
-        semantics are the seeder's own, kept as they were before 021 (characterized by R-021-2):
-
-        * a line whose (from, to, equivalent) already has a LIVE row in the database is skipped. A `closed` row is
-          not live, so importing a `closed` line again adds another closed incarnation;
-        * lines of ONE call are not checked against each other: two live lines of one triple in one scenario
-          still fail at the flush on the live-uniqueness index, and the caller rolls the seeding back;
-        * the status is stored as given (`active` or `closed`), the policy as given.
-
-        The caller has already parsed the scenario and dropped what it cannot use (unknown participant or
-        equivalent, a limit that is not a storable non-negative amount); anything else reaching here is a
-        programming error and raises `ValueError`.
-        """
-
-        for line in lines:
-            if line.status not in INITIAL_STATUSES:
-                raise ValueError(f"initial trust-line status {line.status!r} is not one of {sorted(INITIAL_STATUSES)}")
-            if not isinstance(line.limit, Decimal) or line.limit < 0 or not is_storable_money(line.limit):
-                raise ValueError(f"initial trust-line limit {line.limit!r} is not a storable non-negative amount")
-            if not isinstance(line.policy, dict):
-                raise ValueError("initial trust-line policy must be an object")
-        if not lines:
-            return []
-
-        # One lookup per chunk of triples, not one per line (the seeder's per-line lookup cost a statement per
-        # scenario line even when nothing was new). Chunked so a large scenario stays under the driver's bind-
-        # parameter ceiling (three parameters per triple).
-        triples = sorted(
-            {(ln.from_participant.id, ln.to_participant.id, ln.equivalent.id) for ln in lines},
-            key=lambda t: tuple(str(x) for x in t),
-        )
-        live: set = set()
-        for start in range(0, len(triples), _IMPORT_LOOKUP_CHUNK):
-            chunk = triples[start:start + _IMPORT_LOOKUP_CHUNK]
-            live.update(
-                (
-                    await self.session.execute(
-                        select(
-                            TrustLine.from_participant_id,
-                            TrustLine.to_participant_id,
-                            TrustLine.equivalent_id,
-                        ).where(
-                            tuple_(
-                                TrustLine.from_participant_id,
-                                TrustLine.to_participant_id,
-                                TrustLine.equivalent_id,
-                            ).in_(chunk),
-                            TrustLine.status != "closed",
-                        )
-                    )
-                ).all()
-            )
-
-        imported: list[TrustLine] = []
-        for line in lines:
-            triple = (line.from_participant.id, line.to_participant.id, line.equivalent.id)
-            if triple in live:
-                continue
-            await batch._touch(line.equivalent.id, line.equivalent.code)
-            trustline = TrustLine(
-                from_participant_id=line.from_participant.id,
-                to_participant_id=line.to_participant.id,
-                equivalent_id=line.equivalent.id,
-                limit=line.limit,
-                status=line.status,
-                policy=line.policy,
-            )
-            self.session.add(trustline)
-            batch._record(
-                "TRUST_LINE_CREATE",
-                line.equivalent.id,
-                # TRUST_LINE_CREATE's shape ({from, to}, `api/openapi.yaml`) plus the imported status.
-                {
-                    "from": line.from_participant.pid,
-                    "to": line.to_participant.pid,
-                    "initial_status": line.status,
-                },
-            )
-            imported.append(trustline)
-        return imported
 
     async def _require_step(self, equivalent_id: UUID, limit: Decimal, *, timeout_ms: int | None = None) -> None:
         """028 `F-028-23`/`F-028-25` (owner В-4): a limit finer than the equivalent's step is refused, never rounded.

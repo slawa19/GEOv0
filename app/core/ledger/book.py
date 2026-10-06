@@ -12,10 +12,8 @@ operation's kind, which are PRESERVED per kind and NOT unified:
   underneath this transaction is raised as `DebtVersionConflict`, and the owner of the whole
   transaction retries it on a fresh snapshot.
 * `CLEARING` - `ClearingReduction`: decrease or delete only. Growth or a new row is refused.
-* `INJECT` - `InjectIncrease`: increase or refuse. An effect opposite to an existing debt `> 0` is
-  REFUSED and returned to the caller as refused (F-015-12, `6a882d2`); so is an effect whose result
-  would exceed the caller's ceiling (the trust limit). Never nets, so the criterion (b) rule
-  `reconciliation._inject_subset` stays true unchanged.
+* `INJECT` - takes no effect since 030 S3b (F-030-6, owner В1): the simulator's `inject_debt` and its
+  `InjectIncrease` are deleted; the kind stays in the journal's CHECK for the rows already written.
 * `SEED`, `TEST_FIXTURE` - `NewDebt`: create. After a reconciliation baseline of a touched equivalent
   the operation is refused at completion (`T1501`; moved here from the deleted listener journal).
 
@@ -66,15 +64,11 @@ TWO SHAPES OF USE:
 
 * `async with Book.operation(session, op) as posting:` - one envelope around a block in which the
   caller applies debt effects with `await posting.apply(effect)` IN ITS OWN ORDER, interleaved with
-  work the book does not own (an inject event's participants, trust lines and freezes; a payment's
-  invariant checks; a clearing's audit row). The effects of an inject event see each other, so
-  collecting them at one end or posting them as separate operations would change the outcome.
+  work the book does not own (a payment's invariant checks; a clearing's audit row).
 * `await Book.post(session, op, effects)` - the shorthand for an operation made of debt effects only.
 
-`Book.current(session)` returns the posting open on a session. It exists for the inject executor,
-which runs inside the envelope its owner opened (until programme 019, stage 4 also for the payment
-engine's forwarding `_apply_flow`; the engine is gone, and the payment path's perturbation seam is
-`_apply_payment_flow` below).
+`Book.current(session)` returns the posting open on a session (the inject executor's entrance until 030
+S3b; the payment path's perturbation seam is `_apply_payment_flow` below).
 """
 
 from __future__ import annotations
@@ -153,9 +147,8 @@ class Refusal:
 class BookError(Exception):
     """A request the book refuses: the wrong effect for the kind, no open operation, bad input.
 
-    These are programming errors of a caller, not business outcomes. A business refusal (an inject
-    effect opposite to an existing debt, or over its ceiling) is RETURNED, never raised. `reason` is a
-    `Refusal` value (for `BookMoneyError`, the money predicate that failed).
+    These are programming errors of a caller, not business outcomes. `reason` is a `Refusal` value (for
+    `BookMoneyError`, the money predicate that failed).
     """
 
     def __init__(
@@ -274,17 +267,6 @@ class ClearingReduction:
 
 
 @dataclass(frozen=True)
-class InjectIncrease:
-    """Grow `debtor -> creditor` by `amount`, refusing an opposing debt or a result over `ceiling`."""
-
-    debtor_id: uuid.UUID
-    creditor_id: uuid.UUID
-    equivalent_id: uuid.UUID
-    amount: Decimal
-    ceiling: Decimal
-
-
-@dataclass(frozen=True)
 class NewDebt:
     """Create `debtor -> creditor` holding `amount` (seed or test fixture)."""
 
@@ -294,18 +276,15 @@ class NewDebt:
     amount: Decimal
 
 
-Effect = PaymentFlow | ClearingReduction | InjectIncrease | NewDebt
+Effect = PaymentFlow | ClearingReduction | NewDebt
 
-#: The outcomes `Posting.apply` returns. Only `INJECT` can refuse without raising.
+#: The outcome `Posting.apply` returns; a refusal raises.
 APPLIED = "APPLIED"
-REFUSED_OPPOSING_DEBT = "REFUSED_OPPOSING_DEBT"
-REFUSED_OVER_CEILING = "REFUSED_OVER_CEILING"
 
 #: Which effect each kind accepts. One effect type per kind: the semantics are per kind.
 _EFFECT_FOR_KIND: dict[str, type] = {
     "PAYMENT": PaymentFlow,
     "CLEARING": ClearingReduction,
-    "INJECT": InjectIncrease,
     "SEED": NewDebt,
     "TEST_FIXTURE": NewDebt,
 }
@@ -455,87 +434,6 @@ async def _apply_clearing_reduction(session: Any, effect: ClearingReduction) -> 
     return APPLIED
 
 
-async def _apply_inject_increase(session: Any, effect: InjectIncrease) -> str:
-    """Increase or refuse (F-015-12). Moved from `InjectExecutor.stage_inject_event` (018 stage A).
-
-    ONE DIRECTION PER PAIR (protocol §11.2.4). A debt the other way round between the same two
-    participants in the same equivalent refuses this effect: the caller counts it as skipped, like an
-    effect over the trust limit. Refusal, not netting - netting would write a decrease, which the
-    INJECT rule of criterion (b) reads as a contradiction (`reconciliation._inject_subset`,
-    `entry_is_not_an_increase`).
-
-    The flush first: the session runs with `autoflush=False`, so a reverse debt STAGED by an earlier
-    effect of this same event would be invisible to the read below. A flush error propagates
-    (`SQLAlchemyError`), as the inject executor's contract requires.
-
-    A reverse debt committed concurrently is not missed either (027 stage 2): the owner holds both
-    non-closed lines of the pair `FOR UPDATE` before this read (`inject_executor.py`, `op_inject_debt`), and
-    every other writer of the pair's debt holds them too, so it has committed before this read at READ
-    COMMITTED or waits until this commits. Measured by `test_p027_t2703_stage2_counterexamples_postgres.py`
-    (opposing inject/inject and payment/inject).
-    """
-
-    debtor_id, creditor_id, eq_id = effect.debtor_id, effect.creditor_id, effect.equivalent_id
-    amount = effect.amount
-    if not amount > 0:
-        raise BookError(f"an inject increase must be positive, got {amount}")
-
-    await session.flush()
-    reverse_amount = (
-        await session.execute(
-            select(Debt.amount).where(
-                Debt.debtor_id == creditor_id,
-                Debt.creditor_id == debtor_id,
-                Debt.equivalent_id == eq_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if reverse_amount is not None and Decimal(str(reverse_amount)) > 0:
-        return REFUSED_OPPOSING_DEBT
-
-    existing = (
-        await session.execute(
-            select(Debt).where(
-                Debt.debtor_id == debtor_id,
-                Debt.creditor_id == creditor_id,
-                Debt.equivalent_id == eq_id,
-            )
-        )
-    ).scalar_one_or_none()
-
-    if existing is None:
-        new_amt = amount
-        if new_amt > effect.ceiling:
-            return REFUSED_OVER_CEILING
-        session.add(
-            Debt(
-                debtor_id=debtor_id,
-                creditor_id=creditor_id,
-                equivalent_id=eq_id,
-                amount=new_amt,
-            )
-        )
-    else:
-        # NO RE-QUANTISATION OF WHAT IS ALREADY STORED. T1514 of programme 015.
-        #
-        # This read the row back, added its own amount and rounded the SUM down to cents before
-        # writing it back. `debts` is shared with the production core, which stores at the column's
-        # own scale - `Numeric(20, 8)` - and since 012/T1201 the money door refuses anything the
-        # column cannot hold unchanged, so eight fraction digits are legitimate ledger content. A
-        # debt of 5.12345678 became 6.12 after an injected 1.00: 0.00345678 destroyed by a rounding
-        # nobody asked for, in a table the simulator does not own, and the result feeds the next
-        # operation.
-        #
-        # `amount` is already normalised to the simulator's own input scale by the caller, so the
-        # sum is storable as it stands. Normalising the INPUT is the simulator's business; rewriting
-        # a stored value is not.
-        new_amt = Decimal(str(existing.amount)) + amount
-        if new_amt > effect.ceiling:
-            return REFUSED_OVER_CEILING
-        _set_amount(existing, new_amt, what="the increased injected debt")
-    return APPLIED
-
-
 async def _apply_new_debt(session: Any, effect: NewDebt) -> str:
     if not effect.amount > 0:
         raise BookError(f"a new debt must be positive, got {effect.amount}")
@@ -606,8 +504,6 @@ class Posting:
             return await _apply_payment_flow(session, effect)
         if isinstance(effect, ClearingReduction):
             return await _apply_clearing_reduction(session, effect)
-        if isinstance(effect, InjectIncrease):
-            return await _apply_inject_increase(session, effect)
         return await _apply_new_debt(session, effect)
 
 
@@ -1132,15 +1028,12 @@ def operation_for(
 
 __all__: Sequence[str] = (
     "APPLIED",
-    "REFUSED_OPPOSING_DEBT",
-    "REFUSED_OVER_CEILING",
     "DEBT_OPERATION_IDENTITY_CONSTRAINTS",
     "Book",
     "BookError",
     "BookMoneyError",
     "ClearingReduction",
     "Effect",
-    "InjectIncrease",
     "NewDebt",
     "Operation",
     "PaymentFlow",

@@ -21,11 +21,8 @@ class InjectResult:
     new_trustlines_scenario: list[dict[str, Any]] = field(default_factory=list)
     frozen_participant_pids: list[str] = field(default_factory=list)
     frozen_edges: list[dict[str, str]] = field(default_factory=list)  # {from_pid,to_pid,equivalent_code}
-    inject_debt_equivalents: set[str] = field(default_factory=set)
-    inject_debt_edges_by_eq: dict[str, set[tuple[str, str]]] = field(default_factory=dict)
     applied: int = 0
     skipped: int = 0
-    total_applied: dict[str, Decimal] = field(default_factory=dict)  # per equivalent (028 F-028-30)
     skipped_reasons: dict[str, int] = field(default_factory=dict)
 
 

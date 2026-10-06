@@ -9,13 +9,17 @@ from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
 from app.core.integrity import create_equivalent
+from app.core.money_boundary import MoneyBoundary
+from app.core.participants.service import ParticipantService
 from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
+from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
-from app.core.trustlines.service import InitialTrustLine, TrustLineService
-from app.utils.exceptions import BadRequestException, ConflictException
+from app.core.trustlines.service import TrustLineService
+from app.utils.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.utils.validation import (
     AMOUNT_PRECISION_EXCEEDED,
     MONEY_QUANTIZATION,
@@ -53,13 +57,18 @@ class SimulatorPidTakenError(ConflictException):
         self.pid = pid
 
 
+#: What the internal (unsigned) path of the trust-line service takes in the signature field (the drift engine's
+#: convention): the service does not read it when `require_signature=False`.
+_UNSIGNED = "__internal__"
+
 SCENARIO_TRUSTLINE_REFUSED = "SCENARIO_TRUSTLINE_REFUSED"
 
 
 class ScenarioTrustLineRefused(ConflictException):
     """028 `F-028-3`/`F-028-24`: a scenario line the trust-line doors would refuse - its policy breaks the policy
-    grammar, or its limit is finer than the equivalent's step. Seeding stops naming the line; it is never skipped
-    (the policy decides who mediates) and never rounded (owner В-4)."""
+    grammar, its limit is finer than the equivalent's step, or (030 S3b) the service refuses it: a suspended end, a
+    stopped or held equivalent, a self-line. Seeding stops naming the line; it is never skipped (the policy decides
+    who mediates) and never rounded (owner В-4)."""
 
     def __init__(self, line: str, reason: str, message: str) -> None:
         super().__init__(f"{SCENARIO_TRUSTLINE_REFUSED}: trust line {line}: {message}",
@@ -164,6 +173,7 @@ class RealScenarioSeeder:
                 await create_equivalent(session, code=code, is_active=True, metadata_={})  # with its baseline
 
         # Participants
+        later_status: dict[str, str] = {}  # new participants whose scenario status is not active: set after the lines
         participants = scenario.get("participants") or []
         pids = [str(p.get("id") or "").strip() for p in participants]
         pids = [p for p in pids if p]
@@ -191,19 +201,13 @@ class RealScenarioSeeder:
                     status = "deleted"
                 elif status not in {"active", "suspended", "left", "deleted"}:
                     status = "active"
-                public_key = simulated_public_key(pid)
-                session.add(
-                    Participant(
-                        pid=pid,
-                        display_name=name,
-                        public_key=public_key,
-                        type=(
-                            p_type if p_type in {"person", "business", "hub"} else "person"
-                        ),
-                        status=status,
-                        profile={},
-                    )
-                )
+                # Inserted ACTIVE by the participant service (030 S3b, F-030-19); a scenario status other than
+                # active is set AFTER the lines, because the trust-line service refuses a line to a suspended end.
+                await ParticipantService(session).insert_participant(
+                    pid=pid, display_name=name, public_key=simulated_public_key(pid),
+                    type=p_type if p_type in {"person", "business", "hub"} else "person", profile={}, flush=False)
+                if status != "active":
+                    later_status[pid] = status
 
         # NOTE: app.db.session.AsyncSessionLocal has autoflush=False.
         # We must flush pending inserts before querying IDs for trustlines.
@@ -245,7 +249,7 @@ class RealScenarioSeeder:
             )
             p_by_pid = {p.pid: p for p in p_rows}
 
-            initial: list[InitialTrustLine] = []
+            initial: list[tuple[Participant, Participant, str, Decimal, str, dict, str]] = []
             for tl in trustlines:
                 eq = str(effective_equivalent(scenario, tl) or "").strip().upper()
                 if not eq or eq not in eq_by_code:
@@ -296,23 +300,39 @@ class RealScenarioSeeder:
                 except BadRequestException as exc:
                     raise ScenarioTrustLineRefused(line, AMOUNT_PRECISION_EXCEEDED, exc.message) from exc
 
-                initial.append(
-                    InitialTrustLine(
-                        from_participant=p_from,
-                        to_participant=p_to,
-                        equivalent=eq_by_code[eq],
-                        limit=limit,
-                        status=status,
-                        policy=policy,
-                    )
-                )
+                initial.append((p_from, p_to, eq, limit, status, policy, line))
 
-            # Programme 021, stage 1: the lines go through `TrustLineService`'s narrow import of an initial
-            # state - one audit row per imported line, one checkpoint pair per touched equivalent for this
-            # whole seeding transaction. The import skips a line whose triple already has a LIVE row (only a
-            # live row occupies the triple since migration 019), exactly as the per-line lookup here did.
-            # `finish()` flushes and audits; the CALLER commits, and on any failure rolls back.
+            # 030 S3b (F-030-19, `T3000` item 3): the lines go through `TrustLineService.execute_create`, the entrance of
+            # every creation, with its checks - a suspended end, a stopped or held equivalent, the step, a self-line.
+            # The order is the writers' one: every participant row first, then the lines in one sorted pair order
+            # (a concurrent inject or payment meets them in the same order); the equivalent row is the service's third
+            # lock. A refusal fails the whole seeding by name; the CALLER rolls back, and nothing of it stays.
+            def pair_order(item):
+                return (sorted((str(item[0].id), str(item[1].id))), item[2], item[0].pid, item[1].pid)
+
+            initial.sort(key=pair_order)
+            await MoneyBoundary(session).lock_participants({x.id for item in initial for x in item[:2]})
             service = TrustLineService(session)
             batch = service.begin_internal_batch()
-            await service.import_initial_trustlines(batch, initial)
+            for p_from, p_to, eq, limit, status, policy, line in initial:
+                if (await session.execute(select(TrustLine.id).where(
+                    TrustLine.from_participant_id == p_from.id, TrustLine.to_participant_id == p_to.id,
+                    TrustLine.equivalent_id == eq_by_code[eq].id, TrustLine.status != "closed"))).first():
+                    continue  # a LIVE line occupies the triple (migration 019): re-seeding a scenario adds nothing
+                try:
+                    created = await service.execute_create(
+                        batch, p_from.id,
+                        TrustLineCreateRequest(to=p_to.pid, equivalent=eq, limit=format(limit, "f"), policy=policy,
+                                               signature=_UNSIGNED),
+                        require_signature=False)
+                    if status == "closed":  # an initial closed line is a CREATE and a CLOSE (no debt: closed at once)
+                        await service.execute_close(batch, created.id, p_from.id,
+                                                    TrustLineCloseRequest(signature=_UNSIGNED), require_signature=False)
+                except (BadRequestException, ConflictException, ForbiddenException, NotFoundException) as exc:
+                    raise ScenarioTrustLineRefused(line, str((exc.details or {}).get("reason") or type(exc).__name__),
+                                                   exc.message) from exc
+            # `finish()` flushes and audits; the CALLER commits, and on any failure rolls back.
             await batch.finish()
+
+        for pid, status in sorted(later_status.items()):
+            await ParticipantService(session).set_status(pid, status)
