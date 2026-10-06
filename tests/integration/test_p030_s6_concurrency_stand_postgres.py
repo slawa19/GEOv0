@@ -100,13 +100,11 @@ async def _seed(rig: Rig, names, lines, debts, *, baseline=True):
                                    close_requested_at=datetime.now(timezone.utc) if req else None)
         s.add_all(tl.values())
         await s.flush()
-        ids = []
+        rows = [Debt(id=uuid.uuid4(), debtor_id=ps[debtor].id, creditor_id=ps[creditor].id, equivalent_id=eq.id,
+                     amount=D(amount)) for debtor, creditor, amount in debts]
+        ids = [row.id for row in rows]
         async with debt_fixture_setup(s, label="adv"):
-            for debtor, creditor, amount in debts:
-                debt = Debt(id=uuid.uuid4(), debtor_id=ps[debtor].id, creditor_id=ps[creditor].id,
-                            equivalent_id=eq.id, amount=D(amount))
-                ids.append(debt.id)
-                s.add(debt)
+            s.add_all(rows)
         await s.commit()
     if baseline:
         async with rig.sessions() as s:

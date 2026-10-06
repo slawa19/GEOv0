@@ -21,22 +21,34 @@ from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
 
 
+async def _add_ring(db_session, eq, people, amount: str) -> None:
+    """Debts p0 -> p1 -> ... -> p0, every edge with its consenting line (`creditor -> debtor`)."""
+
+    ring = [(debtor, people[(i + 1) % len(people)]) for i, debtor in enumerate(people)]
+    db_session.add_all([TrustLine(from_participant_id=creditor.id, to_participant_id=debtor.id, equivalent_id=eq.id,
+                                  limit=Decimal("100"), status="active", policy={"auto_clearing": True})
+                        for debtor, creditor in ring])
+    debts = [Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal(amount))
+             for debtor, creditor in ring]
+    async with debt_fixture_setup(db_session, label="p030-s6"):
+        db_session.add_all(debts)
+    await db_session.commit()
+
+
+def _people(prefix: str, n: str, size: int) -> list:
+    return [Participant(pid=f"{prefix}{i}_{n}", display_name=f"{prefix}{i}", public_key=f"pk{prefix}{i}-{n}",
+                        type="person", status="active", profile={}) for i in range(size)]
+
+
 async def _ring(db_session, size: int, *, tag: str):
-    """`size` participants in a debt ring p0 -> p1 -> ... -> p0 of 10.00, every edge with its consenting line."""
+    """A fresh equivalent and `size` participants in a debt ring of 10.00."""
 
     n = uuid.uuid4().hex[:8].upper()
     eq = Equivalent(code=f"{tag}{n}", symbol=tag, description=None, precision=2, metadata_={}, is_active=True)
-    people = [Participant(pid=f"P{i}_{tag}_{n}", display_name=f"P{i}", public_key=f"pk{i}-{tag}-{n}", type="person",
-                          status="active", profile={}) for i in range(size)]
+    people = _people("P", n, size)
     db_session.add_all([eq, *people])
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="p030-s6"):
-        for i, debtor in enumerate(people):
-            creditor = people[(i + 1) % size]
-            db_session.add(Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal("10")))
-            db_session.add(TrustLine(from_participant_id=creditor.id, to_participant_id=debtor.id, equivalent_id=eq.id,
-                                     limit=Decimal("100"), status="active", policy={"auto_clearing": True}))
-    await db_session.commit()
+    await _add_ring(db_session, eq, people, "10")
     return eq, people
 
 
@@ -68,19 +80,10 @@ async def test_a_frozen_participant_removes_only_its_own_cycles(db_session):
     """The rule drops edges of non-active participants, not the equivalent: a disjoint active triangle is still offered."""
 
     eq, ring = await _ring(db_session, 3, tag="DH")
-    # a second triangle in the same equivalent, disjoint from the first
-    n = uuid.uuid4().hex[:8].upper()
-    other = [Participant(pid=f"Q{i}_DH_{n}", display_name=f"Q{i}", public_key=f"pkq{i}-{n}", type="person",
-                         status="active", profile={}) for i in range(3)]
+    other = _people("Q", uuid.uuid4().hex[:8].upper(), 3)  # a second triangle, disjoint from the first
     db_session.add_all(other)
     await db_session.flush()
-    async with debt_fixture_setup(db_session, label="p030-s6"):
-        for i, debtor in enumerate(other):
-            creditor = other[(i + 1) % 3]
-            db_session.add(Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal("7")))
-            db_session.add(TrustLine(from_participant_id=creditor.id, to_participant_id=debtor.id, equivalent_id=eq.id,
-                                     limit=Decimal("100"), status="active", policy={"auto_clearing": True}))
-    await db_session.commit()
+    await _add_ring(db_session, eq, other, "7")
     service = ClearingService(db_session)
     assert len(await service.find_cycles(eq.code, max_depth=3)) == 2
 
