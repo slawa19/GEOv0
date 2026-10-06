@@ -1,0 +1,90 @@
+"""030 S6 (`F-030-16`): the cycles `GET /clearing/cycles` offers are the cycles the planner would plan.
+
+The planner leaves out every edge whose debtor or creditor is not `active` (`flow_planner.py`, `_ELIGIBLE_EDGES_SQL`,
+028 `F-028-28`), and execution skips an occurrence through such a participant. Diagnostics read the same debts with the
+same trust-line consent but not the participant status, so a cycle through a suspended participant was offered and could
+never be cleared. Three detectors answer `find_cycles` - SQL triangles, SQL quadrangles, the in-memory DFS - and each
+is a separate reader, so each cell below reaches a different one. Red on `9ed439de`: the suspended-participant cells."""
+
+from __future__ import annotations
+
+import uuid
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import update
+
+from app.core.clearing.service import ClearingService
+from app.db.models.debt import Debt
+from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
+from app.db.models.trustline import TrustLine
+from tests.debt_setup import debt_fixture_setup
+
+
+async def _ring(db_session, size: int, *, tag: str):
+    """`size` participants in a debt ring p0 -> p1 -> ... -> p0 of 10.00, every edge with its consenting line."""
+
+    n = uuid.uuid4().hex[:8].upper()
+    eq = Equivalent(code=f"{tag}{n}", symbol=tag, description=None, precision=2, metadata_={}, is_active=True)
+    people = [Participant(pid=f"P{i}_{tag}_{n}", display_name=f"P{i}", public_key=f"pk{i}-{tag}-{n}", type="person",
+                          status="active", profile={}) for i in range(size)]
+    db_session.add_all([eq, *people])
+    await db_session.flush()
+    async with debt_fixture_setup(db_session, label="p030-s6"):
+        for i, debtor in enumerate(people):
+            creditor = people[(i + 1) % size]
+            db_session.add(Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal("10")))
+            db_session.add(TrustLine(from_participant_id=creditor.id, to_participant_id=debtor.id, equivalent_id=eq.id,
+                                     limit=Decimal("100"), status="active", policy={"auto_clearing": True}))
+    await db_session.commit()
+    return eq, people
+
+
+async def _set_status(db_session, participant, status: str) -> None:
+    await db_session.execute(update(Participant).where(Participant.id == participant.id).values(status=status))
+    await db_session.commit()
+
+
+# (ring size, max_depth that reaches only the detector under test, detector)
+_DETECTORS = [(3, 3, "sql triangles"), (4, 4, "sql quadrangles"), (5, 5, "dfs")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["suspended", "left", "deleted"])
+@pytest.mark.parametrize("size,depth,detector", _DETECTORS, ids=[d[2] for d in _DETECTORS])
+async def test_a_cycle_through_a_participant_that_is_not_active_is_not_offered(db_session, size, depth, detector, status):
+    eq, people = await _ring(db_session, size, tag="DG")
+    service = ClearingService(db_session)
+    # Anti-vacuum: the detector under test finds this very ring while everyone is active.
+    offered = await service.find_cycles(eq.code, max_depth=depth)
+    assert [len(c) for c in offered] == [size], (detector, offered)
+
+    await _set_status(db_session, people[1], status)  # an intermediate, not the first vertex
+    assert await service.find_cycles(eq.code, max_depth=depth) == [], (detector, status)
+
+
+@pytest.mark.asyncio
+async def test_a_frozen_participant_removes_only_its_own_cycles(db_session):
+    """The rule drops edges of non-active participants, not the equivalent: a disjoint active triangle is still offered."""
+
+    eq, ring = await _ring(db_session, 3, tag="DH")
+    # a second triangle in the same equivalent, disjoint from the first
+    n = uuid.uuid4().hex[:8].upper()
+    other = [Participant(pid=f"Q{i}_DH_{n}", display_name=f"Q{i}", public_key=f"pkq{i}-{n}", type="person",
+                         status="active", profile={}) for i in range(3)]
+    db_session.add_all(other)
+    await db_session.flush()
+    async with debt_fixture_setup(db_session, label="p030-s6"):
+        for i, debtor in enumerate(other):
+            creditor = other[(i + 1) % 3]
+            db_session.add(Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal("7")))
+            db_session.add(TrustLine(from_participant_id=creditor.id, to_participant_id=debtor.id, equivalent_id=eq.id,
+                                     limit=Decimal("100"), status="active", policy={"auto_clearing": True}))
+    await db_session.commit()
+    service = ClearingService(db_session)
+    assert len(await service.find_cycles(eq.code, max_depth=3)) == 2
+
+    await _set_status(db_session, ring[0], "suspended")
+    left = await service.find_cycles(eq.code, max_depth=3)
+    assert [{e["debtor"] for e in c} for c in left] == [{p.pid for p in other}], left

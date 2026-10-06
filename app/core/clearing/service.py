@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import AbstractSet, Dict, List, Set
 
-from sqlalchemy import bindparam, select, and_, text
+from sqlalchemy import bindparam, exists, select, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models.debt import Debt
@@ -41,6 +41,15 @@ _CLEARABLE_TRUSTLINE_STATUSES = ("active",)
 _SQL_CLEARABLE_TRUSTLINE_STATUSES = (
     "(" + ", ".join(f"'{status}'" for status in _CLEARABLE_TRUSTLINE_STATUSES) + ")"
 )
+
+# 030 S6 (`F-030-16`): the participant rule of the clearing PLANNER (`flow_planner.py`, `_ELIGIBLE_EDGES_SQL`, 028
+# `F-028-28`) as a predicate of the diagnostics: a cycle through a participant that is not `active` is not offered, because
+# execution skips an occurrence through one and the planner never plans it. `columns` name every vertex of the cycle.
+def _sql_participants_active(*columns: str) -> str:
+    return (
+        "AND NOT EXISTS (SELECT 1 FROM participants p "
+        f"WHERE p.id IN ({', '.join(columns)}) AND p.status <> 'active')"
+    )
 
 
 class ClearingCommittedAfterCancellation(asyncio.CancelledError):
@@ -778,6 +787,7 @@ class ClearingService:
                                                             AND {self._sql_auto_clearing_ok('t3')}
             WHERE d1.equivalent_id = :equivalent_id
               AND d1.amount > 0 AND d2.amount > 0 AND d3.amount > 0
+              {_sql_participants_active("d1.debtor_id", "d1.creditor_id", "d2.creditor_id")}
               {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 100
@@ -906,6 +916,7 @@ class ClearingService:
               AND d1.debtor_id != d2.creditor_id
               AND d1.debtor_id != d3.creditor_id
               AND d1.creditor_id != d3.creditor_id
+              {_sql_participants_active("d1.debtor_id", "d1.creditor_id", "d2.creditor_id", "d3.creditor_id")}
               {scope_sql}
             ORDER BY clear_amount DESC
             LIMIT 50
@@ -1300,6 +1311,14 @@ class ClearingService:
         # inside the allowlist, no cycle the DFS can build reaches outside it, so no output
         # filter is needed here (2026-08-22 / p010, `F-010-3`).
         conditions = [Debt.equivalent_id == equivalent.id, Debt.amount > 0]
+        # 030 S6 (`F-030-16`): the planner's participant rule, as in the SQL detectors above. The DFS is the third
+        # reader that answers `find_cycles` (depth > 4, and whenever the SQL answer is empty), so it needs its own.
+        conditions.append(
+            ~exists().where(
+                or_(Participant.id == Debt.debtor_id, Participant.id == Debt.creditor_id),
+                Participant.status != "active",
+            )
+        )
         if allowed_ids is not None:
             conditions.append(Debt.debtor_id.in_(allowed_ids))
             conditions.append(Debt.creditor_id.in_(allowed_ids))
