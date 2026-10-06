@@ -23,7 +23,7 @@ from decimal import Decimal
 
 import pytest
 from nacl.signing import SigningKey
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, text
 
 from app.core.auth.canonical import canonical_json
 from app.core.trustlines.service import TrustLineService
@@ -273,8 +273,11 @@ async def test_an_empty_update_is_not_one_shot(client, db_session) -> None:
 async def test_a_concurrent_double_submit_of_one_signed_update_applies_once(client, db_session) -> None:
     """Two sessions submit the same signed UPDATE 10 -> 20. The line is locked `FOR UPDATE` before the check, so the
     second reads the row the first committed (`populate_existing`) and sees `expected` false: one applies, one is the
-    conflict, the limit is 20 once and the journal has one UPDATE row. The barrier holds the winner after its lock
-    until the loser is about to lock, so the loser's `SELECT ... FOR UPDATE` waits on a live lock, not on history."""
+    conflict, the limit is 20 once and the journal has one UPDATE row. THE WAIT IS ASSERTED, NOT ASSUMED (030 S6,
+    review `T3095`, class 2): the winner holds its transaction open after taking the lock, a referee on a third
+    connection releases it only once `pg_blocking_pids` names the winner's backend as the one a waiting backend is
+    blocked on - so the loser's `SELECT ... FOR UPDATE` really queued on a live lock, and a loser that never waits
+    (no lock, or a read that does not lock) fails the cell instead of passing on a lucky ordering."""
 
     _code, a, _b, created = await _world(client, db_session)
     line_id = uuid.UUID(created.json()["id"])
@@ -284,22 +287,25 @@ async def test_a_concurrent_double_submit_of_one_signed_update_applies_once(clie
     await db_session.commit()
     factory = sessionmaker_of(db_session)
     audit_before = int(await db_session.scalar(select(func.count()).select_from(IntegrityAuditLog)))
-    barrier = asyncio.Barrier(2)
+    locked, release = asyncio.Event(), asyncio.Event()
+    winner_backend: list[int] = []
 
-    async def submit(hold_after_lock: bool):
+    async def submit(winner: bool):
         async with factory() as session:
             service = TrustLineService(session)
-            if hold_after_lock:
+            if winner:
                 original = service.execute_update
 
                 async def locked_then_wait(*args, **kwargs):
                     line = await original(*args, **kwargs)
-                    await asyncio.wait_for(barrier.wait(), timeout=15)
+                    winner_backend.append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+                    locked.set()
+                    await asyncio.wait_for(release.wait(), timeout=30)
                     return line
 
                 service.execute_update = locked_then_wait  # type: ignore[method-assign]
             else:
-                await asyncio.wait_for(barrier.wait(), timeout=15)
+                await asyncio.wait_for(locked.wait(), timeout=15)
             try:
                 await service.update(line_id, owner_id, TrustLineUpdateRequest(**body))
                 return "applied"
@@ -307,7 +313,29 @@ async def test_a_concurrent_double_submit_of_one_signed_update_applies_once(clie
                 assert exc.details["reason"] == STATE_CHANGED and Decimal(exc.details["current"]["limit"]) == 20
                 return "conflict"
 
-    outcomes = await asyncio.gather(submit(True), submit(False))
+    async def referee() -> int:
+        """Release the winner once a backend is observed waiting on it; the number of such backends (0: never seen)."""
+
+        try:
+            await asyncio.wait_for(locked.wait(), timeout=15)
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 15
+            while loop.time() < deadline:
+                async with factory() as watcher:
+                    waiting = int(await watcher.scalar(text(
+                        "SELECT count(*) FROM pg_stat_activity a WHERE a.datname = current_database() "
+                        "AND a.wait_event_type = 'Lock' AND :winner = ANY(pg_blocking_pids(a.pid))"),
+                        {"winner": winner_backend[0]}))
+                    await watcher.rollback()
+                if waiting:
+                    return waiting
+                await asyncio.sleep(0.02)
+            return 0
+        finally:
+            release.set()
+
+    outcomes, waited = await asyncio.gather(asyncio.gather(submit(True), submit(False)), referee())
+    assert waited >= 1, "the second submit was never seen waiting on the first one's line lock"
     assert sorted(outcomes) == ["applied", "conflict"], outcomes
     async with factory() as s:
         assert Decimal(str((await s.execute(select(TrustLine.limit).where(TrustLine.id == line_id))).scalar_one())) == 20

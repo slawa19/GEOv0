@@ -1,10 +1,13 @@
 import asyncio
+import json
 import time
 from decimal import Decimal, ROUND_DOWN
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.orm import aliased
 
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -104,8 +107,25 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
         assert time.monotonic() < deadline, f"the run's seeding did not land in {SEEDING_DEADLINE_S} s"
         await asyncio.sleep(0.2)
 
+    # 030 S6: a pair the scenario never freezes. The seeder applies a scenario's non-active statuses AFTER the lines
+    # (`real_scenario_seeder.py`), so a pair read here at random could be one whose end turns `suspended` between this
+    # read and the snapshot below - and since 030 S6 (`tests/conftest.py`, `override_get_db`) a request reads the
+    # committed row instead of the identity map this test loaded the participant into, it shows that.
+    scenario = json.loads(
+        (Path(__file__).resolve().parents[2] / "fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json")
+        .read_text(encoding="utf-8")
+    )
+    never_active = {p["id"] for p in scenario["participants"] if str(p.get("status") or "active") != "active"}
+    assert never_active, "the scenario freezes nobody: this selection would be vacuous"
+    from_end, to_end = aliased(Participant), aliased(Participant)
     tl = (
-        await db_session.execute(select(TrustLine).where(TrustLine.equivalent_id == eq.id))
+        await db_session.execute(
+            select(TrustLine)
+            .join(from_end, from_end.id == TrustLine.from_participant_id)
+            .join(to_end, to_end.id == TrustLine.to_participant_id)
+            .where(TrustLine.equivalent_id == eq.id, from_end.pid.notin_(never_active), to_end.pid.notin_(never_active))
+            .order_by(TrustLine.id)
+        )
     ).scalars().first()
     assert tl is not None
 

@@ -1,7 +1,8 @@
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 from decimal import Decimal
-from typing import List, Literal
+from typing import Iterable, List, Literal
 from sqlalchemy import event, func, select, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,9 +51,14 @@ def _rfc3339(value: datetime | None) -> str | None:
     return None if value is None else value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+#: RFC 3339 `date-time` with an offset or `Z` (030 S6b, `T3095` #2): `fromisoformat` alone took `2026-10-06X12:00:00Z`;
+#: the offset is `HH 00-23`, `MM 00-59` (RFC 3339 §5.6; S6 `T3096` #4: `+00:60` was taken and normalised to an hour).
+_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\Z")
+
+
 def _parse_rfc3339(text: object, *, field: str) -> datetime:
     try:
-        value = datetime.fromisoformat(text) if isinstance(text, str) else None
+        value = datetime.fromisoformat(text) if isinstance(text, str) and _RFC3339.match(text) else None
     except ValueError:
         value = None
     if value is None or value.tzinfo is None:
@@ -138,6 +144,10 @@ def _matches_live_triple(text: str) -> bool:
     )
 
 
+def _pair_key(equivalent_id: UUID, a: UUID, b: UUID) -> tuple[UUID, UUID, UUID]:
+    return (equivalent_id, *sorted((a, b), key=str))  # a pair as `lock_pair_lines` locks it: both directions
+
+
 #: Where the internal trust-line path labels an audit row as part of a caller transaction (programme 021, stage 1;
 #: the name predates 024 `T2413.2`, which removed the checkpoints themselves - the key is wire-stable).
 #: `affected_participants` is the audit row's open metadata object (`api/openapi.yaml`,
@@ -175,6 +185,13 @@ class TrustLineWriteBatch:
     its session: committing such a batch without `finish()` raises instead of making mutations durable without
     their audit rows. A real rollback of the session disarms it. This detects a mistake of an in-process caller;
     it is not a barrier against code that wants to bypass it.
+
+    THE HOLDER OF THE CREATIONS' LOCKS (030 S6b, `T3093` #1). A pair's lines `FOR UPDATE` and the equivalent row
+    `FOR SHARE` are held to commit, so a batch takes each ONCE (`lock()`: every pair up front, in the writers' one
+    order) and the stop/hold and step the equivalent statement read stand for the whole transaction - a change takes
+    a conflicting lock, and no caller changes an equivalent inside a batch. Participant statuses are re-read at
+    every creation: the same transaction may freeze one between two creations (028 E3 (г)). A rollback - of the
+    transaction or of a savepoint, which releases the locks taken since - forgets what the batch held.
     """
 
     def __init__(self, session: AsyncSession, *, transaction_scoped: bool) -> None:
@@ -186,6 +203,9 @@ class TrustLineWriteBatch:
         self._finished = False
         self._discarded = False
         self._armed = False
+        self._pairs: set[tuple[UUID, UUID, UUID]] = set()  # pairs whose lines this transaction holds FOR UPDATE
+        self._steps: dict[UUID, tuple[str, int] | None] = {}  # equivalents held FOR SHARE, not stopped or held
+        self._rows: dict[tuple, object] = {}  # reference rows by (kind, key): only their identity is read
 
     @property
     def applied_operations(self) -> int:
@@ -206,10 +226,48 @@ class TrustLineWriteBatch:
         if equivalent_id not in self._codes:
             raise RuntimeError("TrustLineWriteBatch: an operation was recorded before its equivalent was touched")
         self._operations.append((operation_type, equivalent_id, affected))
+        self._arm()
+
+    def _arm(self) -> None:
         if not self._armed:
             self._armed = True
             event.listen(self.session.sync_session, "before_commit", self._refuse_unfinished)
             event.listen(self.session.sync_session, "after_soft_rollback", self._on_rollback)
+
+    async def lock(self, participant_ids: Iterable[UUID], pairs: Iterable[tuple[UUID, UUID, UUID]], *,
+                   timeout_ms: int | None = None) -> list:
+        """Every participant `FOR SHARE`, then every live line of `pairs` (both directions) `FOR UPDATE` in ONE
+        statement by `trust_lines.id` - a payment's own statement; RETURNS the locked line rows (`MoneyBoundary._LINE`).
+        Until S6b the seeder locked pair by pair in participant order and deadlocked with a payment."""
+        self._arm()
+        pairs, boundary = list(pairs), MoneyBoundary(self.session)
+        await boundary.lock_participants(participant_ids, timeout_ms=timeout_ms)
+        rows = await boundary.lock_pair_lines(pairs, timeout_ms=timeout_ms)
+        self._pairs.update(_pair_key(*pair) for pair in pairs)
+        return rows
+
+    async def _hold_pair(self, pair: tuple[UUID, UUID, UUID], *, timeout_ms: int | None) -> None:
+        """027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` - a creation waits for a money writer over the pair."""
+        self._arm()
+        if _pair_key(*pair) not in self._pairs:
+            await MoneyBoundary(self.session).lock_pair_lines([pair], timeout_ms=timeout_ms)
+            self._pairs.add(_pair_key(*pair))
+
+    async def _hold_equivalent(self, equivalent_id: UUID, *, timeout_ms: int | None) -> tuple[str, int] | None:
+        """030 S3b (F-030-19), 028 `F-028-25`: the equivalent row `FOR SHARE`, the writers' third lock - refused when
+        stopped or held; `(code, precision)` is the step every limit is checked against."""
+        self._arm()
+        if equivalent_id not in self._steps:
+            boundary = MoneyBoundary(self.session)
+            await boundary.refuse_inactive_equivalents([equivalent_id], timeout_ms=timeout_ms)
+            self._steps[equivalent_id] = await boundary.share_equivalent_step(equivalent_id, timeout_ms=timeout_ms)
+        return self._steps[equivalent_id]
+
+    async def _row(self, key: tuple, stmt):
+        """A reference row (a participant by pid, an equivalent by code) once per batch: only its identity is used."""
+        if key not in self._rows:
+            self._rows[key] = (await self.session.execute(stmt)).scalar_one_or_none()
+        return self._rows[key]
 
     def _refuse_unfinished(self, _session) -> None:
         if self._operations and not self._finished and not self._discarded:
@@ -220,9 +278,12 @@ class TrustLineWriteBatch:
 
     def _on_rollback(self, _session, previous_transaction) -> None:
         # A rollback of the session's own transaction discards what this batch staged; a savepoint rolled
-        # back inside it does not, so the detector stays armed for that one.
+        # back inside it does not, so the detector stays armed for that one. Either releases the locks taken
+        # since it began: the batch forgets what it held and re-locks (030 S6b).
         if not getattr(previous_transaction, "nested", False):
             self._discarded = True
+        self._pairs.clear()
+        self._steps.clear()
 
     async def finish(self) -> None:
         """Flush the mutations, stage one audit row per operation, flush."""
@@ -450,10 +511,8 @@ class TrustLineService:
         if data.policy is not None:
             validate_trustline_policy(data.policy)
 
-        # Check existence of 'to' participant (by PID)
-        stmt = select(Participant).where(Participant.pid == data.to)
-        result = await self.session.execute(stmt)
-        to_participant = result.scalar_one_or_none()
+        # Check existence of 'to' participant (by PID) - once per batch (030 S6b): only its id and pid are read
+        to_participant = await batch._row(("pid", data.to), select(Participant).where(Participant.pid == data.to))
         if not to_participant:
             raise NotFoundException("Recipient participant not found")
 
@@ -461,27 +520,22 @@ class TrustLineService:
         if from_participant_id == to_participant.id:
             raise BadRequestException("Cannot create trustline to self")
 
-        # Check equivalent
-        stmt = select(Equivalent).where(Equivalent.code == data.equivalent)
-        result = await self.session.execute(stmt)
-        equivalent = result.scalar_one_or_none()
+        # Check equivalent - once per batch (030 S6b): only its id and code are read here
+        equivalent = await batch._row(("code", data.equivalent),
+                                      select(Equivalent).where(Equivalent.code == data.equivalent))
         if not equivalent:
             raise NotFoundException(f"Equivalent '{data.equivalent}' not found")
 
-        # 028 `F-028-28` (owner В-1): both ends `FOR SHARE` first (the one order: participants -> lines), the status
-        # read by that statement - no line to or from a suspended participant (409 `participant_suspended`).
+        # The writers' one order (participants -> pair lines -> the equivalent row -> debts), every check at every
+        # creation and every entrance (the public one, the inject's, the seeder's); the pair and equivalent locks
+        # once per batch (030 S6b, see `TrustLineWriteBatch`). 028 `F-028-28` (owner В-1): both ends `FOR SHARE`, no
+        # line to or from a suspended participant (409 `participant_suspended`) - re-read, the status is the one
+        # fact this transaction may itself have changed.
         await MoneyBoundary(self.session).refuse_suspended_participants(
             [from_participant_id, to_participant.id], timeout_ms=lock_timeout_ms)
-        # 027 stage 2 (§15 P1): the pair's lines `FOR UPDATE` first, so a creation waits for a money writer in
-        # flight over the pair (which decides only from the lines it locked) - symmetric with every other writer.
-        await MoneyBoundary(self.session).lock_pair_lines(
-            [(equivalent.id, from_participant_id, to_participant.id)], timeout_ms=lock_timeout_ms)
-
-        # 030 S3b (F-030-19): no new line in an equivalent the operator stopped or the integrity hold stands over -
-        # the writers' one order, third lock (participants -> pair lines -> the equivalent row -> debts), `FOR SHARE`
-        # to commit. Every entrance of a creation passes here: the public one, the inject's, the seeder's.
-        await MoneyBoundary(self.session).refuse_inactive_equivalents([equivalent.id])
-        await self._require_step(equivalent.id, limit, timeout_ms=lock_timeout_ms)
+        await batch._hold_pair((equivalent.id, from_participant_id, to_participant.id), timeout_ms=lock_timeout_ms)
+        code, precision = await batch._hold_equivalent(equivalent.id, timeout_ms=lock_timeout_ms) or ("?", 8)
+        require_money_step(limit, precision=precision, equivalent=code, field="limit")
 
         # Only a LIVE line blocks a new one.  This matches the protocol precondition of
         # TRUST_LINE_CREATE — «Не существует активной линии (from, to, equivalent)»

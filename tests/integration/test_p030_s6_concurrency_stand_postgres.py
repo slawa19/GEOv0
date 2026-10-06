@@ -1,10 +1,22 @@
-"""p029 adversarial concurrency stands (review only, not for merge).
+"""030 S6: the concurrency stand of the money writers' lock protocol - a regression guard (moved from the review
+evidence `specs/030-zero-sum-protection/evidence-2026-10-05/`, where it stood as `test_p029_adv_concurrency_postgres.py`
+at `46d2d934`).
 
-Each stand: writer 1 parks INSIDE its money transaction (after its locks), writer 2 starts; the stand proves
-writer 2 is queued on a lock writer 1 holds (pg_locks / pg_blocking_pids) or records that it was not; then
-writer 1 is released. Mechanism asserts: the isolation level every guarded writer ran at; who waited on whom.
-Target asserts: the serial result, both directions never coexist, criterion (b) clean, and the full
-reconciliation (baseline taken after the seed) PASSED.
+Each stand: writer 1 parks INSIDE its money transaction (after its locks), writer 2 starts; the stand proves writer 2
+is queued on a lock writer 1 holds (`pg_blocking_pids`) - a cell whose second writer did not wait fails, so a stand
+that cannot see the lock protocol cannot pass; then writer 1 is released. Every cell also asserts the isolation level
+each guarded writer ran at (`_rc`: READ COMMITTED) - the level the line locks rely on, and the one at which the absence
+of an effect would otherwise be explained by a snapshot instead of a lock. Target asserts: the serial result, both
+directions never coexist, criterion (b) clean, and the full reconciliation (baseline taken after the seed) PASSED.
+
+THE CONTROL (`test_control_*`): with the line `FOR UPDATE` taken out the same schedule breaks the limit, and the cell
+asserts that the second writer did NOT wait - the stand sees the failure it exists to prevent. A stand proving the
+ABSENCE of an effect without this would pass on a protocol that did nothing (AGENTS.md section 15).
+
+WHAT IT DOES NOT SEE (Codex review of 2026-10-05, `final-r1.md`): the stands install baselines and bypass signatures;
+they cover the schedules named, not every writer entrypoint (imports, seeder, the staged tick phase) or every outcome
+(40P01 deadlock classification is not measured here); and F9 below is a check of CONSISTENT READING around a valid
+payment, not detection of corruption - no corruption is planted in it.
 """
 
 from __future__ import annotations
@@ -88,13 +100,11 @@ async def _seed(rig: Rig, names, lines, debts, *, baseline=True):
                                    close_requested_at=datetime.now(timezone.utc) if req else None)
         s.add_all(tl.values())
         await s.flush()
-        ids = []
+        rows = [Debt(id=uuid.uuid4(), debtor_id=ps[debtor].id, creditor_id=ps[creditor].id, equivalent_id=eq.id,
+                     amount=D(amount)) for debtor, creditor, amount in debts]
+        ids = [row.id for row in rows]
         async with debt_fixture_setup(s, label="adv"):
-            for debtor, creditor, amount in debts:
-                debt = Debt(id=uuid.uuid4(), debtor_id=ps[debtor].id, creditor_id=ps[creditor].id,
-                            equivalent_id=eq.id, amount=D(amount))
-                ids.append(debt.id)
-                s.add(debt)
+            s.add_all(rows)
         await s.commit()
     if baseline:
         async with rig.sessions() as s:
@@ -189,18 +199,6 @@ async def _race(rig, park: Park, first, second, *, wait_s=3.0):
     return r, waiters, second_done_while_parked
 
 
-def _report(name, **kw):
-    import os
-    from pathlib import Path
-
-    line = f"P029ADV {name} " + " ".join(f"{k}={v!r}" for k, v in kw.items())
-    print(line)
-    root = Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT") or ".local-run/test-runs/p029_adv/artifacts")
-    root.mkdir(parents=True, exist_ok=True)
-    with (root / "p029_adv.log").open("a", encoding="utf-8") as out:
-        out.write(line + "\n")
-
-
 def _rc(rig):
     assert rig.levels, "no writer reached the isolation guard"
     assert {lvl for _w, lvl in rig.levels} == {"read committed"}, rig.levels
@@ -219,9 +217,8 @@ async def test_f1_same_direction_over_limit(rig, monkeypatch):
                                          lambda: _pay(rig, p["X"], p["Y"], eq.code, "30"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f1", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, rec=rec.status,
-            conflicts=conflicts.payment, levels=rig.levels)
     _rc(rig)
+    assert conflicts.payment == [], f"the second payment was retried after a conflict instead of waiting: {conflicts.payment}"
     assert waiters and not early, "second payment did not queue on the first one's lock"
     assert sorted([_code(a), _code(b)]) == ["COMMITTED", "E002"], (a, b)
     assert debts == {(p["X"].id, p["Y"].id): D("80.00000000")}
@@ -241,7 +238,6 @@ async def test_f2_opposite_directions_existing_debt(rig, monkeypatch):
                                          lambda: _pay(rig, p["Y"], p["X"], eq.code, "70"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f2", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, rec=rec.status)
     _rc(rig)
     assert waiters and not early
     assert (_code(a), _code(b)) == ("COMMITTED", "COMMITTED"), (a, b)
@@ -265,8 +261,6 @@ async def test_f3_settling_payment_closes_line_while_second_waits(rig, monkeypat
         statuses = dict((await s.execute(select(TrustLine.id, TrustLine.status).where(
             TrustLine.equivalent_id == eq.id))).all())
     rec = await _reconcile(rig, eq)
-    _report("f3", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, statuses=statuses,
-            rec=rec.status)
     _rc(rig)
     assert waiters and not early
     assert _code(a) == "COMMITTED"
@@ -286,7 +280,6 @@ async def test_f3b_two_partial_settlements_on_requested_close(rig, monkeypatch):
                                          lambda: _pay(rig, p["X"], p["Y"], eq.code, "30"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f3b", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, rec=rec.status)
     _rc(rig)
     assert waiters and not early
     assert sorted([_code(a), _code(b)]) == ["COMMITTED", "E002"], (a, b)
@@ -323,10 +316,12 @@ async def test_f4_limit_change_first_then_payment(rig, monkeypatch, kind):
         lambda: _pay(rig, p["X"], p["Y"], eq.code, "40"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report(f"f4_first_{kind}", t=t, pay=_code(pay), waiters=waiters, early=early, debts=debts, rec=rec.status)
     _rc(rig)
     assert waiters and not early, "payment did not wait for the line change"
-    assert t == "TL_COMMITTED" and _code(pay) == "E002", pay
+    # Refused by the FINAL check, on what the line change committed: an update to 60 leaves capacity 10 (E002, "not
+    # enough"), a close with debt is a request, limit 0, capacity 0 (E001, "no route") - 029 S2 made the code follow the
+    # reason. A payment answered from the state before the change would have committed 40 (control below).
+    assert t == "TL_COMMITTED" and _code(pay) == {"update": "E002", "close": "E001"}[kind], pay
     assert debts == {(p["X"].id, p["Y"].id): D("50.00000000")}
     assert rec.status == PASSED, rec.findings
 
@@ -347,8 +342,6 @@ async def test_f4_payment_first_then_limit_change(rig, monkeypatch, kind):
         line = (await s.execute(select(TrustLine.limit, TrustLine.status, TrustLine.close_requested_at).where(
             TrustLine.id == tl[("Y", "X")].id))).one()
     rec = await _reconcile(rig, eq)
-    _report(f"f4_pay_first_{kind}", t=t, pay=_code(pay), waiters=waiters, early=early, debts=debts, line=line,
-            rec=rec.status)
     _rc(rig)
     assert waiters and not early, "line change did not wait for the payment"
     assert _code(pay) == "COMMITTED" and t == "TL_COMMITTED"
@@ -395,7 +388,6 @@ async def test_f5_overlapping_clearings(rig, monkeypatch):
     (c1, c2), waiters, early = await _race(rig, park, lambda: clear(occ1), lambda: clear(occ2))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f5_cc", c1=c1, c2=c2, waiters=waiters, early=early, debts=debts, rec=rec.status)
     _rc(rig)
     assert waiters and not early
     assert c1 == D("30.00000000") and c2 is None, (c1, c2)
@@ -423,7 +415,6 @@ async def test_f5_clearing_parked_payment_reduces_cycle_edge(rig, monkeypatch):
     (c, pay), waiters, early = await _race(rig, park, clear, lambda: _pay(rig, p["C"], p["B"], eq.code, "20"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f5_cp", c=c, pay=_code(pay), waiters=waiters, early=early, debts=debts, rec=rec.status)
     _rc(rig)
     assert waiters and not early
     # serial: clearing 30 -> A->B 70, C->A 10, B->C gone; then C pays B 20: B owes C nothing, C owes B 20
@@ -448,12 +439,20 @@ async def test_f6_multipath_vs_shared_edge(rig, monkeypatch):
                                          lambda: _pay(rig, p["M"], p["R"], eq.code, "80"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f6", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, rec=rec.status,
-            conflicts=conflicts.payment, a_routes=getattr(a, "routes", None))
     _rc(rig)
+    assert conflicts.payment == [], f"a payment was retried after a conflict instead of waiting: {conflicts.payment}"
     assert waiters and not early
     lim = {(p["S"].id, p["R"].id): D(100), (p["S"].id, p["M"].id): D(100), (p["M"].id, p["R"].id): D(100)}
     assert all(amount <= lim.get(edge, D(0)) for edge, amount in debts.items()), debts
+    # Both outcomes and the delivery (Codex 2026-10-05: this cell asserted neither). The parked S -> R 150 commits
+    # first, over the direct line and the detour through M; M -> R 80 waited on the M-R line, found the hop used up
+    # by the detour's second leg (50 of 100, capacity 50 < 80) and was refused - the serial result.
+    assert (_code(a), _code(b)) == ("COMMITTED", "E002"), (a, b)
+    S, R, M = (p[k].id for k in "SRM")
+    owed_to_r = sum(v for (_debtor, creditor), v in debts.items() if creditor == R)
+    owed_by_s = sum(v for (debtor, _creditor), v in debts.items() if debtor == S)
+    assert owed_to_r == D(150) == owed_by_s, ("R received the whole 150 and S paid it", debts)
+    assert debts[(S, M)] == debts[(M, R)], ("M only passes the detour through; its own payment must not have landed", debts)
     assert rec.status == PASSED, rec.findings
 
 
@@ -479,13 +478,12 @@ async def test_f7_stale_route_never_overspends(rig, monkeypatch):
                                          lambda: _pay(rig, p["X"], p["Y"], eq.code, "50"))
     debts = await _debts(rig, eq)
     rec = await _reconcile(rig, eq)
-    _report("f7", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, builds=builds, rec=rec.status,
-            b_routes=getattr(b, "routes", None))
     _rc(rig)
     assert waiters and not early
     assert _code(a) == "COMMITTED"
     lim = {(p["X"].id, p["Y"].id): D(100), (p["X"].id, p["M"].id): D(100), (p["M"].id, p["Y"].id): D(100)}
     assert all(v <= lim.get(e, D(0)) for e, v in debts.items()), debts
+    assert False in builds, f"the second payment never re-routed (route graph builds: {builds}) - the stand did not reach the stale route"
     assert _code(b) == "COMMITTED", b  # the one re-route finds the detour
     assert debts == {(p["X"].id, p["Y"].id): D("100.00000000"), (p["X"].id, p["M"].id): D("50.00000000"),
                      (p["M"].id, p["Y"].id): D("50.00000000")}, debts
@@ -495,11 +493,11 @@ async def test_f7_stale_route_never_overspends(rig, monkeypatch):
 # ── F9: the scheduled reconciliation with a payment committed between its reads ───────────────
 
 
-@pytest.mark.asyncio
-async def test_f9_payment_between_reconciliation_reads_is_passed_and_no_hold(rig, monkeypatch):
+async def _reconcile_with_a_payment_between_its_reads(rig, monkeypatch, p, eq):
+    """The scheduled run with a real payment committed between two of the verifier's reads."""
+
     from app.core.ledger import reconciliation as rec_module
 
-    eq, p, _tl, _ = await _seed(rig, "XY", [("Y", "X", "100", False)], [("X", "Y", "10")])
     seen = []
     original = rec_module._current_debts
 
@@ -513,12 +511,38 @@ async def test_f9_payment_between_reconciliation_reads_is_passed_and_no_hold(rig
     counts = await rec_module.run_scheduled_reconciliation(rig.sessions, equivalent_ids=[eq.id])
     async with rig.sessions() as s:
         hold = await s.scalar(select(Equivalent.integrity_hold_result_id).where(Equivalent.id == eq.id))
-    debts = await _debts(rig, eq)
-    _report("f9", seen=seen, counts=counts, hold=hold, debts=debts)
+    return seen, counts, hold, await _debts(rig, eq)
+
+
+@pytest.mark.asyncio
+async def test_f9_the_verifier_reads_one_consistent_snapshot_around_a_payment(rig, monkeypatch):
+    """A check of CONSISTENT READING, not of corruption detection (Codex 2026-10-05): no corruption is planted, the
+    payment is valid and lands between the verifier's reads. The verifier runs REPEATABLE READ and reports `PASSED`
+    with no hold - the mechanism asserted is that level, and the control below shows what a verifier without it says."""
+
+    eq, p, _tl, _ = await _seed(rig, "XY", [("Y", "X", "100", False)], [("X", "Y", "10")])
+    seen, counts, hold, debts = await _reconcile_with_a_payment_between_its_reads(rig, monkeypatch, p, eq)
     assert seen == ["repeatable read", "COMMITTED"], seen
     assert debts == {(p["X"].id, p["Y"].id): D("35.00000000")}  # the payment really landed mid-verification
     assert counts[PASSED] == 1, counts
     assert hold is None
+
+
+@pytest.mark.asyncio
+async def test_control_f9_a_verifier_without_its_snapshot_reads_the_payment_half(rig, monkeypatch):
+    """The stand can see inconsistent reading: with the snapshot not opened, the same schedule reports a false `FAILED` (the reaction re-verifies in its own snapshot, finds no fault, sets no hold)."""
+
+    from app.core.ledger import reconciliation as rec_module
+
+    async def no_snapshot(session):
+        return None
+
+    monkeypatch.setattr(rec_module, "open_verification_snapshot", no_snapshot)
+    eq, p, _tl, _ = await _seed(rig, "XY", [("Y", "X", "100", False)], [("X", "Y", "10")])
+    seen, counts, _hold, debts = await _reconcile_with_a_payment_between_its_reads(rig, monkeypatch, p, eq)
+    assert seen == ["read committed", "COMMITTED"], seen
+    assert debts == {(p["X"].id, p["Y"].id): D("35.00000000")}
+    assert (counts[PASSED], counts["FAILED"]) == (0, 1), counts  # a FALSE failed: no payment was wrong
 
 
 # ── F10: the same tx_id twice at once ─────────────────────────────────────────────────────────
@@ -536,7 +560,6 @@ async def test_f10_same_tx_id_concurrently(rig, monkeypatch):
     async with rig.sessions() as s:
         rows = (await s.execute(select(Transaction.state).where(Transaction.tx_id == tx))).all()
     rec = await _reconcile(rig, eq)
-    _report("f10", a=_code(a), b=_code(b), waiters=waiters, early=early, debts=debts, rows=rows, rec=rec.status)
     _rc(rig)
     assert waiters and not early
     assert (_code(a), _code(b)) == ("COMMITTED", "COMMITTED"), (a, b)
@@ -571,7 +594,11 @@ async def test_control_f4_update_first_without_line_locks_breaks_the_limit(rig, 
         rig, park, lambda: _trustline_op(rig, park, "update", tl[("Y", "X")], p["Y"], "60"),
         lambda: _pay(rig, p["X"], p["Y"], eq.code, "40"))
     debts = await _debts(rig, eq)
-    _report("control_f4", t=t, pay=_code(pay), waiters=waiters, early=early, debts=debts)
+    async with rig.sessions() as s:
+        limit = (await s.execute(select(TrustLine.limit).where(TrustLine.id == tl[("Y", "X")].id))).scalar_one()
     assert early and not waiters, "without line locks the payment must not wait"
+    # 030 S6 `T3096` #2: the PATCH really committed (an error collected by `_race` as a result would leave limit 100 and
+    # a debt of 90 that is legal), so the limit is 60 and the debt 90 is OVER it
+    assert t == "TL_COMMITTED" and limit == D("60"), (t, limit)
     # the payment decided on limit 100 while the PATCH to 60 was uncommitted: growth 50 -> 90 over limit 60
     assert _code(pay) == "COMMITTED" and debts == {(p["X"].id, p["Y"].id): D("90.00000000")}, (pay, debts)
