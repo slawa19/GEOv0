@@ -109,8 +109,10 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
 
     # 030 S6: a pair the scenario never freezes. The seeder applies a scenario's non-active statuses AFTER the lines
     # (`real_scenario_seeder.py`), so a pair read here at random could be one whose end turns `suspended` between this
-    # read and the snapshot below - and since 030 S6 (`tests/conftest.py`, `override_get_db`) a request reads the
-    # committed row instead of the identity map this test loaded the participant into, it shows that.
+    # read and the snapshot below, and the snapshot then shows a `suspended` end (CI on `d5764a39`). The lines are
+    # taken in `trust_lines.id` order, so the choice is deterministic; the snapshot is requested after the rollback
+    # below, which expires what this session loaded. (The S6a conftest change that made a request re-read committed
+    # rows was rolled back in the S6 fix-delta; this test does not depend on it.)
     scenario = json.loads(
         (Path(__file__).resolve().parents[2] / "fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json")
         .read_text(encoding="utf-8")
