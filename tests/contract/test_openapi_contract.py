@@ -109,10 +109,18 @@ TRANSPORT_HEADER_DRIFT_COUNT = 67
 # and no entry got worse - only the number recorded inside two existing entries changed.
 # Measured: the two admin-equivalent entries are the only ones whose content differs from the
 # previous digest.
+# 2026-10-06 / programme 030 S5 (`T3005`, F-030-13): 13 -> 14. ONE entry enters, `DELETE /trustlines/{id}`, and ONE
+# changes content, `PATCH /trustlines/{id}` (already here for its `policy` differences). Both sides gain the signed
+# fields `operation`, `expected` (`TrustLineExpectedState`) and `issued_at`; the canon lists them in `required` and
+# the generated schema does not: the same pydantic model is the argument of the service's unsigned internal path,
+# whose callers do not carry them, so they are optional on the model and the service refuses a public body without
+# them (400 `E005` `signed_payload_incomplete`). Measured with a per-entry dump of both ledgers on `d5764a39` and on
+# this tree (`.local-run/s5/dump_ledgers.py`, not committed): no other entry differs; the base dump equals the
+# previous `3dcb8cda...bcd5`, count 13.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "3dcb8cda4f88dc7f06ff06b38b9a392b4ef8c87dee2551ee3ecc2874bc4dbcd5"
+    "f35d6cc0459bf07b0dc28edd5897884b5a23844c3424cbba3952047a3b607d6e"
 )
-REQUEST_SCHEMA_DRIFT_COUNT = 13
+REQUEST_SCHEMA_DRIFT_COUNT = 14
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
 # (canonical YAML and generated schema) so "not measured" is distinguishable from
 # a measured zero. The GET /simulator/runs/{run_id}/metrics entry already carried
@@ -519,8 +527,14 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # there, as at `PATCH /trustlines/{id}` (`T2603.1`). The operation was already in this dictionary for its older
 # differences. Measured: the new ledger with that one canonical 409 removed hashes to the previous `d9e62ef3...15e0`,
 # count 51, and no other entry differs.
+# 2026-10-06 / programme 030 S5 (`T3005`, F-030-13): count HOLDS at 51, digest moves. ONE entry changes content: the
+# canon's `DELETE /trustlines/{id}` declares 409 (the signed `expected` differs from the locked row,
+# `TRUSTLINE_STATE_CHANGED`; the line is history, `TRUSTLINE_CLOSED`); FastAPI declares no 409 there, as at `PATCH`
+# and `POST /trustlines`. The operation was already in this dictionary for its older differences. Measured with the
+# same per-entry dump on `d5764a39` and on this tree: the base dump equals the previous `102a0de8...0065`, count 51,
+# and no other entry differs.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "102a0de86ae4b71b7305e8a7396a842f8882a6bdbd1f926d1700620647310065"
+    "dca494bb537a24df20ec7f90c00cf7b4190cd663d6c1410e150813404f45e9f6"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

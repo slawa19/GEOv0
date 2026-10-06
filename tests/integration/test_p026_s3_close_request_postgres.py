@@ -29,17 +29,20 @@ from app.db.models.trustline import TrustLine
 from tests.conftest import MODE_B
 from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _patch_limit, _world
 from tests.integration.test_scenarios import (
-    _sign_trustline_close_request,
     _sign_trustline_create_request,
-    _sign_trustline_update_request,
+    expected_state_of,
+    signed_trustline_close,
+    signed_trustline_update,
 )
 from tests.p019_support import require_target
 
 
 async def _close(client, creditor, line_id: str):
     key = SigningKey(base64.b64decode(creditor["priv"]))
-    return await client.request("DELETE", f"/api/v1/trustlines/{line_id}", headers=creditor["headers"], json={
-        "signature": _sign_trustline_close_request(signing_key=key, trustline_id=line_id)})
+    return await client.request("DELETE", f"/api/v1/trustlines/{line_id}", headers=creditor["headers"],
+                                json=signed_trustline_close(signing_key=key, trustline_id=line_id,
+                                                            expected=await expected_state_of(
+                                                                client, creditor["headers"], line_id)))
 
 
 async def _line(client, creditor, line_id: str) -> dict:
@@ -98,9 +101,9 @@ async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(clien
     assert r.status_code == 409 and r.json()["error"]["details"]["reason"] == "TRUSTLINE_CLOSE_REQUESTED", r.text
     key = SigningKey(base64.b64decode(a["priv"]))
     policy = {"auto_clearing": False}
-    r = await client.patch(f"/api/v1/trustlines/{lines['AB']}", headers=a["headers"], json={
-        "policy": policy, "signature": _sign_trustline_update_request(
-            signing_key=key, trustline_id=lines["AB"], policy=policy)})
+    r = await client.patch(f"/api/v1/trustlines/{lines['AB']}", headers=a["headers"], json=signed_trustline_update(
+        signing_key=key, trustline_id=lines["AB"], policy=policy,
+        expected=await expected_state_of(client, a["headers"], lines["AB"])))
     assert r.status_code == 200 and r.json()["close_requested_at"] == asked, r.text
 
     # Partial repayment keeps the request pending; the exact zero closes in the same transaction.

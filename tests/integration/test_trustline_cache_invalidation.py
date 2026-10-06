@@ -17,6 +17,15 @@ from app.schemas.trustline import (
     TrustLineCreateRequest,
     TrustLineUpdateRequest,
 )
+from tests.integration.test_scenarios import utc_now_rfc3339
+
+
+def _signed_fields(operation: str) -> dict:
+    """030 S5: the public path needs the operation, the line as seeded (limit 10, no policy) and a fresh `issued_at`;
+    the signature itself is stubbed out by `verify_signature` - the cache eviction is the subject here."""
+
+    return {"operation": operation, "issued_at": utc_now_rfc3339(),
+            "expected": {"limit": "10", "policy": {}, "status": "active", "close_requested_at": None}}
 
 
 @pytest.fixture(autouse=True)
@@ -101,14 +110,14 @@ async def _run_operation(
         return await service.update(
             trustline.id,
             sender.id,
-            TrustLineUpdateRequest(limit="20", signature="test-signature"),
+            TrustLineUpdateRequest(limit="20", signature="test-signature", **_signed_fields("TRUST_LINE_UPDATE")),
         )
     if operation == "close":
         assert trustline is not None
         return await service.close(
             trustline.id,
             sender.id,
-            TrustLineCloseRequest(signature="test-signature"),
+            TrustLineCloseRequest(signature="test-signature", **_signed_fields("TRUST_LINE_CLOSE")),
         )
     raise AssertionError(f"Unsupported operation: {operation}")
 

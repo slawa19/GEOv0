@@ -27,8 +27,9 @@ from tests.conftest import MODE_B
 from tests.integration.test_p011_money_is_a_decimal_string_on_the_wire import money_scenario  # noqa: F401 (fixture)
 from tests.integration.test_scenarios import (
     _sign_payment_request,
-    _sign_trustline_close_request,
+    expected_state_of,
     register_and_login,
+    signed_trustline_close,
 )
 
 _EXPONENT = re.compile(r"^-?\d+(\.\d+)?[eE][+-]?\d+$")
@@ -52,8 +53,9 @@ async def _request_close(client: AsyncClient, scenario: dict) -> dict:
         "DELETE",
         f"/api/v1/trustlines/{scenario['trustline_id']}",
         headers=bob["headers"],
-        json={"signature": _sign_trustline_close_request(
-            signing_key=SigningKey(base64.b64decode(bob["priv"])), trustline_id=scenario["trustline_id"])},
+        json=signed_trustline_close(
+            signing_key=SigningKey(base64.b64decode(bob["priv"])), trustline_id=scenario["trustline_id"],
+            expected=await expected_state_of(client, bob["headers"], scenario["trustline_id"])),
     )
     assert response.status_code == 200, response.text
     assert response.json()["trustline"]["close_requested_at"], "setup: the close must be a request, not a closure"

@@ -28,6 +28,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
 from app.utils.exceptions import InvalidSignatureException
+from tests.integration.test_scenarios import trustline_operation_payload, utc_now_rfc3339
 
 
 def _sign(key: SigningKey, payload: dict) -> str:
@@ -130,9 +131,13 @@ async def test_control_a_correct_signature_is_accepted_and_audited_per_operation
     owner_id = owner.id
     audit_before = await _audit_rows(db_session)
 
+    # 030 S5: the signed bytes carry the operation, the new limit, the state the owner saw and `issued_at`.
+    payload = trustline_operation_payload(
+        operation="TRUST_LINE_UPDATE", trustline_id=str(line_id), limit="20", issued_at=utc_now_rfc3339(),
+        expected={"limit": "10", "policy": {}, "status": "active", "close_requested_at": None})
     await TrustLineService(db_session).update(
-        line_id, owner_id,
-        TrustLineUpdateRequest(limit="20", signature=_sign(owner_key, {"id": str(line_id), "limit": "20"})),
+        line_id, owner_id, TrustLineUpdateRequest(**{k: v for k, v in payload.items() if k != "id"},
+                                                  signature=_sign(owner_key, payload)),
     )
     assert await _state(db_session, line_id) == (Decimal("20"), "active")
     rows = (

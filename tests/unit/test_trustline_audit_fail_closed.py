@@ -18,6 +18,15 @@ from app.schemas.trustline import (
     TrustLineCreateRequest,
     TrustLineUpdateRequest,
 )
+from tests.integration.test_scenarios import utc_now_rfc3339
+
+
+def _signed_fields(operation: str) -> dict:
+    """030 S5: the public path needs the operation, the line as seeded (limit 10, no policy) and a fresh `issued_at`;
+    the signature itself is stubbed out by `verify_signature` below - the batch failure is the subject here."""
+
+    return {"operation": operation, "issued_at": utc_now_rfc3339(),
+            "expected": {"limit": "10", "policy": {}, "status": "active", "close_requested_at": None}}
 
 
 @pytest.mark.asyncio
@@ -127,7 +136,7 @@ async def test_update_checkpoint_failure_is_not_swallowed_or_committed(
         await TrustLineService(db_session).update(
             trustline_id,
             sender.id,
-            TrustLineUpdateRequest(limit="20", signature="test-signature"),
+            TrustLineUpdateRequest(limit="20", signature="test-signature", **_signed_fields("TRUST_LINE_UPDATE")),
         )
 
     commit.assert_not_awaited()
@@ -191,7 +200,7 @@ async def test_close_checkpoint_failure_is_not_swallowed_or_committed(
         await TrustLineService(db_session).close(
             trustline_id,
             sender.id,
-            TrustLineCloseRequest(signature="test-signature"),
+            TrustLineCloseRequest(signature="test-signature", **_signed_fields("TRUST_LINE_CLOSE")),
         )
 
     commit.assert_not_awaited()
