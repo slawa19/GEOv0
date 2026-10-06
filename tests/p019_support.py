@@ -19,6 +19,7 @@ ever be mistaken for it.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -103,7 +104,7 @@ class QueuedCompetitor:
 
     victim_pid: int
     competitor_pid: int
-    waiting: "asyncio.Task"
+    waiting: asyncio.Task
 
 
 async def queue_behind_the_victim(victim, competitor, *, hold, wait_on_victim, deadline_s: float = 15.0) -> QueuedCompetitor:
