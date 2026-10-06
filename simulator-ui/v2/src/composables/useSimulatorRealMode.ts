@@ -30,6 +30,7 @@ import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '..
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
 import { toLower } from '../utils/stringHelpers'
+import { runErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -405,7 +406,7 @@ export function useSimulatorRealMode(opts: {
       if (!isCurrent()) return 'superseded'
       real.runStatus = st
       const le = st.last_error
-      real.lastError = le && isUserFacingRunError(le.code) ? `${le.code}: ${le.message}` : ''
+      real.lastError = le && isUserFacingRunError(le.code) ? runErrorText(le) : ''
       return 'current'
     } catch (e: unknown) {
       if (!isCurrent()) return 'superseded'
