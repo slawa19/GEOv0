@@ -160,14 +160,23 @@ async def commit_trust_drift(
     """
 
     rolled_back = False
+    commit_error: BaseException | None = None
 
     def _defer_rollback() -> None:
         nonlocal rolled_back
         rolled_back = True
 
+    async def _commit() -> None:
+        nonlocal commit_error
+        try:
+            await session.commit()
+        except BaseException as exc:
+            commit_error = exc
+            raise
+
     try:
         await resolve_commit_under_cancellation(
-            commit=session.commit,
+            commit=_commit,
             rollback=session.rollback,
             on_commit=on_commit,
             on_rollback=_defer_rollback,
@@ -196,10 +205,14 @@ async def commit_trust_drift(
             on_unknown()
         raise
     except BaseException:
-        # A caller cancellation after a failed COMMIT: no read is attempted and the outcome stays the rollback the
-        # resolver reported, as before 031 (this path is not covered by the ack-loss stand).
+        # A caller cancellation after a failed COMMIT (the resolver restores it after the ROLLBACK): no read is
+        # attempted, the cancellation keeps priority. Only a COMMIT the server refused proves the rollback; any other
+        # failure may have landed, so the outcome is unknown - as for a cancellation of the read above (031 T3191 #2).
         if rolled_back:
-            on_rollback()
+            if _commit_refused(commit_error):
+                on_rollback()
+            else:
+                on_unknown()
         raise
 
 
