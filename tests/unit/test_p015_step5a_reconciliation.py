@@ -619,7 +619,7 @@ async def test_step5a_an_unchanged_verdict_keeps_one_row_and_advances_last_check
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    triangle = await _seed_triangle(factory, trustlines=[])
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     await _fixture_debts(factory, triangle, [("a", "b", "10")])
     await _baseline(factory, triangle.equivalent.id)
 
@@ -650,7 +650,7 @@ async def test_step5a_a_failed_then_passed_transition_inserts_and_keeps_the_fail
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    triangle = await _seed_triangle(factory, trustlines=[])
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
     await _baseline(factory, triangle.equivalent.id)
 
@@ -736,7 +736,7 @@ async def test_step5a_different_findings_under_the_same_status_insert(db_session
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    triangle = await _seed_triangle(factory, trustlines=[])
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
     ab, bc = await _fixture_debts(factory, triangle, [("a", "b", "10"), ("b", "c", "4")])
     await _baseline(factory, triangle.equivalent.id)
 
@@ -782,7 +782,7 @@ async def test_step5a_the_baseline_adopts_a_debt_the_journal_cannot_explain_and_
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
     adopted_id = uuid.uuid4()
     await _around_the_application(
         factory,
@@ -841,7 +841,7 @@ async def test_step5a_a_seed_or_fixture_write_after_the_baseline_is_refused(db_s
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    baselined = await _seed_triangle(factory, trustlines=[])
+    baselined = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     open_book = await _seed_triangle(factory, trustlines=[])
     await _fixture_debts(factory, baselined, [("a", "b", "10")])
     await _baseline(factory, baselined.equivalent.id)

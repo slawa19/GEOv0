@@ -3,8 +3,9 @@ money INJECT envelope (T3000 decision DELETE), plus the anti-vacuum of the trans
 
 Every corrupted state is written AROUND the application by THE named corruption helper (`tests/ledger_corruption.py`)
 and COORDINATED, so criterion (a) stays silent: a structural debt arrives with the baseline offset that adopts it (the
-equivalent's baseline is taken at creation, 030 F-030-9), a money INJECT with its envelope and journal entry. The hold is the existing confirm-then-hold path (`run_scheduled_reconciliation` -> `react_to_failed`); the
-proof that money stops is a payment on a pair the corruption does not touch, refused for the hold by name.
+equivalent's baseline is taken at creation, 030 F-030-9), a money INJECT with its envelope and journal entry. The hold
+is the existing confirm-then-hold path (`run_scheduled_reconciliation` -> `react_to_failed`); the proof that money
+stops is a payment on a pair the corruption does not touch, refused for the hold by name.
 """
 
 from __future__ import annotations
@@ -204,7 +205,8 @@ async def test_s3a_anti_vacuum_payments_a_clearing_and_a_stored_refusal_pass_wit
     async with factory() as s:
         await ClearingService(s).execute_occurrence(occurrence)
     a, b = e.alice["pid"], e.bob["pid"]
-    monkeypatch.setattr(PaymentRouter, "find_flow_routes", lambda *_a, **_k: [([a, b], Decimal("4.00")), ([a, b], Decimal("3.00"))])
+    short = [([a, b], Decimal("4.00")), ([a, b], Decimal("3.00"))]
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", lambda *_a, **_k: short)
     refused = await _pay(api, e, e.alice, e.bob, "10.00")  # short of the request (R-4): refused after admission
     monkeypatch.undo()
     assert not _committed(refused) and refused.status_code != 200, refused.text

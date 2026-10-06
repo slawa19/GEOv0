@@ -37,21 +37,14 @@ CRITERION (b), per operation that touched or named the equivalent, from what the
     PAYMENT   (intent v1)  STRUCTURAL ONLY. The envelope carries no pre-state, so nothing is replayed:
                            the intent must parse and every journalled edge must be a direction of a flow
                            pair. It is recorded as `structural_only` and is never a full recomputation.
-    INJECT    (intent v1)  AN HONEST SUBSET. The intent is the raw scenario event; the scenario's
-                           default equivalent, the pid map, the trust line's limit and state and the
-                           event's `max_total_amount` are NOT recorded, so which edge and how much each
-                           effect wrote cannot be recomputed. What CAN be: every entry is an increase,
-                           every delta is a multiple of the equivalent's step, no more edges than this
-                           equivalent's `inject_debt` effects, and no more debt in total than the positive
-                           amounts those effects name, taken whole (028 `F-028-34`: an effect naming another
-                           equivalent is not counted; one naming none is, its scenario default not being
-                           recorded). The step grain refuses a historical cent-truncated entry at precision
-                           0 or 1 - accepted, 028 Changelog 2026-10-04.
     SEED, TEST_FIXTURE     NOT EXAMINED. Refused after the baseline (5a), adopted by it before.
 
-and for every examined kind: the envelope's version is one a rule above reads. The stored intent digest
-is NOT recomputed: every ledger-relevant change of an intent is refuted by its kind's rule. Findings of (b) are immutable journal and intent facts, so they are stable fault
-identities; they enter the same outcome and the same fingerprint as (a).
+and for every examined kind: the envelope's version is one a rule above reads. No rule reads `INJECT` (030
+`T3000` DELETE, with the writer): an INJECT envelope that named or touched the equivalent is
+`b_version_unsupported`, FAILED and held - the base is reseeded (owner В2/В4); one that did neither is not selected.
+The stored intent digest is NOT recomputed: every ledger-relevant change of an intent is refuted by its kind's
+rule. Findings of (b) are immutable journal and intent facts, so they are stable fault identities; they enter the
+same outcome and the same fingerprint as (a).
 
 ALL ARITHMETIC IS IN INTEGER ATOMS (1e-8) IN PYTHON, never an SQL `SUM`: one exact rule in one place,
 whatever the database does with an aggregate (on SQLite, until 017, an aggregate over a `NUMERIC` column
@@ -66,12 +59,16 @@ tables.
         writer that is not instrumented, a journal entry that disappeared or was duplicated.
     (b) detects: a writer that journals a WRONG change faithfully (the `C6` counterexamples), and a
         coordinated rewrite of debts and journal that leaves the recorded intent behind - including
-        net-neutral cycle inflation - for the kinds with full recomputation; for INJECT only what its
-        subset names; for v1 payments only an edge outside the flow pairs.
-    Neither detects: a coordinated rewrite of debts, journal AND intent; an intent rewrite that changes
+        net-neutral cycle inflation - for the kinds with full recomputation; for v1 payments only an edge
+        outside the flow pairs.
+    `_correspondence` (030 `F-030-5`) and `_structure` (`F-030-20`) detect: a `transactions` row and an operation
+        that disagree (a committed row without its operation, an operation whose row is not committed, a row in
+        a shape no writer leaves); a counter-debt or a debt without a live line - states no supported writer leaves.
+    None detects: a coordinated rewrite of debts, journal AND intent; an intent rewrite that changes
         nothing a rule reads (a lock id, say); a consistent full
         restore; code that disables this verifier; incorrect opening balances (the baseline adopts, it
-        does not certify); a v1 payment or an inject that wrote a wrong amount on a named edge.
+        does not certify); a v1 payment that wrote a wrong amount on a named edge; a `transactions` row without an
+        operation whose payload names no existing equivalent (no run reads it); a durable `OPEN` envelope.
 
 It is DETECTION, not tamper protection, and nothing downstream may call it more.
 
@@ -106,6 +103,7 @@ from typing import Any, Callable, Iterable
 
 from sqlalchemy import and_, insert, or_, select, update
 
+from app.core.invariants import InvariantChecker
 from app.db.journal_tables import (
     debt_journal_entries,
     debt_operation_equivalents,
@@ -119,6 +117,7 @@ from app.db.reconciliation_tables import (
     debt_reconciliation_baselines,
     debt_reconciliation_results,
 )
+from app.utils.exceptions import IntegrityViolationException
 
 __all__ = [
     "BaselineAlreadyTaken",
@@ -138,7 +137,6 @@ __all__ = [
     "ReconciliationOutcome",
     "ReconciliationReadError",
     "STRUCTURAL_ONLY",
-    "SUBSET",
     "UNVERIFIABLE",
     "record_outcome",
     "run_scheduled_reconciliation",
@@ -160,12 +158,11 @@ CRITERION_B = "b:recorded_change_equals_recorded_intent:per_operation_kind"
 #: operation that could only be checked in part never reads as a full recomputation.
 FULL_RECOMPUTATION = "full_recomputation"
 STRUCTURAL_ONLY = "structural_only"
-SUBSET = "subset"
 NOT_EXAMINED = "not_examined"
 
 #: The levels that LIMIT what a PASSED claims. They enter the fingerprint; `full_recomputation` and
 #: `not_examined` do not (see `ReconciliationOutcome.fingerprint`).
-_LIMITED_LEVELS = frozenset({STRUCTURAL_ONLY, SUBSET})
+_LIMITED_LEVELS = frozenset({STRUCTURAL_ONLY})
 
 #: `(kind, intent_encoding_version)` -> the rule that reads that envelope. Anything else is a finding.
 _READABLE_ENVELOPES = {
@@ -173,7 +170,6 @@ _READABLE_ENVELOPES = {
     ("CLEARING", 2): FULL_RECOMPUTATION,
     ("PAYMENT", 2): FULL_RECOMPUTATION,
     ("PAYMENT", 1): STRUCTURAL_ONLY,
-    ("INJECT", 1): SUBSET,
 }
 
 #: Written only before a baseline (5a refuses them after one) and adopted by it; nothing recomputes them.
@@ -184,9 +180,6 @@ _NOT_EXAMINED_KINDS = frozenset({"SEED", "TEST_FIXTURE"})
 MAX_STORED_FINDINGS = 50
 
 _ATOM_EXPONENT = 8
-
-#: One cent in atoms: the INJECT grain when the equivalent's precision is unknown (`_inject_subset`).
-_CENT_ATOMS = 10**6
 
 Edge = tuple[uuid.UUID, uuid.UUID]
 
@@ -235,6 +228,9 @@ class ReconciliationOutcome:
     entries_read: int
     #: `(level, operation kind, count)` for criterion (b), sorted. Empty when no operation was read.
     criterion_b_coverage: tuple[tuple[str, str, int], ...] = ()
+    #: 030 `F-030-5`: rows of `transactions` read, and those that met their operation (anti-vacuum).
+    transactions_read: int = 0
+    transaction_pairs: int = 0
 
     @property
     def status(self) -> str:
@@ -272,6 +268,7 @@ class ReconciliationOutcome:
                 # What a PASSED here does NOT claim: operations checked only structurally or in part.
                 "limited": self._criterion_b_limited(),
             },
+            "correspondence": {"transactions_read": self.transactions_read, "transaction_pairs": self.transaction_pairs},
         }
 
     def fingerprint(self) -> str:
@@ -292,10 +289,10 @@ class ReconciliationOutcome:
 
         THE LIMITS OF (b) ARE HASHED AND THE COUNTS ARE NOT (step 5b). The row's `detail` is the verdict
         as first observed, so a PASSED stored before the first v1 payment or inject would otherwise keep
-        saying nothing about them for as long as the status stays PASSED. `limited` - the levels
-        `structural_only` and `subset`, per kind, that occur at all - changes only when such a kind first
-        appears, which bounds the transitions; operation counts change with every payment and are not
-        hashed.
+        saying nothing about them for as long as the status stays PASSED. `limited` - the level
+        `structural_only`, per kind, that occurs at all - changes only when such a kind first
+        appears, which bounds the transitions; operation counts (and the correspondence counts) change
+        with every payment and are not hashed.
         """
 
         def _canonical(value: Any) -> str:
@@ -330,8 +327,10 @@ _FAULT_IDENTITY_FIELDS = {
         "journal_amount_before",
     ),
     "b_payment_v1_structure": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
-    "b_inject_subset": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
     "b_clearing_v2_effect": ("kind", "operation_id", "rule", "debtor_id", "creditor_id"),
+    "tx_operation_correspondence": ("kind", "rule", "tx_id", "operation_id"),
+    "debt_counter_debt": ("kind", "participant_a", "participant_b"),
+    "debt_without_a_live_line": ("kind", "debtor_id", "creditor_id"),
 }
 
 
@@ -441,22 +440,26 @@ async def _has_baseline(session: Any, equivalent_id: uuid.UUID) -> bool:
 # ==================================================================================================
 
 
-async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
-    """Every envelope that NAMED this equivalent or has an entry in it, in one read.
-
-    Named: `debt_operation_equivalents`, written at completion for the intent's equivalents and the
-    touched ones - so an operation whose entries in this equivalent went missing is still found and
-    recomputed against nothing. Has an entry: the journal's own foreign key.
-    """
+def _here(equivalent_id: uuid.UUID) -> Any:
+    """An operation is HERE when it NAMED this equivalent (`debt_operation_equivalents`, written at completion for
+    the intent's equivalents and the touched ones - so an operation whose entries here went missing is still found
+    and recomputed against nothing) or has an entry in it (the journal's own foreign key)."""
 
     ops = debt_operations.c
-    transactions = Transaction.__table__
     named = select(debt_operation_equivalents.c.operation_id).where(
         debt_operation_equivalents.c.equivalent_id == equivalent_id
     )
     touched = select(debt_journal_entries.c.operation_id).where(
         debt_journal_entries.c.equivalent_id == equivalent_id
     )
+    return or_(ops.id.in_(named), ops.id.in_(touched))
+
+
+async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
+    """Every envelope that is here (`_here`), in one read."""
+
+    ops = debt_operations.c
+    transactions = Transaction.__table__
     return list(
         (
             await session.execute(
@@ -482,7 +485,7 @@ async def _operations(session: Any, equivalent_id: uuid.UUID) -> list[Any]:
                         ),
                     )
                 )
-                .where(or_(ops.id.in_(named), ops.id.in_(touched)))
+                .where(_here(equivalent_id))
             )
         ).all()
     )
@@ -846,63 +849,11 @@ def _payment_v1(op: Any, intent: dict[str, Any], entries: list[_Entry], equivale
     ]
 
 
-def _inject_subset(
-    op: Any,
-    intent: dict[str, Any],
-    entries: list[_Entry],
-    _equivalent_id: uuid.UUID,
-    grain_atoms: int = _CENT_ATOMS,
-    equivalent_code: str | None = None,
-) -> list:
-    effects = intent.get("effects")
-    if not isinstance(effects, list):
-        raise _Malformed("inject_intent_shape")
-    inject_debt_effects = 0
-    named_atoms = 0
-    for effect in effects:
-        if not isinstance(effect, dict) or str(effect.get("op") or "").strip() != "inject_debt":
-            continue
-        named_equivalent = str(effect.get("equivalent") or "").strip().upper()
-        if equivalent_code is not None and named_equivalent and named_equivalent != equivalent_code:
-            continue  # 028 `F-028-34` (A6): another equivalent's effect bounds nothing here (owner В-3)
-        inject_debt_effects += 1
-        try:  # whole, as the writer applies it since 028 `F-028-30` (an upper bound for the older cent-rounded ones)
-            amount = Decimal(str(effect.get("amount")))
-            if amount.is_finite() and amount > 0:
-                named_atoms += int(amount.scaleb(_ATOM_EXPONENT))
-        except (InvalidOperation, ValueError):
-            continue
-
-    def _rule(rule: str, edge: Edge | None = None) -> dict[str, Any]:
-        return _finding(
-            "b_inject_subset",
-            op,
-            rule=rule,
-            debtor_id=None if edge is None else str(edge[0]),
-            creditor_id=None if edge is None else str(edge[1]),
-        )
-
-    findings: list[dict[str, Any]] = []
-    ordered = sorted(entries, key=lambda e: (e.ordinal, e.debtor_id.bytes, e.creditor_id.bytes))
-    for entry in ordered:
-        edge = (entry.debtor_id, entry.creditor_id)
-        if entry.effect not in ("I", "U") or entry.delta <= 0:
-            findings.append(_rule("entry_is_not_an_increase", edge))
-        if entry.delta % grain_atoms != 0:  # the name predates 028: the grain is the equivalent's step
-            findings.append(_rule("delta_is_not_whole_cents", edge))
-    if len({(e.debtor_id, e.creditor_id) for e in entries}) > inject_debt_effects:
-        findings.append(_rule("more_edges_than_inject_debt_effects"))
-    if sum(e.delta for e in entries) > named_atoms:
-        findings.append(_rule("more_debt_than_the_intent_names"))
-    return findings
-
-
 _RULES = {
     ("CLEARING", 1): _clearing,
     ("CLEARING", 2): _clearing_v2,
     ("PAYMENT", 2): _payment_v2,
     ("PAYMENT", 1): _payment_v1,
-    ("INJECT", 1): _inject_subset,
 }
 
 
@@ -910,8 +861,6 @@ def _criterion_b(
     equivalent_id: uuid.UUID,
     operations: list[Any],
     entries_by_operation: dict[uuid.UUID, list[_Entry]],
-    grain_atoms: int = _CENT_ATOMS,
-    equivalent_code: str | None = None,
 ) -> tuple[list[dict[str, Any]], tuple[tuple[str, str, int], ...]]:
     findings: list[dict[str, Any]] = []
     coverage: Counter[tuple[str, str]] = Counter()
@@ -935,36 +884,104 @@ def _criterion_b(
         # digest and the writer are unchanged. WHAT THAT GIVES UP, exactly: for CLEARING and PAYMENT v2 an
         # intent rewrite is still caught, because their rules read every ledger-relevant field of the
         # intent and recompute against the journal; what is lost there is only a rewrite of a field no
-        # rule reads (a lock id). For PAYMENT v1 (structural only) and INJECT (subset), an independent
-        # rewrite of the intent is NOT detected - their rules cannot recompute what the intent says. That
+        # rule reads (a lock id). For PAYMENT v1 (structural only), an independent
+        # rewrite of the intent is NOT detected - its rule cannot recompute what the intent says. That
         # is accepted under the threat model: this is detection around the application, and a rewrite
         # of the intent that also moved the ledger remains a coordinated rewrite, outside it.
         try:
-            rule, args = _RULES[(kind, version)], (op, intent, entries_by_operation.get(op.id, []), equivalent_id)
-            findings.extend(rule(*args, grain_atoms, equivalent_code) if rule is _inject_subset else rule(*args))
+            findings.extend(_RULES[(kind, version)](op, intent, entries_by_operation.get(op.id, []), equivalent_id))
         except _Malformed as malformed:
             findings.append(_finding("b_intent_malformed", op, reason=malformed.reason))
     return findings, tuple(sorted((level, kind, count) for (level, kind), count in coverage.items()))
 
 
+#: The operation kinds that are protocol transactions and own a `tx_id` (`chk_debt_operations_tx_id_iff_kind`).
+#: SEED and TEST_FIXTURE are initial state, not transactions, and have no row to correspond to.
+_TX_KINDS = ("PAYMENT", "CLEARING")
+
+
+async def _correspondence(
+    session: Any, equivalent_id: uuid.UUID, operations: list[Any]
+) -> tuple[list[dict[str, Any]], int, int]:
+    """030 `F-030-5`: every `transactions` row of this equivalent against its operation, both directions.
+
+    A row is this equivalent's when its payload names it (the code, or the id a clearing without a loaded
+    equivalent writes) OR its operation is here, so a row whose payload disagrees with its operation is read too.
+    ONE statement inside the verifier's one snapshot - a row and its envelope commit together, so both or neither.
+    The shapes the two writers leave, and nothing else: a payment row is inserted terminal
+    (`chk_transaction_payment_terminal`) - `COMMITTED` with its envelope, or `ABORTED` as a stored refusal with
+    none (`record_definitive_refusal`); a clearing row goes `NEW` -> `COMMITTED` inside one transaction
+    (`ClearingService`), so only `COMMITTED` is ever durable; no writer leaves the other five types.
+    """
+
+    findings: list[dict[str, Any]] = []
+
+    def _refute(rule: str, tx_id: Any, op_id: Any, tx_type: Any = None, tx_state: Any = None) -> None:
+        findings.append({"kind": "tx_operation_correspondence", "rule": rule, "tx_id": tx_id, "tx_type": tx_type,
+                         "tx_state": tx_state, "operation_id": None if op_id is None else str(op_id)})
+
+    tx, ops, here = Transaction.__table__.c, debt_operations.c, _here(equivalent_id)
+    names_it = tx.payload["equivalent"].as_string()
+    rows = (await session.execute(
+        select(tx.tx_id, tx.type, tx.state, ops.id.label("op_id"), ops.kind.label("op_kind"), here.label("op_here"))
+        .select_from(Transaction.__table__.outerjoin(debt_operations, ops.tx_id == tx.tx_id))
+        .where(or_(names_it == str(equivalent_id),
+                   names_it == select(Equivalent.code).where(Equivalent.id == equivalent_id).scalar_subquery(), here))
+    )).all()
+    pairs, met = 0, set()
+    for row in rows:
+        met.add(row.op_id)
+        committed = row.type in _TX_KINDS and row.state == "COMMITTED"
+        if committed and row.op_kind == row.type and row.op_here:
+            pairs += 1
+        elif committed:
+            _refute("committed_transaction_without_its_operation", row.tx_id, row.op_id, row.type, row.state)
+        elif row.op_id is not None:
+            _refute("operation_without_its_committed_transaction", row.tx_id, row.op_id, row.type, row.state)
+        elif not (row.type == "PAYMENT" and row.state == "ABORTED"):
+            _refute("transaction_in_a_shape_no_writer_leaves", row.tx_id, None, row.type, row.state)
+    for op in operations:  # the FK is RESTRICT, so a missing row is a write with the constraints off
+        if op.kind in _TX_KINDS and op.id not in met:
+            _refute("operation_without_its_committed_transaction", op.tx_id, op.id)
+    return findings, len(rows), pairs
+
+
+async def _structure(session: Any, equivalent_id: uuid.UUID) -> list[dict[str, Any]]:
+    """030 `F-030-20` (`T3000` B): a counter-debt, a debt without a live line - states no supported writer leaves
+    (a payment nets a mutual pair, `book.py::_apply_flow`; a line closes only at zero debt, `trustlines/service.py`).
+    Excess over a LOWERED limit is allowed (026 В3) and returned by the checker, not raised. Any other exception
+    propagates - an error of the check, never a hold."""
+
+    checker, findings = InvariantChecker(session), []
+    for check, invariant, kind, fields in (
+        (checker.check_debt_symmetry, "DEBT_SYMMETRY_VIOLATION", "debt_counter_debt", ("participant_a", "participant_b")),
+        (checker.check_trust_limits, "TRUST_LIMIT_VIOLATION", "debt_without_a_live_line", ("debtor_id", "creditor_id")),
+    ):
+        try:
+            await check(equivalent_id=equivalent_id)
+        except IntegrityViolationException as exc:
+            if exc.details.get("invariant") != invariant:
+                raise
+            findings += [{"kind": kind, **{k: v[k] for k in fields}, "violation": v} for v in exc.details["violations"]]
+    return findings
+
+
 async def verify_journal_equals_change(
     session: Any, equivalent_id: uuid.UUID
 ) -> ReconciliationOutcome:
-    """Criteria (a) and (b) for one equivalent: six reads, no writes, arithmetic in atoms."""
+    """Criteria (a) and (b), the correspondence and the structure for one equivalent: reads only, atoms."""
 
     sums, findings, entries_read, entries_by_operation = await _journal_sums(session, equivalent_id)
-    # 028 `F-028-34`: the INJECT grain is the equivalent's step, and its effects are this equivalent's.
-    row = (await session.execute(select(Equivalent.precision, Equivalent.code).where(Equivalent.id == equivalent_id))
-           ).one_or_none()
-    grain_atoms = _CENT_ATOMS if row is None else 10 ** (_ATOM_EXPONENT - min(int(row.precision), _ATOM_EXPONENT))
-    equivalent_code = None if row is None else str(row.code).strip().upper()
 
-    # Criterion (b) needs no baseline: a recorded change that contradicts its recorded intent is
+    # Criterion (b), the correspondence and the structure need no baseline: each contradiction is
     # conclusive on its own, like a row that contradicts its own arithmetic.
-    b_findings, coverage = _criterion_b(
-        equivalent_id, await _operations(session, equivalent_id), entries_by_operation, grain_atoms, equivalent_code
-    )
+    operations = await _operations(session, equivalent_id)
+    b_findings, coverage = _criterion_b(equivalent_id, operations, entries_by_operation)
     findings.extend(b_findings)
+    correspondence, transactions_read, pairs = await _correspondence(session, equivalent_id, operations)
+    findings.extend(correspondence)
+    findings.extend(await _structure(session, equivalent_id))
+    seen = {"transactions_read": transactions_read, "transaction_pairs": pairs}
 
     if not await _has_baseline(session, equivalent_id):
         # Without a baseline the edge predicate has nothing to be compared against. A row that
@@ -976,6 +993,7 @@ async def verify_journal_equals_change(
             edges_checked=0,
             entries_read=entries_read,
             criterion_b_coverage=coverage,
+            **seen,
         )
 
     debts = await _current_debts(session, equivalent_id)
@@ -1018,6 +1036,7 @@ async def verify_journal_equals_change(
         edges_checked=len(edges),
         entries_read=entries_read,
         criterion_b_coverage=coverage,
+        **seen,
     )
 
 
@@ -1120,7 +1139,7 @@ async def open_verification_snapshot(session: Any) -> None:
     """Begin ONE read transaction for all of the verifier's reads, or refuse.
 
     The scheduled verifier reads journal, envelopes, baseline, debts and offsets WITHOUT the owner lock,
-    so its verdict is sound only if the five reads see one snapshot. A false FAILED is the worst outcome in this
+    so its verdict is sound only if all of its reads see one snapshot. A false FAILED is the worst outcome in this
     programme: step 5c will hold money on it.
 
     MEASURED 2026-09-14 by forced interleaving (a real payment committed between `_journal_sums` and
@@ -1403,7 +1422,7 @@ async def run_scheduled_reconciliation(
     }
     for equivalent_id in list(equivalent_ids):
         try:
-            # ONE snapshot for the five verification reads, ended before anything is written.
+            # ONE snapshot for every verification read, ended before anything is written.
             async with session_factory() as session:
                 await open_verification_snapshot(session)
                 outcome = await verify_journal_equals_change(session, equivalent_id)

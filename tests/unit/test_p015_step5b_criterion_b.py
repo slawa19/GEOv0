@@ -6,7 +6,7 @@ RECORDED INTENT - inside the 5a verifier, in the same outcome and fingerprint as
     CLEARING            full recomputation from the recorded cycle pre-amounts
     PAYMENT, intent v2  full recomputation from the recorded pre-state of both directions of every pair
     PAYMENT, intent v1  structural only - never reported as a full recomputation
-    INJECT              the honest subset its intent supports
+    INJECT              no rule (030 T3000 DELETE): `b_version_unsupported`, held - test_p030_s3a_*
     SEED, TEST_FIXTURE  not examined (5a refuses them after the baseline)
 
 and `app/core/payments/service.py::_read_payment_prestate` (the engine's until 019 stage 4), the one
@@ -54,13 +54,11 @@ from app.db.journal_tables import (
 )
 from app.db.models.debt import Debt
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
-from tests.conftest import MODE_B, sessionmaker_of
 from tests.p023_support import TEST_PLAN_ID, historical_v1_clearing, occurrence_of
 
 # Every test commits through sessions of its own, so it runs on a disposable clone of the migrated
-# template and leaves its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`): the two
-# `MODE_B` tests through `db_session`'s clone, every other test through `tier_on_a_clone`, which it
-# opts into by name - never both in one test, since both clone under one name.
+# template and leaves its rows to the clone's drop (018 B0b; see `tests/tier_on_a_clone.py`) through
+# `tier_on_a_clone`, which it opts into by name (the two `MODE_B` inject tests went with 030 S3a).
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fixture
 from tests.unit.test_p015_b4_wrong_writer_is_recorded_faithfully import (
     ATOM,
@@ -430,7 +428,8 @@ async def test_step5b_net_neutral_cycle_inflation_on_a_payment_is_failed(db_sess
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
+    # `("a", "c")` supports the inflated edge `c -> a` (030 S3a: a debt without a live line is a finding of its own).
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100"), ("a", "c", "100")])
     await _baseline(factory, triangle.equivalent.id)
     await _pay(factory, triangle, ["a", "b", "c"], "5")
     envelope = await _operation(factory, equivalent_id=triangle.equivalent.id, kind="PAYMENT")
@@ -766,136 +765,6 @@ async def test_step5b_a_corrupted_clearing_record_is_failed(db_session, corrupti
         assert _kinds(_b_findings(outcome)) == expected, outcome.findings
     if corruption == "clear_amount":
         assert found_reasons == reasons, outcome.findings
-
-
-# ==============================================================================================
-# INJECT: the honest subset
-# ==============================================================================================
-
-
-async def _inject_world(db_session, *, inject_amount: str = "1.00"):
-    from tests.unit.test_p015_t1514_simulator_must_not_requantise_stored_money import _scenario, _seed
-    from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
-
-    eq, creditor, debtor = await _seed(db_session, existing_amount=Decimal("5.00000000"), limit=Decimal("100.00"))
-    await db_session.commit()
-    run = _make_run(
-        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-        equivalents=[str(eq.code)],
-    )
-    scenario = _scenario(eq, creditor, debtor, inject_amount=inject_amount, limit="100.00")
-    runner, _artifacts = _make_runner(inject_enabled=True)
-    return SimpleNamespace(eq=eq, creditor=creditor, debtor=debtor, run=run, scenario=scenario, runner=runner)
-
-
-async def _apply_inject(db_session, world) -> None:
-    await world.runner._apply_due_scenario_events(
-        db_session, run_id="r-step5b", run=world.run, scenario=world.scenario
-    )
-
-
-# MODE B (017 stage 2b, T1702). The inject world is seeded on `db_session` and every read after it -
-# the baseline, the envelope, the verdict - is taken on sessions of their own. In mode A on PostgreSQL
-# those sessions could not see the uncommitted seed, and the baseline failed on the foreign key to
-# an equivalent it could not see (stage-2 catalogue, class VIS). The other tests of this module seed
-# and read through `factory` alone, so they pass in mode A and were left there.
-@MODE_B
-@pytest.mark.asyncio
-async def test_step5b_an_honest_inject_is_checked_as_its_subset_and_passed(db_session) -> None:
-    """A real inject of 1.00 onto a debt of 5.00: PASSED, recorded as `subset`, never as full.
-
-    MUTATION: record INJECT as `full_recomputation` in `_READABLE_ENVELOPES` - red on the coverage.
-    """
-    factory = sessionmaker_of(db_session)
-
-    world = await _inject_world(db_session)
-    await _baseline(factory, world.eq.id)
-    await _apply_inject(db_session, world)
-    envelope = await _operation(factory, equivalent_id=world.eq.id, kind="INJECT")
-    assert envelope.version == 1, envelope
-    (entry,) = await _operation_entries(factory, envelope.id)
-    assert (entry.effect, Decimal(entry.delta)) == ("U", Decimal("1.00000000")), "stand: the inject did not apply"
-
-    outcome = await _verify(factory, world.eq.id)
-    assert outcome.status == PASSED, outcome
-    assert _coverage(outcome) == {"subset": {"INJECT": 1}, "not_examined": {"TEST_FIXTURE": 1}}, outcome.detail()
-    assert outcome.detail()["criterion_b"]["limited"] == ["subset:INJECT"], outcome.detail()
-
-
-@MODE_B
-@pytest.mark.asyncio
-@pytest.mark.parametrize("corruption", ["atom_writer", "intent_amount", "split_edge", "decrease"])
-async def test_step5b_an_inject_outside_its_subset_is_failed(db_session, corruption) -> None:
-    """Each rule of the INJECT subset, reddened alone.
-
-    * `atom_writer` - a listener takes one atom off while the inject stages: `delta_is_not_whole_cents`
-      alone (one atom MORE would also exceed the named total and trip a second rule).
-    * `intent_amount` - the effect says 0.50, re-digested: `more_debt_than_the_intent_names`.
-    * `split_edge` - coordinated: 0.50 on the named edge and 0.50 on the reverse edge:
-      `more_edges_than_inject_debt_effects`.
-    * `decrease` - coordinated: the entry and the debt go 5 -> 4: `entry_is_not_an_increase`.
-
-    MUTATIONS: remove each rule from `_inject_subset` - its own case goes red.
-    """
-    factory = sessionmaker_of(db_session)
-    import _pytest.monkeypatch
-
-    patch = _pytest.monkeypatch.MonkeyPatch()
-    world = await _inject_world(db_session)
-    await _baseline(factory, world.eq.id)
-    listener = None
-    try:
-        if corruption == "atom_writer":
-            armed = {"on": False}
-            original = world.runner._inject_executor.stage_inject_event
-
-            def _skim(_target, value, _old, _initiator):
-                return value - ATOM if armed["on"] else value
-
-            async def _wrapper(*args, **kwargs):
-                armed["on"] = True
-                try:
-                    return await original(*args, **kwargs)
-                finally:
-                    armed["on"] = False
-
-            listener = _skim
-            event.listen(Debt.amount, "set", _skim, retval=True)
-            patch.setattr(world.runner._inject_executor, "stage_inject_event", _wrapper)
-        await _apply_inject(db_session, world)
-        if listener is not None:
-            event.remove(Debt.amount, "set", listener)
-            listener = None
-        patch.undo()
-
-        envelope = await _operation(factory, equivalent_id=world.eq.id, kind="INJECT")
-        (entry,) = await _operation_entries(factory, envelope.id)
-        debtor, creditor = world.debtor.id, world.creditor.id
-        debt_id = await _debt_id(factory, world.eq.id, debtor, creditor)
-        if corruption == "atom_writer":
-            assert Decimal(entry.delta) == Decimal("0.99999999"), "stand: the listener did not fire"
-            rule = "delta_is_not_whole_cents"
-        elif corruption == "intent_amount":
-            intent = copy.deepcopy(envelope.intent)
-            intent["effects"][0]["amount"] = "0.50"
-            await _rewrite_intent(factory, envelope.id, intent)
-            rule = "more_debt_than_the_intent_names"
-        elif corruption == "split_edge":
-            await _move_entry_and_debt(factory, entry, new_after=Decimal("5.50"), debt_id=debt_id)
-            await _add_entry_and_debt(factory, envelope.id, world.eq.id, creditor, debtor, Decimal("0.50"))
-            rule = "more_edges_than_inject_debt_effects"
-        else:
-            await _move_entry_and_debt(factory, entry, new_after=Decimal("4"), debt_id=debt_id)
-            rule = "entry_is_not_an_increase"
-
-        outcome = await _verify(factory, world.eq.id)
-        assert _a_findings(outcome) == [], f"stand: the corruption was not coordinated: {outcome}"
-        assert outcome.status == FAILED, outcome
-        assert {f["rule"] for f in _b_findings(outcome)} == {rule}, outcome.findings
-    finally:
-        if listener is not None:
-            event.remove(Debt.amount, "set", listener)
-        patch.undo()
 
 
 # ==============================================================================================

@@ -245,7 +245,7 @@ async def test_step5a_p_passed_failed_unverifiable_and_the_scheduled_row(factory
     """On the migrated schema: honest payment PASSED, one atom FAILED, no baseline UNVERIFIABLE."""
 
     triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100"), ("c", "b", "100")])
-    unbaselined = await _seed_triangle(factory, trustlines=[])
+    unbaselined = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     await _fixture_debts(factory, triangle, [("b", "a", "3")])
     await _fixture_debts(factory, unbaselined, [("a", "b", "2")])
     await _baseline(factory, triangle.equivalent.id)
