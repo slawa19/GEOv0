@@ -34,8 +34,6 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
-from tests.debt_setup import debt_fixture_setup
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -579,274 +577,6 @@ async def test_create_trustline_unknown_equivalent_skips(db_session) -> None:
 
 
 # ===================================================================
-# inject_debt tests
-# ===================================================================
-
-
-@pytest.mark.asyncio
-async def test_inject_debt_creates_debt_row_from_to(db_session) -> None:
-    """inject_debt should accept from/to (creditor->debtor) and create Debt."""
-    n = _nonce()
-
-    eq = Equivalent(code=f"J{n}".upper()[:16], precision=2, is_active=True)
-    creditor = Participant(
-        pid=f"CRED_{n}",
-        display_name="Creditor",
-        public_key=f"pk_cred_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    debtor = Participant(
-        pid=f"DEBT_{n}",
-        display_name="Debtor",
-        public_key=f"pk_debt_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    db_session.add_all([eq, creditor, debtor])
-    await db_session.flush()
-
-    tl = TrustLine(
-        from_participant_id=creditor.id,
-        to_participant_id=debtor.id,
-        equivalent_id=eq.id,
-        limit=Decimal("100.00"),
-        status="active",
-    )
-    db_session.add(tl)
-    await db_session.flush()
-
-    run = _make_run(
-        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-        equivalents=[eq.code],
-    )
-
-    scenario: dict[str, Any] = {
-        "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
-        "trustlines": [
-            {
-                "from": creditor.pid,
-                "to": debtor.pid,
-                "equivalent": eq.code,
-                "limit": "100.00",
-                "status": "active",
-            }
-        ],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {
-                        "op": "inject_debt",
-                        "from": creditor.pid,
-                        "to": debtor.pid,
-                        "equivalent": eq.code,
-                        "amount": "10.00",
-                    }
-                ],
-            }
-        ],
-    }
-
-    runner, _arts = _make_runner(inject_enabled=True)
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=scenario
-    )
-
-    row = (
-        await db_session.execute(
-            select(Debt).where(
-                Debt.debtor_id == debtor.id,
-                Debt.creditor_id == creditor.id,
-                Debt.equivalent_id == eq.id,
-            )
-        )
-    ).scalar_one_or_none()
-    assert row is not None
-    assert Decimal(str(row.amount)).quantize(Decimal("0.01")) == Decimal("10.00")
-
-
-@pytest.mark.asyncio
-async def test_inject_debt_updates_existing_debt_row(db_session) -> None:
-    """inject_debt should accumulate amount into an existing Debt row."""
-    n = _nonce()
-
-    eq = Equivalent(code=f"K{n}".upper()[:16], precision=2, is_active=True)
-    creditor = Participant(
-        pid=f"CRED_{n}",
-        display_name="Creditor",
-        public_key=f"pk_cred_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    debtor = Participant(
-        pid=f"DEBT_{n}",
-        display_name="Debtor",
-        public_key=f"pk_debt_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    db_session.add_all([eq, creditor, debtor])
-    await db_session.flush()
-
-    tl = TrustLine(
-        from_participant_id=creditor.id,
-        to_participant_id=debtor.id,
-        equivalent_id=eq.id,
-        limit=Decimal("100.00"),
-        status="active",
-    )
-    db_session.add(tl)
-    await db_session.flush()
-
-    async with debt_fixture_setup(db_session, label="setup"):
-        existing = Debt(
-            debtor_id=debtor.id,
-            creditor_id=creditor.id,
-            equivalent_id=eq.id,
-            amount=Decimal("5.00"),
-        )
-        db_session.add(existing)
-    await db_session.flush()
-
-    run = _make_run(
-        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-        equivalents=[eq.code],
-    )
-
-    scenario: dict[str, Any] = {
-        "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
-        "trustlines": [
-            {
-                "from": creditor.pid,
-                "to": debtor.pid,
-                "equivalent": eq.code,
-                "limit": "100.00",
-                "status": "active",
-            }
-        ],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {
-                        "op": "inject_debt",
-                        "from": creditor.pid,
-                        "to": debtor.pid,
-                        "equivalent": eq.code,
-                        "amount": "10.00",
-                    }
-                ],
-            }
-        ],
-    }
-
-    runner, _arts = _make_runner(inject_enabled=True)
-    await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=scenario
-    )
-
-    row = (
-        await db_session.execute(
-            select(Debt).where(
-                Debt.debtor_id == debtor.id,
-                Debt.creditor_id == creditor.id,
-                Debt.equivalent_id == eq.id,
-            )
-        )
-    ).scalar_one_or_none()
-    assert row is not None
-    assert Decimal(str(row.amount)).quantize(Decimal("0.01")) == Decimal("15.00")
-
-
-@pytest.mark.asyncio
-async def test_inject_debt_invalidates_graph_cache_and_viz(db_session) -> None:
-    """inject_debt must evict routing graph cache and viz cache for the affected equivalent."""
-    n = _nonce()
-
-    eq_code = f"L{n}".upper()[:16]
-    eq = Equivalent(code=eq_code, precision=2, is_active=True)
-    creditor = Participant(
-        pid=f"CRED_{n}",
-        display_name="Creditor",
-        public_key=f"pk_cred_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    debtor = Participant(
-        pid=f"DEBT_{n}",
-        display_name="Debtor",
-        public_key=f"pk_debt_{n}"[:64],
-        type="person",
-        status="active",
-    )
-    db_session.add_all([eq, creditor, debtor])
-    await db_session.flush()
-
-    tl = TrustLine(
-        from_participant_id=creditor.id,
-        to_participant_id=debtor.id,
-        equivalent_id=eq.id,
-        limit=Decimal("100.00"),
-        status="active",
-    )
-    db_session.add(tl)
-    await db_session.flush()
-
-    run = _make_run(
-        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-        equivalents=[eq.code],
-        edges_by_equivalent={eq_code: []},
-    )
-    run._real_viz_by_eq[eq_code] = "old_viz"
-
-    original_cache = PaymentRouter._graph_cache.copy()
-    PaymentRouter._graph_cache[eq_code] = (0.0, {}, {}, {}, {}, {})  # type: ignore[assignment]
-
-    scenario: dict[str, Any] = {
-        "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
-        "trustlines": [
-            {
-                "from": creditor.pid,
-                "to": debtor.pid,
-                "equivalent": eq.code,
-                "limit": "100.00",
-                "status": "active",
-            }
-        ],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {
-                        "op": "inject_debt",
-                        "from": creditor.pid,
-                        "to": debtor.pid,
-                        "equivalent": eq.code,
-                        "amount": "10.00",
-                    }
-                ],
-            }
-        ],
-    }
-
-    runner, _arts = _make_runner(inject_enabled=True)
-    try:
-        await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=scenario
-        )
-
-        assert eq_code not in PaymentRouter._graph_cache
-        assert eq_code not in run._real_viz_by_eq
-    finally:
-        PaymentRouter._graph_cache.clear()
-        PaymentRouter._graph_cache.update(original_cache)
-
-
-# ===================================================================
 # freeze_participant tests
 # ===================================================================
 
@@ -1166,10 +896,10 @@ async def test_inject_skipped_when_env_disabled() -> None:
 async def test_malformed_inject_effect_skipped(db_session) -> None:
     """Malformed payload (missing fields) → skip + no crash.
 
-    A REAL SESSION, and it stopped being optional. `_MockSession` carried this test until the debt
-    journal was armed (step 4 slice C): the inject unit of work now opens a debt operation before it
-    stages anything, and an operation needs a database connection, a transaction and a dialect - so
-    a double that answers `add`, `flush` and `commit` no longer reaches the code under test at all.
+    A REAL SESSION, and it stopped being optional. `_MockSession` carried this test until the inject
+    unit of work began to take the participant locks and to read the database before it stages
+    anything - so a double that answers `add`, `flush` and `commit` no longer reaches the code under
+    test at all.
     The subject is unchanged: every effect here is malformed, none of them is applied, and nothing
     raises.
     """
@@ -1220,3 +950,64 @@ async def test_malformed_inject_effect_skipped(db_session) -> None:
         await session.execute(_select(_Participant.id).where(_Participant.pid == "PID_NEW"))
     ).scalars().all() == []
     assert (await session.execute(_select(_TrustLine.id))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_removed_inject_debt_op_is_skipped_and_writes_nothing(db_session) -> None:
+    """`inject_debt` no longer exists: the scenario schema refuses it, and the executor, handed one anyway,
+    counts it skipped and writes neither a debt nor a line (a refusal that is only in the schema would let a
+    hand-built event still move money).
+    """
+    n = _nonce()
+    eq = Equivalent(code=f"R{n}".upper()[:16], precision=2, is_active=True)
+    creditor = Participant(
+        pid=f"RC_{n}", display_name="C", public_key=f"pk_rc_{n}"[:64], type="person", status="active"
+    )
+    debtor = Participant(
+        pid=f"RD_{n}", display_name="D", public_key=f"pk_rd_{n}"[:64], type="person", status="active"
+    )
+    db_session.add_all([eq, creditor, debtor])
+    await db_session.flush()
+
+    run = _make_run(
+        participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
+        equivalents=[eq.code],
+    )
+    scenario: dict[str, Any] = {
+        "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
+        "trustlines": [],
+        "events": [
+            {
+                "type": "inject",
+                "time": 0,
+                "effects": [
+                    {
+                        "op": "inject_debt",
+                        "from": creditor.pid,
+                        "to": debtor.pid,
+                        "equivalent": eq.code,
+                        "amount": "10.00",
+                    }
+                ],
+            }
+        ],
+    }
+
+    runner, arts = _make_runner(inject_enabled=True)
+    await runner._apply_due_scenario_events(
+        db_session, run_id="r1", run=run, scenario=scenario
+    )
+
+    # The event was consumed, and the note says one effect was skipped and none applied.
+    assert 0 in run._real_fired_scenario_event_indexes
+    notes = [p["scenario"] for p in arts.payloads if p.get("type") == "note"]
+    assert [n_["description"] for n_ in notes] == ["inject applied"], notes
+    assert notes[0]["stats"]["applied"] == 0 and notes[0]["stats"]["skipped"] == 1, notes
+
+    # Nothing was written, read back from the database.
+    assert (await db_session.execute(select(Debt.id).where(Debt.equivalent_id == eq.id))).scalars().all() == []
+    assert (
+        await db_session.execute(
+            select(TrustLine.id).where(TrustLine.equivalent_id == eq.id)
+        )
+    ).scalars().all() == []

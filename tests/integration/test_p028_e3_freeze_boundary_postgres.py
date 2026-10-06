@@ -87,8 +87,9 @@ def _inject(eq, p, effects):
     return _runner(run, scenario, artifacts), run, scenario, artifacts
 
 
-def _debt(eq, creditor, debtor, amount="1.00") -> dict:
-    return {"op": "inject_debt", "from": creditor.pid, "to": debtor.pid, "equivalent": eq.code, "amount": amount}
+def _line(eq, creditor, debtor, limit="10") -> dict:
+    """An inject effect creating the line creditor -> debtor (030 S3b: the inject writes no debt, only lines)."""
+    return {"op": "create_trustline", "from": creditor.pid, "to": debtor.pid, "equivalent": eq.code, "limit": limit}
 
 
 async def _pay(session, eq, p, path: str, amount: str = "1.00"):
@@ -148,32 +149,36 @@ async def test_a_suspended_intermediate_carries_no_payment(stand, generous_budge
 
 
 @pytest.mark.asyncio
-async def test_an_inject_debt_toward_a_suspended_participant_is_skipped(stand) -> None:  # noqa: F811
-    """(в) B is suspended, its lines stay `active` (after F-028-29 every line is): the effect is skipped, by reason."""
+async def test_an_inject_line_to_or_from_a_suspended_participant_is_skipped(stand) -> None:  # noqa: F811
+    """(в) B is suspended: a new line to or from it is skipped, by reason; a line between active ends lands."""
     eq, p, _ = await _world(stand)
     async with stand() as s:
         await _admin_status(s, p["B"].pid)
-    runner, run, scenario, artifacts = _inject(eq, p, [_debt(eq, p["A"], p["B"]), _debt(eq, p["B"], p["C"])])
+    before = await _footprint(stand, eq, p["B"])
+    runner, run, scenario, artifacts = _inject(eq, p, [_line(eq, p["B"], p["D"]), _line(eq, p["D"], p["B"]),
+                                                       _line(eq, p["A"], p["D"])])  # the last: active ends, control
     async with stand() as s:
         await runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
-    debts, _lines = await _footprint(stand, eq, p["B"])
     stats = [e["scenario"]["stats"] for e in artifacts.events if e.get("type") == "note"]
-    assert debts == [] and 0 in run._real_fired_scenario_event_indexes, (debts, stats)
+    assert await _footprint(stand, eq, p["B"]) == before and 0 in run._real_fired_scenario_event_indexes, stats
+    assert (await _footprint(stand, eq, p["D"]))[1] == [(str(p["A"].id), str(p["D"].id))], "the control line did not land"
     assert stats and stats[-1].get("skipped_reasons", {}).get("participant_suspended") == 2, stats
 
 
 @pytest.mark.asyncio
-async def test_a_debt_after_the_freeze_in_the_same_event_is_skipped(stand) -> None:  # noqa: F811
-    """(г) one event: debt A -> B, freeze B, debt A -> B. The first lands, the one after the freeze does not."""
+async def test_a_line_after_the_freeze_in_the_same_event_is_skipped(stand) -> None:  # noqa: F811
+    """(г) one event: line B -> D, freeze B, line D -> B. The first lands, the one after the freeze does not."""
     eq, p, _ = await _world(stand)
-    effects = [_debt(eq, p["A"], p["B"], "3.00"), {"op": "freeze_participant", "participant_id": p["B"].pid},
-               _debt(eq, p["A"], p["B"], "2.00")]
+    effects = [_line(eq, p["B"], p["D"]), {"op": "freeze_participant", "participant_id": p["B"].pid},
+               _line(eq, p["D"], p["B"])]
     runner, run, scenario, artifacts = _inject(eq, p, effects)
     async with stand() as s:
         await runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
-    debts, _ = await _footprint(stand, eq, p["B"])
-    assert [(d, c, Decimal(a)) for d, c, a in debts] == [(str(p["B"].id), str(p["A"].id), Decimal("3"))], debts
+    _debts_of_b, lines = await _footprint(stand, eq, p["B"])
+    assert (str(p["B"].id), str(p["D"].id)) in lines and (str(p["D"].id), str(p["B"].id)) not in lines, lines
     assert await _status(stand, p["B"]) == "suspended"
+    stats = [e["scenario"]["stats"] for e in artifacts.events if e.get("type") == "note"]
+    assert stats[-1].get("skipped_reasons", {}).get("participant_suspended") == 1, stats
 
 
 @pytest.mark.asyncio
@@ -203,7 +208,7 @@ async def _writer(kind, stand, eq, p, debt_ids):  # noqa: F811
             occurrence = occurrence_of(debt_ids, equivalent_id=eq.id, amount="10.00", plan_id=TEST_PLAN_ID, ordinal=0)
             return await ClearingService(s).execute_occurrence(occurrence)
         if kind == "inject":
-            runner, run, scenario, _ = _inject(eq, p, [_debt(eq, p["B"], p["A"])])
+            runner, run, scenario, _ = _inject(eq, p, [_line(eq, p["B"], p["D"])])
             return await runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
         if kind == "seed":  # 030 S3b (F-030-19): the seeder's line goes through the same entry
             await RealScenarioSeeder().seed_scenario_into_db(session=s, scenario={
@@ -233,7 +238,7 @@ async def _freezer(kind, stand, eq, p, hold: asyncio.Event | None):  # noqa: F81
         if kind == "admin":
             return await _admin_status(s, p["B"].pid)
         runner, run, scenario, _ = _inject(eq, p, [{"op": "freeze_participant", "participant_id": p["B"].pid},
-                                                   _debt(eq, p["C"], p["B"])])
+                                                   _line(eq, p["D"], p["B"])])
         return await runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
 
 

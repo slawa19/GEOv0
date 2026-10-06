@@ -4,8 +4,8 @@ leans on SERIALIZABLE refuses a transaction that is not, BEFORE its first write.
 REVERSED BY 027 STAGE 2 (`T2704`): the refused levels are REPEATABLE READ and SERIALIZABLE; admin is not guarded.
 
 WHY. Stage 5 may remove the advisory coordination only if every invariant-relevant money writer runs at
-SERIALIZABLE (spec, "Изоляция, писатели и клиринг", item 2): the inject's one-direction-per-pair check
-(`book.py`, `_apply_inject_increase`), the payment's capacity read, the clearing's cycle re-read and the
+SERIALIZABLE (spec, "Изоляция, писатели и клиринг", item 2): the inject's line creation (`TrustLineService`,
+stop/hold and step reads), the payment's capacity read, the clearing's cycle re-read and the
 trust decay's floor all hold under concurrency only because every participant is in SSI. Since
 2026-09-25 the application's own engine cannot be configured below SERIALIZABLE (`app/config.py`), so
 what is left is a SESSION HANDED IN BY A CALLER at another level - the staged tick, the clearing's
@@ -130,7 +130,7 @@ async def _run_writer(name: str, session, seed, committed_database):
     """Call writer `name` on `session`; returns its outcome (a value or the exception)."""
 
     a_id, b_id, _c_id = seed["participant_ids"]
-    a_pid, b_pid, _c_pid = seed["participant_pids"]
+    a_pid, b_pid, c_pid = seed["participant_pids"]
     code = seed["equivalent_code"]
 
     if name == "payment_staged":
@@ -145,7 +145,7 @@ async def _run_writer(name: str, session, seed, committed_database):
         from app.core.clearing.service import ClearingService
 
         return await _call(ClearingService(session).execute_occurrence(seed["occurrence"]))
-    if name == "inject":
+    if name == "inject_create":
         from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (
             _Artifacts,
             _runner,
@@ -162,8 +162,9 @@ async def _run_writer(name: str, session, seed, committed_database):
                     "type": "inject",
                     "time": 0,
                     "effects": [
-                        # creditor B, debtor A: A->B grows from 100 to 105 under B's 200 line.
-                        {"op": "inject_debt", "from": b_pid, "to": a_pid, "equivalent": code, "amount": "5.00"}
+                        # 030 S3b: the inject writes no debt; its money-door writer is the line creation
+                        # (the seed has no C -> A line).
+                        {"op": "create_trustline", "from": c_pid, "to": a_pid, "equivalent": code, "limit": "50"}
                     ],
                 }
             ],
@@ -222,7 +223,7 @@ _INSIDE_CALLER = {"payment_staged", "trust_decay"}
 _WRITERS = [
     "payment_staged",
     "clearing",
-    "inject",
+    "inject_create",
     "trust_decay",
     "trust_growth",
 ]
@@ -286,10 +287,10 @@ async def test_the_api_pay_refuses_a_snapshot_session_factory(unsuitable, commit
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("writer", ["payment_staged", "clearing", "trust_decay"])
+@pytest.mark.parametrize("writer", ["payment_staged", "clearing", "inject_create", "trust_decay"])
 async def test_the_same_writer_runs_at_read_committed(writer, committed_database) -> None:
     """COUNTER-CHECK (anti-vacuum): the refusal is about the level, not the writer - on a READ COMMITTED
-    transaction the same call does its work (a payment staged, 30 cleared, a limit decayed)."""
+    transaction the same call does its work (a payment staged, 30 cleared, a line created, a limit decayed)."""
 
     seed = await _seed_interlock_case()
     try:
@@ -303,12 +304,14 @@ async def test_the_same_writer_runs_at_read_committed(writer, committed_database
         PaymentRouter.invalidate_cache(seed["equivalent_code"])
     assert not isinstance(outcome, Exception), repr(outcome)
     after = await _state(committed_database, seed)
-    a_id, b_id, _c = seed["participant_ids"]
+    a_id, b_id, c_id = seed["participant_ids"]
     if writer == "payment_staged":
         assert outcome.result.status == "COMMITTED", outcome
         assert after["debts"][(a_id, b_id)] == Decimal("110.00000000"), after["debts"]
     elif writer == "clearing":
         assert outcome == Decimal("30.00000000"), outcome
+    elif writer == "inject_create":
+        assert after["limits"][(c_id, a_id)] == Decimal("50.00000000"), after["limits"]
     else:
         assert outcome.updated_count == 1, outcome
         assert after["limits"][(b_id, a_id)] == Decimal("196.00000000"), after["limits"]

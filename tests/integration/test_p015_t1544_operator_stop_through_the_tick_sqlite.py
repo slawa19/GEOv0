@@ -178,31 +178,50 @@ def _messages(caplog, marker: str) -> list[str]:
     return [r.getMessage() for r in caplog.records if marker in r.getMessage()]
 
 
-@pytest.mark.asyncio
-async def test_a_refused_inject_is_consumed_and_does_not_fail_the_run(factory, monkeypatch, caplog) -> None:
-    """RED before the rejection rule: the refused event stayed pending and failed every tick."""
-    eq, (creditor, debtor) = await _seed(factory, ["C", "D"])
-    await _trust(factory, eq, creditor, debtor, "100.00")
-    await _deactivate(factory, eq)
-    scenario = {
+async def _lines(factory, eq: Equivalent) -> list[TrustLine]:
+    async with factory() as s:
+        return list((await s.execute(select(TrustLine).where(TrustLine.equivalent_id == eq.id))).scalars().all())
+
+
+def _inject_line_scenario(eq: Equivalent, creditor: Participant, debtor: Participant) -> dict[str, Any]:
+    """A scenario whose one inject event creates the line `creditor -> debtor` in `eq` (no line exists yet)."""
+    return {
         "equivalents": [eq.code],
         "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
-        "trustlines": [
-            {"from": creditor.pid, "to": debtor.pid, "equivalent": eq.code, "limit": "100.00",
-             "status": "active"}
-        ],
+        "trustlines": [],
         "behaviorProfiles": [],
         "events": [
             {
                 "type": "inject",
                 "time": 0,
                 "effects": [
-                    {"op": "inject_debt", "from": creditor.pid, "to": debtor.pid,
-                     "equivalent": eq.code, "amount": "5.00"}
+                    {"op": "create_trustline", "from": creditor.pid, "to": debtor.pid,
+                     "equivalent": eq.code, "limit": "100.00"}
                 ],
             }
         ],
     }
+
+
+def _inject_notes(artifacts: _Artifacts) -> list[dict[str, Any]]:
+    return [
+        p["scenario"] for p in artifacts.payloads
+        if p.get("type") == "note" and (p.get("scenario") or {}).get("event_index") is not None
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_inject_line_is_a_skip_consumed_and_does_not_fail_the_run(
+    factory, monkeypatch, caplog
+) -> None:
+    """RED before the rejection rule: the refused event stayed pending and failed every tick.
+
+    Since 030 S3b the inject has no money effect; its stop check is the one inside the line creation
+    (`TrustLineService.execute_create`), so a refused line is a per-effect SKIP of the event, which is
+    consumed - the carrier of this property is a `create_trustline` effect."""
+    eq, (creditor, debtor) = await _seed(factory, ["C", "D"])
+    await _deactivate(factory, eq)
+    scenario = _inject_line_scenario(eq, creditor, debtor)
     artifacts = _Artifacts()
     run = _run(f"t1544-inject-{uuid.uuid4().hex[:6]}", [creditor, debtor], eq.code, intensity=0)
     runner = _runner(run, scenario, actions=1, clearing_every=10_000, artifacts=artifacts)
@@ -215,22 +234,41 @@ async def test_a_refused_inject_is_consumed_and_does_not_fail_the_run(factory, m
 
     # The property first, so a regression reports the run it damaged; the premise right after.
     _assert_the_run_was_not_charged(run)
-    refusals = _messages(caplog, "simulator.real.inject.refused_equivalent_inactive")
-    assert len(refusals) == 1, (
-        f"premise and consumption: expected the refusal exactly once over {limit + 2} ticks, got {refusals}"
+    notes = _inject_notes(artifacts)
+    assert len(notes) == 1, (
+        f"premise and consumption: expected the event's note exactly once over {limit + 2} ticks, got {notes}"
     )
-    notes = [
-        p for p in artifacts.payloads
-        if p.get("type") == "note"
-        and (p.get("scenario") or {}).get("description") == "inject refused (equivalent inactive)"
-    ]
-    assert len(notes) == 1, artifacts.payloads
-    assert 0 in run._real_fired_scenario_event_indexes
+    assert notes[0]["description"] == "inject applied", notes
+    assert notes[0]["stats"]["skipped_reasons"] == {MoneyBoundary.EQUIVALENT_INACTIVE_REASON: 1}, notes
+    assert notes[0]["stats"]["applied"] == 0, notes
+    assert 0 in run._real_fired_scenario_event_indexes, "the refused inject was left pending"
     _assert_the_run_was_not_charged(run)
-    assert await _debts(factory, eq) == []
+    assert await _lines(factory, eq) == []
     async with factory() as s:
-        envelopes = await s.scalar(text("SELECT count(*) FROM debt_operations"))
-    assert envelopes == 0
+        assert await s.scalar(text("SELECT count(*) FROM debt_operations")) == 0
+
+
+@pytest.mark.asyncio
+async def test_control_the_same_inject_line_in_an_active_equivalent_is_created(factory, monkeypatch) -> None:
+    """Anti-vacuum for the test above: the same event, equivalent left active - the line IS created, so the
+    refusal above is the stop and not an effect the executor never applies."""
+    eq, (creditor, debtor) = await _seed(factory, ["C", "D"])
+    scenario = _inject_line_scenario(eq, creditor, debtor)
+    artifacts = _Artifacts()
+    run = _run(f"t1544-inject-ctl-{uuid.uuid4().hex[:6]}", [creditor, debtor], eq.code, intensity=0)
+    runner = _runner(run, scenario, actions=1, clearing_every=10_000, artifacts=artifacts)
+    _install(monkeypatch, factory)
+
+    await _ticks(runner, run, 2)
+
+    _assert_the_run_was_not_charged(run)
+    notes = _inject_notes(artifacts)
+    assert len(notes) == 1 and notes[0]["stats"]["applied"] == 1, notes
+    assert "skipped_reasons" not in notes[0]["stats"], notes
+    lines = await _lines(factory, eq)
+    assert [(l.from_participant_id, l.to_participant_id, Decimal(str(l.limit)), l.status) for l in lines] == [
+        (creditor.id, debtor.id, Decimal("100.00"), "active")
+    ]
 
 
 @pytest.mark.asyncio

@@ -5,21 +5,18 @@ simulator. The core stores at the column's own scale - `Numeric(20, 8)` - and si
 money door refuses anything the column cannot hold unchanged, so a ledger row legitimately carries
 eight fraction digits.
 
-THE DEFECT. `app/core/simulator/inject_executor.py` reads such a row back, adds its own amount, and
-re-quantises the SUM to cents with `ROUND_DOWN` before writing it back. A debt of `5.12345678`
-created by a real payment becomes `6.12` after an injected `1.00`: `0.00345678` destroyed by a
+THE DEFECT. The simulator read such a row back and re-quantised it to cents with `ROUND_DOWN` before
+writing it back: a debt of `5.12345678` became `6.12` after an injected `1.00`, a limit of
+`100.12345678` became a cent-grained number on the first growth tick. `0.00345678` destroyed by a
 rounding nobody asked for, in a table the core owns, and the result is the input to the next
 operation.
 
-WHY A TEST AND NOT A ONE-LINE FIX. The existing coverage of this path,
-`test_inject_debt_updates_existing_debt_row`, ends with
-`Decimal(str(row.amount)).quantize(Decimal("0.01")) == Decimal("15.00")` - it normalises away
-exactly the thing that is wrong before comparing. It passes with the truncation and would pass
-without it. That is the shape programme 014 spent itself on, and it is why this file asserts the
-stored value EXACTLY.
-
-SCOPE. This module covers the debt path. Quantising the simulator's own INPUT amount is not the
-defect and is not touched - the spec withdrew that claim explicitly.
+SCOPE TODAY. This module covers the trust-limit half (growth, its ceiling, the scenario copy of the
+limit). The debt half - the `inject_debt` effect and its three tests - left with the effect itself
+(030 S3b): a simulator that no longer writes `debts` cannot re-quantise them. `_seed` and
+`_scenario` stay because `test_p015_step5b_criterion_b.py` and `test_p015_t1544_*` still build their
+worlds with them; `_scenario` builds a scenario carrying an `inject_debt` effect, which the
+scenario schema now refuses.
 """
 
 from __future__ import annotations
@@ -37,7 +34,7 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.db.models.trustline import TrustLine
-from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
+from tests.unit.test_scenario_inject_topology import _nonce
 
 from tests.debt_setup import debt_fixture_setup
 
@@ -124,109 +121,6 @@ def _scenario(eq, creditor, debtor, *, inject_amount: str, limit: str) -> dict[s
             }
         ],
     }
-
-
-async def _stored_debt(db_session, eq, creditor, debtor) -> Decimal:
-    row = (
-        await db_session.execute(
-            select(Debt).where(
-                Debt.debtor_id == debtor.id,
-                Debt.creditor_id == creditor.id,
-                Debt.equivalent_id == eq.id,
-            )
-        )
-    ).scalar_one()
-    return Decimal(str(row.amount))
-
-
-@pytest.mark.asyncio
-async def test_injecting_into_a_core_created_debt_preserves_its_stored_precision(
-    db_session,
-) -> None:
-    """The reproducer. RED before T1514.
-
-    `5.12345678` is a value the core can and does store. Adding an injected `1.00` must leave
-    `6.12345678`. Today it leaves `6.12`, and the assertion below states the exact figure rather
-    than rounding both sides until they agree.
-    """
-    existing = Decimal("5.12345678")
-    eq, creditor, debtor = await _seed(
-        db_session, existing_amount=existing, limit=Decimal("100.00")
-    )
-
-    runner, _artifacts = _make_runner(inject_enabled=True)
-    await runner._apply_due_scenario_events(
-        db_session,
-        run_id="r-t1514",
-        run=_make_run(
-            participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-            equivalents=[eq.code],
-        ),
-        scenario=_scenario(eq, creditor, debtor, inject_amount="1.00", limit="100.00"),
-    )
-
-    stored = await _stored_debt(db_session, eq, creditor, debtor)
-    assert stored == Decimal("6.12345678"), (
-        f"the simulator re-quantised a debt the core stored: {existing} + 1.00 became {stored}. "
-        f"Storage is Numeric(20, 8) and the core writes eight fraction digits; rounding them off "
-        f"here destroys money in a table the simulator does not own."
-    )
-
-
-@pytest.mark.asyncio
-async def test_the_injected_amount_itself_is_still_normalised(db_session) -> None:
-    """Control, and a boundary: the INPUT may be refused, the STORED value may not be rewritten.
-
-    INTENTIONAL, 028 `F-028-30` (owner В-4, 2026-10-04): the input is no longer truncated to 0.01 - an amount
-    finer than the equivalent's step is skipped with a reason, and one in the step is applied whole.
-    """
-    eq, creditor, debtor = await _seed(
-        db_session, existing_amount=Decimal("1.00"), limit=Decimal("100.00")
-    )
-
-    runner, _artifacts = _make_runner(inject_enabled=True)
-    await runner._apply_due_scenario_events(
-        db_session,
-        run_id="r-t1514-input",
-        run=_make_run(
-            participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-            equivalents=[eq.code],
-        ),
-        # Three fraction digits in at precision 2: skipped, never truncated to 2.009 -> 2.00.
-        scenario=_scenario(eq, creditor, debtor, inject_amount="2.009", limit="100.00"),
-    )
-
-    stored = await _stored_debt(db_session, eq, creditor, debtor)
-    assert stored == Decimal("1.00"), f"an amount finer than the step must be skipped, not truncated; stored {stored}"
-
-
-@pytest.mark.asyncio
-async def test_the_trust_limit_still_bounds_the_result(db_session) -> None:
-    """Control on the guard that sits beside the quantisation, so the fix cannot remove it.
-
-    The injector refuses when the accumulated debt would exceed the trustline limit. That check
-    reads the same value the quantisation used to truncate, so a careless edit could drop it.
-    """
-    eq, creditor, debtor = await _seed(
-        db_session, existing_amount=Decimal("99.50000000"), limit=Decimal("100.00")
-    )
-
-    runner, _artifacts = _make_runner(inject_enabled=True)
-    await runner._apply_due_scenario_events(
-        db_session,
-        run_id="r-t1514-limit",
-        run=_make_run(
-            participants=[(creditor.id, creditor.pid), (debtor.id, debtor.pid)],
-            equivalents=[eq.code],
-        ),
-        scenario=_scenario(eq, creditor, debtor, inject_amount="5.00", limit="100.00"),
-    )
-
-    stored = await _stored_debt(db_session, eq, creditor, debtor)
-    assert stored == Decimal("99.50000000"), (
-        f"the injection would have taken the debt past the trustline limit and must have been "
-        f"refused; the row now holds {stored}"
-    )
 
 
 # ---------------------------------------------------------------------------

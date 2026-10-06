@@ -58,6 +58,7 @@ from app.core.payments.service import PaymentService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
+from app.db.models.trustline import TrustLine
 from app.main import app
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
 from tests.integration.p019_interlock_support import (
@@ -759,45 +760,72 @@ async def test_a_patch_arriving_while_a_payment_holds_the_stop_check_waits_for_t
 async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_nothing(
     factory, admin_api, monkeypatch, caplog
 ) -> None:
-    """The inject's owner transaction, holding the equivalent lock shared, queues with its `FOR SHARE`
-    check on the PATCH's row (measured) with a snapshot from before the PATCH commits.
+    """The inject's owner transaction runs a `create_trustline` effect: the line creation
+    (`TrustLineService.execute_create`) reads the equivalent row `FOR SHARE` and queues on the PATCH's
+    uncommitted row (measured), AFTER the owner took the participant locks and the line-pair locks - the
+    row is the first lock of the equivalent the inject waits on, not the advisory one.
 
-    Its `FOR SHARE` check then meets 40001, the inject owner retries on a fresh snapshot, and the
-    retry refuses it: consumed as a rejection, no debt, no envelope. RED if the check at the inject owner
-    reads without `FOR SHARE`: the stale snapshot still says active and the debt is written after the
-    PATCH returned.
+    The PATCH commits, the wait ends and the check reads the stop (the inject owner runs READ COMMITTED
+    since 027 stage 2, so no 40001 and no transient retry): the effect is a per-effect SKIP
+    (`skipped_reasons == {equivalent_inactive: 1}`), the event is consumed, and no line row exists. RED if
+    the check inside the line creation reads without `FOR SHARE`: the stale snapshot still says active and
+    the line is created after the PATCH returned.
+
+    030 S3b moved this race off an `inject_debt` carrier (the effect is deleted). It is the only test that
+    races the line-creation entrance against the PATCH.
     """
     client, gate = admin_api
     world = await _seed(factory)
     run_id = f"t1544-inject-{uuid.uuid4().hex[:8]}"
+    creditor, debtor = world.outsider_a, world.outsider_b
     task = patch = None
     try:
         sse = _Sse()
         run = _run_record(world, run_id)
+        run._real_participants += [(creditor.id, creditor.pid), (debtor.id, debtor.pid)]
         scenario = dict(_scenario(world))
+        scenario["participants"] = [*scenario["participants"], {"id": creditor.pid}, {"id": debtor.pid}]
         scenario["events"] = [
             {
                 "type": "inject",
                 "time": 0,
                 "effects": [
                     {
-                        "op": "inject_debt",
-                        "from": world.receiver.pid,
-                        "to": world.sender.pid,
+                        "op": "create_trustline",
+                        "from": creditor.pid,
+                        "to": debtor.pid,
                         "equivalent": world.equivalent.code,
-                        "amount": "5.00",
+                        "limit": "50.00",
                     }
                 ],
             }
         ]
         runner = _runner(run, scenario, sse)
         runner._real_enable_inject = True
+        payloads: list[dict] = []
+
+        class _Recorder:
+            def enqueue_event_artifact(self, _run_id, payload) -> None:
+                payloads.append(payload)
+
+        runner._inject_executor._artifacts = _Recorder()  # the executor keeps its own reference
         _install(monkeypatch, factory)
 
         async def _inject():
             async with factory() as session:
                 await runner._apply_due_scenario_events(
                     session, run_id=run_id, run=run, scenario=scenario
+                )
+
+        async def _lines() -> int:
+            async with factory() as fresh:
+                return int(
+                    await fresh.scalar(
+                        select(func.count(TrustLine.id)).where(
+                            TrustLine.equivalent_id == world.equivalent.id,
+                            TrustLine.from_participant_id == creditor.id,
+                        )
+                    )
                 )
 
         with caplog.at_level(logging.WARNING):
@@ -810,36 +838,39 @@ async def test_an_inject_that_waited_behind_the_patch_is_refused_and_writes_noth
                 await _waiters_behind(gate.pid, timeout=30.0), what="the inject", behind="the PATCH"
             )
             assert await _advisory_modes(inject_pid, world.equivalent.id) == [], (
-                "the inject queued on the row without holding the equivalent lock shared"
+                "the inject queued on the row while holding an advisory lock of the equivalent"
             )
             assert not task.done()
+            assert await _lines() == 0, "premise: the line was created while the PATCH was still open"
 
             gate.release.set()
             resp = await asyncio.wait_for(patch, timeout=20)
             assert resp.status_code == 200, resp.text
 
-            # A rejection of the inject, consumed by its owner - not an exception for the tick.
+            # A skip of the effect, consumed by the event's owner - not an exception for the tick.
             await asyncio.wait_for(task, timeout=30)
 
-        refusals = [
-            r.getMessage()
-            for r in caplog.records
-            if "simulator.real.inject.refused_equivalent_inactive" in r.getMessage()
+        notes = [
+            p["scenario"] for p in payloads
+            if p.get("type") == "note" and (p.get("scenario") or {}).get("event_index") == 0
         ]
-        assert len(refusals) == 1, (
-            f"premise: the inject was not refused by the operator stop exactly once: {refusals}"
+        assert len(notes) == 1 and notes[0]["description"] == "inject applied", notes
+        assert notes[0]["stats"]["skipped_reasons"] == {MoneyBoundary.EQUIVALENT_INACTIVE_REASON: 1}, (
+            f"premise: the inject's line was not refused by the operator stop exactly once: {notes}"
         )
+        assert notes[0]["stats"]["applied"] == 0, notes
         retries = [
             r.getMessage()
             for r in caplog.records
             if "simulator.real.inject.transient_retry" in r.getMessage()
         ]
         assert not retries, "027 stage 2: the inject's FOR SHARE waits and reads the stop, no 40001"
+        assert await _lines() == 0, "the line was written after the PATCH returned"
         assert await _debts(factory, world) == {(world.sender.pid, world.receiver.pid): _OPENING}
         async with factory() as fresh:
             envelopes = await fresh.scalar(
-                text("SELECT count(*) FROM debt_operations WHERE identity = :identity"),
-                {"identity": f"{run_id}:0"},
+                text("SELECT count(*) FROM debt_operations WHERE kind = 'INJECT' OR identity LIKE :identity"),
+                {"identity": f"{run_id}%"},
             )
         assert envelopes == 0, envelopes
         assert 0 in run._real_fired_scenario_event_indexes, (
