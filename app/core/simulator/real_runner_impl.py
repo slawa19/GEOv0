@@ -10,10 +10,8 @@ from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
-from app.core.ledger.book import Book, operation_for
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import is_debt_pair_collision
-from app.utils.exceptions import ConflictException
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder
 from app.core.simulator.inject_executor import (
@@ -21,7 +19,6 @@ from app.core.simulator.inject_executor import (
     InjectOwnerLockSetTooNarrow,
     StagedInjectEvent,
     inject_event_equivalent_codes,
-    inject_event_debt_participant_pids,
     inject_event_freeze_participant_pids,
     inject_event_participant_pids,
     invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
@@ -32,7 +29,6 @@ from app.core.simulator.real_payment_action import _RealPaymentAction
 from app.core.simulator.real_payment_planner import RealPaymentPlanner
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
-from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.config import settings
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.tick import RealTick
@@ -330,43 +326,6 @@ class RealRunnerImpl:
             # Unknown / unsupported event types are ignored, but we still mark them fired once due.
             run._real_fired_scenario_event_indexes.add(idx)
 
-    async def _resolve_inject_debt_equivalent_ids(
-        self,
-        session,
-        *,
-        scenario: dict[str, Any],
-        event: dict[str, Any] | None,
-    ) -> set[uuid.UUID]:
-        """The equivalents this event's `inject_debt` effects NAME - its journal intent.
-
-        Narrower than the owner lock set on purpose (design v2 §2). The lock set also holds the
-        run's own equivalents and those of every trustline a `freeze_participant` effect will
-        touch; an intent built from it would declare "this operation is about that book" for books
-        the event never says a word about, and `debt_operation_equivalents.in_intent` would stop
-        meaning anything. Scope stays the lock set, which is the authoritative statement of what
-        the operation is ALLOWED to touch; intent is what it SAID it would.
-        """
-
-        codes = {
-            code
-            for eff in ((event or {}).get("effects") or [])
-            if isinstance(eff, dict)
-            and str(eff.get("op") or "").strip() == "inject_debt"
-            for code in (effective_equivalent(scenario=scenario, payload=eff),)
-            if code
-        }
-        if not codes:
-            return set()
-        return set(
-            (
-                await session.execute(
-                    select(Equivalent.id).where(Equivalent.code.in_(sorted(codes)))
-                )
-            )
-            .scalars()
-            .all()
-        )
-
     async def _resolve_inject_owner_lock_ids(
         self,
         session,
@@ -449,14 +408,11 @@ class RealRunnerImpl:
                     lock_ids = await self._resolve_inject_owner_lock_ids(
                         session, run=run, scenario=scenario, event=event
                     )
-                # 027 stage 2 (`T2704`): the one-direction-per-pair check of `inject_debt` (`book.py`,
-                # `_apply_inject_increase`) holds against a concurrent writer only at READ COMMITTED behind
-                # the line locks. Read on the unit of work's transaction before its first write; the
-                # refusal is neither transient nor a stop, so it propagates and the event stays pending.
+                # 027 stage 2 (`T2704`): the stop/hold and step reads of a line creation (`TrustLineService`) hold against
+                # a concurrent writer only at READ COMMITTED behind the row locks. Read on the unit of work's transaction
+                # before its first write; the refusal is neither transient nor a stop, so it propagates and the event
+                # stays pending.
                 await MoneyBoundary.require_read_committed(session, writer="inject")
-                intent_equivalent_ids = await self._resolve_inject_debt_equivalent_ids(
-                    session, scenario=scenario, event=event
-                )
                 # 028 `F-028-28`: the FIRST locks of the event - the rows of every participant its effects name, in
                 # `participants.id` order, `FOR UPDATE` for the targets of its freezes (taken now, never upgraded from
                 # `FOR SHARE` mid-event), `FOR SHARE` for the rest. Each effect reads the status under them.
@@ -465,85 +421,22 @@ class RealRunnerImpl:
                 await MoneyBoundary(session).lock_participants(
                     event_ids.values(), exclusive=[event_ids[p] for p in inject_event_freeze_participant_pids(
                         event=event) if p in event_ids], timeout_ms=MoneyBoundary.lock_budget_ms())
-                # 027 stage 2: the event's COMPLETE line set before its first debt read - every non-closed
-                # line among the participants its `inject_debt` effects name, in their equivalents,
-                # `FOR UPDATE` in `trust_lines.id` order. `lock_ids` stays the event's declared scope; it
-                # is no lock any more (019 `T1909`'s shared equivalent lock is gone).
-                await MoneyBoundary(session).lock_lines_among(
-                    intent_equivalent_ids,
-                    {pid_to_participant_id[pid] for pid in inject_event_debt_participant_pids(event=event)
-                     if pid in pid_to_participant_id},
-                    timeout_ms=MoneyBoundary.lock_budget_ms(),  # 55P03 past it: transient, then the event stays pending
-                )
-                # T1544: no money in an equivalent the operator has deactivated (protocol §11.5.1
-                # blocks OPERATIONS in it, and `inject_debt` writes the shared `debts`). The order is
-                # owner lock -> `FOR SHARE` -> envelope -> debt write, so the check sits here, before
-                # `Book.operation` flushes the envelope, and not inside staging.
-                #
-                # WHY THE INTENT SET IS ENOUGH. It is built from exactly the `inject_debt` effects,
-                # through the same `effective_equivalent` the writer uses, and matched on stored
-                # (upper-case) codes; an effect whose code is not stored is skipped by the writer, so
-                # every debt this event can write is denominated in an equivalent named here. An
-                # event with no `inject_debt` effect has an empty intent and writes no debt, and the
-                # call is then a no-op.
-                #
-                # `FOR SHARE` for the same reason as the payment commit: this transaction's snapshot
-                # was taken before it waited on the owner lock. A 40001 from it is transient and
-                # retried below on a fresh snapshot; the refusal is a non-retryable
-                # `ConflictException`, which the handler below rolls back and re-raises, with no
-                # envelope ever opened.
-                await MoneyBoundary(session).refuse_inactive_equivalents(intent_equivalent_ids)
-                # THE OPERATION ENVELOPE (programme 015, phase B step 4). Staging and its flush
-                # are one declared operation: `stage_inject_event` is what writes the debts, and
-                # the flush below is what sends them.
-                #
-                # PER ATTEMPT, NOT PER EVENT. This region sits inside the `while True:` retry loop
-                # above, and every handler below rolls the session back before it continues - so
-                # each attempt opens its own envelope and each rollback takes that attempt's
-                # envelope with it. Opening once outside the loop would leave a record of an
-                # attempt the database no longer holds, and the second attempt would be refused for
-                # nesting inside the first.
-                #
-                # THE IDENTITY is the event, not the attempt: `run_id:event_index` is the same
-                # string on a retry, which is exactly what makes a genuinely duplicated apply
-                # collide on `UNIQUE(kind, identity)` rather than quietly write a second envelope.
-                # A retry after a rollback does not collide, because the rolled-back envelope is
-                # not there.
-                #
-                # ONE OPERATION FOR THE WHOLE EVENT (018 stage A). The book's envelope wraps staging:
-                # the debt effects go through the posting in source order, interleaved with the
-                # participant, trust-line and freeze effects the executor still owns, because they
-                # see each other (`tests/integration/test_p018_mixed_inject_event_is_one_operation_postgres.py`).
-                async with Book.operation(
+                # NO DEBT IS WRITTEN HERE (030 S3b, F-030-6): the event is participants, lines and freezes, each through
+                # its service with that service's own checks (the line creation refuses a stopped or held equivalent),
+                # so there is no operation envelope, no line lock set for debts and no stop check of the event's own.
+                staged = await executor.stage_inject_event(
                     session,
-                    operation_for(
-                        "INJECT",
-                        f"{run_id}:{event_index}",
-                        {
-                            "run_id": run_id,
-                            "event_index": event_index,
-                            "event_time_ms": event_time_ms,
-                            "effects": effects,
-                        },
-                        scope_equivalent_ids=set(lock_ids or ()),
-                        intent_equivalent_ids=intent_equivalent_ids,
-                    ),
-                ):
-                    staged = await executor.stage_inject_event(
-                        session,
-                        scenario=scenario,
-                        event=event,
-                        pid_to_participant_id=pid_to_participant_id,
-                        locked_equivalent_ids=frozenset(lock_ids),
-                    )
-                    # Flush HERE, not inside `commit()`. A flush error (a constraint, a 40001 or a
-                    # SQLite busy on the write itself) leaves nothing COMMITTED - the transaction may
-                    # well still be open, which is why every handler below rolls back before it
-                    # retries or returns. Left to the commit, the same error would be
-                    # indistinguishable from a failure of the commit statement, whose outcome is
-                    # genuinely unknown, and the inject would be recorded as "outcome unknown"
-                    # instead of "failed".
-                    await session.flush()
+                    scenario=scenario,
+                    event=event,
+                    pid_to_participant_id=pid_to_participant_id,
+                    locked_equivalent_ids=frozenset(lock_ids),
+                )
+                # Flush HERE, not inside `commit()`. A flush error (a constraint, a 40001 or a SQLite busy on the write
+                # itself) leaves nothing COMMITTED - the transaction may well still be open, which is why every handler
+                # below rolls back before it retries or returns. Left to the commit, the same error would be
+                # indistinguishable from a failure of the commit statement, whose outcome is genuinely unknown, and the
+                # inject would be recorded as "outcome unknown" instead of "failed".
+                await session.flush()
             except asyncio.CancelledError:
                 fired.discard(event_index)
                 try:
@@ -585,39 +478,6 @@ class RealRunnerImpl:
                         event_index,
                     )
                     continue
-                refusal_reason = (
-                    (exc.details or {}).get("reason")
-                    if isinstance(exc, ConflictException)
-                    else None
-                )
-                if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
-                    # T1544: the operator's stop refuses THIS inject; it is not an error of the run.
-                    # The same rule the payments phase already applies to a refused payment (a 4xx
-                    # becomes REJECTED and the tick continues): consumed with a visible note, no
-                    # debt and no envelope (the refusal came before `Book.operation`), and no retry
-                    # - re-raising here left the event pending, so every later tick failed on it
-                    # until the consecutive-failure limit stopped a run that is also serving other
-                    # equivalents. Any other `ConflictException` keeps the path below.
-                    # Step 5c: the integrity hold is classified identically, with its own reason in
-                    # the log marker and the note.
-                    self._logger.warning(
-                        "simulator.real.inject.refused_%s event_index=%s",
-                        refusal_reason,
-                        event_index,
-                    )
-                    executor.enqueue_inject_note(
-                        run_id,
-                        run=run,
-                        event_index=event_index,
-                        event_time_ms=event_time_ms,
-                        description=(
-                            "inject refused (equivalent inactive)"
-                            if refusal_reason == MoneyBoundary.EQUIVALENT_INACTIVE_REASON
-                            else "inject refused (equivalent integrity hold)"
-                        ),
-                    )
-                    fired.add(event_index)
-                    return
                 if isinstance(exc, SQLAlchemyError):
                     self._logger.warning(
                         "simulator.real.inject.db_error event_index=%s",
@@ -677,15 +537,12 @@ class RealRunnerImpl:
         pid_to_participant_id.update(staged.pid_additions)
         try:
             await executor.publish_committed_inject(
-                session,
                 run_id=run_id,
                 run=run,
                 scenario=scenario,
                 event_index=event_index,
                 event_time_ms=event_time_ms,
                 staged=staged,
-                build_edge_patch_for_equivalent=self._build_edge_patch_for_equivalent,
-                broadcast_topology_edge_patch=self._broadcast_topology_edge_patch,
             )
         except Exception:
             # Post-delivery: the inject is committed and fired. A failed publication is logged,

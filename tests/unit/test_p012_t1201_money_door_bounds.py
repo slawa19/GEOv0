@@ -348,7 +348,7 @@ def test_is_storable_money_accepts_what_the_column_keeps_unchanged(value: object
     """The predicate's positive half, which nothing exercised.
 
     An independent scan of 187 tracked JSON files found zero values that would trip this
-    predicate, so its four call sites (`inject_executor.py` x3, `real_scenario_seeder.py`) gave
+    predicate, so its four call sites (measured before 030 S3b: `inject_executor.py` x3, `real_scenario_seeder.py`) gave
     it no indirect coverage either: it could have been `return True` and the suite would not
     have noticed.
 

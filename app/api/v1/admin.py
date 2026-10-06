@@ -70,6 +70,7 @@ from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
 from app.core.simulator.net_balance_utils import net_decimal_to_atoms
+from app.core.participants.service import ParticipantService
 from app.core.trustlines.service import TrustLineService
 from app.core.integrity import create_equivalent
 from app.db.reconciliation_tables import debt_reconciliation_baselines
@@ -906,20 +907,11 @@ async def _set_participant_status(
     request: Request,
     db: AsyncSession,
 ) -> dict:
-    # 028 `F-028-28` (owner В-1): the row `FOR UPDATE` - the freeze's whole lock. A money writer holds the rows of
-    # its participants `FOR SHARE` (`MoneyBoundary.lock_participants`): the freeze waits for one in flight, and one
-    # arriving after it waits for this commit and reads the new status.
-    participant = (
-        await db.execute(select(Participant).where(Participant.pid == pid).with_for_update()
-                         .execution_options(populate_existing=True))
-    ).scalar_one_or_none()
-    if participant is None:
-        raise NotFoundException(f"Participant {pid} not found")
-
-    before = {"status": participant.status}
-    participant.status = status_value
-    result = {"pid": participant.pid, "status": participant.status}
+    # The lock and the mutation are the core's (`ParticipantService.set_status`, 030 S3b); the audit and the commit here.
     try:
+        participant, before_status = await ParticipantService(db).set_status(pid, status_value)
+        before = {"status": before_status}
+        result = {"pid": participant.pid, "status": participant.status}
         _add_audit_entry(
             db,
             request=request,

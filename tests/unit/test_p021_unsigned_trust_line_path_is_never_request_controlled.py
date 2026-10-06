@@ -1,12 +1,12 @@
 """Architecture guard (programme 021, stage 1, `T2102`): the unsigned trust-line path is never request-controlled.
 
 WHAT IT PINS (spec, "Решения" item 4 and "Запрещено"). `TrustLineService.execute_create/update/close` take a
-keyword-only `require_signature`; `import_initial_trustlines` and `begin_internal_batch` are the seeder's and
-drift's internal entrances. The rule has three parts, each checked on the source of `app/`:
+keyword-only `require_signature`; `begin_internal_batch` is the seeder's and
+drift's internal entrance. The rule has three parts, each checked on the source of `app/`:
 
 1. every call of `execute_*` passes `require_signature=` as a LITERAL `True` or `False` - never a variable, an
    attribute or an expression, which is the only way a request could reach it;
-2. a literal `False`, `import_initial_trustlines` and `begin_internal_batch` appear only in the NAMED trusted
+2. a literal `False` and `begin_internal_batch` appear only in the NAMED trusted
    modules below (stage 1: the seeder and drift; stage 2: the inject executor and the Interact handlers);
 3. no request schema (`app/schemas/`) mentions `require_signature` at all, and an HTTP module (`app/api/`) names
    it ONLY as the literal keyword of an `execute_*` call - and only if it is a trusted module (stage 2: the
@@ -31,7 +31,7 @@ REPO = Path(__file__).resolve().parents[2]
 APP = REPO / "app"
 
 EXECUTE = {"execute_create", "execute_update", "execute_close"}
-INTERNAL_ENTRANCES = {"import_initial_trustlines", "begin_internal_batch"}
+INTERNAL_ENTRANCES = {"begin_internal_batch"}  # 030 S3b: `import_initial_trustlines` is gone
 
 #: The named trusted callers of the unsigned path, by module (spec, "Решения" item 4). Stage 1: the seeder and
 #: drift; stage 2: the inject executor and the Interact actions' handlers.
@@ -176,7 +176,7 @@ def test_counter_check_an_unsigned_call_outside_the_trusted_modules_is_refused()
 def test_counter_check_a_missing_flag_and_a_stray_import_are_refused() -> None:
     missing = "async def f(svc, b, d):\n    await svc.execute_create(b, 1, d)\n"
     assert violations_in(missing, "app/core/simulator/trust_drift_engine.py"), "a call without the flag passed"
-    stray = "async def f(svc, b):\n    await svc.import_initial_trustlines(b, [])\n"
+    stray = "async def f(svc, b):\n    await svc.begin_internal_batch()\n"
     assert violations_in(stray, "app/core/simulator/real_payments_executor.py"), "an untrusted import call passed"
 
 

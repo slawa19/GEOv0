@@ -1,4 +1,5 @@
 import asyncio
+import time
 from decimal import Decimal, ROUND_DOWN
 
 import pytest
@@ -21,6 +22,9 @@ from tests.debt_setup import _uuid_literals, debt_fixture_setup
 # the test, and `client` routes the simulator's `AsyncSessionLocal` to the same clone. On SQLite
 # nothing changes: the tier's session already commits for real and is reset per test.
 pytestmark = MODE_B
+
+# The longest this test waits for the run's first-tick seeding to commit (see the poll below for the measurement).
+SEEDING_DEADLINE_S = 60.0
 
 
 @pytest_asyncio.fixture
@@ -78,8 +82,16 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     # runner's later commit can never appear in it. This is not a SQLite quirk to work around: any
     # backend at a repeatable-read or stricter isolation behaves the same. Waiting for another
     # transaction's write means re-reading in a NEW transaction.
+    #
+    # 030 S3 CI failure (2026-10-06): the wait was `range(15)` x 0.2 s = 3 s, sized for the batched import. The
+    # seeder now creates its 432 lines one by one through `TrustLineService.execute_create` (S3b, ~9 statements a
+    # line): measured locally 2.0-2.5 s of seeding and 3.2-3.7 s from the run's start to the lines being visible,
+    # against 0.2 s / 1.4 s on the batched import - so CI missed the 3 s. The wait is a DEADLINE sized for the work,
+    # not a count of sleeps; the loop still leaves at the first poll that sees the lines, so a fast seeding costs
+    # nothing and a seeding that never lands fails at the deadline, naming it.
     eq = None
-    for _ in range(15):
+    deadline = time.monotonic() + SEEDING_DEADLINE_S
+    while True:
         await db_session.rollback()
         eq = (
             await db_session.execute(select(Equivalent).where(Equivalent.code == "UAH"))
@@ -89,8 +101,8 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
             select(TrustLine.id).where(TrustLine.equivalent_id == eq.id).limit(1)
         )).first() is not None:
             break
+        assert time.monotonic() < deadline, f"the run's seeding did not land in {SEEDING_DEADLINE_S} s"
         await asyncio.sleep(0.2)
-    assert eq is not None
 
     tl = (
         await db_session.execute(select(TrustLine).where(TrustLine.equivalent_id == eq.id))

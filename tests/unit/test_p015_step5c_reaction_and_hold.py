@@ -52,7 +52,6 @@ from app.core.payments.service import PaymentService
 from app.db.models.audit_log import AuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
-from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
@@ -424,7 +423,7 @@ async def test_step5c_no_hold_on_unverifiable(db_session, monkeypatch) -> None:
     """
     from tests.conftest import TestingSessionLocal as factory
 
-    triangle = await _seed_triangle(factory, trustlines=[])
+    triangle = await _seed_triangle(factory, trustlines=[("b", "a", "100")])
     (debt,) = await _fixture_debts(factory, triangle, [("a", "b", "10")])
     await _set_debt(factory, debt, "10.00000001")
     reactions = _spy_reactions(monkeypatch)
@@ -477,39 +476,10 @@ async def test_step5c_no_hold_on_a_verifier_error_either_before_or_inside_the_re
     assert _hold_logs(caplog) == []
 
 
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("tier_on_a_clone")
-async def test_step5c_no_hold_on_an_inherited_critical_checkpoint(db_session, monkeypatch) -> None:
-    """A debt with no trust line makes the integrity checkpoint `critical`; the baseline adopts it and the
-    reconciliation is PASSED. The scheduled host must not hold: the hold reads only a confirmed FAILED.
-
-    MUTATION: react to every scheduled status, not only FAILED (`if False: continue` in the loop) - a
-    reaction runs on a PASSED equivalent whose checkpoint is critical, red. No code path reads the
-    checkpoint's severity for the hold; that absence is what this negative control pins.
-    """
-    from tests.conftest import TestingSessionLocal as factory
-
-    triangle = await _seed_triangle(factory, trustlines=[])
-    await _fixture_debts(factory, triangle, [("a", "b", "10")])
-    await _baseline(factory, triangle.equivalent.id)
-    reactions = _spy_reactions(monkeypatch)
-
-    await _scheduled_run(monkeypatch, factory)
-
-    async with factory() as session:
-        (status,) = (
-            await session.execute(
-                select(IntegrityCheckpoint.invariants_status).where(
-                    IntegrityCheckpoint.equivalent_id == triangle.equivalent.id
-                )
-            )
-        ).scalars().all()
-    assert status["passed"] is False and status["status"] == "critical", (
-        f"premise: the checkpoint is not critical: {status}"
-    )
-    assert [row.status for row in await _result_rows(factory, triangle.equivalent.id)] == [PASSED]
-    assert reactions == []
-    assert await _hold_of(factory, triangle.equivalent.id) is None
+# `test_step5c_no_hold_on_an_inherited_critical_checkpoint` left with 030 S3a (`T3000` decision B): a debt without a
+# live line is now a finding of the reconciliation itself, so its premise "critical checkpoint, PASSED reconciliation"
+# cannot be built; `tests/integration/test_p030_s3a_reconciliation_holds_on_structure_postgres.py` holds the inverse.
+# "Hold only on a confirmed FAILED" stays pinned by the UNVERIFIABLE and error tests above.
 
 
 @pytest.mark.asyncio

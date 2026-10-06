@@ -1,40 +1,36 @@
-"""Programme 015, phase B step 3: every debt the simulator's inject writes is written under the owner lock.
+"""Programme 015, phase B step 3: every debt a simulator-run money writer writes is written under the owner lock.
 
-027 STAGE 2 (`T2704`): the "owner lock" is the line locks, read from `trust_lines.xmax` (top-level xid only).
+027 STAGE 2 (`T2704`): the "owner lock" is the line locks, read from `trust_lines.xmax` (any (sub)transaction xid of the writing backend).
 
-WHAT IS WRONG TODAY. The equivalent owner lock is a transactional `pg_advisory_xact_lock`
-(`app/core/payments/engine.py`). The tick orchestrator takes it for the run's equivalents and then
-hands its session to the due-events phase, where `InjectExecutor.apply_inject_event` calls
-`session.commit()` on a transaction it did not open (`app/core/simulator/inject_executor.py`). That
-commit releases the lock. A second inject event due in the same tick then writes `debts` with no
-owner lock at all, and the payments phase reads its debt snapshot before anything takes it again.
+030 STAGE S3b: the simulator's `inject_debt` effect is deleted, so the writer under observation is the real
+one - `PaymentService.pay` - and the tick half keeps only the payments phase's debt snapshot. The stand
+and its helpers (`observed_factory`, `_seed`, `_run`, `_runner`, `_stored`, `_Artifacts`, `_observations`)
+stay: other modules import them.
 
-Phase B orders its journal, per-equivalent counter and checksum chain under exactly this lock, so a
-writer outside it would make the chain's order a matter of luck. The contract makes the repair a
-precondition of activating the journal.
+WHAT WAS WRONG (015, phase B step 3). The equivalent owner lock was a transactional `pg_advisory_xact_lock`
+(`app/core/payments/engine.py`). The tick orchestrator took it for the run's equivalents and handed its
+session to the due-events phase, where a nested `session.commit()` released it; a second writer in the
+same tick then wrote `debts` with no owner lock at all, and the payments phase read its debt snapshot
+before anything took it again. Phase B orders its journal, per-equivalent counter and checksum chain under
+exactly this lock, so a writer outside it would make the chain's order a matter of luck.
 
-HOW THE STAND SEES IT. A `before_flush` listener on the writing session asks `pg_locks`, through that
-session's own connection, whether the backend holds the owner lock of each debt's equivalent: the
-exact key (`classid` = namespace, `objid` = key as unsigned, `objsubid` = 2 for the two-argument
-form), `ShareLock` since 019 stage 5 (`T1909`: the inject holds the ONE equivalent lock SHARED; the
-clearing is the only exclusive holder - `ExclusiveLock` until then), granted. Observations are recorded and asserted AFTER the call returns: an
-assertion raised inside a commit would be swallowed by the inject's own error handling and read as
-"inject failed", which is the kind of green this programme exists to remove.
+HOW THE STAND SEES IT. A `before_flush` listener on the writing session asks `pg_locks`/`trust_lines.xmax`,
+through that session's own connection, whether the transaction holds every non-closed line of the debt's
+pair in its equivalent. Observations are recorded and asserted AFTER the call returns: an assertion raised
+inside a commit would be swallowed by the writer's own error handling and read as "payment failed", which
+is the kind of green this programme exists to remove.
 
 WHY THE STAND IS BUILT THIS WAY, and each choice is load-bearing:
 
-* Its own engine with `isolation_level="SERIALIZABLE"`. The shared test engine runs READ COMMITTED
-  while the application runs SERIALIZABLE (`app/db/session.py`).
+* Its own engine with `isolation_level` of the application (`settings.DB_POSTGRES_ISOLATION_LEVEL`). The
+  shared test engine runs READ COMMITTED while the application runs SERIALIZABLE (`app/db/session.py`).
 * A real pool of two connections, not NullPool and not the savepoint-wrapped `db_session`. Under
   `db_session` an outer transaction survives every "commit", so a transaction-level lock would never
-  be released and a writer that lost its lock would still look locked. With NullPool a released
-  connection is closed, so "the lock was released" could not be told from "the connection died".
-* Two equivalents with two different lock keys, so "some advisory lock is held" cannot pass for
-  "this debt's lock is held".
-* Non-vacuity: both debts must actually be flushed and stored with their exact amounts. No flush,
-  no observation - and an empty observation list must not read as compliance.
+  be released and a writer that lost its lock would still look locked.
+* Two equivalents, so "some lock is held" cannot pass for "this debt's lines are locked".
+* Non-vacuity: debts must actually be flushed in both equivalents, a debt flush under no lock must be
+  observed as NOT held (the control), and an empty observation list must not read as compliance.
 """
-
 from __future__ import annotations
 
 import logging
@@ -52,20 +48,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core.payments.router import PaymentRouter
+from app.core.payments.service import PaymentService
 from app.core.simulator.models import RunRecord
 from app.core.simulator.real_runner_impl import RealRunnerImpl
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.schemas.payment import PaymentCreateRequest
+from tests.debt_setup import add_debts
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# A row lock stamps `xmax` with the xid of the (sub)transaction that took it. The payment takes its line locks inside the
+# operation's SAVEPOINT, so the stamp is a SUBtransaction xid, which `pg_current_xact_id()` (top level) never equals;
+# every assigned (sub)xid of this backend holds a `transactionid` lock, which is what "mine" is read from.
 _HOLDS_LINES_SQL = """
-    SELECT count(*) FILTER (WHERE xmax = pg_current_xact_id()::xid), count(*) FROM trust_lines
+    SELECT count(*) FILTER (WHERE xmax IN (
+        SELECT transactionid FROM pg_locks
+        WHERE locktype = 'transactionid' AND pid = pg_backend_pid() AND granted)), count(*) FROM trust_lines
     WHERE equivalent_id = :eq AND status <> 'closed'"""
 _PAIR_SQL = " AND from_participant_id IN (:a, :b) AND to_participant_id IN (:a, :b)"
 
@@ -173,37 +178,6 @@ async def _seed(factory) -> _World:
 _AMOUNTS = (Decimal("3.00"), Decimal("5.00"))
 
 
-def _scenario(world: _World) -> dict[str, Any]:
-    c, d = world.creditor.pid, world.debtor.pid
-    return {
-        "equivalents": [eq.code for eq in world.equivalents],
-        "participants": [{"id": c}, {"id": d}],
-        "trustlines": [
-            {"from": c, "to": d, "equivalent": eq.code, "limit": "100.00", "status": "active"}
-            for eq in world.equivalents
-        ],
-        "behaviorProfiles": [],
-        # TWO inject events due in the same tick, one per equivalent. The second is the one that
-        # writes after the first one's commit released the orchestrator's lock.
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {
-                        "op": "inject_debt",
-                        "from": c,
-                        "to": d,
-                        "equivalent": eq.code,
-                        "amount": str(amount),
-                    }
-                ],
-            }
-            for eq, amount in zip(world.equivalents, _AMOUNTS)
-        ],
-    }
-
-
 class _Artifacts:
     def __init__(self) -> None:
         self.events: list[dict[str, Any]] = []
@@ -250,7 +224,7 @@ def _run(world: _World, run_id: str) -> RunRecord:
     run.seed = 7
     run.tick_index = 1  # not a clearing tick
     run.sim_time_ms = 1_000
-    run.intensity_percent = 0  # no payments: the debts under test are the injected ones only
+    run.intensity_percent = 0  # the tick plans no payments of its own
     run._real_seeded = True
     run._real_participants = [(world.creditor.id, world.creditor.pid), (world.debtor.id, world.debtor.pid)]
     run._real_equivalents = sorted(eq.code for eq in world.equivalents)
@@ -287,44 +261,94 @@ def _assert_every_debt_write_was_locked(world: _World) -> None:
     )
 
 
-@pytest.mark.asyncio
-async def test_the_due_events_phase_writes_each_injected_debt_under_its_owner_lock(
-    observed_factory,
-) -> None:
-    """RED before phase B step 3: nothing in the due-events phase takes the lock at all."""
-    world = await _seed(observed_factory)
-    scenario = _scenario(world)
-    run = _run(world, "p015-due-events")
-    artifacts = _Artifacts()
-    runner = _runner(run, scenario, artifacts)
+async def _pay(factory, sender_id: uuid.UUID, receiver_pid: str, eq_code: str, amount: Decimal):
+    request = PaymentCreateRequest(
+        tx_id="tx-" + uuid.uuid4().hex, to=receiver_pid, equivalent=eq_code, amount=str(amount),
+        signature="__internal__",
+    )
+    try:
+        return await PaymentService.pay(factory, sender_id, request, require_signature=False)
+    finally:
+        PaymentRouter.invalidate_cache(eq_code)
 
-    async with observed_factory() as session:
-        await runner._apply_due_scenario_events(
-            session, run_id=run.run_id, run=run, scenario=scenario
-        )
+
+@pytest.mark.asyncio
+async def test_a_payment_writes_each_debt_under_the_line_locks_of_its_pair(observed_factory) -> None:
+    """The real money writer, through the observed factory: every `Debt` flush of a payment - the INSERT of a
+    new debt in each equivalent and the UPDATE that a reducing payment makes to an existing one - happens in a
+    transaction that holds every non-closed line of the debt's pair.
+
+    The debtor pays the creditor on the creditor's line in both equivalents (a debt grows: INSERT), then the
+    creditor pays part of it back in the first one (the debt shrinks: UPDATE).
+    """
+    world = await _seed(observed_factory)
+    eq1, eq2 = world.equivalents
+    creditor, debtor = world.creditor, world.debtor
+
+    for eq, amount in zip(world.equivalents, _AMOUNTS):
+        paid = await _pay(observed_factory, debtor.id, creditor.pid, eq.code, amount)
+        assert paid.status == "COMMITTED", paid
+    reduced = await _pay(observed_factory, creditor.id, debtor.pid, eq1.code, Decimal("1.00"))
+    assert reduced.status == "COMMITTED", reduced
 
     stored = await _stored(observed_factory, world)
-    assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, stored
-    assert run._real_fired_scenario_event_indexes == {0, 1}
+    assert stored == {eq1.id: _AMOUNTS[0] - Decimal("1.00"), eq2.id: _AMOUNTS[1]}, stored
     _assert_every_debt_write_was_locked(world)
+    assert len([o for o in _observations if o.equivalent_id == eq1.id]) >= 2, (
+        "non-vacuity: the first equivalent's debt was both created and reduced, two flushes at least; "
+        f"observed {_observations}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_real_tick_keeps_the_owner_lock_boundary_from_inject_to_payments(
+async def test_the_observer_sees_a_debt_written_without_the_line_locks(observed_factory) -> None:
+    """CONTROL (anti-vacuum) of the test above: a `Debt` flushed by a session that holds no line lock is
+    observed as NOT held. Without it, "every observation is held" could pass because `_holds` always says so."""
+    world = await _seed(observed_factory)
+    eq = world.equivalents[0]
+    async with observed_factory() as session:
+        await add_debts(
+            session,
+            [Debt(debtor_id=world.debtor.id, creditor_id=world.creditor.id, equivalent_id=eq.id,
+                  amount=Decimal("1.00"))],
+            label="p030_s3b_unlocked_write",
+        )
+        await session.flush()
+        await session.commit()
+
+    assert [(o.equivalent_id, o.held, o.error) for o in _observations] == [(eq.id, False, None)], _observations
+
+
+@pytest.mark.asyncio
+async def test_a_real_tick_reads_its_payments_snapshot_under_the_owner_lock(
     observed_factory, monkeypatch
 ) -> None:
-    """RED before phase B step 3, through the orchestrator's own PostgreSQL branch.
-
-    Nothing ran that branch before this test. The orchestrator takes the lock, the first inject's
-    commit drops it, the second inject writes without it, and the payments phase reads its debt
-    snapshot without it. After the repair: each inject is its own locked unit of work, and the
-    payments phase reads its snapshot inside a transaction that holds every run equivalent's lock.
-    """
+    """The payments phase of a real tick reads its debt snapshot inside a transaction that holds every run
+    equivalent's lines (015 step 3, through the orchestrator's own PostgreSQL branch). The debts are seeded
+    as fixtures (a `TEST_FIXTURE` operation), the scenario has no events, and the tick must leave them as they were."""
     import app.core.simulator.storage as simulator_storage
     import app.db.session as app_db_session
 
     world = await _seed(observed_factory)
-    scenario = _scenario(world)
+    async with observed_factory() as session:
+        await add_debts(
+            session,
+            [
+                Debt(debtor_id=world.debtor.id, creditor_id=world.creditor.id, equivalent_id=eq.id, amount=amount)
+                for eq, amount in zip(world.equivalents, _AMOUNTS)
+            ],
+            label="p030_s3b_tick_debts",
+        )
+        await session.commit()
+    _observations.clear()  # the fixture's own flushes are not under test
+
+    scenario: dict[str, Any] = {
+        "equivalents": [eq.code for eq in world.equivalents],
+        "participants": [{"id": world.creditor.pid}, {"id": world.debtor.pid}],
+        "trustlines": [],
+        "behaviorProfiles": [],
+        "events": [],
+    }
     run = _run(world, "p015-real-tick")
     artifacts = _Artifacts()
     runner = _runner(run, scenario, artifacts)
@@ -351,10 +375,9 @@ async def test_a_real_tick_keeps_the_owner_lock_boundary_from_inject_to_payments
 
     stored = await _stored(observed_factory, world)
     assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, (
-        f"both injects must be applied exactly once by the tick, got {stored}; "
-        f"artifacts: {artifacts.events}"
+        f"the tick must leave the seeded debts as they were, got {stored}; artifacts: {artifacts.events}"
     )
-    _assert_every_debt_write_was_locked(world)
+    assert not _observations, f"a tick with no events and no payments wrote a debt: {_observations}"
 
     assert {o.equivalent_id for o in snapshot_locks} == {eq.id for eq in world.equivalents}, (
         "non-vacuity: the payments phase never read its debt snapshot"

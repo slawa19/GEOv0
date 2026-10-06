@@ -59,16 +59,6 @@ class ParticipantService:
             raise InvalidSignatureException("Invalid signature")
 
         # 4. Create participant
-        participant = Participant(
-            pid=pid,
-            display_name=participant_in.display_name,
-            public_key=participant_in.public_key,
-            type=participant_in.type,
-            profile=(participant_in.profile.model_dump(exclude_unset=True) if participant_in.profile is not None else None),
-            status='active',
-            verification_level=0
-        )
-        self.db.add(participant)
         # 2026-08-22 / p009_t905 (`F-009-6`): read the server-generated values back INSIDE
         # the transaction, so a readback failure undoes the mutation instead of reporting
         # a mutation that already happened as failed. See `RT-009-5`.
@@ -78,7 +68,10 @@ class ParticipantService:
             # above cannot see a competitor that inserts between it and this write, and
             # that race is precisely what this handler answers.  Outside the handler it
             # would become an unhandled 500 on the path whose job is to report conflicts.
-            await self.db.flush()
+            participant = await self.insert_participant(
+                pid=pid, display_name=participant_in.display_name, public_key=participant_in.public_key,
+                type=participant_in.type,
+                profile=participant_in.profile.model_dump(exclude_unset=True) if participant_in.profile is not None else None)
             await self.db.refresh(participant)
             await self.db.commit()
         except IntegrityError:
@@ -86,6 +79,36 @@ class ParticipantService:
             await self.db.rollback()
             raise ConflictException("Participant already exists")
         return participant
+
+    async def insert_participant(self, *, pid: str, display_name: str, public_key: str, type: str,
+                                 profile: dict | None, flush: bool = True) -> Participant:
+        """The one insert of a participant: ACTIVE, staged and flushed in the caller's transaction, never committed.
+
+        030 S3b (F-030-19, `T3000` item 3): the public registration calls it after its key and signature checks; the
+        trusted simulator (seeder, inject) with its pseudo key. Another status is `set_status`, after the lines."""
+
+        participant = Participant(pid=pid, display_name=display_name, public_key=public_key, type=type,
+                                  profile=profile, status="active", verification_level=0)
+        self.db.add(participant)
+        if flush:
+            await self.db.flush()
+        return participant
+
+    async def set_status(self, pid: str, status: str) -> tuple[Participant, str]:
+        """Set the status in the caller's transaction, flushed, never committed; returns the row and the old status.
+
+        028 `F-028-28` (owner В-1): the row `FOR UPDATE` is the freeze's whole lock - a money writer holds its
+        participants `FOR SHARE`, so the freeze waits for one in flight, and one arriving later waits for this commit
+        and reads the new status. Moved from the admin handler by 030 S3b; the simulator's freezes call it too."""
+
+        participant = (await self.db.execute(select(Participant).where(Participant.pid == pid).with_for_update()
+                                             .execution_options(populate_existing=True))).scalar_one_or_none()
+        if participant is None:
+            raise NotFoundException(f"Participant {pid} not found")
+        before = participant.status
+        participant.status = status
+        await self.db.flush()
+        return participant, before
 
     async def get_participant(self, pid: str) -> Participant:
         result = await self.db.execute(select(Participant).where(Participant.pid == pid))

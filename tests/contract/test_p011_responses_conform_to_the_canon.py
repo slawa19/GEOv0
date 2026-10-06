@@ -138,7 +138,8 @@ from tests.contract.openapi_response_conformance import (
 # `policy=data.policy or {}` (app/core/trustlines/service.py:190), update writes a dict
 # (:334-336), the simulator trustline-create action omits the kwarg so the ORM default fires
 # (app/api/v1/simulator.py:1116-1121), the injector and the real-mode seeder pass dicts
-# (app/core/simulator/inject_executor.py:506, :622; real_scenario_seeder.py:213-224), and
+# (historical anchors, before 030 S3b moved seeding onto `TrustLineService`: app/core/simulator/inject_executor.py:506,
+# :622; real_scenario_seeder.py:213-224), and
 # scripts/seed_db.py:359-382 coerced a non-dict (that direct import was deleted by 030 S2). Two unit tests were inserting `policy=None`
 # straight through the ORM, which bypasses the column's Python-side `default=`
 # (app/db/models/trustline.py:15-21 - it fires only when the attribute is unset, and there is no

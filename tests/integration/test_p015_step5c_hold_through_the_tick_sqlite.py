@@ -7,8 +7,8 @@ asserts that the hold refusal really happened, so a path that never ran cannot p
 
 Asserted after every run, because a refusal that works when a function is called directly can still damage
 the run through its caller: the run is `running`, `errors_total == 0`, no consecutive tick failures,
-`last_error is None`; the published phase is reset; the refused inject is consumed, not left pending; no
-debt and no envelope was written.
+`last_error is None`; the published phase is reset; the refused inject (a `create_trustline` effect) is consumed, not left pending; no
+line and no envelope was written.
 
 The hold is set directly (`hold_directly`): the subject here is the tick's classification of the refusal.
 The reaction that sets a hold in production is exercised in `tests/unit/test_p015_step5c_reaction_and_hold.py`.
@@ -34,6 +34,9 @@ from tests.integration.test_p015_t1544_operator_stop_through_the_tick_sqlite imp
     _Artifacts,
     _assert_the_run_was_not_charged,
     _debts,
+    _inject_line_scenario,
+    _inject_notes,
+    _lines,
     _messages,
     _run,
     _runner,
@@ -48,30 +51,17 @@ HOLD = MoneyBoundary.EQUIVALENT_INTEGRITY_HOLD_REASON
 
 
 @pytest.mark.asyncio
-async def test_step5c_a_held_inject_is_consumed_and_does_not_fail_the_run(factory, monkeypatch, caplog) -> None:
-    """MUTATION: match only `equivalent_inactive` in the inject owner's handler - the event stays pending,
-    every tick fails on it and the run is stopped after the limit, red."""
+async def test_step5c_a_held_inject_line_is_a_skip_consumed_and_does_not_fail_the_run(
+    factory, monkeypatch, caplog
+) -> None:
+    """MUTATION: drop the hold check from the line creation (`TrustLineService.execute_create`) - the line is
+    created in the held equivalent, red; stop treating the refusal as a per-effect skip in the inject
+    executor - the event stays pending, every tick fails on it and the run is stopped after the limit, red.
+
+    Since 030 S3b the inject has no money effect: its carrier of the hold is a `create_trustline` effect."""
     eq, (creditor, debtor) = await _seed(factory, ["C", "D"])
-    await _trust(factory, eq, creditor, debtor, "100.00")
     await hold_directly(factory, eq.id)
-    scenario = {
-        "equivalents": [eq.code],
-        "participants": [{"id": creditor.pid}, {"id": debtor.pid}],
-        "trustlines": [
-            {"from": creditor.pid, "to": debtor.pid, "equivalent": eq.code, "limit": "100.00", "status": "active"}
-        ],
-        "behaviorProfiles": [],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {"op": "inject_debt", "from": creditor.pid, "to": debtor.pid, "equivalent": eq.code,
-                     "amount": "5.00"}
-                ],
-            }
-        ],
-    }
+    scenario = _inject_line_scenario(eq, creditor, debtor)
     artifacts = _Artifacts()
     run = _run(f"s5c-inject-{uuid.uuid4().hex[:6]}", [creditor, debtor], eq.code, intensity=0)
     runner = _runner(run, scenario, actions=1, clearing_every=10_000, artifacts=artifacts)
@@ -83,20 +73,36 @@ async def test_step5c_a_held_inject_is_consumed_and_does_not_fail_the_run(factor
         await _ticks(runner, run, limit + 2)
 
     _assert_the_run_was_not_charged(run)
-    refusals = _messages(caplog, f"simulator.real.inject.refused_{HOLD}")
-    assert len(refusals) == 1, (
-        f"premise and consumption: expected the hold refusal exactly once over {limit + 2} ticks, got {refusals}"
+    notes = _inject_notes(artifacts)
+    assert len(notes) == 1, (
+        f"premise and consumption: expected the event's note exactly once over {limit + 2} ticks, got {notes}"
     )
-    notes = [
-        p for p in artifacts.payloads
-        if p.get("type") == "note"
-        and (p.get("scenario") or {}).get("description") == "inject refused (equivalent integrity hold)"
-    ]
-    assert len(notes) == 1, artifacts.payloads
+    assert notes[0]["description"] == "inject applied", notes
+    assert notes[0]["stats"]["skipped_reasons"] == {HOLD: 1}, notes
+    assert notes[0]["stats"]["applied"] == 0, notes
     assert 0 in run._real_fired_scenario_event_indexes, "the refused inject was left pending"
-    assert await _debts(factory, eq) == []
+    assert await _lines(factory, eq) == []
     async with factory() as s:
         assert await s.scalar(text("SELECT count(*) FROM debt_operations")) == 0
+
+
+@pytest.mark.asyncio
+async def test_step5c_control_the_same_inject_line_without_a_hold_is_created(factory, monkeypatch) -> None:
+    """Anti-vacuum for the test above: the same event, equivalent not held - the line IS created."""
+    eq, (creditor, debtor) = await _seed(factory, ["C", "D"])
+    scenario = _inject_line_scenario(eq, creditor, debtor)
+    artifacts = _Artifacts()
+    run = _run(f"s5c-inject-ctl-{uuid.uuid4().hex[:6]}", [creditor, debtor], eq.code, intensity=0)
+    runner = _runner(run, scenario, actions=1, clearing_every=10_000, artifacts=artifacts)
+    _install(monkeypatch, factory)
+
+    await _ticks(runner, run, 2)
+
+    _assert_the_run_was_not_charged(run)
+    notes = _inject_notes(artifacts)
+    assert len(notes) == 1 and notes[0]["stats"]["applied"] == 1, notes
+    assert "skipped_reasons" not in notes[0]["stats"], notes
+    assert len(await _lines(factory, eq)) == 1
 
 
 @pytest.mark.asyncio

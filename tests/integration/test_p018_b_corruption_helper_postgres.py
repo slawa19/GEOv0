@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ledger.book import Book, NewDebt, operation_for
 from app.core.ledger.reconciliation import FAILED, PASSED, take_baseline, verify_journal_equals_change
+from app.db.models.trustline import TrustLine
 from tests.ledger_corruption import CorruptionHelperError, corrupt, probe, require_the_privilege
 from tests.p018_support import (
     CHECK_VIOLATION,
@@ -46,6 +47,10 @@ async def test_one_atom_through_the_helper_is_unjournalled_and_criterion_a_fails
     try:
         async with AsyncSession(bind=engine, expire_on_commit=False, autoflush=False) as session:
             world = await seed_world(session)
+            # The debt's supporting line (030 S3a: a debt without a live line is a finding of the verifier itself).
+            session.add(TrustLine(from_participant_id=world.p(1), to_participant_id=world.p(0),
+                                  equivalent_id=world.eq, limit=Decimal("100"), status="active"))
+            await session.flush()
             await Book.post(
                 session,
                 operation_for("TEST_FIXTURE", f"helper-{uuid.uuid4()}", {"seed": True}),

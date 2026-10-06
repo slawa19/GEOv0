@@ -1,79 +1,66 @@
-"""Programme 015, phase B step 3: a REAL serialization failure restarts the inject's unit of work.
+"""Programme 015, phase B step 3: a REAL transient failure restarts the inject's unit of work.
 
-The default tier proves the retry with a synthetic `DBAPIError`. That proves the owner's branch, not
-that PostgreSQL produces what the branch expects where the branch expects it. This stand produces a
-real `40001`: the inject stages an update of a debt it has read, another connection updates and
-commits the same debt before the inject commits, and PostgreSQL refuses the inject's write under
-SERIALIZABLE ("could not serialize access due to concurrent update").
+030 S3b: the carrier is a `create_trustline` effect (the `inject_debt` effect is deleted). The property is
+unchanged: the owner of the event's transaction restarts the WHOLE unit of work on a transient database error.
 
-What must follow, and is asserted on the stored row:
-* PostgreSQL raised the 40001 at the owner's EXPLICIT FLUSH of the staged writes - where the UPDATE
-  is executed - and nowhere else, so the failure is real, not assumed. Asserting the place, not just
-  the code, also guards the flush itself: without it the write runs inside `commit()`, the error is
-  raised there, and a commit error is exactly what the owner must not confuse with a staging one;
+The default tier proves the retry with a synthetic `DBAPIError` (`tests/unit/test_p015_inject_transaction_ownership.py`).
+That proves the owner's branch, not that PostgreSQL produces what the branch expects where the branch expects it.
+This stand produces a real `40P01`: another connection holds an UNCOMMITTED line of the very pair the event creates,
+so the event's INSERT waits on the other transaction's unique-index entry; the other connection then asks for the
+participant rows the event holds `FOR SHARE`. Each waits for the other, and PostgreSQL aborts the one that waited
+first - the inject - at the flush that sends the line (`TrustLineWriteBatch.finish`, inside `stage_inject_event`).
+(027 stage 2: a real DEADLOCK stands in for the SSI `40001` of the earlier stand; every inject event holds its
+participant rows `FOR SHARE`, so the cycle exists on any run of it.)
+
+What must follow, and is asserted on the stored rows:
+* PostgreSQL raised the `40P01` at the owner's flush of the staged line and nowhere else, so the failure is real,
+  not assumed;
 * the whole unit of work ran again (staging twice), not just the commit;
-* the stored amount is the CONCURRENT value plus the injected amount, exactly once. A retry that
-  replayed the first attempt's staged amount would store 5.00 + 3.00 and silently discard the
-  concurrent write; a double application would add 3.00 twice.
+* the line lands EXACTLY ONCE with the event's own limit - not the competitor's, which was rolled back - and has
+  exactly one audit row: a retry that replayed the first attempt's staged writes, or applied twice, would leave two.
 
-THE STAND is the reproducer's (`test_p015_inject_holds_the_owner_lock_postgres.py`): its own engine
-with `isolation_level="SERIALIZABLE"` and a real pool of two connections - the shared test engine runs
-READ COMMITTED, where this conflict does not exist at all, and `db_session` wraps every commit in a
-savepoint. The concurrent writer takes the pool's second connection.
+THE STAND is the reproducer's (`test_p015_inject_holds_the_owner_lock_postgres.py`): its own engine at the
+application's isolation level and a real pool of two connections - `db_session` wraps every commit in a savepoint.
+The competitor takes the pool's second connection.
 """
 
 from __future__ import annotations
 
 import asyncio
-import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
-from app.core.ledger.book import Book, operation_for
-from app.db.models.debt import Debt
+from app.core.trustlines.service import TrustLineWriteBatch
+from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  # noqa: F401
     _Artifacts,
-    _observations,
     _run,
     _runner,
     _seed,
-    _stored,
     observed_factory,
 )
-
-from tests.debt_setup import debt_fixture_setup
 from tests.p019_support import deadlock_after_the_wait
+from tests.p021_support import trust_line_audit_rows
 
-
-_EXISTING = Decimal("5.00")
-_CONCURRENT = Decimal("7.12345678")
-_INJECTED = Decimal("3.00")
+_EVENT_LIMIT = Decimal("50.00")
+_COMPETITOR_LIMIT = Decimal("1.00")
 
 
 @pytest.mark.asyncio
-async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_work(
+async def test_a_real_deadlock_restarts_the_whole_inject_unit_of_work(
     observed_factory,  # noqa: F811
+    monkeypatch,
 ) -> None:
     world = await _seed(observed_factory)
     eq = world.equivalents[0]
-    async with observed_factory() as s:
-        async with debt_fixture_setup(s, label="setup"):
-            s.add(
-                Debt(
-                    debtor_id=world.debtor.id,
-                    creditor_id=world.creditor.id,
-                    equivalent_id=eq.id,
-                    amount=_EXISTING,
-                )
-            )
-        await s.commit()
-    _observations.clear()
-
     c, d = world.creditor.pid, world.debtor.pid
+    # The seed has the line creditor -> debtor in both equivalents; the event creates the opposite one.
+    line = (TrustLine.from_participant_id == world.debtor.id, TrustLine.to_participant_id == world.creditor.id,
+            TrustLine.equivalent_id == eq.id)
     scenario = {
         "equivalents": [e.code for e in world.equivalents],
         "participants": [{"id": c}, {"id": d}],
@@ -86,47 +73,55 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
                 "type": "inject",
                 "time": 0,
                 "effects": [
-                    {
-                        "op": "inject_debt",
-                        "from": c,
-                        "to": d,
-                        "equivalent": eq.code,
-                        "amount": str(_INJECTED),
-                    }
+                    {"op": "create_trustline", "from": d, "to": c, "equivalent": eq.code,
+                     "limit": str(_EVENT_LIMIT)}
                 ],
             }
         ],
     }
-    run = _run(world, "p015-real-40001")
+    run = _run(world, "p015-real-40P01")
     artifacts = _Artifacts()
     runner = _runner(run, scenario, artifacts)
 
     real_stage = runner._inject_executor.stage_inject_event
     stage_calls = 0
 
-    async def _stage_then_a_concurrent_writer_commits(session, **kwargs):
+    async def _count_stages(session, **kwargs):
         nonlocal stage_calls
         stage_calls += 1
-        staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
-        if stage_calls == 1:  # 027 stage 2: a real DEADLOCK (40P01) replaces the SSI 40001 - see `_competitor`
-            holding = asyncio.Event()
-            competitors.append(asyncio.create_task(_competitor(holding)))
-            await holding.wait()
-        return staged
+        return await real_stage(session, **kwargs)
+
+    runner._inject_executor.stage_inject_event = _count_stages
 
     competitors: list[asyncio.Task] = []
+    real_finish = TrustLineWriteBatch.finish
+    finish_calls = 0
 
     async def _competitor(holding: asyncio.Event) -> None:
         async with observed_factory() as other:
-            async with Book.operation(other, operation_for("TEST_FIXTURE", f"p027-competitor/{uuid.uuid4()}", {})):
-                mine = Debt.debtor_id == world.debtor.id, Debt.creditor_id == world.creditor.id, Debt.equivalent_id == eq.id
-                await other.execute(select(Debt.id).where(*mine).with_for_update())
-                await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
-                    TrustLine.equivalent_id == eq.id).with_for_update())
-                await other.execute(update(Debt).where(*mine).values(amount=_CONCURRENT))
-            await other.commit()
+            # WHO IS THE VICTIM: PostgreSQL checks for a deadlock once per lock wait, `deadlock_timeout` after it began, in
+            # the waiting backend, and aborts the backend that finds it. The inject waits first; pushing the competitor's
+            # check to 30 s (this transaction only) keeps it from ever detecting first - measured: without it the
+            # competitor was the victim in 2 of 6 runs. Needs a superuser, as the test role is here and in CI (the
+            # precedent is `test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py`).
+            await other.execute(text("SET LOCAL deadlock_timeout = '30s'"))
+            other.add(TrustLine(from_participant_id=world.debtor.id, to_participant_id=world.creditor.id,
+                                equivalent_id=eq.id, limit=_COMPETITOR_LIMIT, status="active"))
+            await other.flush()  # uncommitted: the event's INSERT of the same pair waits on this transaction
+            await deadlock_after_the_wait(other, holding, select(Participant.id).where(
+                Participant.id.in_([world.creditor.id, world.debtor.id])).with_for_update())
+            await other.rollback()  # the competitor never commits its line
 
-    runner._inject_executor.stage_inject_event = _stage_then_a_concurrent_writer_commits
+    async def _finish_after_the_competitor_holds_its_line(batch):
+        nonlocal finish_calls
+        finish_calls += 1
+        if finish_calls == 1:  # the first attempt only: the retry runs against a competitor that is gone
+            holding = asyncio.Event()
+            competitors.append(asyncio.create_task(_competitor(holding)))
+            await holding.wait()
+        return await real_finish(batch)
+
+    monkeypatch.setattr(TrustLineWriteBatch, "finish", _finish_after_the_competitor_holds_its_line)
 
     failures: list[tuple[str, str | None]] = []
 
@@ -154,22 +149,19 @@ async def test_a_real_serialization_failure_restarts_the_whole_inject_unit_of_wo
 
     await asyncio.gather(*competitors)
     assert failures == [("flush", "40P01")], (
-        f"non-vacuity: the stand must produce exactly one real serialization failure, at the "
-        f"owner's explicit flush of the staged writes; observed {failures}"
+        f"non-vacuity: the stand must produce exactly one real deadlock, at the flush that sends the "
+        f"event's line; observed {failures}"
     )
     assert stage_calls == 2, f"the unit of work must be staged again, staged {stage_calls}x"
-    stored = await _stored(observed_factory, world)
-    assert stored == {eq.id: _CONCURRENT + _INJECTED}, (
-        f"expected the concurrent {_CONCURRENT} plus the injected {_INJECTED} exactly once, "
-        f"stored {stored}"
+    async with observed_factory() as s:
+        lines = (await s.execute(select(TrustLine.limit, TrustLine.status).where(*line))).all()
+        audit = await trust_line_audit_rows(s, equivalent_codes=[eq.code], operation_type="TRUST_LINE_CREATE")
+    assert [(Decimal(str(limit)), status) for limit, status in lines] == [(_EVENT_LIMIT, "active")], (
+        f"expected the event's line exactly once with its own limit {_EVENT_LIMIT}, stored {lines}"
     )
+    assert len(audit) == 1, f"the retried event must leave one audit row, got {len(audit)}"
     assert run._real_fired_scenario_event_indexes == {0}
     notes = [
         p["scenario"]["description"] for p in artifacts.events if p.get("type") == "note"
     ]
     assert notes == ["inject applied"], notes
-
-    # Both debt flushes (the refused one and the retried one) ran under the owner lock.
-    debt_flushes = [o for o in _observations if o.equivalent_id == eq.id]
-    assert len(debt_flushes) == 2, debt_flushes
-    assert not [o for o in debt_flushes if o.error or not o.held], debt_flushes

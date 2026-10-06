@@ -7,6 +7,9 @@ held, and the next inject event of the tick wrote `debts` unlocked
 reproducer). The executor now only STAGES (`stage_inject_event`) and PUBLISHES
 (`publish_committed_inject`); `RealRunnerImpl._apply_due_scenario_events` owns every boundary.
 
+THE CARRIER is an inject `create_trustline` (030 S3b: the `inject_debt` effect that carried these properties is gone; ownership,
+retry, lock-set and publication are the same for every effect of the event).
+
 WHAT THIS FILE PROVES, always through the database: every effect is read back through a NEW session
 (`world.sessions()`), never through the session under test and never through a counter standing in
 for the row. The lock itself is proven by the PostgreSQL module named above; the lock SET check is
@@ -16,7 +19,7 @@ MODE B, EVERY TEST THAT TAKES `db_session` (017 stage 2b, T1702). A new session 
 COMMITTED. In mode A on PostgreSQL nothing the test commits is - `commit()` releases a SAVEPOINT
 inside the fixture's outer transaction - so the reads below saw no seed at all: twelve tests failed
 on it (`NoResultFound`, `assert None == Decimal('10.00')`), and every assertion of ABSENCE
-(`_fresh_debt(world) is None`) passed whether or not the owner had rolled back, because the second
+(`_fresh_lines(world) == []`) passed whether or not the owner had rolled back, because the second
 session could not have seen the row either way. One test hung for ever: its second session inserts a
 trustline whose foreign keys wait on participants the first, still-open transaction holds (stage-2
 catalogue, section 5). In mode B the commits are real, on a clone, and `world.sessions()` reaches that
@@ -41,14 +44,11 @@ from sqlalchemy import event, select
 from sqlalchemy.exc import DBAPIError
 
 from app.core.simulator.inject_executor import InjectOwnerLockSetTooNarrow
-from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner, _nonce
-
-from tests.debt_setup import debt_fixture_setup, writer_operation
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +81,10 @@ class _World:
     sessions: Any
 
 
-async def _seed_debt_world(
-    db_session, *, existing: Decimal | None = None, sessions: Any = None
-) -> _World:
+async def _seed_line_world(db_session, *, sessions: Any = None) -> _World:
+    """Two active participants and an equivalent, and NO line between them: the carrier of every
+    test below is an inject `create_trustline` creditor -> debtor, so "the line exists exactly once"
+    and "no line exists" are the two observable outcomes."""
     n = _nonce()
     eq = Equivalent(code=f"W{n}".upper()[:16], precision=2, is_active=True)
     creditor = Participant(
@@ -96,25 +97,6 @@ async def _seed_debt_world(
     )
     db_session.add_all([eq, creditor, debtor])
     await db_session.flush()
-    db_session.add(
-        TrustLine(
-            from_participant_id=creditor.id,
-            to_participant_id=debtor.id,
-            equivalent_id=eq.id,
-            limit=Decimal("100.00"),
-            status="active",
-        )
-    )
-    if existing is not None:
-        async with debt_fixture_setup(db_session, label="existing-debt"):
-            db_session.add(
-                Debt(
-                    debtor_id=debtor.id,
-                    creditor_id=creditor.id,
-                    equivalent_id=eq.id,
-                    amount=existing,
-                )
-            )
     await db_session.commit()
     return _World(
         eq.id, eq.code, creditor.id, creditor.pid, debtor.id, debtor.pid,
@@ -122,57 +104,66 @@ async def _seed_debt_world(
     )
 
 
-def _debt_event(world: _World, amount: str = "10.00") -> dict[str, Any]:
+def _line_event(world: _World, limit: str = "100.00", *, reverse: bool = False) -> dict[str, Any]:
+    frm, to = (
+        (world.debtor_pid, world.creditor_pid) if reverse else (world.creditor_pid, world.debtor_pid)
+    )
     return {
         "type": "inject",
         "time": 0,
         "effects": [
             {
-                "op": "inject_debt",
-                "from": world.creditor_pid,
-                "to": world.debtor_pid,
+                "op": "create_trustline",
+                "from": frm,
+                "to": to,
                 "equivalent": world.eq_code,
-                "amount": amount,
+                "limit": limit,
             }
         ],
     }
 
 
-def _debt_scenario(world: _World, *events: dict[str, Any]) -> dict[str, Any]:
+def _line_scenario(world: _World, *events: dict[str, Any]) -> dict[str, Any]:
     return {
         "participants": [{"id": world.creditor_pid}, {"id": world.debtor_pid}],
-        "trustlines": [
-            {
-                "from": world.creditor_pid,
-                "to": world.debtor_pid,
-                "equivalent": world.eq_code,
-                "limit": "100.00",
-                "status": "active",
-            }
-        ],
-        "events": list(events) or [_debt_event(world)],
+        "trustlines": [],
+        "events": list(events) or [_line_event(world)],
     }
 
 
-def _debt_run(world: _World):
+def _line_run(world: _World):
     return _make_run(
         participants=[(world.creditor_id, world.creditor_pid), (world.debtor_id, world.debtor_pid)],
         equivalents=[world.eq_code],
     )
 
 
-async def _fresh_debt(world: _World) -> Decimal | None:
+async def _fresh_lines(world: _World) -> list[tuple[uuid.UUID, uuid.UUID, str, Decimal]]:
+    """Every trust line between the world's two participants, in either direction, read through a NEW session."""
+    ids = (world.creditor_id, world.debtor_id)
     async with world.sessions() as s:
-        value = (
+        rows = (
             await s.execute(
-                select(Debt.amount).where(
-                    Debt.debtor_id == world.debtor_id,
-                    Debt.creditor_id == world.creditor_id,
-                    Debt.equivalent_id == world.eq_id,
+                select(
+                    TrustLine.from_participant_id,
+                    TrustLine.to_participant_id,
+                    TrustLine.status,
+                    TrustLine.limit,
+                ).where(
+                    TrustLine.equivalent_id == world.eq_id,
+                    TrustLine.from_participant_id.in_(ids),
+                    TrustLine.to_participant_id.in_(ids),
                 )
             )
-        ).scalar_one_or_none()
-    return None if value is None else Decimal(str(value))
+        ).all()
+    return sorted(
+        ((r[0], r[1], str(r[2]), Decimal(str(r[3]))) for r in rows), key=lambda t: (str(t[0]), str(t[1]))
+    )
+
+
+def _the_line(world: _World, limit: str = "100.00") -> tuple[uuid.UUID, uuid.UUID, str, Decimal]:
+    """What `_fresh_lines` returns once the event's one `create_trustline` has landed, exactly once."""
+    return (world.creditor_id, world.debtor_id, "active", Decimal(limit))
 
 
 async def _fresh_participant_ids(world: _World, pid: str) -> list[uuid.UUID]:
@@ -187,6 +178,17 @@ def _notes(arts, event_index: int = 0) -> list[str]:
         str(p["scenario"]["description"])
         for p in arts.payloads
         if p.get("type") == "note" and p.get("scenario", {}).get("event_index") == event_index
+    ]
+
+
+def _stats(arts, event_index: int = 0) -> list[dict[str, Any]]:
+    """The `stats` of each "inject applied" note of one event: the retry's own count of what it applied."""
+    return [
+        dict(p["scenario"]["stats"])
+        for p in arts.payloads
+        if p.get("type") == "note"
+        and p.get("scenario", {}).get("event_index") == event_index
+        and "stats" in p.get("scenario", {})
     ]
 
 
@@ -257,7 +259,7 @@ def _fail_commits_carrying_writes(monkeypatch, session, failures: list[BaseExcep
 # ---------------------------------------------------------------------------
 
 
-async def _stage_debt_with_a_caller_row(db_session, runner, world: _World) -> str:
+async def _stage_line_with_a_caller_row(db_session, runner, world: _World) -> str:
     caller_pid = f"CALLER_{_nonce()}"
     db_session.add(
         Participant(
@@ -267,21 +269,16 @@ async def _stage_debt_with_a_caller_row(db_session, runner, world: _World) -> st
     )
     await db_session.flush()  # the caller's transaction is really open, with a write in it
 
-    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `stage_inject_event`
-    # is production code that writes debts; called directly it opens no operation and the journal
-    # refuses its flush. `INJECT` is the kind the real caller declares
-    # (`app/core/simulator/real_runner_impl.py`), and it carries no `tx_id`.
-    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[world.eq_id]):
-        staged = await runner._inject_executor.stage_inject_event(
-            db_session,
-            scenario=_debt_scenario(world),
-            event=_debt_event(world, "10.00"),
-            pid_to_participant_id={
-                world.creditor_pid: world.creditor_id,
-                world.debtor_pid: world.debtor_id,
-            },
-            locked_equivalent_ids={world.eq_id},
-        )
+    staged = await runner._inject_executor.stage_inject_event(
+        db_session,
+        scenario=_line_scenario(world),
+        event=_line_event(world),
+        pid_to_participant_id={
+            world.creditor_pid: world.creditor_id,
+            world.debtor_pid: world.debtor_id,
+        },
+        locked_equivalent_ids={world.eq_id},
+    )
     assert staged.applied == 1, staged
     return caller_pid
 
@@ -289,14 +286,14 @@ async def _stage_debt_with_a_caller_row(db_session, runner, world: _World) -> st
 @MODE_B
 @pytest.mark.asyncio
 async def test_staging_leaves_the_transaction_to_its_caller_rollback(db_session) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, _arts = _make_runner()
 
-    caller_pid = await _stage_debt_with_a_caller_row(db_session, runner, world)
+    caller_pid = await _stage_line_with_a_caller_row(db_session, runner, world)
     await db_session.rollback()
 
-    assert await _fresh_debt(world) is None, (
-        "the injected debt survived the CALLER's rollback: staging committed a transaction it "
+    assert await _fresh_lines(world) == [], (
+        "the injected line survived the CALLER's rollback: staging committed a transaction it "
         "does not own"
     )
     assert await _fresh_participant_ids(world, caller_pid) == [], (
@@ -308,13 +305,13 @@ async def test_staging_leaves_the_transaction_to_its_caller_rollback(db_session)
 @pytest.mark.asyncio
 async def test_staging_leaves_the_transaction_to_its_caller_commit_control(db_session) -> None:
     """Control: the same staging, committed by the caller, lands both rows - exactly."""
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, _arts = _make_runner()
 
-    caller_pid = await _stage_debt_with_a_caller_row(db_session, runner, world)
+    caller_pid = await _stage_line_with_a_caller_row(db_session, runner, world)
     await db_session.commit()
 
-    assert await _fresh_debt(world) == Decimal("10.00")
+    assert await _fresh_lines(world) == [_the_line(world)]
     assert len(await _fresh_participant_ids(world, caller_pid)) == 1
 
 
@@ -326,9 +323,9 @@ async def test_staging_leaves_the_transaction_to_its_caller_commit_control(db_se
 @MODE_B
 @pytest.mark.asyncio
 async def test_the_owner_refuses_a_session_with_unflushed_changes(db_session) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     stray_pid = f"STRAY_{_nonce()}"
     db_session.add(
         Participant(
@@ -339,12 +336,12 @@ async def test_the_owner_refuses_a_session_with_unflushed_changes(db_session) ->
 
     with pytest.raises(RuntimeError, match="unflushed"):
         await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+            db_session, run_id="r1", run=run, scenario=_line_scenario(world)
         )
 
     assert run._real_fired_scenario_event_indexes == set()
     assert arts.payloads == []
-    assert await _fresh_debt(world) is None
+    assert await _fresh_lines(world) == []
     assert await _fresh_participant_ids(world, stray_pid) == [], "the owner committed the caller's work"
     db_session.expunge_all()
 
@@ -352,20 +349,20 @@ async def test_the_owner_refuses_a_session_with_unflushed_changes(db_session) ->
 @MODE_B
 @pytest.mark.asyncio
 async def test_the_owner_returns_with_no_transaction_open(db_session) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, _arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
 
     # Hand over an OPEN read transaction, as the orchestrator does after loading participants.
     await db_session.execute(select(Equivalent.id))
     assert db_session.in_transaction()
 
     await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+        db_session, run_id="r1", run=run, scenario=_line_scenario(world)
     )
 
     assert not db_session.in_transaction()
-    assert await _fresh_debt(world) == Decimal("10.00")
+    assert await _fresh_lines(world) == [_the_line(world)]
     assert run._real_fired_scenario_event_indexes == {0}
 
 
@@ -390,9 +387,9 @@ async def test_the_owner_returns_with_no_transaction_open(db_session) -> None:
 async def test_a_transient_failure_is_retried_and_applied_exactly_once(
     db_session, monkeypatch, where, error_kwargs
 ) -> None:
-    world = await _seed_debt_world(db_session, existing=Decimal("5.12345678"))
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
 
     if where == "staging":
         spy = _StageSpy(runner, fail_on_calls={1: _db_error(**error_kwargs)})
@@ -401,13 +398,16 @@ async def test_a_transient_failure_is_retried_and_applied_exactly_once(
         _fail_commits_carrying_writes(monkeypatch, db_session, [_db_error(**error_kwargs)])
 
     await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+        db_session, run_id="r1", run=run, scenario=_line_scenario(world)
     )
 
     assert spy.calls == 2, f"expected one retry of the whole unit of work, stage ran {spy.calls}x"
-    assert await _fresh_debt(world) == Decimal("15.12345678"), (
-        "the injected 10.00 must land exactly once on 5.12345678"
+    assert await _fresh_lines(world) == [_the_line(world)], (
+        "the injected line must land exactly once"
     )
+    # Anti-vacuum: a first attempt that was NOT rolled back would leave the line behind, the retry would
+    # skip it as "already exists", and the single row above would be the first attempt's, not the retry's.
+    assert _stats(arts) == [{"applied": 1, "skipped": 0}], _stats(arts)
     assert run._real_fired_scenario_event_indexes == {0}
     assert _notes(arts) == ["inject applied"]
     assert not db_session.in_transaction()
@@ -419,10 +419,10 @@ async def test_a_transient_failure_is_retried_and_applied_exactly_once(
 async def test_a_second_transient_failure_propagates_and_leaves_the_event_pending(
     db_session, monkeypatch, where
 ) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
-    later = _debt_event(world, "1.00")
+    run = _line_run(world)
+    later = _line_event(world, reverse=True)
 
     if where == "staging":
         spy = _StageSpy(
@@ -437,12 +437,12 @@ async def test_a_second_transient_failure_propagates_and_leaves_the_event_pendin
 
     with pytest.raises(DBAPIError):
         await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=_debt_scenario(world, _debt_event(world), later)
+            db_session, run_id="r1", run=run, scenario=_line_scenario(world, _line_event(world), later)
         )
 
     assert spy.calls == 2, "the later event must not run after the failure propagated"
     assert run._real_fired_scenario_event_indexes == set()
-    assert await _fresh_debt(world) is None
+    assert await _fresh_lines(world) == []
     assert _notes(arts, 0) == [] and _notes(arts, 1) == []
     assert not db_session.in_transaction()
 
@@ -455,17 +455,17 @@ async def test_a_non_transient_staging_error_is_recorded_not_retried(db_session)
     That set is 40001/40P01/55P03. A driver error outside it is recorded and the event fired,
     exactly as before.
     """
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     spy = _StageSpy(runner, fail_on_calls={1: _db_error(sqlstate="23505")})
 
     await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+        db_session, run_id="r1", run=run, scenario=_line_scenario(world)
     )
 
     assert spy.calls == 1
-    assert await _fresh_debt(world) is None
+    assert await _fresh_lines(world) == []
     assert run._real_fired_scenario_event_indexes == {0}
     assert _notes(arts) == ["inject failed (db error)"]
 
@@ -572,9 +572,9 @@ async def test_a_freeze_names_no_equivalent_and_writes_no_line(db_session) -> No
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_second_lock_set_expansion_leaves_the_event_pending(db_session) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     missing = frozenset({uuid.uuid4()})
     spy = _StageSpy(
         runner,
@@ -586,13 +586,13 @@ async def test_a_second_lock_set_expansion_leaves_the_event_pending(db_session) 
 
     with pytest.raises(InjectOwnerLockSetTooNarrow):
         await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+            db_session, run_id="r1", run=run, scenario=_line_scenario(world)
         )
 
     assert spy.calls == 2
     assert missing <= spy.locked_sets[1]
     assert run._real_fired_scenario_event_indexes == set()
-    assert await _fresh_debt(world) is None
+    assert await _fresh_lines(world) == []
     assert _notes(arts) == []
 
 
@@ -606,9 +606,9 @@ async def test_a_flush_error_is_a_known_rollback_not_an_unknown_outcome(
     Before the owner flushed explicitly, the flush ran inside `commit()` and its error was reported
     as a commit whose outcome could not be known.
     """
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     spy = _StageSpy(runner)
 
     real_flush = db_session.flush
@@ -622,12 +622,12 @@ async def test_a_flush_error_is_a_known_rollback_not_an_unknown_outcome(
     monkeypatch.setattr(db_session, "flush", flush)
 
     await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+        db_session, run_id="r1", run=run, scenario=_line_scenario(world)
     )
 
     assert not flush_failures, "non-vacuity: the flush failure was never injected"
     assert spy.calls == 1
-    assert await _fresh_debt(world) is None
+    assert await _fresh_lines(world) == []
     assert run._real_fired_scenario_event_indexes == {0}
     assert _notes(arts) == ["inject failed (db error)"]
     assert not db_session.in_transaction()
@@ -643,14 +643,14 @@ async def test_a_flush_error_is_a_known_rollback_not_an_unknown_outcome(
 async def test_a_non_transient_commit_error_keeps_the_event_fired_and_is_not_retried(
     db_session, monkeypatch
 ) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     spy = _StageSpy(runner)
     _fail_commits_carrying_writes(monkeypatch, db_session, [_db_error(sqlstate="08006")])
 
     await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+        db_session, run_id="r1", run=run, scenario=_line_scenario(world)
     )
 
     assert spy.calls == 1, "a commit whose outcome is unknown must not be staged again"
@@ -664,15 +664,15 @@ async def test_a_non_transient_commit_error_keeps_the_event_fired_and_is_not_ret
 async def test_cancellation_during_the_commit_keeps_the_event_fired(
     db_session, monkeypatch
 ) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     spy = _StageSpy(runner)
     _fail_commits_carrying_writes(monkeypatch, db_session, [asyncio.CancelledError()])
 
     with pytest.raises(asyncio.CancelledError):
         await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+            db_session, run_id="r1", run=run, scenario=_line_scenario(world)
         )
 
     assert spy.calls == 1
@@ -688,20 +688,20 @@ async def test_cancellation_during_the_commit_keeps_the_event_fired(
 async def test_cancellation_while_staging_rolls_back_and_leaves_the_event_pending(
     db_session,
 ) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     spy = _StageSpy(runner, fail_on_calls={1: asyncio.CancelledError()})
 
     with pytest.raises(asyncio.CancelledError):
         await runner._apply_due_scenario_events(
-            db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+            db_session, run_id="r1", run=run, scenario=_line_scenario(world)
         )
 
     assert spy.calls == 1
     assert run._real_fired_scenario_event_indexes == set()
     assert not db_session.in_transaction()
-    assert await _fresh_debt(world) is None
+    assert await _fresh_lines(world) == []
     assert _notes(arts) == []
 
 
@@ -712,31 +712,31 @@ async def test_cancellation_while_staging_rolls_back_and_leaves_the_event_pendin
 
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failing", ["edge_patch_builder", "artifacts"])
+@pytest.mark.parametrize("failing", ["topology_broadcast", "artifacts"])
 async def test_a_publish_failure_after_commit_keeps_the_committed_inject(
     db_session, monkeypatch, failing
 ) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     spy = _StageSpy(runner)
 
-    async def _broken_builder(**_kwargs):
-        raise RuntimeError("edge patch builder failed")
+    def _broken_broadcast(**_kwargs):
+        raise RuntimeError("topology broadcast failed")
 
     def _broken_enqueue(_run_id, _payload):
         raise RuntimeError("artifacts failed")
 
-    if failing == "edge_patch_builder":
-        monkeypatch.setattr(runner, "_build_edge_patch_for_equivalent", _broken_builder)
+    if failing == "topology_broadcast":
+        monkeypatch.setattr(runner._inject_executor, "broadcast_topology_changed", _broken_broadcast)
     else:
         monkeypatch.setattr(arts, "enqueue_event_artifact", _broken_enqueue)
 
     await runner._apply_due_scenario_events(
-        db_session, run_id="r1", run=run, scenario=_debt_scenario(world)
+        db_session, run_id="r1", run=run, scenario=_line_scenario(world)
     )
 
-    assert await _fresh_debt(world) == Decimal("10.00")
+    assert await _fresh_lines(world) == [_the_line(world)]
     assert run._real_fired_scenario_event_indexes == {0}
     assert spy.calls == 1
     assert not db_session.in_transaction()
@@ -766,24 +766,19 @@ def _add_participant_event(sponsor_pid: str, new_pid: str, eq_code: str) -> dict
 @MODE_B
 @pytest.mark.asyncio
 async def test_staging_does_not_touch_the_shared_pid_map(db_session) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, _arts = _make_runner()
     new_pid = f"NEWP_{_nonce()}"
     shared = {world.creditor_pid: world.creditor_id}
     before = dict(shared)
 
-    # THE WRITER'S OWN OPERATION, not a fixture context (design v2 §8 R5/F7). `stage_inject_event`
-    # is production code that writes debts; called directly it opens no operation and the journal
-    # refuses its flush. `INJECT` is the kind the real caller declares
-    # (`app/core/simulator/real_runner_impl.py`), and it carries no `tx_id`.
-    async with writer_operation(db_session, kind="INJECT", equivalent_ids=[world.eq_id]):
-        staged = await runner._inject_executor.stage_inject_event(
-            db_session,
-            scenario={"participants": [], "trustlines": []},
-            event=_add_participant_event(world.creditor_pid, new_pid, world.eq_code),
-            pid_to_participant_id=shared,
-            locked_equivalent_ids={world.eq_id},
-        )
+    staged = await runner._inject_executor.stage_inject_event(
+        db_session,
+        scenario={"participants": [], "trustlines": []},
+        event=_add_participant_event(world.creditor_pid, new_pid, world.eq_code),
+        pid_to_participant_id=shared,
+        locked_equivalent_ids={world.eq_id},
+    )
     assert new_pid in staged.pid_additions
     assert shared == before, "staging wrote a participant id that does not exist yet into the shared map"
 
@@ -797,16 +792,16 @@ async def test_staging_does_not_touch_the_shared_pid_map(db_session) -> None:
 async def test_a_rolled_back_add_participant_is_not_seen_by_the_retry_but_a_committed_one_is(
     db_session, monkeypatch
 ) -> None:
-    world = await _seed_debt_world(db_session)
+    world = await _seed_line_world(db_session)
     runner, _arts = _make_runner()
-    run = _debt_run(world)
+    run = _line_run(world)
     new_pid = f"NEWP_{_nonce()}"
     scenario = {
         "participants": [{"id": world.creditor_pid}, {"id": world.debtor_pid}],
         "trustlines": [],
         "events": [
             _add_participant_event(world.creditor_pid, new_pid, world.eq_code),
-            _debt_event(world, "1.00"),
+            _line_event(world),
         ],
     }
     spy = _StageSpy(runner)
@@ -816,7 +811,7 @@ async def test_a_rolled_back_add_participant_is_not_seen_by_the_retry_but_a_comm
 
     committed_ids = await _fresh_participant_ids(world, new_pid)
     assert len(committed_ids) == 1, committed_ids
-    assert spy.calls == 3  # add_participant twice (retry), then the debt event once
+    assert spy.calls == 3  # add_participant twice (retry), then the line event once
     assert new_pid not in spy.pid_maps[1], (
         "the retry of add_participant was handed the id its rolled-back first attempt staged"
     )
@@ -824,3 +819,4 @@ async def test_a_rolled_back_add_participant_is_not_seen_by_the_retry_but_a_comm
         "the next event must see the participant id that was actually committed"
     )
     assert run._real_fired_scenario_event_indexes == {0, 1}
+    assert await _fresh_lines(world) == [_the_line(world)], "the later event's line must land exactly once"

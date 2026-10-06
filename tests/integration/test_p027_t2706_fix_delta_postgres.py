@@ -12,13 +12,14 @@ from sqlalchemy.exc import DBAPIError
 from app.config import settings
 from app.core.clearing.service import ClearingService
 from app.core.money_boundary import MoneyBoundary
+from app.core.payments.service import PaymentService
 from app.core.simulator import trust_drift_engine
 from app.core.trustlines.service import TrustLineService
-from app.db.models.debt import Debt
 from app.db.sqlstate import sqlstate
+from app.db.models.debt import Debt
 from app.db.models.trustline import TrustLine
-from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest, TrustLineUpdateRequest
-from app.utils.exceptions import TimeoutException
+from app.schemas.trustline import TrustLineCreateRequest, TrustLineUpdateRequest
+from app.utils.exceptions import GeoException, TimeoutException
 from tests.integration.p019_interlock_support import _seed_interlock_case
 from tests.integration.test_p019_money_writers_refuse_non_serializable_postgres import _run_writer
 from tests.integration.test_p019_t1908_lock_removal_experiments_postgres import _inject_runner, _seed_pair, stand  # noqa: F401
@@ -42,50 +43,53 @@ async def _live(sessions, eq, creditor, debtor):
 
 
 @pytest.mark.asyncio
-async def test_a_line_created_after_the_lock_is_never_used_unlocked(stand, monkeypatch) -> None:  # noqa: F811
+async def test_a_line_created_while_a_payment_holds_its_pair_waits_and_is_never_used(stand, monkeypatch) -> None:  # noqa: F811
+    """§15 P1 of stage 2 (a line created after the lock was read unlocked), on the payment: Y -> X is closed, a payment
+    X -> Y is handed a route over it past the router and pauses holding its pair's locks; the creation of Y -> X must
+    WAIT for it (not commit under it), and no debt X -> Y exists without a live supporting line Y -> X. Until 030 S3b
+    this ran on the inject effect `inject_debt`, now deleted; the property is the money writers'."""
+
+    for name in ("PREPARE_TIMEOUT_SECONDS", "COMMIT_TIMEOUT_SECONDS", "PAYMENT_TOTAL_TIMEOUT_SECONDS"):
+        monkeypatch.setattr(settings, name, 30)
     eq, x, y = await _seed_pair(stand, "NL")
     async with stand() as s:
         await s.execute(update(TrustLine).where(TrustLine.from_participant_id == y.id).values(status="closed"))
         await s.commit()
-    paused, go, staged, go2 = asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event()
+    paused, go, armed = asyncio.Event(), asyncio.Event(), [True]
     lock = MoneyBoundary.lock_pair_lines
 
-    async def lock_then_pause(self, *args, **kwargs):
+    async def lock_then_pause(self, *args, **kwargs):  # only the payment pauses (the first caller), holding its rows
         rows = await lock(self, *args, **kwargs)
-        paused.set()
-        await go.wait()
+        if armed[0]:
+            armed[0] = False
+            paused.set()
+            await go.wait()
         return rows
 
     monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", lock_then_pause)
-    runner, run, scenario, _ = _inject_runner(eq, [x, y], creditor=y, debtor=x, amount="10.00")
 
-    async def inject():
+    async def pay():
         async with stand() as session:
-            commit = session.commit
+            service = PaymentService(session)
+            service.router.find_flow_routes = lambda *_a, **_k: [([x.pid, y.pid], Decimal("10.00"))]
+            try:
+                return (await service.create_payment_internal(x.id, to_pid=y.pid, equivalent=eq.code,
+                                                              amount="10.00")).status
+            except GeoException as exc:  # a refusal is an outcome
+                return exc.details.get("reason") or type(exc).__name__
 
-            async def pause_then_commit():  # the book has completed (its growth check passed); COMMIT is next
-                if paused.is_set():
-                    staged.set()
-                    await go2.wait()
-                return await commit()
-
-            session.commit = pause_then_commit
-            await runner._apply_due_scenario_events(session, run_id=run.run_id, run=run, scenario=scenario)
-
-    injecting = asyncio.create_task(inject())
+    paying = asyncio.create_task(pay())
     await asyncio.wait_for(paused.wait(), 20)
     creating = asyncio.create_task(_trust(stand, lambda svc, b: svc.execute_create(
         b, y.id, TrustLineCreateRequest(to=x.pid, equivalent=eq.code, limit="100", signature="-"), require_signature=False)))
-    await asyncio.wait([creating], timeout=2)  # done on the old code; waits on the X -> Y lock after the fix
+    await asyncio.wait([creating], timeout=2)
+    waited = not creating.done()
     go.set()
-    await asyncio.wait([injecting, asyncio.create_task(staged.wait())], return_when=asyncio.FIRST_COMPLETED, timeout=20)
-    if creating.done() and (new := await _live(stand, eq, y, x)) is not None:
-        await _trust(stand, lambda svc, b: svc.execute_close(b, new, y.id, TrustLineCloseRequest(signature="-"),
-                                                            require_signature=False))
-    go2.set()
-    await asyncio.wait_for(asyncio.gather(injecting, creating), 30)
+    outcome = await asyncio.wait_for(paying, 30)
+    await asyncio.wait_for(creating, 30)
     async with stand() as s:
         debt = await s.scalar(select(Debt.amount).where(Debt.debtor_id == x.id, Debt.creditor_id == y.id))
+    assert waited, f"the line Y -> X was created while the payment held its pair's locks: {outcome}"
     assert not debt or await _live(stand, eq, y, x), f"a debt {debt} X -> Y without a live supporting line Y -> X"
 
 
@@ -126,15 +130,14 @@ async def _blocked_by(stand, holder) -> bool:
 
 
 def _inject_create(eq, x, y):
-    """028 F-028-14: an event whose only effect is `create_trustline` Y -> X (no `inject_debt`, no pre-lock)."""
-    runner, run, scenario, _ = _inject_runner(eq, [x, y], creditor=x, debtor=y, amount="10.00")
-    scenario["events"][0]["effects"] = [
-        {"op": "create_trustline", "from": y.pid, "to": x.pid, "equivalent": eq.code, "limit": "50"}]
+    """028 F-028-14: an event whose only effect is `create_trustline` Y -> X."""
+    runner, run, scenario, _ = _inject_runner(eq, [x, y], [
+        {"op": "create_trustline", "from": y.pid, "to": x.pid, "equivalent": eq.code, "limit": "50"}])
     return runner, run, scenario
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("owner", ["clearing", "inject", "inject_create"])
+@pytest.mark.parametrize("owner", ["clearing", "inject_create"])
 async def test_a_held_line_bounds_the_owner_wait(owner, stand, monkeypatch) -> None:  # noqa: F811
     monkeypatch.setattr(settings, "COMMIT_TIMEOUT_SECONDS", 1)
     seed = await _seed_interlock_case() if owner == "clearing" else None
@@ -148,9 +151,6 @@ async def test_a_held_line_bounds_the_owner_wait(owner, stand, monkeypatch) -> N
             TrustLine.equivalent_id == (seed["equivalent_id"] if seed else eq.id)).with_for_update())
         if seed:
             call = ClearingService(s).execute_occurrence(seed["occurrence"])
-        elif owner == "inject":
-            runner, run, scenario, _ = _inject_runner(eq, [x, y], creditor=x, debtor=y, amount="10.00")
-            call = runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)
         else:
             runner, run, scenario = _inject_create(eq, x, y)
             call = runner._apply_due_scenario_events(s, run_id=run.run_id, run=run, scenario=scenario)

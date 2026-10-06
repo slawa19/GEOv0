@@ -2593,6 +2593,18 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/UnauthorizedBearer'
+        '409':
+          description: >-
+            E008, the error envelope with `details.reason`: an active line over the pair and equivalent already
+            exists (`CONCURRENT_TRUSTLINE_CREATE` when the clash was met at the write); an end is a suspended
+            participant (`participant_suspended`); the equivalent is stopped by the operator
+            (`equivalent_inactive`) or under an integrity hold (`equivalent_integrity_hold`), both with
+            `details.equivalents` naming the codes (030 S3b, F-030-19: the same refusal and reasons as
+            `POST /payments`, none retryable). A stopped or held equivalent takes no new line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -8556,7 +8568,8 @@ components:
           type: string
           enum: [caller_transaction]
         initial_status:
-          # TRUST_LINE_CREATE of a scenario import (`import_initial_trustlines`): the status the line was created
+          # TRUST_LINE_CREATE of a scenario import (the simulator's seeding wrote it until 030 S3b, F-030-19, which
+          # routes seeding through `TrustLineService`; no writer sets it now): the status the line was created
           # with. `frozen` only on rows written before migration 035 (028 F-028-29).
           type: string
           enum: [active, closed, frozen]

@@ -9,6 +9,11 @@ THE TARGET (spec, "Решения" items 6 and 9). Seeding goes through a narrow
 labelled as belonging to the caller's transaction, and exactly one before/after checkpoint pair per touched
 equivalent for the whole seeding transaction.
 
+030 S3B (F-030-19, `T3000` item 3) MOVED two things, on purpose: the lines are created by `TrustLineService.execute_create`
+(the entrance of every creation), and an initial `closed` line is a CREATE and a CLOSE - so it is stored with limit 0
+(the close request zeroes it) and carries a `TRUST_LINE_CLOSE` row beside its `TRUST_LINE_CREATE`; no row says
+`initial_status` any more (`import_initial_trustlines` is gone).
+
 THE CHARACTERIZATION (green before and after, the half that must NOT move): the initial statuses
 `active`/`closed` (028 `F-028-29`: `frozen` is refused, below) and the fallback of anything else to `active`, the policy default, the skips (no
 equivalent, unknown participant, negative, non-numeric and too-large limits - 028 E4: a limit finer than 1E-8 is refused by name instead, a live line already there) and
@@ -118,7 +123,7 @@ def _expected_first_seed(w) -> list:
     return sorted([
         (p["A"], p["B"], e1, Decimal("100"), "active", {"auto_clearing": False}),
         (p["A"], p["C"], e1, Decimal("50.5"), "active", DEFAULT_POLICY),
-        (p["B"], p["C"], e1, Decimal("10"), "closed", DEFAULT_POLICY),
+        (p["B"], p["C"], e1, Decimal("0"), "closed", DEFAULT_POLICY),  # CREATE then CLOSE: the close zeroes the limit
         (p["B"], p["D"], e1, Decimal("7"), "active", DEFAULT_POLICY),
         (p["C"], p["B"], e1, Decimal("33"), "active", {"auto_clearing": True}),  # pre-existing, untouched
         (p["D"], p["B"], e2, Decimal("20"), "active", DEFAULT_POLICY),
@@ -146,7 +151,7 @@ async def test_repeated_seeding_imports_only_the_closed_line_again(db_session) -
     await _seed(db_session, w)
 
     p, e1 = w["pid"], w["e1"]
-    expected = sorted(_expected_first_seed(w) + [(p["B"], p["C"], e1, Decimal("10"), "closed", DEFAULT_POLICY)])
+    expected = sorted(_expected_first_seed(w) + [(p["B"], p["C"], e1, Decimal("0"), "closed", DEFAULT_POLICY)])
     assert await _lines(db_session, w) == expected
 
 
@@ -173,16 +178,20 @@ async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session,
 
     p, e1, e2 = w["pid"], w["e1"], w["e2"]
     applied_first = sorted([
-        (p["A"], p["B"], e1, "active"), (p["A"], p["C"], e1, "active"), (p["B"], p["C"], e1, "closed"),
-        (p["B"], p["D"], e1, "active"), (p["D"], p["B"], e2, "active"),
+        (p["A"], p["B"], e1), (p["A"], p["C"], e1), (p["B"], p["C"], e1),
+        (p["B"], p["D"], e1), (p["D"], p["B"], e2),
     ])
 
     def described(rows) -> list:
         return sorted(
-            (r.affected_participants.get("from"), r.affected_participants.get("to"), r.equivalent_code,
-             r.affected_participants.get("initial_status"))
+            (r.affected_participants.get("from"), r.affected_participants.get("to"), r.equivalent_code)
             for r in rows
         )
+
+    # The closed line is a CREATE and a CLOSE: one `TRUST_LINE_CLOSE` row per seeding, completed by the request.
+    close_rows = await trust_line_audit_rows(db_session, equivalent_codes=[w["e1"], w["e2"]],
+                                             operation_type="TRUST_LINE_CLOSE")
+    assert described(close_rows) == [(p["B"], p["C"], e1)] * 2, described(close_rows)
 
     def shares_one_pair_per_equivalent(rows) -> bool:
         pairs: dict[str, set] = {}
@@ -196,7 +205,7 @@ async def test_every_seeded_line_has_a_transaction_scoped_create_row(db_session,
         and all(is_transaction_scoped(r) for r in first_rows)
         and shares_one_pair_per_equivalent(first_rows)
         and first_seed_checkpoints == 2 * 2
-        and described(second_rows) == [(p["B"], p["C"], e1, "closed")]
+        and described(second_rows) == [(p["B"], p["C"], e1)]
         and all(is_transaction_scoped(r) for r in second_rows)
         and second_seed_checkpoints == 2 * 1,
         f"first seed: {len(first_rows)} TRUST_LINE_CREATE rows {described(first_rows)}, "

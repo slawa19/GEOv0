@@ -79,12 +79,6 @@ from app.db.models.trustline import TrustLine
 from tests.p019_support import deadlock_after_the_wait
 from tests.debt_setup import debt_fixture_setup
 
-# The proven inject stand, imported rather than rebuilt: `observed_factory` is its own SERIALIZABLE
-# engine with the session class whose debt flushes are observed, and `C8`'s inject half drives the
-# real owner through it. A second stand for the same conflict would be a second thing to keep right.
-from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  # noqa: F401
-    observed_factory,
-)
 from app.core.ledger.book import BookError, BookMoneyError, NewDebt
 from tests.ledger_corruption import probe_statements
 from tests.p015_b4_support import (
@@ -522,8 +516,10 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
     than driven through `PaymentEngine`, so it proves nothing about `_is_retryable_db_error`'s
     predicate. Design v2 §9 asks for the real `40001` "on Debt write for INJECT and PAYMENT COMMIT",
     which is the two owners' own loops - `_run_uow_with_retry` and `_apply_inject_event`'s
-    `while True:`. Those are the two tests that follow this one (added 2026-09-13 after the external
-    review named the gap); this one isolates the journal's obligation under a real conflict with no
+    `while True:`. Those were the two tests that follow this one (added 2026-09-13 after the external
+    review named the gap); 030 S3b deleted the inject half with the `INJECT` envelope - the inject owner's
+    real-deadlock retry is `test_p015_inject_retries_a_serialization_failure_postgres.py`, and the inject
+    writes no debt and no journal entry any more; this one isolates the journal's obligation under a real conflict with no
     owner in the way, which is why it is kept rather than replaced.
 
     RED TODAY BECAUSE: `debt_journal_entries` does not exist, so the non-vacuity assertion placed
@@ -649,7 +645,7 @@ async def test_c8_a_real_40001_leaves_one_envelope_and_only_the_successful_attem
 # ----------------------------------------------------------------------------------------------
 # C8, through the PRODUCTION OWNERS. Design v2 §9: "real 40001 on Debt write for inject and
 # payment commit". The test above isolates the journal's obligation under a hand-written retry;
-# these two drive the loops the application really has.
+# these drive the loops the application really has (030 S3b: the inject half is gone with the effect).
 # ----------------------------------------------------------------------------------------------
 
 
@@ -855,190 +851,6 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         f"the completion did not write exactly one `{OPERATION_EQUIVALENTS_TABLE}` row for the "
         f"one equivalent the payment touched: {equivalents}"
     )
-
-
-@pytest.mark.asyncio
-async def test_c8_the_inject_owners_own_retry_leaves_one_envelope_and_the_winning_entries(
-    observed_factory,  # noqa: F811 - the proven inject stand, imported rather than rebuilt
-):
-    """C8, inject owner, API-SHAPED. The other writer design v2 §9 names, on a real `40001`.
-
-    THE STAND IS NOT NEW AND THAT IS DELIBERATE. `tests/integration/
-    test_p015_inject_retries_a_serialization_failure_postgres.py` already produces this exact
-    conflict against the real inject owner - `_apply_due_scenario_events` ->
-    `_apply_inject_event`'s `while True:` loop - and asserts that the unit of work ran again and
-    that the stored amount is the concurrent value plus the injected one exactly once. Its helpers
-    are imported here rather than rewritten: a second stand for the same conflict would be a second
-    thing to keep correct, and the part C8 adds is about the JOURNAL, not about the retry.
-
-    WHAT THIS ADDS. The inject owner opens its envelope INSIDE the retry loop, once per attempt
-    (`app/core/simulator/real_runner_impl.py:653`), under an identity that is the same string on
-    every attempt (`run_id:event_index`). Both halves of that are load-bearing and neither is
-    covered by the retry test: if the rolled-back attempt's envelope survived, the second attempt
-    would collide on `UNIQUE(kind, identity)`; if the envelope were opened OUTSIDE the loop, the
-    second attempt would be refused for nesting inside the first. Exactly one COMPLETED envelope
-    with exactly the winning attempt's entries is the only outcome consistent with both.
-
-    RED BEFORE STEP 4 BECAUSE: `debt_operations` does not exist, and the non-vacuity assertion
-    placed FIRST says so.
-    MUTATION: open the inject's operation outside the `while True:` loop, or leave the rolled-back
-    attempt's envelope in place (complete it without the `state = 'OPEN'` predicate). Both produce
-    either two envelopes or a refusal, and this test names which.
-    """
-    from sqlalchemy import update as sa_update
-
-    from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (
-        _Artifacts,
-        _run,
-        _runner,
-        _seed as _seed_inject_world,
-        _stored as _stored_inject,
-    )
-
-    existing = Decimal("5.00")
-    concurrent = Decimal("7.12345678")
-    injected = Decimal("3.00")
-
-    world = await _seed_inject_world(observed_factory)
-    equivalent = world.equivalents[0]
-    run_id = f"p015-b4-c8-inject-{uuid.uuid4().hex[:8]}"
-    identity = f"{run_id}:0"
-    async with observed_factory() as setup:
-        async with debt_fixture_setup(setup, label="c8-inject-starting-edge"):
-            setup.add(
-                Debt(
-                    debtor_id=world.debtor.id,
-                    creditor_id=world.creditor.id,
-                    equivalent_id=equivalent.id,
-                    amount=existing,
-                )
-            )
-        await setup.commit()
-
-    creditor, debtor = world.creditor.pid, world.debtor.pid
-    scenario = {
-        "equivalents": [eq.code for eq in world.equivalents],
-        "participants": [{"id": creditor}, {"id": debtor}],
-        "trustlines": [
-            {
-                "from": creditor,
-                "to": debtor,
-                "equivalent": equivalent.code,
-                "limit": "100.00",
-                "status": "active",
-            }
-        ],
-        "behaviorProfiles": [],
-        "events": [
-            {
-                "type": "inject",
-                "time": 0,
-                "effects": [
-                    {
-                        "op": "inject_debt",
-                        "from": creditor,
-                        "to": debtor,
-                        "equivalent": equivalent.code,
-                        "amount": str(injected),
-                    }
-                ],
-            }
-        ],
-    }
-    run = _run(world, run_id)
-    artifacts = _Artifacts()
-    runner = _runner(run, scenario, artifacts)
-
-    real_stage = runner._inject_executor.stage_inject_event
-    stage_calls = 0
-
-    async def _stage_then_a_competitor_commits(session, **kwargs):
-        nonlocal stage_calls
-        stage_calls += 1
-        staged = await real_stage(session, **kwargs)  # has read the debt at 5.00
-        if stage_calls == 1:  # 027 stage 2: a real deadlock (`p019_support.deadlock_after_the_wait`)
-            holding = asyncio.Event()
-            _TASKS.append(asyncio.create_task(_compete(holding)))
-            await holding.wait()
-        return staged
-
-    async def _compete(holding: asyncio.Event) -> None:
-        async with observed_factory() as other:
-            async with operation(other, kind="TEST_FIXTURE", identity=_identity("c8-inject-competitor"),
-                                 intent=_intent(name="c8-inject-competitor")):
-                mine = (Debt.debtor_id == world.debtor.id, Debt.creditor_id == world.creditor.id,
-                        Debt.equivalent_id == equivalent.id)
-                await other.execute(select(Debt.id).where(*mine).with_for_update())
-                await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
-                    TrustLine.equivalent_id == equivalent.id).with_for_update())
-                await other.execute(sa_update(Debt).where(*mine).values(amount=concurrent))
-            await other.commit()
-
-    runner._inject_executor.stage_inject_event = _stage_then_a_competitor_commits
-
-    sqlstates: list[str | None] = []
-
-    async with observed_factory() as session:
-        real_flush = session.flush
-
-        async def _flush(*args, **kwargs):
-            try:
-                return await real_flush(*args, **kwargs)
-            except DBAPIError as exc:
-                sqlstates.append(
-                    getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
-                )
-                raise
-
-        session.flush = _flush  # type: ignore[method-assign]
-        await runner._apply_due_scenario_events(
-            session, run_id=run.run_id, run=run, scenario=scenario
-        )
-
-    await asyncio.gather(*_TASKS)
-    _TASKS.clear()
-    envelopes = await stored_operations(observed_factory, identity)
-    entries = await stored_entries(observed_factory, identity)
-    stored = await _stored_inject(observed_factory, world)
-
-    # NON-VACUITY, FIRST.
-    assert envelopes is not None, missing_journal_tables(envelopes, OPERATIONS_TABLE)
-
-    # NON-VACUITY: the conflict was real, at the owner's explicit flush of the staged writes,
-    # and the owner re-ran the WHOLE unit of work rather than only the commit.
-    assert sqlstates == ["40P01"], (
-        f"stand: the inject's staged write was not refused with exactly one genuine "
-        f"serialization failure at the owner's flush (observed {sqlstates})"
-    )
-    assert stage_calls == 2, (
-        f"stand: the unit of work was staged {stage_calls} time(s), so the owner did not re-run "
-        f"it and this is not the inject owner's retry"
-    )
-    assert stored == {equivalent.id: concurrent + injected}, (
-        f"stand: expected the concurrent {concurrent} plus the injected {injected} exactly once, "
-        f"stored {stored}"
-    )
-
-    # VERDICT.
-    assert len(envelopes) == 1, (
-        f"an inject that was refused with a 40001 and retried by its own loop left {envelopes} "
-        f"for identity {identity}. The envelope is opened per ATTEMPT under an identity that is "
-        f"per EVENT, so the rolled-back attempt's envelope must be gone - otherwise the retry "
-        f"collides on UNIQUE(kind, identity) instead of recording the work it did."
-    )
-    assert envelopes[0]["kind"] == "INJECT" and envelopes[0]["state"] == "COMPLETED", envelopes
-    assert envelopes[0]["tx_id"] is None, (
-        f"an INJECT envelope carries no tx_id (design v2 §5): {envelopes}"
-    )
-    assert entries is not None and len(entries) == 1 and entries[0]["effect"] == "U", (
-        f"the attempt that was refused with a 40001 left a trace in the journal: {entries}"
-    )
-    assert _atom_column(entries, "amount_before") == [_atoms(concurrent)], (
-        f"the retry's entry does not record the value the database held when it ran ({entries}); "
-        f"`amount_before` must be the competitor's {concurrent}, not the {existing} the first "
-        f"attempt had read"
-    )
-    assert _atom_column(entries, "delta") == [_atoms(injected)], entries
 
 
 # ==============================================================================================
