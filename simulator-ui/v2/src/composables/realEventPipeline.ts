@@ -6,6 +6,7 @@ import type {
 import type { RunStatus, TopologyChangedEvent } from '../api/simulatorTypes'
 import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
+import { runErrorText } from '../utils/runErrorClassification'
 import { resolveTxDirection } from '../utils/txDirection'
 import { toLowerTrim } from '../utils/stringHelpers'
 
@@ -335,7 +336,7 @@ export function applyAcceptedRealEvent(
     draft.real.runStatus = status
     const lastError = status.last_error
     draft.real.lastError =
-      lastError && deps.isUserFacingRunError(lastError.code) ? `${lastError.code}: ${lastError.message}` : ''
+      lastError && deps.isUserFacingRunError(lastError.code) ? runErrorText(lastError) : ''
     if (typeof status.attempts_total === 'number') draft.real.runStats.attempts = status.attempts_total
     if (typeof status.committed_total === 'number') draft.real.runStats.committed = status.committed_total
     if (typeof status.rejected_total === 'number') draft.real.runStats.rejected = status.rejected_total

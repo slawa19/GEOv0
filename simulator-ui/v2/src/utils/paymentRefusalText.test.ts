@@ -6,7 +6,7 @@ import SystemBalanceBar from '../components/SystemBalanceBar.vue'
 import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecision'
 import { useEdgeTooltip } from '../composables/useEdgeTooltip'
 import { useInteractMode } from '../composables/useInteractMode'
-import { PAYMENT_REFUSAL_REASONS, paymentRefusalText } from './paymentRefusalText'
+import { PAYMENT_REFUSAL_REASONS, clearingRefusalText, paymentRefusalText } from './paymentRefusalText'
 
 const refusal = (code: string, details: Record<string, unknown>) => ({ status: 409, code, message: 'server text', details })
 
@@ -68,5 +68,36 @@ describe('F-028-48: display and input at the equivalent precision', () => {
     expect(equivalentPrecision('HOUR')).toBe(2)
     expect(amountStepHint('1.500', 'UAH')).toBeNull()
     expect(amountStepHint('1.505', 'UAH')).toBe('UAH allows at most 2 decimal places; the server will refuse this amount.')
+  })
+})
+
+// 031 slice C (item 17): `POST .../clearing-real` answers 409 CLEARING_REFUSED with details.reason
+// `occurrence_amount_not_in_step` (030 S2); the Interact panel showed the server's English hint raw.
+describe('031 item 17: the human text of a clearing refusal', () => {
+  const stepRefusal = refusal('CLEARING_REFUSED', { reason: 'occurrence_amount_not_in_step' })
+  const runClearingRefused = (error: unknown) => {
+    const im = useInteractMode({ actions: { actionsDisabled: ref(false), runClearing: vi.fn(async () => { throw error }),
+      fetchParticipants: async () => [], fetchTrustlines: async () => [], fetchPaymentTargets: async () => [] } as never,
+    runId: computed(() => 'run_1'), equivalent: computed(() => 'UAH'), snapshot: ref(null) })
+    im.startClearingFlow()
+    return im
+  }
+
+  it('repro: Interact shows the step refusal in the interface language, not the server text', async () => {
+    document.documentElement.lang = 'ru'
+    const im = runClearingRefused(stepRefusal)
+    await im.confirmClearing()
+    expect(im.state.error).toBe('Клиринг отклонён: в базе есть долги мельче шага учёта эквивалента UAH. Нужен пересев базы.')
+    document.documentElement.lang = 'en'
+    const en = runClearingRefused(stepRefusal)
+    await en.confirmClearing()
+    expect(en.state.error).toBe(
+      'Clearing refused: the database holds debts finer than the accounting step of UAH. Reseed the database.')
+  })
+  it('anti-vacuum: another clearing answer keeps its own message', async () => {
+    const im = runClearingRefused({ status: 409, code: 'CLEARING_INTERRUPTED', message: 'interrupted', details: { reason: 'retry_budget' } })
+    await im.confirmClearing()
+    expect(im.state.error).toBe('interrupted')
+    expect(clearingRefusalText(refusal('CLEARING_REFUSED', { reason: 'future_reason' }), 'UAH', 'en')).toBe('server text')
   })
 })

@@ -75,3 +75,28 @@ export function paymentRefusalText(error: unknown, equivalent: string, locale: U
   if (text) return text[locale](vars)
   return CODE_GENERIC.has(code) ? GENERIC[locale] : extractErrorMessage(error)
 }
+
+/**
+ * 031 slice C (item 17): the human text of a clearing refusal, in the same place and pattern as a payment's.
+ * `POST .../clearing-real` answers 409 CLEARING_REFUSED with `details.reason` `occurrence_amount_not_in_step`
+ * (030 S2: the database holds debts finer than the equivalent's step), and the tick names the same refusal as
+ * `last_error.code` CLEARING_REFUSED (which carries no reason, so no equivalent either: `equivalent` is optional).
+ */
+export const CLEARING_REFUSAL_REASONS: readonly string[] = Object.freeze(['occurrence_amount_not_in_step'])
+
+export function clearingStepRefusalText(equivalent: string | null, locale: UiLocale = uiLocale()): string {
+  const eq = equivalent ? ` ${equivalent.toUpperCase()}` : ''
+  return locale === 'ru'
+    ? `Клиринг отклонён: в базе есть долги мельче шага учёта эквивалента${eq}. Нужен пересев базы.`
+    : `Clearing refused: the database holds debts finer than the accounting step of ${equivalent ? equivalent.toUpperCase() : 'the equivalent'}. Reseed the database.`
+}
+
+/** The text of a failed clearing action; any answer this client has no text for keeps the server's own message. */
+export function clearingRefusalText(error: unknown, equivalent: string, locale: UiLocale = uiLocale()): string {
+  const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown }
+  const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>
+  if (e.code === 'CLEARING_REFUSED' && details.reason === 'occurrence_amount_not_in_step') {
+    return clearingStepRefusalText(String(details.equivalent ?? equivalent), locale)
+  }
+  return extractErrorMessage(error)
+}
