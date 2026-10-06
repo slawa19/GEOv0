@@ -224,13 +224,15 @@ class RealScenarioSeeder:
                 "blocked_participants": [],
             }
 
-            # `FOR SHARE` with the precision re-read (028 `F-028-25`): the step checked below cannot be lowered by an
-            # admin PATCH before this seeding commits.
+            # The precision, re-read (`populate_existing`) and NOT locked: this only names the refused line (the step
+            # check below). The authoritative step check, under the equivalent row `FOR SHARE` held to commit
+            # (028 `F-028-25`), is `TrustLineService.execute_create`'s - taken after the participants and the pair
+            # lines, the writers' one order (030 S3b); a share lock taken here, before them, would invert it.
             eq_rows = (
                 (
                     await session.execute(
                         select(Equivalent).where(Equivalent.code.in_(eq_codes)).order_by(Equivalent.id)
-                        .with_for_update(read=True).execution_options(populate_existing=True)
+                        .execution_options(populate_existing=True)
                     )
                 )
                 .scalars()
