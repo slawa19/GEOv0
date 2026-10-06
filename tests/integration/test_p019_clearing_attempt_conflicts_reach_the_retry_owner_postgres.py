@@ -126,15 +126,23 @@ async def _deadlocks(stand) -> int:
     return int(value or 0)
 
 
-async def _waiting_on(observer, table: str) -> int | None:
-    pid = await observer.scalar(
+async def _waiting_on(observer, table: str, blocker: int) -> list[int]:
+    """Every backend OF THIS DATABASE queued on a relation lock of `table` that `blocker` holds (031 `T3102`).
+
+    Clones of one template share table OIDs, so `to_regclass` alone also matches a waiter of another task's
+    database under parallel `-TaskSlug` runs; the probe is tied to this database and to the blocker, as
+    `tests/p019_locks_off.blocked_by` (029 S5), and returns all matches instead of `LIMIT 1`.
+    """
+
+    rows = await observer.execute(
         text(
-            "SELECT l.pid FROM pg_locks l WHERE l.locktype = 'relation' AND NOT l.granted "
-            "AND l.relation = to_regclass(:t) LIMIT 1"
+            "SELECT l.pid FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+            "WHERE a.datname = current_database() AND l.locktype = 'relation' AND NOT l.granted "
+            "AND l.relation = to_regclass(:t) AND :blocker = ANY(pg_blocking_pids(l.pid))"
         ),
-        {"t": table},
+        {"t": table, "blocker": blocker},
     )
-    return None if pid is None else int(pid)
+    return [int(pid) for (pid,) in rows.all()]
 
 
 async def _blocked_by(observer, waiter: int, holder: int) -> bool:
@@ -190,8 +198,9 @@ async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, 
                     return exc
 
         clearing_task = asyncio.create_task(clear())
-        clearing_pid = await _poll(lambda: _waiting_on(observer, table))
-        assert clearing_pid is not None, f"the clearing never waited on {table}"
+        waiting = await _poll(lambda: _waiting_on(observer, table, blocker_pid))
+        assert waiting is not None and len(waiting) == 1, f"expected the clearing alone to wait on {table}: {waiting}"
+        [clearing_pid] = waiting
 
         async def take_the_clearing_row():
             await blocker.execute(select(Debt.id).where(Debt.id == d_ab).with_for_update())
