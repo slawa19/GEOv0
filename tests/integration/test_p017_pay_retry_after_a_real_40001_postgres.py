@@ -41,7 +41,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.transaction import Transaction
 from app.schemas.payment import PaymentCreateRequest
-from tests.p019_support import deadlock_after_the_wait
 from tests.integration.test_p015_p1_money_replay_postgres import (
     _OPENING,
     _debts,
@@ -65,18 +64,33 @@ async def factory(committed_database):
 
 
 async def _provoke_a_serialization_failure(factory) -> DBAPIError:
+    """A real `40P01` between two probe rows; the victim is WHICHEVER side PostgreSQL picks (031 `T3102`).
+
+    Each side holds one row and asks for the other's: the cycle forms whatever the order, and PostgreSQL aborts the
+    backend whose deadlock check finds it - which one is not part of its contract (review `T3096` finding 3). The
+    stand needs only a genuine `40P01`, so it takes it from either side: the loser rolls back AT ONCE (freeing its
+    row for the winner), and exactly one side must have failed.
+    """
+
     row = "SELECT v FROM p017_retry_probe WHERE id = {} FOR UPDATE"
-    async with factory() as victim, factory() as other:
-        await victim.execute(text(row.format(1)))
-        await other.execute(text(row.format(2)))
-        holding = asyncio.Event()
-        competitor = asyncio.create_task(deadlock_after_the_wait(other, holding, text(row.format(1))))
-        await holding.wait()
-        with pytest.raises(DBAPIError) as conflict:
-            await victim.execute(text(row.format(2)))
-        await victim.rollback()
-        await competitor
-    return conflict.value
+
+    async def ask(session, wanted: int) -> DBAPIError | None:
+        try:
+            await session.execute(text(row.format(wanted)))
+        except DBAPIError as exc:
+            await session.rollback()
+            return exc
+        return None
+
+    async with factory() as first, factory() as second:
+        await first.execute(text(row.format(1)))
+        await second.execute(text(row.format(2)))
+        outcomes = await asyncio.wait_for(asyncio.gather(ask(first, 2), ask(second, 1)), timeout=30)
+        await first.rollback()
+        await second.rollback()
+    failed = [exc for exc in outcomes if exc is not None]
+    assert len(failed) == 1, f"expected exactly one deadlock victim, got {outcomes!r}"
+    return failed[0]
 
 
 def _request(world) -> PaymentCreateRequest:
