@@ -19,6 +19,9 @@ ever be mistaken for it.
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
+
 import pytest
 
 
@@ -67,20 +70,89 @@ def allow_below_serializable_for_a_diagnostic(monkeypatch) -> list[str]:
     return skipped
 
 
-async def deadlock_after_the_wait(session, holding, second_lock) -> None:
-    """027 stage 2: the competitor of a real `40P01`. It already holds a row; it waits until a backend queues on it,
-    then asks for `second_lock` (rows the waiter holds): the waiter waited first, so ITS deadlock check aborts it."""
+#: The competitor's deadlock check: far beyond any stand's deadline, so it never runs while the stand is alive.
+_COMPETITOR_DEADLOCK_TIMEOUT = "10min"
+#: The victim's deadlock check: short, and it runs only after the victim's own wait has closed the cycle.
+_VICTIM_DEADLOCK_TIMEOUT = "200ms"
+
+
+@dataclass
+class QueuedCompetitor:
+    """A competitor confirmed WAITING on the victim's row; the victim's next conflicting lock closes the cycle."""
+
+    victim_pid: int
+    competitor_pid: int
+    waiting: asyncio.Task
+
+
+async def queue_behind_the_victim(victim, competitor, *, hold, wait_on_victim, deadline_s: float = 15.0) -> QueuedCompetitor:
+    """031 `T3102`: a real `40P01` whose victim is `victim` - by construction, not by timing.
+
+    THE ORDER. The competitor takes `hold` (the row the victim will ask for next), then asks for `wait_on_victim`
+    (rows the victim already holds) and is CONFIRMED waiting on the victim's backend (`pg_blocking_pids`) before
+    this returns. The caller then lets the victim ask for the `hold` row: the victim's wait is the one that closes
+    the cycle. Its deadlock check (`_VICTIM_DEADLOCK_TIMEOUT` after its wait began) therefore always finds the
+    cycle closed, and the competitor's check (`_COMPETITOR_DEADLOCK_TIMEOUT`, set for its transaction only) never
+    runs before it. Both are `SET LOCAL`: the GUC is superuser-only (`PGC_SUSET`), as the test role is here and in
+    CI (`postgres:16` with `POSTGRES_USER=geo`); a role that may not set it fails here loudly with `42501`.
+
+    No sleep stands in for the order: the poll below only waits for the server to REPORT the wait, and returns as
+    soon as it does. The competitor's statement is `waiting`; the caller awaits it after the victim's failure has
+    ended the victim's transaction, and commits or rolls the competitor back itself.
+    """
 
     import asyncio
 
     from sqlalchemy import text
 
-    me = await session.scalar(text("SELECT pg_backend_pid()"))
-    holding.set()
-    while not await session.scalar(text("SELECT count(*) FROM pg_stat_activity a WHERE CAST(:me AS int) = "
-                                        "ANY(pg_blocking_pids(a.pid))"), {"me": me}):
-        await asyncio.sleep(0.02)
-    await session.execute(second_lock)
+    # The victim's statements go to its CONNECTION, never through the ORM session: an autoflush here would send the
+    # victim's pending writes before the competitor holds its row, and the order below would be the stand's, not this.
+    victim_connection = await victim.connection()
+    victim_pid = int(await victim_connection.scalar(text("SELECT pg_backend_pid()")))
+    competitor_pid = int(await competitor.scalar(text("SELECT pg_backend_pid()")))
+    await competitor.execute(text(f"SET LOCAL deadlock_timeout = '{_COMPETITOR_DEADLOCK_TIMEOUT}'"))
+    await victim_connection.execute(text(f"SET LOCAL deadlock_timeout = '{_VICTIM_DEADLOCK_TIMEOUT}'"))
+    await competitor.execute(hold)
+    waiting = asyncio.create_task(competitor.execute(wait_on_victim))
+    loop = asyncio.get_running_loop()
+    until = loop.time() + deadline_s
+    while loop.time() < until and not waiting.done():
+        if await victim_connection.scalar(text("SELECT CAST(:v AS int) = ANY(pg_blocking_pids(:c))"),
+                               {"v": victim_pid, "c": competitor_pid}):
+            return QueuedCompetitor(victim_pid, competitor_pid, waiting)
+        await asyncio.sleep(0.005)
+    if waiting.done():
+        waiting.result()  # its own error, if it failed
+        raise AssertionError("the competitor got the victim's rows without waiting: no cycle can be formed")
+    waiting.cancel()
+    raise AssertionError(f"the competitor (pid {competitor_pid}) never queued on the victim (pid {victim_pid})")
+
+
+def deadlock_detail(exc: BaseException) -> str:
+    """The server's DETAIL of a deadlock error ("Process A waits for ...; blocked by process B."), from anywhere in
+    the chain of `orig` / `__cause__` / `__context__`; empty when no such detail is carried."""
+
+    seen: set[int] = set()
+    todo: list[object] = [exc]
+    while todo:
+        current = todo.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str) and "blocked by process" in detail:
+            return detail
+        todo.extend(getattr(current, name, None) for name in ("orig", "__cause__", "__context__"))
+    return ""
+
+
+def assert_victim_of(exc: BaseException, queued: QueuedCompetitor) -> None:
+    """The deadlock was detected IN the victim's backend, against the competitor: PostgreSQL names the detecting
+    process first ("Process <victim> waits ... blocked by process <competitor>")."""
+
+    detail = deadlock_detail(exc)
+    assert detail.startswith(f"Process {queued.victim_pid} waits"), (queued, detail)
+    assert f"blocked by process {queued.competitor_pid}." in detail, (queued, detail)
 
 
 async def wait_until_blocked(observer, *, holder_pid: int, waiter_pid: int) -> bool:

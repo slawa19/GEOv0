@@ -72,6 +72,7 @@ from app.core.simulator.scenario_equivalent import (
     scenario_default_equivalent,
 )
 from app.core.simulator.sse_broadcast import SseEventEmitter, publish_closed_trustlines
+from app.core.simulator.trust_drift_engine import commit_trust_drift
 from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -1347,11 +1348,15 @@ class RealTick:
                 kind="trust_drift_post_commit",
             )
 
-        await self._commit_and_resolve(
-            session,
-            on_commit=apply_committed_effects,
-            on_rollback=callbacks["on_rollback"],
-            on_unknown=callbacks["on_unknown"],
+        # 031 (BACKLOG item 14): a failed COMMIT whose acknowledgement was lost is resolved by the persisted limits;
+        # a decay established as committed is reported below like any other.
+        await commit_trust_drift(
+            session=session,
+            result=decay_res,
+            on_commit=lambda: self._apply_callback(apply_committed_effects, kind="post_commit"),
+            on_rollback=lambda: self._apply_callback(callbacks["on_rollback"], kind="rollback"),
+            on_unknown=lambda: self._apply_callback(callbacks["on_unknown"], kind="unknown"),
+            logger=rr._logger,
         )
 
         # Notify the frontend about changed limits via edge_patch (no full refresh).

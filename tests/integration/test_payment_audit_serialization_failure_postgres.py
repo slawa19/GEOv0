@@ -1,6 +1,7 @@
 """A REAL `40001` inside the payment's audit write reaches the owner of the retries as `40001`.
 
-027 `T2706` (§15 P2): restored on a real deadlock (`40P01`, `deadlock_after_the_wait`); the text is history.
+027 `T2706` (§15 P2): restored on a real deadlock (`40P01`, `deadlock_after_the_wait`, removed by 031); the text is history.
+031 `T3102`: the victim is the payment by construction (`queue_behind_the_victim`), asserted from the server's DETAIL.
 
 T401 (programme 004; AGENTS §9 "проглоченный 40001 отравляет транзакцию"): a serialization failure raised
 while the payment writes its integrity audit must not be swallowed - PostgreSQL has aborted the
@@ -36,13 +37,13 @@ import pytest_asyncio
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
-from tests.p019_support import deadlock_after_the_wait
+from tests.p019_support import QueuedCompetitor, assert_victim_of, queue_behind_the_victim
 from tests.integration.test_p015_p1_money_replay_postgres import (
     _OPENING,
     _debts,
@@ -79,21 +80,41 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
     contended_id = bystander.id
     audit_calls = 0
 
-    async def _competitor_updates_the_contended_row(holding) -> None:
-        async with factory() as competitor:
-            await competitor.execute(select(Participant.id).where(Participant.id == contended_id).with_for_update(key_share=True))
-            await deadlock_after_the_wait(competitor, holding, select(TrustLine.id).where(
-                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
+    queued: list[QueuedCompetitor] = []
+    conflicts: list[BaseException] = []
+
+    async def _competitor_commits_after_the_payment_failed(competitor, waiting) -> None:
+        try:
+            await asyncio.wait_for(waiting.waiting, _COMPETITOR_TIMEOUT_S)  # the payment's failure freed its lines
             await competitor.execute(
                 update(Participant).where(Participant.id == contended_id).values(display_name="competitor")
             )
             await competitor.commit()
+        finally:
+            await competitor.close()
 
     async def _conflict(session) -> None:
-        holding = asyncio.Event()
-        competitors.append(asyncio.create_task(_competitor_updates_the_contended_row(holding)))
-        await asyncio.wait_for(holding.wait(), _COMPETITOR_TIMEOUT_S)
-        await session.execute(update(Participant).where(Participant.id == contended_id).values(display_name="payment"))
+        # The competitor holds the contended row and is CONFIRMED waiting on the payment's lines; the payment's
+        # UPDATE of that row then closes the cycle, so ITS deadlock check finds it (031 `T3102`, review `T3096`
+        # finding 3: before, the competitor closed the cycle and the victim was whoever's check ran first).
+        competitor = factory()
+        try:
+            waiting = await queue_behind_the_victim(
+                session, competitor,
+                hold=select(Participant.id).where(Participant.id == contended_id).with_for_update(),
+                wait_on_victim=select(TrustLine.id).where(TrustLine.equivalent_id == world.equivalent.id).with_for_update(),
+                deadline_s=_COMPETITOR_TIMEOUT_S,
+            )
+        except BaseException:
+            await competitor.close()
+            raise
+        queued.append(waiting)
+        competitors.append(asyncio.create_task(_competitor_commits_after_the_payment_failed(competitor, waiting)))
+        try:
+            await session.execute(update(Participant).where(Participant.id == contended_id).values(display_name="payment"))
+        except BaseException as exc:
+            conflicts.append(exc)
+            raise
 
     competitors: list[asyncio.Task] = []
     original_audit = PaymentService._write_integrity_audit
@@ -138,6 +159,10 @@ async def test_audit_serialization_failure_is_retried_by_pay_before_the_transact
     retries = [r.getMessage() for r in caplog.records if "event=payment.attempt_retry" in r.getMessage()]
     await asyncio.gather(*competitors)
     assert any("pgcode=40P01" in message for message in retries), retries
+    # ... raised by the payment's own UPDATE and detected in ITS backend against the competitor (031 `T3102`).
+    assert len(conflicts) == len(queued) == 1, (conflicts, queued)
+    assert _payment_db_sqlstate(conflicts[0]) == "40P01", conflicts[0]
+    assert_victim_of(conflicts[0], queued[0])
     assert audit_calls == 2, audit_calls
     assert any("event=payment.audit_log_failed" in r.getMessage() for r in caplog.records), "countercheck not reached"
 

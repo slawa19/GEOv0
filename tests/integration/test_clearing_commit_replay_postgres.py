@@ -316,7 +316,8 @@ async def _seed_conflict_cycle(prefix: str):
 def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlstates: list[str]):
     """A `ClearingService` whose first `len(writes)` attempts each meet a concurrent committed write.
 
-    027 STAGE 2 (`T2704`): a real deadlock (`40P01`, `deadlock_after_the_wait`); the text below is history.
+    027 STAGE 2 (`T2704`): a real deadlock (`40P01`); since 031 `T3102` the clearing is the victim by construction
+    (`queue_behind_the_victim` at the stop guard, after the lines, before the debt rows); the text below is history.
 
     THE SCHEDULE IS REAL. Each attempt's FIRST statement is the committed-occurrence read
     (`_committed_execution_amount`), which fixes the attempt's SERIALIZABLE snapshot; right after it, a
@@ -332,22 +333,26 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
     from tests.conftest import TestingSessionLocal
 
     from app.db.models.trustline import TrustLine
-    from tests.p019_support import deadlock_after_the_wait
+    from tests.p019_support import deadlock_detail, queue_behind_the_victim
 
     writers: list[asyncio.Task] = []
 
-    async def write(attempt_no: int, holding: asyncio.Event) -> None:
-        async with TestingSessionLocal() as writer:
-            debt = await writer.get(Debt, debt_id, with_for_update=True)
-            await deadlock_after_the_wait(writer, holding, select(TrustLine.id).where(
-                TrustLine.equivalent_id == debt.equivalent_id).with_for_update())
+    async def write(attempt_no: int, writer, queued) -> None:
+        try:
+            await queued.waiting  # returns once the clearing's failure has ended its attempt
+            debt = await writer.get(Debt, debt_id)  # already locked FOR UPDATE by `hold`
             # Declared: the journal asks every movement of money to name its operation.
             async with debt_fixture_setup(writer, label=f"concurrent-writer-{attempt_no}"):
                 debt.amount = writes[attempt_no - 1]
             await writer.commit()
+        finally:
+            await writer.close()
 
     class _Service(ClearingService):
         attempts = 0
+        #: (detail of the 40P01 the clearing classified, victim pid, competitor pid) per conflicted attempt.
+        deadlocks: list[tuple[str, int, int]] = []
+        _queued = None
 
         async def _committed_execution_amount(self, tx_id: str, *, allowed_participant_pids=None):
             # The perimeter is forwarded rather than dropped (p010), so this observer cannot mask a
@@ -359,11 +364,30 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
             assert amount is None, "premise: no occurrence is committed when an attempt starts"
             for previous in writers:
                 await previous
-            if type(self).attempts <= len(writes):
-                holding = asyncio.Event()
-                writers.append(asyncio.create_task(write(type(self).attempts, holding)))
-                await holding.wait()
             return amount
+
+        async def _refuse_if_equivalent_inactive(self, equivalent_ids):
+            # 031 `T3102` (review `T3096` finding 3): after the attempt's line locks, before its debt rows. The
+            # writer takes the debt row and is CONFIRMED waiting on the clearing's lines; the clearing's own
+            # `FOR UPDATE` of the debt rows then closes the cycle, so ITS deadlock check finds it. Before, the
+            # writer closed the cycle (`deadlock_after_the_wait`, removed by 031) and the victim was whoever's check ran first:
+            # the full tier of 031 A saw a writer lose, an attempt pass, and the budget not spent.
+            attempt_no = type(self).attempts
+            if attempt_no <= len(writes):
+                writer = TestingSessionLocal()
+                try:
+                    queued = await queue_behind_the_victim(
+                        self.session, writer,
+                        hold=select(Debt.id).where(Debt.id == debt_id).with_for_update(),
+                        wait_on_victim=select(TrustLine.id).where(
+                            TrustLine.equivalent_id.in_(list(equivalent_ids))).with_for_update(),
+                    )
+                except BaseException:
+                    await writer.close()
+                    raise
+                type(self)._queued = queued
+                writers.append(asyncio.create_task(write(attempt_no, writer, queued)))
+            return await super()._refuse_if_equivalent_inactive(equivalent_ids)
 
         @classmethod
         def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
@@ -372,10 +396,23 @@ def _conflicting_clearing_service(debt_id, writes: list[Decimal], observed_sqlst
                 observed_sqlstates.extend(
                     sorted(cls._postgres_error_codes(exc) & {"40001", "40P01"})
                 )
+                if cls._queued is not None:
+                    cls.deadlocks.append((deadlock_detail(exc), cls._queued.victim_pid, cls._queued.competitor_pid))
+                    cls._queued = None
             return is_retryable
 
     _Service.attempts = 0
+    _Service.deadlocks = []
     return _Service
+
+
+def _assert_the_clearing_was_each_victim(service_cls, conflicts: int) -> None:
+    """Each conflicted attempt's 40P01 was detected in the CLEARING's backend, against its writer (031 `T3102`)."""
+
+    assert len(service_cls.deadlocks) == conflicts, service_cls.deadlocks
+    for detail, victim, competitor in service_cls.deadlocks:
+        assert detail.startswith(f"Process {victim} waits"), (victim, detail)
+        assert f"blocked by process {competitor}." in detail, (competitor, detail)
 
 
 async def _clearing_evidence(equivalent_code: str, execution_tx_id: str, equivalent_id):
@@ -476,6 +513,7 @@ async def test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_sna
     )
     assert service_cls.attempts == 2, service_cls.attempts
     assert observed == ["40P01"], observed
+    _assert_the_clearing_was_each_victim(service_cls, 1)
     transactions, audits, operations, entries, debts = await _clearing_evidence(
         equivalent_code, execution_tx_id, equivalent_id
     )
@@ -535,6 +573,7 @@ async def test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryab
     assert details.get("conflict_kind") == "database_concurrency", details
     assert service_cls.attempts == 3, service_cls.attempts
     assert observed == ["40P01"] * 3, observed
+    _assert_the_clearing_was_each_victim(service_cls, 3)
     transactions, audits, operations, entries, debts = await _clearing_evidence(
         equivalent_code, execution_tx_id, equivalent_id
     )

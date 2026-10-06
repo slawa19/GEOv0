@@ -5,10 +5,11 @@ unchanged: the owner of the event's transaction restarts the WHOLE unit of work 
 
 The default tier proves the retry with a synthetic `DBAPIError` (`tests/unit/test_p015_inject_transaction_ownership.py`).
 That proves the owner's branch, not that PostgreSQL produces what the branch expects where the branch expects it.
-This stand produces a real `40P01`: another connection holds an UNCOMMITTED line of the very pair the event creates,
-so the event's INSERT waits on the other transaction's unique-index entry; the other connection then asks for the
-participant rows the event holds `FOR SHARE`. Each waits for the other, and PostgreSQL aborts the one that waited
-first - the inject - at the flush that sends the line (`TrustLineWriteBatch.finish`, inside `stage_inject_event`).
+This stand produces a real `40P01`: another connection holds an UNCOMMITTED line of the very pair the event creates
+and waits for the participant rows the event holds `FOR SHARE`; then the event's INSERT waits on the other
+transaction's unique-index entry and closes the cycle. Since 031 `T3102` that order is confirmed before the INSERT
+(`queue_behind_the_victim`), so the inject's own deadlock check finds the cycle and PostgreSQL aborts the inject at
+the flush that sends the line (`TrustLineWriteBatch.finish`, inside `stage_inject_event`) - asserted from the DETAIL.
 (027 stage 2: a real DEADLOCK stands in for the SSI `40001` of the earlier stand; every inject event holds its
 participant rows `FOR SHARE`, so the cycle exists on any run of it.)
 
@@ -30,7 +31,7 @@ import asyncio
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import insert, select
 from sqlalchemy.exc import DBAPIError
 
 from app.core.trustlines.service import TrustLineWriteBatch
@@ -43,7 +44,7 @@ from tests.integration.test_p015_inject_holds_the_owner_lock_postgres import (  
     _seed,
     observed_factory,
 )
-from tests.p019_support import deadlock_after_the_wait
+from tests.p019_support import QueuedCompetitor, assert_victim_of, queue_behind_the_victim
 from tests.p021_support import trust_line_audit_rows
 
 _EVENT_LIMIT = Decimal("50.00")
@@ -97,33 +98,45 @@ async def test_a_real_deadlock_restarts_the_whole_inject_unit_of_work(
     real_finish = TrustLineWriteBatch.finish
     finish_calls = 0
 
-    async def _competitor(holding: asyncio.Event) -> None:
-        async with observed_factory() as other:
-            # WHO IS THE VICTIM: PostgreSQL checks for a deadlock once per lock wait, `deadlock_timeout` after it began, in
-            # the waiting backend, and aborts the backend that finds it. The inject waits first; pushing the competitor's
-            # check to 30 s (this transaction only) keeps it from ever detecting first - measured: without it the
-            # competitor was the victim in 2 of 6 runs. Needs a superuser, as the test role is here and in CI (the
-            # precedent is `test_p019_clearing_attempt_conflicts_reach_the_retry_owner_postgres.py`).
-            await other.execute(text("SET LOCAL deadlock_timeout = '30s'"))
-            other.add(TrustLine(from_participant_id=world.debtor.id, to_participant_id=world.creditor.id,
-                                equivalent_id=eq.id, limit=_COMPETITOR_LIMIT, status="active"))
-            await other.flush()  # uncommitted: the event's INSERT of the same pair waits on this transaction
-            await deadlock_after_the_wait(other, holding, select(Participant.id).where(
-                Participant.id.in_([world.creditor.id, world.debtor.id])).with_for_update())
+    queued: list[QueuedCompetitor] = []
+
+    async def _competitor(other, waiting: QueuedCompetitor) -> None:
+        try:
+            await waiting.waiting  # returns once the inject's failure has ended its attempt
             await other.rollback()  # the competitor never commits its line
+        finally:
+            await other.close()
 
     async def _finish_after_the_competitor_holds_its_line(batch):
         nonlocal finish_calls
         finish_calls += 1
         if finish_calls == 1:  # the first attempt only: the retry runs against a competitor that is gone
-            holding = asyncio.Event()
-            competitors.append(asyncio.create_task(_competitor(holding)))
-            await holding.wait()
+            # WHO IS THE VICTIM (031 `T3102`, review `T3096` finding 3): the competitor inserts the same pair
+            # UNCOMMITTED and is CONFIRMED waiting on the participant rows the inject holds `FOR SHARE`; only then
+            # does the inject's flush send its line, wait on the competitor's index entry and close the cycle - so
+            # the inject's own deadlock check finds it (`queue_behind_the_victim`). Before, the competitor closed
+            # the cycle and a 30 s `deadlock_timeout` on it only made the inject's win likely (measured 2 of 6
+            # competitor victims without it).
+            other = observed_factory()
+            try:
+                waiting = await queue_behind_the_victim(
+                    batch.session, other,
+                    hold=insert(TrustLine).values(from_participant_id=world.debtor.id, to_participant_id=world.creditor.id,
+                                                  equivalent_id=eq.id, limit=_COMPETITOR_LIMIT, status="active"),
+                    wait_on_victim=select(Participant.id).where(
+                        Participant.id.in_([world.creditor.id, world.debtor.id])).with_for_update(),
+                )
+            except BaseException:
+                await other.close()
+                raise
+            queued.append(waiting)
+            competitors.append(asyncio.create_task(_competitor(other, waiting)))
         return await real_finish(batch)
 
     monkeypatch.setattr(TrustLineWriteBatch, "finish", _finish_after_the_competitor_holds_its_line)
 
     failures: list[tuple[str, str | None]] = []
+    errors: list[BaseException] = []
 
     def _observed(where: str, real):
         async def _call(*args, **kwargs):
@@ -131,6 +144,7 @@ async def test_a_real_deadlock_restarts_the_whole_inject_unit_of_work(
                 return await real(*args, **kwargs)
             except DBAPIError as exc:
                 orig = getattr(exc, "orig", None)
+                errors.append(exc)
                 failures.append(
                     (where, getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None))
                 )
@@ -152,6 +166,8 @@ async def test_a_real_deadlock_restarts_the_whole_inject_unit_of_work(
         f"non-vacuity: the stand must produce exactly one real deadlock, at the flush that sends the "
         f"event's line; observed {failures}"
     )
+    assert len(errors) == len(queued) == 1, (errors, queued)
+    assert_victim_of(errors[0], queued[0])  # detected in the inject's backend, against the competitor
     assert stage_calls == 2, f"the unit of work must be staged again, staged {stage_calls}x"
     async with observed_factory() as s:
         lines = (await s.execute(select(TrustLine.limit, TrustLine.status).where(*line))).all()

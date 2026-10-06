@@ -11,19 +11,24 @@ through `_raise_unexpected_execution` (`E010`), and the checkpoint before
 `25P02` (transaction aborted) and the original SQLSTATE was lost behind it. Intended: whole-execution retry
 (spec, "Изоляция, писатели и клиринг", item 3).
 
-THE SCHEDULE - a REAL deadlock, detected by PostgreSQL, at the named call site. A blocker session takes
-`ACCESS EXCLUSIVE` on a table that the attempt reads for the first time AT that call site; the clearing
-reaches it and waits (observed in `pg_locks`); the blocker then asks for a cycle debt row the clearing holds
-`FOR UPDATE`. The clearing waited first, so ITS deadlock timer fires first and PostgreSQL aborts the
-clearing's statement with `40P01`; the blocker then gets its row and rolls back, freeing the table. The
+THE SCHEDULE - a REAL deadlock, detected by PostgreSQL, at the named call site, with the clearing as its victim
+BY CONSTRUCTION (031 `T3191` finding 4, `tests/p019_support.queue_behind_the_victim`). At the call site, before
+the clearing's own statement, a blocker session takes `ACCESS EXCLUSIVE` on the table that the attempt reads for
+the first time there, then asks for a cycle debt row the clearing holds `FOR UPDATE` and is CONFIRMED waiting on
+the clearing's backend. Only then does the clearing read the table: its wait closes the cycle, its deadlock check
+(short, set for its transaction) finds the cycle closed, and PostgreSQL aborts the clearing's statement with
+`40P01`; the blocker's check is set far beyond the stand. The blocker then gets its row and rolls back, freeing
+the table. Before, the clearing began to wait first under an ordinary timer and the blocker closed the cycle
+afterwards - if the clearing's one check ran before the blocker's request, the victim was left to timing. The
 metadata site is reached naturally (`participants` is first read there). The policy site too
 (`trust_lines`). The net-positions site (and the checkpoint site, until 024 `T2413.2` removed the checkpoint
 from the clearing) reads only tables the attempt already holds (`debts`), so there the call site is INSTRUMENTED: its function first reads a test-only
 table `p019_t1909_barrier` - the statement is the test's, the deadlock and its SQLSTATE are PostgreSQL's
 own (no error is injected). Every site is instrumented only on its first call, so the retry runs clean.
 
-CONTROLS before the target: the clearing was really seen waiting on that table, the blocker really waited
-on the clearing's row, and PostgreSQL's own `pg_stat_database.deadlocks` counted the deadlock (independent of
+CONTROLS before the target: the blocker was confirmed waiting on the clearing's row before the clearing asked
+for the table, the server's DETAIL names the clearing's backend as the one that detected the cycle against the
+blocker, and PostgreSQL's own `pg_stat_database.deadlocks` counted the deadlock (independent of
 the code under test - on the old code the checkpoint site swallowed the 40P01, so no application hook would
 have seen it). TARGET: the retry predicate saw `40P01`, and the execution is retried and clears the serial
 result `A->B 70, C->A 10` (the cycle A->B 100, B->C 30, C->A 40 cleared by 30) with ONE committed occurrence,
@@ -48,7 +53,7 @@ from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
 from tests.integration.p019_interlock_support import _seed_interlock_case
-from tests.p019_support import require_target
+from tests.p019_support import QueuedCompetitor, assert_victim_of, queue_behind_the_victim, require_target
 
 # MODE B: every commit lands in a clone dropped after the test (`tests/tier_on_a_clone.py`).
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
@@ -76,15 +81,40 @@ async def stand(committed_database):
         await engine.dispose()
 
 
-def _instrument(monkeypatch, site: str) -> None:
-    """For the site that reads only tables the attempt already holds (net positions): read the barrier first, once."""
+class _Schedule:
+    """What the instrumented call site did on its one armed call: the queued blocker and the clearing's error."""
+
+    def __init__(self) -> None:
+        self.queued: QueuedCompetitor | None = None
+        self.victim_error: BaseException | None = None
+        self.reached = asyncio.Event()
+
+
+def _instrument(monkeypatch, site: str, *, blocker, cycle_row, schedule: _Schedule) -> None:
+    """For the site that reads only tables the attempt already holds (net positions): read the barrier first, once
+    - after the blocker took the barrier and was confirmed waiting on the clearing's `cycle_row`."""
+
+    from sqlalchemy.exc import DBAPIError
 
     done: list[int] = []
 
     async def barrier_read(session) -> None:
         if not done:
             done.append(1)
-            await session.execute(text(f"SELECT count(*) FROM {BARRIER}"))
+            try:
+                schedule.queued = await queue_behind_the_victim(
+                    session,
+                    blocker,
+                    hold=text(f"LOCK TABLE {_TABLE[site]} IN ACCESS EXCLUSIVE MODE"),
+                    wait_on_victim=select(Debt.id).where(Debt.id == cycle_row).with_for_update(),
+                )
+            finally:
+                schedule.reached.set()
+            try:
+                await session.execute(text(f"SELECT count(*) FROM {BARRIER}"))
+            except DBAPIError as exc:
+                schedule.victim_error = exc
+                raise
 
     if site == "net_positions":
         original = InvariantChecker._calculate_net_position
@@ -126,25 +156,6 @@ async def _deadlocks(stand) -> int:
     return int(value or 0)
 
 
-async def _waiting_on(observer, table: str) -> int | None:
-    pid = await observer.scalar(
-        text(
-            "SELECT l.pid FROM pg_locks l WHERE l.locktype = 'relation' AND NOT l.granted "
-            "AND l.relation = to_regclass(:t) LIMIT 1"
-        ),
-        {"t": table},
-    )
-    return None if pid is None else int(pid)
-
-
-async def _blocked_by(observer, waiter: int, holder: int) -> bool:
-    return bool(
-        await observer.scalar(
-            text("SELECT :holder = ANY(pg_blocking_pids(:waiter))"), {"holder": holder, "waiter": waiter}
-        )
-    )
-
-
 async def _poll(check, timeout: float = 15.0):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -162,25 +173,15 @@ async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, 
     seed = await _seed_interlock_case()
     a_id, b_id, c_id = seed["participant_ids"]
     d_ab = seed["debt_ids"][0]
-    _instrument(monkeypatch, site)
+    blocker = stand()
+    schedule = _Schedule()
+    _instrument(monkeypatch, site, blocker=blocker, cycle_row=d_ab, schedule=schedule)
     retried = _record_retried_codes(monkeypatch)
-    table = _TABLE[site]
     deadlocks_before = await _deadlocks(stand)
 
-    blocker = stand()
-    observer_engine = create_async_engine(stand.kw["bind"].url, pool_size=1, max_overflow=0)
-    observer = await observer_engine.connect()
-    await observer.execution_options(isolation_level="AUTOCOMMIT")
-    clearing_task = blocker_task = None
+    clearing_task = None
     outcome: object = None
     try:
-        blocker_pid = int(await blocker.scalar(text("SELECT pg_backend_pid()")))
-        # WHO IS THE VICTIM. PostgreSQL checks for a deadlock once per lock wait, `deadlock_timeout` after
-        # the wait began, in the waiting backend, and aborts the backend that finds it. The clearing waits
-        # first (default 1 s); the blocker's check is pushed to 30 s so that it never detects first - the
-        # stand needs the CLEARING to be the victim. (Needs a superuser, as the test role is here and in CI.)
-        await blocker.execute(text("SET deadlock_timeout = '30s'"))
-        await blocker.execute(text(f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE"))
 
         async def clear():
             async with stand() as session:
@@ -190,18 +191,15 @@ async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, 
                     return exc
 
         clearing_task = asyncio.create_task(clear())
-        clearing_pid = await _poll(lambda: _waiting_on(observer, table))
-        assert clearing_pid is not None, f"the clearing never waited on {table}"
-
-        async def take_the_clearing_row():
-            await blocker.execute(select(Debt.id).where(Debt.id == d_ab).with_for_update())
-
-        # Immediately: the clearing's one deadlock check runs 1 s after it began to wait.
-        blocker_task = asyncio.create_task(take_the_clearing_row())
-        assert await _blocked_by(observer, clearing_pid, blocker_pid), "the clearing waits, but not on the blocker"
-        blocker_waited = await _poll(lambda: _blocked_by(observer, blocker_pid, clearing_pid), timeout=5.0)
-        # The deadlock resolves in the clearing's backend; the blocker then gets the row.
-        await asyncio.wait_for(blocker_task, timeout=30)
+        reached = asyncio.create_task(schedule.reached.wait())
+        await asyncio.wait({reached, clearing_task}, timeout=30, return_when=asyncio.FIRST_COMPLETED)
+        reached.cancel()
+        assert schedule.queued is not None, (
+            f"the {site} call site was not reached with the blocker queued on the clearing: {clearing_task!r}"
+        )
+        # The clearing's failure ended its attempt, so the blocker gets the row; its rollback frees the table and the
+        # row for the retry.
+        await asyncio.wait_for(schedule.queued.waiting, timeout=30)
         await blocker.rollback()
         outcome = await asyncio.wait_for(clearing_task, timeout=60)
     finally:
@@ -209,16 +207,14 @@ async def test_a_deadlock_anywhere_in_the_attempt_is_retried_by_the_owner(site, 
             await blocker.rollback()
         finally:
             await blocker.close()
-            await observer.close()
-            await observer_engine.dispose()
-        for task in (clearing_task, blocker_task):
-            if task is not None and not task.done():
-                task.cancel()
+        if clearing_task is not None and not clearing_task.done():
+            clearing_task.cancel()
         PaymentRouter.invalidate_cache(seed["equivalent_code"])
 
-    # Controls: the blocker waited on the clearing, and PostgreSQL detected a deadlock (its own counter; the
-    # statistics are flushed asynchronously, hence the poll).
-    assert blocker_waited, "the blocker never queued on the clearing's row: no deadlock was formed"
+    # Controls: the clearing's backend detected the cycle against the blocker (the server's DETAIL), and PostgreSQL
+    # counted a deadlock (its own counter; the statistics are flushed asynchronously, hence the poll).
+    assert schedule.victim_error is not None, f"the clearing's read at {site} did not fail: outcome {outcome!r}"
+    assert_victim_of(schedule.victim_error, schedule.queued)
 
     async def counted() -> bool:
         return await _deadlocks(stand) > deadlocks_before

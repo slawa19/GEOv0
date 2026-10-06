@@ -78,7 +78,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import deadlock_after_the_wait
+from tests.p019_support import QueuedCompetitor, deadlock_detail, queue_behind_the_victim
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
@@ -288,6 +288,32 @@ def _record_plans(monkeypatch, runner: RealRunnerImpl) -> list[list[Any]]:
 
 
 _PENDING: list[asyncio.Task] = []
+#: (DETAIL of the 40P01 at the tick's debt write, tick pid, competitor pid), one per conflicted attempt (031 `T3102`).
+_VICTIMS: list[tuple[str, int, int]] = []
+
+
+#: 031 `T3191` finding 5: the test-only table the tick reads, at the conflicted flow, after the competitor locked it.
+_PREFIX_BARRIER = "p015_p1_prefix_barrier"
+
+
+@dataclass
+class _StagedPrefix:
+    """What the conflicted attempt had really written when the conflict was provoked, read IN its transaction."""
+
+    flows_completed: int
+    tx_ids: list[str]
+    debt_amount: Decimal
+
+
+#: One per conflicted attempt of a stand that provokes the conflict after a staged prefix.
+_PREFIXES: list[_StagedPrefix] = []
+
+
+def _assert_the_tick_was_each_victim(conflicts: int) -> None:
+    assert len(_VICTIMS) == conflicts, _VICTIMS
+    for detail, victim, competitor in _VICTIMS:
+        assert detail.startswith(f"Process {victim} waits"), (victim, detail)
+        assert f"blocked by process {competitor}." in detail, (competitor, detail)
 
 
 def _competitor_after_snapshot(
@@ -298,8 +324,15 @@ def _competitor_after_snapshot(
     *,
     amount: Decimal,
     only_first: bool,
+    after_flows: int = 0,
 ) -> list[int]:
     """A second SERIALIZABLE transaction that commits after the tick has taken its snapshot.
+
+    `after_flows` (031 `T3191` finding 5): the conflict is provoked only after the attempt has COMPLETED that
+    many payment flows, so a staged prefix really exists in its transaction. The prefix is read there, in the
+    tick's own transaction (`_PREFIXES`), before the competitor queues. The competitor then takes the test-only
+    `_PREFIX_BARRIER` and is confirmed waiting on the tick's lines; the tick's read of the barrier closes the
+    cycle (the tick is the victim, as for `after_flows=0`).
 
     The barrier is the tick's own debt snapshot read: when it returns, the tick's transaction has
     read (and already holds its owner lock and its snapshot), and its first write is still ahead.
@@ -307,21 +340,85 @@ def _competitor_after_snapshot(
     write, which is what makes PostgreSQL refuse to serialise the two - the tick's commit gets a
     genuine `40001`.
     """
+    from sqlalchemy.exc import DBAPIError
+
+    from app.core.ledger import book
+
     commits: list[int] = []
     competitors = _PENDING  # 027 stage 2: awaited by `_debts` before it reads
     original = runner._load_debt_snapshot_by_pid
+    real_apply_flow = book._apply_payment_flow
+    armed: list[bool] = []
+    flows_in_attempt: list[int] = []  # completed flows of the armed attempt
+    pending: list[QueuedCompetitor] = []
+    the_lines = select(TrustLine.id).where(TrustLine.equivalent_id == world.equivalent.id).with_for_update()
 
-    async def _compete(holding: asyncio.Event) -> None:
-        async with session_factory() as other:
+    async def _compete(other, queued: QueuedCompetitor) -> None:
+        try:
+            await queued.waiting  # returns once the tick's failure has ended its attempt
             debt = (await other.execute(select(Debt).where(
                 Debt.equivalent_id == world.equivalent.id, Debt.debtor_id == world.sender.id,
-                Debt.creditor_id == world.receiver.id).with_for_update())).scalar_one()
-            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
-                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
+                Debt.creditor_id == world.receiver.id))).scalar_one()  # locked by `hold`, or at the flush below
             raised = Decimal(str(debt.amount)) + amount
             async with debt_fixture_setup(other, label="the-competitor"):
                 debt.amount = raised
             await other.commit()
+        finally:
+            await other.close()
+
+    async def _first_flow_meets_the_competitor(*args, **kwargs):
+        # 031 `T3102` (review `T3096` finding 3): at the attempt's first payment flow - its lines held, its debt
+        # write next - the competitor takes that debt row and is CONFIRMED waiting on the tick's lines; the tick's
+        # own debt write then closes the cycle, so ITS deadlock check finds it (`queue_behind_the_victim`). Before,
+        # the competitor closed the cycle and the victim was whoever's check ran first.
+        if armed and len(flows_in_attempt) >= after_flows:
+            armed.clear()
+            session = args[0] if args else kwargs["session"]
+            other = session_factory()
+            try:
+                if after_flows:
+                    _PREFIXES.append(await _staged_in_the_attempt(session, world, len(flows_in_attempt)))
+                    queued = await queue_behind_the_victim(
+                        session, other,
+                        hold=text(f"LOCK TABLE {_PREFIX_BARRIER} IN ACCESS EXCLUSIVE MODE"),
+                        # the lines, as below: the replay waits for the competitor's commit before it re-plans
+                        wait_on_victim=the_lines,
+                    )
+                else:
+                    queued = await queue_behind_the_victim(
+                        session, other,
+                        hold=select(Debt.id).where(
+                            Debt.equivalent_id == world.equivalent.id, Debt.debtor_id == world.sender.id,
+                            Debt.creditor_id == world.receiver.id).with_for_update(),
+                        wait_on_victim=the_lines,
+                    )
+            except BaseException:
+                await other.close()
+                raise
+            pending.append(queued)
+            competitors.append(asyncio.create_task(_compete(other, queued)))
+            if after_flows:
+                try:
+                    await (await session.connection()).execute(text(f"SELECT count(*) FROM {_PREFIX_BARRIER}"))
+                except DBAPIError as exc:
+                    queued = pending.pop()
+                    _VICTIMS.append((deadlock_detail(exc), queued.victim_pid, queued.competitor_pid))
+                    raise
+                raise AssertionError("the tick read the barrier the competitor holds without a deadlock")
+        try:
+            flowed = await real_apply_flow(*args, **kwargs)
+        except DBAPIError as exc:
+            if pending:
+                queued = pending.pop()
+                _VICTIMS.append((deadlock_detail(exc), queued.victim_pid, queued.competitor_pid))
+            raise
+        if armed:
+            flows_in_attempt.append(1)
+        return flowed
+
+    monkeypatch.setattr(book, "_apply_payment_flow", _first_flow_meets_the_competitor)
+    _VICTIMS.clear()
+    _PREFIXES.clear()
 
     async def _load_then_let_someone_else_commit(session, participants, equivalents):
         snapshot = await original(session, participants, equivalents)
@@ -332,15 +429,35 @@ def _competitor_after_snapshot(
             monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
             async with session_factory() as warm:
                 await PaymentRouter(warm).build_graph(world.equivalent.code, use_shared_cache=True)
-            holding = asyncio.Event()
-            competitors.append(asyncio.create_task(_compete(holding)))
-            await holding.wait()
+            flows_in_attempt.clear()
+            armed.append(True)  # the competitor enters at this attempt's flow number `after_flows + 1`
         return snapshot
 
     monkeypatch.setattr(
         runner, "_load_debt_snapshot_by_pid", _load_then_let_someone_else_commit
     )
     return commits
+
+
+async def _staged_in_the_attempt(session, world: _World, flows_completed: int) -> _StagedPrefix:
+    """The attempt's own writes, read on ITS connection (no ORM flush): the transactions it staged and the debt
+    row as its transaction holds it."""
+
+    connection = await session.connection()
+    tx_ids = [
+        str(tx_id)
+        for (tx_id,) in (
+            await connection.execute(
+                select(Transaction.tx_id).where(transactions_of([world.sender.id, world.receiver.id]))
+            )
+        ).all()
+    ]
+    amount = await connection.scalar(
+        select(Debt.amount).where(
+            Debt.equivalent_id == world.equivalent.id, Debt.debtor_id == world.sender.id,
+            Debt.creditor_id == world.receiver.id)
+    )
+    return _StagedPrefix(flows_completed, tx_ids, Decimal(str(amount)))
 
 
 def _record_staged_conflicts(monkeypatch) -> list[str]:
@@ -474,6 +591,7 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         # read by its SQLSTATE, not merely something that shares the exception type. Carried over
         # from `test_p015_p1_money_replay_sqlite.py`, which asserted SQLITE_BUSY_SNAPSHOT here.
         assert sqlstates == ["40P01"], sqlstates
+        _assert_the_tick_was_each_victim(1)
 
         # ── The plan was recomputed against a snapshot that includes the competitor ───
         assert len(plans) == 2, f"the money phase was not replanned: {plans}"
@@ -526,11 +644,16 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
 async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
     factory, monkeypatch
 ) -> None:
-    """Two payments are staged before the conflict; neither survives, and neither is duplicated.
+    """A payment is staged before the conflict, which the attempt's SECOND payment meets; the staged prefix does
+    not survive, and nothing is duplicated.
 
     The discarded attempt wrote real rows into its transaction. If any of that prefix survived, the
     replay would apply its payments on top of writes that the tick reports as never having
     happened - the exact double-spend shape the boundary exists to prevent.
+
+    031 `T3191` finding 5: before, the conflict fired at the attempt's FIRST payment flow (staging is serialised,
+    so nothing had been staged yet) and the non-vacuity check counted planned payments, not written ones. The
+    conflict now fires after one COMPLETED flow, and the prefix is read in the attempt's own transaction.
     """
     world = await _seed(factory)
     try:
@@ -538,19 +661,33 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
         run = _run_record(world, f"p1-pg-prefix-{uuid.uuid4().hex[:8]}")
         runner = _runner(run, _scenario(world), sse, actions_per_tick_max=2)
         _install(monkeypatch, factory)
+        async with factory() as s:
+            await s.execute(text(f"CREATE TABLE IF NOT EXISTS {_PREFIX_BARRIER} (id int)"))
+            await s.commit()
         plans = _record_plans(monkeypatch, runner)
         _competitor_after_snapshot(
-            monkeypatch, runner, factory, world, amount=_COMPETITOR, only_first=True
+            monkeypatch, runner, factory, world, amount=_COMPETITOR, only_first=True, after_flows=1
         )
 
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
 
         assert len(plans) == 2, plans
-        staged_in_discarded_attempt = len(plans[0])
-        assert staged_in_discarded_attempt >= 1, (
-            "stand is vacuous: the discarded attempt planned nothing, so there was no prefix"
+        _assert_the_tick_was_each_victim(1)
+        # ── Non-vacuity, from WRITES: one flow completed and its rows were in the attempt's transaction ──
+        assert len(_PREFIXES) == 1, f"stand is vacuous: the conflict was not provoked after a staged prefix: {_PREFIXES}"
+        [prefix] = _PREFIXES
+        assert len(plans[0]) >= 2, f"stand is vacuous: the attempt planned {len(plans[0])} payment(s), no second"
+        assert prefix.flows_completed == 1, prefix
+        staged_amount = Decimal(plans[0][0].amount)
+        # The completed payment's row, and the conflicted payment's own row (written before its flow).
+        assert len(prefix.tx_ids) == prefix.flows_completed + 1, (
+            f"stand is vacuous: the attempt's transaction did not hold the staged payment's row: {prefix}"
+        )
+        assert prefix.debt_amount == _OPENING + staged_amount, (
+            f"stand is vacuous: the attempt's debt row did not carry the staged payment: {prefix}"
         )
 
+        # ── The prefix's rows did not persist: read on an independent session ──
         replanned_total = sum(Decimal(a.amount) for a in plans[1])
         debts = await _debts(factory, world)
         assert debts == {
@@ -558,6 +695,9 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
         }, f"the discarded attempt's prefix survived: {debts}"
 
         transactions = await _transactions(factory, world)
+        assert not set(prefix.tx_ids) & set(transactions), (
+            f"the discarded attempt's staged transaction {prefix.tx_ids} persisted: {transactions}"
+        )
         assert len(transactions) == len(plans[1]), (
             f"expected one transaction per REPLANNED payment and nothing from the discarded "
             f"attempt; got {transactions}"
@@ -589,6 +729,7 @@ async def test_permanent_contention_exhausts_the_budget_without_spending_the_err
             await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
 
         assert len(commits) == 3, commits
+        _assert_the_tick_was_each_victim(3)
         exhausted = [
             record.getMessage()
             for record in caplog.records

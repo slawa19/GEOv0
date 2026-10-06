@@ -1,9 +1,9 @@
 """Seed a database by PERFORMING a community's recipe, not by writing its result down.
 
-Programme 017, `T1711`. The other seeding paths in `scripts/seed_db.py` insert rows: participants,
-trust lines and then *debts* and *transactions* invented by a fixture generator. The debts they write
-were never produced by a payment, so nothing in the database explains them, the admin screens show a
-history that never happened, and the debt journal has to adopt the lot as an opaque `SEED` operation.
+Programme 017, `T1711`. This is the only seeding path: the direct-insert sources of `scripts/seed_db.py`
+(rows for participants, trust lines and then *debts* and *transactions* invented by a fixture generator,
+adopted by the debt journal as an opaque `SEED` operation) were deleted by programme 030 S2. Debts written
+that way were never produced by a payment, so nothing in the database explained them.
 
 This path does the opposite. It reads
 

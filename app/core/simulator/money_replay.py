@@ -70,12 +70,12 @@ from sqlalchemy.exc import DBAPIError
 
 from app.core.ledger.book import DebtVersionConflict
 from app.core.payments.service import (
-    _COMMIT_REFUSED_SQLSTATE_CLASSES,
     DefinitiveRefusal,
     _public_error_of_stored,
     PaymentTransactionUnusable,
     _drain_call,
     collect_admitted_refusals,
+    commit_refused_by_server,
     is_debt_pair_collision,
     record_definitive_refusal,
 )
@@ -171,12 +171,12 @@ class _CommitResolution:
 def _commit_refused(error: BaseException | None) -> bool:
     """The COMMIT's failure itself proves nothing landed: the server answered it with a refusal - a conflict the
     replay owns, or an error of the classes PostgreSQL rolls the transaction back with (`23`, `40`, `P0`, the
-    payment owner's `_COMMIT_REFUSED_SQLSTATE_CLASSES`). Anything else - a lost connection, a lost acknowledgement,
-    a timeout - leaves the commit possibly landed, whatever the rollback after it says."""
+    payment owner's `commit_refused_by_server`, which excludes `40003 statement_completion_unknown`). Anything
+    else - a lost connection, a lost acknowledgement, a timeout - leaves the commit possibly landed, whatever the
+    rollback after it says."""
     if money_conflict_name(error) is not None:
         return True
-    code = sqlstate(error)
-    return code is not None and code[:2] in _COMMIT_REFUSED_SQLSTATE_CLASSES
+    return commit_refused_by_server(sqlstate(error))
 
 
 @dataclass(frozen=True)

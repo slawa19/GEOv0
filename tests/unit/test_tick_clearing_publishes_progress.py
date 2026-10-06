@@ -365,14 +365,24 @@ async def test_each_pass_gets_the_tick_budget_as_its_deadline(monkeypatch) -> No
     Budget 300 ms: each equivalent's pass is handed `now + 0.3 s` of the event loop's clock, measured when the pass
     starts - not one deadline for the whole tick, not the hard timeout, and not missing (the runner has no budget of
     its own). The run perimeter reaches every pass.
+
+    THE CLOCK IS THE STAND'S (031 `T3102`, closing review `T3008` finding 3). Measured on the real loop clock the
+    stand read `deadline - loop.time()` and bounded it by `0.3`, and `(t + 0.3) - t` exceeds `0.3` by a rounding
+    unit for some `t` (`assert 0.3000000000029104 <= 0.3`, full tier 2026-10-06). The loop's `time` is replaced by a
+    clock that only the passes advance, so each pass knows the exact reading its deadline was taken from and the
+    comparison is equality, with no rounding to tolerate.
     """
 
+    loop = asyncio.get_running_loop()
+    clock = {"now": 1000.0}  # any reading: the comparison below repeats the product's own float expression
+    monkeypatch.setattr(loop, "time", lambda: clock["now"])
     run = _run("deadline-run", 2)
-    seen: list[tuple[str, float, object]] = []
+    seen: list[tuple[str, float, float, object]] = []
 
     async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):
-        seen.append((equivalent, deadline - asyncio.get_running_loop().time(), allowed_participant_pids))
-        await asyncio.sleep(0.05)  # the second equivalent starts later, so a shared deadline would show
+        seen.append((equivalent, clock["now"], deadline, allowed_participant_pids))
+        clock["now"] += 0.05  # the second equivalent starts later, so a shared deadline would show
+        await asyncio.sleep(0)
         return _result([], status="complete", reason=None)
 
     async def _apply_trust_growth(**_kwargs):
@@ -388,7 +398,10 @@ async def test_each_pass_gets_the_tick_budget_as_its_deadline(monkeypatch) -> No
     )
     await tick._run_clearing(session=None, run_id=run.run_id, run=run, equivalents=["USD", "EUR"], committed={})
 
-    assert [eq for eq, _, _ in seen] == ["USD", "EUR"]
-    for _, remaining, scope in seen:
-        assert 0.25 < remaining <= 0.3, remaining
+    assert [eq for eq, _, _, _ in seen] == ["USD", "EUR"]
+    [(_, usd_start, usd_deadline, _), (_, eur_start, eur_deadline, _)] = seen
+    assert eur_start > usd_start, "premise: the second pass starts later on the stand's clock"
+    assert eur_deadline > usd_deadline, "one deadline shared by the whole tick"
+    for _, start, deadline, scope in seen:
+        assert deadline == start + 0.3, (start, deadline)  # the budget, from the reading at this pass's start
         assert scope == {"alice", "bob"}

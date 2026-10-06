@@ -68,7 +68,7 @@ from tests.integration.p019_stand import (  # noqa: F401 - `api` and `factory` a
     payment_body,
     tx_row,
 )
-from tests.p019_support import deadlock_after_the_wait, require_target
+from tests.p019_support import QueuedCompetitor, assert_victim_of, queue_behind_the_victim, require_target
 
 PHASES = ["commit"]
 
@@ -81,9 +81,20 @@ class _Stand:
     competitors: list[asyncio.Task] = field(default_factory=list)
     touches: int = 0
     subject_held_shared: list[bool] = field(default_factory=list)
+    errors: list[BaseException] = field(default_factory=list)
+    queued: list[QueuedCompetitor] = field(default_factory=list)
 
 
 def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stand) -> None:  # noqa: F811
+    """The subject's money phase meets a real `40P01` IN ITS OWN BACKEND, on every attempt (031 `T3102`).
+
+    At the stop guard - after the subject's line locks, before its `FOR SHARE` of the equivalent row - a competitor
+    UPDATEs that row (its `description`, so the stop never becomes true) and asks for the subject's lines; it is
+    CONFIRMED waiting on the subject (`queue_behind_the_victim`), and only then does the guard read the row: the
+    subject's wait closes the cycle and its own deadlock check finds it. Before 031 the competitor closed the cycle
+    (`deadlock_after_the_wait`, removed by 031) and the victim was whoever's check ran first (review `T3096` finding 3).
+    """
+
     original_commit = PaymentService._apply_payment  # the money phase (019 stage 4)
     original_guard = MoneyBoundary.refuse_inactive_equivalents
     pair = (world.ids[world.alice["pid"]], world.ids[world.bob["pid"]])
@@ -96,25 +107,36 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
             return await original_commit(self, declaration, *args, **kwargs)
         except BaseException as exc:
             stand.sqlstates.append(_payment_db_sqlstate(exc))
+            stand.errors.append(exc)
             raise
         finally:
             self._boundary._p019_subject_commit = False
 
-    async def competitor(holding: asyncio.Event) -> str:
-        async with factory() as other:
-            stand.touches += 1
-            await other.execute(update(Equivalent).where(Equivalent.id == world.equivalent_id)
-                                .values(description=f"p027-touch-{stand.touches}"))
-            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
-                TrustLine.from_participant_id.in_(pair), TrustLine.to_participant_id.in_(pair)).with_for_update())
+    async def competitor(other, queued: QueuedCompetitor) -> str:
+        try:
+            await queued.waiting  # returns once the subject's failure has ended its transaction
             await other.commit()
             return "COMMITTED"
+        finally:
+            await other.close()
 
     async def guard(self, equivalent_ids):
         if getattr(self, "_p019_subject_commit", False):
-            holding = asyncio.Event()
-            stand.competitors.append(asyncio.create_task(competitor(holding)))
-            await holding.wait()
+            other = factory()
+            stand.touches += 1
+            try:
+                queued = await queue_behind_the_victim(
+                    self.session, other,
+                    hold=update(Equivalent).where(Equivalent.id == world.equivalent_id)
+                    .values(description=f"p027-touch-{stand.touches}"),
+                    wait_on_victim=select(TrustLine.id).where(
+                        TrustLine.from_participant_id.in_(pair), TrustLine.to_participant_id.in_(pair)).with_for_update(),
+                )
+            except BaseException:
+                await other.close()
+                raise
+            stand.queued.append(queued)
+            stand.competitors.append(asyncio.create_task(competitor(other, queued)))
         return await original_guard(self, equivalent_ids)
 
     monkeypatch.setattr(PaymentService, "_apply_payment", commit)
@@ -151,6 +173,10 @@ async def _conflict_then_resubmit(api, factory, monkeypatch, caplog, phase: str)
     budget = int(settings.COMMIT_RETRY_ATTEMPTS)
     assert budget >= 2, f"premise: pay() retries nothing ({budget})"
     assert stand.sqlstates == ["40P01"] * budget, stand.sqlstates
+    # ... detected in the subject's backend against its competitor, on every attempt (031 `T3102`).
+    assert len(stand.errors) == len(stand.queued) == budget, (stand.errors, stand.queued)
+    for error, queued in zip(stand.errors, stand.queued):
+        assert_victim_of(error, queued)
     retries = [
         r.getMessage()
         for r in caplog.records

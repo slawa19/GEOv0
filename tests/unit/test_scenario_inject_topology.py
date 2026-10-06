@@ -927,7 +927,7 @@ async def test_malformed_inject_effect_skipped(db_session) -> None:
                     {"op": "create_trustline", "from": "", "to": "", "equivalent": ""},
                     # freeze_participant without participant_id.
                     {"op": "freeze_participant"},
-                    # Unknown op — silently skipped.
+                    # Unknown op — skipped, the note names it (`unsupported_op:unknown_op_xyz`, 031).
                     {"op": "unknown_op_xyz"},
                     # Non-dict effect.
                     42,

@@ -46,6 +46,9 @@ from app.utils.validation import money_storability_violation
 #: `skipped_reasons` key of an effect refused over a participant that is not active (028 `F-028-28`).
 PARTICIPANT_SUSPENDED = MoneyBoundary.PARTICIPANT_SUSPENDED_REASON
 
+#: `skipped_reasons` key prefix of an effect whose op this executor does not have, followed by `:<op>` (031).
+UNSUPPORTED_OP_REASON = "unsupported_op"
+
 # How many effects of one inject event are processed. Shared by staging and by the lock-set
 # helper below, so the helper never names fewer equivalents than staging can reach.
 _MAX_INJECT_EFFECTS = 500
@@ -934,7 +937,11 @@ class InjectExecutor:
             if op == "freeze_participant":
                 await op_freeze_participant(eff)
                 continue
-            skipped += 1  # an op this executor does not have (the scenario schema refuses it; `inject_debt` is gone)
+            # An op this executor does not have. The scenario schema refuses it on upload, but a scenario stored before
+            # an op was removed (`inject_debt`, 030 S3) is still loaded as it is; the note names the op (031, BACKLOG 18).
+            skipped += 1
+            reason = f"{UNSUPPORTED_OP_REASON}:{op[:64] or '<empty>'}"
+            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
 
         # Programme 021, stage 2: flush, the after-checkpoint of each touched equivalent, the audit rows. A failure
         # here propagates to the owner, which rolls the event back.

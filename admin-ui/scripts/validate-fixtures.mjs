@@ -144,6 +144,33 @@ function validateTrustlines(trustlines, label) {
   }
 }
 
+// 031 slice C (item 6): the equivalent's `precision` is the unit of account of every amount in the pack, so it is checked
+// once, before any debt is walked, for every pack (`--only-pack` may carry no viz datasets, whose walk used to be the
+// only place it was checked): a missing one was `Number(undefined)` = NaN, and `length > NaN` never fires - the step
+// check of `validateDebts` passed vacuously. The range is the storage scale of `Numeric(20, 8)`: `precision` is
+// 0..8 in `app/schemas/admin.py` (`AdminEquivalentCreateRequest`).
+// 031 T3191 finding 6: a bare-code equivalent ("UAH", allowed by `asEquivalentCodes`) carries no precision, and nothing
+// else in a pack declares one. A pack with debts needs the step of every equivalent, so it may not use a bare code; a
+// pack without debts has no amount checked against a step and keeps the bare form.
+const MAX_EQUIVALENT_PRECISION = 8
+function validateEquivalentPrecisions(equivalents, label, debts) {
+  const hasDebts = Array.isArray(debts) && debts.length > 0
+  for (const e of equivalents) {
+    if (typeof e === 'string') {
+      assert(
+        !hasDebts,
+        `${label} equivalent ${e} is a bare code with no precision; a pack with debts must declare it as {code, precision}`,
+      )
+      continue
+    }
+    if (!e || typeof e !== 'object' || typeof e.code !== 'string') continue
+    assert(
+      Number.isInteger(e.precision) && e.precision >= 0 && e.precision <= MAX_EQUIVALENT_PRECISION,
+      `${label} equivalent ${e.code} has no usable precision (an integer 0..${MAX_EQUIVALENT_PRECISION}), got ${JSON.stringify(e.precision)}`,
+    )
+  }
+}
+
 // A debt row is refused, never skipped: a row the net check silently left out would let a wrong file pass as "no effect".
 // Besides the shape: a known equivalent, two known participants, a positive amount that is a whole number of the
 // equivalent's step (precision 2 -> 0.01) - the step is the unit of account, a finer amount is not money here.
@@ -521,6 +548,7 @@ async function validateSide(label, dir, { requireViz }) {
   const incidentItems = getIncidentItems(incidents, label)
   assert(Array.isArray(incidentItems), `${label} incidents items must be an array`)
 
+  validateEquivalentPrecisions(equivalents, label, debts)
   validateDebts(debts, label, participants, equivalents)
 
   // The canonical pack and its public copy carry one viz dataset per equivalent (the mock reads them); a pack built
