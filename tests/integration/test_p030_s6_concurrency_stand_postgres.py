@@ -594,6 +594,11 @@ async def test_control_f4_update_first_without_line_locks_breaks_the_limit(rig, 
         rig, park, lambda: _trustline_op(rig, park, "update", tl[("Y", "X")], p["Y"], "60"),
         lambda: _pay(rig, p["X"], p["Y"], eq.code, "40"))
     debts = await _debts(rig, eq)
+    async with rig.sessions() as s:
+        limit = (await s.execute(select(TrustLine.limit).where(TrustLine.id == tl[("Y", "X")].id))).scalar_one()
     assert early and not waiters, "without line locks the payment must not wait"
+    # 030 S6 `T3096` #2: the PATCH really committed (an error collected by `_race` as a result would leave limit 100 and
+    # a debt of 90 that is legal), so the limit is 60 and the debt 90 is OVER it
+    assert t == "TL_COMMITTED" and limit == D("60"), (t, limit)
     # the payment decided on limit 100 while the PATCH to 60 was uncommitted: growth 50 -> 90 over limit 60
     assert _code(pay) == "COMMITTED" and debts == {(p["X"].id, p["Y"].id): D("90.00000000")}, (pay, debts)

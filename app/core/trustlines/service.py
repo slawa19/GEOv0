@@ -51,8 +51,9 @@ def _rfc3339(value: datetime | None) -> str | None:
     return None if value is None else value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-#: RFC 3339 `date-time` with an offset or `Z` (030 S6b, `T3095` #2): `fromisoformat` alone took `2026-10-06X12:00:00Z`.
-_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})\Z")
+#: RFC 3339 `date-time` with an offset or `Z` (030 S6b, `T3095` #2): `fromisoformat` alone took `2026-10-06X12:00:00Z`;
+#: the offset is `HH 00-23`, `MM 00-59` (RFC 3339 §5.6; S6 `T3096` #4: `+00:60` was taken and normalised to an hour).
+_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\Z")
 
 
 def _parse_rfc3339(text: object, *, field: str) -> datetime:

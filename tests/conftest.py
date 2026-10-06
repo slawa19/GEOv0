@@ -1,13 +1,13 @@
 from typing import AsyncGenerator
 import os
 import asyncio
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
@@ -594,47 +594,6 @@ def _mode_a_has_no_payment_sessions():
     )
 
 
-@contextmanager
-def _a_request_reads_the_database(session: AsyncSession):
-    """For the span of one MODE-B request: every load reads the committed row, as in a session of its own (030 S6).
-
-    Production opens one session per request, so a request starts with an empty identity map. Mode B runs every
-    request on the test's ONE session, whose identity map outlives the request: an ORM object loaded before (by the
-    test, or by an earlier request - a refused one keeps its objects alive through the exception's traceback) came
-    back from a later `select` or `session.get` with the attributes it had then, not what another session committed
-    since. `populate_existing` is the one option that makes a load overwrite the object in place, so
-    * the test's handles stay readable (no expiry, no detaching: the session is `expire_on_commit=False` on purpose,
-      see `override_get_db`) and show what a request read through them, which the mode-B tests read results by;
-    * `expunge_all()` would detach those handles and `expire_all()` would make their next read do IO.
-    The ORM-enabled SELECTs get it through `do_orm_execute`; `Session.get` answers from the identity map without
-    emitting a statement, so it is passed the option here (`AsyncSession.get` calls `sync_session.get`). Autoflush
-    runs before a load, so a pending change of the test is written, not overwritten."""
-
-    info = session.info
-    if info.get("geo_request_depth", 0) == 0:  # requests may overlap on the one session (a held SSE stream)
-        sync = session.sync_session
-        plain_get = sync.get
-
-        def force(state) -> None:
-            if state.is_select:
-                state.update_execution_options(populate_existing=True)
-
-        def get(*args, **kwargs):
-            kwargs["populate_existing"] = True  # `AsyncSession.get` passes False explicitly: override, not default
-            return plain_get(*args, **kwargs)
-
-        event.listen(sync, "do_orm_execute", force)
-        sync.get = get
-        info["geo_request_undo"] = lambda: (sync.__dict__.pop("get", None), event.remove(sync, "do_orm_execute", force))
-    info["geo_request_depth"] = info.get("geo_request_depth", 0) + 1
-    try:
-        yield
-    finally:
-        info["geo_request_depth"] -= 1
-        if info["geo_request_depth"] == 0:
-            info.pop("geo_request_undo")()  # back to the class's `get`, no listener
-
-
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """httpx AsyncClient bound to the FastAPI app with a DB override."""
@@ -661,13 +620,11 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         # objects stay readable (a rollback would expire them and a later attribute read would do IO).
         if committed is not None:
             await _end_the_transaction(db_session)
-            with _a_request_reads_the_database(db_session):
-                try:
-                    yield db_session
-                finally:
-                    await _end_the_transaction(db_session)
-        else:
+        try:
             yield db_session
+        finally:
+            if committed is not None:
+                await _end_the_transaction(db_session)
 
     app.dependency_overrides[get_db] = override_get_db
     # 019 stage 3 (`FORK-11`): `POST /payments` runs as ONE transaction on sessions of its own - one

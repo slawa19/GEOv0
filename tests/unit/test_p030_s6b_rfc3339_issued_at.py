@@ -14,7 +14,9 @@ from app.utils.exceptions import BadRequestException
 
 @pytest.mark.parametrize("text", ["2026-10-06X12:00:00+00:00", "2026-10-06 12:00:00+00:00", "20261006T120000Z",
                                   "2026-10-06T12:00:00", "2026-10-06T12:00:00+0000", "2026-10-06T12:00Z",
-                                  "2026-10-06", 12, None])
+                                  "2026-10-06", 12, None,
+                                  # offset out of RFC 3339 §5.6 range: 030 S6 `T3096` #4 (minutes 60..99 were taken)
+                                  "2026-10-06T12:00:00+00:60", "2026-10-06T12:00:00-00:99", "2026-10-06T12:00:00+24:00"])
 def test_a_form_outside_rfc3339_is_refused(text) -> None:
     with pytest.raises(BadRequestException) as refused:
         _parse_rfc3339(text, field="issued_at")
