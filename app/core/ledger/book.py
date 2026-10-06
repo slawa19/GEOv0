@@ -67,8 +67,8 @@ TWO SHAPES OF USE:
   work the book does not own (a payment's invariant checks; a clearing's audit row).
 * `await Book.post(session, op, effects)` - the shorthand for an operation made of debt effects only.
 
-`Book.current(session)` returns the posting open on a session (the inject executor's entrance until 030
-S3b; the payment path's perturbation seam is `_apply_payment_flow` below).
+`Book.current(session)` returns the posting open on a session (the entrance of the test fixtures,
+`tests/debt_setup.py`; the payment path's perturbation seam is `_apply_payment_flow` below).
 """
 
 from __future__ import annotations

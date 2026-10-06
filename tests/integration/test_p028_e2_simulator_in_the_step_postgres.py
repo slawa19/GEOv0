@@ -54,14 +54,9 @@ async def _lines(db_session, eq, c, d) -> list[Decimal]:
 
 
 async def _inject(db_session, eqs, c, d, effects):
-    """Run one inject event. An effect is a dict (used as is) or a legacy `(eq key, amount)` pair, which is an
-    `inject_debt` effect: the op no longer exists, so such an effect is skipped (kept for the importer
-    `test_p028_e4_inject_criterion_b_postgres.py`)."""
+    """Run one inject event whose effects are dicts, used as is."""
     runner, artifacts = _make_runner(inject_enabled=True)
-    event = {"type": "inject", "time": 0, "effects": [
-        e if isinstance(e, dict) else
-        {"op": "inject_debt", "from": c.pid, "to": d.pid, "equivalent": eqs[e[0]].code, "amount": e[1]}
-        for e in effects]}
+    event = {"type": "inject", "time": 0, "effects": list(effects)}
     scenario = {"participants": [{"id": c.pid}, {"id": d.pid}], "events": [event], "trustlines": []}
     await runner._apply_due_scenario_events(db_session, run_id="r-028-inject", scenario=scenario, run=_make_run(
         participants=[(c.id, c.pid), (d.id, d.pid)], equivalents=[eq.code for eq in eqs.values()]))

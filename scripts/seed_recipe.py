@@ -1144,9 +1144,9 @@ def write_key_table(run: _Run, *, root: Path | None = None) -> Path:
 #: money in `debts`, which a legitimate operation keeps true. The other two reconciliation checks
 #: are properties of the SEED's verdict (the baseline adopted nothing; every operation of the seed
 #: was fully recomputed) and are not kept either. The second would go red on a sound database the
-#: moment the simulator's injector writes an `INJECT` operation, which reconciliation examines only
-#: as a subset (`app/core/ledger/reconciliation.py:162`) - a limit the verdict records about
-#: itself, not a defect of the database.
+#: moment an operation the reconciliation examines only structurally enters the journal - a limit the verdict
+#: records about itself, not a defect of the database. (Written when the simulator's injector wrote `INJECT`
+#: operations, examined as a subset; since 030 S3b it writes none and reconciliation holds on any INJECT envelope.)
 READINESS_CHECKS = ("reconciliation_passed",)
 
 
