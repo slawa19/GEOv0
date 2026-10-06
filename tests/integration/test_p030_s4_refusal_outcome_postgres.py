@@ -22,7 +22,7 @@ import app.core.payments.service as payment_service
 from app.config import settings
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, _payment_db_sqlstate
 from app.db.models.trustline import TrustLine
 from app.schemas.payment import PaymentCreateRequest
 from app.utils.exceptions import RetryablePaymentConflictException, TimeoutException
@@ -49,8 +49,8 @@ async def _pay(stand, payer, request: PaymentCreateRequest, role: str) -> object
         return exc
 
 
-async def _waiters(stand, blocker_pid: int, *, query_prefix: str | None = None, timeout: float = 10.0) -> bool:  # noqa: F811
-    """Some backend of this database waits on a lock `blocker_pid` holds (and runs `query_prefix...`)."""
+async def _waiters(stand, blocker_pid: int, *, query_marks: tuple[str, ...] = (), timeout: float = 10.0) -> bool:  # noqa: F811
+    """Some backend of this database waits on a lock `blocker_pid` holds (and runs a statement holding every mark)."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     async with stand() as observer:
@@ -59,11 +59,11 @@ async def _waiters(stand, blocker_pid: int, *, query_prefix: str | None = None, 
                 "SELECT a.query FROM pg_stat_activity a WHERE a.datname = current_database() "
                 "AND a.wait_event_type = 'Lock' AND :b = ANY(pg_blocking_pids(a.pid))"), {"b": blocker_pid})).all()
             await observer.rollback()
-            if any(query_prefix is None or str(q).lstrip().upper().startswith(query_prefix) for (q,) in rows):
+            if any(all(mark in " ".join(str(q).upper().split()) for mark in query_marks) for (q,) in rows):
                 return True
             if loop.time() > deadline:
                 return False
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.005)
 
 
 def _reason(outcome: object) -> tuple:
@@ -149,8 +149,9 @@ async def test_a_refusal_whose_recording_times_out_answers_outcome_not_establish
     eq, p, _ = await _world(stand, lines=[("B", "A"), ("C", "B")])
     request = PaymentCreateRequest(tx_id=str(uuid.uuid4()), to=p["C"].pid, equivalent=eq.code, amount="1.00",
                                    signature="__internal__")
-    b_written, b_resume = asyncio.Event(), asyncio.Event()
+    b_written, b_resume, a_at_recorder = asyncio.Event(), asyncio.Event(), asyncio.Event()
     b_pid: list[int] = []
+    a_recorder_raised: list[tuple[str, str | None]] = []
 
     real_execute = PaymentService.execute
 
@@ -162,7 +163,20 @@ async def test_a_refusal_whose_recording_times_out_answers_outcome_not_establish
             await b_resume.wait()
         return staged
 
+    real_record = payment_service.record_definitive_refusal
+
+    async def recorder(sessions, refusal, **kw):
+        if _ROLE.get() != "A":
+            return await real_record(sessions, refusal, **kw)
+        a_at_recorder.set()  # A's own payment insert is behind it: any wait from here on is the recorder's
+        try:
+            return await real_record(sessions, refusal, **kw)
+        except Exception as exc:
+            a_recorder_raised.append((type(exc).__name__, _payment_db_sqlstate(exc.__cause__) if exc.__cause__ else None))
+            raise
+
     monkeypatch.setattr(PaymentService, "execute", execute)
+    monkeypatch.setattr(payment_service, "record_definitive_refusal", recorder)
 
     a = b = None
     try:
@@ -172,7 +186,12 @@ async def test_a_refusal_whose_recording_times_out_answers_outcome_not_establish
         await asyncio.wait_for(b_written.wait(), timeout=30)
         _budget(monkeypatch, 1)
         a = asyncio.create_task(_pay(stand, p["A"], request, "A"))
-        a_queued_on_the_row = await _waiters(stand, b_pid[0], query_prefix="INSERT INTO TRANSACTIONS")
+        # 031 `T3102` (BACKLOG, S4 of 030): A's OWN payment insert (`_bind_payment`'s flush) also queues on B's row
+        # before A times out, so the bare prefix `INSERT INTO TRANSACTIONS` could be satisfied by that earlier wait.
+        # The probe starts only after A entered the real recorder and matches only the recorder's statement - the
+        # one insert of `transactions` with `ON CONFLICT` (`record_definitive_refusal`).
+        await asyncio.wait_for(a_at_recorder.wait(), timeout=30)
+        a_queued_on_the_row = await _waiters(stand, b_pid[0], query_marks=("INSERT INTO TRANSACTIONS", "ON CONFLICT"))
         a_outcome = await asyncio.wait_for(a, timeout=30)
         ended_before_b = not b.done()
         stored_while_b_open = await tx_row(stand, request.tx_id)
@@ -187,6 +206,7 @@ async def test_a_refusal_whose_recording_times_out_answers_outcome_not_establish
 
     # The mechanism, before the outcome.
     assert a_queued_on_the_row, "premise: A's refusal insert never queued on B's uncommitted row"
+    assert a_recorder_raised == [("RefusalNotRecorded", "55P03")], a_recorder_raised  # its bounded wait gave up
     assert ended_before_b and stored_while_b_open is None, (ended_before_b, stored_while_b_open)
     assert _reason(b_outcome)[0] == "COMMITTED" and _reason(replay)[0] == "COMMITTED", (b_outcome, replay)
     # The outcome: not A's original timeout refusal, but "not established - send the same request again".

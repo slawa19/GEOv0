@@ -13,13 +13,17 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import update
 
 import app.core.simulator.money_replay as money_replay
-from app.core.payments.service import PaymentService
+from app.core.payments.service import PaymentService, _public_error_of_stored
+from app.core.simulator.real_payments_executor import _classify_refusal
+from app.core.simulator.rejection_codes import map_rejection_code
 from app.db.models.trustline import TrustLine
+from app.schemas.payment import PaymentError
 from tests.integration.p019_stand import api, factory, tx_row  # noqa: F401 - fixtures
 from tests.integration.test_p019_staged_refusal_is_durable_postgres import (
     _run_the_tick_behind_a_slow_edit,
@@ -67,5 +71,18 @@ async def test_the_owner_publishes_the_stored_refusal_of_an_aborted_winner(api, 
     # The outcome: the one observation of seq 1 is the stored refusal.
     failed = [e for e in t.sse.events if e.get("type") == "tx.failed"]
     assert len(failed) == 1, failed
-    assert (failed[0].get("error") or {}).get("code") != "PAYMENT_TIMEOUT", failed
-    assert "insufficient_capacity" in repr(failed[0].get("error")), failed
+    # 031 `T3102` (BACKLOG, S3/S4 of 030): the published observation is compared with the STORED row through the
+    # product's own public mapping - the stored error as the exception it was refused with (`_public_error_of_stored`),
+    # classified and labelled as the executor labels every refusal (`_classify_refusal`, `map_rejection_code`).
+    # Before, the stand checked only "not PAYMENT_TIMEOUT" and a substring, which a refusal published under the wrong
+    # class (same details, another code) still passed.
+    stored_error = PaymentError(**stored[1])
+    public = _public_error_of_stored(SimpleNamespace(status="ABORTED", error=stored_error))
+    _status, run_code, expected_details = _classify_refusal(public)
+    expected_code = run_code or map_rejection_code(expected_details)
+    assert stored_error.code == "E002" and expected_code == "ROUTING_NO_CAPACITY", (stored_error, expected_code)
+    published = failed[0].get("error") or {}
+    assert published.get("code") == expected_code, (published, expected_code)
+    details = published.get("details") or {}
+    assert details.get("exc") == type(public).__name__ and details.get("geo_code") == stored_error.code, (details, public)
+    assert details.get("details") == stored_error.details, (details, stored_error)
