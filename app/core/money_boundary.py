@@ -250,9 +250,12 @@ class MoneyBoundary:
     async def refuse_inactive_equivalents(
         self,
         equivalent_ids: set[UUID] | list[UUID] | tuple[UUID, ...],
+        *,
+        timeout_ms: int | None = None,
     ) -> None:
         """T1544: money does not move in an equivalent the operator has deactivated - and, since
-        step 5c (`T1546`), in one under an integrity hold.
+        step 5c (`T1546`), in one under an integrity hold. `timeout_ms` bounds the wait on the row as the other
+        bounded reads (030 S6b, `T3093` #2: an inject held its lines while it waited here past its budget).
 
         ONE STATEMENT READS BOTH: `is_active` and `integrity_hold_result_id` live on the same row, so the
         hold inherits every guarantee described below unchanged. The scheduled reaction that sets a hold
@@ -280,7 +283,7 @@ class MoneyBoundary:
         stmt = select(
             Equivalent.code, Equivalent.is_active, Equivalent.integrity_hold_result_id, Equivalent.id
         ).where(Equivalent.id.in_(ids)).with_for_update(read=True)
-        rows = (await self.session.execute(stmt)).all()
+        rows = await self._locking(stmt, timeout_ms)
         gone = sorted(str(i) for i in set(ids) - {row.id for row in rows})
         inactive = sorted(str(code) for code, is_active, _hold, _id in rows if not is_active) + gone
         if inactive:

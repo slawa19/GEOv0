@@ -31,7 +31,10 @@ from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, simulate
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from app.core.trustlines.service import TrustLineService
 from app.db.sqlstate import sqlstate
+from app.schemas.trustline import TrustLineCreateRequest
+from app.utils.exceptions import ConflictException
 from tests.integration.test_p019_t1908_lock_removal_experiments_postgres import _seed_pair, stand  # noqa: F401
 from tests.integration.test_p027_t2706_fix_delta_postgres import _blocked_by, _inject_create, _live
 from tests.integration.test_scenarios import (_sign_trustline_create_request, expected_state_of, register_and_login,
@@ -122,6 +125,34 @@ async def test_t3093_1_the_seeder_takes_its_lines_in_the_writers_order(stand, mo
     async with stand() as s:
         assert await s.scalar(select(func.count()).select_from(TrustLine).where(
             TrustLine.equivalent_id == eq.id, TrustLine.status != "closed")) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_batch_holding_its_locks_still_runs_every_check(stand, monkeypatch) -> None:  # noqa: F811
+    """Anti-vacuum of the once-per-batch locks: after `lock()` a creation takes no new line lock, yet the live-line
+    re-check and the participant status still run at every creation (the status: re-read, 028 E3 (г))."""
+    eq, x, y = await _seed_pair(stand, "S6V")
+    lock, statements = MoneyBoundary.lock_pair_lines, []
+    monkeypatch.setattr(MoneyBoundary, "lock_pair_lines", lambda self, pairs, **kw: (statements.append(list(pairs)),
+                                                                                       lock(self, pairs, **kw))[1])
+    async with stand() as s:
+        await s.execute(update(TrustLine).where(TrustLine.from_participant_id == y.id).values(status="closed"))
+        await s.commit()
+        service, batch = TrustLineService(s), TrustLineService(s).begin_internal_batch()
+        assert len(await batch.lock([x.id, y.id], [(eq.id, x.id, y.id)])) == 1  # X -> Y is the pair's one live line
+
+        def create(creditor, debtor):
+            return service.execute_create(batch, creditor.id, TrustLineCreateRequest(
+                to=debtor.pid, equivalent=eq.code, limit="5", signature="-"), require_signature=False)
+
+        await create(y, x)  # the line the pre-lock did not see is created...
+        with pytest.raises(ConflictException, match="already exists"):
+            await create(y, x)  # ...and found by the next creation's re-check, under the pair lock the batch holds
+        await s.execute(update(Participant).where(Participant.id == x.id).values(status="suspended"))  # this txn
+        with pytest.raises(ConflictException, match="not active"):
+            await create(x, y)
+        await s.rollback()
+    assert len(statements) == 1, statements  # one line statement for the whole batch: the pre-lock
 
 
 @pytest.mark.asyncio
