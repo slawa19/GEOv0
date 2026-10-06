@@ -70,28 +70,6 @@ def allow_below_serializable_for_a_diagnostic(monkeypatch) -> list[str]:
     return skipped
 
 
-async def deadlock_after_the_wait(session, holding, second_lock) -> None:
-    """027 stage 2: the competitor of a real `40P01`. It already holds a row; it waits until a backend queues on it,
-    then asks for `second_lock` (rows the waiter holds): the waiter waited first, so ITS deadlock check aborts it.
-
-    NOT A GUARANTEE OF THE VICTIM (031 `T3102`, review `T3096` finding 3). PostgreSQL 16 checks for a deadlock once
-    per lock wait, `deadlock_timeout` after it began, in the waiting backend, and aborts the backend whose check
-    finds the cycle. The waiter's single check can run BEFORE this competitor closes the cycle (a slow poll), pass,
-    and leave the competitor's own later check to find it - the competitor is then the victim. A stand that needs
-    the error in a named backend uses `queue_behind_the_victim` instead."""
-
-    import asyncio
-
-    from sqlalchemy import text
-
-    me = await session.scalar(text("SELECT pg_backend_pid()"))
-    holding.set()
-    while not await session.scalar(text("SELECT count(*) FROM pg_stat_activity a WHERE CAST(:me AS int) = "
-                                        "ANY(pg_blocking_pids(a.pid))"), {"me": me}):
-        await asyncio.sleep(0.02)
-    await session.execute(second_lock)
-
-
 #: The competitor's deadlock check: far beyond any stand's deadline, so it never runs while the stand is alive.
 _COMPETITOR_DEADLOCK_TIMEOUT = "10min"
 #: The victim's deadlock check: short, and it runs only after the victim's own wait has closed the cycle.
@@ -127,16 +105,19 @@ async def queue_behind_the_victim(victim, competitor, *, hold, wait_on_victim, d
 
     from sqlalchemy import text
 
-    victim_pid = int(await victim.scalar(text("SELECT pg_backend_pid()")))
+    # The victim's statements go to its CONNECTION, never through the ORM session: an autoflush here would send the
+    # victim's pending writes before the competitor holds its row, and the order below would be the stand's, not this.
+    victim_connection = await victim.connection()
+    victim_pid = int(await victim_connection.scalar(text("SELECT pg_backend_pid()")))
     competitor_pid = int(await competitor.scalar(text("SELECT pg_backend_pid()")))
     await competitor.execute(text(f"SET LOCAL deadlock_timeout = '{_COMPETITOR_DEADLOCK_TIMEOUT}'"))
-    await victim.execute(text(f"SET LOCAL deadlock_timeout = '{_VICTIM_DEADLOCK_TIMEOUT}'"))
+    await victim_connection.execute(text(f"SET LOCAL deadlock_timeout = '{_VICTIM_DEADLOCK_TIMEOUT}'"))
     await competitor.execute(hold)
     waiting = asyncio.create_task(competitor.execute(wait_on_victim))
     loop = asyncio.get_running_loop()
     until = loop.time() + deadline_s
     while loop.time() < until and not waiting.done():
-        if await victim.scalar(text("SELECT CAST(:v AS int) = ANY(pg_blocking_pids(:c))"),
+        if await victim_connection.scalar(text("SELECT CAST(:v AS int) = ANY(pg_blocking_pids(:c))"),
                                {"v": victim_pid, "c": competitor_pid}):
             return QueuedCompetitor(victim_pid, competitor_pid, waiting)
         await asyncio.sleep(0.005)

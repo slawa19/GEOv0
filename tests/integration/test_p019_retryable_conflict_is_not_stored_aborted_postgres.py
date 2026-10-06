@@ -92,7 +92,7 @@ def _install_commit_conflict(monkeypatch, factory, world: ApiWorld, stand: _Stan
     UPDATEs that row (its `description`, so the stop never becomes true) and asks for the subject's lines; it is
     CONFIRMED waiting on the subject (`queue_behind_the_victim`), and only then does the guard read the row: the
     subject's wait closes the cycle and its own deadlock check finds it. Before 031 the competitor closed the cycle
-    (`deadlock_after_the_wait`) and the victim was whoever's check ran first (review `T3096` finding 3).
+    (`deadlock_after_the_wait`, removed by 031) and the victim was whoever's check ran first (review `T3096` finding 3).
     """
 
     original_commit = PaymentService._apply_payment  # the money phase (019 stage 4)

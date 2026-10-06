@@ -76,7 +76,7 @@ from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
-from tests.p019_support import deadlock_after_the_wait
+from tests.p019_support import QueuedCompetitor, assert_victim_of, queue_behind_the_victim
 from tests.debt_setup import debt_fixture_setup
 
 from app.core.ledger.book import BookError, BookMoneyError, NewDebt
@@ -678,15 +678,18 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
     calls: list[tuple] = []
     sqlstates: list[str | None] = []
 
-    async def _competitor(holding: asyncio.Event) -> None:  # 027 stage 2: a real deadlock, `p019_support`
-        async with factory() as other:
-            debt = (await other.execute(select(Debt).where(Debt.equivalent_id == world.equivalent.id)
-                                        .with_for_update())).scalar_one()
-            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
-                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
+    victims: list[tuple[BaseException, QueuedCompetitor]] = []
+    queued_now: list[QueuedCompetitor] = []
+
+    async def _competitor(other, queued: QueuedCompetitor) -> None:
+        try:
+            await queued.waiting  # returns once the payment's failure has ended its attempt
+            debt = (await other.execute(select(Debt).where(Debt.equivalent_id == world.equivalent.id))).scalar_one()
             async with debt_fixture_setup(other, label="the-competitor"):
                 debt.amount = amount
             await other.commit()
+        finally:
+            await other.close()
 
     async def _wrapper(*args, **kwargs):
         # The signature is not restated: `_apply_payment_flow(session, flow)` is the book's, and a
@@ -694,18 +697,34 @@ def _a_competitor_commits_before_the_first_flow(factory, seeded: _Seeded, amount
         # the wrong argument in the meantime.
         calls.append((len(args), tuple(sorted(kwargs))))
         if len(calls) == 1:
-            holding = asyncio.Event()
-            _TASKS.append(asyncio.create_task(_competitor(holding)))
-            await holding.wait()
+            # 031 `T3102` (review `T3096` finding 3): the competitor takes the debt row and is CONFIRMED waiting
+            # on the payment's lines; the payment's own debt write then closes the cycle, so ITS deadlock check
+            # finds it - the victim by construction, not by which check ran first.
+            session = args[0] if args else kwargs["session"]
+            other = factory()
+            try:
+                queued = await queue_behind_the_victim(
+                    session, other,
+                    hold=select(Debt.id).where(Debt.equivalent_id == world.equivalent.id).with_for_update(),
+                    wait_on_victim=select(TrustLine.id).where(
+                        TrustLine.equivalent_id == world.equivalent.id).with_for_update(),
+                )
+            except BaseException:
+                await other.close()
+                raise
+            queued_now.append(queued)
+            _TASKS.append(asyncio.create_task(_competitor(other, queued)))
         try:
             return await real_apply_flow(*args, **kwargs)
         except DBAPIError as exc:
             sqlstates.append(
                 getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
             )
+            if queued_now:
+                victims.append((exc, queued_now.pop()))
             raise
 
-    return _wrapper, calls, sqlstates
+    return _wrapper, calls, sqlstates, victims
 
 
 @pytest.mark.asyncio
@@ -766,7 +785,7 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
 
     tx_id = await _seed_payment(serializable_factory, seeded)
 
-    wrapper, calls, sqlstates = _a_competitor_commits_before_the_first_flow(
+    wrapper, calls, sqlstates, victims = _a_competitor_commits_before_the_first_flow(
         serializable_factory, seeded, competitor_amount
     )
     monkeypatch.setattr(book, "_apply_payment_flow", wrapper)
@@ -809,6 +828,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
         f"failure (observed {sqlstates}). Without a real 40001 at the debt write this test "
         f"observes an ordinary commit."
     )
+    assert len(victims) == 1, victims
+    assert_victim_of(*victims[0])  # detected in the payment's backend, against the competitor (031 `T3102`)
     assert len(attempts) == 2 and len(calls) == 2, (
         f"stand: `execute` ran {len(attempts)} time(s) and the flow {len(calls)} time(s), so `pay()` "
         f"did not re-run the whole payment on a fresh attempt and this is not the owner's retry"

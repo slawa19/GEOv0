@@ -78,7 +78,7 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import RetryablePaymentConflictException
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p019_support import deadlock_after_the_wait
+from tests.p019_support import QueuedCompetitor, deadlock_detail, queue_behind_the_victim
 
 # MODE B (017 stage 2c, T1702): every commit of this module lands in a clone dropped after the test,
 # not in the tier database it shares with mode-A tests - see `tests/tier_on_a_clone.py`. Since 018 B0b
@@ -288,6 +288,15 @@ def _record_plans(monkeypatch, runner: RealRunnerImpl) -> list[list[Any]]:
 
 
 _PENDING: list[asyncio.Task] = []
+#: (DETAIL of the 40P01 at the tick's debt write, tick pid, competitor pid), one per conflicted attempt (031 `T3102`).
+_VICTIMS: list[tuple[str, int, int]] = []
+
+
+def _assert_the_tick_was_each_victim(conflicts: int) -> None:
+    assert len(_VICTIMS) == conflicts, _VICTIMS
+    for detail, victim, competitor in _VICTIMS:
+        assert detail.startswith(f"Process {victim} waits"), (victim, detail)
+        assert f"blocked by process {competitor}." in detail, (competitor, detail)
 
 
 def _competitor_after_snapshot(
@@ -307,21 +316,63 @@ def _competitor_after_snapshot(
     write, which is what makes PostgreSQL refuse to serialise the two - the tick's commit gets a
     genuine `40001`.
     """
+    from sqlalchemy.exc import DBAPIError
+
+    from app.core.ledger import book
+
     commits: list[int] = []
     competitors = _PENDING  # 027 stage 2: awaited by `_debts` before it reads
     original = runner._load_debt_snapshot_by_pid
+    real_apply_flow = book._apply_payment_flow
+    armed: list[bool] = []
+    pending: list[QueuedCompetitor] = []
 
-    async def _compete(holding: asyncio.Event) -> None:
-        async with session_factory() as other:
+    async def _compete(other, queued: QueuedCompetitor) -> None:
+        try:
+            await queued.waiting  # returns once the tick's failure has ended its attempt
             debt = (await other.execute(select(Debt).where(
                 Debt.equivalent_id == world.equivalent.id, Debt.debtor_id == world.sender.id,
-                Debt.creditor_id == world.receiver.id).with_for_update())).scalar_one()
-            await deadlock_after_the_wait(other, holding, select(TrustLine.id).where(
-                TrustLine.equivalent_id == world.equivalent.id).with_for_update())
+                Debt.creditor_id == world.receiver.id))).scalar_one()  # already locked by `hold`
             raised = Decimal(str(debt.amount)) + amount
             async with debt_fixture_setup(other, label="the-competitor"):
                 debt.amount = raised
             await other.commit()
+        finally:
+            await other.close()
+
+    async def _first_flow_meets_the_competitor(*args, **kwargs):
+        # 031 `T3102` (review `T3096` finding 3): at the attempt's first payment flow - its lines held, its debt
+        # write next - the competitor takes that debt row and is CONFIRMED waiting on the tick's lines; the tick's
+        # own debt write then closes the cycle, so ITS deadlock check finds it (`queue_behind_the_victim`). Before,
+        # the competitor closed the cycle and the victim was whoever's check ran first.
+        if armed:
+            armed.clear()
+            session = args[0] if args else kwargs["session"]
+            other = session_factory()
+            try:
+                queued = await queue_behind_the_victim(
+                    session, other,
+                    hold=select(Debt.id).where(
+                        Debt.equivalent_id == world.equivalent.id, Debt.debtor_id == world.sender.id,
+                        Debt.creditor_id == world.receiver.id).with_for_update(),
+                    wait_on_victim=select(TrustLine.id).where(
+                        TrustLine.equivalent_id == world.equivalent.id).with_for_update(),
+                )
+            except BaseException:
+                await other.close()
+                raise
+            pending.append(queued)
+            competitors.append(asyncio.create_task(_compete(other, queued)))
+        try:
+            return await real_apply_flow(*args, **kwargs)
+        except DBAPIError as exc:
+            if pending:
+                queued = pending.pop()
+                _VICTIMS.append((deadlock_detail(exc), queued.victim_pid, queued.competitor_pid))
+            raise
+
+    monkeypatch.setattr(book, "_apply_payment_flow", _first_flow_meets_the_competitor)
+    _VICTIMS.clear()
 
     async def _load_then_let_someone_else_commit(session, participants, equivalents):
         snapshot = await original(session, participants, equivalents)
@@ -332,9 +383,7 @@ def _competitor_after_snapshot(
             monkeypatch.setattr(settings, "ROUTING_GRAPH_CACHE_TTL_SECONDS", 3600)
             async with session_factory() as warm:
                 await PaymentRouter(warm).build_graph(world.equivalent.code, use_shared_cache=True)
-            holding = asyncio.Event()
-            competitors.append(asyncio.create_task(_compete(holding)))
-            await holding.wait()
+            armed.append(True)  # the competitor enters at this attempt's first payment flow
         return snapshot
 
     monkeypatch.setattr(
@@ -474,6 +523,7 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         # read by its SQLSTATE, not merely something that shares the exception type. Carried over
         # from `test_p015_p1_money_replay_sqlite.py`, which asserted SQLITE_BUSY_SNAPSHOT here.
         assert sqlstates == ["40P01"], sqlstates
+        _assert_the_tick_was_each_victim(1)
 
         # ── The plan was recomputed against a snapshot that includes the competitor ───
         assert len(plans) == 2, f"the money phase was not replanned: {plans}"
@@ -546,6 +596,7 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
 
         assert len(plans) == 2, plans
+        _assert_the_tick_was_each_victim(1)
         staged_in_discarded_attempt = len(plans[0])
         assert staged_in_discarded_attempt >= 1, (
             "stand is vacuous: the discarded attempt planned nothing, so there was no prefix"
@@ -589,6 +640,7 @@ async def test_permanent_contention_exhausts_the_budget_without_spending_the_err
             await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
 
         assert len(commits) == 3, commits
+        _assert_the_tick_was_each_victim(3)
         exhausted = [
             record.getMessage()
             for record in caplog.records

@@ -1,6 +1,6 @@
 """A REAL `40001` inside the payment's audit write reaches the owner of the retries as `40001`.
 
-027 `T2706` (§15 P2): restored on a real deadlock (`40P01`, `deadlock_after_the_wait`); the text is history.
+027 `T2706` (§15 P2): restored on a real deadlock (`40P01`, `deadlock_after_the_wait`, removed by 031); the text is history.
 031 `T3102`: the victim is the payment by construction (`queue_behind_the_victim`), asserted from the server's DETAIL.
 
 T401 (programme 004; AGENTS §9 "проглоченный 40001 отравляет транзакцию"): a serialization failure raised
