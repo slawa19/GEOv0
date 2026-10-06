@@ -235,3 +235,125 @@ async def test_control_a_commit_the_server_refused_is_a_rollback_without_a_read(
         )
 
     assert (session.rollbacks, outcomes) == (1, ["rollback"])
+
+
+def _cancel_after_the_failed_commit(monkeypatch, *, failure):
+    """Wrap the drift's commit: `failure(commit)` runs the commit's fate, then waits for the stand to cancel the
+    caller, then raises. The caller's cancellation is therefore delivered while the shielded COMMIT is in flight,
+    and the resolver restores it after the rollback (`commit_resolution.py`, cancellation keeps priority)."""
+    import asyncio
+
+    reached, release = asyncio.Event(), asyncio.Event()
+    real = drift_module.resolve_commit_under_cancellation
+
+    async def resolve(*, commit, **kw):
+        async def failing_commit():
+            error = await failure(commit)
+            reached.set()
+            await release.wait()
+            raise error
+
+        return await real(commit=failing_commit, **kw)
+
+    monkeypatch.setattr(drift_module, "resolve_commit_under_cancellation", resolve)
+    return reached, release
+
+
+async def _drive_cancelled(session, result, reached, release) -> list[str]:
+    import asyncio
+
+    outcomes: list[str] = []
+    task = asyncio.create_task(
+        drift_module.commit_trust_drift(
+            session=session,
+            result=result,
+            on_commit=lambda: outcomes.append("commit"),
+            on_rollback=lambda: outcomes.append("rollback"),
+            on_unknown=lambda: outcomes.append("unknown"),
+            logger=logging.getLogger("tests.p031.cancelled"),
+        )
+    )
+    await reached.wait()
+    task.cancel()  # the caller is cancelled while the shielded COMMIT is still in flight
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    return outcomes
+
+
+@pytest.mark.asyncio
+async def test_a_caller_cancellation_after_a_commit_whose_acknowledgement_is_lost_is_unknown_not_a_rollback(
+    factory, monkeypatch  # noqa: F811
+) -> None:
+    """031 T3191 finding 2. The ack_loss boundary with the caller cancelled after the failed COMMIT: the real
+    COMMIT lands, its acknowledgement is lost, the ROLLBACK after it succeeds and the resolver restores the
+    caller's cancellation. The COMMIT may have landed (here it did), so the outcome is unknown - never a rollback -
+    and no committed effects are published; the cancellation propagates."""
+
+    from app.core.simulator.models import TrustDriftLimitUpdate, TrustDriftResult
+
+    line_id, eq_code, (_a_id, a_pid), (_b_id, b_pid) = await _growth_world(factory)
+    install_tick_stand(monkeypatch, factory)
+    seen: list[str] = []
+
+    async def landed_then_lost(commit):
+        await commit()
+        seen.append("committed-then-lost")
+        return RuntimeError("commit acknowledgement lost")
+
+    reached, release = _cancel_after_the_failed_commit(monkeypatch, failure=landed_then_lost)
+    result = TrustDriftResult(
+        updated_count=1,
+        committed_limit_updates=(TrustDriftLimitUpdate(a_pid, b_pid, eq_code, Decimal("105.00")),),
+    )
+    async with factory() as session:
+        line = await session.get(TrustLine, line_id)
+        line.limit = Decimal("105.00")
+        await session.flush()
+        outcomes = await _drive_cancelled(session, result, reached, release)
+
+    # ── the mechanism: the COMMIT landed, so a rollback outcome would be false ──
+    assert seen == ["committed-then-lost"], seen
+    async with factory() as s:
+        stored = Decimal(str(await s.scalar(select(TrustLine.limit).where(TrustLine.id == line_id))))
+    assert stored == Decimal("105.00"), stored
+    # ── the outcome ──
+    assert outcomes == ["unknown"], f"a cancelled drift whose COMMIT may have landed was resolved as {outcomes}"
+
+
+@pytest.mark.asyncio
+async def test_control_a_caller_cancellation_after_a_commit_the_server_refused_stays_a_rollback(monkeypatch) -> None:
+    """Counter-check: the same cancellation schedule after a COMMIT the server REFUSED (`40001`) proves nothing
+    landed - the outcome stays the rollback, exactly once."""
+
+    from sqlalchemy.exc import DBAPIError
+
+    from app.core.simulator.models import TrustDriftLimitUpdate, TrustDriftResult
+
+    class _Refused(Exception):
+        sqlstate = "40001"
+
+    class _Session:
+        rollbacks = 0
+
+        async def commit(self):
+            raise DBAPIError("COMMIT", None, _Refused("could not serialize access"))
+
+        async def rollback(self):
+            self.rollbacks += 1
+
+    async def refused(commit):
+        try:
+            await commit()
+        except DBAPIError as exc:
+            return exc
+        raise AssertionError("the stub COMMIT must be refused")
+
+    reached, release = _cancel_after_the_failed_commit(monkeypatch, failure=refused)
+    session = _Session()
+    result = TrustDriftResult(
+        updated_count=1,
+        committed_limit_updates=(TrustDriftLimitUpdate("A", "B", "UAH", Decimal("105")),),
+    )
+    outcomes = await _drive_cancelled(session, result, reached, release)
+    assert (session.rollbacks, outcomes) == (1, ["rollback"])
