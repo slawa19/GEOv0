@@ -513,8 +513,14 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # `resume`/`restart` declare the 409 of the entry limits (`T2864`) on both halves and stay for their older differences.
 # Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
 # committed).
+# 2026-10-06 / programme 030 S3 (`T3003`): count HOLDS at 51, digest moves. ONE entry changes content: the canon's
+# `POST /trustlines` declares 409 (an active line already exists; a suspended participant; a stopped or held
+# equivalent, `equivalent_inactive` / `equivalent_integrity_hold`, since S3b `F-030-19`); FastAPI declares no 409
+# there, as at `PATCH /trustlines/{id}` (`T2603.1`). The operation was already in this dictionary for its older
+# differences. Measured: the new ledger with that one canonical 409 removed hashes to the previous `d9e62ef3...15e0`,
+# count 51, and no other entry differs.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "d9e62ef35c926fff19b11e02fc6e08b56e8f44e8fe650afe7ad60b2097c515e0"
+    "102a0de86ae4b71b7305e8a7396a842f8882a6bdbd1f926d1700620647310065"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 51
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
