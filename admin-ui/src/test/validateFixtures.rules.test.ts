@@ -115,6 +115,35 @@ describe('validate-fixtures: every rule fires on the one thing it exists for', (
     expect(r.out).toContain('equivalent UAH has no usable precision')
   })
 
+  // 031 T3191 finding 6: a bare-code equivalent ("UAH") carries no precision and nothing else in a pack declares one, so a
+  // pack with debts may not use it - it was refused only as an "unknown equivalent" of each debt row, a false reason.
+  function bareCodes(dir: string, codes: string[]) {
+    const file = path.join(dir, 'datasets', 'equivalents.json')
+    const eqs = JSON.parse(readFileSync(file, 'utf8')) as Array<Record<string, unknown>>
+    writeFileSync(file, JSON.stringify(eqs.map((e) => (codes.includes(String(e.code)) ? e.code : e)), null, 2) + '\n')
+    for (const code of codes) rmSync(path.join(dir, 'datasets', `participants.viz-${code}.json`))
+  }
+
+  it('a bare-code equivalent in a pack with debts is refused as having no precision, before the debts are walked', () => {
+    const dir = copyPack()
+    bareCodes(dir, ['UAH'])
+
+    const r = validatePack(dir)
+    expect(r.status).toBe(1)
+    expect(r.out).toContain('equivalent UAH is a bare code with no precision')
+    expect(r.out).not.toContain('unknown equivalent')
+  })
+
+  it('control: bare-code equivalents in a pack WITHOUT debts are not refused by the precision rule (no amount uses the step)', () => {
+    const dir = copyPack()
+    bareCodes(dir, ['UAH', 'EUR', 'HOUR'])
+    writeDebts(dir, [])
+
+    const r = validatePack(dir)
+    expect(r.out).toContain('Fixtures OK (pack)')
+    expect(r.status).toBe(0)
+  })
+
   it.each([0, 8])('a precision of %s (the ends of the allowed range 0..8) is not refused by the precision rule', (precision) => {
     const dir = copyPack()
     breakPrecision(dir, (e) => { e.precision = precision })
