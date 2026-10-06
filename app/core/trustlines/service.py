@@ -39,6 +39,35 @@ from app.core.payments.router import PaymentRouter
 
 _LIVE_TRUSTLINE_INDEX = "uq_trust_lines_live_from_to_equivalent"
 
+#: 030 S5 (F-030-13, `T3000` item 1): a signed UPDATE/CLOSE is usable while `issued_at` is at most this old and at
+#: most `SIGNATURE_MAX_CLOCK_AHEAD_SECONDS` ahead of the server's UTC clock. Constants, not settings.
+SIGNATURE_MAX_AGE_SECONDS = 300
+SIGNATURE_MAX_CLOCK_AHEAD_SECONDS = 30
+TRUSTLINE_STATE_CHANGED = "TRUSTLINE_STATE_CHANGED"
+
+
+def _rfc3339(value: datetime | None) -> str | None:
+    return None if value is None else value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_rfc3339(text: object, *, field: str) -> datetime:
+    try:
+        value = datetime.fromisoformat(text) if isinstance(text, str) else None
+    except ValueError:
+        value = None
+    if value is None or value.tzinfo is None:
+        raise BadRequestException(f"{field} must be an RFC 3339 date-time with a UTC offset",
+                                  details={"field": field, "reason": "not_rfc3339"})
+    return value
+
+
+def line_state(trustline: TrustLine) -> dict:
+    """The four fields a signed UPDATE/CLOSE binds as `expected`, as the 409 reports them (`limit` as stored; a
+    client compares it numerically)."""
+
+    return {"limit": format(trustline.limit, "f"), "policy": dict(trustline.policy or {}),
+            "status": str(trustline.status), "close_requested_at": _rfc3339(trustline.close_requested_at)}
+
 
 def _is_live_trustline_uniqueness_violation(exc: IntegrityError) -> bool:
     """True only for a clash with the live-trustline partial unique index.
@@ -563,9 +592,11 @@ class TrustLineService:
         # without this guard its id stays patchable forever -- i.e. recorded history could
         # be rewritten after the fact.
         if str(trustline.status) == "closed":
+            # `current` since 030 S5: every 409 of the signed routes names the line's state (a retry reads it).
             raise ConflictException(
                 "Cannot update a closed trustline",
-                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
+                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id),
+                         "current": line_state(trustline)},
             )
 
         user = None
@@ -587,19 +618,7 @@ class TrustLineService:
             )
 
         if require_signature:
-            signed_payload: dict = {"id": str(trustline_id)}
-            if data.limit is not None:
-                signed_payload["limit"] = data.limit
-            if data.policy is not None:
-                signed_payload["policy"] = data.policy
-
-            # Same hoist as `create`: `policy` can carry a canon-blessed float, and its refusal
-            # by `canonical_json` must not be relabelled as a signature failure.
-            message = canonical_json(signed_payload)
-            try:
-                verify_signature(user.public_key, message, data.signature)
-            except Exception:
-                raise InvalidSignatureException("Invalid signature")
+            self._verify_line_operation("TRUST_LINE_UPDATE", trustline, user, data)
 
         # Every refusal BEFORE the first mutation and before the batch is touched. There is no debt floor
         # any more (026 `T2602`): a limit below `used` is a trust change, see the docstring. A requested close
@@ -683,7 +702,8 @@ class TrustLineService:
         if str(trustline.status) == "closed":
             raise ConflictException(
                 "Trustline is already closed",
-                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id)},
+                details={"reason": "TRUSTLINE_CLOSED", "trustline_id": str(trustline_id),
+                         "current": line_state(trustline)},
             )
 
         if require_signature:
@@ -693,15 +713,7 @@ class TrustLineService:
             user = await self.session.get(Participant, user_id)
             if not user:
                 raise NotFoundException("Sender not found")
-
-            signed_payload: dict = {"id": str(trustline_id)}
-            # Hoisted like create/update; no float can occur in this payload, kept uniform so the
-            # next field added here does not resurrect the relabelling.
-            message = canonical_json(signed_payload)
-            try:
-                verify_signature(user.public_key, message, data.signature)
-            except Exception:
-                raise InvalidSignatureException("Invalid signature")
+            self._verify_line_operation("TRUST_LINE_CLOSE", trustline, user, data)
 
         supported = await self._get_used_amount(trustline)
         requested_now = trustline.close_requested_at is None
@@ -723,6 +735,56 @@ class TrustLineService:
         batch._record(TRUST_LINE_CLOSE, trustline.equivalent_id,
                       trust_line_close_completed(*parties, str(trustline_id), "request"))
         return trustline
+
+    def _verify_line_operation(self, operation: str, trustline: TrustLine, user: Participant, data) -> None:
+        """030 S5 (F-030-13, `T3000` item 1): the signed bytes of an UPDATE/CLOSE are `operation` (the route's), `id`,
+        the new `limit`/`policy` as sent, `expected` = {limit, policy, status, close_requested_at} and `issued_at`.
+        Checked in this order, before any write and after the row lock: the body carries all of them (the pre-S5
+        form over `{id}` is refused, no compatibility), `operation` is the route's, `issued_at` is inside the window
+        (server UTC), the signature verifies, and the LOCKED row equals `expected` - limit numerically, policy
+        structurally, status and `close_requested_at` exactly. A line that moved on answers 409
+        `TRUSTLINE_STATE_CHANGED` with its current state; a client whose intent equals that state is done.
+
+        `canonical_json` stays outside the `try` (the `create` shape): a float in a policy is the payload's 400, not a
+        signature failure. Accepted residual: A -> B -> A inside the window re-admits the first A -> B signature, and
+        an empty UPDATE is not one-shot.
+        """
+
+        if data.operation is None or data.expected is None or data.issued_at is None:
+            raise InvalidSignatureException("Signed payload incomplete", details={
+                "reason": "signed_payload_incomplete", "required": ["operation", "expected", "issued_at", "signature"]})
+        if data.operation != operation:
+            raise InvalidSignatureException("Signed operation does not match the route", details={
+                "reason": "operation_mismatch", "route_operation": operation, "signed_operation": data.operation})
+        age = (datetime.now(timezone.utc) - _parse_rfc3339(data.issued_at, field="issued_at")).total_seconds()
+        if age > SIGNATURE_MAX_AGE_SECONDS:
+            raise InvalidSignatureException("Signature expired", details={
+                "reason": "signature_expired", "issued_at": data.issued_at, "max_age_seconds": SIGNATURE_MAX_AGE_SECONDS})
+        if -age > SIGNATURE_MAX_CLOCK_AHEAD_SECONDS:
+            raise InvalidSignatureException("Signature issued in the future", details={
+                "reason": "signature_issued_in_the_future", "issued_at": data.issued_at,
+                "max_clock_ahead_seconds": SIGNATURE_MAX_CLOCK_AHEAD_SECONDS})
+
+        signed_payload: dict = {"operation": operation, "id": str(trustline.id),
+                                "expected": data.expected.model_dump(), "issued_at": data.issued_at}
+        for field in ("limit", "policy"):
+            if getattr(data, field, None) is not None:
+                signed_payload[field] = getattr(data, field)
+        message = canonical_json(signed_payload)
+        try:
+            verify_signature(user.public_key, message, data.signature)
+        except Exception:
+            raise InvalidSignatureException("Invalid signature")
+
+        expected = data.expected
+        expected_at = None if expected.close_requested_at is None else _parse_rfc3339(
+            expected.close_requested_at, field="expected.close_requested_at")
+        if (parse_money_amount(expected.limit, field="expected.limit", require_non_negative=True) != trustline.limit
+                or (expected.policy or {}) != (trustline.policy or {})
+                or expected.status != str(trustline.status)
+                or expected_at != trustline.close_requested_at):
+            raise ConflictException("Trustline state differs from the signed expected state", details={
+                "reason": TRUSTLINE_STATE_CHANGED, "trustline_id": str(trustline.id), "current": line_state(trustline)})
 
     async def _require_step(self, equivalent_id: UUID, limit: Decimal, *, timeout_ms: int | None = None) -> None:
         """028 `F-028-23`/`F-028-25` (owner В-4): a limit finer than the equivalent's step is refused, never rounded.

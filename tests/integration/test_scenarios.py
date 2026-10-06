@@ -3,6 +3,7 @@ from httpx import AsyncClient
 import base64
 import json
 import uuid
+from datetime import datetime, timezone
 from app.core.auth.crypto import generate_keypair
 from app.core.auth.canonical import canonical_json
 from nacl.signing import SigningKey
@@ -50,30 +51,72 @@ def _sign_trustline_create_request(
     return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
 
 
-def _sign_trustline_update_request(
+def utc_now_rfc3339() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def trustline_expected_state(line: dict) -> dict:
+    """`expected` of a signed UPDATE/CLOSE (030 S5, F-030-13): the line as `GET /trustlines/{id}` served it."""
+
+    return {key: line[key] for key in ("limit", "policy", "status", "close_requested_at")}
+
+
+async def expected_state_of(client: AsyncClient, headers: dict, trustline_id: str) -> dict:
+    response = await client.get(f"/api/v1/trustlines/{trustline_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    return trustline_expected_state(response.json())
+
+
+def trustline_operation_payload(
     *,
-    signing_key: SigningKey,
+    operation: str,
     trustline_id: str,
+    expected: dict,
+    issued_at: str,
     limit: str | None = None,
     policy: dict | None = None,
-) -> str:
-    payload: dict = {"id": str(trustline_id)}
+) -> dict:
+    """The signed bytes of a line operation (030 S5): `operation`, `id`, the new fields, `expected`, `issued_at`."""
+
+    payload: dict = {"operation": operation, "id": str(trustline_id), "expected": expected, "issued_at": issued_at}
     if limit is not None:
         payload["limit"] = limit
     if policy is not None:
         payload["policy"] = policy
-    message = canonical_json(payload)
-    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
+    return payload
 
 
-def _sign_trustline_close_request(
+def _signed_body(signing_key: SigningKey, payload: dict) -> dict:
+    """The request body: the signed payload without the path's `id`, plus the signature over the whole payload."""
+
+    signature = base64.b64encode(signing_key.sign(canonical_json(payload)).signature).decode("utf-8")
+    return {**{k: v for k, v in payload.items() if k != "id"}, "signature": signature}
+
+
+def signed_trustline_update(
     *,
     signing_key: SigningKey,
     trustline_id: str,
-) -> str:
-    payload: dict = {"id": str(trustline_id)}
-    message = canonical_json(payload)
-    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
+    expected: dict,
+    limit: str | None = None,
+    policy: dict | None = None,
+    issued_at: str | None = None,
+) -> dict:
+    """The whole body of a signed `PATCH /trustlines/{id}`."""
+
+    return _signed_body(signing_key, trustline_operation_payload(
+        operation="TRUST_LINE_UPDATE", trustline_id=trustline_id, expected=expected,
+        issued_at=issued_at or utc_now_rfc3339(), limit=limit, policy=policy))
+
+
+def signed_trustline_close(
+    *, signing_key: SigningKey, trustline_id: str, expected: dict, issued_at: str | None = None,
+) -> dict:
+    """The whole body of a signed `DELETE /trustlines/{id}`."""
+
+    return _signed_body(signing_key, trustline_operation_payload(
+        operation="TRUST_LINE_CLOSE", trustline_id=trustline_id, expected=expected,
+        issued_at=issued_at or utc_now_rfc3339()))
 
 async def register_and_login(client: AsyncClient, name: str) -> dict:
     pub, priv = generate_keypair()
@@ -239,30 +282,21 @@ async def test_trustlines_crud(client: AsyncClient, db_session):
             break
     assert found
     
-    # 4. Update
-    update_data = {
-        "limit": "200.00",
-        "signature": _sign_trustline_update_request(
-            signing_key=alice_signing_key,
-            trustline_id=tl_id,
-            limit="200.00",
-        ),
-    }
+    # 4. Update (030 S5: signed over the operation, the new limit and the line's expected state)
+    update_data = signed_trustline_update(
+        signing_key=alice_signing_key, trustline_id=tl_id, limit="200.00",
+        expected=await expected_state_of(client, alice["headers"], tl_id))
     resp = await client.patch(f"/api/v1/trustlines/{tl_id}", json=update_data, headers=alice["headers"])
     assert resp.status_code == 200
     assert float(resp.json()["limit"]) == 200.0
-    
+
     # 5. Close
     resp = await client.request(
         "DELETE",
         f"/api/v1/trustlines/{tl_id}",
         headers=alice["headers"],
-        json={
-            "signature": _sign_trustline_close_request(
-                signing_key=alice_signing_key,
-                trustline_id=tl_id,
-            )
-        },
+        json=signed_trustline_close(signing_key=alice_signing_key, trustline_id=tl_id,
+                                    expected=await expected_state_of(client, alice["headers"], tl_id)),
     )
     assert resp.status_code == 200
     

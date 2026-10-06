@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.core.auth.canonical import canonical_json
 from app.core.auth.crypto import generate_keypair
 from app.db.models.equivalent import Equivalent
+from tests.integration.test_scenarios import expected_state_of, signed_trustline_close
 
 
 def _sign_trustline_create_request(
@@ -21,12 +22,6 @@ def _sign_trustline_create_request(
     payload: dict = {"to": to_pid, "equivalent": equivalent, "limit": limit}
     if policy is not None:
         payload["policy"] = policy
-    message = canonical_json(payload)
-    return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
-
-
-def _sign_trustline_close_request(*, signing_key: SigningKey, trustline_id: str) -> str:
-    payload: dict = {"id": str(trustline_id)}
     message = canonical_json(payload)
     return base64.b64encode(signing_key.sign(message).signature).decode("utf-8")
 
@@ -120,7 +115,8 @@ async def test_trustlines_list_status_filter_and_pagination(client: AsyncClient,
         "DELETE",
         f"/api/v1/trustlines/{to_close_id}",
         headers=alice["headers"],
-        json={"signature": _sign_trustline_close_request(signing_key=alice_signing_key, trustline_id=to_close_id)},
+        json=signed_trustline_close(signing_key=alice_signing_key, trustline_id=to_close_id,
+                                    expected=await expected_state_of(client, alice["headers"], to_close_id)),
     )
     assert resp.status_code == 200, resp.text
 

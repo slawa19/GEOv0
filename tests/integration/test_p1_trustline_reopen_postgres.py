@@ -42,6 +42,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
 from app.utils.exceptions import ConflictException, GeoException
+from tests.integration.test_scenarios import trustline_operation_payload, utc_now_rfc3339
 
 
 
@@ -110,10 +111,15 @@ async def test_recreating_a_closed_trustline_does_not_raise_a_raw_db_error(db_se
     )
     await db_session.commit()
 
+    # 030 S5: a CLOSE signs the operation, the state the owner saw and `issued_at`.
+    close_payload = trustline_operation_payload(
+        operation="TRUST_LINE_CLOSE", trustline_id=str(first.id), issued_at=utc_now_rfc3339(),
+        expected={"limit": "100", "policy": {}, "status": "active", "close_requested_at": None})
     await service.close(
         first.id,
         sender.id,
-        TrustLineCloseRequest(signature=_sign(sender_priv, {"id": str(first.id)})),
+        TrustLineCloseRequest(**{k: v for k, v in close_payload.items() if k != "id"},
+                              signature=_sign(sender_priv, close_payload)),
     )
     await db_session.commit()
 

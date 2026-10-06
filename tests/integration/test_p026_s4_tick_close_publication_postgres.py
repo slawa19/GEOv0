@@ -110,7 +110,7 @@ async def test_the_tick_removes_a_closed_line_only_after_a_confirmed_commit(clie
             resolve = {"rollback": effects.apply_after_rollback, "discard": effects.discard,
                        "unknown": effects.apply_after_unknown_transaction_outcome}[outcome]
             assert resolve()
-    line = await _line(client, p["A"], lines["AB"])
+    line = await _line(client, db_session, p["A"], lines["AB"])
 
     if outcome != "commit":  # counter-check: nothing durable, nothing published, the edge stays
         assert line["status"] == "active" and line["close_requested_at"], line
@@ -144,7 +144,7 @@ async def test_an_interact_clearing_that_completes_a_close_removes_the_edge_once
     r = await client.post(f"/api/v1/simulator/runs/{run.run_id}/actions/clearing-real",
                           headers={"X-Admin-Token": settings.ADMIN_TOKEN}, json={"equivalent": code})
     assert r.status_code == 200 and r.json()["cleared_cycles"] == 1, r.text
-    assert (await _line(client, p["A"], lines["AB"]))["status"] == "closed", "the clearing did not complete the close"
+    assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed", "the clearing did not complete the close"
     assert sse.published("clearing.done") == 1
     a, b = p["A"]["pid"], p["B"]["pid"]
     require_target(
@@ -169,7 +169,7 @@ async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_clos
         result = await _tick_payment(session, run, sse, code, p)
         assert result.committed == 1, result
         await session.commit()
-    assert (await _line(client, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
+    assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
 
     key = SigningKey(base64.b64decode(p["A"]["priv"]))
     r = await client.post("/api/v1/trustlines", headers=p["A"]["headers"], json={
@@ -208,7 +208,7 @@ async def test_a_line_recreated_after_the_liveness_read_is_not_erased(client, db
         result = await _tick_payment(session, run, sse, code, p)
         assert result.committed == 1, result
         await session.commit()
-    assert (await _line(client, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
+    assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
 
     read_live = sse_broadcast._live_pairs
     seen: list = []

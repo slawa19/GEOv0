@@ -422,15 +422,25 @@ Authorization: Bearer {token}
 Content-Type: application/json
 
 {
+  "operation": "TRUST_LINE_UPDATE",
   "limit": "1500.00",
   "policy": {
     "daily_limit": "500.00"
   },
+  "expected": {
+    "limit": "1000.00",
+    "policy": {},
+    "status": "active",
+    "close_requested_at": null
+  },
+  "issued_at": "2026-10-06T10:00:00.000000Z",
   "signature": "base64_signature"
 }
 
 Примечание (MVP): `policy.daily_limit` принимается и сохраняется как часть policy, но **не enforced** в платёжном критическом пути (informational only).
 ```
+
+С 2026-10-06 (030 S5, F-030-13) подпись берётся над `operation`, `id` из пути, новыми `limit`/`policy`, `expected` — состоянием линии, как его отдал `GET /trustlines/{id}`, — и `issued_at` (окно 300 с назад / 30 с вперёд). Линия, отличная от `expected`, — `409` `TRUSTLINE_STATE_CHANGED` с `details.current`. Семантика — протокол §5.2; канон — `api/openapi.yaml` (`TrustLineUpdateRequest`, `TrustLineExpectedState`).
 
 ### 4.5. Закрыть линию
 
@@ -439,11 +449,19 @@ DELETE /trustlines/{id}
 Authorization: Bearer {token}
 
 {
+  "operation": "TRUST_LINE_CLOSE",
+  "expected": {
+    "limit": "1000.00",
+    "policy": {},
+    "status": "active",
+    "close_requested_at": null
+  },
+  "issued_at": "2026-10-06T10:00:00.000000Z",
   "signature": "base64_signature"
 }
 ```
 
-**Требования:** `used` должен быть 0 (долг погашен).
+**Требования:** подпись владельца над `operation`, `id`, `expected`, `issued_at` (030 S5; протокол §5.3). Долг не обязан быть нулевым: с 2026-10-02 (026 `T2603.1`) закрытие — запрос, лимит становится 0, линия закрывается, когда поддерживаемый долг доходит до 0.
 
 ---
 

@@ -37,8 +37,9 @@ from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import writer_operation
 from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
-    _sign_trustline_update_request,
+    expected_state_of,
     register_and_login,
+    signed_trustline_update,
 )
 from tests.p019_support import require_target
 
@@ -91,8 +92,9 @@ async def _debts(factory, code: str) -> dict[tuple, Decimal]:
 
 async def _patch_limit(client, creditor, line_id: str, limit: str):
     key = SigningKey(base64.b64decode(creditor["priv"]))
-    return await client.patch(f"/api/v1/trustlines/{line_id}", headers=creditor["headers"], json={
-        "limit": limit, "signature": _sign_trustline_update_request(signing_key=key, trustline_id=line_id, limit=limit)})
+    return await client.patch(f"/api/v1/trustlines/{line_id}", headers=creditor["headers"], json=signed_trustline_update(
+        signing_key=key, trustline_id=line_id, limit=limit,
+        expected=await expected_state_of(client, creditor["headers"], line_id)))
 
 
 @MODE_B

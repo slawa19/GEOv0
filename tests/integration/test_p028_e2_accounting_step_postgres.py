@@ -30,8 +30,9 @@ from app.utils.exceptions import BadRequestException, GeoException
 from tests.conftest import MODE_B, sessionmaker_of
 from tests.integration.test_scenarios import (
     _sign_trustline_create_request,
-    _sign_trustline_update_request,
+    expected_state_of,
     register_and_login,
+    signed_trustline_update,
 )
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
@@ -100,9 +101,9 @@ async def test_a_trust_line_limit_finer_than_the_step_is_refused_at_create_and_u
     line_id = created.json()["id"]
 
     async def update(limit: str):
-        sig = _sign_trustline_update_request(signing_key=_key(lender), trustline_id=line_id, limit=limit)
-        return await client.patch(f"/api/v1/trustlines/{line_id}", headers=lender["headers"],
-                                  json={"limit": limit, "signature": sig})
+        body = signed_trustline_update(signing_key=_key(lender), trustline_id=line_id, limit=limit,
+                                       expected=await expected_state_of(client, lender["headers"], line_id))
+        return await client.patch(f"/api/v1/trustlines/{line_id}", headers=lender["headers"], json=body)
 
     refused = await update("12.345")
     assert refused.status_code == 400 and _reason(refused) == STEP, refused.text

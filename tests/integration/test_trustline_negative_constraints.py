@@ -10,10 +10,11 @@ from sqlalchemy import select
 from app.db.models.equivalent import Equivalent
 from tests.integration.test_scenarios import (
     _sign_payment_request,
-    _sign_trustline_close_request,
     _sign_trustline_create_request,
-    _sign_trustline_update_request,
+    expected_state_of,
     register_and_login,
+    signed_trustline_close,
+    signed_trustline_update,
 )
 from tests.conftest import MODE_B
 
@@ -83,14 +84,8 @@ async def test_trustline_update_accepts_limit_below_used(client: AsyncClient, db
     update = await client.patch(
         f"/api/v1/trustlines/{tl_id}",
         headers=bob["headers"],
-        json={
-            "limit": "5.00",
-            "signature": _sign_trustline_update_request(
-                signing_key=bob_sk,
-                trustline_id=tl_id,
-                limit="5.00",
-            ),
-        },
+        json=signed_trustline_update(signing_key=bob_sk, trustline_id=tl_id, limit="5.00",
+                                     expected=await expected_state_of(client, bob["headers"], tl_id)),
     )
     assert update.status_code == 200, update.text
     body = update.json()
@@ -150,7 +145,8 @@ async def test_trustline_close_with_debt_is_a_request(client: AsyncClient, db_se
     # INTENTIONAL, 026 `T2603.1` (owner В1 2026-09-29): a close with outstanding debt was refused (400 E009); it is
     # now a REQUEST - limit 0, the line stays active until Alice's debt is repaid. The auth counter-check stays: only
     # the creditor may ask, and a stranger's request changes nothing.
-    close_body = {"signature": _sign_trustline_close_request(signing_key=bob_sk, trustline_id=tl_id)}
+    close_body = signed_trustline_close(signing_key=bob_sk, trustline_id=tl_id,
+                                        expected=await expected_state_of(client, bob["headers"], tl_id))
     foreign = await client.request("DELETE", f"/api/v1/trustlines/{tl_id}", headers=alice["headers"], json=close_body)
     assert foreign.status_code == 403, foreign.text
     close = await client.request("DELETE", f"/api/v1/trustlines/{tl_id}", headers=bob["headers"], json=close_body)

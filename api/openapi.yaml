@@ -2595,12 +2595,14 @@ paths:
           $ref: '#/components/responses/UnauthorizedBearer'
         '409':
           description: >-
-            E008, the error envelope with `details.reason`: an active line over the pair and equivalent already
-            exists (`CONCURRENT_TRUSTLINE_CREATE` when the clash was met at the write); an end is a suspended
-            participant (`participant_suspended`); the equivalent is stopped by the operator
-            (`equivalent_inactive`) or under an integrity hold (`equivalent_integrity_hold`), both with
-            `details.equivalents` naming the codes (030 S3b, F-030-19: the same refusal and reasons as
-            `POST /payments`, none retryable). A stopped or held equivalent takes no new line.
+            E008, the error envelope. An active line over the pair and equivalent already exists: met by the
+            check before the write it carries NO `details` (030 S5, `T3093`: the description used to promise a
+            reason there); met at the write, `details.reason` = `CONCURRENT_TRUSTLINE_CREATE`. With
+            `details.reason` always: an end is a suspended participant (`participant_suspended`); the equivalent
+            is stopped by the operator (`equivalent_inactive`) or under an integrity hold
+            (`equivalent_integrity_hold`), both with `details.equivalents` naming the codes (030 S3b, F-030-19:
+            the same refusal and reasons as `POST /payments`, none retryable). A stopped or held equivalent takes
+            no new line.
           content:
             application/json:
               schema:
@@ -2645,6 +2647,17 @@ paths:
         While a close is requested (`close_requested_at` set) the limit stays 0: a positive limit is 409
         (`details.reason` = `TRUSTLINE_CLOSE_REQUESTED`) and does not cancel the request; a policy change is
         accepted.
+
+
+        SIGNATURE (030 S5, F-030-13, protocol §5.2): the body is signed over `operation`, the path `id`, the new
+        `limit`/`policy` as sent, `expected` - the line as the owner saw it - and `issued_at`
+        (`TrustLineUpdateRequest`). The server applies the change only if the row it locked `FOR UPDATE` equals
+        `expected` (limit numerically, policy structurally, status and `close_requested_at` exactly); a line
+        that moved on is 409 `TRUSTLINE_STATE_CHANGED` with `details.current`. A client that lost the response
+        re-sends the same body: 409 whose `current` equals its intended state means the intent is in force.
+        `issued_at` older than 300 s or more than 30 s ahead of the server clock is 400 `E005`
+        (`signature_expired`, `signature_issued_in_the_future`); the pre-S5 body without `operation`, `expected`
+        and `issued_at` is 400 `E005` `signed_payload_incomplete`, no compatibility mode.
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
       requestBody:
@@ -2661,7 +2674,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/TrustLine'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >-
+            E008 with `details.reason`: `TRUSTLINE_STATE_CHANGED` (the locked row differs from the signed
+            `expected`), `TRUSTLINE_CLOSE_REQUESTED` (a positive limit while a close is pending),
+            `TRUSTLINE_CLOSED` (the line is history). Every one carries `details.trustline_id` and
+            `details.current` = `{limit, policy, status, close_requested_at}` - the line as stored, `limit` as
+            stored (compare it numerically) - except `TRUSTLINE_CLOSE_REQUESTED`, whose state the request already
+            knows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2683,8 +2706,14 @@ paths:
         and `close_requested_at` is set. Only the debt the line supports (`to` owes `from`) counts: at 0 the
         line is closed now; otherwise it stays `active` until a payment or a clearing brings that
         debt to exactly 0, and closes in that transaction. A debt the other way belongs to the other line and
-        does not hold the close. Repeating the request while it is pending changes nothing. The answer is the
-        line's factual state.
+        does not hold the close. Repeating the request while it is pending changes nothing - when it is signed
+        over the pending state; a repeat signed over the state BEFORE the request is 409 (below). The answer is
+        the line's factual state.
+
+
+        SIGNATURE (030 S5, F-030-13, protocol §5.3): signed over `operation` = `TRUST_LINE_CLOSE`, the path `id`,
+        `expected` and `issued_at` (`TrustLineCloseRequest`); the same state match, window and refusals as
+        `PATCH /trustlines/{id}`. A signature of an UPDATE - even an empty one - does not verify here.
       parameters:
         - $ref: '#/components/parameters/TrustLineIdPath'
       requestBody:
@@ -2709,6 +2738,16 @@ paths:
                     description: '`Trustline closed` or `Trustline close requested`.'
                   trustline:
                     $ref: '#/components/schemas/TrustLine'
+        '409':
+          description: >-
+            E008 with `details.reason`: `TRUSTLINE_STATE_CHANGED` (the locked row differs from the signed
+            `expected` - also the answer to a retry after the close applied) or `TRUSTLINE_CLOSED` (the line is
+            history). Both carry `details.trustline_id` and `details.current` = `{limit, policy, status,
+            close_requested_at}` as stored (030 S5).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5601,10 +5640,50 @@ components:
             base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
             Signed payload keys: `to`, `equivalent`, `limit`, and optional `policy` if provided.
 
+    TrustLineExpectedState:
+      # 030 S5 (F-030-13, `T3000` item 1): the line as its owner saw it, bound by the signature of an UPDATE or
+      # CLOSE and matched by the server against the row it locked. All four keys are required - `policy` and
+      # `close_requested_at` may be null, never absent - so a key left out cannot widen the match.
+      type: object
+      required: [limit, policy, status, close_requested_at]
+      properties:
+        limit:
+          type: string
+          description: The limit as `GET /trustlines/{id}` served it; the server compares it numerically.
+        policy:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: The policy as served; compared structurally.
+        status:
+          type: string
+          description: '`active` or `closed`; compared exactly.'
+        close_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: As served (RFC 3339) or null; compared as an instant.
+
     TrustLineUpdateRequest:
       type: object
-      required: [signature]
+      # 030 S5: `operation`, `expected` and `issued_at` are required on this route - a body without them is 400
+      # `E005` `signed_payload_incomplete`. The generated schema lists only `signature` because the same pydantic
+      # model is the argument of the unsigned internal path (`require_signature=False`); recorded in the request
+      # schema ratchet of `tests/contract/test_openapi_contract.py`.
+      required: [operation, expected, issued_at, signature]
       properties:
+        operation:
+          type: string
+          description: Must be `TRUST_LINE_UPDATE` - the route's operation; any other value is 400 `E005` `operation_mismatch`.
+        expected:
+          $ref: '#/components/schemas/TrustLineExpectedState'
+        issued_at:
+          type: string
+          format: date-time
+          description: >-
+            When the owner signed, RFC 3339 with a UTC offset, signed verbatim. Accepted while at most 300 s old
+            and at most 30 s ahead of the server's UTC clock (constants `SIGNATURE_MAX_AGE_SECONDS`,
+            `SIGNATURE_MAX_CLOCK_AHEAD_SECONDS` in `app/core/trustlines/service.py`).
         limit:
           type: string
           description: "A multiple of the equivalent's step `10^-precision` (028, owner decision 2026-10-04: precision is the accounting step); a finer value is refused, never rounded - 400 `E009` with `details.reason = amount_precision_exceeded`, `equivalent`, `precision`."
@@ -5666,18 +5745,29 @@ components:
         signature:
           type: string
           description: |
-            base64 Ed25519 signature of canonical JSON of this request body **excluding** `signature`.
-            Signed payload keys: `id` (path param), optional `limit` if provided, optional `policy` if provided.
+            base64 Ed25519 signature of canonical JSON (Appendix A) of this request body **excluding** `signature`,
+            plus the path `id`. Signed payload keys (030 S5): `operation`, `id`, `expected`, `issued_at`, and
+            `limit` / `policy` when provided - the values exactly as sent.
 
     TrustLineCloseRequest:
       type: object
-      required: [signature]
+      # 030 S5: see the note on `TrustLineUpdateRequest` - required here, optional on the generated side.
+      required: [operation, expected, issued_at, signature]
       properties:
+        operation:
+          type: string
+          description: Must be `TRUST_LINE_CLOSE`; any other value is 400 `E005` `operation_mismatch`.
+        expected:
+          $ref: '#/components/schemas/TrustLineExpectedState'
+        issued_at:
+          type: string
+          format: date-time
+          description: As on `TrustLineUpdateRequest` - the same window.
         signature:
           type: string
           description: |
             base64 Ed25519 signature of canonical JSON payload **excluding** `signature`.
-            Signed payload keys: `id` (path param).
+            Signed payload keys (030 S5): `operation`, `id` (path param), `expected`, `issued_at`.
 
     ClearingCycleEdge:
       type: object

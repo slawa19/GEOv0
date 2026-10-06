@@ -56,8 +56,9 @@ from app.db.models.equivalent import Equivalent
 from tests.integration.test_scenarios import (
     _sign_payment_request,
     _sign_trustline_create_request,
-    _sign_trustline_update_request,
+    expected_state_of,
     register_and_login,
+    signed_trustline_update,
 )
 from tests.conftest import MODE_B
 
@@ -216,14 +217,9 @@ async def test_the_smallest_storable_limit_is_signable_by_a_client_that_signs_wh
     updated = await client.patch(
         f"/api/v1/trustlines/{trustline_id}",
         headers=lender["headers"],
-        json={
-            "limit": updated_limit,
-            "signature": _sign_trustline_update_request(
-                signing_key=lender_key,
-                trustline_id=trustline_id,
-                limit=updated_limit,
-            ),
-        },
+        json=signed_trustline_update(
+            signing_key=lender_key, trustline_id=trustline_id, limit=updated_limit,
+            expected=await expected_state_of(client, lender["headers"], trustline_id)),
     )
     assert updated.status_code == 200, (
         f"an updated limit of {updated_limit!r}, signed over exactly that string, was "

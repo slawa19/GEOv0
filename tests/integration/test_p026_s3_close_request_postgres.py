@@ -14,6 +14,7 @@ signed `DELETE /trustlines/{id}`. No row of `debts` or `trust_lines` is written 
 from __future__ import annotations
 
 import base64
+import gc
 import uuid
 from decimal import Decimal
 
@@ -29,20 +30,46 @@ from app.db.models.trustline import TrustLine
 from tests.conftest import MODE_B
 from tests.integration.test_p026_s2_limit_below_used_postgres import _debts, _pay, _patch_limit, _world
 from tests.integration.test_scenarios import (
-    _sign_trustline_close_request,
     _sign_trustline_create_request,
-    _sign_trustline_update_request,
+    expected_state_of,
+    signed_trustline_close,
+    signed_trustline_update,
 )
 from tests.p019_support import require_target
 
 
+@pytest.fixture(autouse=True)
+def _the_collector_is_off_for_the_test():
+    """The WORST case, made the only case (030 S5, 2026-10-06). Whether an ORM object an earlier request loaded is
+    still in the shared session's identity map when a later request reads depends on when the cycle collector last
+    ran - a phase of the whole run, not of this test. With it off, an object kept alive by a cycle stays alive, so a
+    read that depends on the collector's luck fails here every time instead of when a whole-tier run happens to land in that phase."""
+
+    gc.disable()
+    try:
+        yield
+    finally:
+        gc.enable()
+
+
 async def _close(client, creditor, line_id: str):
     key = SigningKey(base64.b64decode(creditor["priv"]))
-    return await client.request("DELETE", f"/api/v1/trustlines/{line_id}", headers=creditor["headers"], json={
-        "signature": _sign_trustline_close_request(signing_key=key, trustline_id=line_id)})
+    return await client.request("DELETE", f"/api/v1/trustlines/{line_id}", headers=creditor["headers"],
+                                json=signed_trustline_close(signing_key=key, trustline_id=line_id,
+                                                            expected=await expected_state_of(
+                                                                client, creditor["headers"], line_id)))
 
 
-async def _line(client, creditor, line_id: str) -> dict:
+async def _line(client, db_session, creditor, line_id: str) -> dict:
+    """The line as a NEW request reads it. In mode B every request runs on the test's one session, whose identity
+    map outlives the request: a TrustLine an earlier request loaded (a refused PATCH keeps it alive through its
+    exception's traceback, a cycle, until the collector runs) comes back from `select(TrustLine)` with the status
+    it had then, not the one another session committed since - `available` is recomputed, `status` is not (030 S5,
+    2026-10-06). Production has one session per request and no such map; so the lines are forgotten here, and the
+    read sees the committed row."""
+
+    for held in [o for o in db_session.identity_map.values() if isinstance(o, TrustLine)]:
+        db_session.expunge(held)
     r = await client.get(f"/api/v1/trustlines/{line_id}", headers=creditor["headers"])
     assert r.status_code == 200, r.text
     return r.json()
@@ -98,17 +125,17 @@ async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(clien
     assert r.status_code == 409 and r.json()["error"]["details"]["reason"] == "TRUSTLINE_CLOSE_REQUESTED", r.text
     key = SigningKey(base64.b64decode(a["priv"]))
     policy = {"auto_clearing": False}
-    r = await client.patch(f"/api/v1/trustlines/{lines['AB']}", headers=a["headers"], json={
-        "policy": policy, "signature": _sign_trustline_update_request(
-            signing_key=key, trustline_id=lines["AB"], policy=policy)})
+    r = await client.patch(f"/api/v1/trustlines/{lines['AB']}", headers=a["headers"], json=signed_trustline_update(
+        signing_key=key, trustline_id=lines["AB"], policy=policy,
+        expected=await expected_state_of(client, a["headers"], lines["AB"])))
     assert r.status_code == 200 and r.json()["close_requested_at"] == asked, r.text
 
     # Partial repayment keeps the request pending; the exact zero closes in the same transaction.
     assert await _pay(factory, a, b, code, "20")
-    assert (await _line(client, a, lines["AB"]))["status"] == "active"
+    assert (await _line(client, db_session, a, lines["AB"]))["status"] == "active"
     assert await _pay(factory, a, b, code, "30")
     assert await _debts(factory, code) == {}
-    closed = await _line(client, a, lines["AB"])
+    closed = await _line(client, db_session, a, lines["AB"])
     assert (closed["status"], closed["close_requested_at"]) == ("closed", asked), closed
     audit = await _audit(factory, lines["AB"])
     assert [op for op, _ in audit] == ["TRUST_LINE_CLOSE", "TRUST_LINE_CLOSE_REQUEST"], audit
@@ -116,7 +143,7 @@ async def test_a_close_with_debt_waits_for_zero_and_a_payment_completes_it(clien
 
     # Reopening is a new incarnation without a request.
     new_id = await _create(client, a, b, code, "10")
-    fresh = await _line(client, a, new_id)
+    fresh = await _line(client, db_session, a, new_id)
     assert new_id != lines["AB"] and fresh["close_requested_at"] is None and fresh["status"] == "active"
 
 
@@ -130,7 +157,7 @@ async def test_a_clearing_completes_a_requested_close(client, db_session) -> Non
     result = await run_clearing_pass(factory, code)
     assert len(result.committed) == 1 and result.status == "complete", result
     assert await _debts(factory, code) == {}
-    line = await _line(client, a, lines["AB"])
+    line = await _line(client, db_session, a, lines["AB"])
     assert line["status"] == "closed" and line["policy"].get("auto_clearing", True) is not False, line
     audit = await _audit(factory, lines["AB"])
     assert [(op, x.get("completed_by")) for op, x in audit] == [
@@ -219,7 +246,7 @@ async def test_a_rolled_back_completion_leaves_no_close(client, db_session, monk
     assert ("closed", 1, kind) in seen and fired, (seen, fired)
     # The outcome: nothing of it survived.
     assert await _debts(factory, code) == debts_before
-    line = await _line(client, a, lines["AB"])
+    line = await _line(client, db_session, a, lines["AB"])
     assert (line["status"], Decimal(line["limit"])) == ("active", 0) and line["close_requested_at"], line
     assert [op for op, _ in await _audit(factory, lines["AB"])] == ["TRUST_LINE_CLOSE_REQUEST"]
 

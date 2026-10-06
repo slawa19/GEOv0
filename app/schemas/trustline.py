@@ -60,14 +60,37 @@ class TrustLineCreateRequest(BaseModel):
     policy: Optional[Dict[str, Any]] = None
     signature: str
 
+class TrustLineExpectedState(BaseModel):
+    """030 S5 (F-030-13, `T3000` item 1): the line as its owner saw it, bound by the signature of an UPDATE or CLOSE.
+
+    All four fields are required (`close_requested_at` and `policy` may be null, never absent): a field left out
+    cannot widen the match the service makes against the row it locked.
+    """
+
+    limit: str
+    policy: Optional[Dict[str, Any]]
+    status: str
+    close_requested_at: Optional[str]
+
+
+# 030 S5: `operation`, `expected` and `issued_at` are REQUIRED on the public routes (the canon says so and the service
+# refuses a body without them - no compatibility with the pre-S5 signature over `{id}`). They are optional on the
+# model only because the same model is the argument of the service's unsigned INTERNAL execution path (the
+# simulator's trusted callers), which has no owner-seen state to declare and never reads them.
 class TrustLineUpdateRequest(BaseModel):
+    operation: Optional[str] = None
     # Same contract as `TrustLineCreateRequest.limit`.
     limit: Optional[str] = None
     policy: Optional[Dict[str, Any]] = None
+    expected: Optional[TrustLineExpectedState] = None
+    issued_at: Optional[str] = None
     signature: str
 
 
 class TrustLineCloseRequest(BaseModel):
+    operation: Optional[str] = None
+    expected: Optional[TrustLineExpectedState] = None
+    issued_at: Optional[str] = None
     signature: str
 
 
