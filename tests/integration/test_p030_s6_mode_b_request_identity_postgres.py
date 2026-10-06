@@ -1,17 +1,12 @@
-"""030 S6: in mode B a request reads the database, not the identity map the test's session kept from before.
+"""030 S6: in mode B a request reads the database, not the identity map the test's one session kept from before.
 
-Production opens one session per request, so a request starts with an empty identity map and every load reads the
-committed row. In mode B every request runs on the test's ONE session (`tests/conftest.py`, `override_get_db`), whose
-identity map outlives the request: an ORM object an earlier request - or the test - loaded comes back from a later
-`select(TrustLine)` or `session.get` with the attributes it had then, not the ones another session committed since.
-Found in `test_p026_s3_close_request_postgres.py` (a refused PATCH kept the line alive; the next GET answered
-`active` for a line the payment's own session had closed) and worked around there by forgetting the lines in the test
-(`235706c5`). The mechanism is fixed once, in `override_get_db`; these cells are its guard.
+Production opens a session per request (empty identity map); mode B runs every request on the test's session
+(`tests/conftest.py`, `override_get_db`), so an ORM object loaded earlier - by the test, or by a refused request that
+the exception's traceback keeps alive - came back from a later `select` or `session.get` with its old attributes.
+Found in `test_p026_s3_close_request_postgres.py`, worked around there in `235706c5`, fixed once in the conftest.
 
-Red on `9ed439de` (conftest unchanged): all four cells, gc off. `test_handles_stay_readable_...` is the control of the
-fix's shape: the test's handles must stay readable without IO (the session is `expire_on_commit=False`) and must show
-what a request loaded through them - the sharing the existing mode-B tests read their results by. Its red on the old
-conftest is the stale read itself; what it protects afterwards is that `expunge_all` / `expire_all` are not the fix."""
+Red on `9ed439de`: the four first cells, collector off. `test_handles_stay_readable_...` pins the fix's shape: handles
+stay readable without IO and show what a request loaded through them (`expunge_all` / `expire_all` would break that)."""
 
 from __future__ import annotations
 
@@ -64,7 +59,7 @@ async def _committed_elsewhere(db_session, line_id, **values) -> None:
 
 
 async def _one_request(read):
-    """What `get_db` hands a request under this conftest: the override's span, driven by hand around `read(session)`."""
+    """The override's span, as `get_db` hands it to a request, driven by hand around `read(session)`."""
 
     span = app.dependency_overrides[get_db]()
     session = await span.__anext__()
@@ -106,7 +101,7 @@ async def test_handles_stay_readable_and_show_what_a_request_loaded_through_them
 @MODE_B
 @pytest.mark.asyncio
 async def test_a_refused_request_leaves_nothing_the_next_request_reads_stale(client, db_session) -> None:
-    """The p026 shape, whole: a refused PATCH, a payment on another session that completes the requested close, a GET."""
+    """The p026 shape: a refused PATCH, a payment on another session completes the requested close, a GET."""
 
     code, p, lines, factory = await _world(client, db_session)
     a, b = p["A"], p["B"]
@@ -122,7 +117,7 @@ async def test_a_refused_request_leaves_nothing_the_next_request_reads_stale(cli
 @MODE_B
 @pytest.mark.asyncio
 async def test_overlapping_requests_leave_the_session_as_it_was_when_the_last_one_ends(client, db_session) -> None:
-    """A held stream is a request still open while others run on the same session: the first to end must not undo it."""
+    """A held stream is a request open while others run on the session: the first to end must not undo it."""
 
     first, second = app.dependency_overrides[get_db](), app.dependency_overrides[get_db]()
     session = await first.__anext__()

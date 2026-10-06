@@ -532,7 +532,7 @@ async def test_f9_the_verifier_reads_one_consistent_snapshot_around_a_payment(ri
 
 @pytest.mark.asyncio
 async def test_control_f9_a_verifier_without_its_snapshot_reads_the_payment_half(rig, monkeypatch):
-    """The stand can see inconsistent reading: with the snapshot not opened, the same schedule does not report `PASSED`."""
+    """The stand can see inconsistent reading: with the snapshot not opened, the same schedule reports a false `FAILED` (the reaction re-verifies in its own snapshot, finds no fault, sets no hold)."""
 
     from app.core.ledger import reconciliation as rec_module
 
@@ -544,7 +544,7 @@ async def test_control_f9_a_verifier_without_its_snapshot_reads_the_payment_half
     seen, counts, _hold, debts = await _reconcile_with_a_payment_between_its_reads(rig, monkeypatch, p, eq)
     assert seen == ["read committed", "COMMITTED"], seen
     assert debts == {(p["X"].id, p["Y"].id): D("35.00000000")}
-    assert counts[PASSED] == 0, counts
+    assert (counts[PASSED], counts["FAILED"]) == (0, 1), counts  # a FALSE failed: no payment was wrong
 
 
 # ── F10: the same tx_id twice at once ─────────────────────────────────────────────────────────

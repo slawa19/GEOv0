@@ -1,10 +1,9 @@
 """030 S6 (`F-030-16`): the cycles `GET /clearing/cycles` offers are the cycles the planner would plan.
 
-The planner leaves out every edge whose debtor or creditor is not `active` (`flow_planner.py`, `_ELIGIBLE_EDGES_SQL`,
-028 `F-028-28`), and execution skips an occurrence through such a participant. Diagnostics read the same debts with the
-same trust-line consent but not the participant status, so a cycle through a suspended participant was offered and could
-never be cleared. Three detectors answer `find_cycles` - SQL triangles, SQL quadrangles, the in-memory DFS - and each
-is a separate reader, so each cell below reaches a different one. Red on `9ed439de`: the suspended-participant cells."""
+The planner leaves out every edge with a participant that is not `active` (`flow_planner.py`, 028 `F-028-28`) and
+execution skips such an occurrence; diagnostics did not read the status. Three detectors answer `find_cycles` - SQL
+triangles, SQL quadrangles, the DFS - each its own reader, so each cell reaches a different one. Red on `9ed439de`:
+every cell with a participant that is not active (10)."""
 
 from __future__ import annotations
 
