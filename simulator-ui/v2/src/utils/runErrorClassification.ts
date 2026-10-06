@@ -13,7 +13,7 @@ export function isUserFacingRunErrorCode(code: string): boolean {
 }
 
 /** The run-level error line: the step refusal is a human text in the interface language, the rest is `CODE: message`. */
-export function runErrorText(error: Pick<RunError, 'code' | 'message'>, locale: UiLocale = uiLocale()): string {
+export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return clearingStepRefusalText(null, locale)
   return `${error.code}: ${error.message}`
 }
