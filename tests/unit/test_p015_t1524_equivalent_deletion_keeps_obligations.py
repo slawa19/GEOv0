@@ -22,7 +22,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-import app.api.v1.admin as admin_api
+import app.core.equivalents as equivalents_core  # the delete and its usage count, since 032 A-6
 from app.config import settings
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -84,7 +84,7 @@ async def test_the_route_refuses_when_its_usage_count_misses_a_debt(
     async def _count_that_missed_the_debt(db, *, equivalent_id):
         return {"trustlines": 0, "debts": 0, "integrity_checkpoints": 0}
 
-    monkeypatch.setattr(admin_api, "_equivalent_usage_counts", _count_that_missed_the_debt)
+    monkeypatch.setattr(equivalents_core, "equivalent_usage_counts", _count_that_missed_the_debt)
 
     resp = await client.request(
         "DELETE",

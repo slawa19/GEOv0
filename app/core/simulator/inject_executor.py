@@ -684,7 +684,8 @@ class InjectExecutor:
                         )
 
                 if status != "active":
-                    await ParticipantService(session).set_status(pid, status)
+                    # The row was inserted ACTIVE above, in this transaction (032 A-5: the scenario's status from it).
+                    await ParticipantService(session).set_status(pid, status, from_statuses=("active",))
                 applied += 1
                 return True
             except (
@@ -879,8 +880,18 @@ class InjectExecutor:
                     )
                     skipped += 1
                     return False
+                if p_row.status != "active":
+                    # 032 A-5: a freeze starts from `active` only; `left`/`deleted` is skipped like `suspended` above,
+                    # where before 032 it was silently turned into `suspended`.
+                    self._logger.info(
+                        "simulator.real.inject.freeze_participant.not_active pid=%s status=%s",
+                        freeze_pid,
+                        p_row.status,
+                    )
+                    skipped += 1
+                    return False
 
-                await ParticipantService(session).set_status(freeze_pid, "suspended")
+                await ParticipantService(session).set_status(freeze_pid, "suspended", from_statuses=("active",))
 
                 # Invalidate only incident equivalents (best-effort).
                 # Freezing a participant affects routing; avoid evicting all equivalents.

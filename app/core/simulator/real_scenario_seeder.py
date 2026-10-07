@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.db.models.equivalent import Equivalent
-from app.core.integrity import create_equivalent
+from app.core.equivalents import create_equivalent
 from app.core.participants.service import ParticipantService
 from app.db.models.participant import Participant
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
@@ -335,5 +335,5 @@ class RealScenarioSeeder:
             # `finish()` flushes and audits; the CALLER commits, and on any failure rolls back.
             await batch.finish()
 
-        for pid, status in sorted(later_status.items()):
-            await ParticipantService(session).set_status(pid, status)
+        for pid, status in sorted(later_status.items()):  # inserted ACTIVE above, in this transaction (032 A-5)
+            await ParticipantService(session).set_status(pid, status, from_statuses=("active",))

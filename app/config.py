@@ -301,7 +301,7 @@ class Settings(BaseSettings):
     ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS: int = 50
     ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS: int = 50
 
-    # Feature flags (runtime mutable via /admin/feature-flags)
+    # Feature flags (runtime mutable via PATCH /admin/config; /admin/feature-flags was removed by 032 F-6)
     FEATURE_FLAGS_MULTIPATH_ENABLED: bool = True
     FEATURE_FLAGS_FULL_MULTIPATH_ENABLED: bool = False
     CLEARING_ENABLED: bool = True

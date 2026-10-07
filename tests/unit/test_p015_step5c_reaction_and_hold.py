@@ -919,7 +919,7 @@ async def test_step5c_the_hold_is_cleared_only_explicitly_after_a_later_passed_a
     MUTATIONS: (1) clear automatically on a PASSED in `run_scheduled_reconciliation` - still-held
     assertion red; (2) drop `latest.status != PASSED` from the predicate - since 030 F-030-10 the re-verification
     under the clear's row lock still refuses F2, so this mutation alone no longer reddens;
-    (3) drop `_add_audit_entry` - no audit row, red.
+    (3) drop the audit row (`add_audit_entry`, `app/api/audit.py`) - no audit row, red.
     NOT REDDENABLE, and said so: `latest.id == hold_result_id` alone. A hold only ever points at a FAILED
     row and a row's status never changes, so the status condition already implies it.
     """

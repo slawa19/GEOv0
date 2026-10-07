@@ -94,18 +94,29 @@ class ParticipantService:
             await self.db.flush()
         return participant
 
-    async def set_status(self, pid: str, status: str) -> tuple[Participant, str]:
+    async def set_status(self, pid: str, status: str, *, from_statuses: tuple[str, ...]) -> tuple[Participant, str]:
         """Set the status in the caller's transaction, flushed, never committed; returns the row and the old status.
 
         028 `F-028-28` (owner В-1): the row `FOR UPDATE` is the freeze's whole lock - a money writer holds its
         participants `FOR SHARE`, so the freeze waits for one in flight, and one arriving later waits for this commit
-        and reads the new status. Moved from the admin handler by 030 S3b; the simulator's freezes call it too."""
+        and reads the new status. Moved from the admin handler by 030 S3b; the simulator's freezes call it too.
+
+        032 A-5: `from_statuses` - the statuses this transition may start from - is REQUIRED, so no caller changes a
+        status without saying from what. It is checked against the status read by the locking statement, so two
+        concurrent commands cannot both pass it. Any other status is a 409 `status_transition_not_allowed`, nothing
+        changed. The matrix of each caller is in `docs/ru/09-decisions-and-defaults.md`, 1.6."""
 
         participant = (await self.db.execute(select(Participant).where(Participant.pid == pid).with_for_update()
                                              .execution_options(populate_existing=True))).scalar_one_or_none()
         if participant is None:
             raise NotFoundException(f"Participant {pid} not found")
         before = participant.status
+        if before not in from_statuses:
+            raise ConflictException(
+                f"Participant {pid} is {before}; it cannot be set to {status} from that status",
+                details={"reason": "status_transition_not_allowed", "pid": pid, "status": before,
+                         "requested": status},
+            )
         participant.status = status
         await self.db.flush()
         return participant, before

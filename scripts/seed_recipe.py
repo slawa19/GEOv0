@@ -339,8 +339,8 @@ def _new_identity(ref: str) -> tuple[str, str, SigningKey]:
 def _synthetic_request(path: str) -> Any:
     """A `Request` for the admin handlers, which take one for the audit row and nothing else.
 
-    `_add_audit_entry` reads `X-Request-ID`, `user-agent` and `request.client`
-    (`app/api/v1/admin.py:409-413`). A scope without a client makes `request.client` `None`, which
+    `add_audit_entry` (`app/api/audit.py`) reads `X-Request-ID`, `user-agent` and `request.client`
+    (032 A-8). A scope without a client makes `request.client` `None`, which
     that helper already handles, so the audit row records this seed as its own user agent and an
     invented request id - which is exactly what it is.
     """

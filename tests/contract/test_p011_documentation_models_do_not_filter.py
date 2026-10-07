@@ -26,9 +26,8 @@ from app.main import app
 # Operations whose 2xx shape is declared for documentation only, with the model that declares it.
 # Adding a row here is a promise that the handler still returns a plain object and that FastAPI
 # is not filtering it.
+# 032 F-5: the ban/unban rows left with the two routes (owner's decision of 2026-10-07).
 DOCUMENTATION_ONLY = {
-    ("POST", "/api/v1/admin/participants/{pid}/ban"): "AdminParticipantStatusChange",
-    ("POST", "/api/v1/admin/participants/{pid}/unban"): "AdminParticipantStatusChange",
     ("GET", "/api/v1/admin/health/db"): "AdminDbHealthResponse",
 }
 

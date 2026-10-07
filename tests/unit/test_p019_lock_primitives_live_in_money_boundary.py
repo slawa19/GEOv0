@@ -282,7 +282,8 @@ def test_the_scan_is_not_vacuous() -> None:
 
     # Each app consumer that the owner surface names reaches the primitives through MoneyBoundary.
     for consumer in (
-        "app/api/v1/admin.py",
+        # 032 A-6: the equivalent protocol (stop, step, hold clear, delete) moved out of `app/api/v1/admin.py`.
+        "app/core/equivalents.py",
         "app/api/v1/simulator.py",
         "app/core/clearing/service.py",
         "app/core/payments/service.py",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from decimal import Decimal
 from datetime import datetime, timezone
@@ -11,21 +12,19 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
 from pydantic import BaseModel, TypeAdapter, ValidationError, WithJsonSchema
 from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
-from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.api import deps
+from app.api.audit import add_audit_entry, audited
 from app.config import Settings, settings
 from app.db.models.audit_log import AuditLog
 from app.db.models.equivalent import Equivalent as EquivalentModel
 from app.db.models.debt import Debt
-from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.schemas.admin import (
-    AdminParticipantStatusChange,
     AdminAuditLogItem,
     AdminAuditLogListResponse,
     AdminAbortTxRequest,
@@ -39,8 +38,6 @@ from app.schemas.admin import (
     AdminEquivalentUpdateRequest,
     AdminEquivalentUsageResponse,
     AdminDeleteResponse,
-    AdminFeatureFlags,
-    AdminFeatureFlagsPatchRequest,
     AdminMigrationsStatus,
     AdminParticipantActionRequest,
     AdminParticipantStatusResponse,
@@ -51,7 +48,6 @@ from app.schemas.admin import (
     AdminParticipantsStatsResponse,
     AdminTrustLinesBottlenecksResponse,
     AdminTrustLinesListResponse,
-    AdminWhoAmIResponse,
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
 from app.schemas.equivalents import EquivalentsList, StoredEquivalent
@@ -72,17 +68,14 @@ from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_t
 from app.core.simulator.net_balance_utils import net_decimal_to_atoms
 from app.core.participants.service import ParticipantService
 from app.core.trustlines.service import TrustLineService
-from app.core.integrity import create_equivalent
-from app.db.reconciliation_tables import debt_reconciliation_baselines
-from sqlalchemy.exc import IntegrityError
+from app.core import equivalents as equivalents_core
 from app.utils.exceptions import (
     BadRequestException,
     ConflictException,
     NotFoundException,
 )
 from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-from app.utils.request_id import new_request_id, request_id_var, validate_request_id
-from app.utils.validation import MONEY_MAX_SCALE, validate_equivalent_code, validate_equivalent_precision
+from app.utils.validation import validate_equivalent_code
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
@@ -113,6 +106,8 @@ def _dedupe_trustline_rows(rows, *, equivalent_index: int, from_index: int, to_i
     return out
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
+
+logger = logging.getLogger(__name__)
 
 _runtime_config_lock = asyncio.Lock()
 
@@ -157,10 +152,7 @@ def _participant_status_db_values_for_filter(status: str | None) -> list[str] | 
         # Treat "left" as banned for UI compatibility.
         return ["deleted", "left"]
 
-    # DB aliases (backward compatibility)
-    if v in {"active", "suspended", "left", "deleted"}:
-        return [v]
-
+    # A DB value (or anything else) filters on itself; an unknown value matches nothing.
     return [v]
 
 
@@ -360,39 +352,6 @@ def _validate_runtime_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
-def _add_audit_entry(
-    db: AsyncSession,
-    *,
-    request: Request,
-    action: str,
-    object_type: str | None = None,
-    object_id: str | None = None,
-    reason: str | None = None,
-    before_state: dict[str, Any] | None = None,
-    after_state: dict[str, Any] | None = None,
-) -> AuditLog:
-    rid = validate_request_id(request_id_var.get())
-    if rid is None:
-        rid = validate_request_id(request.headers.get("X-Request-ID")) or new_request_id()
-    ip = (request.client.host if request.client else None) or None
-    ua = request.headers.get("user-agent")
-    entry = AuditLog(
-        actor_id=None,
-        actor_role="admin",
-        action=action,
-        object_type=object_type,
-        object_id=object_id,
-        reason=reason,
-        before_state=before_state,
-        after_state=after_state,
-        request_id=rid,
-        ip_address=ip,
-        user_agent=ua,
-    )
-    db.add(entry)
-    return entry
-
-
 async def _required_audit_and_publish(
     db: AsyncSession,
     *,
@@ -406,7 +365,7 @@ async def _required_audit_and_publish(
     after_state: dict[str, Any] | None = None,
 ) -> None:
     async def _operation() -> None:
-        _add_audit_entry(
+        add_audit_entry(
             db,
             request=request,
             action=action,
@@ -455,7 +414,7 @@ async def _required_audit_and_publish(
         raise operation_error
 
 
-@router.get("/config", response_model=AdminConfigResponse, dependencies=[])
+@router.get("/config", response_model=AdminConfigResponse)
 async def get_admin_config() -> AdminConfigResponse:
     items = []
     for key, mutable in _runtime_config_items():
@@ -498,71 +457,12 @@ async def patch_admin_config(
         return AdminConfigPatchResponse(updated=list(validated))
 
 
-@router.get("/whoami", response_model=AdminWhoAmIResponse, dependencies=[])
-async def admin_whoami() -> AdminWhoAmIResponse:
-    # For now, require_admin implies role=admin.
-    return AdminWhoAmIResponse(role="admin")
+def _ilike_contains(column, needle: str):
+    """`column ILIKE '%needle%'` with the needle taken literally (032 A-11): `%` and `_` typed by the operator are
+    characters to find, not wildcards. `\\` is the escape, so it is escaped first."""
 
-
-@router.get("/feature-flags", response_model=AdminFeatureFlags, dependencies=[])
-async def get_feature_flags() -> AdminFeatureFlags:
-    return AdminFeatureFlags(
-        multipath_enabled=settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
-        full_multipath_enabled=settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
-        clearing_enabled=settings.CLEARING_ENABLED,
-    )
-
-
-@router.patch("/feature-flags", response_model=AdminFeatureFlags)
-async def patch_feature_flags(
-    body: AdminFeatureFlagsPatchRequest,
-    request: Request,
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminFeatureFlags:
-    async with _runtime_config_lock:
-        before = {
-            "multipath_enabled": settings.FEATURE_FLAGS_MULTIPATH_ENABLED,
-            "full_multipath_enabled": settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED,
-            "clearing_enabled": settings.CLEARING_ENABLED,
-        }
-        after = dict(before)
-        if body.multipath_enabled is not None:
-            after["multipath_enabled"] = body.multipath_enabled
-        if body.full_multipath_enabled is not None:
-            after["full_multipath_enabled"] = body.full_multipath_enabled
-        if body.clearing_enabled is not None:
-            after["clearing_enabled"] = body.clearing_enabled
-
-        def _publish() -> None:
-            try:
-                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = after["multipath_enabled"]
-                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = after[
-                    "full_multipath_enabled"
-                ]
-                settings.CLEARING_ENABLED = after["clearing_enabled"]
-            except BaseException:
-                settings.FEATURE_FLAGS_MULTIPATH_ENABLED = before[
-                    "multipath_enabled"
-                ]
-                settings.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED = before[
-                    "full_multipath_enabled"
-                ]
-                settings.CLEARING_ENABLED = before["clearing_enabled"]
-                raise
-
-        await _required_audit_and_publish(
-            db,
-            publish=_publish,
-            request=request,
-            action="admin.feature_flags.patch",
-            object_type="feature_flags",
-            object_id=None,
-            reason=body.reason,
-            before_state=before,
-            after_state=after,
-        )
-
-        return AdminFeatureFlags(**after)
+    escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return column.ilike(f"%{escaped}%", escape="\\")
 
 
 @router.get("/participants")
@@ -577,11 +477,7 @@ async def list_admin_participants(
     base = select(Participant)
 
     if q:
-        needle = f"%{q}%"
-        base = base.where(
-            (Participant.pid.ilike(needle))
-            | (Participant.display_name.ilike(needle))
-        )
+        base = base.where(_ilike_contains(Participant.pid, q) | _ilike_contains(Participant.display_name, q))
     status_db_values = _participant_status_db_values_for_filter(status)
     if status_db_values:
         if len(status_db_values) == 1:
@@ -898,6 +794,22 @@ async def admin_liquidity_summary(
     )
 
 
+#: 032 A-5: the operator's status matrix - only freeze and unfreeze since the ban was removed (F-5). The key is the
+#: status a command sets, the value the statuses it may start from; anything else is a 409, a repeat included.
+_OPERATOR_STATUS_SOURCES: dict[str, tuple[str, ...]] = {
+    "suspended": ("active",),  # freeze
+    "active": ("suspended",),  # unfreeze
+}
+
+_STATUS_TRANSITION_REFUSED = {
+    409: {
+        "model": ErrorEnvelope,
+        "description": "The participant's status is not the one this command starts from "
+        "(status_transition_not_allowed); nothing changed",
+    }
+}
+
+
 async def _set_participant_status(
     *,
     pid: str,
@@ -907,25 +819,15 @@ async def _set_participant_status(
     request: Request,
     db: AsyncSession,
 ) -> dict:
-    # The lock and the mutation are the core's (`ParticipantService.set_status`, 030 S3b); the audit and the commit here.
-    try:
-        participant, before_status = await ParticipantService(db).set_status(pid, status_value)
-        before = {"status": before_status}
+    # The lock, the matrix check and the mutation are the core's (`ParticipantService.set_status`, 030 S3b, 032 A-5);
+    # the audit and the commit here.
+    async with audited(db, request=request, action=audit_action, object_type="participant", object_id=pid,
+                       reason=body.reason) as audit:
+        participant, before_status = await ParticipantService(db).set_status(
+            pid, status_value, from_statuses=_OPERATOR_STATUS_SOURCES[status_value])
         result = {"pid": participant.pid, "status": participant.status}
-        _add_audit_entry(
-            db,
-            request=request,
-            action=audit_action,
-            object_type="participant",
-            object_id=pid,
-            reason=body.reason,
-            before_state=before,
-            after_state={"status": participant.status},
-        )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
+        audit.before_state = {"status": before_status}
+        audit.after_state = {"status": participant.status}
     # The route graphs skip a suspended participant's lines (a hint; the core's refusal is the boundary).
     PaymentRouter.invalidate_cache()
 
@@ -935,6 +837,7 @@ async def _set_participant_status(
 @router.post(
     "/participants/{pid}/freeze",
     response_model=AdminParticipantStatusResponse,
+    responses=_STATUS_TRANSITION_REFUSED,
 )
 async def freeze_participant(
     pid: str,
@@ -955,6 +858,7 @@ async def freeze_participant(
 @router.post(
     "/participants/{pid}/unfreeze",
     response_model=AdminParticipantStatusResponse,
+    responses=_STATUS_TRANSITION_REFUSED,
 )
 async def unfreeze_participant(
     pid: str,
@@ -965,46 +869,6 @@ async def unfreeze_participant(
     return await _set_participant_status(
         pid=pid,
         audit_action="admin.participants.unfreeze",
-        status_value="active",
-        body=body,
-        request=request,
-        db=db,
-    )
-
-
-@router.post(
-    "/participants/{pid}/ban",
-    responses={200: {"model": AdminParticipantStatusChange}},
-)
-async def ban_participant(
-    pid: str,
-    body: AdminParticipantActionRequest,
-    request: Request,
-    db: AsyncSession = Depends(deps.get_db),
-):
-    return await _set_participant_status(
-        pid=pid,
-        audit_action="admin.participants.ban",
-        status_value="deleted",
-        body=body,
-        request=request,
-        db=db,
-    )
-
-
-@router.post(
-    "/participants/{pid}/unban",
-    responses={200: {"model": AdminParticipantStatusChange}},
-)
-async def unban_participant(
-    pid: str,
-    body: AdminParticipantActionRequest,
-    request: Request,
-    db: AsyncSession = Depends(deps.get_db),
-):
-    return await _set_participant_status(
-        pid=pid,
-        audit_action="admin.participants.unban",
         status_value="active",
         body=body,
         request=request,
@@ -1025,17 +889,16 @@ async def list_audit_log(
     base = select(AuditLog)
 
     if q:
-        needle = f"%{q}%"
         base = base.where(
-            func.coalesce(cast(AuditLog.id, String), "").ilike(needle)
-            | func.coalesce(cast(AuditLog.actor_id, String), "").ilike(needle)
-            | func.coalesce(AuditLog.actor_role, "").ilike(needle)
-            | func.coalesce(AuditLog.action, "").ilike(needle)
-            | func.coalesce(AuditLog.object_type, "").ilike(needle)
-            | func.coalesce(AuditLog.object_id, "").ilike(needle)
-            | func.coalesce(AuditLog.reason, "").ilike(needle)
-            | func.coalesce(AuditLog.request_id, "").ilike(needle)
-            | func.coalesce(AuditLog.ip_address, "").ilike(needle)
+            _ilike_contains(func.coalesce(cast(AuditLog.id, String), ""), q)
+            | _ilike_contains(func.coalesce(cast(AuditLog.actor_id, String), ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.actor_role, ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.action, ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.object_type, ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.object_id, ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.reason, ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.request_id, ""), q)
+            | _ilike_contains(func.coalesce(AuditLog.ip_address, ""), q)
         )
 
     if action:
@@ -1049,7 +912,13 @@ async def list_audit_log(
         await db.execute(select(func.count()).select_from(base.subquery()))
     ).scalar_one()
 
-    stmt = base.order_by(desc(AuditLog.timestamp)).limit(per_page).offset((page - 1) * per_page)
+    # `id` breaks the ties of one timestamp (032 A-11): without it rows of one instant page in planner order, and an
+    # operator paging through them can see one twice and another never.
+    stmt = (
+        base.order_by(desc(AuditLog.timestamp), desc(AuditLog.id))
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
     items = (await db.execute(stmt)).scalars().all()
     return AdminAuditLogListResponse(items=items, page=page, per_page=per_page, total=int(total))
 
@@ -1111,21 +980,10 @@ async def abort_transaction(
         )
 
     stored = {"state": tx.state, "error": tx.error}
-    try:
-        _add_audit_entry(
-            db,
-            request=request,
-            action="admin.transactions.abort",
-            object_type="transaction",
-            object_id=tx_id,
-            reason=body.reason,
-            before_state=stored,
-            after_state=stored,
-        )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
+    async with audited(db, request=request, action="admin.transactions.abort", object_type="transaction",
+                       object_id=tx_id, reason=body.reason) as audit:
+        audit.before_state = stored
+        audit.after_state = stored
 
     try:
         PAYMENT_EVENTS_TOTAL.labels(event="abort", result="already_aborted").inc()
@@ -1147,15 +1005,25 @@ async def admin_list_equivalents(
     return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])
 
 
-@router.post("/equivalents", response_model=EquivalentSchema)
+#: 032 A-11: PATCH, DELETE and usage normalise the path code (`equivalents_core.canonical_code`); one that cannot
+#: exist after that is a 400, declared on both halves of the contract.
+_CODE_CANNOT_EXIST = {400: {"model": ErrorEnvelope, "description": "Not an equivalent code after normalisation"}}
+
+
+@router.post(
+    "/equivalents",
+    response_model=EquivalentSchema,
+    responses={409: {"model": ErrorEnvelope, "description": "The code is taken (code_exists); nothing created"}},
+)
 async def admin_create_equivalent(
     body: AdminEquivalentCreateRequest,
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> EquivalentSchema:
-    try:
-        # 024 `T2412.2`, 030 F-030-9: the row and its baseline in this transaction, by the one core function.
-        eq = await create_equivalent(
+    # 024 `T2412.2`, 030 F-030-9: the row and its baseline in this transaction, by the one core function.
+    async with audited(db, request=request, action="admin.equivalents.create", object_type="equivalent",
+                       object_id=body.code, reason=body.reason) as audit:
+        eq = await equivalents_core.create_equivalent(
             db,
             code=body.code,
             symbol=body.symbol,
@@ -1166,20 +1034,8 @@ async def admin_create_equivalent(
         )
         await db.refresh(eq)
         result = EquivalentSchema.model_validate(eq)
-        _add_audit_entry(
-            db,
-            request=request,
-            action="admin.equivalents.create",
-            object_type="equivalent",
-            object_id=eq.code,
-            reason=body.reason,
-            before_state=None,
-            after_state={"code": eq.code, "is_active": eq.is_active},
-        )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
+        audit.object_id = eq.code
+        audit.after_state = {"code": eq.code, "is_active": eq.is_active}
     return result
 
 
@@ -1187,6 +1043,7 @@ async def admin_create_equivalent(
     "/equivalents/{code}",
     response_model=EquivalentSchema,
     responses={
+        **_CODE_CANNOT_EXIST,
         409: {
             "model": ErrorEnvelope,
             "description": "Stored equivalent requires an explicit legacy-data repair, or a lower precision under "
@@ -1200,130 +1057,21 @@ async def admin_update_equivalent(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> EquivalentSchema:
-    # The operator stop is a money boundary: the equivalent row `FOR UPDATE` before any decision - it waits for
-    # every money writer holding it `FOR SHARE` and keeps new ones out until this commits (027 stage 2; 019
-    # `T1907` checked for SERIALIZABLE here instead).
-    eq = (
-        await db.execute(select(EquivalentModel).where(EquivalentModel.code == code).with_for_update(key_share=True))
-    ).scalar_one_or_none()
-    if eq is None:
-        raise NotFoundException(f"Equivalent {code} not found")
-
-    try:
-        validate_equivalent_code(eq.code)
-    except BadRequestException:
-        raise ConflictException(
-            "Legacy equivalent code requires manual cleanup",
-            details={
-                "code": eq.code,
-                "reason": "noncanonical_code",
-                "repair": "manual_cleanup",
-            },
-        )
-
-    try:
-        validate_equivalent_precision(eq.precision)
-    except BadRequestException:
-        if body.precision is None:
-            raise ConflictException(
-                "Legacy equivalent precision must be repaired by this PATCH",
-                details={
-                    "code": eq.code,
-                    "reason": "noncanonical_precision",
-                    "repair": "patch_precision",
-                },
-            )
-
-    # T1544: the operator's stop has an observable cutoff through the ROW: every money writer - payment,
-    # tick, inject and, since 019 stage 5 (`T1907`), the clearing in every attempt - reads this row
-    # `FOR SHARE` and holds it through its commit (`MoneyBoundary.refuse_inactive_equivalents`), so the
-    # `UPDATE` below waits for a writer that has already read `active`, and a writer that reads after it
-    # committed meets 40001 and refuses on its retry. Two outcomes only: the writer commits before this
-    # PATCH returns, or this PATCH commits first and the writer refuses. No advisory lock since 019 stage 5
-    # (`T1909`): the row lock is the whole protocol.
-
-    # 028 `F-028-25` (owner В-4): precision is the accounting step, so lowering it under stored data would make
-    # those amounts finer than the step. Read AFTER the row lock above: every writer that checks the step holds
-    # this row `FOR SHARE` to its commit (`MoneyBoundary.share_equivalent_step`), so its row is visible here. A
-    # step finer than the storage scale is the scale (`noncanonical_precision` repair stays possible).
-    if body.precision is not None and body.precision < min(int(eq.precision), MONEY_MAX_SCALE):
-        from app.db.journal_tables import debt_journal_entries
-
-        used = await db.scalar(select(
-            select(TrustLine.id).where(TrustLine.equivalent_id == eq.id).exists()
-            | select(Debt.id).where(Debt.equivalent_id == eq.id).exists()
-            | select(debt_journal_entries.c.id).where(debt_journal_entries.c.equivalent_id == eq.id).exists()))
-        if used:
-            raise ConflictException(
-                f"Equivalent {eq.code} holds lines, debts or journal entries; its precision cannot be lowered",
-                details={"code": eq.code, "reason": "precision_in_use", "precision": eq.precision},
-            )
-
-    before = {
-        "symbol": eq.symbol,
-        "description": eq.description,
-        "precision": eq.precision,
-        "metadata": eq.metadata_,
-        "is_active": eq.is_active,
-    }
-    if body.symbol is not None:
-        eq.symbol = body.symbol
-    if body.description is not None:
-        eq.description = body.description
-    if body.precision is not None:
-        eq.precision = body.precision
-    if body.metadata is not None:
-        eq.metadata_ = body.metadata
-    if body.is_active is not None:
-        eq.is_active = body.is_active
-
-    try:
-        await db.flush()
-        await db.refresh(eq)
-        after = {
-            "symbol": eq.symbol,
-            "description": eq.description,
-            "precision": eq.precision,
-            "metadata": eq.metadata_,
-            "is_active": eq.is_active,
-        }
-        result = EquivalentSchema.model_validate(eq)
-        _add_audit_entry(
+    # The stop and the step are the core's (`app/core/equivalents.py`, 032 A-6): its row lock, its checks.
+    normalized = equivalents_core.canonical_code(code)
+    async with audited(db, request=request, action="admin.equivalents.patch", object_type="equivalent",
+                       object_id=normalized, reason=body.reason) as audit:
+        eq, audit.before_state, audit.after_state = await equivalents_core.update_equivalent(
             db,
-            request=request,
-            action="admin.equivalents.patch",
-            object_type="equivalent",
-            object_id=eq.code,
-            reason=body.reason,
-            before_state=before,
-            after_state=after,
+            normalized,
+            symbol=body.symbol,
+            description=body.description,
+            precision=body.precision,
+            metadata=body.metadata,
+            is_active=body.is_active,
         )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
-
+        result = EquivalentSchema.model_validate(eq)
     return result
-
-
-async def _equivalent_usage_counts(db: AsyncSession, *, equivalent_id) -> dict[str, int]:
-    trustlines = (
-        await db.execute(select(func.count()).select_from(TrustLine).where(TrustLine.equivalent_id == equivalent_id))
-    ).scalar_one()
-    debts = (await db.execute(select(func.count()).select_from(Debt).where(Debt.equivalent_id == equivalent_id))).scalar_one()
-    integrity_checkpoints = (
-        await db.execute(
-            select(func.count())
-            .select_from(IntegrityCheckpoint)
-            .where(IntegrityCheckpoint.equivalent_id == equivalent_id)
-        )
-    ).scalar_one()
-
-    return {
-        "trustlines": int(trustlines or 0),
-        "debts": int(debts or 0),
-        "integrity_checkpoints": int(integrity_checkpoints or 0),
-    }
 
 
 _ResultStatus = Literal["PASSED", "FAILED", "UNVERIFIABLE"]
@@ -1335,7 +1083,7 @@ _NullableResultStatus = Annotated[
 
 
 class IntegrityHoldClearRefusalDetails(BaseModel):
-    """Documentation only (030 F-030-10): the `details` of the clear's 409, as the handler writes them below."""
+    """Documentation only (030 F-030-10): the `details` of the clear's 409, as `clear_integrity_hold` writes them."""
 
     reason: Literal["no_integrity_hold", "no_later_passed_reconciliation_result"]
     latest_status: _NullableResultStatus = None
@@ -1374,108 +1122,28 @@ async def admin_clear_equivalent_integrity_hold(
 ) -> EquivalentSchema:
     """Programme 015 step 5c (`T1546`): lift an integrity hold, explicitly, with audit.
 
-    PREDICATE, NO CLOCKS: the equivalent is held AND its latest reconciliation result is `PASSED` AND that
-    result is not the one the hold points at AND a verification here, under the row lock, is `PASSED` too.
-    Result transitions alone do not give the causal order: two overlapping verifier runs can publish an older
-    PASSED after a newer hold (030 F-030-10, `tests/integration/test_p030_s1_stale_passed_hold_clear_postgres.py`).
+    The predicate and its row locks are the core's (`app/core/equivalents.py::clear_integrity_hold`, 032 A-6): the
+    hold is set by the core and lifted by it. A refusal leaves nothing behind - the frame rolls back, so the row
+    locks end with the refusal, not when the request's session is torn down after the response was sent."""
 
-    The two predicate reads take row locks (`FOR UPDATE` on the equivalent, `FOR SHARE` on the latest
-    result) held through commit, like the deactivating PATCH, so a scheduled reaction confirming a new FAILED
-    is serialised with this clear; at READ COMMITTED (027 stage 2) a read after the wait sees the committed row.
-    """
-
-    from sqlalchemy import update as sql_update
-
-    from app.core.ledger.reconciliation import PASSED, verify_journal_equals_change
-    from app.db.reconciliation_tables import debt_reconciliation_results
-
-    eq = (
-        await db.execute(select(EquivalentModel).where(EquivalentModel.code == code))
-    ).scalar_one_or_none()
-    if eq is None:
-        raise NotFoundException(f"Equivalent {code} not found")
-
-    # The row lock below is the whole protocol with money writers (019 stage 5, `T1909`): they hold this
-    # row `FOR SHARE` through their commits.
-    try:
-        hold_result_id = (
-            await db.execute(
-                select(EquivalentModel.integrity_hold_result_id)
-                .where(EquivalentModel.id == eq.id)
-                .with_for_update()
-            )
-        ).scalar_one()
-        if hold_result_id is None:
-            raise ConflictException(
-                f"Equivalent {eq.code} is not under an integrity hold",
-                details={"reason": "no_integrity_hold"},
-            )
-
-        results = debt_reconciliation_results.c
-        latest = (
-            await db.execute(
-                select(results.id, results.status)
-                .where(results.equivalent_id == eq.id, results.is_latest.is_(True))
-                .with_for_update(read=True)
-            )
-        ).first()
-        # 030 F-030-10: publication order is open (`record_outcome`), so a stored PASSED may predate the hold. The
-        # equivalent is re-verified here, after the row lock every money writer of it waits on.
-        recheck = None if latest is None or latest.status != PASSED else await verify_journal_equals_change(db, eq.id)
-        if recheck is None or recheck.status != PASSED or latest.id == hold_result_id:
-            raise ConflictException(
-                f"Equivalent {eq.code} can be cleared only after a later PASSED reconciliation result",
-                details={
-                    "reason": "no_later_passed_reconciliation_result",
-                    "latest_status": None if latest is None else str(latest.status),
-                    "recheck_status": None if recheck is None else recheck.status,
-                },
-            )
-    except BaseException:
-        # A refusal leaves nothing behind: the owner lock and the row locks end HERE, not whenever the
-        # request's session is torn down after the response has been sent.
-        await db.rollback()
-        raise
-
-    try:
-        await db.execute(
-            sql_update(EquivalentModel)
-            .where(
-                EquivalentModel.id == eq.id,
-                EquivalentModel.integrity_hold_result_id == hold_result_id,
-            )
-            .values(integrity_hold_result_id=None)
-        )
-        await db.refresh(eq)
+    async with audited(db, request=request, action="admin.equivalents.integrity_hold.clear",
+                       object_type="equivalent", object_id=code, reason=body.reason) as audit:
+        eq, hold_result_id, cleared_on = await equivalents_core.clear_integrity_hold(db, code)
         result = EquivalentSchema.model_validate(eq)
-        _add_audit_entry(
-            db,
-            request=request,
-            action="admin.equivalents.integrity_hold.clear",
-            object_type="equivalent",
-            object_id=eq.code,
-            reason=body.reason,
-            before_state={"integrity_hold_result_id": str(hold_result_id)},
-            after_state={
-                "integrity_hold_result_id": None,
-                "cleared_on_reconciliation_result_id": str(latest.id),
-            },
-        )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
-
+        audit.before_state = {"integrity_hold_result_id": str(hold_result_id)}
+        audit.after_state = {
+            "integrity_hold_result_id": None,
+            "cleared_on_reconciliation_result_id": str(cleared_on),
+        }
     return result
 
 
-@router.get("/equivalents/{code}/usage", response_model=AdminEquivalentUsageResponse)
+@router.get("/equivalents/{code}/usage", response_model=AdminEquivalentUsageResponse, responses=_CODE_CANNOT_EXIST)
 async def admin_equivalent_usage(
     code: str,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminEquivalentUsageResponse:
-    normalized = str(code or "").strip().upper()
-    validate_equivalent_code(normalized)
+    normalized = equivalents_core.canonical_code(code)
 
     eq = (
         await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized))
@@ -1483,7 +1151,7 @@ async def admin_equivalent_usage(
     if eq is None:
         raise NotFoundException(f"Equivalent {normalized} not found")
 
-    counts = await _equivalent_usage_counts(db, equivalent_id=eq.id)
+    counts = await equivalents_core.equivalent_usage_counts(db, equivalent_id=eq.id)
     return AdminEquivalentUsageResponse(code=eq.code, **counts)
 
 
@@ -1491,6 +1159,7 @@ async def admin_equivalent_usage(
     "/equivalents/{code}",
     response_model=AdminDeleteResponse,
     responses={
+        **_CODE_CANNOT_EXIST,
         409: {
             "model": ErrorEnvelope,
             "description": "Active, in use, or named by rows it must not outlive; nothing deleted",
@@ -1503,82 +1172,23 @@ async def admin_delete_equivalent(
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminDeleteResponse:
-    normalized = str(code or "").strip().upper()
-    validate_equivalent_code(normalized)
-
-    # The row `FOR UPDATE` before the usage counts below (027 stage 2): it waits for every money writer holding it
-    # `FOR SHARE`, and the counts are read after them.
-    eq = (
-        await db.execute(select(EquivalentModel).where(EquivalentModel.code == normalized).with_for_update())
-    ).scalar_one_or_none()
-    if eq is None:
-        raise NotFoundException(f"Equivalent {normalized} not found")
-
-    # T1524: the RESTRICT foreign key is the guarantee that no debt outlives its equivalent. No advisory lock
-    # narrows the window: the row lock above waits for every money writer holding it `FOR SHARE`, and a writer
-    # that reads it afterwards finds it gone and refuses (`refuse_inactive_equivalents`). (A deletable
-    # equivalent is already inactive, so writers refuse it anyway.)
-
-    if eq.is_active:
-        raise ConflictException("Deactivate equivalent before delete")
-
-    counts = await _equivalent_usage_counts(db, equivalent_id=eq.id)
-    # 024 `T2412.3`: integrity checkpoints are reports ABOUT the equivalent (`ON DELETE CASCADE`), not use of
-    # it; counted as use, every equivalent was undeletable after the first integrity run. They stay in the
-    # counts reported, not in the refusal.
-    if counts["trustlines"] > 0 or counts["debts"] > 0:
-        raise ConflictException("Equivalent is in use", details=counts)
-
-    before = {
-        "code": eq.code,
-        "symbol": eq.symbol,
-        "description": eq.description,
-        "precision": eq.precision,
-        "metadata": eq.metadata_,
-        "is_active": eq.is_active,
-    }
-
-    try:
-        # 024 `T2412.3`: the baseline header goes with the equivalent - it is `RESTRICT`, and since `T2412.2`
-        # every created equivalent has one. Only the HEADER: a baseline that recorded offsets adopted real
-        # debts, its offsets keep `RESTRICT` on it, and this statement then fails into the 409 below. Journal
-        # entries keep refusing the equivalent's own delete the same way.
-        await db.execute(
-            sql_delete(debt_reconciliation_baselines).where(
-                debt_reconciliation_baselines.c.equivalent_id == eq.id
-            )
-        )
-        await db.delete(eq)
-        _add_audit_entry(
-            db,
-            request=request,
-            action="admin.equivalents.delete",
-            object_type="equivalent",
-            object_id=normalized,
-            reason=body.reason,
-            before_state=before,
-            after_state=None,
-        )
-        await db.commit()
-    except IntegrityError as exc:
-        # T1524: `debts.equivalent_id` is RESTRICT. If a debt exists that the count above did not see
-        # - it appeared after the count, or a writer does not hold the owner lock - the database
-        # refuses the delete instead of cascading the obligation away. Reported as the same 409 an
-        # equivalent in use already gets, because that is exactly what it is.
-        await db.rollback()
-        raise ConflictException(
-            "Equivalent is in use",
-            details={"reason": "referenced_by_existing_rows"},
-        ) from exc
-    except BaseException:
-        await db.rollback()
-        raise
-
+    normalized = equivalents_core.canonical_code(code)
+    # The lock, the refusals (active, in use, referenced by rows it must not outlive) and the delete are the core's.
+    async with audited(db, request=request, action="admin.equivalents.delete", object_type="equivalent",
+                       object_id=normalized, reason=body.reason) as audit:
+        audit.before_state = await equivalents_core.delete_equivalent(db, normalized)
     return AdminDeleteResponse(deleted=normalized)
 
 
-@router.get("/migrations", response_model=AdminMigrationsStatus, dependencies=[])
+@router.get("/migrations", response_model=AdminMigrationsStatus)
 async def migrations_status() -> AdminMigrationsStatus:
+    """The database's Alembic revision against the repository's head.
+
+    032 A-1: the application's engine is ASYNC, and `engine.sync_engine.connect()` from a coroutine raises
+    `MissingGreenlet` every time - which the old `except Exception` turned into "not up to date" on every database.
+    The revision is read on an async connection through `run_sync` now, and a failure is LOGGED with its traceback
+    before the degraded answer (both revisions `null`, `is_up_to_date: false`) - never swallowed silently."""
+
     try:
         from alembic.config import Config
         from alembic.runtime.migration import MigrationContext
@@ -1594,9 +1204,10 @@ async def migrations_status() -> AdminMigrationsStatus:
 
         from app.db.session import engine
 
-        with engine.sync_engine.connect() as conn:
-            ctx = MigrationContext.configure(conn)
-            current = ctx.get_current_revision()
+        async with engine.connect() as conn:
+            current = await conn.run_sync(
+                lambda sync_conn: MigrationContext.configure(sync_conn).get_current_revision()
+            )
 
         return AdminMigrationsStatus(
             current_revision=current,
@@ -1604,6 +1215,7 @@ async def migrations_status() -> AdminMigrationsStatus:
             is_up_to_date=(current == head and current is not None),
         )
     except Exception:
+        logger.error("admin.migrations.status_failed", exc_info=True)
         return AdminMigrationsStatus(current_revision=None, head_revision=None, is_up_to_date=False)
 
 
