@@ -1050,10 +1050,10 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
     read an older snapshot could, in principle, publish its verdict after a newer run published one.
     That is not prevented here, and these are the measured reasons:
 
-    * Within one process the runs are strictly sequential: `_integrity_loop` (`app/main.py:270`) awaits
-      the startup run (`:274`) and then each periodic run (`:281`) before scheduling the next, and it is
-      started once (`:314`). A task that dies is recorded (`_on_background_task_done`, `:62`), not
-      restarted concurrently.
+    * Within one process the runs are strictly sequential: `_integrity_loop` (`app/core/maintenance_jobs.py`)
+      awaits the startup run and then each periodic run before scheduling the next, and it is started once
+      (`_start_configured_background_tasks`). A task that dies is recorded (`_on_background_task_done` in
+      `app/utils/background_jobs.py`), not restarted concurrently.
     * No launcher, compose file or Dockerfile starts more than one worker (no `--workers`,
       `WEB_CONCURRENCY` or gunicorn anywhere in them). Overlap needs two or more processes on one
       database WITHOUT Redis, which is not a configured deployment. With Redis the integrity loop's
@@ -1066,7 +1066,7 @@ async def record_outcome(session: Any, outcome: ReconciliationOutcome) -> str:
       persisting state recomputes a different fingerprint from the stale one and is stored as a
       transition; and step 5c re-verifies in one snapshot before it holds anything.
     * THE REDIS LOCK IS NOT RENEWED. `redis_distributed_lock` sets its key once with a TTL
-      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default `max(30, interval)`, `app/main.py`) and never
+      (`INTEGRITY_CHECKPOINT_LOCK_TTL_SECONDS`, by default `max(30, interval)`, `app/core/maintenance_jobs.py`) and never
       extends it, so a run longer than the TTL could overlap a second Redis-backed process. Acceptable
       for the single-worker v0.1 deployment; a renewable lease is registered as a follow-up and is not
       built here.
@@ -1387,8 +1387,8 @@ async def run_scheduled_reconciliation(
     """Verify every equivalent in its own fresh session and transaction, persisting each result.
 
     Called only from the scheduled integrity loop, after the checkpoints have committed
-    (`app/main.py`). Inactive equivalents are verified too: reading is not moving money, and a held
-    equivalent keeps being verified - a later `PASSED` is what permits an admin to clear it.
+    (`_run_debt_reconciliation_once` in `app/core/maintenance_jobs.py`). Inactive equivalents are verified too:
+    reading is not moving money, and a held equivalent keeps being verified - a later `PASSED` is what permits an admin to clear it.
 
     A failure while verifying ONE equivalent is logged as an error and leaves NO result row for it -
     an error is not `UNVERIFIABLE` and nothing is substituted for it - and the next equivalent is still

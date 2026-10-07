@@ -185,6 +185,22 @@ class _ClearingAttemptConflict(Exception):
 
 
 class ClearingService:
+    """Clearing detection and execution of one plan occurrence, on the caller's `AsyncSession`.
+
+    WHO OWNS THE TRANSACTION (032 `P-2`) differs by method, not by class:
+
+    * `find_cycles`, `find_triangles_sql`, `find_quadrangles_sql` only read: they neither commit nor
+      roll back the session they are given.
+    * `execute_occurrence` (and `execute_clearing_with_amount`, which only it reaches) OWNS the
+      session's transaction and ends it on every path: success commits it
+      (`_commit_to_terminal`); a skip, a replay of an occurrence that is already committed, a refusal
+      and every failure roll it back (`_rollback_skipped_execution`, `_raise_unexpected_execution`,
+      the commit resolver). A retryable conflict runs the next attempt on the same session after
+      `expunge_all`, each attempt its own transaction (`_run_attempts`). Anything the caller had
+      pending on that session is committed or rolled back with it, so hand it a session that carries
+      no other work.
+    """
+
     #: The v2 occurrence being executed (`execute_occurrence`); None outside it, and then the boundary refuses
     #: (024 `T2417`: execution without an occurrence is removed). Instance state on
     #: purpose: every replay resolver reads it, so no path of the
@@ -1585,6 +1601,10 @@ class ClearingService:
 
         Returns `c` (or the durable amount of a verified replay), or `None` for a skip. Since slice (d) the only
         production caller is the clearing runner (`app/core/clearing/runner.py`).
+
+        TRANSACTION: it commits the passed session when the occurrence lands and rolls it back on a skip, a
+        replay, a refusal or a failure - the caller never inherits an open transaction from it, and never
+        commits or rolls back around it (see the class docstring).
         """
         if not isinstance(occurrence, ClearingOccurrence):
             raise TypeError("execute_occurrence takes a ClearingOccurrence")
@@ -1605,7 +1625,11 @@ class ClearingService:
         *,
         allowed_participant_pids: "AbstractSet[str] | None" = None,
     ) -> Decimal | None:
-        """Execute one clearing with its retry owner, on the caller's session (027 stage 2, `T2704`).
+        """Execute one clearing with its retry owner (027 stage 2, `T2704`); COMMITS or ROLLS BACK the passed session.
+
+        The session is the caller's object but not the caller's transaction: this method ends it on every
+        path (success commits, a skip, a replay, a refusal and a failure roll back), and a retryable conflict
+        runs the next attempt on it as a new transaction. It is not a step inside a larger transaction.
 
         No equivalent lock and no pinned connection any more (019 `T1909`'s exclusive session lock and its
         interlock are gone): each attempt locks the lines of the cycle's pairs, reads the stop/hold, locks the

@@ -74,8 +74,8 @@ by counter-checks in this file.
   header is the *only* way a `422` can happen, and a generic "validation failed" description
   would have been the same kind of untrue statement this programme is removing.
 
-* **S5 - the rate limiter implies `429`.** Not restated here: `_declare_rate_limit_status` from
-  `app/main.py` is *called* on a probe document to learn the set, so this guard and the schema
+* **S5 - the rate limiter implies `429`.** Not restated here: `declare_rate_limit_status` from
+  `app/openapi_postprocess.py` is *called* on a probe document to learn the set, so this guard and the schema
   the application publishes cannot come to disagree about which operations the limiter covers.
   Already closed on both sides - zero entries in either list - and the bite-check deletes a `429`
   to prove the wiring still carries rather than merely being imported.
@@ -89,7 +89,7 @@ The two lists are therefore complete for five mechanically derivable signals and
 else; a `404`/`409` census needs per-route reasoning and is a separate task.
 
 **Two lists, not one.** The canon and the generated schema fail for different reasons: `422` is a
-canon-only debt (FastAPI adds `422` itself and `_custom_openapi` re-skins it), while `401`/`403`
+canon-only debt (FastAPI adds `422` itself and `_custom_openapi` (`app/openapi_postprocess.py`) re-skins it), while `401`/`403`
 are a generated-only one (they come from `GeoException`s raised inside dependencies and no
 decorator carries `responses=`). A single list would let one side's progress mask the other's
 regression.
@@ -118,7 +118,8 @@ from fastapi.routing import APIRoute
 
 from app.api import deps
 from app.config import settings
-from app.main import _declare_rate_limit_status, app
+from app.main import app
+from app.openapi_postprocess import declare_rate_limit_status
 from tests.contract.test_openapi_contract import (
     _load_fastapi_openapi,
     _load_openapi_yaml,
@@ -194,7 +195,7 @@ def is_falsifiable(field: Any) -> bool:
 
 
 def is_simulator_action_path(path: str) -> bool:
-    """The paths where `app/main.py` re-skins a validation failure as `400` rather than `422`."""
+    """The paths where `app/openapi_postprocess.py` re-skins a validation failure as `400` rather than `422`."""
 
     return path.startswith("/api/v1/simulator/runs/") and "/actions/" in path
 
@@ -238,10 +239,10 @@ class _Operation:
 
 
 def rate_limited_operations() -> set[tuple[str, str]]:
-    """S5, obtained by RUNNING `app/main.py`'s derivation rather than restating it.
+    """S5, obtained by RUNNING `app/openapi_postprocess.py`'s derivation rather than restating it.
 
     A probe document holding every operation and nothing else is handed to
-    `_declare_rate_limit_status`; whichever operations come back carrying a `429` are the ones
+    `declare_rate_limit_status`; whichever operations come back carrying a `429` are the ones
     the limiter covers. Restating the condition here would give this guard its own copy of
     `_RATE_LIMIT_EXEMPT_PATHS`, and the two could then drift apart in silence - which is the
     defect this whole programme is about.
@@ -255,7 +256,7 @@ def rate_limited_operations() -> set[tuple[str, str]]:
         for method in route.methods & _HTTP_METHODS:
             item[method.lower()] = {}
 
-    _declare_rate_limit_status(probe)
+    declare_rate_limit_status(app, probe)
 
     return {
         (method.upper(), path)
@@ -357,8 +358,8 @@ def _measure() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
 #     have no falsifiable parameter and so can answer 422 for exactly one reason), and the two
 #     remaining 401s through the existing `Unauthorized`. Every body is `ErrorEnvelope`; no new
 #     shape was invented.
-#   * the generated side by ONE function - `_declare_auth_statuses` in `app/main.py`, the
-#     sibling of `_declare_rate_limit_status`, deriving 401/403 from the same dependency closure
+#   * the generated side by ONE function - `declare_auth_statuses` in `app/openapi_postprocess.py`, the
+#     sibling of `declare_rate_limit_status`, deriving 401/403 from the same dependency closure
 #     this file derives them from and `setdefault`-ing them into the emitted document. Not 79
 #     decorator edits, and nothing a client receives changed.
 #
@@ -385,8 +386,8 @@ def _measure() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
 UNDECLARED_REACHABLE_CANON: set[tuple[str, str]] = set()
 
 # `app.openapi()` learns a status only from `responses=` on the decorator, and `401`/`403` are
-# raised inside dependencies, so it knew about neither. Closed by `_declare_auth_statuses` in
-# `app/main.py` rather than by 79 decorator edits - see the header above.
+# raised inside dependencies, so it knew about neither. Closed by `declare_auth_statuses` in
+# `app/openapi_postprocess.py` rather than by 79 decorator edits - see the header above.
 UNDECLARED_REACHABLE_GENERATED: set[tuple[str, str]] = set()
 
 
@@ -611,7 +612,7 @@ def test_the_guard_bites_when_a_declaration_is_deleted() -> None:
     `POST /simulator/runs/{run_id}/actions/tx-once` is one of the eight Interact Mode operations
     with no gaps on either side, so anything reported for it after the mutation came from the
     mutation. `403` proves the dependency-graph half; `429` proves S5 is genuinely wired through
-    `_declare_rate_limit_status` and not merely imported.
+    `declare_rate_limit_status` and not merely imported.
 
     The mutation is on a deep copy. This module never writes to `api/openapi.yaml`.
     """
@@ -702,7 +703,7 @@ async def test_a_malformed_simulator_owner_header_really_answers_422(client) -> 
 
 
 def test_s5_is_the_applications_own_derivation() -> None:
-    """Counter-check: the `429` set comes from `app/main.py`, exemption included.
+    """Counter-check: the `429` set comes from `app/openapi_postprocess.py`, exemption included.
 
     If this guard ever grew its own copy of the limiter condition, the two could disagree about
     `_RATE_LIMIT_EXEMPT_PATHS` and both stay green.

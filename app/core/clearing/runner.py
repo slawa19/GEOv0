@@ -2,7 +2,8 @@
 
 Its product callers since the atomic switch of slice (d): `POST /clearing/auto` (`run_awaited_clearing`), the
 Interact action `clearing-real` and the simulator's tick driver (`run_clearing_pass`, in the run's perimeter), and the
-periodic loop in `app/main.py` (`run_periodic_clearing_pass`), started only when `CLEARING_PERIODIC_ENABLED` is set -
+periodic job `_run_periodic_clearing_once` in `app/core/maintenance_jobs.py` (`run_periodic_clearing_pass`), started
+only when `CLEARING_PERIODIC_ENABLED` is set -
 by a separate hub deployment, never by default (decision R1). No product caller executes clearing around it
 (`tests/unit/test_p023_d_product_callers_go_through_the_runner.py`).
 

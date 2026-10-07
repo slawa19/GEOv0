@@ -28,6 +28,6 @@ import pytest
     ],
 )
 def test_map_rejection_code(err_details, expected):
-    from app.core.simulator.runtime import _map_rejection_code
+    from app.core.simulator.rejection_codes import map_rejection_code
 
-    assert _map_rejection_code(err_details) == expected
+    assert map_rejection_code(err_details) == expected
