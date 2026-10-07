@@ -50,7 +50,7 @@ describe('Admin config contracts', () => {
     useRealApiEnv()
     const items = Object.entries<unknown>(runtimeConfig()).map(([key, value]) => ({ key, value, mutable: true }))
     // 029 F-029-4: a key read only at start comes with `mutable: false` and is not offered for editing.
-    items.push({ key: 'LOG_LEVEL', value: 'INFO', mutable: false }, { key: 'RECOVERY_ENABLED', value: true, mutable: false })
+    items.push({ key: 'LOG_LEVEL', value: 'INFO', mutable: false }, { key: 'INTEGRITY_CHECKPOINT_ENABLED', value: true, mutable: false })
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ items })) as unknown as typeof fetch)
 
     await expect(realApi.getConfig()).resolves.toEqual(runtimeConfig())

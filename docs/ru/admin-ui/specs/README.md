@@ -8,9 +8,6 @@
   - Статус: blueprint; часть секций описывает Phase 2.
   - Рекомендуемая практика: для реализованных частей переносить «нормативные» решения в [docs/ru/admin-ui/README.md](../README.md), а здесь оставлять требования к будущему.
 
-- [docs/ru/admin-ui/specs/operator-advice-spec.md](operator-advice-spec.md)
-  - Статус: реализовано; документ хранит исходные acceptance-требования, а текущее поведение подтверждают UI-код и behavioral tests.
-
 Отдельный список незавершённого: [docs/ru/admin-ui/specs/UNFINISHED.md](UNFINISHED.md)
 
 ## Архив
@@ -20,3 +17,4 @@
 - [docs/ru/admin-ui/specs/archive/admin-ui-typography.md](archive/admin-ui-typography.md)
 - [docs/ru/admin-ui/specs/archive/admin-ui-prototype-fixtures-spec.md](archive/admin-ui-prototype-fixtures-spec.md)
 - [docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md](archive/admin-console-minimal-spec.md)
+- [docs/ru/admin-ui/specs/archive/operator-advice-spec.md](archive/operator-advice-spec.md) — исторический, советы оператору удалены 2026-10-07 программой 032

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { ClearingCycles, GraphSnapshot } from '../types/domain'
+import type { GraphSnapshot } from '../types/domain'
 import { realApi } from './realApi'
 
 // The schema-drift tests below make realApi reject on purpose, and a rejection calls toastApiError, which mounts a real
@@ -16,7 +16,8 @@ function jsonResponse(obj: unknown): Response {
 function assertGraphSnapshotShape(s: GraphSnapshot) {
   expect(Array.isArray(s.participants)).toBe(true)
   expect(Array.isArray(s.trustlines)).toBe(true)
-  expect(Array.isArray(s.incidents)).toBe(true)
+  // 032 S5 (A-4): the snapshot carries no incidents collection.
+  expect('incidents' in s).toBe(false)
   expect(Array.isArray(s.equivalents)).toBe(true)
   expect(Array.isArray(s.debts)).toBe(true)
   expect(Array.isArray(s.audit_log)).toBe(true)
@@ -46,27 +47,6 @@ function assertGraphSnapshotShape(s: GraphSnapshot) {
   }
 }
 
-function assertClearingCyclesShape(c: ClearingCycles) {
-  expect(c && typeof c === 'object').toBe(true)
-  expect(c.equivalents && typeof c.equivalents === 'object').toBe(true)
-
-  for (const [eq, v] of Object.entries(c.equivalents || {})) {
-    expect(typeof eq).toBe('string')
-    expect(v && typeof v === 'object').toBe(true)
-    expect(Array.isArray(v.cycles)).toBe(true)
-
-    for (const cycle of v.cycles || []) {
-      expect(Array.isArray(cycle)).toBe(true)
-      for (const edge of cycle || []) {
-        expect(typeof edge.equivalent).toBe('string')
-        expect(typeof edge.debtor).toBe('string')
-        expect(typeof edge.creditor).toBe('string')
-        expect(typeof edge.amount).toBe('string')
-      }
-    }
-  }
-}
-
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -81,7 +61,6 @@ describe('API contract invariants', () => {
     const payload: GraphSnapshot = {
       participants: [{ pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' }],
       trustlines: [],
-      incidents: [],
       equivalents: [{ code: 'GEO', precision: 2, description: 'GEO', is_active: true }],
       debts: [],
       audit_log: [],
@@ -119,7 +98,6 @@ describe('API contract invariants', () => {
           policy: {},
         },
       ],
-      incidents: [],
       equivalents: [{ code: 'GEO', precision: 2, description: 'GEO', is_active: true }],
       debts: [{ equivalent: 'GEO', debtor: 'PID_B', creditor: 'PID_A', amount: 12.5 }],
       audit_log: [],
@@ -146,7 +124,6 @@ describe('API contract invariants', () => {
     const badPayload = {
       participants: [{ pid: 123, display_name: 'Alice', type: 'person', status: 'active' }],
       trustlines: [],
-      incidents: [],
       equivalents: [{ code: 'GEO', precision: 2, description: 'GEO', is_active: true }],
       debts: [],
       audit_log: [],
@@ -159,48 +136,4 @@ describe('API contract invariants', () => {
     await expect(realApi.graphSnapshot()).rejects.toBeInstanceOf(Error)
   })
 
-  it('realApi.clearingCycles returns ClearingCycles-like shape and coerces decimals', async () => {
-    const meta = import.meta as unknown as { env: Record<string, unknown> }
-    meta.env.VITE_API_BASE_URL = ''
-    meta.env.PROD = false
-    meta.env.DEV = true
-
-    const payload = {
-      equivalents: {
-        GEO: {
-          cycles: [
-            [
-              { equivalent: 'GEO', debtor: 'PID_B', creditor: 'PID_A', amount: 1.5 },
-              { equivalent: 'GEO', debtor: 'PID_C', creditor: 'PID_B', amount: 2 },
-            ],
-          ],
-        },
-      },
-    }
-
-    const fetchMock = vi.fn(async () => jsonResponse(payload))
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    assertClearingCyclesShape(await realApi.clearingCycles())
-  })
-
-  it('realApi.clearingCycles rejects invalid payload shapes (schema drift guard)', async () => {
-    const meta = import.meta as unknown as { env: Record<string, unknown> }
-    meta.env.VITE_API_BASE_URL = ''
-    meta.env.PROD = false
-    meta.env.DEV = true
-
-    const badPayload = {
-      equivalents: {
-        GEO: {
-          cycles: [{ not: 'a-cycle' }],
-        },
-      },
-    }
-
-    const fetchMock = vi.fn(async () => jsonResponse(badPayload))
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    await expect(realApi.clearingCycles()).rejects.toBeInstanceOf(Error)
-  })
 })

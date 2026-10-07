@@ -29,7 +29,6 @@ type SectionId =
   | 'logging'
   | 'rateLimit'
   | 'routing'
-  | 'recovery'
   | 'integrity'
   | 'other'
 
@@ -157,7 +156,6 @@ function sectionForKey(key: string): SectionId {
   if (k === 'LOG_LEVEL') return 'logging'
   if (k.startsWith('RATE_LIMIT_')) return 'rateLimit'
   if (k.startsWith('ROUTING_')) return 'routing'
-  if (k.startsWith('RECOVERY_') || k.startsWith('PAYMENT_TX_')) return 'recovery'
   if (k.startsWith('INTEGRITY_CHECKPOINT_')) return 'integrity'
   return 'other'
 }
@@ -182,7 +180,6 @@ const sections = computed((): Section[] => {
     mk('logging', 'config.sections.logging'),
     mk('rateLimit', 'config.sections.rateLimit'),
     mk('routing', 'config.sections.routing'),
-    mk('recovery', 'config.sections.recovery'),
     mk('integrity', 'config.sections.integrity'),
     mk('other', 'config.sections.other'),
   ]

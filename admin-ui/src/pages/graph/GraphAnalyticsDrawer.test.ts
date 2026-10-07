@@ -1,95 +1,122 @@
-import { shallowMount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import GraphAnalyticsDrawer from './GraphAnalyticsDrawer.vue'
+import { formatMoneyByEquivalent } from '../../composables/useEquivalentPrecision'
+import type { BalanceRow } from '../../types/domain'
 
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {} }),
-}))
+const PRECISION = new Map([['EUR', 2], ['HOUR', 1]])
 
-describe('GraphAnalyticsDrawer', () => {
+function row(equivalent: string, net: string): BalanceRow {
+  return {
+    equivalent,
+    outgoing_limit: '0',
+    outgoing_used: '0',
+    incoming_limit: '0',
+    incoming_used: '0',
+    total_debt: '0',
+    total_credit: '0',
+    net,
+  }
+}
+
+function mountDrawer(over: Record<string, unknown> = {}) {
+  return mount(GraphAnalyticsDrawer, {
+    props: {
+      modelValue: true,
+      tab: 'summary',
+      eq: 'ALL',
+      connectionsIncomingPage: 1,
+      connectionsOutgoingPage: 1,
+      selected: { kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 },
+      availableEquivalents: ['EUR', 'HOUR'],
+      reloadCurrentView: vi.fn(),
+      money: (value: string, equivalent: unknown) => formatMoneyByEquivalent(value, equivalent, PRECISION),
+      metricsLoading: false,
+      metricsError: null,
+      selectedBalanceRows: [],
+      selectedConnectionsIncoming: [],
+      selectedConnectionsOutgoing: [],
+      selectedConnectionsIncomingPaged: [],
+      selectedConnectionsOutgoingPaged: [],
+      connectionsPageSize: 10,
+      onConnectionRowClick: vi.fn(),
+      ...over,
+    },
+    global: {
+      stubs: {
+        'el-drawer': { template: '<section><slot /></section>' },
+        'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
+        'el-tabs': { template: '<div><slot /></div>' },
+        'el-tab-pane': {
+          props: ['name', 'label'],
+          template: '<section data-testid="drawer-tab" :data-name="name"><slot /></section>',
+        },
+        'el-card': { template: '<div><slot name="header" /><slot /></div>' },
+        'el-alert': { props: ['title'], template: '<div data-testid="drawer-alert">{{ title }}</div>' },
+        'el-skeleton': { template: '<div data-testid="drawer-skeleton" />' },
+        TooltipLabel: { props: ['label'], template: '<span>{{ label }}</span>' },
+        CopyIconButton: true,
+        'el-descriptions': true,
+        'el-descriptions-item': true,
+        'el-divider': true,
+        'el-select': true,
+        'el-option': true,
+        'el-empty': true,
+        'el-pagination': true,
+        'el-table': true,
+        'el-table-column': true,
+      },
+    },
+  })
+}
+
+function summaryNetLines(wrapper: ReturnType<typeof mountDrawer>) {
+  return wrapper
+    .get('[data-testid="drawer-tab"][data-name="summary"]')
+    .findAll('[data-testid="graph-summary-net"]')
+    .map((line) => line.text())
+}
+
+describe('GraphAnalyticsDrawer (032 S5, F-1)', () => {
+  it('has exactly the summary, connections and balance tabs', () => {
+    const wrapper = mountDrawer()
+    expect(wrapper.findAll('[data-testid="drawer-tab"]').map((tab) => tab.attributes('data-name'))).toEqual([
+      'summary',
+      'connections',
+      'balance',
+    ])
+  })
+
+  it('prints the net position of the selected equivalent from balance_rows', () => {
+    const wrapper = mountDrawer({ eq: 'EUR', selectedBalanceRows: [row('EUR', '-1.5')] })
+    expect(summaryNetLines(wrapper)).toEqual(['-1.50 EUR'])
+  })
+
+  it('without an equivalent prints one net line per equivalent and never their sum', () => {
+    const wrapper = mountDrawer({ selectedBalanceRows: [row('EUR', '-1.50'), row('HOUR', '4.0')] })
+    const lines = summaryNetLines(wrapper)
+    expect(lines).toEqual(['-1.50 EUR', '4.0 HOUR'])
+    // A cross-equivalent total (2.50 in either precision) appears nowhere in the summary.
+    const summary = wrapper.get('[data-testid="drawer-tab"][data-name="summary"]').text()
+    expect(summary).not.toContain('2.50')
+    expect(summary).not.toContain('2.5')
+  })
+
+  it('shows loading while the metrics are in flight and the error on failure, never a substitute figure', () => {
+    const loading = mountDrawer({ metricsLoading: true })
+    expect(loading.findAll('[data-testid="drawer-skeleton"]').length).toBeGreaterThan(0)
+    expect(summaryNetLines(loading)).toEqual([])
+
+    const failed = mountDrawer({ metricsError: 'metrics unavailable' })
+    const summary = failed.get('[data-testid="drawer-tab"][data-name="summary"]')
+    expect(summary.get('[data-testid="drawer-alert"]').text()).toBe('metrics unavailable')
+    expect(summaryNetLines(failed)).toEqual([])
+  })
+
   it('delegates refresh to the current-view reload supplied by GraphPage', async () => {
     const reloadCurrentView = vi.fn()
-    const wrapper = shallowMount(GraphAnalyticsDrawer, {
-      props: {
-        modelValue: true,
-        tab: 'summary',
-        eq: 'EUR',
-        analytics: {
-          showRank: false,
-          showDistribution: false,
-          showConcentration: false,
-          showCapacity: false,
-          showBottlenecks: false,
-          showActivity: false,
-        },
-        connectionsIncomingPage: 1,
-        connectionsOutgoingPage: 1,
-        selected: { kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 },
-        showIncidents: false,
-        incidentRatioByPid: new Map(),
-        availableEquivalents: ['EUR'],
-        analyticsEq: 'EUR',
-        threshold: '0.10',
-        precisionByEq: new Map([['EUR', 2]]),
-        atomsToDecimal: (atoms: bigint) => String(atoms),
-        reloadCurrentView,
-        money: (value: string) => value,
-        pct: (value: number) => String(value),
-        selectedRank: null,
-        selectedConcentration: {
-          eq: null,
-          outgoing: { top1: 0, top5: 0, hhi: 0, level: { label: '', type: 'success' } },
-          incoming: { top1: 0, top5: 0, hhi: 0, level: { label: '', type: 'success' } },
-        },
-        selectedCapacity: null,
-        selectedActivity: null,
-        netDistribution: null,
-        selectedBalanceRows: [],
-        selectedCounterpartySplit: {
-          eq: null,
-          totalDebtAtoms: 0n,
-          totalCreditAtoms: 0n,
-          creditors: [],
-          debtors: [],
-        },
-        selectedConnectionsIncoming: [],
-        selectedConnectionsOutgoing: [],
-        selectedConnectionsIncomingPaged: [],
-        selectedConnectionsOutgoingPaged: [],
-        connectionsPageSize: 10,
-        onConnectionRowClick: vi.fn(),
-        selectedCycles: [],
-        isCycleActive: () => false,
-        toggleCycleHighlight: vi.fn(),
-        summaryToggleItems: [],
-        balanceToggleItems: [],
-        riskToggleItems: [],
-      },
-      global: {
-        stubs: {
-          'el-drawer': { template: '<section><slot /></section>' },
-          'el-button': { template: '<button v-bind="$attrs"><slot /></button>' },
-          'el-descriptions': true,
-          'el-descriptions-item': true,
-          'el-divider': true,
-          'el-select': true,
-          'el-option': true,
-          'el-tabs': true,
-          'el-tab-pane': true,
-          'el-alert': true,
-          'el-card': true,
-          'el-progress': true,
-          'el-tag': true,
-          'el-empty': true,
-          'el-pagination': true,
-          'el-table': true,
-          'el-table-column': true,
-          'el-collapse': true,
-          'el-collapse-item': true,
-        },
-      },
-    })
+    const wrapper = mountDrawer({ reloadCurrentView })
 
     await wrapper.get('[data-testid="refresh-current-graph-view"]').trigger('click')
 

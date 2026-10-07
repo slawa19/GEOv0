@@ -8,5 +8,4 @@ export const MIN_ZOOM_LABELS_PERSON = 1.25
 export const DEFAULT_LAYOUT_SPACING = 2.2
 export const DEFAULT_FOCUS_DEPTH: 1 | 2 = 1
 
-export const HISTOGRAM_BINS_COUNT = 20
 export const PARTICIPANT_SUGGESTIONS_LIMIT = 20

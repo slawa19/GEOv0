@@ -55,9 +55,7 @@
 
 Минимальный состав экранов (соответствует `docs/ru/admin-ui/specs/archive/admin-console-minimal-spec.md`):
 - `Dashboard`
-- `Liquidity analytics` (Snapshot triage)
-- `Integrity`
-- `Incidents`
+- `Integrity` (с удержаниями эквивалентов, см. 4.3)
 - `Trustlines`
 - `Network Graph` (реализовано в прототипе)
 - `Participants`
@@ -72,20 +70,11 @@ Phase 2:
 - `Events` (timeline)
 - `Transactions` / `Clearing` (глобальные списки)
 
-#### Liquidity analytics (Snapshot triage)
+#### ~~Liquidity analytics (Snapshot triage)~~
 
-Цель: дать оператору «ситуационный центр» по ликвидности сети, чтобы быстро понять состояние и приоритизировать расследование.
-
-Позиционирование (чтобы не было дублирования):
-- `Liquidity analytics` = обзор + watchlist + советы.
-- `Trustlines`/`Graph` = drill-down и диагностика конкретных рёбер/узлов.
-
-MVP (без историчности):
-- Источник данных: `GraphSnapshot` с backend-а.
-- Управляющие параметры: `equivalent` (или `ALL`), `threshold` (bottleneck).
-- KPI: active trustlines / bottlenecks / incidents over SLA / total limit-used-available (суммы decimal-safe).
-- Watchlist: top bottleneck edges, top net positions (из `debts`).
-- Operator Advice: детерминированные советы + быстрые переходы в `Trustlines`, `Incidents`, `Graph`, `Participants`.
+**Удалено 2026-10-07 (программа 032 S5, решение владельца), F-2:** экран Liquidity, советы оператору и `GET /admin/trustlines/bottlenecks` удалены — аналитика
+ликвидности не вела ни к одному действию оператора (маршрута изменения лимитов у админки нет). Суммы по эквиваленту —
+строка эквивалента на Dashboard (4.1); узкие места подсвечиваются на экране линий доверия (4.14) и на графе (4.2).
 
 ### 3.3. Header
 - Breadcrumbs.
@@ -99,23 +88,19 @@ MVP (без историчности):
 
 ### 4.1. Dashboard (read-only)
 
-Цель: быстрый обзор состояния.
+Цель: быстрый обзор состояния. **Пересмотрено 2026-10-07 (программа 032 S5, F-3):** карточки API/DB/миграций удалены
+(шапка уже опрашивает здоровье хаба, `stores/health.ts`), карточка узких мест с порогом удалена.
 
-Должно показывать:
-- Версию/окружение/uptime (если отдаётся в health/метриках).
-- Краткие KPI (минимум один экран без глубоких фильтров).
+Показывает:
+- счётчики участников по типам и по статусам (переход на `Participants` с фильтром);
+- строку на эквивалент — `GET /admin/liquidity/summary?equivalent={code}` по каждому эквиваленту каталога, включая
+  остановленные: число активных линий и суммы лимитов, использованного и доступного **только внутри этого
+  эквивалента** (028 F-028-37), с точностью самого эквивалента (`useEquivalentPrecision`, `include_inactive: true`);
+- предупреждение об удержаниях эквивалентов (`GET /integrity/summary`, `hold: true`) со ссылкой на `Integrity`;
+- последние записи аудита (`GET /admin/audit-log?page=1&per_page=10`).
 
-Состояния:
-- Loading / Error / Empty (если метрики недоступны).
-
-MVP дополнение: **Network Health виджеты** (быстрый статус ключевых зависимостей).
-- Источники:
-	- `GET /health` (доступность API)
-	- `GET /health/db` (доступность БД)
-	- `GET /admin/migrations` (статус миграций; требует `X-Admin-Token`)
-	- `GET /admin/audit-log?page=1&per_page=20` (последняя активность; требует `X-Admin-Token`)
-- Обновление: автообновление каждые 10–30 секунд + кнопка `Refresh`.
-- Ошибки: виджеты деградируют независимо (ошибка в audit-log не ломает health).
+Ошибки: виджеты деградируют независимо (отказ сводки одного эквивалента печатает прочерки в его строке и называет
+причину, остальные строки не затрагивает).
 
 ### 4.2. Network Graph
 
@@ -146,7 +131,6 @@ UI (MVP) — что должно быть на странице:
 	- `Layout`: `fcose (force)`, `grid`, `circle`
 	- Toggle: `Labels` (показывать/скрывать подписи)
 	- Toggle: `Auto labels` (автоматически выключать подписи при большом числе узлов/маленьком зуме)
-	- Toggle: `Incidents` (включить/выключить наложение инцидентов)
 	- Toggle: `Hide isolates` (скрыть узлы без рёбер после фильтрации)
 	- `Search` (PID или имя) + `Find` (центрировать/зуум на узел)
 	- `Focus` (эго‑граф): `Focus Mode` on/off + `Depth 1/2` + `Use selected` + `Clear`
@@ -165,16 +149,13 @@ UI (MVP) — что должно быть на странице:
 - Bottleneck:
 	- условие: `available/limit < threshold` (только для `active`)
 	- стиль: красное ребро, увеличенная толщина
-- Incidents overlay:
-	- источник: инциденты с backend-а
-	- узел-инициатор (`initiator_pid`) подсвечивается (border)
-	- рёбра, исходящие от инициатора, выделяются пунктиром
+- ~~Incidents overlay~~ — **Удалено 2026-10-07 (программа 032 S5, решение владельца), A-4:** инцидентов нет с программы 019 (коллекция `incidents` графа удалена).
 
 Дополнительные подсветки:
 - `Search-hit`: узел временно получает оранжевую рамку.
 - `Selected`: выбранный узел имеет пульсирующее «свечение» (overlay), не меняя цвет рамок.
 - `Connections`: при выборе связи в drawer подсвечиваются ребро и два узла (зелёным).
-- `Cycles`: по клику на цикл подсвечиваются рёбра/узлы, входящие в цикл (оранжевым).
+- ~~`Cycles`~~ — **Удалено 2026-10-07 (программа 032 S5, решение владельца), F-1:** вкладка циклов и их подсветка удалены вместе с `GET /admin/clearing/cycles`.
 
 Интерактив (MVP):
 - Zoom/Pan — средствами Cytoscape.
@@ -182,32 +163,40 @@ UI (MVP) — что должно быть на странице:
 - Двойной клик по узлу: центрирует/зуумит как `Find` и открывает `Drawer` с деталями участника.
 - Клик по ребру: открывает `Drawer` с деталями trustline (equivalent/from/to/status/limit/used/available/created_at).
 
-Operator Advice (MVP+; реализовать сейчас):
-- В `Drawer → Summary` должна быть панель **Operator advice**: контекстные рекомендации по bottlenecks/capacity/concentration.
-- Рекомендации детерминированы (фиксированные правила) и объясняют «почему» + дают быстрые переходы на существующие экраны.
-- Детальная спецификация правил и UX: `docs/ru/admin-ui/specs/operator-advice-spec.md`.
+Drawer участника: вкладки «Сводка» (описание узла и net по `balance_rows[].net` каждого эквивалента, без
+суммирования между эквивалентами), «Связи» (из графа), «Баланс» (таблица `balance_rows` из
+`GET /admin/participants/{pid}/metrics`). ~~Аналитика участника~~ — **Удалено 2026-10-07 (программа 032 S5, решение владельца), F-1:** рейтинг и распределение,
+концентрация (HHI), контрагенты, ёмкость, активность 7/30/90, циклы и панель советов оператору удалены вместе с
+клиентским расчётом этих метрик из снимка; ответ метрик сужен до `balance_rows`.
 
 Расширения (для последующей модификации):
 - Добавить tooltip на hover по ребру (без внешних зависимостей можно реализовать через overlay div).
-- Добавить режимы представления (вкладки): `Overview`, `Equivalent Lens`, `Incidents Overlay`.
-- Добавить визуальную «тепловую карту» по SLA: `age_seconds/sla_seconds` (градиент/интенсивность).
+- Добавить режимы представления (вкладки): `Overview`, `Equivalent Lens`.
 - Добавить экспорт PNG и сохранение пресетов фильтров в `localStorage`.
 
 ### 4.3. Integrity Dashboard
 
-Цель: видимость инвариантов и запуск проверки.
+Цель: видимость инвариантов, запуск проверки и снятие удержаний эквивалентов.
 
 UI:
 - Таблица проверок: `name`, `status`, `last_check`, `details`.
 - Кнопка «Запустить полную проверку» → подтверждение → запуск.
+- **Удержания эквивалентов (с 2026-10-07, программа 032 S5, F-4):** по `GET /integrity/summary` у каждого эквивалента
+  отметка «на удержании» (`hold: true`) или «не удерживается»; у удерживаемого — действие «Снять» с обязательной
+  причиной (`POST /admin/equivalents/{code}/integrity-hold/clear`, аудит). Подсказка: на удержании отказывают платёж,
+  клиринг и новые линии. Отказы показываются текстом (RU/EN): `no_integrity_hold` — «удержание уже снято»;
+  `no_later_passed_reconciliation_result` при `latest_status = null` — «сверка ещё не давала результата», при
+  `FAILED`/`UNVERIFIABLE` — «последняя сверка не PASSED; дождитесь следующей», при `recheck_status = FAILED` —
+  «проверка при снятии не прошла, удержание остаётся», при `UNVERIFIABLE` — «проверить сейчас нельзя»; прочее — общий
+  текст с кодом. После любого ответа список удержаний перечитывается. Время и причина удержания не показываются
+  (для этого нужно новое поле API; причина видна в логе `debt_reconciliation.integrity_hold_set` и в
+  `GET /integrity/status`).
 
-### 4.4. Incidents (Incident Management)
+### ~~4.4. Incidents (Incident Management)~~
 
-Цель: операционные действия по зависшим транзакциям.
-
-UI:
-- Список «stuck» транзакций (определение: статус промежуточный + превышен SLA возраста).
-- Действие: `Force Abort` с обязательным вводом причины.
+**Удалено 2026-10-07 (программа 032 S5, решение владельца), F-4, A-4:** экран, `GET /admin/incidents` и `POST /admin/transactions/{tx_id}/abort` удалены — с программы
+019 «зависших» платежей нет (платёж — одна транзакция, миграция `030`). Путь `/incidents` ведёт на `Integrity`, где
+показаны и снимаются удержания эквивалентов. Строки аудита `admin.transactions.abort` остаются как историческое действие.
 
 ### 4.5. Participants
 
@@ -217,9 +206,6 @@ UI:
 - Поиск по PID.
 - Действия: Freeze/Unfreeze (с причиной).
 - Для `auditor` — только просмотр (в реализации ролей нет, см. 2.1).
-
-Примечание:
-- Operator Advice может вести на `Participants` как на следующий шаг диагностики (например, открыть карточку участника после выявления bottleneck-ребра).
 
 ### 4.6. Config
 
@@ -298,6 +284,8 @@ UI:
 - Таблица/детали: как в Transactions.
 
 ### 4.13. Liquidity analytics (optional / Phase 2)
+
+**Не планируется:** экран Liquidity удалён 2026-10-07 (программа 032 S5, F-2), см. 3.2.
 
 Цель: агрегированные графики/таблицы по ликвидности и эффективности клиринга.
 
@@ -398,16 +386,20 @@ UI правила:
 - AuditLogEntry: `id`, `timestamp`, `actor_id`, `actor_role`, `action`, `object_type`, `object_id`, `reason`, `before_state`, `after_state`, `request_id`, `ip_address`.
 - DomainEvent: `event_id`, `event_type`, `timestamp`, `actor_pid`, `tx_id`, `run_id`, `scenario_id`, `payload`.
 
-### 6.5. Graph / Integrity / Incidents
+### 6.5. Graph / Integrity
 - `GET /admin/trustlines?equivalent={code}&creditor={pid}&debtor={pid}&status={active|closed}`
-- `GET /integrity/status`
+- `GET /admin/graph/snapshot`, `GET /admin/graph/ego` (`include` — `audit_log`, `transactions`)
+- `GET /admin/participants/{pid}/metrics?equivalent={code}` → `{pid, equivalent, balance_rows}`
+- `GET /admin/liquidity/summary?equivalent={code}` → `{equivalent, updated_at, active_trustlines, total_limit, total_used, total_available}`
+- `GET /integrity/status`, `GET /integrity/summary`
 - `POST /integrity/verify`
-- `POST /admin/transactions/{tx_id}/abort` (body: `{reason}`)
+- `POST /admin/equivalents/{code}/integrity-hold/clear` (body: `{reason}`)
 
 UI правила:
 - Graph: фильтр `equivalent` обязателен.
 - Integrity check: действие должно требовать подтверждения.
-- Abort: `reason` обязателен; после abort UI должен предложить перейти в Events и проверить связанный `tx_id`.
+- Снятие удержания: `reason` обязателен; отказ показывается текстом (4.3).
+- ~~`POST /admin/transactions/{tx_id}/abort`~~ — удалён 2026-10-07 (программа 032 S5).
 
 ### 6.6. Equivalents
 - `GET /admin/equivalents` (query: `include_inactive`)
@@ -425,7 +417,7 @@ UI правила:
 - `GET /admin/clearing` (paginated)
 
 ### 6.8. Liquidity analytics (optional / Phase 2)
-- `GET /admin/analytics/stats`
+- Не планируется (экран удалён 2026-10-07, программа 032 S5).
 
 ---
 

@@ -9,14 +9,12 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
-import OperatorAdvicePanel from '../ui/OperatorAdvicePanel.vue'
 import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
-import { buildTrustlinesAdvice } from '../advice/operatorAdvice'
 import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { useLatestRequest } from '../composables/useLatestRequest'
@@ -228,23 +226,9 @@ const statusOptions = computed(() => [
   { label: t('trustlines.status.closed'), value: 'closed' },
 ])
 
-const bottlenecksCount = computed(() =>
-  items.value.filter((row) => String(row.status || '').trim().toLowerCase() === 'active' && isBottleneck(row)).length,
-)
-
 // Пока каталог не ответил, «точность неизвестна» — ещё не вывод, а состояние загрузки.
 const precisionMissing = computed(
   () => catalogueSettled.value && hasUnknownPrecision(items.value.map((row) => row.equivalent)),
-)
-
-const trustlinesAdviceItems = computed(() =>
-  buildTrustlinesAdvice({
-    summary: { threshold: threshold.value, total: items.value.length, bottlenecks: bottlenecksCount.value },
-    baseQuery: route.query,
-    equivalent: equivalent.value || undefined,
-    creditor: creditor.value || undefined,
-    debtor: debtor.value || undefined,
-  }),
 )
 </script>
 
@@ -327,7 +311,6 @@ const trustlinesAdviceItems = computed(() =>
         :closable="false"
         class="mb"
       />
-      <OperatorAdvicePanel :items="trustlinesAdviceItems" />
       <el-table
         :data="items"
         size="small"

@@ -19,14 +19,6 @@ import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
 import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
 import {
-  DEFAULT_ANALYTICS_TOGGLES,
-  type AnalyticsToggles,
-  balanceToggleItems,
-  riskToggleItems,
-  summaryToggleItems,
-} from './graph/graphAnalyticsToggles'
-import {
-  atomsToDecimal,
   computeSeedLabel,
   createDebouncedGraphElementSearch,
   extractPidFromText,
@@ -35,7 +27,6 @@ import {
   labelPartsToMode,
   money,
   modeToLabelParts,
-  pct,
   reloadGraphView,
   syncGraphCoreForView,
   waitForLatestPendingGraphLoad,
@@ -81,8 +72,6 @@ const analyticsEq = computed(() => {
   return key === 'ALL' ? null : key
 })
 
-const analytics = ref<AnalyticsToggles>({ ...DEFAULT_ANALYTICS_TOGGLES })
-
 const seedLabel = computed(() => {
   return computeSeedLabel(participants.value)
 })
@@ -127,7 +116,6 @@ const autoLabelsByZoom = ref(true)
 const minZoomLabelsAll = ref(MIN_ZOOM_LABELS_ALL)
 const minZoomLabelsPerson = ref(MIN_ZOOM_LABELS_PERSON)
 
-const showIncidents = ref(true)
 const hideIsolates = ref(true)
 const showLegend = ref(false)
 
@@ -169,23 +157,13 @@ const {
   loading,
   error,
   participants,
-  trustlines,
-  incidents,
-  debts,
-  clearingCycles,
-  auditLog,
-  transactions,
-  included,
-  truncated,
   availableEquivalents,
   eqAutoSelected,
   filteredTrustlines,
   precisionByEq,
-  incidentRatioByPid: incidentRatioByPidAll,
   participantByPid,
   refreshSnapshotForEq,
   refreshForFocusMode,
-  refreshClearingCyclesForParticipant,
   invalidateDataOwnership,
   reloadCurrentView,
 } = useGraphData({
@@ -205,31 +183,10 @@ function moneyByEquivalent(value: string, equivalent: unknown): string {
   return money(value, equivalent, precisionByEq.value)
 }
 
-const graphAnalytics = useGraphAnalytics({
-  threshold,
+const { metricsLoading, metricsError, selectedBalanceRows } = useGraphAnalytics({
   analyticsEq,
-
-  precisionByEq,
-  availableEquivalents,
-  participantByPid,
-
-  participants,
-  trustlines,
-  debts,
-  incidents,
-  auditLog,
-  transactions,
-  // F-013-1 / T1302. Completeness metadata travels with the collections it describes; the drawer
-  // must not be able to see the transactions array without also seeing whether it was ever asked
-  // for.
-  included,
-  truncated,
-  clearingCycles,
-
   selected,
 })
-
-const activeCycleKey = ref('')
 
 const activeConnectionKey = ref('')
 
@@ -244,32 +201,11 @@ const { setFocusRoot, ensureFocusRootPid, useSelectedForFocus, clearFocusMode, c
   extractPidFromText,
 })
 
-const selectedBalanceRows = graphAnalytics.selectedBalanceRows
-
-// Note: we keep split counterparties (creditors vs debtors) as the primary UI.
-
-const selectedCounterpartySplit = graphAnalytics.selectedCounterpartySplit
-
-const selectedConcentration = graphAnalytics.selectedConcentration
-
-const netDistribution = graphAnalytics.netDistribution
-
-const selectedRank = graphAnalytics.selectedRank
-
-const selectedCapacity = graphAnalytics.selectedCapacity
-
-const selectedActivity = graphAnalytics.selectedActivity
-
-const selectedCycles = graphAnalytics.selectedCycles
-
-const incidentRatioByPid = computed(() => (showIncidents.value ? incidentRatioByPidAll.value : new Map<string, number>()))
-
 const { restore: restoreStorage } = useGraphPageStorage({
   showLegend,
   layoutSpacing,
   toolbarTab,
   drawerEq,
-  analytics,
 })
 
 const graphViz = useGraphVisualization({
@@ -280,11 +216,9 @@ const graphViz = useGraphVisualization({
   typeFilter,
   minDegree,
   hideIsolates,
-  showIncidents,
 
   participants,
   filteredTrustlines,
-  incidentRatioByPid,
 
   selected,
   drawerOpen,
@@ -310,7 +244,6 @@ const graphViz = useGraphVisualization({
   layoutName,
   layoutSpacing,
 
-  activeCycleKey,
   activeConnectionKey,
 
   extractPidFromText,
@@ -411,7 +344,6 @@ useGraphPageWatchers({
   eq,
   statusFilter,
   threshold,
-  showIncidents,
   hideIsolates,
   typeFilter,
   minDegree,
@@ -421,7 +353,6 @@ useGraphPageWatchers({
   ensureFocusRootPid,
   refreshForFocusMode,
   refreshSnapshotForEq,
-  refreshClearingCyclesForParticipant,
   invalidateDataOwnership,
   waitForPendingGraphLoad,
   selected,
@@ -490,12 +421,10 @@ watch(
     graphRenderGuardActive,
     participants,
     filteredTrustlines,
-    incidentRatioByPid,
     threshold,
     typeFilter,
     minDegree,
     hideIsolates,
-    showIncidents,
     focusMode,
     focusRootPid,
     focusDepth,
@@ -638,7 +567,6 @@ const graphLiveAnnouncement = computed(() => {
       v-model:person-label-parts="personLabelParts"
       v-model:show-labels="showLabels"
       v-model:auto-labels-by-zoom="autoLabelsByZoom"
-      v-model:show-incidents="showIncidents"
       v-model:hide-isolates="hideIsolates"
       v-model:show-legend="showLegend"
       v-model:search-query="searchQuery"
@@ -723,39 +651,21 @@ const graphLiveAnnouncement = computed(() => {
     v-model="drawerOpen"
     v-model:tab="drawerTab"
     v-model:eq="drawerEq"
-    v-model:analytics="analytics"
     v-model:connections-incoming-page="connectionsIncomingPage"
     v-model:connections-outgoing-page="connectionsOutgoingPage"
     :selected="selected"
-    :show-incidents="showIncidents"
-    :incident-ratio-by-pid="incidentRatioByPid"
     :available-equivalents="availableEquivalents"
-    :analytics-eq="analyticsEq"
-    :threshold="threshold"
-    :precision-by-eq="precisionByEq"
-    :atoms-to-decimal="atomsToDecimal"
     :reload-current-view="reloadDrawer"
     :money="moneyByEquivalent"
-    :pct="pct"
-    :selected-rank="selectedRank"
-    :selected-concentration="selectedConcentration"
-    :selected-capacity="selectedCapacity"
-    :selected-activity="selectedActivity"
-    :net-distribution="netDistribution"
+    :metrics-loading="metricsLoading"
+    :metrics-error="metricsError"
     :selected-balance-rows="selectedBalanceRows"
-    :selected-counterparty-split="selectedCounterpartySplit"
     :selected-connections-incoming="selectedConnectionsIncoming"
     :selected-connections-outgoing="selectedConnectionsOutgoing"
     :selected-connections-incoming-paged="selectedConnectionsIncomingPaged"
     :selected-connections-outgoing-paged="selectedConnectionsOutgoingPaged"
     :connections-page-size="connectionsPageSize"
     :on-connection-row-click="onConnectionRowClick"
-    :selected-cycles="selectedCycles"
-    :is-cycle-active="graphViz.isCycleActive"
-    :toggle-cycle-highlight="graphViz.toggleCycleHighlight"
-    :summary-toggle-items="summaryToggleItems"
-    :balance-toggle-items="balanceToggleItems"
-    :risk-toggle-items="riskToggleItems"
   />
 </template>
 

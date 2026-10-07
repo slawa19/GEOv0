@@ -31,83 +31,12 @@ export type Trustline = {
   close_requested_at?: string | null
 }
 
-export type Debt = {
-  equivalent: string
-  debtor: string
-  creditor: string
-  amount: string
-}
-
-export type Incident = {
-  tx_id: string
-  state: string
-  initiator_pid: string
-  equivalent: string
-  age_seconds: number
-  sla_seconds: number
-  created_at?: string
-}
-
-export type AuditLogEntry = {
-  id: string
-  timestamp: string
-  actor_id?: string
-  actor_role?: string
-  action: string
-  object_type: string
-  object_id: string
-  reason?: string | null
-  before_state?: unknown
-  after_state?: unknown
-  request_id?: string
-  ip_address?: string
-}
-
-// F-013-1 / T1302. Mirrors the snapshot projection: `equivalent` is a top-level field, `payload`
-// is not published at all and is optional only because the mock fixture still ships one.
-export type Transaction = {
-  id?: string
-  tx_id: string
-  idempotency_key?: string | null
-  type: string
-  initiator_pid: string | null // null on a CLEARING (028 F-028-45)
-  equivalent?: string | null
-  payload?: Record<string, unknown>
-  signatures?: unknown[] | null
-  state: string
-  error?: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
-}
-
 export type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 
+// 032 S5 (F-1): the graph page reads only these collections of a snapshot; the optional
+// `audit_log` / `transactions` collections fed the removed activity card and are not requested.
 export type GraphSnapshotPayload = {
   participants: Participant[]
   trustlines: Trustline[]
-  incidents: Incident[]
   equivalents: Equivalent[]
-  debts: Debt[]
-  audit_log: AuditLogEntry[]
-  transactions: Transaction[]
-  // F-013-1 / T1302. Completeness metadata for the three optional collections, carried alongside
-  // them so no consumer has to infer "we have no data" from "the array is empty".
-  included: string[]
-  truncated: string[]
-}
-
-export type ClearingCycles = {
-  equivalents: Record<
-    string,
-    {
-      cycles: Array<
-        Array<{
-          equivalent: string
-          debtor: string
-          creditor: string
-          amount: string
-        }>
-      >
-    }
-  >
 }

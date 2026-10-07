@@ -55,13 +55,10 @@ const SPEC_BY_EQUIVALENT = new Map(ROWS_SPEC.map((r) => [r.code, r]))
 const apiMock = vi.hoisted(() => ({
   listTrustlines: vi.fn(),
   listEquivalents: vi.fn(),
-  trustlineBottlenecks: vi.fn(),
+  liquiditySummary: vi.fn(),
+  integritySummary: vi.fn(),
   listAuditLog: vi.fn(),
-  listIncidents: vi.fn(),
   participantsStats: vi.fn(),
-  health: vi.fn(),
-  healthDb: vi.fn(),
-  migrations: vi.fn(),
 }))
 
 vi.mock('../api', () => ({ api: apiMock }))
@@ -148,7 +145,16 @@ beforeEach(() => {
   for (const mock of Object.values(apiMock)) mock.mockReset()
 
   apiMock.listTrustlines.mockResolvedValue(paginated(ROWS))
-  apiMock.trustlineBottlenecks.mockResolvedValue(ok({ items: ROWS, threshold: '0.10' }))
+  // 032 S5 (F-3): the Dashboard's money is now its row per equivalent (the bottlenecks table was removed); the
+  // fourth cell of that row is the equivalent's total limit, so the same rows reach the same check.
+  apiMock.liquiditySummary.mockImplementation(async (params: { equivalent?: string }) => {
+    const spec = SPEC_BY_EQUIVALENT.get(String(params.equivalent)) as Row
+    return ok({
+      equivalent: spec.code, updated_at: '2026-08-24T00:00:00Z', active_trustlines: 1,
+      total_limit: spec.limit, total_used: '0', total_available: spec.limit,
+    })
+  })
+  apiMock.integritySummary.mockResolvedValue(ok({ equivalents: [] }))
   apiMock.listEquivalents.mockResolvedValue(
     paginated(
       Object.entries(PRECISION_BY_EQUIVALENT).map(([code, precision]) => ({
@@ -159,17 +165,13 @@ beforeEach(() => {
     ),
   )
   apiMock.listAuditLog.mockResolvedValue(paginated([]))
-  apiMock.listIncidents.mockResolvedValue(paginated([]))
   apiMock.participantsStats.mockResolvedValue(
     ok({ participants_by_status: {}, participants_by_type: {} }),
   )
-  apiMock.health.mockResolvedValue(ok({ status: 'healthy' }))
-  apiMock.healthDb.mockResolvedValue(ok({ status: 'healthy' }))
-  apiMock.migrations.mockResolvedValue(ok({ current: 'head' }))
 })
 
 describe.each([
-  { name: 'DashboardPage bottlenecks table', component: DashboardPage, path: '/' },
+  { name: 'DashboardPage equivalents table', component: DashboardPage, path: '/' },
   { name: 'TrustlinesPage table', component: TrustlinesPage, path: '/trustlines' },
 ])('RT-012-6: $name renders money by the row equivalent', ({ component, path }) => {
   it('sentinel: the sample must redden under the implementation T1211 removed', () => {

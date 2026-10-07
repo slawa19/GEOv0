@@ -5,7 +5,6 @@ import { computed, onBeforeUnmount, watch, type ComputedRef, type Ref } from 'vu
 
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
 import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS, GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
-import { cycleDebtEdgeToTrustlineDirection } from '../utils/cycleMapping'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import type { Participant, Trustline } from '../pages/graph/graphTypes'
 import { t } from '../i18n'
@@ -38,7 +37,7 @@ export type SelectedInfo =
       close_requested_at?: string | null
     }
 
-export type DrawerTab = 'summary' | 'connections' | 'balance' | 'counterparties' | 'risk' | 'cycles'
+export type DrawerTab = 'summary' | 'connections' | 'balance'
 
 export type LabelMode = 'off' | 'name' | 'pid' | 'both'
 
@@ -85,11 +84,9 @@ export function useGraphVisualization(options: {
   typeFilter: Ref<string[]>
   minDegree: Ref<number>
   hideIsolates: Ref<boolean>
-  showIncidents: Ref<boolean>
 
   participants: Ref<Participant[] | null>
   filteredTrustlines: ComputedRef<Trustline[]>
-  incidentRatioByPid: ComputedRef<Map<string, number>>
 
   selected: Ref<SelectedInfo | null>
   drawerOpen: Ref<boolean>
@@ -115,7 +112,6 @@ export function useGraphVisualization(options: {
   layoutName: Ref<'fcose' | 'grid' | 'circle'>
   layoutSpacing: Ref<number>
 
-  activeCycleKey: Ref<string>
   activeConnectionKey: Ref<string>
 
   extractPidFromText: (text: string) => string | null
@@ -131,11 +127,8 @@ export function useGraphVisualization(options: {
 
   applySelectedHighlight: (pid: string) => void
 
-  clearCycleHighlight: () => void
   clearConnectionHighlight: () => void
   highlightConnection: (fromPid: string, toPid: string, eqCode: string) => void
-  toggleCycleHighlight: (cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) => void
-  isCycleActive: (cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) => boolean
 
   visibleParticipantSuggestions: () => ParticipantSuggestion[]
   querySearchParticipants: (query: string, cb: (results: ParticipantSuggestion[]) => void) => void
@@ -225,14 +218,6 @@ export function useGraphVisualization(options: {
       if (selectedPulseOn) nn.addClass('selected-pulse')
       else nn.removeClass('selected-pulse')
     }, 520)
-  }
-
-  function clearCycleHighlight() {
-    options.activeCycleKey.value = ''
-    const cy = getCy()
-    if (!cy) return
-    cy.edges('.cycle-highlight').removeClass('cycle-highlight')
-    cy.nodes('.cycle-node').removeClass('cycle-node')
   }
 
   function clearConnectionHighlight() {
@@ -455,7 +440,6 @@ export function useGraphVisualization(options: {
 
     const nodes = Array.from(finalPids).map((pid) => {
       const p = pIndex.get(pid)
-      const ratio = options.incidentRatioByPid.value.get(pid)
       const name = (p?.display_name || '').trim()
       const typeKey = String(p?.type || '').toLowerCase()
 
@@ -521,7 +505,6 @@ export function useGraphVisualization(options: {
           display_name: name,
           status: statusKey,
           type: (p?.type || '').toLowerCase(),
-          incident_ratio: typeof ratio === 'number' ? ratio : 0,
 
           viz_w: vizW,
           viz_h: vizH,
@@ -532,7 +515,6 @@ export function useGraphVisualization(options: {
           statusKey ? `p-${statusKey}` : '',
           (p?.type || '').toLowerCase() ? `type-${(p?.type || '').toLowerCase()}` : '',
           vizColorKey ? `viz-${vizColorKey}` : '',
-          options.showIncidents.value && (options.incidentRatioByPid.value.get(pid) || 0) > 0 ? 'has-incident' : '',
         ]
           .filter(Boolean)
           .join(' '),
@@ -547,7 +529,6 @@ export function useGraphVisualization(options: {
         const classes = [
           `tl-${String(t.status || '').toLowerCase()}`,
           bottleneck ? 'bottleneck' : '',
-          options.showIncidents.value && (options.incidentRatioByPid.value.get(t.from) || 0) > 0 ? 'incident' : '',
         ]
           .filter(Boolean)
           .join(' ')
@@ -670,64 +651,6 @@ export function useGraphVisualization(options: {
     if (b && !b.empty()) b.addClass('connection-node')
   }
 
-  function cycleKey(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>): string {
-    return (cycle || [])
-      .map((e) => `${normEq(e.equivalent)}:${String(e.debtor || '')}->${String(e.creditor || '')}`)
-      .join('|')
-  }
-
-  function highlightCycle(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) {
-    const cy = getCy()
-    if (!cy) return
-
-    const touchedPids = new Set<string>()
-    for (const e of cycle || []) {
-      const debtor = String(e.debtor || '').trim()
-      const creditor = String(e.creditor || '').trim()
-      const mapped = cycleDebtEdgeToTrustlineDirection({ debtor, creditor, equivalent: e.equivalent })
-      if (!mapped) continue
-      const { from, to, equivalent } = mapped
-
-      // Note: cycle edges are debt edges (debtor -> creditor).
-      // TrustLine direction in the graph is creditor -> debtor.
-      cy.edges().forEach((edge) => {
-        const src = String(edge.data('source') || '')
-        const dst = String(edge.data('target') || '')
-        const eeq = normEq(String(edge.data('equivalent') || ''))
-        if (src === from && dst === to && eeq === equivalent) edge.addClass('cycle-highlight')
-      })
-
-      touchedPids.add(debtor)
-      touchedPids.add(creditor)
-    }
-
-    for (const pid of touchedPids) {
-      const n = cy.getElementById(pid)
-      if (n && !n.empty()) n.addClass('cycle-node')
-    }
-  }
-
-  function toggleCycleHighlight(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>) {
-    const cy = getCy()
-    if (!cy) return
-    const key = cycleKey(cycle)
-    if (!key) return
-
-    if (options.activeCycleKey.value === key) {
-      clearCycleHighlight()
-      return
-    }
-
-    clearCycleHighlight()
-    options.activeCycleKey.value = key
-    highlightCycle(cycle)
-  }
-
-  function isCycleActive(cycle: Array<{ debtor: string; creditor: string; equivalent: string; amount: string }>): boolean {
-    const key = cycleKey(cycle)
-    return Boolean(key) && options.activeCycleKey.value === key
-  }
-
   function updateZoomStyles() {
     const cy = getCy()
     if (!cy) return
@@ -750,11 +673,9 @@ export function useGraphVisualization(options: {
 
     const edgeW = clamp(1.2 * strokeScale, 0.12, 1.4)
     const edgeWBottleneck = clamp(2.4 * strokeScale, 0.28, 2.6)
-    const edgeWCycle = clamp(3.0 * strokeScale, 0.34, 3.2)
     const edgeWConnection = clamp(3.0 * strokeScale, 0.34, 3.2)
     const arrowScale = clamp(0.9 * strokeScale, 0.16, 1.0)
     const arrowScaleBottleneck = clamp(1.05 * strokeScale, 0.18, 1.15)
-    const arrowScaleCycle = clamp(1.1 * strokeScale, 0.2, 1.25)
     const arrowScaleConnection = clamp(1.1 * strokeScale, 0.2, 1.25)
 
     const selectedBorderW = clamp(3.5 * strokeScale, 1.2, 3.5)
@@ -779,11 +700,6 @@ export function useGraphVisualization(options: {
       .style({
         width: edgeWBottleneck,
         'arrow-scale': arrowScaleBottleneck,
-      })
-      .selector('edge.cycle-highlight')
-      .style({
-        width: edgeWCycle,
-        'arrow-scale': arrowScaleCycle,
       })
       .selector('edge.connection-highlight')
       .style({
@@ -891,14 +807,6 @@ export function useGraphVisualization(options: {
       },
 
       {
-        selector: 'node.has-incident',
-        style: {
-          'border-width': 3,
-          'border-color': '#f56c6c',
-        },
-      },
-
-      {
         selector: 'node.search-hit',
         style: {
           'border-width': 4,
@@ -928,31 +836,6 @@ export function useGraphVisualization(options: {
       },
 
       {
-        selector: 'edge.incident',
-        style: {
-          'line-style': 'dashed',
-        },
-      },
-
-      {
-        selector: 'edge.cycle-highlight',
-        style: {
-          'line-color': '#e6a23c',
-          'target-arrow-color': '#e6a23c',
-          width: 3.2,
-          opacity: 1,
-          'arrow-scale': 1.05,
-        },
-      },
-      {
-        selector: 'node.cycle-node',
-        style: {
-          'border-width': 4,
-          'border-color': '#e6a23c',
-        },
-      },
-
-      {
         selector: 'edge.connection-highlight',
         style: {
           'line-color': '#67c23a',
@@ -972,7 +855,7 @@ export function useGraphVisualization(options: {
       },
 
       // Selected contour: blink the border (no glow).
-      // Keep this block near the end so it overrides other highlight layers (connection/cycle/search).
+      // Keep this block near the end so it overrides other highlight layers (connection/search).
       // selected-pulse is toggled on/off by JS timer.
       {
         selector: 'node.selected-node, node.selected-pulse',
@@ -1074,7 +957,6 @@ export function useGraphVisualization(options: {
     const layoutFit = !opts?.preserveViewport
 
     const { nodes, edges } = buildElements()
-    clearCycleHighlight()
     cy.elements().remove()
     cy.add(nodes)
     cy.add(edges)
@@ -1549,11 +1431,8 @@ export function useGraphVisualization(options: {
 
     applySelectedHighlight,
 
-    clearCycleHighlight,
     clearConnectionHighlight,
     highlightConnection,
-    toggleCycleHighlight,
-    isCycleActive,
 
     visibleParticipantSuggestions,
     querySearchParticipants,

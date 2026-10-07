@@ -145,26 +145,17 @@ describe('realApi.requestJson', () => {
   })
 })
 
-describe('realApi bottleneck threshold transport', () => {
-  it('rejects invalid thresholds before any HTTP request', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    expect(() => realApi.trustlineBottlenecks({ threshold: '1.00000000000000001' })).toThrowError(
-      expect.objectContaining({ name: 'ApiException', code: 'VALIDATION_ERROR', status: 422 }),
-    )
-    expect(() => realApi.liquiditySummary({ threshold: '-0.01' })).toThrowError(
-      expect.objectContaining({ name: 'ApiException', code: 'VALIDATION_ERROR', status: 422 }),
-    )
-    await expect(realApi.participantMetrics('PID_A', { threshold: '1e-1' })).rejects.toMatchObject({
-      name: 'ApiException',
-      code: 'VALIDATION_ERROR',
-      status: 422,
-    })
-    expect(fetchMock).not.toHaveBeenCalled()
+// 032 S5 (F-1, F-2, F-4, A-4): the bottleneck list, the incidents list, admin abort and the admin cycle search were
+// removed with their server routes, and the two narrowed reads lost their `threshold` (the old threshold-transport
+// cases tested that removed parameter). What the client may still send is pinned here by the URL it builds.
+describe('realApi narrowed admin reads (032 S5)', () => {
+  it('has no client for a removed route', () => {
+    for (const removed of ['trustlineBottlenecks', 'listIncidents', 'abortTx', 'clearingCycles']) {
+      expect(removed in realApi, removed).toBe(false)
+    }
   })
 
-  it('preserves a valid high-precision decimal string for every endpoint', async () => {
+  it('asks the summary and the metrics with the equivalent only', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -174,29 +165,29 @@ describe('realApi bottleneck threshold transport', () => {
       }),
     )
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-    const threshold = '0.10000000000000001'
 
     // Only the URL is under test; the stub refuses every call, so each one rejects.
-    await realApi.trustlineBottlenecks({ threshold }).catch(() => undefined)
-    await realApi.liquiditySummary({ threshold }).catch(() => undefined)
-    await realApi.participantMetrics('PID_A', { threshold }).catch(() => undefined)
+    await realApi.liquiditySummary({ equivalent: 'UAH' }).catch(() => undefined)
+    await realApi.liquiditySummary({}).catch(() => undefined)
+    await realApi.participantMetrics('PID_A', { equivalent: 'UAH' }).catch(() => undefined)
+    await realApi.participantMetrics('PID_A').catch(() => undefined)
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
-      `/api/v1/admin/trustlines/bottlenecks?threshold=${threshold}&limit=10`,
-      `/api/v1/admin/liquidity/summary?threshold=${threshold}&limit=10`,
-      `/api/v1/admin/participants/PID_A/metrics?threshold=${threshold}`,
+      '/api/v1/admin/liquidity/summary?equivalent=UAH',
+      '/api/v1/admin/liquidity/summary',
+      '/api/v1/admin/participants/PID_A/metrics?equivalent=UAH',
+      '/api/v1/admin/participants/PID_A/metrics',
     ])
   })
 })
 
 describe('realApi liquidity summary decoder (028 F-028-37)', () => {
-  it('accepts the summary without an equivalent: money null, net lists empty', async () => {
+  it('accepts the summary without an equivalent: money null', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
     const body = {
-      equivalent: null, threshold: 0.1, updated_at: '2026-10-04T00:00:00Z', active_trustlines: 2, bottlenecks: 0,
-      incidents_over_sla: 0, total_limit: null, total_used: null, total_available: null,
-      top_creditors: [], top_debtors: [], top_by_abs_net: [], top_bottleneck_edges: [],
+      equivalent: null, updated_at: '2026-10-04T00:00:00Z', active_trustlines: 2,
+      total_limit: null, total_used: null, total_available: null,
     }
     vi.stubGlobal(
       'fetch',

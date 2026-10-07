@@ -53,13 +53,6 @@ export const AdminParticipantActionResponseSchema = z
   })
   .strict()
 
-export const AdminAbortTxResponseSchema = z
-  .object({
-    tx_id: z.string(),
-    status: z.literal('aborted'),
-  })
-  .strict()
-
 export const AdminEquivalentCodeSchema = z.string().regex(/^[A-Z0-9_]{1,16}$/)
 // 0..8, narrowed from 0..18 on 2026-08-25 (012 / S1): the ledger stores money in
 // `Numeric(20, 8)` and protocol §3.2 declares `precision` as 0-8, so the API bound moved to
@@ -201,15 +194,33 @@ export const IntegrityVerifyResponseSchema = z
   })
   .strict()
 
+// 032 S5 (F-4): the per-equivalent summary the Integrity screen reads for the holds (`GET /integrity/summary`,
+// `api/openapi.yaml` IntegritySummaryResponse). `hold: true` - money in this equivalent is held until an admin
+// clears it (`POST /admin/equivalents/{code}/integrity-hold/clear`).
+export const IntegritySummaryResponseSchema = z
+  .object({
+    equivalents: z.array(
+      z
+        .object({
+          equivalent: z.string(),
+          status: IntegrityStatusValueSchema,
+          checked_at: DateTimeSchema.nullable(),
+          hold: z.boolean(),
+        })
+        .strict(),
+    ),
+  })
+  .strict()
+
 export type AdminConfigResponse = z.infer<typeof AdminConfigResponseSchema>
 export type AdminConfigPatchResponse = z.infer<typeof AdminConfigPatchResponseSchema>
 export type AdminParticipantActionResponse = z.infer<typeof AdminParticipantActionResponseSchema>
-export type AdminAbortTxResponse = z.infer<typeof AdminAbortTxResponseSchema>
 export type AdminEquivalentMutationResponse = z.infer<typeof AdminEquivalentMutationResponseSchema>
 export type AdminEquivalentDeleteResponse = z.infer<typeof AdminEquivalentDeleteResponseSchema>
 export type AdminEquivalentUsageResponse = z.infer<typeof AdminEquivalentUsageResponseSchema>
 export type IntegrityStatusResponse = z.infer<typeof IntegrityStatusResponseSchema>
 export type IntegrityVerifyResponse = z.infer<typeof IntegrityVerifyResponseSchema>
+export type IntegritySummaryResponse = z.infer<typeof IntegritySummaryResponseSchema>
 
 export function decodeAdminResponse<T>(schema: ZodType<T>, value: unknown, operation: string): T {
   const validated = schema.safeParse(value)

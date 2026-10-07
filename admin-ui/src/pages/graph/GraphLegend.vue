@@ -44,9 +44,6 @@ const props = defineProps<{
     <div class="legend__row">
       <span class="swatch swatch--edge-bottleneck" /> {{ t('graph.legend.bottleneck') }}
     </div>
-    <div class="legend__row">
-      <span class="swatch swatch--edge-incident" /> {{ t('graph.legend.incidentEdge') }}
-    </div>
   </div>
 </template>
 
@@ -156,9 +153,5 @@ const props = defineProps<{
 .swatch--edge-bottleneck {
   background: #f56c6c;
   height: 10px;
-}
-
-.swatch--edge-incident {
-  background: repeating-linear-gradient(90deg, #606266 0 4px, transparent 4px 7px);
 }
 </style>

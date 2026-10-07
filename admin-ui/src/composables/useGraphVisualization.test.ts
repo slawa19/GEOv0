@@ -39,10 +39,8 @@ function mountGraph(input?: {
           typeFilter: ref<string[]>([]),
           minDegree: ref(0),
           hideIsolates: ref(false),
-          showIncidents: ref(false),
           participants,
           filteredTrustlines: computed(() => input?.trustlines ?? []),
-          incidentRatioByPid: computed(() => new Map<string, number>()),
           selected,
           drawerOpen,
           drawerTab: ref('summary'),
@@ -61,7 +59,6 @@ function mountGraph(input?: {
           zoom: ref(1),
           layoutName: ref(input?.layoutName ?? 'grid'),
           layoutSpacing: ref(1),
-          activeCycleKey: ref(''),
           activeConnectionKey: ref(''),
           extractPidFromText: () => null,
         })
@@ -132,6 +129,28 @@ describe('useGraphVisualization', () => {
       mounted.wrapper.unmount()
     },
   )
+
+  it('marks an active edge below the threshold as a bottleneck, and neither a closed one nor one above it', () => {
+    const base = { equivalent: 'EUR', limit: '10.00', created_at: '2026-01-01T00:00:00Z' }
+    const mounted = mountGraph({
+      trustlines: [
+        { ...base, from: 'PID_A', to: 'PID_B', used: '9.50', available: '0.50', status: 'active' },
+        { ...base, from: 'PID_B', to: 'PID_A', used: '2.00', available: '8.00', status: 'active' },
+        { ...base, from: 'PID_A', to: 'PID_B', used: '10.00', available: '0.00', status: 'closed' },
+      ],
+    })
+
+    const { edges } = mounted.graph.buildElements()
+    expect(edges.map((edge) => [edge.data?.source, edge.data?.target, edge.data?.bottleneck])).toEqual([
+      ['PID_A', 'PID_B', 1],
+      ['PID_B', 'PID_A', 0],
+      ['PID_A', 'PID_B', 0],
+    ])
+    expect(String(edges[0]?.classes)).toContain('bottleneck')
+    expect(String(edges[2]?.classes)).not.toContain('bottleneck')
+
+    mounted.wrapper.unmount()
+  })
 
   it('opens node and edge details through DOM option keys without a Core', () => {
     const trustline: Trustline = {
