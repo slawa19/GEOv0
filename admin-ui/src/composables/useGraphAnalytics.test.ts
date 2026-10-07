@@ -73,7 +73,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     })
 
     const g = useGraphAnalytics({
-      isRealMode: computed(() => false),
       threshold: ref('0.10'),
       analyticsEq: computed(() => 'EUR'),
 
@@ -135,7 +134,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     })
 
     const g = useGraphAnalytics({
-      isRealMode: computed(() => false),
       threshold: ref('0.10'),
       analyticsEq: computed(() => 'EUR'),
 
@@ -194,7 +192,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     })
 
     const g = useGraphAnalytics({
-      isRealMode: computed(() => false),
       threshold,
       analyticsEq: computed(() => 'EUR'),
 
@@ -229,7 +226,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
     const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
     const graph = useGraphAnalytics({
-      isRealMode: computed(() => false),
       threshold: ref('0.10'),
       analyticsEq: computed(() => 'EUR'),
       precisionByEq: computed(() => new Map([['EUR', 2]])),
@@ -264,7 +260,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     const selected = ref<SelectedInfo | null>({ kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 })
     const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
     const graph = useGraphAnalytics({
-      isRealMode: computed(() => true),
       threshold: ref('0.10'),
       analyticsEq: computed(() => 'EUR'),
       precisionByEq: computed(() => new Map([['EUR', 2]])),
@@ -301,7 +296,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     const threshold = ref('1.00000000000000001')
     const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
     const graph = useGraphAnalytics({
-      isRealMode: computed(() => true),
       threshold,
       analyticsEq: computed(() => 'EUR'),
       precisionByEq: computed(() => new Map([['EUR', 2]])),
@@ -340,7 +334,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
     const participants = ref<Participant[]>([{ pid: 'PID_A', display_name: 'Alice' }])
     const scope = effectScope()
     const graph = scope.run(() => useGraphAnalytics({
-      isRealMode: computed(() => true),
       threshold: ref('0.10'),
       analyticsEq: computed(() => 'EUR'),
       precisionByEq: computed(() => new Map([['EUR', 2]])),
@@ -374,7 +367,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       { pid: 'PID_B', display_name: 'Bob' },
     ])
     const graph = useGraphAnalytics({
-      isRealMode: computed(() => false),
       threshold: ref('0.10'),
       analyticsEq: computed(() => ' eur '),
       precisionByEq: computed(() => new Map([['EUR', 4]])),
@@ -404,7 +396,6 @@ describe('useGraphAnalytics (fixtures-first)', () => {
       { pid: 'PID_B', display_name: 'Bob' },
     ])
     const graph = useGraphAnalytics({
-      isRealMode: computed(() => false),
       threshold: ref('0.10'),
       analyticsEq: computed(() => 'EUR'),
       precisionByEq: computed(() => new Map()),

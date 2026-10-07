@@ -103,7 +103,6 @@ function hhiLevel(hhi: number): { label: string; type: 'success' | 'warning' | '
 }
 
 export function useGraphAnalytics(opts: {
-  isRealMode: ComputedRef<boolean>
   threshold: Ref<string>
   analyticsEq: ComputedRef<string | null>
 
@@ -148,11 +147,6 @@ export function useGraphAnalytics(opts: {
 
   async function loadSelectedMetrics() {
     const request = metricsRequests.begin()
-    if (!opts.isRealMode.value) {
-      metricsLoading.value = false
-      metricsError.value = null
-      return
-    }
     const pid = selectedPid.value
     if (!pid) {
       metricsLoading.value = false

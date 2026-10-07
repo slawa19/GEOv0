@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
@@ -21,13 +20,7 @@ const route = useRoute()
 const router = useRouter()
 const filterKey = ref('')
 
-const authStore = useAuthStore()
-
 type ScopeTag = 'runtime'
-
-function isKeyReadOnly(_key: string): boolean {
-  return authStore.isReadOnly
-}
 
 const original = ref<Record<string, unknown>>({})
 const rows = ref<Row[]>([])
@@ -198,10 +191,6 @@ const sections = computed((): Section[] => {
 })
 
 async function save() {
-  if (authStore.isReadOnly) {
-    ElMessage.error(t('common.readOnlyUpdatesDisabled'))
-    return
-  }
   const keys = dirtyKeys.value
   if (keys.length === 0) {
     ElMessage.info(t('common.noChanges'))
@@ -215,7 +204,6 @@ async function save() {
     const patch: Record<string, unknown> = {}
 
     for (const k of keys) {
-      if (isKeyReadOnly(k)) continue
       const r = rowByKey.get(k)
       if (!r) continue
       if (r.kind === 'json') {
@@ -286,7 +274,7 @@ watch(
             {{ t('common.dirtyCount', { n: dirtyKeys.length }) }}
           </el-tag>
           <el-button
-            :disabled="authStore.isReadOnly || dirtyKeys.length === 0"
+            :disabled="dirtyKeys.length === 0"
             :loading="saving"
             type="primary"
             @click="save"
@@ -390,7 +378,6 @@ watch(
                     >{{ t('common.false') }}</span>
                     <el-switch
                       v-model="scope.row.value"
-                      :disabled="isKeyReadOnly(scope.row.key)"
                     />
                     <span
                       class="cfgBoolLabel"
@@ -401,7 +388,6 @@ watch(
                   <el-input-number
                     v-else-if="scope.row.kind === 'number'"
                     v-model="scope.row.value"
-                    :disabled="isKeyReadOnly(scope.row.key)"
                     controls-position="right"
                     class="cfgNumber"
                     style="width: 160px"
@@ -410,7 +396,6 @@ watch(
                   <template v-else-if="scope.row.kind === 'string'">
                     <el-input
                       v-model="scope.row.value"
-                      :disabled="isKeyReadOnly(scope.row.key)"
                       size="small"
                       :placeholder="t('common.valuePlaceholder')"
                       class="cfgText"
@@ -420,7 +405,6 @@ watch(
                   <el-input
                     v-else
                     v-model="scope.row.value"
-                    :disabled="isKeyReadOnly(scope.row.key)"
                     size="small"
                     type="textarea"
                     :rows="2"
@@ -428,13 +412,6 @@ watch(
                     class="cfgJson"
                   />
 
-                  <el-tag
-                    v-if="isKeyReadOnly(scope.row.key)"
-                    size="small"
-                    type="info"
-                  >
-                    {{ t('common.readOnly') }}
-                  </el-tag>
                 </div>
               </template>
             </el-table-column>

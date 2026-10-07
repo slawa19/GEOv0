@@ -4,7 +4,6 @@ import { ElMessage } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { toastApiError } from '../api/errorToast'
-import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
@@ -17,8 +16,6 @@ const error = ref<string | null>(null)
 const saving = ref(false)
 
 const rows = ref<FlagRow[]>([])
-
-const authStore = useAuthStore()
 
 async function load() {
   loading.value = true
@@ -42,10 +39,6 @@ const dirtyCount = computed(() => rows.value.filter((r) => r.value !== r.origina
 const fullMultipathEnabled = computed(() => rows.value.find((r) => r.key === 'full_multipath_enabled')?.value === true)
 
 async function save() {
-  if (authStore.isReadOnly) {
-    ElMessage.error(t('common.readOnlyUpdatesDisabled'))
-    return
-  }
   const dirty = rows.value.filter((r) => r.value !== r.original)
   if (dirty.length === 0) {
     ElMessage.info(t('common.noChanges'))
@@ -84,7 +77,7 @@ onMounted(() => void load())
             {{ t('common.dirtyCount', { n: dirtyCount }) }}
           </el-tag>
           <el-button
-            :disabled="authStore.isReadOnly || dirtyCount === 0"
+            :disabled="dirtyCount === 0"
             :loading="saving"
             type="primary"
             @click="save"
@@ -145,7 +138,7 @@ onMounted(() => void load())
           <template #default="scope">
             <el-switch
               v-model="scope.row.value"
-              :disabled="authStore.isReadOnly || saving"
+              :disabled="saving"
             />
           </template>
         </el-table-column>

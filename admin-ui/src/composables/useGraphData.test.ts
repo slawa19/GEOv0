@@ -134,13 +134,12 @@ describe('useGraphData', () => {
 
   it('availableEquivalents merges dataset + trustlines (no ALL option)', () => {
     const eq = ref('')
-    const isRealMode = ref(false)
     const focusMode = ref(false)
     const focusRootPid = ref('')
     const focusDepth = ref(1)
     const statusFilter = ref<string[]>([])
 
-    const g = useGraphData({ eq, isRealMode, focusMode, focusRootPid, focusDepth, statusFilter })
+    const g = useGraphData({ eq, focusMode, focusRootPid, focusDepth, statusFilter })
     g.equivalents.value = [{ code: 'eur', precision: 2, description: '', is_active: true } satisfies Equivalent]
     const tlBase = {
       from: 'A',
@@ -163,7 +162,7 @@ describe('useGraphData', () => {
     apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('A'))
     apiMock.clearingCycles.mockResolvedValueOnce(cyclesEnvelope('EUR'))
     const eq = ref('')
-    const g = useGraphData({ eq, isRealMode: ref(false), focusMode: ref(false), focusRootPid: ref(''),
+    const g = useGraphData({ eq, focusMode: ref(false), focusRootPid: ref(''),
       focusDepth: ref(1), statusFilter: ref<string[]>([]) })
     await g.loadData()
     expect(eq.value).toBe('EUR')
@@ -171,31 +170,6 @@ describe('useGraphData', () => {
     eq.value = 'UAH'
     await nextTick()
     expect(g.eqAutoSelected.value).toBe(false)
-  })
-
-  it('does not claim mock focus data is ready while the full snapshot is loading', async () => {
-    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
-    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
-    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
-    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
-    const graph = useGraphData({
-      eq: ref('EUR'),
-      isRealMode: ref(false),
-      focusMode: ref(true),
-      focusRootPid: ref('PID_A'),
-      focusDepth: ref(1),
-      statusFilter: ref<string[]>([]),
-    })
-
-    const pending = graph.loadData()
-    expect(graph.loading.value).toBe(true)
-    await expect(graph.refreshForFocusMode()).resolves.toBe(false)
-
-    snapshot.resolve(snapshotEnvelope('READY'))
-    cycles.resolve(cyclesEnvelope('READY'))
-    await pending
-
-    await expect(graph.refreshForFocusMode()).resolves.toBe(true)
   })
 
   it('keeps the newest graph load when an older load rejects last', async () => {
@@ -208,7 +182,6 @@ describe('useGraphData', () => {
 
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -243,7 +216,6 @@ describe('useGraphData', () => {
     })
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -266,7 +238,6 @@ describe('useGraphData', () => {
     const eq = ref('EUR')
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -307,7 +278,6 @@ describe('useGraphData', () => {
 
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -342,7 +312,6 @@ describe('useGraphData', () => {
     apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -370,7 +339,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantCycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -397,7 +365,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantCycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -432,7 +399,6 @@ describe('useGraphData', () => {
         .mockReturnValueOnce(participantCycles.promise)
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -475,7 +441,6 @@ describe('useGraphData', () => {
         .mockReturnValueOnce(participantCycles.promise)
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -524,7 +489,6 @@ describe('useGraphData', () => {
         .mockReturnValueOnce(participantCycles.promise)
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -565,7 +529,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantB.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -595,7 +558,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantB.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -630,7 +592,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantB.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -667,7 +628,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantRetry.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -697,7 +657,6 @@ describe('useGraphData', () => {
     })
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -737,7 +696,6 @@ describe('useGraphData', () => {
     const eq = ref('EUR')
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -781,7 +739,6 @@ describe('useGraphData', () => {
     const focusMode = ref(false)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -817,7 +774,6 @@ describe('useGraphData', () => {
     })
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(true),
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -845,7 +801,6 @@ describe('useGraphData', () => {
       .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid,
       focusDepth: ref(1),
@@ -889,7 +844,6 @@ describe('useGraphData', () => {
       .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid,
       focusDepth: ref(1),
@@ -930,7 +884,6 @@ describe('useGraphData', () => {
         .mockResolvedValueOnce(cyclesEnvelope('GLOBAL'))
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode,
         focusRootPid: ref('PID_FOCUS'),
         focusDepth: ref(1),
@@ -972,7 +925,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(focusCycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid: ref('PID_FOCUS'),
       focusDepth: ref(1),
@@ -1001,7 +953,6 @@ describe('useGraphData', () => {
     apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('GLOBAL'))
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -1039,7 +990,6 @@ describe('useGraphData', () => {
     const statusFilter = ref<string[]>(['active'])
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(true),
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -1086,7 +1036,6 @@ describe('useGraphData', () => {
     const scope = effectScope()
     const graph = scope.run(() => useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -1116,7 +1065,6 @@ describe('useGraphData', () => {
     const scope = effectScope()
     const graph = scope.run(() => useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(true),
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),

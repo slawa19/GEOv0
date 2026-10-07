@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ConfigPage from './ConfigPage.vue'
 import IntegrityPage from './IntegrityPage.vue'
-import { useAuthStore } from '../stores/auth'
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -43,11 +42,9 @@ const debtSymmetryFailure = {
 async function mountPage(
   component: object,
   path: string,
-  role: 'admin' | 'auditor' = 'admin',
 ): Promise<{ wrapper: VueWrapper; router: Router }> {
   const pinia = createPinia()
   setActivePinia(pinia)
-  useAuthStore(pinia).role = role
 
   const router = createRouter({
     history: createMemoryHistory(),
@@ -133,17 +130,6 @@ describe('Phase 4 Config operator workflow', () => {
     expect(apiMock.getConfig).toHaveBeenCalledTimes(2)
     expect(success).toHaveBeenCalledTimes(1)
     expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
-    wrapper.unmount()
-  })
-
-  it('makes auditor mode read-only without issuing a mutation', async () => {
-    apiMock.getConfig.mockResolvedValue({ success: true, data: { CLEARING_ENABLED: false } })
-    const { wrapper } = await mountPage(ConfigPage, '/config', 'auditor')
-
-    expect(wrapper.find('.el-switch').classes()).toContain('is-disabled')
-    expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
-    await primaryButton(wrapper).trigger('click')
-    expect(apiMock.patchConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

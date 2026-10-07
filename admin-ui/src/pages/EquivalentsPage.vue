@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
-import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 import { useLatestRequest } from '../composables/useLatestRequest'
-import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
+import { toLocationQueryRaw } from '../router/query'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
@@ -23,8 +22,6 @@ const loadRequests = useLatestRequest()
 let pageActive = true
 
 const router = useRouter()
-const route = useRoute()
-const authStore = useAuthStore()
 
 const createOpen = ref(false)
 const editOpen = ref(false)
@@ -250,7 +247,7 @@ async function deleteEq(row: Equivalent) {
 function goAudit(row: Equivalent) {
   void router.push({
     path: '/audit-log',
-    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), code: row.code, q: row.code }),
+    query: toLocationQueryRaw({ code: row.code, q: row.code }),
   })
 }
 
@@ -273,7 +270,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
         />
         <div class="hdr__actions">
           <el-button
-            :disabled="authStore.isReadOnly"
             type="primary"
             @click="openCreate"
           >
@@ -399,7 +395,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             <div class="eqActions">
               <el-button
                 size="small"
-                :disabled="authStore.isReadOnly"
                 @click="openEdit(scope.row)"
               >
                 {{ t('common.edit') }}
@@ -408,7 +403,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="scope.row.is_active"
                 size="small"
                 type="warning"
-                :disabled="authStore.isReadOnly"
                 @click="setActive(scope.row, false)"
               >
                 {{ t('common.deactivate') }}
@@ -417,7 +411,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-else
                 size="small"
                 type="success"
-                :disabled="authStore.isReadOnly"
                 @click="setActive(scope.row, true)"
               >
                 {{ t('common.activate') }}
@@ -426,7 +419,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="!scope.row.is_active"
                 size="small"
                 type="danger"
-                :disabled="authStore.isReadOnly"
                 @click="deleteEq(scope.row)"
               >
                 {{ t('common.delete') }}
@@ -483,7 +475,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </el-button>
       <el-button
         type="primary"
-        :disabled="authStore.isReadOnly"
         @click="createEq"
       >
         {{ t('common.create') }}
@@ -521,7 +512,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </el-button>
       <el-button
         type="primary"
-        :disabled="authStore.isReadOnly"
         @click="saveEdit"
       >
         {{ t('common.save') }}

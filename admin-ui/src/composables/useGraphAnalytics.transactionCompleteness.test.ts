@@ -56,7 +56,6 @@ function analyticsFor(input: {
   truncated: string[]
 }) {
   return useGraphAnalytics({
-    isRealMode: computed(() => true),
     threshold: ref('0.10'),
     analyticsEq: computed(() => 'EUR'),
 

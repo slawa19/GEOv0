@@ -4,12 +4,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { formatApiError } from '../api/errorFormat'
-import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
-
-const authStore = useAuthStore()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -115,10 +112,6 @@ async function load() {
 }
 
 async function verify() {
-  if (authStore.isReadOnly) {
-    ElMessage.error(t('integrity.readOnlyVerificationDisabled'))
-    return
-  }
   try {
     await ElMessageBox.confirm(
       t('integrity.verify.confirmText'),
@@ -159,7 +152,6 @@ onMounted(() => void load())
         />
         <el-button
           :loading="verifyLoading"
-          :disabled="authStore.isReadOnly"
           type="primary"
           @click="verify"
         >

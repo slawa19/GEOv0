@@ -18,7 +18,7 @@ import { t } from '../i18n'
 import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
 import { buildTrustlinesAdvice } from '../advice/operatorAdvice'
-import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { useLatestRequest } from '../composables/useLatestRequest'
 
@@ -177,11 +177,11 @@ function openRow(row: Trustline) {
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ q: pid }) })
 }
 
 function goEquivalent(eq: string) {
-  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: eq }) })
+  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ q: eq }) })
 }
 
 onMounted(() => {

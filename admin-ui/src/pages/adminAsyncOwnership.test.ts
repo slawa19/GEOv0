@@ -631,7 +631,7 @@ describe('selected non-Graph operator and navigation paths', () => {
     wrapper.unmount()
   })
 
-  it('covers Equivalent state change, usage-guard failure, scenario navigation, and late unmount', async () => {
+  it('covers Equivalent state change, usage-guard failure, navigation, and late unmount', async () => {
     const inactive = { ...equivalentNew, is_active: false }
     apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
     apiMock.setEquivalentActive.mockResolvedValue(ok({ updated: inactive }))
@@ -658,7 +658,7 @@ describe('selected non-Graph operator and navigation paths', () => {
     state.goAudit(state.items[0])
     expect(routing.push).toHaveBeenLastCalledWith({
       path: '/audit-log',
-      query: { scenario: 'slow', code: equivalentNew.code, q: equivalentNew.code },
+      query: { code: equivalentNew.code, q: equivalentNew.code },
     })
 
     const pending = deferred<any>()
@@ -778,7 +778,7 @@ describe('selected non-Graph operator and navigation paths', () => {
     state.goGraph()
     expect(routing.push).toHaveBeenLastCalledWith({
       path: '/graph',
-      query: { scenario: 'slow', equivalent: 'EUR', threshold: '0.25' },
+      query: { equivalent: 'EUR', threshold: '0.25' },
     })
     wrapper.unmount()
   })

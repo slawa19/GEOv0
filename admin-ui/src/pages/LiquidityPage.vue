@@ -20,7 +20,7 @@ import {
 } from '../composables/useEquivalentPrecision'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
-import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useConfigStore } from '../stores/config'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { debounce } from '../utils/debounce'
@@ -190,7 +190,6 @@ function goTrustlinesEdge(row: Trustline) {
   void router.push({
     path: '/trustlines',
     query: toLocationQueryRaw({
-      ...carryScenarioQuery(route.query),
       equivalent: String(row.equivalent || '').toUpperCase(),
       creditor: row.from,
       debtor: row.to,
@@ -200,14 +199,13 @@ function goTrustlinesEdge(row: Trustline) {
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ q: pid }) })
 }
 
 function goGraph() {
   void router.push({
     path: '/graph',
     query: toLocationQueryRaw({
-      ...carryScenarioQuery(route.query),
       ...(selectedEq.value ? { equivalent: selectedEq.value } : {}),
       threshold: threshold.value,
     }),
@@ -405,7 +403,7 @@ function money(v: string, equivalent: unknown): string {
               <div class="hdr__right">
                 <el-button
                   size="small"
-                  @click="router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(selectedEq ? { equivalent: selectedEq } : {}), threshold }) })"
+                  @click="router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...(selectedEq ? { equivalent: selectedEq } : {}), threshold }) })"
                 >
                   {{ t('liquidity.actions.openTrustlines') }}
                 </el-button>

@@ -145,7 +145,6 @@ export function computeIncidentRatioByPid(input: { incidents: Incident[]; equiva
 
 export function useGraphData(opts: {
   eq: Ref<string>
-  isRealMode: Ref<boolean>
   focusMode: Ref<boolean>
   focusRootPid: Ref<string>
   focusDepth: Ref<number>
@@ -362,10 +361,6 @@ export function useGraphData(opts: {
   }
 
   async function refreshForFocusMode(): Promise<boolean> {
-    // Mock focus mode only rebuilds the already-loaded snapshot. While the
-    // initial/full load is pending there is no stable data for a watcher render.
-    if (!opts.isRealMode.value) return !loading.value
-
     const viewRequest = viewRequests.begin()
     const cycleRequest = cycleRequests.begin()
     resetParticipantCycleVisibility()

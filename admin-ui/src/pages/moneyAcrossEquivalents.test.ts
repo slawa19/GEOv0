@@ -183,7 +183,6 @@ function analyticsFixture(analyticsEq: string | null) {
   ])
 
   return useGraphAnalytics({
-    isRealMode: computed(() => false),
     threshold: ref('0.10'),
     analyticsEq: computed(() => analyticsEq),
     precisionByEq: computed(() => new Map(Object.entries(PRECISION_BY_EQUIVALENT))),

@@ -10,7 +10,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
-import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
+import { toLocationQueryRaw } from '../router/query'
 import { labelParticipantStatus, normalizeParticipantStatusKey } from '../ui/participantStatus'
 
 const router = useRouter()
@@ -190,7 +190,6 @@ function goTrustlinesWithThreshold() {
   void router.push({
     path: '/trustlines',
     query: toLocationQueryRaw({
-      ...carryScenarioQuery(route.query),
       ...(thresholdValue ? { threshold: thresholdValue } : {}),
     }),
   })
