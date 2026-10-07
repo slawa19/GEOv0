@@ -825,6 +825,24 @@ def _refuse_attempt(attempt: "_PaymentAttempt", error: Exception, prefix: str) -
 
 
 class PaymentService:
+    """Payments on one `AsyncSession`.
+
+    WHO OWNS THE TRANSACTION (032 `P-2`) differs by method, not by class:
+
+    * `execute`, `create_payment_internal_staged`, `lock_staged_lines` work INSIDE the caller's
+      transaction and commit nothing. A failure inside the payment operation rolls back that
+      operation's own savepoint, not the caller's transaction. The one exception is
+      `execute(release_before_routing=True)` on a session bound to an engine: it ends the session's
+      read-only transaction before routing, and only `pay()` asks for that (see `execute`).
+    * `pay`, `create_payment`, `create_payment_internal` own the whole transaction and commit it
+      once (`_pay_attempt`, "THE ONE COMMIT"). A failed attempt ends by commit when it can - the
+      attempt wrote nothing of the payment, and this keeps what a caller had staged on a session it
+      lent - or by rollback when it cannot (`_end_failed_attempt`); a refusal is recorded in a short
+      transaction of its own. `create_payment` and `create_payment_internal` run `pay()` on THIS
+      service's session, so they also commit whatever the caller had pending on it.
+    * `get_payment_for_participant`, `list_payments` only read; they end no transaction.
+    """
+
     def __init__(self, session: AsyncSession):
         self.session = session
         # ONE money boundary for the service's lifetime (the line locks, the stop/hold guard, the delta check).
@@ -1110,7 +1128,13 @@ class PaymentService:
         emit_start: bool = True,
         release_before_routing: bool = False,
     ) -> StagedPaymentResult:
-        """Execute a payment INSIDE THE CALLER'S TRANSACTION; never commit or roll it back.
+        """Execute a payment INSIDE THE CALLER'S TRANSACTION; it commits nothing.
+
+        The caller's transaction is not rolled back either, with one deliberate exception:
+        `release_before_routing=True` (set only by `pay()` for a session it opened itself) rolls the
+        session back once, before the route is built - at that point the transaction has written
+        nothing, and freeing its pooled connection keeps the route reader from starving the pool. It
+        has no effect on a session bound to a connection.
 
         Programme 019 stages 3-4 (`specs/019-payment-one-transaction/spec.md`, "Контракт исполнения").
         Steps: validation and idempotency (a stored row answers with its stored result or a 409),
@@ -1338,7 +1362,8 @@ class PaymentService:
             async with _payment_deadline(deadline, total_timeout_s):
                 # 027 stage 1 (F-027-4): the graph build is bounded by the payment's deadline, not by the routing
                 # budget, which bounds only the path search below; a timeout of either is logged by its stage.
-                # §15 review of stage 1, #1: `pay()` owns this transaction and its reads above wrote nothing - end it
+                # §15 review of stage 1, #1: with `release_before_routing` (`pay()` owns the session) the
+                # transaction and its reads above wrote nothing - end it
                 # and free its pooled connection before the route reader takes one (else attempts waiting for a
                 # leader's build hold the pool it needs); the money attempt below is a fresh, re-guarded transaction.
                 released = release_before_routing and isinstance(self.session.bind, AsyncEngine)
