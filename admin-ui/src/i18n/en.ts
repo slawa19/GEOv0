@@ -97,6 +97,10 @@ export const EN: Record<string, string> = {
   'equivalents.usage.tlDebtsIc': 'Used by {trustlines}\u00A0TL / {debts}\u00A0Debts / {ic}\u00A0IC',
   'equivalents.warning.deletePermanent': 'This permanently deletes the equivalent. This cannot be undone.',
 
+  'notFound.title': 'Page not found',
+  'notFound.text': 'There is no page at {path}.',
+  'notFound.toDashboard': 'Go to the Dashboard',
+
   'dashboard.title': 'Dashboard',
   'dashboard.card.participantsByType': 'Participants by type',
   'dashboard.card.participantsByStatus': 'Participants by status',
@@ -319,6 +323,9 @@ export const EN: Record<string, string> = {
   'integrity.section.rawPayload': 'Raw Payload',
   'integrity.columns.debtSymmetry': 'Debt symmetry',
   'integrity.notVerified': 'not verified',
+  'integrity.overLimitAllowed': 'Over the lowered limit (allowed, not a failure): {n}',
+  'integrity.overLimitItem': '{debtor} owes {creditor}: {debt} against a limit of {limit} (over by {excess})',
+  'integrity.growthNotVerified': 'Debt growth is not verified by a snapshot; it is refused on the write path (a payment).',
   'integrity.columns.zeroSum': 'Zero-sum',
   'integrity.columns.trustLimits': 'Trust limits',
   'integrity.holds.title': 'Equivalent holds',

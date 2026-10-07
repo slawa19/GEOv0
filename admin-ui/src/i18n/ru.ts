@@ -96,6 +96,10 @@ export const RU: Record<string, string> = {
   'equivalents.usage.tlDebtsIc': 'Используется: {trustlines}\u00A0TL / {debts}\u00A0Debts / {ic}\u00A0IC',
   'equivalents.warning.deletePermanent': 'Это навсегда удалит эквивалент. Отменить нельзя.',
 
+  'notFound.title': 'Страница не найдена',
+  'notFound.text': 'Страницы {path} не существует.',
+  'notFound.toDashboard': 'На дашборд',
+
   'dashboard.title': 'Дашборд',
   'dashboard.card.participantsByType': 'Участники по типам',
   'dashboard.card.participantsByStatus': 'Участники по статусам',
@@ -319,6 +323,9 @@ export const RU: Record<string, string> = {
   'integrity.section.rawPayload': 'Сырые данные',
   'integrity.columns.debtSymmetry': 'Симметрия долгов',
   'integrity.notVerified': 'не проверяется',
+  'integrity.overLimitAllowed': 'Выше сниженного лимита (допустимо, не нарушение): {n}',
+  'integrity.overLimitItem': '{debtor} должен {creditor}: {debt} при лимите {limit} (превышение {excess})',
+  'integrity.growthNotVerified': 'Рост долга снимок не проверяет; он отказывается на пути записи (при платеже).',
   'integrity.columns.zeroSum': 'Нулевой баланс',
   'integrity.columns.trustLimits': 'Лимиты доверия',
   'integrity.holds.title': 'Удержания эквивалентов',
