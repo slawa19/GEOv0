@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import GraphAnalyticsDrawer from './GraphAnalyticsDrawer.vue'
 import { formatMoneyByEquivalent } from '../../composables/useEquivalentPrecision'
@@ -30,7 +30,6 @@ function mountDrawer(over: Record<string, unknown> = {}) {
       connectionsOutgoingPage: 1,
       selected: { kind: 'node', pid: 'PID_A', degree: 0, inDegree: 0, outDegree: 0 },
       availableEquivalents: ['EUR', 'HOUR'],
-      reloadCurrentView: vi.fn(),
       money: (value: string, equivalent: unknown) => formatMoneyByEquivalent(value, equivalent, PRECISION),
       metricsLoading: false,
       metricsError: null,
@@ -40,7 +39,6 @@ function mountDrawer(over: Record<string, unknown> = {}) {
       selectedConnectionsIncomingPaged: [],
       selectedConnectionsOutgoingPaged: [],
       connectionsPageSize: 10,
-      onConnectionRowClick: vi.fn(),
       ...over,
     },
     global: {
@@ -114,12 +112,11 @@ describe('GraphAnalyticsDrawer (032 S5, F-1)', () => {
     expect(summaryNetLines(failed)).toEqual([])
   })
 
-  it('delegates refresh to the current-view reload supplied by GraphPage', async () => {
-    const reloadCurrentView = vi.fn()
-    const wrapper = mountDrawer({ reloadCurrentView })
+  it('asks the page to reload the current view when refresh is pressed', async () => {
+    const wrapper = mountDrawer()
 
     await wrapper.get('[data-testid="refresh-current-graph-view"]').trigger('click')
 
-    expect(reloadCurrentView).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 })

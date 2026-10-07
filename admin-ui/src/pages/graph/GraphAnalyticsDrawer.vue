@@ -1,23 +1,14 @@
 <script setup lang="ts">
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import CopyIconButton from '../../ui/CopyIconButton.vue'
+import GraphConnectionsTable from './GraphConnectionsTable.vue'
 import { t } from '../../i18n'
 import { labelTrustlineStatus } from '../../i18n/labels'
+import { formatTs } from '../../utils/datetime'
 
 import type { DrawerTab, SelectedInfo } from '../../composables/useGraphVisualization'
 import type { BalanceRow } from '../../types/domain'
-
-type ConnectionRow = {
-  direction: 'incoming' | 'outgoing'
-  counterparty_pid: string
-  counterparty_name: string
-  equivalent: string
-  status: string
-  limit: string
-  used: string
-  available: string
-  bottleneck: boolean
-}
+import type { ConnectionRow } from './useGraphConnections'
 
 const open = defineModel<boolean>({ required: true })
 const tab = defineModel<DrawerTab>('tab', { required: true })
@@ -30,7 +21,6 @@ defineProps<{
 
   availableEquivalents: string[]
 
-  reloadCurrentView: () => void
   money: (v: string, equivalent: unknown) => string
 
   // 032 S5 (F-1): the balance rows are the server's `balance_rows`. While they load the drawer says
@@ -45,8 +35,12 @@ defineProps<{
   selectedConnectionsOutgoingPaged: ConnectionRow[]
 
   connectionsPageSize: number
+}>()
 
-  onConnectionRowClick: (row: ConnectionRow) => void
+const emit = defineEmits<{
+  /** Read the graph again (what the drawer shows is part of it). */
+  refresh: []
+  connectionRowClick: [row: ConnectionRow]
 }>()
 </script>
 
@@ -117,7 +111,7 @@ defineProps<{
               <el-button
                 size="small"
                 data-testid="refresh-current-graph-view"
-                @click="reloadCurrentView"
+                @click="emit('refresh')"
               >
                 {{ t('common.refresh') }}
               </el-button>
@@ -200,142 +194,25 @@ defineProps<{
             />
             <div v-else>
               <el-divider>{{ t('graph.common.incomingOwedToYou') }}</el-divider>
-              <div class="tableTop">
-                <el-pagination
-                  v-model:current-page="connectionsIncomingPage"
-                  :page-size="connectionsPageSize"
-                  :total="selectedConnectionsIncoming.length"
-                  size="small"
-                  background
-                  layout="prev, pager, next, total"
-                />
-              </div>
-              <el-table
-                :data="selectedConnectionsIncomingPaged"
-                size="small"
-                border
-                table-layout="fixed"
-                style="width: 100%"
-                class="mb clickable-table"
-                highlight-current-row
-                @row-click="onConnectionRowClick"
-              >
-                <el-table-column
-                  :label="t('graph.analytics.connections.columns.counterparty')"
-                  min-width="220"
-                >
-                  <template #default="{ row }">
-                    <span class="mono pidLink">{{ row.counterparty_pid }}</span>
-                    <span
-                      v-if="row.counterparty_name"
-                      class="muted"
-                    > — {{ row.counterparty_name }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  prop="equivalent"
-                  :label="t('graph.analytics.connections.columns.eq')"
-                  width="80"
-                />
-                <el-table-column
-                  prop="status"
-                  :label="t('common.status')"
-                  width="90"
-                />
-                <el-table-column
-                  :label="t('trustlines.available')"
-                  width="120"
-                >
-                  <template #default="{ row }">
-                    {{ money(row.available, row.equivalent) }}
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  :label="t('trustlines.used')"
-                  width="120"
-                >
-                  <template #default="{ row }">
-                    {{ money(row.used, row.equivalent) }}
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  :label="t('trustlines.limit')"
-                  width="120"
-                >
-                  <template #default="{ row }">
-                    {{ money(row.limit, row.equivalent) }}
-                  </template>
-                </el-table-column>
-              </el-table>
+              <GraphConnectionsTable
+                v-model:page="connectionsIncomingPage"
+                class="mb"
+                :rows="selectedConnectionsIncoming"
+                :paged-rows="selectedConnectionsIncomingPaged"
+                :page-size="connectionsPageSize"
+                :money="money"
+                @row-click="(row) => emit('connectionRowClick', row)"
+              />
 
               <el-divider>{{ t('graph.common.outgoingYouOwe') }}</el-divider>
-              <div class="tableTop">
-                <el-pagination
-                  v-model:current-page="connectionsOutgoingPage"
-                  :page-size="connectionsPageSize"
-                  :total="selectedConnectionsOutgoing.length"
-                  size="small"
-                  background
-                  layout="prev, pager, next, total"
-                />
-              </div>
-              <el-table
-                :data="selectedConnectionsOutgoingPaged"
-                size="small"
-                border
-                table-layout="fixed"
-                style="width: 100%"
-                class="clickable-table"
-                highlight-current-row
-                @row-click="onConnectionRowClick"
-              >
-                <el-table-column
-                  :label="t('graph.analytics.connections.columns.counterparty')"
-                  min-width="220"
-                >
-                  <template #default="{ row }">
-                    <span class="mono pidLink">{{ row.counterparty_pid }}</span>
-                    <span
-                      v-if="row.counterparty_name"
-                      class="muted"
-                    > — {{ row.counterparty_name }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  prop="equivalent"
-                  :label="t('graph.analytics.connections.columns.eq')"
-                  width="80"
-                />
-                <el-table-column
-                  prop="status"
-                  :label="t('common.status')"
-                  width="90"
-                />
-                <el-table-column
-                  :label="t('trustlines.available')"
-                  width="120"
-                >
-                  <template #default="{ row }">
-                    {{ money(row.available, row.equivalent) }}
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  :label="t('trustlines.used')"
-                  width="120"
-                >
-                  <template #default="{ row }">
-                    {{ money(row.used, row.equivalent) }}
-                  </template>
-                </el-table-column>
-                <el-table-column
-                  :label="t('trustlines.limit')"
-                  width="120"
-                >
-                  <template #default="{ row }">
-                    {{ money(row.limit, row.equivalent) }}
-                  </template>
-                </el-table-column>
-              </el-table>
+              <GraphConnectionsTable
+                v-model:page="connectionsOutgoingPage"
+                :rows="selectedConnectionsOutgoing"
+                :paged-rows="selectedConnectionsOutgoingPaged"
+                :page-size="connectionsPageSize"
+                :money="money"
+                @row-click="(row) => emit('connectionRowClick', row)"
+              />
             </div>
           </el-tab-pane>
 
@@ -492,7 +369,7 @@ defineProps<{
             {{ money(selected.available, selected.equivalent) }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('trustlines.createdAt')">
-            {{ selected.created_at }}
+            {{ formatTs(selected.created_at) }}
           </el-descriptions-item>
         </el-descriptions>
       </div>
@@ -597,22 +474,4 @@ defineProps<{
   color: var(--el-text-color-secondary);
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: var(--geo-font-size-sub);
-}
-
-.pidLink {
-  color: var(--el-color-primary);
-}
-
-.clickable-table :deep(tr) {
-  cursor: pointer;
-}
-
-.tableTop {
-  display: flex;
-  justify-content: flex-end;
-  margin: 6px 0 8px;
-}
 </style>

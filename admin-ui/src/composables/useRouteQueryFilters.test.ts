@@ -14,6 +14,7 @@ type Harness = {
   router: Router
   q: Ref<string>
   threshold: Ref<string>
+  kept: Ref<string>
   onRouteChange: ReturnType<typeof vi.fn>
   onUserChange: ReturnType<typeof vi.fn>
   applyRoute: () => boolean
@@ -25,6 +26,7 @@ async function harness(initial: Record<string, string> = {}): Promise<Harness> {
   const onUserChange = vi.fn()
   const q = ref('')
   const threshold = ref('0.10')
+  const kept = ref('')
   let applyRoute!: () => boolean
   const page = defineComponent({
     setup() {
@@ -34,6 +36,7 @@ async function harness(initial: Record<string, string> = {}): Promise<Harness> {
         path: '/page',
         filters: {
           q: { model: q, fromQuery: (raw) => raw.trim(), toQuery: (v) => v.trim() },
+          kept: { model: kept, keepWhenAbsent: true },
           threshold: {
             model: threshold,
             fromQuery: (raw) => raw.trim() || '0.10',
@@ -59,7 +62,7 @@ async function harness(initial: Record<string, string> = {}): Promise<Harness> {
   await router.isReady()
   const wrapper = mount({ template: '<router-view />' }, { global: { plugins: [router] } })
   await nextTick()
-  return { router, q, threshold, onRouteChange, onUserChange, applyRoute: () => applyRoute(), unmount: () => wrapper.unmount() }
+  return { router, q, threshold, kept, onRouteChange, onUserChange, applyRoute: () => applyRoute(), unmount: () => wrapper.unmount() }
 }
 
 async function flush() {
@@ -118,6 +121,23 @@ describe('useRouteQueryFilters', () => {
     await flush()
     expect(h.q.value).toBe('')
     expect(h.onRouteChange).toHaveBeenCalledTimes(2)
+    h.unmount()
+  })
+
+  it('a filter marked keepWhenAbsent keeps the value the page chose when the route does not carry the key', async () => {
+    const h = await harness()
+    h.kept.value = 'UAH'
+    await flush()
+    expect(h.router.currentRoute.value.query).toEqual({ kept: 'UAH' })
+
+    await h.router.replace({ query: { q: 'x' } })
+    await flush()
+    expect(h.kept.value).toBe('UAH')
+    expect(h.q.value).toBe('x')
+    // And the route still wins when it does carry the key.
+    await h.router.replace({ query: { kept: 'EUR' } })
+    await flush()
+    expect(h.kept.value).toBe('EUR')
     h.unmount()
   })
 

@@ -4,7 +4,6 @@ import { useLatestRequest } from '../../composables/useLatestRequest'
 import { renderWithPrecisionAsMaximum } from '../../test/precisionAsMaximum'
 
 import {
-  computeSeedLabel,
   createDebouncedGraphElementSearch,
   extractPidFromText,
   graphElementOptionsForSearch,
@@ -56,14 +55,6 @@ describe('graphPageHelpers', () => {
     expect(modeToLabelParts('name')).toEqual(['name'])
     expect(modeToLabelParts('pid')).toEqual(['pid'])
     expect(modeToLabelParts('both')).toEqual(['name', 'pid'])
-  })
-
-  it('computeSeedLabel handles known seeds and fallback', () => {
-    expect(computeSeedLabel(undefined)).toBe('Seed: (not loaded)')
-    expect(computeSeedLabel([{ display_name: 'Greenfield Village (Test)' }, { display_name: 'x' }])).toMatch(/^Seed: 2 participants, first:/)
-
-    const greenfield = Array.from({ length: 100 }, (_, i) => ({ display_name: i === 0 ? 'Greenfield Village (Test)' : 'X' }))
-    expect(computeSeedLabel(greenfield)).toBe('Seed: Greenfield (100)')
   })
 
   it('does not build guarded keyboard options before a meaningful query', () => {

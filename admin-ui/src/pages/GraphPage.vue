@@ -19,7 +19,6 @@ import GraphAnalyticsDrawer from './graph/GraphAnalyticsDrawer.vue'
 import GraphLegend from './graph/GraphLegend.vue'
 import GraphFiltersToolbar from './graph/GraphFiltersToolbar.vue'
 import {
-  computeSeedLabel,
   createDebouncedGraphElementSearch,
   extractPidFromText,
   graphElementOptionsForSearch,
@@ -38,27 +37,12 @@ import { useGraphPageStorage } from './graph/useGraphPageStorage'
 import { useGraphPageOptions } from './graph/useGraphPageOptions'
 import { useGraphPageWatchers } from './graph/useGraphPageWatchers'
 import GraphKeyboardNavigator from './graph/GraphKeyboardNavigator.vue'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
-import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
+import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 import { useLatestRequest } from '../composables/useLatestRequest'
 
 const route = useRoute()
 const router = useRouter()
-
-const { isApplying: applyingRouteQuery, isActive: isGraphRoute, run: withRouteHydration } =
-  useRouteHydrationGuard(route, '/graph')
-
-function updateRouteQuery(patch: Record<string, unknown>) {
-  // Avoid calling router.replace after the user navigated away (prevents double navigation/flicker).
-  if (!isGraphRoute.value) return
-  const query: Record<string, unknown> = { ...route.query }
-  for (const [k, v] of Object.entries(patch)) {
-    const s = typeof v === 'string' ? v.trim() : v
-    if (s === '' || s === null || s === undefined) delete query[k]
-    else query[k] = v
-  }
-  void router.replace({ query: toLocationQueryRaw(query) })
-}
 
 const cyRoot = ref<HTMLElement | null>(null)
 
@@ -68,43 +52,34 @@ const drawerTab = ref<DrawerTab>('summary')
 const drawerEq = ref<string>('ALL')
 
 const analyticsEq = computed(() => {
-  const key = String(drawerEq.value || '').trim().toUpperCase()
+  const key = normalizeEquivalentCode(drawerEq.value)
   return key === 'ALL' ? null : key
-})
-
-const seedLabel = computed(() => {
-  return computeSeedLabel(participants.value)
 })
 
 const eq = ref<string>('')  // Will be auto-selected to primary equivalent after loadData()
 const statusFilter = ref<string[]>(['active', 'closed'])
 const threshold = ref<string>(DEFAULT_THRESHOLD)
 
-function syncFromRouteQuery() {
-  // Avoid mutating state when this component is being navigated away from.
-  if (!isGraphRoute.value) return
-  withRouteHydration(() => {
-    const nextEq = readQueryString(route.query.equivalent).trim().toUpperCase()
-    const nextThr = readQueryString(route.query.threshold).trim()
-    if (nextEq) eq.value = nextEq === 'ALL' ? '' : nextEq
-    if (nextThr) threshold.value = nextThr
-  })
-}
-
-watch(
-  () => [route.query.equivalent, route.query.threshold],
-  () => syncFromRouteQuery(),
-  { immediate: true },
-)
-
-watch(eq, (v) => {
-  if (applyingRouteQuery.value) return
-  updateRouteQuery({ equivalent: v || '' })
+// The equivalent and the bottleneck threshold are linked in the URL. A route that does not carry them leaves them
+// as they are: the page picks the equivalent itself once the data is in (`eqAutoSelected`), and the threshold has a default.
+const { applyRoute } = useRouteQueryFilters({
+  route,
+  router,
+  path: '/graph',
+  filters: {
+    equivalent: {
+      model: eq,
+      fromQuery: (raw) => {
+        const code = normalizeEquivalentCode(raw)
+        return code === 'ALL' ? '' : code
+      },
+      toQuery: (value) => value,
+      keepWhenAbsent: true,
+    },
+    threshold: { model: threshold, keepWhenAbsent: true },
+  },
 })
-watch(threshold, (v) => {
-  if (applyingRouteQuery.value) return
-  updateRouteQuery({ threshold: String(v || '').trim() })
-})
+applyRoute()
 
 const typeFilter = ref<string[]>(['person', 'business'])
 const minDegree = ref<number>(0)
@@ -504,9 +479,6 @@ const graphLiveAnnouncement = computed(() => {
 
           <div class="hdr__stats">
             <el-tag type="info">
-              {{ seedLabel }}
-            </el-tag>
-            <el-tag type="info">
               {{ t('graph.stats.nodes') }}: {{ stats.nodes }}
             </el-tag>
             <el-tag type="info">
@@ -578,12 +550,12 @@ const graphLiveAnnouncement = computed(() => {
       :statuses="statuses"
       :layout-options="layoutOptions"
       :fetch-suggestions="graphViz.querySearchParticipants"
-      :on-focus-search="graphViz.focusSearch"
       :can-find="graphViz.canFind.value"
       :focus-root-pid="focusRootPid"
       :can-use-selected-for-focus="canUseSelectedForFocus"
-      :on-use-selected-for-focus="useSelectedForFocus"
-      :on-clear-focus-mode="clearFocusMode"
+      @focus-search="graphViz.focusSearch"
+      @use-selected-for-focus="useSelectedForFocus"
+      @clear-focus="clearFocusMode"
     />
 
     <GraphKeyboardNavigator
@@ -655,7 +627,6 @@ const graphLiveAnnouncement = computed(() => {
     v-model:connections-outgoing-page="connectionsOutgoingPage"
     :selected="selected"
     :available-equivalents="availableEquivalents"
-    :reload-current-view="reloadDrawer"
     :money="moneyByEquivalent"
     :metrics-loading="metricsLoading"
     :metrics-error="metricsError"
@@ -665,7 +636,8 @@ const graphLiveAnnouncement = computed(() => {
     :selected-connections-incoming-paged="selectedConnectionsIncomingPaged"
     :selected-connections-outgoing-paged="selectedConnectionsOutgoingPaged"
     :connections-page-size="connectionsPageSize"
-    :on-connection-row-click="onConnectionRowClick"
+    @refresh="reloadDrawer"
+    @connection-row-click="onConnectionRowClick"
   />
 </template>
 

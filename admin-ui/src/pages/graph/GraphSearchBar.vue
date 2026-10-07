@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import TooltipLabel from '../../ui/TooltipLabel.vue'
 import { t } from '../../i18n'
 
@@ -10,28 +9,19 @@ type ParticipantSuggestion = {
 
 type FetchSuggestionsFn = (query: string, cb: (results: ParticipantSuggestion[]) => void) => void
 
-type Props = {
-  searchQuery: string
-  focusPid: string
+const searchQuery = defineModel<string>('searchQuery', { required: true })
+const focusPid = defineModel<string>('focusPid', { required: true })
+
+defineProps<{
   canFind?: boolean
+  /** The autocomplete calls this with a callback; it is a function by the contract of that component. */
   fetchSuggestions: FetchSuggestionsFn
-  onFocusSearch: () => void
-}
-
-const props = defineProps<Props>()
-
-const emit = defineEmits<{
-  (e: 'update:searchQuery', v: string): void
-  (e: 'update:focusPid', v: string): void
 }>()
 
-const searchQueryModel = computed({
-  get: () => props.searchQuery,
-  set: (v) => emit('update:searchQuery', v),
-})
+const emit = defineEmits<{ focusSearch: [] }>()
 
 const onSelect = (s: ParticipantSuggestion) => {
-  emit('update:focusPid', String(s?.pid || ''))
+  focusPid.value = String(s?.pid || '')
 }
 </script>
 
@@ -41,10 +31,10 @@ const onSelect = (s: ParticipantSuggestion) => {
       class="toolbarLabel navRow__label"
       :label="t('graph.search.label')"
       tooltip-key="graph.search"
-        :max-lines="4"
+      :max-lines="4"
     />
     <el-autocomplete
-      v-model="searchQueryModel"
+      v-model="searchQuery"
       :fetch-suggestions="fetchSuggestions"
       :placeholder="t('graph.search.placeholder')"
       size="small"
@@ -52,13 +42,13 @@ const onSelect = (s: ParticipantSuggestion) => {
       class="navRow__field"
       data-testid="graph-search-input"
       @select="onSelect"
-      @keyup.enter="onFocusSearch"
+      @keyup.enter="emit('focusSearch')"
     />
     <el-button
       class="navRow__button"
       size="small"
-      :disabled="props.canFind === false"
-      @click="onFocusSearch"
+      :disabled="canFind === false"
+      @click="emit('focusSearch')"
     >
       {{ t('graph.navigate.find') }}
     </el-button>
