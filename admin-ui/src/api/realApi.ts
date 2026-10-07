@@ -1,4 +1,4 @@
-import { DEFAULT_REQUEST_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS } from '../constants/timing'
+import { DEFAULT_REQUEST_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS, LONG_REQUEST_TIMEOUT_MS } from '../constants/timing'
 import { normalizeEquivalentCode } from '../utils/equivalent'
 import { ApiException } from './apiException'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
@@ -420,6 +420,7 @@ export const realApi = {
       method: 'POST',
       body: { reason },
       admin: true,
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       schema: AdminEquivalentMutationResponseSchema,
     })
   },
@@ -429,6 +430,7 @@ export const realApi = {
       method: 'POST',
       body: {},
       admin: true,
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       schema: IntegrityVerifyResponseSchema,
     })
   },

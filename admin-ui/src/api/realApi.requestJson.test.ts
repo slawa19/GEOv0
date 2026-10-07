@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
-import { DEFAULT_REQUEST_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS } from '../constants/timing'
+import { DEFAULT_REQUEST_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS, LONG_REQUEST_TIMEOUT_MS } from '../constants/timing'
 import { ApiException } from './apiException'
 import { realApi, requestJson } from './realApi'
 
@@ -318,6 +318,27 @@ describe('realApi.requestJson: timeout (032 S6, E-2)', () => {
     await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS)
     await other
     expect(ordinary).toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('lets the two reconciliation-running actions wait longer than an ordinary request', async () => {
+    vi.useFakeTimers()
+    noBase()
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_ADMIN_TOKEN = 'test-token'
+    vi.stubGlobal('fetch', vi.fn(hangs) as unknown as typeof fetch)
+
+    expect(LONG_REQUEST_TIMEOUT_MS).toBeGreaterThan(DEFAULT_REQUEST_TIMEOUT_MS)
+    for (const action of [() => realApi.integrityVerify(), () => realApi.clearIntegrityHold('UAH', 'recheck')]) {
+      let outcome: unknown = 'pending'
+      const run = action().catch((e: unknown) => {
+        outcome = e
+      })
+      await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS)
+      expect(outcome).toBe('pending')
+      await vi.advanceTimersByTimeAsync(LONG_REQUEST_TIMEOUT_MS - DEFAULT_REQUEST_TIMEOUT_MS)
+      await run
+      expect(outcome).toMatchObject({ code: 'TIMEOUT' })
+    }
   })
 
   it('does not kill a request that answered: no timer is left once the body is read', async () => {
