@@ -186,7 +186,7 @@ def declare_auth_statuses(app: FastAPI, document: dict) -> None:
       defect.
     * `get_current_participant` is in the 403 set as well as the 401 set, because a participant
       whose `status != 'active'` gets `ForbiddenException("Participant account is not active")`.
-      `POST /admin/participants/{pid}/ban` and `/freeze` are that branch's writers.
+      `POST /admin/participants/{pid}/freeze` is that branch's operator writer (ban/unban removed in 032 F-5).
 
     The closure is walked to any depth. `require_simulator_actor` pulls in its own
     sub-dependencies, and a router-level `Depends` sits at the same level as an endpoint-level one
