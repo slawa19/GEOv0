@@ -2,18 +2,19 @@ import { computed, ref, watch, type Ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { api } from '../api'
-import { t } from '../i18n'
-import { buildFocusModeQuery } from '../pages/graph/graphPageHelpers'
+import { describeError } from '../api/describeError'
+import { buildFocusModeQuery } from './graph/graphQueries'
+import { normalizeEquivalentCode } from '../utils/equivalent'
+import { buildPrecisionByEquivalent } from './useEquivalentPrecision'
 import { useLatestRequest } from './useLatestRequest'
-import type { Equivalent, GraphSnapshotPayload, Participant, Trustline } from '../pages/graph/graphTypes'
+import type { Equivalent, GraphSnapshot, Participant, Trustline } from '../types/domain'
+
+/** The collections of a snapshot the graph page reads; the optional `audit_log` / `transactions` are not requested. */
+type GraphSnapshotPayload = Pick<GraphSnapshot, 'participants' | 'trustlines' | 'equivalents'>
 
 // 032 S5 (F-1). The page asks for no optional snapshot collection: `transactions` was requested
 // only for the drawer's activity card, `incidents` fed the incident overlay, and both are removed
 // together with the participant analytics. Balance rows come from `/participants/{pid}/metrics`.
-
-export function normalizeEqCode(v: string): string {
-  return String(v || '').trim().toUpperCase()
-}
 
 /**
  * Compute the primary (most popular) equivalent based on active trustlines count.
@@ -24,7 +25,7 @@ export function computePrimaryEquivalent(trustlines: { equivalent: string; statu
   for (const t of trustlines || []) {
     const status = String(t.status || '').toLowerCase()
     if (status !== 'active') continue
-    const code = normalizeEqCode(t.equivalent)
+    const code = normalizeEquivalentCode(t.equivalent)
     if (!code) continue
     countByEq.set(code, (countByEq.get(code) || 0) + 1)
   }
@@ -42,7 +43,7 @@ export function computePrimaryEquivalent(trustlines: { equivalent: string; statu
 
   // Fallback: first equivalent from the list
   const first = (equivalents || [])[0]
-  return first ? normalizeEqCode(first.code) : ''
+  return first ? normalizeEquivalentCode(first.code) : ''
 }
 
 export function filterTrustlinesByEqAndStatus(input: {
@@ -50,12 +51,12 @@ export function filterTrustlinesByEqAndStatus(input: {
   equivalent: string
   statusFilter: string[]
 }): Trustline[] {
-  const eqKey = normalizeEqCode(input.equivalent)
+  const eqKey = normalizeEquivalentCode(input.equivalent)
   const allowed = new Set((input.statusFilter || []).map((s) => String(s).toLowerCase()).filter(Boolean))
 
   return (input.trustlines || []).filter((t) => {
     // Filter by equivalent (empty = show all)
-    if (eqKey && normalizeEqCode(t.equivalent) !== eqKey) return false
+    if (eqKey && normalizeEquivalentCode(t.equivalent) !== eqKey) return false
     if (allowed.size && !allowed.has(String(t.status || '').toLowerCase())) return false
     return true
   })
@@ -78,28 +79,20 @@ export function useGraphData(opts: {
   // 028 F-028-49 (C2, owner В-3): an equivalent the page chose for the operator is SHOWN as chosen, until the
   // operator picks one; one graph shows one equivalent, and the operator must see which and why.
   const autoSelectedEq = ref('')
-  const eqAutoSelected = computed(() => !!autoSelectedEq.value && normalizeEqCode(opts.eq.value) === autoSelectedEq.value)
+  const eqAutoSelected = computed(() => !!autoSelectedEq.value && normalizeEquivalentCode(opts.eq.value) === autoSelectedEq.value)
   watch(opts.eq, (v) => {
-    if (normalizeEqCode(v) !== autoSelectedEq.value) autoSelectedEq.value = ''
+    if (normalizeEquivalentCode(v) !== autoSelectedEq.value) autoSelectedEq.value = ''
   })
 
   const availableEquivalents = computed(() => {
-    const fromDs = (equivalents.value || []).map((e) => normalizeEqCode(e.code)).filter(Boolean)
-    const fromTls = (trustlines.value || []).map((t) => normalizeEqCode(t.equivalent)).filter(Boolean)
+    const fromDs = (equivalents.value || []).map((e) => normalizeEquivalentCode(e.code)).filter(Boolean)
+    const fromTls = (trustlines.value || []).map((t) => normalizeEquivalentCode(t.equivalent)).filter(Boolean)
     // Note: 'ALL' option removed — now we always select a specific equivalent for proper viz_* support
     return Array.from(new Set([...fromDs, ...fromTls])).sort()
   })
 
-  const precisionByEq = computed(() => {
-    const m = new Map<string, number>()
-    for (const e of equivalents.value || []) {
-      const code = normalizeEqCode(e.code)
-      if (!code) continue
-      const p = Number(e.precision)
-      if (Number.isFinite(p)) m.set(code, p)
-    }
-    return m
-  })
+  // The one precision map (`buildPrecisionByEquivalent`): the same predicate for every consumer.
+  const precisionByEq = computed(() => buildPrecisionByEquivalent(equivalents.value))
 
   const participantByPid = computed(() => {
     const m = new Map<string, Participant>()
@@ -127,9 +120,9 @@ export function useGraphData(opts: {
 
   function toPayload(src: Partial<GraphSnapshotPayload>): GraphSnapshotPayload {
     return {
-      participants: (src.participants || []) as Participant[],
-      trustlines: (src.trustlines || []) as Trustline[],
-      equivalents: (src.equivalents || []) as Equivalent[],
+      participants: src.participants || [],
+      trustlines: src.trustlines || [],
+      equivalents: src.equivalents || [],
     }
   }
 
@@ -145,7 +138,7 @@ export function useGraphData(opts: {
     error.value = null
     try {
       // First load without equivalent to get full trustlines list for primary equivalent computation
-      const snapEq = normalizeEqCode(opts.eq.value)
+      const snapEq = normalizeEquivalentCode(opts.eq.value)
       const snap = await api.graphSnapshot({ equivalent: snapEq || undefined })
       if (!viewRequest.isCurrent()) return false
       const payload = toPayload(snap)
@@ -153,16 +146,15 @@ export function useGraphData(opts: {
       fullSnapshot = payload
 
       // Auto-select primary equivalent if not set or invalid
-      const currentEq = normalizeEqCode(opts.eq.value)
+      const currentEq = normalizeEquivalentCode(opts.eq.value)
       if (!currentEq || !availableEquivalents.value.includes(currentEq)) {
         opts.eq.value = computePrimaryEquivalent(payload.trustlines, payload.equivalents)
-        autoSelectedEq.value = normalizeEqCode(opts.eq.value)
+        autoSelectedEq.value = normalizeEquivalentCode(opts.eq.value)
       }
       return true
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
-      const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      error.value = describeError(e, 'graph.data.loadFailed').text
       return false
     } finally {
       if (viewRequest.isCurrent()) loading.value = false
@@ -175,7 +167,7 @@ export function useGraphData(opts: {
     loading.value = true
     error.value = null
     try {
-      const snapEq = normalizeEqCode(opts.eq.value)
+      const snapEq = normalizeEquivalentCode(opts.eq.value)
       const snap = await api.graphSnapshot({ equivalent: snapEq || undefined })
       if (!request.isCurrent()) return false
       const payload = toPayload(snap)
@@ -184,8 +176,7 @@ export function useGraphData(opts: {
       return true
     } catch (e: unknown) {
       if (!request.isCurrent()) return false
-      const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      error.value = describeError(e, 'graph.data.loadFailed').text
       return false
     } finally {
       if (request.isCurrent()) loading.value = false
@@ -227,8 +218,7 @@ export function useGraphData(opts: {
       return true
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
-      const msg = e instanceof Error ? e.message : String(e)
-      const failure = msg || t('graph.focusMode.loadFailed')
+      const failure = describeError(e, 'graph.focusMode.loadFailed').text
       error.value = failure
       ElMessage.warning(failure)
       return false

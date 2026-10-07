@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
 import { t } from '../i18n'
 
@@ -102,7 +103,7 @@ export const useHealthStore = defineStore('health', {
           this.migrations = await api.migrations()
           this.error = null
         } catch (e: unknown) {
-          this.error = e instanceof Error ? e.message : t('health.loadFailed')
+          this.error = describeError(e, 'health.loadFailed').text
         } finally {
           this.loading = false
           this._refreshPromise = null

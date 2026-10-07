@@ -56,7 +56,7 @@ describe('realApi without an admin token', () => {
     vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch)
 
     try {
-      const failure = requestJson('/api/v1/admin/participants', { admin: true, toast: false })
+      const failure = requestJson('/api/v1/admin/participants', { admin: true })
       await expect(failure).rejects.toBeInstanceOf(ApiException)
       await expect(failure).rejects.toMatchObject({ status: 401, code: 'ADMIN_TOKEN_MISSING' })
       expect(fetchSpy).not.toHaveBeenCalled()

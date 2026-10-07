@@ -1,18 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { __resetApiErrorToastForTests } from './errorToast'
 import { realApi } from './realApi'
 
 // 032 S4 (2026-10-07): the feature-flag client methods and the mock-client cases of this file were
 // removed with `/admin/feature-flags` and the mock client. What the mock cases asserted about the server
 // (partial patch, refusal of unknown/start-only/wrong-type keys) is held by the backend:
 // tests/unit/test_admin_config_patch_atomicity.py and tests/integration/test_p029_s1_operations.py.
-
-vi.mock('element-plus', () => ({
-  ElMessage: {
-    error: vi.fn(),
-  },
-}))
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify(data), {
@@ -42,7 +35,6 @@ function runtimeConfig(overrides: Record<string, unknown> = {}) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  __resetApiErrorToastForTests()
 })
 
 describe('Admin config contracts', () => {

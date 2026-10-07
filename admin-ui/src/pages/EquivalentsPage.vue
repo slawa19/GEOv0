@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
@@ -72,8 +73,7 @@ async function load() {
     items.value = data.items
   } catch (e: unknown) {
     if (!request.isCurrent()) return
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('equivalents.loadFailed')
+    error.value = describeError(e, 'equivalents.loadFailed').text
   } finally {
     if (request.isCurrent()) loading.value = false
   }
@@ -111,8 +111,7 @@ async function createEq() {
     await load()
   } catch (e: unknown) {
     if (!pageActive) return
-    const msg = e instanceof Error ? e.message : String(e)
-    ElMessage.error(msg || t('equivalents.createFailed'))
+    ElMessage.error(describeError(e, 'equivalents.createFailed').text)
   }
 }
 
@@ -131,8 +130,7 @@ async function saveEdit() {
     await load()
   } catch (e: unknown) {
     if (!pageActive) return
-    const msg = e instanceof Error ? e.message : String(e)
-    ElMessage.error(msg || t('equivalents.updateFailed'))
+    ElMessage.error(describeError(e, 'equivalents.updateFailed').text)
   }
 }
 
@@ -165,8 +163,7 @@ async function setActive(row: Equivalent, next: boolean) {
     await load()
   } catch (e: unknown) {
     if (!pageActive) return
-    const msg = e instanceof Error ? e.message : String(e)
-    ElMessage.error(msg || t('equivalents.updateFailed'))
+    ElMessage.error(describeError(e, 'equivalents.updateFailed').text)
   }
 }
 
@@ -222,19 +219,18 @@ async function deleteEq(row: Equivalent) {
     const tl = details?.trustlines
     const debts = details?.debts
     const ic = details?.integrity_checkpoints
-    const msg = e instanceof Error ? e.message : String(err?.message ?? e)
 
     if ([tl, debts, ic].some((v) => typeof v === 'number')) {
       ElMessage.error(
         t('equivalents.deleteFailedWithDetails', {
-          msg: msg || t('equivalents.deleteFailed'),
+          msg: describeError(e, 'equivalents.deleteFailed').text,
           trustlines: Number(tl ?? 0),
           debts: Number(debts ?? 0),
           ic: Number(ic ?? 0),
         }),
       )
     } else {
-      ElMessage.error(msg || t('equivalents.deleteFailed'))
+      ElMessage.error(describeError(e, 'equivalents.deleteFailed').text)
     }
   }
 }

@@ -1,5 +1,6 @@
+import { DEFAULT_REQUEST_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS, LONG_REQUEST_TIMEOUT_MS } from '../constants/timing'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 import { ApiException } from './apiException'
-import { toastApiError } from './errorToast'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 import {
   AdminConfigPatchResponseSchema,
@@ -13,7 +14,6 @@ import {
   IntegrityVerifyResponseSchema,
   flattenAdminConfig,
   type AdminConfigPatchResponse,
-  type AdminConfigResponse,
   type AdminEquivalentDeleteResponse,
   type AdminEquivalentUsageResponse,
   type AdminParticipantActionResponse,
@@ -21,7 +21,17 @@ import {
   type IntegritySummaryResponse,
   type IntegrityVerifyResponse,
 } from './adminContracts'
-import { z, type ZodTypeAny } from 'zod'
+import {
+  AuditLogListSchema,
+  EquivalentsListSchema,
+  GraphSnapshotSchema,
+  LiquiditySummarySchema,
+  ParticipantMetricsSchema,
+  ParticipantsListSchema,
+  ParticipantsStatsSchema,
+  TrustlinesListSchema,
+} from './schemas'
+import type { z } from 'zod'
 import type {
   AuditLogEntry,
   Equivalent,
@@ -47,219 +57,6 @@ function safeJsonPreview(value: unknown, maxLen = 500): string | null {
     return null
   }
 }
-
-// Backend may serialize Decimal-like values as strings (preferred) but some environments
-// might emit numbers. Normalize to string to keep the UI stable.
-const DecimalString = z.union([z.string(), z.number()]).transform((v) => String(v))
-
-const ParticipantSchema = z
-  .object({
-    pid: z.string(),
-    display_name: z.string(),
-    type: z.string(),
-    status: z.string(),
-    created_at: z.string().optional(),
-    meta: z.record(z.string(), z.unknown()).optional(),
-
-    net_balance_atoms: z.string().nullable().optional(),
-    net_sign: z.union([z.literal(-1), z.literal(0), z.literal(1)]).nullable().optional(),
-    viz_color_key: z
-      .union([
-        z.literal('person'),
-        z.literal('business'),
-        z.literal('debt'),
-        z.string().regex(/^debt-[0-8]$/),
-        z.literal('suspended'),
-        z.literal('left'),
-        z.literal('deleted'),
-      ])
-      .nullable()
-      .optional(),
-    viz_size: z
-      .object({
-        w: z.number(),
-        h: z.number(),
-      })
-      .nullable()
-      .optional(),
-  })
-  .passthrough()
-
-const TrustlineSchema = z
-  .object({
-    equivalent: z.string(),
-    from: z.string(),
-    to: z.string(),
-    from_display_name: z.string().nullable().optional(),
-    to_display_name: z.string().nullable().optional(),
-    limit: DecimalString,
-    used: DecimalString,
-    available: DecimalString,
-    status: z.string(),
-    created_at: z.string(),
-    policy: z.record(z.string(), z.unknown()).nullable().optional(),
-    close_requested_at: z.string().nullable().optional(),
-  })
-  .passthrough()
-
-const EquivalentSchema = z
-  .object({
-    code: z.string(),
-    precision: z.number(),
-    description: z.string().nullable().optional(),
-    is_active: z.boolean(),
-  })
-  .passthrough()
-
-const DebtSchema = z
-  .object({
-    equivalent: z.string(),
-    debtor: z.string(),
-    creditor: z.string(),
-    amount: DecimalString,
-  })
-  .passthrough()
-
-const AuditLogEntrySchema = z
-  .object({
-    id: z.string(),
-    timestamp: z.string(),
-    actor_id: z.string().nullable().optional(),
-    actor_role: z.string().nullable().optional(),
-    action: z.string(),
-    object_type: z.string().nullable().optional(),
-    object_id: z.string().nullable().optional(),
-    reason: z.string().nullable().optional(),
-    before_state: z.unknown().optional(),
-    after_state: z.unknown().optional(),
-    request_id: z.string().nullable().optional(),
-    ip_address: z.string().nullable().optional(),
-    user_agent: z.string().nullable().optional(),
-  })
-  .passthrough()
-
-// F-013-1 / T1302. The shape below is AdminGraphTransactionItem (api/openapi.yaml) and what the
-// projection `_graph_fetch_transactions` actually emits - nothing more.
-//
-// It used to require `payload`, which neither the canon declares nor the producer sends. That was
-// invisible only because the client never asked for `include=transactions`, so the array was always
-// empty and no row was ever validated. The first response that carried a transaction would have been
-// rejected whole as INVALID_RESPONSE and blanked the graph page - which is why the include, the
-// schema and the consumer had to land as one change and not as a series with a broken middle.
-//
-// Required here is exactly what the canon marks required. `equivalent` and `error` are nullable and
-// absence-tolerant because the canon says so: `equivalent` is payload.get("equivalent") and is null
-// on a row whose payload has no such key, `error` is null on every row that did not abort.
-// `.passthrough()` keeps the tail open - the mock fixture still carries `payload`/`signatures` -
-// while the schema stays strict about every key it does declare.
-const TransactionSchema = z
-  .object({
-    tx_id: z.string(),
-    type: z.string(),
-    state: z.string(),
-    initiator_pid: z.string().nullable(), // null on a CLEARING (028 F-028-45)
-    created_at: z.string(),
-    updated_at: z.string(),
-    equivalent: z.string().nullable().optional(),
-    error: z.record(z.string(), z.unknown()).nullable().optional(),
-    // ATTRIBUTION FIELDS, declared 2026-09-10 after the internal adversarial review pointed out
-    // that the canon gained them and this schema did not - so they reached the consumer only
-    // through `.passthrough()`, and the consumer had to launder every row through a cast. The rule
-    // written above this schema ("strict about every key it does declare") had been applied to the
-    // key removed and not to the three added.
-    //
-    // Present per type and never both: `from`/`to` on a PAYMENT, `edges` on a CLEARING, and absent
-    // when the internal payload does not carry them - which is why none of them is required.
-    from: z.string().optional(),
-    to: z.string().optional(),
-    edges: z
-      .array(z.object({ debtor: z.string(), creditor: z.string() }).passthrough())
-      .optional(),
-  })
-  .passthrough()
-
-const GraphSnapshotSchema = z
-  .object({
-    participants: z.array(ParticipantSchema),
-    trustlines: z.array(TrustlineSchema),
-    equivalents: z.array(EquivalentSchema),
-    debts: z.array(DebtSchema),
-    audit_log: z.array(AuditLogEntrySchema),
-    transactions: z.array(TransactionSchema),
-    // F-013-1 / T1302. Which optional collections the body actually carries, and which of them hit
-    // the include limit. Optional here on purpose: the canon does not list them under `required`,
-    // and demanding a field the canon does not declare is the exact defect this task removes from
-    // TransactionSchema above. Absent means "this server says nothing about them", which the
-    // consumer must treat as "not asked" - never as "asked, and there are none".
-    // The names are a CLOSED set, and the canon says so (`api/openapi.yaml`,
-    // `AdminGraphSnapshotResponse.included`). Declared as an enum after external review found the
-    // canon narrower than both implementations: `z.string()` here and `list[str]` on the server
-    // would have accepted a fourth name silently, on a field whose entire purpose is to be trusted
-    // when a consumer decides whether it may draw a conclusion.
-    // 032 S5 (A-4): `incidents` left the set with the incidents surface (always empty since 019 stage 4).
-    included: z.array(z.enum(['audit_log', 'transactions'])).optional(),
-    truncated: z.array(z.enum(['audit_log', 'transactions'])).optional(),
-  })
-  .passthrough()
-
-const BalanceRowSchema = z
-  .object({
-    equivalent: z.string(),
-    outgoing_limit: DecimalString,
-    outgoing_used: DecimalString,
-    incoming_limit: DecimalString,
-    incoming_used: DecimalString,
-    total_debt: DecimalString,
-    total_credit: DecimalString,
-    net: DecimalString,
-  })
-  .passthrough()
-
-const ParticipantMetricsSchema = z
-  .object({
-    pid: z.string(),
-    equivalent: z.string().nullable(),
-    // 032 S5 (F-1): the balance rows are the whole answer; the participant analytics were removed.
-    balance_rows: z.array(BalanceRowSchema),
-  })
-  .passthrough()
-
-const ParticipantsStatsSchema = z
-  .object({
-    participants_by_status: z.record(z.string(), z.number()),
-    participants_by_type: z.record(z.string(), z.number()),
-    total_participants: z.number(),
-  })
-  .passthrough()
-
-// 032 S5 (F-2, F-3): the Dashboard's row of one equivalent - its active lines and their money.
-const LiquiditySummarySchema = z
-  .object({
-    equivalent: z.string().nullable(),
-    updated_at: z.string(),
-    active_trustlines: z.number(),
-    // 028 F-028-37: без эквивалента сервер не суммирует деньги — `null`, а не сумма разных единиц.
-    total_limit: DecimalString.nullable(),
-    total_used: DecimalString.nullable(),
-    total_available: DecimalString.nullable(),
-  })
-  .passthrough()
-
-function paginatedSchema(itemSchema: ZodTypeAny) {
-  return z
-    .object({
-      items: z.array(itemSchema),
-      page: z.number().int().min(1),
-      per_page: z.number().int().min(1).max(200),
-      total: z.number().int().min(0),
-    })
-    .passthrough()
-}
-
-const ParticipantsListSchema = paginatedSchema(ParticipantSchema)
-const TrustlinesListSchema = paginatedSchema(TrustlineSchema)
-const AuditLogListSchema = paginatedSchema(AuditLogEntrySchema)
-const EquivalentsListSchema = z.object({ items: z.array(EquivalentSchema) }).passthrough()
 
 function isProdBuild(): boolean {
   const forced = (globalThis as unknown as { __GEO_ADMINUI_FORCE_PROD__?: unknown })?.__GEO_ADMINUI_FORCE_PROD__
@@ -360,155 +157,181 @@ function adminToken(): string | null {
   }
 }
 
-export async function requestJson<T>(
-  pathname: string,
-  opts?: {
-    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
-    body?: unknown
-    headers?: Record<string, string>
-    admin?: boolean
-    timeoutMs?: number
-    schema?: ZodTypeAny
-    toast?: boolean
-  },
-): Promise<T> {
-  const method = opts?.method || 'GET'
-  const url = `${baseUrl()}${pathname}`
+type RequestOptions = {
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  body?: unknown
+  headers?: Record<string, string>
+  admin?: boolean
+  /** Bound of the whole exchange - headers AND body. Default `DEFAULT_REQUEST_TIMEOUT_MS`. */
+  timeoutMs?: number
+}
+
+function nonEmptyString(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+
+/**
+ * One `fetch` bounded in time, covering the read of the body: a server that sends the headers and then stalls
+ * must not hold the caller for ever (032 S6, E-2). The bound is enforced twice: the request is aborted, and the
+ * wait is raced against the bound itself, so an implementation that ignores the abort signal cannot hang us.
+ */
+async function fetchBounded(
+  method: string,
+  url: string,
+  init: { headers: Record<string, string>; body?: string },
+  timeoutMs: number,
+): Promise<{ res: Response; text: string }> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const timeoutError = () =>
+    new ApiException({
+      status: 0,
+      code: 'TIMEOUT',
+      message: `${method} ${url} -> timeout after ${timeoutMs}ms`,
+      details: { url, method, timeout_ms: timeoutMs },
+    })
+
+  const bound = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      reject(timeoutError())
+    }, timeoutMs)
+  })
+  // Consumed by the races below; without this a rejection after they settled would be an unhandled one.
+  bound.catch(() => undefined)
 
   try {
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-      ...(opts?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(opts?.headers || {}),
-    }
-
-    if (opts?.admin) {
-      const tok = adminToken()
-      if (!tok) {
-        throw new ApiException({
-          status: 401,
-          code: 'ADMIN_TOKEN_MISSING',
-          message: `${method} ${url} -> not sent: no admin token is configured (VITE_ADMIN_TOKEN or localStorage "admin-ui.adminToken")`,
-          details: { url, method },
-        })
-      }
-      headers['X-Admin-Token'] = tok
-    }
-
-    const timeoutMs = typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined
-    const controller = timeoutMs !== undefined ? new AbortController() : undefined
-    const timeoutId: ReturnType<typeof setTimeout> | undefined =
-      controller && timeoutMs !== undefined && timeoutMs > 0
-        ? setTimeout(() => controller.abort(), timeoutMs)
-        : undefined
-
-    let res: Response
-    try {
-      res = await fetch(url, {
-        method,
-        headers,
-        body: opts?.body ? JSON.stringify(opts.body) : undefined,
-        signal: controller?.signal,
-      })
-    } catch (err) {
-      if (timeoutId) clearTimeout(timeoutId)
-      const isAbort = controller?.signal.aborted || (err instanceof Error && /abort/i.test(err.name))
-      if (isAbort) {
-        throw new ApiException({
-          status: 0,
-          code: 'TIMEOUT',
-          message: `${method} ${url} -> timeout after ${timeoutMs}ms`,
-          details: {
-            url,
-            method,
-            timeout_ms: timeoutMs,
-          },
-        })
-      }
-      throw err
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId)
-    }
-
-    // 204/205 are valid successful responses without a body.
-    // Some fetch implementations may throw on res.text() for these.
-    if (res.ok && (res.status === 204 || res.status === 205)) {
-      return undefined as T
-    }
-
-    const text = await res.text()
-    let parsed: unknown = undefined
-    try {
-      parsed = text ? JSON.parse(text) : undefined
-    } catch {
-      parsed = undefined
-    }
-
-    // If backend claims OK but returns empty/invalid JSON, fail loudly.
-    if (res.ok && (!text || parsed === undefined || parsed === null)) {
-      throw new ApiException({
-        status: res.status,
-        code: 'INVALID_JSON',
-        message: `${method} ${url} -> ${res.status}: Invalid/empty JSON response`,
-        details: {
-          url,
-          method,
-          status: res.status,
-          status_text: (res.statusText || '').trim(),
-          body_preview: (text || '').slice(0, 500),
-        },
-      })
-    }
-
-    if (!res.ok) {
-      const parsedObj = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
-      const errorObj = parsedObj?.error && typeof parsedObj.error === 'object' ? (parsedObj.error as Record<string, unknown>) : undefined
-
-      const msg = String((errorObj?.message ?? parsedObj?.message ?? `HTTP ${res.status}`) as unknown)
-      const code = String((errorObj?.code ?? parsedObj?.code ?? 'HTTP_ERROR') as unknown)
-      const details = (errorObj?.details ?? parsedObj?.details) as unknown
-      const statusText = (res.statusText || '').trim()
-      const decorated = `${method} ${url} -> ${res.status}${statusText ? ` ${statusText}` : ''}: ${msg}`
-      throw new ApiException({
-        status: res.status,
-        code,
-        message: decorated,
-        details: {
-          url,
-          method,
-          status: res.status,
-          status_text: statusText,
-          code,
-          message: msg,
-          details,
-        },
-      })
-    }
-
-    const schema = opts?.schema
-    if (!schema) return parsed as T
-    const validated = schema.safeParse(parsed)
-    if (!validated.success) {
-      throw new ApiException({
-        status: res.status,
-        code: 'INVALID_RESPONSE',
-        message: `${method} ${url} -> ${res.status}: Response JSON does not match expected schema`,
-        details: {
-          url,
-          method,
-          status: res.status,
-          issues: validated.error.issues,
-          data_preview: safeJsonPreview(parsed),
-        },
-      })
-    }
-    return validated.data as T
+    const res = await Promise.race([fetch(url, { method, ...init, signal: controller.signal }), bound])
+    // 204/205 are valid successful responses without a body; some fetch implementations throw on res.text() for them.
+    if (res.ok && (res.status === 204 || res.status === 205)) return { res, text: '' }
+    const text = await Promise.race([res.text(), bound])
+    return { res, text }
   } catch (err) {
-    if (opts?.toast !== false) {
-      void toastApiError(err, { fallbackTitle: `${method} ${pathname} failed` })
-    }
+    // The abort made `fetch` or `text()` reject with an AbortError before the bound's own rejection won the race.
+    if (controller.signal.aborted && !(err instanceof ApiException)) throw timeoutError()
     throw err
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
+}
+
+/**
+ * The one HTTP call of the Admin UI. Returns the decoded body or throws `ApiException`; it raises no toast -
+ * the caller shows the error with `describeError` (032 S6, E-3).
+ *
+ * With a `schema` the body is validated and the result has the schema's type; without one it is the caller's
+ * unchecked claim `T` (health probes, tests).
+ */
+export async function requestJson<T>(pathname: string, opts: RequestOptions & { schema: z.ZodType<T> }): Promise<T>
+export async function requestJson<T = unknown>(pathname: string, opts?: RequestOptions & { schema?: undefined }): Promise<T>
+export async function requestJson(pathname: string, opts: RequestOptions & { schema?: z.ZodType } = {}): Promise<unknown> {
+  const method = opts.method || 'GET'
+  const url = `${baseUrl()}${pathname}`
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(opts.headers || {}),
+  }
+
+  if (opts.admin) {
+    const tok = adminToken()
+    if (!tok) {
+      throw new ApiException({
+        status: 401,
+        code: 'ADMIN_TOKEN_MISSING',
+        message: `${method} ${url} -> not sent: no admin token is configured (VITE_ADMIN_TOKEN or localStorage "admin-ui.adminToken")`,
+        details: { url, method },
+      })
+    }
+    headers['X-Admin-Token'] = tok
+  }
+
+  const timeoutMs =
+    typeof opts.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+      ? opts.timeoutMs
+      : DEFAULT_REQUEST_TIMEOUT_MS
+
+  const { res, text } = await fetchBounded(
+    method,
+    url,
+    { headers, body: opts.body ? JSON.stringify(opts.body) : undefined },
+    timeoutMs,
+  )
+  const headerRequestId = nonEmptyString(res.headers?.get('X-Request-ID'))
+
+  if (res.ok && (res.status === 204 || res.status === 205)) return undefined
+
+  let parsed: unknown = undefined
+  try {
+    parsed = text ? JSON.parse(text) : undefined
+  } catch {
+    parsed = undefined
+  }
+
+  // If backend claims OK but returns empty/invalid JSON, fail loudly.
+  if (res.ok && (!text || parsed === undefined || parsed === null)) {
+    throw new ApiException({
+      status: res.status,
+      code: 'INVALID_JSON',
+      message: `${method} ${url} -> ${res.status}: Invalid/empty JSON response`,
+      details: {
+        url,
+        method,
+        status: res.status,
+        status_text: (res.statusText || '').trim(),
+        body_preview: (text || '').slice(0, 500),
+      },
+      requestId: headerRequestId,
+    })
+  }
+
+  if (!res.ok) {
+    const parsedObj = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+    const errorObj = parsedObj?.error && typeof parsedObj.error === 'object' ? (parsedObj.error as Record<string, unknown>) : undefined
+
+    const msg = String((errorObj?.message ?? parsedObj?.message ?? `HTTP ${res.status}`) as unknown)
+    const code = String((errorObj?.code ?? parsedObj?.code ?? 'HTTP_ERROR') as unknown)
+    const details = (errorObj?.details ?? parsedObj?.details) as unknown
+    const statusText = (res.statusText || '').trim()
+    const decorated = `${method} ${url} -> ${res.status}${statusText ? ` ${statusText}` : ''}: ${msg}`
+    throw new ApiException({
+      status: res.status,
+      code,
+      message: decorated,
+      details: {
+        url,
+        method,
+        status: res.status,
+        status_text: statusText,
+        code,
+        message: msg,
+        details,
+      },
+      requestId: nonEmptyString(errorObj?.request_id) ?? nonEmptyString(parsedObj?.request_id) ?? headerRequestId,
+    })
+  }
+
+  const schema = opts.schema
+  if (!schema) return parsed
+  const validated = schema.safeParse(parsed)
+  if (!validated.success) {
+    throw new ApiException({
+      status: res.status,
+      code: 'INVALID_RESPONSE',
+      message: `${method} ${url} -> ${res.status}: Response JSON does not match expected schema`,
+      details: {
+        url,
+        method,
+        status: res.status,
+        issues: validated.error.issues,
+        data_preview: safeJsonPreview(parsed),
+      },
+      requestId: headerRequestId,
+    })
+  }
+  return validated.data
 }
 
 // F-013-1 / T1302. `include` is a comma-separated list on the wire (`_parse_include_csv`), not a
@@ -521,9 +344,12 @@ export function normalizeGraphInclude(include?: string[]): string {
     .join(',')
 }
 
+/**
+ * `pathname` with `params` merged into its query string. Returns the path RELATIVE to the API base:
+ * `requestJson` puts `VITE_API_BASE_URL` in front. It used to resolve the base here as well and return the
+ * base's own path, so a base with a path (`https://h/prefix`) was applied twice (032 S6, E-4).
+ */
 export function buildQuery(pathname: string, params: Record<string, unknown>): string {
-  const rawBase = baseUrl()
-
   const [pathOnly = '', initialQuery = ''] = String(pathname || '').split('?', 2)
   const sp = new URLSearchParams(initialQuery)
 
@@ -540,29 +366,27 @@ export function buildQuery(pathname: string, params: Record<string, unknown>): s
   }
 
   const qs = sp.toString()
-  if (!rawBase) return qs ? `${pathOnly}?${qs}` : pathOnly
-
-  const u = new URL(`${rawBase}${pathOnly}`)
-  u.search = qs ? `?${qs}` : ''
-  return u.pathname + u.search
+  return qs ? `${pathOnly}?${qs}` : pathOnly
 }
 
 export const realApi = {
+  // The three health-poll probes get the short bound (`HEALTH_REQUEST_TIMEOUT_MS`): the header status polls them
+  // one after another and must not wait on a dead hub as long as an ordinary request would.
   health(): Promise<Record<string, unknown>> {
-    return requestJson('/api/v1/health')
+    return requestJson('/api/v1/health', { timeoutMs: HEALTH_REQUEST_TIMEOUT_MS })
   },
 
   healthDb(): Promise<Record<string, unknown>> {
-    return requestJson('/api/v1/health/db')
+    return requestJson('/api/v1/health/db', { timeoutMs: HEALTH_REQUEST_TIMEOUT_MS })
   },
 
   migrations(): Promise<Record<string, unknown>> {
-    return requestJson('/api/v1/admin/migrations', { admin: true })
+    return requestJson('/api/v1/admin/migrations', { admin: true, timeoutMs: HEALTH_REQUEST_TIMEOUT_MS })
   },
 
   async getConfig(): Promise<Record<string, unknown>> {
     // Backend returns { items: [{ key, value, mutable }] }. The UI works with a flat object of the mutable keys.
-    const raw = await requestJson<AdminConfigResponse>('/api/v1/admin/config', {
+    const raw = await requestJson('/api/v1/admin/config', {
       admin: true,
       schema: AdminConfigResponseSchema,
     })
@@ -590,14 +414,14 @@ export const realApi = {
 
   // 032 S5 (F-4): lift an equivalent's integrity hold, with the operator's reason (required, audited). The
   // refusals (409 `no_integrity_hold`, `no_later_passed_reconciliation_result`) are shown by the Integrity screen
-  // as text, so no generic toast is raised here.
+  // as text (`describeHoldClearRefusal`).
   clearIntegrityHold(code: string, reason: string): Promise<Equivalent> {
     return requestJson<Equivalent>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/integrity-hold/clear`, {
       method: 'POST',
       body: { reason },
       admin: true,
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       schema: AdminEquivalentMutationResponseSchema,
-      toast: false,
     })
   },
 
@@ -606,6 +430,7 @@ export const realApi = {
       method: 'POST',
       body: {},
       admin: true,
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
       schema: IntegrityVerifyResponseSchema,
     })
   },
@@ -795,7 +620,7 @@ export const realApi = {
   },
 
   graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<GraphSnapshot> {
-    const equivalent = String(params?.equivalent || '').trim().toUpperCase()
+    const equivalent = normalizeEquivalentCode(params?.equivalent)
     const include = normalizeGraphInclude(params?.include)
     const url = buildQuery('/api/v1/admin/graph/snapshot', {
       equivalent: equivalent || undefined,

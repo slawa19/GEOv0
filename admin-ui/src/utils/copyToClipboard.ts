@@ -1,3 +1,6 @@
+import { describeError } from '../api/describeError'
+import { t } from '../i18n'
+
 export type CopyResult = { ok: true } | { ok: false; error: string }
 
 export async function copyToClipboard(text: string): Promise<CopyResult> {
@@ -30,10 +33,9 @@ export async function copyToClipboard(text: string): Promise<CopyResult> {
     const ok = document.execCommand('copy')
     document.body.removeChild(el)
 
-    if (!ok) return { ok: false, error: 'Copy failed' }
+    if (!ok) return { ok: false, error: t('common.copyFailed') }
     return { ok: true }
   } catch (e: unknown) {
-    const error = e instanceof Error ? e.message : 'Copy failed'
-    return { ok: false, error }
+    return { ok: false, error: describeError(e, 'common.copyFailed').text }
   }
 }

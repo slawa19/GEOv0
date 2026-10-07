@@ -28,6 +28,8 @@ test('error500: audit log shows the load error, not an empty list', async ({ pag
 
   await expect(page.locator('.el-alert--error')).toBeVisible()
   await expect(page.locator('.el-alert--error')).toContainText('500')
+  // 032 S6 (E-1): the operator sees the correlation id the server sent, so the message can be found in the log.
+  await expect(page.locator('.el-alert--error')).toContainText('(ref: e2e-request-id)')
 })
 
 test('403: an admin list refused by the server shows the refusal', async ({ page }) => {

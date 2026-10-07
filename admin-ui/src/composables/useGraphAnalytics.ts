@@ -1,15 +1,12 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
-import { t } from '../i18n'
-import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
+import { describeError } from '../api/describeError'
+import { makeMetricsKey } from './graph/graphQueries'
 import type { BalanceRow, ParticipantMetrics } from '../types/domain'
 import type { SelectedInfo } from './useGraphVisualization'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 import { useLatestRequest } from './useLatestRequest'
-
-function normEq(v: string): string {
-  return String(v || '').trim().toUpperCase()
-}
 
 /**
  * The drawer's balance rows of the selected participant (032 S5, F-1).
@@ -30,7 +27,7 @@ export function useGraphAnalytics(opts: {
 
   const selectedPid = computed(() => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''))
   const selectedEqCode = computed(() => {
-    const eqCode = normEq(opts.analyticsEq.value || '')
+    const eqCode = normalizeEquivalentCode(opts.analyticsEq.value || '')
     return eqCode || null
   })
 
@@ -65,8 +62,7 @@ export function useGraphAnalytics(opts: {
       metricsCache.value.set(key, res)
     } catch (e: unknown) {
       if (!request.isCurrent()) return
-      const msg = e instanceof Error ? e.message : String(e)
-      metricsError.value = msg || t('graph.analytics.metricsLoadFailed')
+      metricsError.value = describeError(e, 'graph.analytics.metricsLoadFailed').text
     } finally {
       if (request.isCurrent()) metricsLoading.value = false
     }

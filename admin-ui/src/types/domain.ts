@@ -6,6 +6,16 @@ export type ParticipantsStats = {
   total_participants: number
 }
 
+/** The node colour key the server computes for a participant (`app/core/admin/viz_rules.py`); a closed set. */
+export type VizColorKey =
+  | 'person'
+  | 'business'
+  | 'debt'
+  | `debt-${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`
+  | 'suspended'
+  | 'left'
+  | 'deleted'
+
 export type Participant = {
   pid: string
   display_name: string
@@ -13,6 +23,12 @@ export type Participant = {
   status: string
   created_at?: string
   meta?: Record<string, unknown>
+
+  // Backend-provided net visualization fields (the graph endpoints send them when an equivalent is chosen).
+  net_balance_atoms?: string | null
+  net_sign?: -1 | 0 | 1 | null
+  viz_color_key?: VizColorKey | null
+  viz_size?: { w: number; h: number } | null
 }
 
 export type Trustline = {
@@ -26,7 +42,7 @@ export type Trustline = {
   available: string
   status: string
   created_at: string
-  policy?: Record<string, unknown>
+  policy?: Record<string, unknown> | null
   /** 026: the creditor asked to close; limit 0, the line stays live until the debt it supports is repaid. */
   close_requested_at?: string | null
 }

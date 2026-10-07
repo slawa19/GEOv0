@@ -2,14 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
-import { formatIsoInTimeZone } from '../utils/datetime'
+import { formatTs } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
-import { useConfigStore } from '../stores/config'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import { t } from '../i18n'
@@ -42,9 +42,6 @@ const selected = ref<Trustline | null>(null)
 
 const { isApplying: applyingRouteQuery, isActive: isTrustlinesRoute, run: withRouteHydration } =
   useRouteHydrationGuard(route, '/trustlines')
-
-const configStore = useConfigStore()
-const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
 
 function applyRouteQueryToFilters(): boolean {
   const reloadChanged = withRouteHydration(() => {
@@ -131,7 +128,7 @@ async function loadEquivalents() {
 }
 
 function fmtTs(iso: string): string {
-  return formatIsoInTimeZone(iso, timeZone.value)
+  return formatTs(iso)
 }
 
 async function load() {
@@ -159,8 +156,7 @@ async function load() {
     items.value = data.items
   } catch (e: unknown) {
     if (!request.isCurrent()) return
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('trustlines.loadFailed')
+    error.value = describeError(e, 'trustlines.loadFailed').text
   } finally {
     if (request.isCurrent()) loading.value = false
   }
