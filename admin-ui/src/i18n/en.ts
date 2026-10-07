@@ -29,7 +29,6 @@ export const EN: Record<string, string> = {
   'common.status': 'Status',
   'common.passed': 'passed',
   'common.failed': 'failed',
-  'common.passedPrefix': 'passed:',
   'common.violationsPrefix': 'violations:',
   'common.true': 'true',
   'common.value': 'Value',
@@ -221,31 +220,21 @@ export const EN: Record<string, string> = {
   'config.loadFailed': 'Failed to load config',
   'config.saveFailed': 'Save failed',
   'config.columns.key': 'Name',
-  'config.columns.scope': 'Applies',
   'config.filterByKeyPlaceholder': 'Filter by Key',
   'config.jsonStringifiedPlaceholder': 'JSON (stringified)',
   'config.invalidJsonForKey': 'Invalid JSON for {key}',
   'config.savedKeys': 'Saved ({n} keys)',
   'config.showingKeys': 'Showing {shown} / {total} keys',
 
-  'config.applies.runtime': 'Runtime',
 
   'config.sections.featureFlags': 'Feature Flags',
-  'config.sections.logging': 'Logging',
   'config.sections.rateLimit': 'Rate limiting',
   'config.sections.routing': 'Routing',
-  'config.sections.integrity': 'Integrity checkpoints',
   'config.sections.other': 'Other',
 
-  'config.labels.LOG_LEVEL': 'Log level',
-  'config.help.LOG_LEVEL': 'Controls backend log verbosity.\nTypical: INFO. Use DEBUG only for troubleshooting.',
 
   'config.labels.RATE_LIMIT_ENABLED': 'Rate limiting',
   'config.help.RATE_LIMIT_ENABLED': 'Enables best-effort in-memory rate limiting for API calls.',
-  'config.labels.RATE_LIMIT_WINDOW_SECONDS': 'Rate limit window (seconds)',
-  'config.help.RATE_LIMIT_WINDOW_SECONDS': 'Time window for counting requests in the rate limiter.',
-  'config.labels.RATE_LIMIT_REQUESTS_PER_WINDOW': 'Rate limit requests per window',
-  'config.help.RATE_LIMIT_REQUESTS_PER_WINDOW': 'Max requests allowed per window (per process).',
 
   'config.labels.ROUTING_MAX_HOPS': 'Routing: max hops',
   'config.help.ROUTING_MAX_HOPS': 'Maximum number of trustline edges in a route search.',
@@ -253,10 +242,6 @@ export const EN: Record<string, string> = {
   'config.help.ROUTING_MAX_PATHS': 'Maximum number of alternative paths considered for a payment.',
 
 
-  'config.labels.INTEGRITY_CHECKPOINT_ENABLED': 'Integrity checkpoints',
-  'config.help.INTEGRITY_CHECKPOINT_ENABLED': 'Enables periodic integrity checkpoint computation in the background.',
-  'config.labels.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS': 'Integrity checkpoint interval (seconds)',
-  'config.help.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS': 'How often integrity checkpoints are recomputed.',
 
   'config.labels.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Multipath routing',
   'config.help.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Allows route search to use multiple paths to reach required capacity.',
@@ -270,10 +255,8 @@ export const EN: Record<string, string> = {
   'config.helpFallback.kind.string': 'Type: string.',
   'config.helpFallback.kind.json': 'Type: JSON (valid JSON string).',
   'config.helpFallback.section.featureFlags': 'Affects feature enablement (feature flags).',
-  'config.helpFallback.section.logging': 'Affects backend logging.',
   'config.helpFallback.section.rateLimit': 'Affects request rate limiting.',
   'config.helpFallback.section.routing': 'Affects payment route search.',
-  'config.helpFallback.section.integrity': 'Affects background integrity computations/checks.',
   'config.helpFallback.section.other': 'Backend technical setting.',
   'config.helpFallback.units.seconds': 'Units: seconds.',
   'config.helpFallback.units.count': 'Units: count.',
