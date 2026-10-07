@@ -29,26 +29,6 @@ class AdminConfigPatchResponse(BaseModel):
     updated: list[str]
 
 
-class AdminFeatureFlags(BaseModel):
-    multipath_enabled: bool
-    full_multipath_enabled: bool
-    clearing_enabled: bool
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class AdminFeatureFlagsPatchRequest(BaseModel):
-    # Partial PATCH: all fields optional; only provided ones are updated.
-    multipath_enabled: Optional[bool] = None
-    full_multipath_enabled: Optional[bool] = None
-    clearing_enabled: Optional[bool] = None
-    reason: Optional[str] = None
-
-
-class AdminWhoAmIResponse(BaseModel):
-    role: str = Field(..., pattern="^admin$")
-
-
 class AdminParticipantActionRequest(BaseModel):
     reason: str
 
@@ -56,24 +36,6 @@ class AdminParticipantActionRequest(BaseModel):
 class AdminParticipantStatusResponse(BaseModel):
     pid: str
     status: Literal["active", "suspended"]
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class AdminParticipantStatusChange(BaseModel):
-    """What `_set_participant_status` actually returns (`app/api/v1/admin.py:860`).
-
-    011/T1102. Used for DOCUMENTATION ONLY, via `responses={200: {"model": ...}}`, never as
-    `response_model=`. That distinction is load-bearing: `responses` describes, while
-    `response_model` would make FastAPI filter the handler output to the declared fields, which
-    is a wire change and forbidden by this program. The handler returns a plain dict.
-
-    `AdminParticipantStatusResponse` above cannot serve here - it permits only
-    `active|suspended`, and `ban` writes `deleted` (`app/api/v1/admin.py:933`).
-    """
-
-    pid: str
-    status: Literal["active", "suspended", "deleted"]
 
     model_config = ConfigDict(extra="forbid")
 

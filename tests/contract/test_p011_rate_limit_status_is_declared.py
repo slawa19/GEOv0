@@ -146,8 +146,8 @@ def test_the_path_converter_does_not_hide_an_operation() -> None:
     """
 
     assert _schema_path("/api/v1/participants/{pid:path}") == "/api/v1/participants/{pid}"
-    assert _schema_path("/api/v1/admin/participants/{pid}/ban") == (
-        "/api/v1/admin/participants/{pid}/ban"
+    assert _schema_path("/api/v1/admin/participants/{pid}/freeze") == (
+        "/api/v1/admin/participants/{pid}/freeze"
     ), "a path with no converter must pass through untouched"
 
     reachable = _rate_limited_operations()

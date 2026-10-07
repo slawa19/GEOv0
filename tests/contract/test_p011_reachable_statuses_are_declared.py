@@ -61,7 +61,7 @@ by counter-checks in this file.
   `require_participant_or_admin`, `require_simulator_actor`, and `get_current_participant` - the
   last because a participant whose `status != 'active'` gets
   `ForbiddenException("Participant account is not active")`. That branch is not hypothetical:
-  `POST /admin/participants/{pid}/ban` and `/freeze` are its writers.
+  `POST /admin/participants/{pid}/freeze` is its writer (the ban was removed by 032 F-5).
 
 * **S4 - `require_simulator_actor` implies `422`, independently of S1.** It raises
   `GeoException(..., status_code=422)` when `X-Simulator-Owner` is present and does not match

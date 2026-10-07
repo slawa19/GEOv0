@@ -134,9 +134,27 @@
 
 | Решение | Выбор для MVP |
 |---------|---------------|
-| **Действия** | freeze/unfreeze, ban/unban, расследование, компенсирующие операции |
+| **Действия** | freeze/unfreeze, расследование, компенсирующие операции (ban/unban убраны 2026-10-07, см. ниже) |
 | **Аудит** | Обязательный audit-log для всех действий |
 | **Роли** | admin, operator, auditor |
+
+**Решение 2026-10-07 (программа 032, A-5, F-5): матрица переходов статуса участника.** Протокол
+(`docs/ru/02-protocol-spec.md`, статусы участника) фиксирует статусы `active`, `suspended`, `left`, `deleted` и их
+денежные ограничения, но не то, кто и из какого статуса их меняет. Решение:
+
+- Операторский бан снят владельцем 2026-10-07: `POST /admin/participants/{pid}/ban` и `/unban` удалены (клиента не
+  было; на денежной границе `deleted` отказывает так же, как `suspended`). У оператора — только заморозка.
+- Оператор: `freeze` — только из `active` в `suspended`; `unfreeze` — только из `suspended` в `active`. Любой другой
+  исходный статус, **включая повтор той же команды**, — `409` с `details.reason: status_transition_not_allowed` и
+  текущим `details.status`; ничего не меняется, записи аудита нет. До решения `unfreeze` молча снимал `deleted`, а
+  `freeze` превращал его в `suspended`.
+- Симулятор: начальный статус участника, объявленный сценарием (`active`, `suspended`, `left`, `deleted`), ставится
+  переходом из `active` — строка только что вставлена `active` в той же транзакции (сидер сценария, инжект
+  `add_participant`). Заморозка инжектом (`freeze_participant`) — только из `active`; любой другой статус
+  пропускается, как прежде пропускался `suspended`.
+- Механизм: `ParticipantService.set_status(..., from_statuses=...)` — аргумент обязателен, проверка идёт по статусу,
+  прочитанному под блокировкой строки (`FOR UPDATE`), поэтому две конкурирующие команды не проходят её обе.
+- Денежные ограничения не меняются: любой статус, кроме `active`, по-прежнему отказывает на денежной границе.
 
 ### 1.7. Машина состояний транзакций (internal)
 
@@ -630,7 +648,7 @@ requiredness), schemas, остальные responses и security фиксиру�
 
 | Параметр | Дефолт | Описание |
 |----------|--------|----------|
-| `feature_flags.multipath_enabled` | true | Limited multipath включён |
+| `feature_flags.multipath_enabled` | true | Limited multipath включён (`FEATURE_FLAGS_MULTIPATH_ENABLED`; во время работы меняется через `PATCH /admin/config` — отдельный `/admin/feature-flags` удалён 2026-10-07, программа 032 F-6) |
 | `feature_flags.full_multipath_enabled` | false | Full mode для бенчмарков |
 | `feature_flags.inter_hub_enabled` | false | Межхабовое взаимодействие |
 

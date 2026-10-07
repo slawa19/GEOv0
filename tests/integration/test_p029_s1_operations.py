@@ -78,5 +78,6 @@ async def test_admin_config_refuses_the_keys_nothing_reads_after_start(client, m
     monkeypatch.setattr(settings, "CLEARING_ENABLED", True)
     response = await client.patch("/api/v1/admin/config", headers=ADMIN, json={"updates": {"CLEARING_ENABLED": False}})
     assert response.status_code == 200 and response.json()["updated"] == ["CLEARING_ENABLED"], response.text
-    flags = await client.get("/api/v1/admin/feature-flags", headers=ADMIN)
-    assert flags.json()["clearing_enabled"] is False
+    # Read back through `GET /admin/config`, the flags' one reader since 032 F-6 removed `/admin/feature-flags`.
+    listed = (await client.get("/api/v1/admin/config", headers=ADMIN)).json()["items"]
+    assert {item["key"]: item["value"] for item in listed}["CLEARING_ENABLED"] is False

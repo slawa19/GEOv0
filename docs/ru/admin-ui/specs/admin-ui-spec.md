@@ -18,7 +18,7 @@
 - Наблюдаемость сети доверия (таблица trustlines + базовая диагностика).
 - Управление инцидентами (зависшие транзакции → force abort).
 - Управление runtime-конфигом и feature flags.
-- Управление участниками (freeze/unfreeze, при наличии — ban/unban).
+- Управление участниками (freeze/unfreeze; ban/unban удалены 2026-10-07, программа 032 F-5).
 - Аудит действий операторов.
 
 ### 1.2. Не-цели (в этой версии)
@@ -373,10 +373,9 @@ UI правила:
 - После успешного `PATCH` UI обновляет таблицу конфигурации и отображает список обновлённых ключей.
 
 ### 6.2. Feature Flags
-- `GET /admin/feature-flags`
-- `PATCH /admin/feature-flags`
-
-Примечание: endpoint возвращает/принимает `multipath_enabled`, `full_multipath_enabled`, `clearing_enabled`. Параметр `clearing_enabled` технически соответствует `clearing.enabled` в конфиге, но для удобства UI объединён с feature flags.
+**Удалено 2026-10-07 (программа 032, F-6).** `GET`/`PATCH /admin/feature-flags` убраны: флаги
+`FEATURE_FLAGS_MULTIPATH_ENABLED`, `FEATURE_FLAGS_FULL_MULTIPATH_ENABLED`, `CLEARING_ENABLED` читаются и меняются
+как ключи `GET`/`PATCH /admin/config` (6.1).
 
 UI правила:
 - Любая операция изменения должна требовать явного подтверждения (минимум: confirm dialog).
@@ -384,8 +383,8 @@ UI правила:
 ### 6.3. Participants
 - `POST /admin/participants/{pid}/freeze` (body: `{reason}`)
 - `POST /admin/participants/{pid}/unfreeze` (body: `{reason?}`)
-- `POST /admin/participants/{pid}/ban` (body: `{reason}`)
-- `POST /admin/participants/{pid}/unban` (body: `{reason}`)
+- `ban`/`unban` удалены 2026-10-07 (программа 032, F-5). Матрица: freeze только из `active`, unfreeze только из
+  `suspended`, иначе `409` `status_transition_not_allowed` (`docs/ru/09-decisions-and-defaults.md`, 1.6).
 
 UI правила:
 - `reason` обязателен для freeze.

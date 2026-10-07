@@ -216,81 +216,6 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
-  /admin/whoami:
-    get:
-      tags: [Admin]
-      summary: Who am I (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Current admin role
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminWhoAmIResponse'
-        '403':
-          $ref: '#/components/responses/Unauthorized'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
-  /admin/feature-flags:
-    get:
-      tags: [Admin]
-      summary: Get feature flags (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Flags
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminFeatureFlags'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-    patch:
-      tags: [Admin]
-      summary: Patch feature flags (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminFeatureFlagsPatchRequest'
-      responses:
-        '200':
-          description: Flags
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminFeatureFlags'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
   /admin/participants:
     get:
       tags: [Admin]
@@ -390,6 +315,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminParticipantStatusResponse'
+        '409':
+          # 032 A-5: the participant's status is not the one this command starts from (freeze: `active`,
+          # unfreeze: `suspended`; a repeat included) - `details.reason: status_transition_not_allowed`,
+          # `details.status` the current one. Nothing changed, no audit row.
+          $ref: '#/components/responses/Conflict'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -424,74 +354,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminParticipantStatusResponse'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
-  /admin/participants/{pid}/ban:
-    post:
-      tags: [Admin]
-      summary: Ban participant (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-        - $ref: '#/components/parameters/PidPath'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminParticipantActionRequest'
-      responses:
-        '200':
-          description: Status updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminParticipantStatusChange'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
-  /admin/participants/{pid}/unban:
-    post:
-      tags: [Admin]
-      summary: Unban participant (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-        - $ref: '#/components/parameters/PidPath'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminParticipantActionRequest'
-      responses:
-        '200':
-          description: Status updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminParticipantStatusChange'
+        '409':
+          # 032 A-5: the participant's status is not the one this command starts from (freeze: `active`,
+          # unfreeze: `suspended`; a repeat included) - `details.reason: status_transition_not_allowed`,
+          # `details.status` the current one. Nothing changed, no audit row.
+          $ref: '#/components/responses/Conflict'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -608,6 +475,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Equivalent'
+        '409':
+          # 032 A-2: the code is taken - `details: {reason: code_exists, code}`. Nothing created.
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -646,6 +516,10 @@ paths:
                 $ref: '#/components/schemas/Equivalent'
         '409':
           $ref: '#/components/responses/Conflict'
+        '400':
+          # 032 A-11: the path code is normalised (trimmed, upper case) before the lookup, so `uah` names `UAH`;
+          # a code that cannot exist after that is refused here, not looked up.
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -694,6 +568,10 @@ paths:
           # journal history, or a reconciliation baseline that recorded offsets
           # (`details.reason: referenced_by_existing_rows`).
           $ref: '#/components/responses/Conflict'
+        '400':
+          # 032 A-11: the path code is normalised (trimmed, upper case) before the lookup, so `uah` names `UAH`;
+          # a code that cannot exist after that is refused here, not looked up.
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -726,6 +604,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminEquivalentUsageResponse'
+        '400':
+          # 032 A-11: the path code is normalised (trimmed, upper case) before the lookup, so `uah` names `UAH`;
+          # a code that cannot exist after that is refused here, not looked up.
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -4403,43 +4285,6 @@ components:
           items:
             type: string
 
-    AdminFeatureFlags:
-      type: object
-      required: [multipath_enabled, full_multipath_enabled, clearing_enabled]
-      properties:
-        multipath_enabled:
-          type: boolean
-        full_multipath_enabled:
-          type: boolean
-        clearing_enabled:
-          type: boolean
-      additionalProperties: false
-
-    AdminFeatureFlagsPatchRequest:
-      type: object
-      description: Partial patch; only provided fields are updated.
-      properties:
-        multipath_enabled:
-          type: boolean
-          nullable: true
-        full_multipath_enabled:
-          type: boolean
-          nullable: true
-        clearing_enabled:
-          type: boolean
-          nullable: true
-        reason:
-          type: string
-          nullable: true
-
-    AdminWhoAmIResponse:
-      type: object
-      required: [role]
-      properties:
-        role:
-          type: string
-          enum: [admin]
-
     AdminParticipantActionRequest:
       type: object
       required: [reason]
@@ -4941,23 +4786,6 @@ components:
         timestamp:
           type: string
           format: date-time
-
-    AdminParticipantStatusChange:
-      # 011/T1102. What `_set_participant_status` really emits (app/api/v1/admin.py:859,
-      # returned unchanged at :876): exactly two keys, both always present, both non-null.
-      # All four callers share this shape and differ only in the status literal they write -
-      # freeze -> suspended (:892), unfreeze -> active (:912), ban -> deleted (:929),
-      # unban -> active (:946). The pre-existing AdminParticipantStatusResponse cannot be
-      # reused for ban: it permits only active|suspended, and ban writes deleted.
-      type: object
-      additionalProperties: false
-      required: [pid, status]
-      properties:
-        pid:
-          type: string
-        status:
-          type: string
-          enum: [active, suspended, deleted]
 
     AdminParticipantStatusResponse:
       type: object

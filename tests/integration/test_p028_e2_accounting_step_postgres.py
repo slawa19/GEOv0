@@ -305,9 +305,10 @@ async def test_lowering_precision_of_an_equivalent_with_a_line_is_409(client, db
     """Base: 200, and the stored `10.50` became finer than the new step."""
 
     eq, p, _ = await _payment_stand(db_session, pending=False)
-    response = await client.patch(f"/api/v1/admin/equivalents/{eq.code}", headers=ADMIN, json={"precision": 1})
+    code = eq.code  # read before the refusal: since 032 A-7 it rolls back the request's session, here the test's
+    response = await client.patch(f"/api/v1/admin/equivalents/{code}", headers=ADMIN, json={"precision": 1})
     assert response.status_code == 409 and _reason(response) == "precision_in_use", response.text
-    raised = await client.patch(f"/api/v1/admin/equivalents/{eq.code}", headers=ADMIN, json={"precision": 3})
+    raised = await client.patch(f"/api/v1/admin/equivalents/{code}", headers=ADMIN, json={"precision": 3})
     assert raised.status_code == 200, raised.text  # raising is always allowed
     empty = await _equivalent(db_session)
     lowered = await client.patch(f"/api/v1/admin/equivalents/{empty.code}", headers=ADMIN, json={"precision": 0})
@@ -321,6 +322,7 @@ async def test_a_precision_patch_racing_a_create_waits_and_refuses(client, db_se
     lowers to 1. Base: the PATCH did not wait (200), the create committed `1.23` under precision 1."""
 
     eq = await _equivalent(db_session)
+    eq_id = eq.id  # read before the refusal: since 032 A-7 it rolls back the request's session, here the test's
     a, b = (Participant(pid=f"{n}-{eq.code}", display_name=n, public_key=f"pk-{n}-{eq.code}") for n in "AB")
     db_session.add_all([a, b])
     await db_session.commit()
@@ -342,7 +344,7 @@ async def test_a_precision_patch_racing_a_create_waits_and_refuses(client, db_se
         await creator.commit()
         response = await patch
     async with factory() as s:
-        precision = (await s.execute(select(Equivalent.precision).where(Equivalent.id == eq.id))).scalar_one()
-        limit = (await s.execute(select(TrustLine.limit).where(TrustLine.equivalent_id == eq.id))).scalar_one()
+        precision = (await s.execute(select(Equivalent.precision).where(Equivalent.id == eq_id))).scalar_one()
+        limit = (await s.execute(select(TrustLine.limit).where(TrustLine.equivalent_id == eq_id))).scalar_one()
     assert (response.status_code, _reason(response), precision, limit) == (409, "precision_in_use", 2,
                                                                             Decimal("1.23")), response.text

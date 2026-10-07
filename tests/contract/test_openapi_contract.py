@@ -72,10 +72,15 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 22
 # integrity operations change content (canon `X-Admin-Token` `required: true`, generated `required: false`, as every
 # admin operation here). Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
 # committed): no other entry differs.
+# 2026-10-07 / programme 032 S1: 67 -> 62, FIVE entries leave and none enters - the operator routes removed by the
+# owner's decision of 2026-10-07 (032 F-5, F-6): `POST /admin/participants/{pid}/ban`, `/unban`, `GET`/`PATCH
+# /admin/feature-flags`, `GET /admin/whoami`. Measured with a per-entry dump of every ledger on `44aac655` and on
+# this tree (a scratch script, not committed): the new ledger plus the removed keys hashes to the previous digest,
+# so no other entry changed.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "23f96ef181db1d576b2bfbd1ec73e288c41a97b1b1514ef1b8fd7d90d7fe55b7"
+    "0aa1a11e7796ce1428d8a2222c67e7a25185e28592c8f522b159bb28fff9bb84"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 67
+TRANSPORT_HEADER_DRIFT_COUNT = 62
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -387,10 +392,15 @@ REQUEST_SCHEMA_DRIFT_COUNT = 14
 # where it declared `text/plain`, `application/zip` and `application/x-zip-compressed` (the handler now passes the
 # index's media type). Measured with a per-entry dump of every ledger on `8552c989` and on this tree
 # (`.local-run/dump_ledgers.py`, not committed): no other entry of any ledger differs.
+# 2026-10-07 / programme 032 S1: 63 -> 62, ONE entry leaves and none enters: `GET /admin/whoami`, among the operator
+# routes removed by the owner's decision of 2026-10-07 (032 F-5, F-6): `POST /admin/participants/{pid}/ban`,
+# `/unban`, `GET`/`PATCH /admin/feature-flags`, `GET /admin/whoami` (the other four were not in this ledger).
+# Measured with a per-entry dump of every ledger on `44aac655` and on this tree (a scratch script, not committed):
+# the new ledger plus the removed keys hashes to the previous digest, so no other entry changed.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "7cb1684ef988f79756dd9e5b1b1d3e25b2e94487e5cf0395879cb531ac7a62b6"
+    "ebfd97e5c6d0845649e046abdfe27fde957276bf3430e4bc89fac9ca8c49d402"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 63
+SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -533,10 +543,19 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 63
 # and `POST /trustlines`. The operation was already in this dictionary for its older differences. Measured with the
 # same per-entry dump on `d5764a39` and on this tree: the base dump equals the previous `102a0de8...0065`, count 51,
 # and no other entry differs.
+# 2026-10-07 / programme 032 S1: 51 -> 47, FOUR entries leave and none enters - the operator routes removed by the
+# owner's decision of 2026-10-07 (032 F-5, F-6): `POST /admin/participants/{pid}/ban`, `/unban`, `GET`/`PATCH
+# /admin/feature-flags`, `GET /admin/whoami` (`PATCH /admin/feature-flags` was not in this ledger). FIVE entries
+# change content, each by a status declared
+# IDENTICALLY on both halves: `409` on `POST /admin/participants/{pid}/freeze` and `/unfreeze` (A-5, the status
+# matrix), `400` on `PATCH`/`DELETE /admin/equivalents/{code}` and `GET .../usage` (A-11, one normalisation of the
+# path code; DELETE and usage raised it undeclared before). `POST /admin/equivalents` gains its `409` (A-2,
+# `code_exists`) on both halves too and does not enter. Measured with a per-entry dump on `44aac655` and on this tree:
+# the new ledger with those equal pairs removed, plus the removed keys, hashes to the previous digest.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "dca494bb537a24df20ec7f90c00cf7b4190cd663d6c1410e150813404f45e9f6"
+    "cd9f78db5acb8f179d8f395788c2128635986ab377dd35c0665a4184d9412b26"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 51
+ERROR_RESPONSE_DRIFT_COUNT = 47
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
@@ -551,10 +570,15 @@ ERROR_RESPONSE_DRIFT_COUNT = 51
 # generated optional admin header); the four admin-only integrity operations change content to `security: []` with a
 # required `X-Admin-Token` in the canon, the class of every admin operation here. Measured with a per-entry dump of every ledger on `4ed9f918` and on this tree (`.local-run/e6/dump_ledgers.py`, not
 # committed): no other entry differs.
+# 2026-10-07 / programme 032 S1: 67 -> 62, FIVE entries leave and none enters - the operator routes removed by the
+# owner's decision of 2026-10-07 (032 F-5, F-6): `POST /admin/participants/{pid}/ban`, `/unban`, `GET`/`PATCH
+# /admin/feature-flags`, `GET /admin/whoami`. Measured with a per-entry dump of every ledger on `44aac655` and on
+# this tree (a scratch script, not committed): the new ledger plus the removed keys hashes to the previous digest,
+# so no other entry changed.
 SECURITY_DRIFT_SHA256 = (
-    "207d2b164491edd8fc3a02c72296687b647e78acb02ad9a16b0203b5fe1a7f9b"
+    "d24860fa65d6b277d024282d4dcad8537657979d099c1ad45f93d9063156aec6"
 )
-SECURITY_DRIFT_COUNT = 67
+SECURITY_DRIFT_COUNT = 62
 
 
 def _repo_root() -> Path:
@@ -963,8 +987,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     generated_schemas = generated["components"]["schemas"]
 
     operation_refs = {
-        ("get", "/admin/feature-flags"): "AdminFeatureFlags",
-        ("patch", "/admin/feature-flags"): "AdminFeatureFlags",
         ("post", "/admin/participants/{pid}/freeze"): "AdminParticipantStatusResponse",
         ("post", "/admin/participants/{pid}/unfreeze"): "AdminParticipantStatusResponse",
         ("post", "/admin/transactions/{tx_id}/abort"): "AdminAbortTxResponse",
@@ -977,9 +999,15 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     }
     # 018/T1806: both integrity repair operations are removed, not closed. Neither document may
     # carry them again; a returning route would reappear in the generated half first.
+    # 032 F-5, F-6: ban/unban, feature-flags and whoami are removed by the owner's decision of 2026-10-07 (no client;
+    # the flags are `PATCH /admin/config` keys), held out of both documents the same way.
     for removed in (
         "/integrity/repair/net-mutual-debts",
         "/integrity/repair/cap-debts-to-trust-limits",
+        "/admin/participants/{pid}/ban",
+        "/admin/participants/{pid}/unban",
+        "/admin/feature-flags",
+        "/admin/whoami",
     ):
         assert removed not in canonical["paths"]
         assert f"/api/v1{removed}" not in generated["paths"]
@@ -995,10 +1023,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         assert generated_schema == {"$ref": expected_ref}
 
     exact_shapes = {
-        "AdminFeatureFlags": (
-            {"multipath_enabled", "full_multipath_enabled", "clearing_enabled"},
-            {"multipath_enabled", "full_multipath_enabled", "clearing_enabled"},
-        ),
         "AdminParticipantStatusResponse": (
             {"pid", "status"},
             {"pid", "status"},
@@ -1027,7 +1051,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         assert set(generated_schemas[component]["properties"]) == properties
 
     generated_exact_components = {
-        "AdminFeatureFlags",
         "AdminParticipantStatusResponse",
         "AdminAbortTxResponse",
         "AdminDeleteResponse",

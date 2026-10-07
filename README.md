@@ -543,7 +543,6 @@ Examples:
 
 ```bash
 curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/admin/config
-curl -H "X-Admin-Token: dev-admin-token-change-me" http://localhost:8000/api/v1/admin/feature-flags
 # (repo runner default)
 curl -H "X-Admin-Token: dev-admin-token-change-me" http://127.0.0.1:18000/api/v1/admin/config
 ```

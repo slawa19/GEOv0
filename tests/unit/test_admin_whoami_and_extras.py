@@ -12,20 +12,6 @@ from app.db.models.transaction import Transaction
 
 
 @pytest.mark.asyncio
-async def test_admin_whoami_requires_admin_token(client):
-    r = await client.get("/api/v1/admin/whoami")
-    assert r.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_admin_whoami_returns_role_admin(client):
-    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
-    r = await client.get("/api/v1/admin/whoami", headers=headers)
-    assert r.status_code == 200
-    assert r.json() == {"role": "admin"}
-
-
-@pytest.mark.asyncio
 async def test_admin_dev_auth_allows_missing_token_for_allowlisted_ip(client, monkeypatch):
     # NOTE: httpx ASGI transport client host can vary (e.g. 'testclient').
     monkeypatch.setattr(settings, "ENV", "dev", raising=False)
@@ -37,9 +23,10 @@ async def test_admin_dev_auth_allows_missing_token_for_allowlisted_ip(client, mo
         raising=False,
     )
 
-    r = await client.get("/api/v1/admin/whoami")
+    # Was `/admin/whoami`, removed by 032 F-6 (no client, no roles); any admin read carries the same dependency.
+    r = await client.get("/api/v1/admin/config")
     assert r.status_code == 200
-    assert r.json().get("role") == "admin"
+    assert r.json().get("items")
 
 
 @pytest.mark.asyncio
@@ -64,30 +51,6 @@ async def test_admin_equivalents_include_inactive(client, db_session):
     r2 = await client.get("/api/v1/admin/equivalents?include_inactive=true", headers=headers)
     assert r2.status_code == 200
     assert [e["code"] for e in r2.json().get("items", [])] == ["UAH", "USD"]
-
-
-@pytest.mark.asyncio
-async def test_admin_feature_flags_partial_patch(client, monkeypatch):
-    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
-
-    # Arrange
-    monkeypatch.setattr(settings, "FEATURE_FLAGS_MULTIPATH_ENABLED", True)
-    monkeypatch.setattr(settings, "FEATURE_FLAGS_FULL_MULTIPATH_ENABLED", False)
-    monkeypatch.setattr(settings, "CLEARING_ENABLED", True)
-
-    # Act: patch only one field
-    r = await client.patch(
-        "/api/v1/admin/feature-flags",
-        headers=headers,
-        json={"multipath_enabled": False, "reason": "test"},
-    )
-    assert r.status_code == 200
-
-    # Assert
-    body = r.json()
-    assert body["multipath_enabled"] is False
-    assert body["full_multipath_enabled"] is False
-    assert body["clearing_enabled"] is True
 
 
 @pytest.mark.asyncio

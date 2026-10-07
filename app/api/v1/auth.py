@@ -4,11 +4,10 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.api.audit import add_audit_entry
 from app.core.auth.service import AuthService
-from app.db.models.audit_log import AuditLog
 from app.schemas.auth import ChallengeRequest, ChallengeResponse, LoginRequest, RefreshRequest, TokenPair
 from app.utils.exceptions import GeoException
-from app.utils.request_id import request_id_var
 
 router = APIRouter()
 
@@ -63,29 +62,25 @@ async def login(
         request.device_info.model_dump(exclude_none=True) if request.device_info else None,
     )
 
-    # Best-effort audit entry to give device_info minimal semantics.
+    # Best-effort audit entry to give device_info minimal semantics; the row is built by the one audit writer
+    # (`app/api/audit.py`, 032 A-8). Best-effort is the login's choice: the tokens are already issued.
     try:
-        db.add(
-            AuditLog(
-                actor_id=None,
-                actor_role=None,
-                action="auth.login",
-                object_type="participant",
-                object_id=request.pid,
-                reason=None,
-                before_state=None,
-                after_state={
-                    "device_info": request.device_info.model_dump(exclude_none=True)
-                    if request.device_info
-                    else None
-                },
-                request_id=request_id_var.get(),
-                ip_address=client_host,
-                user_agent=http_request.headers.get("user-agent"),
-            )
+        add_audit_entry(
+            db,
+            request=http_request,
+            action="auth.login",
+            actor_role=None,
+            object_type="participant",
+            object_id=request.pid,
+            after_state={
+                "device_info": request.device_info.model_dump(exclude_none=True)
+                if request.device_info
+                else None
+            },
         )
         await db.commit()
     except Exception:
+        logger.warning("auth.login audit_failed pid=%s", request.pid, exc_info=True)
         await db.rollback()
 
     return tokens

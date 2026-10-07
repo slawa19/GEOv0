@@ -25,13 +25,16 @@ async def _seed_equivalent(db_session, code: str = "USD") -> None:
         await db_session.commit()
 
 
-async def _patch_feature_flags(client: AsyncClient, *, updates: dict, reason: str = "test") -> dict:
+async def _patch_config(client: AsyncClient, *, updates: dict, reason: str = "test") -> dict:
+    """The flags are set through `PATCH /admin/config`, their one writer since 032 F-6 removed `/admin/feature-flags`."""
+
     resp = await client.patch(
-        "/api/v1/admin/feature-flags",
+        "/api/v1/admin/config",
         headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-        json={**updates, "reason": reason},
+        json={"updates": updates, "reason": reason},
     )
     assert resp.status_code == 200, resp.text
+    assert resp.json() == {"updated": list(updates)}, resp.text
     return resp.json()
 
 
@@ -81,7 +84,7 @@ async def test_feature_flag_multipath_enabled_gates_multi_route_payment(client: 
         alice_sk = SigningKey(base64.b64decode(alice["priv"]))
 
         # Disable multipath: should behave like max_paths=1 and fail for amount needing 2 paths.
-        await _patch_feature_flags(client, updates={"multipath_enabled": False}, reason="test-disable-multipath")
+        await _patch_config(client, updates={"FEATURE_FLAGS_MULTIPATH_ENABLED": False}, reason="test-disable-multipath")
 
         resp = await client.post(
             "/api/v1/payments",
@@ -105,7 +108,7 @@ async def test_feature_flag_multipath_enabled_gates_multi_route_payment(client: 
         assert resp.json()["error"]["code"] == "E002"
 
         # Enable multipath: should succeed by splitting across 2 paths.
-        await _patch_feature_flags(client, updates={"multipath_enabled": True}, reason="test-enable-multipath")
+        await _patch_config(client, updates={"FEATURE_FLAGS_MULTIPATH_ENABLED": True}, reason="test-enable-multipath")
 
         resp = await client.post(
             "/api/v1/payments",
@@ -177,7 +180,7 @@ async def test_feature_flag_full_multipath_gates_max_flow_metadata(client: Async
         await tl(dave["headers"], carol["pid"], "5.00", dave_sk)  # edge C->D
 
         # Metadata disabled: paths must be empty, but max_amount should still be correct.
-        await _patch_feature_flags(client, updates={"full_multipath_enabled": False}, reason="test-disable-full")
+        await _patch_config(client, updates={"FEATURE_FLAGS_FULL_MULTIPATH_ENABLED": False}, reason="test-disable-full")
         resp = await client.get(
             "/api/v1/payments/max-flow",
             headers=alice["headers"],
@@ -189,7 +192,7 @@ async def test_feature_flag_full_multipath_gates_max_flow_metadata(client: Async
         assert body["paths"] == []
 
         # Metadata enabled: paths should include the augmenting paths and sum to max_amount.
-        await _patch_feature_flags(client, updates={"full_multipath_enabled": True}, reason="test-enable-full")
+        await _patch_config(client, updates={"FEATURE_FLAGS_FULL_MULTIPATH_ENABLED": True}, reason="test-enable-full")
         resp = await client.get(
             "/api/v1/payments/max-flow",
             headers=alice["headers"],
