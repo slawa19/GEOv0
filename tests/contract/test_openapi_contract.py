@@ -27,10 +27,19 @@ AUTH_TRANSPORT_HEADERS = {"X-Admin-Token", "X-Simulator-Owner"}
 
 # Exact semantic-debt ratchets. They intentionally fail even when drift shrinks,
 # so every resolution is reviewed and the current/intended contract is recorded.
+# 2026-10-07 / programme 033 A (item 5): 22 -> 23, count and digest move. The four `/admin/equivalents/{code}...` routes
+# read the path code through `canonical_code` (any case), so the canon types the path parameter `EquivalentCodePath`
+# (`^[A-Za-z0-9_]{1,16}$`) instead of the stored `EquivalentCode`. ONE entry enters: `POST .../integrity-hold/clear`,
+# which carried the strict pattern on the generated side and no longer does (a malformed code is a 400 by the
+# normaliser, not a 422 by a pattern; the other three never carried one, so the generated side states no pattern
+# and the entry has the same shape as theirs). THREE entries change content: PATCH, DELETE and usage, canonical
+# `pattern` `^[A-Z0-9_]{1,16}$` -> `^[A-Za-z0-9_]{1,16}$`. Measured with a scratch dump of the ledger on this tree
+# (`.local-run/p033a/dump.py`, not committed): the new ledger minus the clear entry, with the canonical pattern of
+# those three put back, hashes to the previous `09c00b95...cbe3` at count 22, so no other entry changed.
 PARAMETER_SCHEMA_DRIFT_SHA256 = (
-    "09c00b95eafbd980730a4709209a7038c7e791e66a819bb169353529c3cccbe3"
+    "d3da4fe8d4632568355a861149a59bb27205e1eeab24bc79bd4c18b8ece9888e"
 )
-PARAMETER_SCHEMA_DRIFT_COUNT = 22
+PARAMETER_SCHEMA_DRIFT_COUNT = 23
 # 2026-08-23 / p011_t1101 (`F-011-2`): the eight Interact Mode operations were published, so
 # they enter these dictionaries for the first time. The ratchet only ever walked operations the
 # canon already declared, which is exactly why a money-moving surface could drift unmeasured.
@@ -960,6 +969,30 @@ def test_admin_equivalent_mutation_inputs_preserve_canonical_bounds() -> None:
         precision = _normalize_schema(properties["precision"], generated)
         assert precision["minimum"] == equivalent_precision["minimum"]
         assert precision["maximum"] == equivalent_precision["maximum"]
+
+
+def test_the_four_equivalent_path_routes_accept_a_code_in_any_case_and_the_stored_code_stays_strict() -> None:
+    """033 A, item 5: PATCH, DELETE, usage and the integrity-hold clear normalise the path code
+    (`equivalents_core.canonical_code`), so the canon's path parameter admits lower case on all four, while the
+    STORED `EquivalentCode` keeps `^[A-Z0-9_]{1,16}$`. Each pattern is asserted as a literal on purpose."""
+
+    canonical = _load_openapi_yaml()
+    schemas = canonical["components"]["schemas"]
+    assert schemas["EquivalentCode"]["pattern"] == r"^[A-Z0-9_]{1,16}$"
+
+    routes = [
+        ("/admin/equivalents/{code}", "patch"),
+        ("/admin/equivalents/{code}", "delete"),
+        ("/admin/equivalents/{code}/usage", "get"),
+        ("/admin/equivalents/{code}/integrity-hold/clear", "post"),
+    ]
+    for path, method in routes:
+        operation = canonical["paths"][path][method]
+        (parameter,) = [p for p in operation["parameters"] if p.get("in") == "path" and p["name"] == "code"]
+        resolved = _resolve_ref(parameter["schema"], canonical)
+        assert resolved["pattern"] == r"^[A-Za-z0-9_]{1,16}$", (path, method)
+        assert parameter["schema"] != {"$ref": "#/components/schemas/EquivalentCode"}, (path, method)
+        assert "400" in operation["responses"], (path, method)
 
 
 def test_equivalent_reads_preserve_legacy_visibility_without_weakening_mutations() -> None:
