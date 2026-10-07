@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
-const routes: RouteRecordRaw[] = [
+export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/dashboard' },
   {
     path: '/dashboard',
@@ -13,6 +13,11 @@ const routes: RouteRecordRaw[] = [
     name: 'Integrity',
     component: () => import('../pages/IntegrityPage.vue'),
     meta: { titleKey: 'integrity.title' },
+  },
+  {
+    path: '/liquidity',
+    // The Liquidity screen is gone (032 S5, F-2): the per-equivalent sums moved to the Dashboard.
+    redirect: '/dashboard',
   },
   {
     path: '/incidents',
@@ -60,6 +65,13 @@ const routes: RouteRecordRaw[] = [
     name: 'Graph',
     component: () => import('../pages/GraphPage.vue'),
     meta: { titleKey: 'graph.title' },
+  },
+  {
+    // Last, so every real path above wins. The address bar keeps what the operator typed.
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('../pages/NotFoundPage.vue'),
+    meta: { titleKey: 'notFound.title' },
   },
 ]
 

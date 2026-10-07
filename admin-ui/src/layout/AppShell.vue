@@ -68,7 +68,11 @@ watch(
   dark,
   (v) => {
     document.documentElement.classList.toggle('dark', v)
-    localStorage.setItem(THEME_KEY, v ? 'dark' : 'light')
+    try {
+      localStorage.setItem(THEME_KEY, v ? 'dark' : 'light')
+    } catch {
+      // Storage can be blocked (private window, blocked site data): the choice then holds for this session only.
+    }
   },
   { immediate: true },
 )
@@ -156,10 +160,7 @@ function navigate(path: string) {
           <template #content>
             <span class="geoTooltipText geoTooltipText--clamp4">{{ getTooltipContent(item.tooltipKey, locale) }}</span>
           </template>
-          <el-menu-item
-            :index="item.path"
-            @click="navigate(item.path)"
-          >
+          <el-menu-item :index="item.path">
             {{ t(item.labelKey) }}
           </el-menu-item>
         </el-tooltip>
