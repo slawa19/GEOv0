@@ -783,7 +783,7 @@ async def admin_graph_snapshot(
     equivalent: str | None = Query(None, description="Optional equivalent code for net visualization"),
     include: str | None = Query(
         None,
-        description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
+        description="Optional extras to include (comma-separated): audit_log,transactions",
     ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphSnapshotResponse:
@@ -816,7 +816,7 @@ async def admin_graph_ego(
     ),
     include: str | None = Query(
         None,
-        description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
+        description="Optional extras to include (comma-separated): audit_log,transactions",
     ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphEgoResponse:

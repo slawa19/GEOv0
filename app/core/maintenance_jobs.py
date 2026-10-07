@@ -232,8 +232,8 @@ def debt_reconciliation_run_problem(app: FastAPI, equivalent_id) -> str | None:
 
 def _start_configured_background_tasks(app: FastAPI) -> None:
     # No payment recovery loop since programme 019, stage 4: the hub executes a payment as one
-    # transaction and persists no intermediate state for it to finish (migration 030). The
-    # `RECOVERY_*` settings are inert until П4 decides their fate with the incidents screen.
+    # transaction and persists no intermediate state for it to finish (migration 030). The inert
+    # `RECOVERY_*` settings were removed with the incidents screen (032 S5).
     if settings.INTEGRITY_CHECKPOINT_ENABLED:
         _start_supervised_background_task(
             app,
