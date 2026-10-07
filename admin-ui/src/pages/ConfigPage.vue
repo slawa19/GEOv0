@@ -9,9 +9,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import ListState from '../ui/ListState.vue'
 import { t, te } from '../i18n'
 import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
-
-type RowKind = 'boolean' | 'number' | 'string' | 'json'
-type Row = { key: string; kind: RowKind; value: unknown }
+import { buildPatch, dirtyKeysOf, sectionForKey, toRows, unitHintKey, type Row, type SectionId } from './configModel'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -24,40 +22,10 @@ const filterKey = ref('')
 const original = ref<Record<string, unknown>>({})
 const rows = ref<Row[]>([])
 
-// The sections of the keys the server lets an operator change (`mutable` in `GET /admin/config`; the client facade
-// drops the rest). Keys that are read once at start (the log level, the integrity job) never reach this page, so they
-// have no section; a mutable key the page does not know yet lands in `other` instead of disappearing.
-type SectionId = 'featureFlags' | 'rateLimit' | 'routing' | 'other'
-
 type Section = {
   id: SectionId
   title: string
   rows: Row[]
-}
-
-function kindOf(value: unknown): RowKind {
-  if (typeof value === 'boolean') return 'boolean'
-  if (typeof value === 'number') return 'number'
-  if (typeof value === 'string') return 'string'
-  return 'json'
-}
-
-function toRows(obj: Record<string, unknown>): Row[] {
-  return Object.entries(obj)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => {
-      const kind = kindOf(value)
-      if (kind === 'json') {
-        return { key, kind, value: JSON.stringify(value, null, 2) }
-      }
-      return { key, kind, value }
-    })
-}
-
-function toObject(rs: Row[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const r of rs) out[r.key] = r.value
-  return out
 }
 
 async function load() {
@@ -90,15 +58,7 @@ const visibleRows = computed(() => {
   })
 })
 
-const dirtyKeys = computed(() => {
-  const dirty: string[] = []
-  for (const row of rows.value) {
-    const originalValue = original.value[row.key]
-    const comparableOriginal = row.kind === 'json' ? JSON.stringify(originalValue, null, 2) : originalValue
-    if (comparableOriginal !== row.value) dirty.push(row.key)
-  }
-  return dirty
-})
+const dirtyKeys = computed(() => dirtyKeysOf(rows.value, original.value))
 
 function configLabel(key: string): string {
   const k = String(key || '').trim()
@@ -118,7 +78,6 @@ function configTooltipTextForRow(row: Row): string {
   const explicit = configTooltipText(row.key)
   if (explicit) return explicit
 
-  const kUpper = String(row.key || '').trim().toUpperCase()
   const section = sectionForKey(row.key)
 
   const lines: string[] = []
@@ -128,24 +87,13 @@ function configTooltipTextForRow(row: Row): string {
   const sectionKey = `config.helpFallback.section.${section}`
   if (te(sectionKey)) lines.push(t(sectionKey as never))
 
-  if (kUpper.endsWith('_SECONDS')) {
-    lines.push(t('config.helpFallback.units.seconds'))
-  } else if (kUpper.includes('_REQUESTS') || kUpper.endsWith('_COUNT') || kUpper.includes('_MAX_')) {
-    lines.push(t('config.helpFallback.units.count'))
-  }
+  const unitKey = unitHintKey(row.key)
+  if (unitKey) lines.push(t(unitKey))
 
   lines.push(t('config.helpFallback.apply'))
   lines.push(t('config.helpFallback.safeDefault'))
 
   return lines.filter(Boolean).slice(0, 4).join('\n')
-}
-
-function sectionForKey(key: string): SectionId {
-  const k = String(key || '').trim().toUpperCase()
-  if (k.startsWith('FEATURE_FLAGS_') || k === 'CLEARING_ENABLED') return 'featureFlags'
-  if (k.startsWith('RATE_LIMIT_')) return 'rateLimit'
-  if (k.startsWith('ROUTING_')) return 'routing'
-  return 'other'
 }
 
 const sections = computed((): Section[] => {
@@ -179,28 +127,15 @@ async function save() {
     return
   }
 
+  const built = buildPatch(rows.value, keys)
+  if ('invalidJsonKey' in built) {
+    ElMessage.error(t('config.invalidJsonForKey', { key: built.invalidJsonKey }))
+    return
+  }
+
   saving.value = true
   try {
-    const now = toObject(rows.value)
-    const rowByKey = new Map(rows.value.map((r) => [r.key, r] as const))
-    const patch: Record<string, unknown> = {}
-
-    for (const k of keys) {
-      const r = rowByKey.get(k)
-      if (!r) continue
-      if (r.kind === 'json') {
-        try {
-          patch[k] = JSON.parse(String(r.value))
-        } catch {
-          ElMessage.error(t('config.invalidJsonForKey', { key: k }))
-          return
-        }
-      } else {
-        patch[k] = now[k]
-      }
-    }
-
-    await api.patchConfig(patch)
+    await api.patchConfig(built.patch)
     ElMessage.success(t('config.savedKeys', { n: keys.length }))
     await load()
   } catch (e: unknown) {

@@ -164,11 +164,19 @@ async function clearHold(code: string) {
   }
 }
 
+async function loadCatalogue() {
+  try {
+    await loadEquivalentPrecision()
+  } catch {
+    // Not fatal and not hidden: without the catalogue the over-limit amounts print '—' (the project's rule for an
+    // unknown precision) instead of a guessed digit count; the status itself does not depend on it.
+  }
+}
+
 onMounted(() => {
   void load()
   void loadHolds()
-  // Without the catalogue the over-limit amounts print '—' (the project's rule for an unknown precision), not a guess.
-  void loadEquivalentPrecision().catch(() => undefined)
+  void loadCatalogue()
 })
 </script>
 

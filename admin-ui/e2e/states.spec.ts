@@ -101,3 +101,18 @@ for (const [status, alertClass] of [
     await expect(uahRow).toContainText(status)
   })
 }
+
+test('404: an unknown path says the page does not exist and keeps the typed address', async ({ page }) => {
+  await page.goto('/nonsense')
+
+  await expect(page.getByTestId('not-found')).toBeVisible()
+  await expect(page.getByTestId('not-found')).toContainText('/nonsense')
+  await expect(page).toHaveURL(/\/nonsense$/)
+})
+
+test('the path of the removed Liquidity screen lands on the Dashboard', async ({ page }) => {
+  await page.goto('/liquidity')
+
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByTestId('dashboard-equivalents')).toBeVisible()
+})
