@@ -36,7 +36,7 @@ const apiMock = vi.hoisted(() => ({
 vi.mock('../api', () => ({ api: apiMock }))
 
 function ok<T>(data: T) {
-  return { success: true as const, data }
+  return data
 }
 
 const HEALTH_OK = { status: 'ok' }

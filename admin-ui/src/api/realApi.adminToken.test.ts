@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiException } from './apiException'
 import { requestJson } from './realApi'
 
 afterEach(() => {
@@ -35,6 +36,33 @@ describe('realApi admin token safety', () => {
       expect(fetchSpy).not.toHaveBeenCalled()
     } finally {
       g.__GEO_ADMINUI_FORCE_PROD__ = prevForceProd
+    }
+  })
+})
+
+describe('realApi without an admin token', () => {
+  it('refuses an admin request with an explicit authorization error before fetch, instead of an empty screen', async () => {
+    const meta = import.meta as unknown as { env: Record<string, unknown> }
+    meta.env.VITE_API_BASE_URL = ''
+    const prevEnvToken = meta.env.VITE_ADMIN_TOKEN
+    meta.env.VITE_ADMIN_TOKEN = ''
+
+    const g = globalThis as unknown as { __GEO_ADMINUI_FORCE_PROD__?: unknown }
+    const prevForceProd = g.__GEO_ADMINUI_FORCE_PROD__
+    g.__GEO_ADMINUI_FORCE_PROD__ = true
+
+    localStorage.removeItem('admin-ui.adminToken')
+    const fetchSpy = vi.fn(async () => new Response('{"items":[]}', { status: 200, statusText: 'OK' }))
+    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch)
+
+    try {
+      const failure = requestJson('/api/v1/admin/participants', { admin: true, toast: false })
+      await expect(failure).rejects.toBeInstanceOf(ApiException)
+      await expect(failure).rejects.toMatchObject({ status: 401, code: 'ADMIN_TOKEN_MISSING' })
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      g.__GEO_ADMINUI_FORCE_PROD__ = prevForceProd
+      meta.env.VITE_ADMIN_TOKEN = prevEnvToken
     }
   })
 })

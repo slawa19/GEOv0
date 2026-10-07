@@ -7,7 +7,6 @@ export type TooltipKey =
   | 'nav.graph'
   | 'nav.participants'
   | 'nav.config'
-  | 'nav.featureFlags'
   | 'nav.auditLog'
   | 'nav.equivalents'
   | 'dashboard.api'
@@ -55,9 +54,6 @@ export type TooltipKey =
   | 'audit.objectType'
   | 'audit.objectId'
   | 'audit.reason'
-    | 'featureFlags.clearing_enabled'
-    | 'featureFlags.multipath_enabled'
-    | 'featureFlags.full_multipath_enabled'
 
 export type TooltipLink = {
   label: string
@@ -117,10 +113,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     title: 'Config',
     body: ['System settings: limits, policies, operational toggles.', 'Some changes may require a restart to take effect.'],
   },
-  'nav.featureFlags': {
-    title: 'Feature Flags',
-    body: ['Feature toggles for the UI/backend behavior.', 'Use carefully; flags may change system behavior immediately.'],
-  },
   'nav.auditLog': {
     title: 'Audit Log',
     body: ['History of administrative actions.', 'Who did what, when, and (optionally) why.'],
@@ -130,18 +122,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     body: ['Catalog of units/currencies used in the network (e.g., UAH, HOUR).', 'Each has precision and description.'],
   },
 
-    'featureFlags.clearing_enabled': {
-      title: 'Clearing cycles',
-      body: ['Enables periodic clearing/settlement logic.', 'Turn off only for testing or emergency isolation.'],
-    },
-    'featureFlags.multipath_enabled': {
-      title: 'Multipath routing',
-      body: ['Allows routes to use multiple paths to find enough capacity.', 'Usually improves success rate in dense networks.'],
-    },
-    'featureFlags.full_multipath_enabled': {
-      title: 'Full multipath routing',
-      body: ['More aggressive multipath mode.', 'Marked as experimental: enable only if you understand the impact.'],
-    },
 
   'dashboard.api': {
     title: 'API',
@@ -410,10 +390,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
     title: 'Конфиг',
     body: ['Настройки системы: лимиты, политики, переключатели.', 'Некоторые изменения начинают действовать только после перезапуска.'],
   },
-  'nav.featureFlags': {
-    title: 'Фиче-флаги',
-    body: ['Переключатели поведения UI/системы.', 'Используйте осторожно: эффект может быть мгновенным.'],
-  },
   'nav.auditLog': {
     title: 'Аудит-лог',
     body: ['История административных действий.', 'Кто что сделал, когда и (при наличии) почему.'],
@@ -423,18 +399,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
     body: ['Каталог единиц/валют сети (например, UAH, HOUR).', 'У каждой есть точность и описание.'],
   },
 
-    'featureFlags.clearing_enabled': {
-      title: 'Клиринг (циклы)',
-      body: ['Включает периодические циклы клиринга/сведения.', 'Отключайте только для теста или аварийной изоляции.'],
-    },
-    'featureFlags.multipath_enabled': {
-      title: 'Мульти-маршрутизация',
-      body: ['Разрешает строить маршрут через несколько путей,', 'чтобы набрать нужную пропускную способность.'],
-    },
-    'featureFlags.full_multipath_enabled': {
-      title: 'Полная мульти-маршрутизация',
-      body: ['Более агрессивный режим multipath.', 'Эксперимент: включайте только если понимаете последствия.'],
-    },
 
   'dashboard.api': {
     title: 'API',

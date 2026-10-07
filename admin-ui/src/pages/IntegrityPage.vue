@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { formatApiError } from '../api/errorFormat'
 import TooltipLabel from '../ui/TooltipLabel.vue'
@@ -102,7 +101,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    status.value = assertSuccess(await api.integrityStatus())
+    status.value = await api.integrityStatus()
   } catch (e: unknown) {
     const f = formatApiError(e)
     error.value = f.hint ? `${f.title} — ${f.hint}` : f.title
@@ -128,7 +127,7 @@ async function verify() {
 
   verifyLoading.value = true
   try {
-    assertSuccess(await api.integrityVerify())
+    await api.integrityVerify()
     ElMessage.success(t('integrity.verify.finished'))
     await load()
   } catch (e: unknown) {

@@ -1,14 +1,5 @@
-import { mockApi } from './mockApi'
+// The Admin UI's one API client, the real one (032 S4, 2026-10-07: the mock client and its mode
+// switch were deleted; `singleClient.guard.test.ts` keeps it that way).
 import { realApi } from './realApi'
 
-import {
-  type ApiMode,
-  apiModeFromEnv,
-  effectiveApiMode,
-  resolveApiMode,
-} from './apiMode'
-
-export type { ApiMode }
-export { resolveApiMode, apiModeFromEnv, effectiveApiMode }
-
-export const api = effectiveApiMode() === 'real' ? realApi : mockApi
+export const api = realApi

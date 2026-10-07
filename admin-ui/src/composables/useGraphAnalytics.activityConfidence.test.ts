@@ -168,7 +168,7 @@ function metricsEnvelope(activity: NonNullable<ParticipantMetrics['activity']>) 
     balance_rows: [],
     activity,
   }
-  return { success: true as const, data: metrics }
+  return metrics
 }
 
 const QUIET_SYSTEM = {

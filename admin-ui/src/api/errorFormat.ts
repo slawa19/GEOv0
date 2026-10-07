@@ -1,4 +1,4 @@
-import { ApiException } from './envelope'
+import { ApiException } from './apiException'
 
 function safeString(v: unknown): string {
   if (v === null || v === undefined) return ''
@@ -29,7 +29,7 @@ export function formatApiError(e: unknown): { title: string; hint?: string } {
     if (status === 404) {
       if (url.includes('localhost:5173') || url.startsWith('/api/')) {
         hint =
-          'Looks like the request went to the Admin UI dev server (Vite) instead of the backend. Check admin-ui/.env.local: VITE_API_MODE=real and VITE_API_BASE_URL=http://127.0.0.1:18000, then restart the UI.'
+          'Looks like the request went to the Admin UI dev server (Vite) instead of the backend. Check admin-ui/.env.local: VITE_API_BASE_URL=http://127.0.0.1:18000, then restart the UI.'
       } else {
         hint = 'Endpoint not found on backend. Check backend version and the API base URL.'
       }

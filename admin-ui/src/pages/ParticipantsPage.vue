@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { toastApiError } from '../api/errorToast'
 import TooltipLabel from '../ui/TooltipLabel.vue'
@@ -104,15 +103,13 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(
-      await api.listParticipants({
-        page: requestPage,
-        per_page: requestPerPage,
-        status: status.value || undefined,
-        type: type.value || undefined,
-        q: q.value || undefined,
-      }),
-    )
+    const data = await api.listParticipants({
+      page: requestPage,
+      per_page: requestPerPage,
+      status: status.value || undefined,
+      type: type.value || undefined,
+      q: q.value || undefined,
+    })
     if (!request.isCurrent()) return
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
@@ -149,7 +146,7 @@ async function freeze(row: Participant) {
   const reason = await promptReason(t('participant.prompt.freezeTitle', { pid: row.pid }))
   if (!reason || !pageActive) return
   try {
-    const result = assertSuccess(await api.freezeParticipant(row.pid, reason))
+    const result = await api.freezeParticipant(row.pid, reason)
     if (!pageActive) return
     const updated = { ...row, status: result.status }
     const index = items.value.findIndex((item) => item.pid === row.pid)
@@ -168,7 +165,7 @@ async function unfreeze(row: Participant) {
   const reason = await promptReason(t('participant.prompt.unfreezeTitle', { pid: row.pid }))
   if (!reason || !pageActive) return
   try {
-    const result = assertSuccess(await api.unfreezeParticipant(row.pid, reason))
+    const result = await api.unfreezeParticipant(row.pid, reason)
     if (!pageActive) return
     const updated = { ...row, status: result.status }
     const index = items.value.findIndex((item) => item.pid === row.pid)

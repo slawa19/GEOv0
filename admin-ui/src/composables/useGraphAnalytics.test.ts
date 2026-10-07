@@ -39,7 +39,7 @@ function metricsEnvelope(net: string) {
       },
     ],
   }
-  return { success: true as const, data: metrics }
+  return metrics
 }
 
 describe('useGraphAnalytics (fixtures-first)', () => {

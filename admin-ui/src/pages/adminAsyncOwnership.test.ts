@@ -11,6 +11,7 @@ import LiquidityPage from './LiquidityPage.vue'
 import DashboardPage from './DashboardPage.vue'
 import ParticipantsPage from './ParticipantsPage.vue'
 import TrustlinesPage from './TrustlinesPage.vue'
+import { ApiException } from '../api/apiException'
 
 const apiMock = vi.hoisted(() => ({
   listParticipants: vi.fn(),
@@ -69,7 +70,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 function ok<T>(data: T) {
-  return { success: true as const, data }
+  return data
 }
 
 function paginated<T>(items: T[]) {
@@ -647,10 +648,9 @@ describe('selected non-Graph operator and navigation paths', () => {
       debts: 0,
       integrity_checkpoints: 0,
     }))
-    apiMock.deleteEquivalent.mockResolvedValue({
-      success: false,
-      error: { code: 'CONFLICT', message: 'equivalent is in use' },
-    })
+    apiMock.deleteEquivalent.mockRejectedValue(
+      new ApiException({ status: 409, code: 'CONFLICT', message: 'equivalent is in use' }),
+    )
     await state.deleteEq(state.items[0])
     expect(apiMock.getEquivalentUsage).toHaveBeenCalledWith(equivalentNew.code)
     expect(ui.error).toHaveBeenCalled()

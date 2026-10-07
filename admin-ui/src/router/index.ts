@@ -46,10 +46,8 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/feature-flags',
-    redirect: (to) => {
-      const scenario = typeof to.query.scenario === 'string' ? to.query.scenario : undefined
-      return { path: '/config', query: { ...(scenario ? { scenario } : {}), tab: 'featureFlags' } }
-    },
+    // The flags are config keys; the separate page and its `/admin/feature-flags` client are gone (032 S4).
+    redirect: '/config',
   },
   {
     path: '/audit-log',

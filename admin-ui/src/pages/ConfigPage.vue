@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
@@ -69,7 +68,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const cfg = assertSuccess(await api.getConfig())
+    const cfg = await api.getConfig()
     original.value = { ...cfg }
     rows.value = toRows(cfg)
   } catch (e: unknown) {
@@ -218,7 +217,7 @@ async function save() {
       }
     }
 
-    assertSuccess(await api.patchConfig(patch))
+    await api.patchConfig(patch)
     ElMessage.success(t('config.savedKeys', { n: keys.length }))
     await load()
   } catch (e: unknown) {

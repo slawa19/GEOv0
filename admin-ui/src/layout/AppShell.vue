@@ -236,7 +236,7 @@ function navigate(path: string) {
                 type="success"
                 effect="plain"
               >
-                {{ t('app.apiMode.real') }}
+                {{ t('app.api.real') }}
               </el-tag>
             </el-tooltip>
           </div>

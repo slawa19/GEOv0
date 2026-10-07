@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
@@ -41,7 +40,7 @@ async function warmUsage(code: string) {
 
   usageLoadingByCode[key] = true
   try {
-    const usage = assertSuccess(await api.getEquivalentUsage(key))
+    const usage = await api.getEquivalentUsage(key)
     if (!pageActive) return
     const u = usage as unknown as Record<string, unknown>
     usageByCode[key] = {
@@ -68,7 +67,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listEquivalents({ include_inactive: requestIncludeInactive }))
+    const data = await api.listEquivalents({ include_inactive: requestIncludeInactive })
     if (!request.isCurrent()) return
     items.value = data.items
   } catch (e: unknown) {
@@ -97,13 +96,13 @@ function openEdit(row: Equivalent) {
 
 async function createEq() {
   try {
-    const created = assertSuccess(
+    const created = (
       await api.createEquivalent({
         code: createForm.code,
         precision: Number(createForm.precision),
         description: createForm.description,
         is_active: Boolean(createForm.is_active),
-      }),
+      })
     ).created
     if (!pageActive) return
     ElMessage.success(t('equivalents.created', { code: created.code }))
@@ -120,11 +119,11 @@ async function createEq() {
 async function saveEdit() {
   if (!editing.value) return
   try {
-    const updated = assertSuccess(
+    const updated = (
       await api.updateEquivalent(editing.value.code, {
         precision: Number(editForm.precision),
         description: editForm.description,
-      }),
+      })
     ).updated
     if (!pageActive) return
     ElMessage.success(t('equivalents.updated', { code: updated.code }))
@@ -157,7 +156,7 @@ async function setActive(row: Equivalent, next: boolean) {
 
   if (!pageActive) return
   try {
-    const updated = assertSuccess(await api.setEquivalentActive(row.code, next, reason)).updated
+    const updated = (await api.setEquivalentActive(row.code, next, reason)).updated
     if (!pageActive) return
     const index = items.value.findIndex((item) => item.code === row.code)
     if (index >= 0) items.value[index] = updated
@@ -174,7 +173,7 @@ async function setActive(row: Equivalent, next: boolean) {
 async function deleteEq(row: Equivalent) {
   let usageLine = ''
   try {
-    const usage = assertSuccess(await api.getEquivalentUsage(row.code))
+    const usage = await api.getEquivalentUsage(row.code)
     const u = usage as unknown as Record<string, unknown>
     const tl = Number(u.trustlines ?? 0)
     const inc = u.incidents
@@ -213,7 +212,7 @@ async function deleteEq(row: Equivalent) {
 
   if (!pageActive) return
   try {
-    assertSuccess(await api.deleteEquivalent(row.code, reason))
+    await api.deleteEquivalent(row.code, reason)
     if (!pageActive) return
     ElMessage.success(t('equivalents.deleted', { code: row.code }))
     includeInactive.value = true

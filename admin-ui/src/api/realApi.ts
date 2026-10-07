@@ -1,4 +1,4 @@
-import { assertSuccess, type ApiEnvelope, ApiException } from './envelope'
+import { ApiException } from './apiException'
 import { toastApiError } from './errorToast'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 import {
@@ -8,7 +8,6 @@ import {
   AdminEquivalentDeleteResponseSchema,
   AdminEquivalentMutationResponseSchema,
   AdminEquivalentUsageResponseSchema,
-  AdminFeatureFlagsSchema,
   AdminParticipantActionResponseSchema,
   IntegrityStatusResponseSchema,
   IntegrityVerifyResponseSchema,
@@ -18,7 +17,6 @@ import {
   type AdminConfigResponse,
   type AdminEquivalentDeleteResponse,
   type AdminEquivalentUsageResponse,
-  type AdminFeatureFlags,
   type AdminParticipantActionResponse,
   type IntegrityStatusResponse,
   type IntegrityVerifyResponse,
@@ -56,19 +54,6 @@ function safeJsonPreview(value: unknown, maxLen = 500): string | null {
 // Backend may serialize Decimal-like values as strings (preferred) but some environments
 // might emit numbers. Normalize to string to keep the UI stable.
 const DecimalString = z.union([z.string(), z.number()]).transform((v) => String(v))
-
-function isApiEnvelopeLike(value: unknown): value is ApiEnvelope<unknown> {
-  if (!value || typeof value !== 'object') return false
-  const v = value as Record<string, unknown>
-  if (typeof v.success !== 'boolean') return false
-  if (v.success === true) return 'data' in v
-
-  if (!('error' in v)) return false
-  const err = v.error
-  if (!err || typeof err !== 'object') return false
-  const e = err as Record<string, unknown>
-  return typeof e.message === 'string' || typeof e.code === 'string' || 'details' in e
-}
 
 const ParticipantSchema = z
   .object({
@@ -370,6 +355,8 @@ function baseUrl(): string {
 }
 
 function adminToken(): string | null {
+  // `null` means "no token configured": `requestJson` turns it into an explicit 401 refusal before any
+  // request is sent (032 S4), so a missing token is an authorization error, not a page of empty lists.
   const key = 'admin-ui.adminToken'
 
   // Prefer explicit env-configured token (useful for teams / non-default backend config).
@@ -405,8 +392,9 @@ function adminToken(): string | null {
     }
 
     // Dev ergonomics: if no token is set yet, seed the default backend token.
-    // This avoids the UI spamming 403s on first run.
-    if (import.meta.env.DEV) {
+    // This avoids the UI spamming 403s on first run. Never in a production build: there a missing
+    // token is an explicit authorization error (`requestJson`).
+    if (!isProdBuild()) {
       try {
         localStorage.setItem(key, DEFAULT_DEV_ADMIN_TOKEN)
       } catch {
@@ -447,7 +435,7 @@ export async function requestJson<T>(
     schema?: ZodTypeAny
     toast?: boolean
   },
-): Promise<ApiEnvelope<T>> {
+): Promise<T> {
   const method = opts?.method || 'GET'
   const url = `${baseUrl()}${pathname}`
 
@@ -460,7 +448,15 @@ export async function requestJson<T>(
 
     if (opts?.admin) {
       const tok = adminToken()
-      if (tok) headers['X-Admin-Token'] = tok
+      if (!tok) {
+        throw new ApiException({
+          status: 401,
+          code: 'ADMIN_TOKEN_MISSING',
+          message: `${method} ${url} -> not sent: no admin token is configured (VITE_ADMIN_TOKEN or localStorage "admin-ui.adminToken")`,
+          details: { url, method },
+        })
+      }
+      headers['X-Admin-Token'] = tok
     }
 
     const timeoutMs = typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : undefined
@@ -501,10 +497,9 @@ export async function requestJson<T>(
     // 204/205 are valid successful responses without a body.
     // Some fetch implementations may throw on res.text() for these.
     if (res.ok && (res.status === 204 || res.status === 205)) {
-      return { success: true, data: undefined as T }
+      return undefined as T
     }
 
-    // The backend might already return ApiEnvelope. If not, adapt here.
     const text = await res.text()
     let parsed: unknown = undefined
     try {
@@ -529,10 +524,7 @@ export async function requestJson<T>(
       })
     }
 
-    let env: ApiEnvelope<T>
-    if (res.ok && isApiEnvelopeLike(parsed)) {
-      env = parsed as ApiEnvelope<T>
-    } else if (!res.ok) {
+    if (!res.ok) {
       const parsedObj = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
       const errorObj = parsedObj?.error && typeof parsedObj.error === 'object' ? (parsedObj.error as Record<string, unknown>) : undefined
 
@@ -555,33 +547,26 @@ export async function requestJson<T>(
           details,
         },
       })
-    } else {
-      // If backend returns raw payload (non-envelope), wrap it.
-      env = { success: true, data: parsed as T }
     }
 
     const schema = opts?.schema
-    if (schema && env.success) {
-      const validated = schema.safeParse(env.data)
-      if (!validated.success) {
-        throw new ApiException({
+    if (!schema) return parsed as T
+    const validated = schema.safeParse(parsed)
+    if (!validated.success) {
+      throw new ApiException({
+        status: res.status,
+        code: 'INVALID_RESPONSE',
+        message: `${method} ${url} -> ${res.status}: Response JSON does not match expected schema`,
+        details: {
+          url,
+          method,
           status: res.status,
-          code: 'INVALID_RESPONSE',
-          message: `${method} ${url} -> ${res.status}: Response JSON does not match expected schema`,
-          details: {
-            url,
-            method,
-            status: res.status,
-            issues: validated.error.issues,
-            data_preview: safeJsonPreview(env.data),
-          },
-        })
-      }
-
-      env = { ...env, data: validated.data as T }
+          issues: validated.error.issues,
+          data_preview: safeJsonPreview(parsed),
+        },
+      })
     }
-
-    return env
+    return validated.data as T
   } catch (err) {
     if (opts?.toast !== false) {
       void toastApiError(err, { fallbackTitle: `${method} ${pathname} failed` })
@@ -641,28 +626,28 @@ function validatedOptionalThreshold(value: string | number | null | undefined): 
 }
 
 export const realApi = {
-  health(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  health(): Promise<Record<string, unknown>> {
     return requestJson('/api/v1/health')
   },
 
-  healthDb(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  healthDb(): Promise<Record<string, unknown>> {
     return requestJson('/api/v1/health/db')
   },
 
-  migrations(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  migrations(): Promise<Record<string, unknown>> {
     return requestJson('/api/v1/admin/migrations', { admin: true })
   },
 
-  async getConfig(): Promise<ApiEnvelope<Record<string, unknown>>> {
+  async getConfig(): Promise<Record<string, unknown>> {
     // Backend returns { items: [{ key, value, mutable }] }. The UI works with a flat object of the mutable keys.
     const raw = await requestJson<AdminConfigResponse>('/api/v1/admin/config', {
       admin: true,
       schema: AdminConfigResponseSchema,
     })
-    return { success: true, data: flattenAdminConfig(assertSuccess(raw)) }
+    return flattenAdminConfig(raw)
   },
 
-  patchConfig(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminConfigPatchResponse>> {
+  patchConfig(patch: Record<string, unknown>): Promise<AdminConfigPatchResponse> {
     return requestJson('/api/v1/admin/config', {
       method: 'PATCH',
       body: { updates: patch },
@@ -671,24 +656,11 @@ export const realApi = {
     })
   },
 
-  getFeatureFlags(): Promise<ApiEnvelope<AdminFeatureFlags>> {
-    return requestJson('/api/v1/admin/feature-flags', { admin: true, schema: AdminFeatureFlagsSchema })
-  },
-
-  patchFeatureFlags(patch: Record<string, unknown>): Promise<ApiEnvelope<AdminFeatureFlags>> {
-    return requestJson('/api/v1/admin/feature-flags', {
-      method: 'PATCH',
-      body: patch,
-      admin: true,
-      schema: AdminFeatureFlagsSchema,
-    })
-  },
-
-  integrityStatus(): Promise<ApiEnvelope<IntegrityStatusResponse>> {
+  integrityStatus(): Promise<IntegrityStatusResponse> {
     return requestJson('/api/v1/integrity/status', { admin: true, schema: IntegrityStatusResponseSchema })
   },
 
-  integrityVerify(): Promise<ApiEnvelope<IntegrityVerifyResponse>> {
+  integrityVerify(): Promise<IntegrityVerifyResponse> {
     return requestJson('/api/v1/integrity/verify', {
       method: 'POST',
       body: {},
@@ -704,7 +676,7 @@ export const realApi = {
     status?: string
     type?: string
     q?: string
-  }): Promise<ApiEnvelope<Paginated<Participant>>> {
+  }): Promise<Paginated<Participant>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
     const status = mapUiStatusToAdmin(params.status)
@@ -714,28 +686,24 @@ export const realApi = {
       { admin: true, schema: ParticipantsListSchema },
     )
 
-    const backend = assertSuccess(payload)
-    const items = backend.items.map((p) => ({
+    const items = payload.items.map((p) => ({
       ...p,
       status: normalizeAdminStatusToUi(p.status),
     }))
 
     return {
-      success: true,
-      data: {
-        items,
-        page: backend.page,
-        per_page: backend.per_page,
-        total: backend.total,
-      },
+      items,
+      page: payload.page,
+      per_page: payload.per_page,
+      total: payload.total,
     }
   },
 
-  participantsStats(): Promise<ApiEnvelope<ParticipantsStats>> {
+  participantsStats(): Promise<ParticipantsStats> {
     return requestJson<ParticipantsStats>('/api/v1/admin/participants/stats', { admin: true, schema: ParticipantsStatsSchema })
   },
 
-  trustlineBottlenecks(params: { threshold?: string; limit?: number; equivalent?: string }): Promise<ApiEnvelope<{ threshold: number; items: Trustline[] }>> {
+  trustlineBottlenecks(params: { threshold?: string; limit?: number; equivalent?: string }): Promise<{ threshold: number; items: Trustline[] }> {
     const threshold = validatedOptionalThreshold(params.threshold)
     const limit = params.limit ?? 10
     const equivalent = String(params.equivalent ?? '').trim() || undefined
@@ -745,7 +713,7 @@ export const realApi = {
     )
   },
 
-  liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<ApiEnvelope<LiquiditySummary>> {
+  liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<LiquiditySummary> {
     const threshold = validatedOptionalThreshold(params.threshold)
     const limit = params.limit ?? 10
     const equivalentRaw = String(params.equivalent ?? '').trim().toUpperCase()
@@ -756,7 +724,7 @@ export const realApi = {
     )
   },
 
-  async freezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
+  async freezeParticipant(pid: string, reason: string): Promise<{ pid: string; status: string }> {
     const r = await requestJson<AdminParticipantActionResponse>(
       `/api/v1/admin/participants/${encodeURIComponent(pid)}/freeze`,
       {
@@ -767,11 +735,10 @@ export const realApi = {
       },
     )
 
-    if (!r.success) return r
-    return { success: true, data: { pid: r.data.pid, status: normalizeAdminStatusToUi(r.data.status) } }
+    return { pid: r.pid, status: normalizeAdminStatusToUi(r.status) }
   },
 
-  async unfreezeParticipant(pid: string, reason: string): Promise<ApiEnvelope<{ pid: string; status: string }>> {
+  async unfreezeParticipant(pid: string, reason: string): Promise<{ pid: string; status: string }> {
     const r = await requestJson<AdminParticipantActionResponse>(
       `/api/v1/admin/participants/${encodeURIComponent(pid)}/unfreeze`,
       {
@@ -782,8 +749,7 @@ export const realApi = {
       },
     )
 
-    if (!r.success) return r
-    return { success: true, data: { pid: r.data.pid, status: normalizeAdminStatusToUi(r.data.status) } }
+    return { pid: r.pid, status: normalizeAdminStatusToUi(r.status) }
   },
 
   async listTrustlines(params: {
@@ -793,7 +759,7 @@ export const realApi = {
     creditor?: string
     debtor?: string
     status?: string
-  }): Promise<ApiEnvelope<Paginated<Trustline>>> {
+  }): Promise<Paginated<Trustline>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
 
@@ -801,15 +767,11 @@ export const realApi = {
       buildQuery('/api/v1/admin/trustlines', { ...params, page, per_page }),
       { admin: true, schema: TrustlinesListSchema },
     )
-    const backend = assertSuccess(payload)
     return {
-      success: true,
-      data: {
-        items: backend.items,
-        page: backend.page,
-        per_page: backend.per_page,
-        total: backend.total,
-      },
+      items: payload.items,
+      page: payload.page,
+      per_page: payload.per_page,
+      total: payload.total,
     }
   },
 
@@ -820,34 +782,29 @@ export const realApi = {
     action?: string
     object_type?: string
     object_id?: string
-  }): Promise<ApiEnvelope<Paginated<AuditLogEntry>>> {
+  }): Promise<Paginated<AuditLogEntry>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 50
     const payload = await requestJson<Paginated<AuditLogEntry>>(
       buildQuery('/api/v1/admin/audit-log', { ...params, page, per_page }),
       { admin: true, schema: AuditLogListSchema },
     )
-    const backend = assertSuccess(payload)
     return {
-      success: true,
-      data: {
-        items: backend.items,
-        page: backend.page,
-        per_page: backend.per_page,
-        total: backend.total,
-      },
+      items: payload.items,
+      page: payload.page,
+      per_page: payload.per_page,
+      total: payload.total,
     }
   },
 
-  async listEquivalents(params: { include_inactive?: boolean }): Promise<ApiEnvelope<{ items: Equivalent[] }>> {
+  async listEquivalents(params: { include_inactive?: boolean }): Promise<{ items: Equivalent[] }> {
     const payload = await requestJson<{ items: Equivalent[] }>(
       buildQuery('/api/v1/admin/equivalents', {
         include_inactive: params.include_inactive ? true : undefined,
       }),
       { admin: true, schema: EquivalentsListSchema },
     )
-    const items = assertSuccess(payload).items
-    return { success: true, data: { items } }
+    return { items: payload.items }
   },
 
   async createEquivalent(input: {
@@ -855,7 +812,7 @@ export const realApi = {
     precision: number
     description: string
     is_active?: boolean
-  }): Promise<ApiEnvelope<{ created: Equivalent }>> {
+  }): Promise<{ created: Equivalent }> {
     const created = await requestJson<Equivalent>('/api/v1/admin/equivalents', {
       method: 'POST',
       body: {
@@ -867,40 +824,40 @@ export const realApi = {
       admin: true,
       schema: AdminEquivalentMutationResponseSchema,
     })
-    return { success: true, data: { created: assertSuccess(created) } }
+    return { created }
   },
 
   async updateEquivalent(
     code: string,
     patch: Partial<{ precision: number; description: string }>,
-  ): Promise<ApiEnvelope<{ updated: Equivalent }>> {
+  ): Promise<{ updated: Equivalent }> {
     const updated = await requestJson<Equivalent>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'PATCH',
       body: patch,
       admin: true,
       schema: AdminEquivalentMutationResponseSchema,
     })
-    return { success: true, data: { updated: assertSuccess(updated) } }
+    return { updated }
   },
 
-  async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<ApiEnvelope<{ updated: Equivalent }>> {
+  async setEquivalentActive(code: string, isActive: boolean, reason: string): Promise<{ updated: Equivalent }> {
     const updated = await requestJson<Equivalent>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'PATCH',
       body: { is_active: isActive, reason },
       admin: true,
       schema: AdminEquivalentMutationResponseSchema,
     })
-    return { success: true, data: { updated: assertSuccess(updated) } }
+    return { updated }
   },
 
-  getEquivalentUsage(code: string): Promise<ApiEnvelope<AdminEquivalentUsageResponse>> {
+  getEquivalentUsage(code: string): Promise<AdminEquivalentUsageResponse> {
     return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/usage`, {
       admin: true,
       schema: AdminEquivalentUsageResponseSchema,
     })
   },
 
-  deleteEquivalent(code: string, reason: string): Promise<ApiEnvelope<AdminEquivalentDeleteResponse>> {
+  deleteEquivalent(code: string, reason: string): Promise<AdminEquivalentDeleteResponse> {
     return requestJson(`/api/v1/admin/equivalents/${encodeURIComponent(code)}`, {
       method: 'DELETE',
       body: { reason },
@@ -912,7 +869,7 @@ export const realApi = {
   listIncidents(params: {
     page?: number
     per_page?: number
-  }): Promise<ApiEnvelope<Paginated<Incident>>> {
+  }): Promise<Paginated<Incident>> {
     const page = params.page ?? 1
     const per_page = params.per_page ?? 20
     return requestJson<Paginated<Incident>>(
@@ -921,31 +878,30 @@ export const realApi = {
     )
   },
 
-  abortTx(txId: string, reason: string): Promise<ApiEnvelope<AdminAbortTxResponse>> {
+  abortTx(txId: string, reason: string): Promise<AdminAbortTxResponse> {
     return requestJson<AdminAbortTxResponse>(
       `/api/v1/admin/transactions/${encodeURIComponent(txId)}/abort`,
       { method: 'POST', body: { reason }, admin: true, schema: AdminAbortTxResponseSchema },
     )
   },
 
-  graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
+  graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<GraphSnapshot> {
     const equivalent = String(params?.equivalent || '').trim().toUpperCase()
     const include = normalizeGraphInclude(params?.include)
     const url = buildQuery('/api/v1/admin/graph/snapshot', {
       equivalent: equivalent || undefined,
       include: include || undefined,
     })
-    return requestJson<GraphSnapshot>(url, { admin: true, schema: GraphSnapshotSchema }).then((r) => {
-      const s = assertSuccess(r)
+    return requestJson<GraphSnapshot>(url, { admin: true, schema: GraphSnapshotSchema }).then((s) => {
       const participants = (s.participants || []).map((p) => ({
         ...p,
         status: normalizeAdminStatusToUi(p.status),
       }))
-      return { success: true, data: { ...s, participants } }
+      return { ...s, participants }
     })
   },
 
-  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[]; include?: string[] }): Promise<ApiEnvelope<GraphSnapshot>> {
+  graphEgo(params: { pid: string; depth?: 1 | 2; equivalent?: string; status?: string[]; include?: string[] }): Promise<GraphSnapshot> {
     const pid = String(params?.pid || '').trim()
     const depth = params?.depth ?? 1
     const equivalent = String(params?.equivalent || '').trim()
@@ -954,17 +910,16 @@ export const realApi = {
     return requestJson<GraphSnapshot>(buildQuery('/api/v1/admin/graph/ego', { pid, depth, equivalent, status, include: include || undefined }), {
       admin: true,
       schema: GraphSnapshotSchema,
-    }).then((r) => {
-      const s = assertSuccess(r)
+    }).then((s) => {
       const participants = (s.participants || []).map((p) => ({
         ...p,
         status: normalizeAdminStatusToUi(p.status),
       }))
-      return { success: true, data: { ...s, participants } }
+      return { ...s, participants }
     })
   },
 
-  clearingCycles(params?: { participant_pid?: string }): Promise<ApiEnvelope<ClearingCycles>> {
+  clearingCycles(params?: { participant_pid?: string }): Promise<ClearingCycles> {
     const participant_pid = String(params?.participant_pid || '').trim()
     return requestJson<ClearingCycles>(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), {
       admin: true,
@@ -975,7 +930,7 @@ export const realApi = {
   async participantMetrics(
     pid: string,
     params?: { equivalent?: string | null; threshold?: string | number | null },
-  ): Promise<ApiEnvelope<ParticipantMetrics>> {
+  ): Promise<ParticipantMetrics> {
     const eq = params?.equivalent ? String(params.equivalent) : undefined
     const threshold = validatedOptionalThreshold(params?.threshold)
 

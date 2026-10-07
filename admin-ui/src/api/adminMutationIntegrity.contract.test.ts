@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { assertSuccess } from './envelope'
-import { __resetMockApiForTests, mockApi } from './mockApi'
 import { realApi } from './realApi'
 
 function jsonResponse(data: unknown): Response {
@@ -16,7 +14,7 @@ function useRealApiResponse(data: unknown) {
   const meta = import.meta as unknown as { env: Record<string, unknown> }
   meta.env.VITE_API_BASE_URL = ''
   meta.env.VITE_ADMIN_TOKEN = 'test-token'
-  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ success: true, data })) as unknown as typeof fetch)
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(data)) as unknown as typeof fetch)
 }
 
 const integrityStatus = {
@@ -56,48 +54,8 @@ function equivalentWire(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function useMockApiFixtures(overrides?: Record<string, unknown>) {
-  const url = new URL('http://localhost/?scenario=happy')
-  const mockWindow = Object.create(window) as Window
-  Object.defineProperty(mockWindow, 'location', { value: url })
-  vi.stubGlobal('window', mockWindow)
-
-  const fixtures: Record<string, unknown> = {
-    'scenarios/happy.json': { name: 'happy', latency_ms: { min: 0, max: 0 } },
-    'datasets/participants.json': [
-      { pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' },
-    ],
-    'datasets/equivalents.json': [
-      { code: 'UAH', precision: 2, description: 'Hryvnia', is_active: true },
-    ],
-    'datasets/trustlines.json': [],
-    'datasets/debts.json': [],
-    'datasets/audit-log.json': [],
-    'datasets/transactions.json': [{
-      tx_id: 'TX_1',
-      type: 'PAYMENT',
-      initiator_pid: 'PID_A',
-      payload: {},
-      state: 'WAITING',
-      created_at: '2026-08-08T10:00:00Z',
-      updated_at: '2026-08-08T10:00:00Z',
-    }],
-    'datasets/integrity-status.json': integrityStatus,
-    ...overrides,
-  }
-
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    const requestUrl = String(input)
-    const entry = Object.entries(fixtures).find(([path]) => requestUrl.includes(`/admin-fixtures/v1/${path}`))
-    if (entry) return jsonResponse(entry[1])
-    return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-  })
-  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-}
-
 afterEach(() => {
   vi.unstubAllGlobals()
-  __resetMockApiForTests()
 })
 
 describe('real Admin mutation and integrity response contracts', () => {
@@ -164,7 +122,7 @@ describe('real Admin mutation and integrity response contracts', () => {
     },
   ])('accepts and normalizes valid $name data', async ({ data, call, expected }) => {
     useRealApiResponse(data)
-    await expect(call()).resolves.toEqual({ success: true, data: expected })
+    await expect(call()).resolves.toEqual(expected)
   })
 
   it.each([
@@ -239,92 +197,9 @@ describe('real Admin mutation and integrity response contracts', () => {
   })
 })
 
-describe('mock Admin mutation and integrity response contracts', () => {
-  it('returns canonical participant, abort, equivalent and integrity mutation shapes', async () => {
-    useMockApiFixtures()
-
-    expect(assertSuccess(await mockApi.freezeParticipant('PID_A', 'reason'))).toEqual({
-      pid: 'PID_A',
-      status: 'suspended',
-    })
-    expect(assertSuccess(await mockApi.unfreezeParticipant('PID_A', 'reason'))).toEqual({
-      pid: 'PID_A',
-      status: 'active',
-    })
-    expect(assertSuccess(await mockApi.abortTx('TX_1', 'reason'))).toEqual({ tx_id: 'TX_1', status: 'aborted' })
-
-    expect(
-      assertSuccess(await mockApi.createEquivalent({ code: 'TOK', precision: 2, description: 'Token' })).created,
-    ).toEqual({ code: 'TOK', precision: 2, description: 'Token', is_active: true })
-    expect(assertSuccess(await mockApi.updateEquivalent('TOK', { precision: 3 })).updated).toEqual({
-      code: 'TOK',
-      precision: 3,
-      description: 'Token',
-      is_active: true,
-    })
-    expect(assertSuccess(await mockApi.setEquivalentActive('TOK', false, 'reason')).updated).toEqual({
-      code: 'TOK',
-      precision: 3,
-      description: 'Token',
-      is_active: false,
-    })
-    expect(assertSuccess(await mockApi.getEquivalentUsage('TOK'))).toEqual({
-      code: 'TOK',
-      trustlines: 0,
-      debts: 0,
-      integrity_checkpoints: 0,
-    })
-    expect(assertSuccess(await mockApi.deleteEquivalent('TOK', 'reason'))).toEqual({ deleted: 'TOK' })
-
-    expect(assertSuccess(await mockApi.integrityStatus())).toEqual(integrityStatus)
-    expect(assertSuccess(await mockApi.integrityVerify())).toMatchObject({
-      status: 'healthy',
-      equivalents: integrityStatus.equivalents,
-      alerts: [],
-    })
-  })
-
-  it('rejects malformed equivalent and integrity fixture data with INVALID_RESPONSE', async () => {
-    useMockApiFixtures({
-      'datasets/equivalents.json': [
-        { code: 'BAD-CODE', precision: 2, description: 'Hryvnia', is_active: true },
-      ],
-      'datasets/integrity-status.json': { ...integrityStatus, last_check: 'yesterday' },
-    })
-
-    await expect(mockApi.updateEquivalent('BAD-CODE', { description: 'Updated' })).rejects.toMatchObject({
-      name: 'ApiException',
-      code: 'INVALID_RESPONSE',
-    })
-    await expect(mockApi.integrityStatus()).rejects.toMatchObject({
-      name: 'ApiException',
-      code: 'INVALID_RESPONSE',
-    })
-  })
-
-  it('rejects equivalent mutation inputs instead of normalizing code or precision', async () => {
-    useMockApiFixtures()
-
-    await expect(mockApi.createEquivalent({ code: 'tok', precision: 2, description: 'Token' })).resolves.toMatchObject({
-      success: false,
-      error: { code: 'VALIDATION_ERROR' },
-    })
-    await expect(mockApi.createEquivalent({ code: 'TOK', precision: 19, description: 'Token' })).resolves.toMatchObject({
-      success: false,
-      error: { code: 'VALIDATION_ERROR' },
-    })
-
-    expect(assertSuccess(await mockApi.createEquivalent({ code: 'TOK', precision: 2, description: 'Token' })).created).toMatchObject({
-      code: 'TOK',
-      precision: 2,
-    })
-    await expect(mockApi.updateEquivalent('TOK', { precision: -1 })).resolves.toMatchObject({
-      success: false,
-      error: { code: 'VALIDATION_ERROR' },
-    })
-    await expect(mockApi.updateEquivalent('tok', { description: 'normalized before' })).resolves.toMatchObject({
-      success: false,
-      error: { code: 'NOT_FOUND' },
-    })
-  })
-})
+// 032 S4 (2026-10-07): the mock-client half of this file was removed with the mock client. What it
+// asserted about the server is held by backend tests: response shapes - tests/integration/
+// test_admin_mutation_audit_atomicity.py, test_admin_freeze_participant.py, test_admin_equivalent_
+// input_validation.py, test_p024_equivalent_baseline_and_delete_postgres.py; refusal of a lower-case
+// code and of precision 19 - test_admin_equivalent_input_validation.py; precision -1 and usage counts -
+// tests/integration/test_p032_s4_admin_semantics_held_by_server.py.

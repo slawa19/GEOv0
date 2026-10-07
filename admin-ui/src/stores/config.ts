@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { t } from '../i18n'
 
@@ -15,7 +14,7 @@ export const useConfigStore = defineStore('config', () => {
     loading.value = true
     error.value = null
     try {
-      config.value = assertSuccess(await api.getConfig())
+      config.value = await api.getConfig()
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : t('config.loadFailed')
     } finally {
@@ -27,7 +26,7 @@ export const useConfigStore = defineStore('config', () => {
     saving.value = true
     error.value = null
     try {
-      assertSuccess(await api.patchConfig(patchObj))
+      await api.patchConfig(patchObj)
       config.value = { ...config.value, ...patchObj }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : t('config.saveFailed')

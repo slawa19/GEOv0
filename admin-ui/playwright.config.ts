@@ -51,7 +51,6 @@ export default defineConfig({
         reuseExistingServer: process.env.PW_REUSE_SERVER === '1',
         env: {
           ...process.env,
-          VITE_API_MODE: 'real',
           VITE_API_BASE_URL: backend.origin,
           VITE_ADMIN_TOKEN: backend.token,
         },

@@ -41,11 +41,10 @@ describe('realApi.requestJson', () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204, statusText: 'No Content' }))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await requestJson<unknown>('/api/v1/health', { toast: false })
-    expect(env).toEqual({ success: true, data: undefined })
+    await expect(requestJson<unknown>('/api/v1/health', { toast: false })).resolves.toBeUndefined()
   })
 
-  it('wraps non-envelope payloads that merely contain a success field', async () => {
+  it('returns the body as is, even one that has a success field (there is no envelope)', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
 
@@ -59,10 +58,7 @@ describe('realApi.requestJson', () => {
     )
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await requestJson<typeof payload>('/api/v1/health', { toast: false })
-    expect(env.success).toBe(true)
-    if (!env.success) return
-    expect(env.data).toEqual(payload)
+    await expect(requestJson<typeof payload>('/api/v1/health', { toast: false })).resolves.toEqual(payload)
   })
 
   it('throws ApiException(TIMEOUT) when fetch is aborted by timeoutMs', async () => {
@@ -93,12 +89,12 @@ describe('realApi.requestJson', () => {
     })
   })
 
-  it('validates envelope.data with schema when provided', async () => {
+  it('validates the body with schema when provided', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
 
     const fetchMock = vi.fn(async () =>
-        new Response(JSON.stringify({ success: true, data: { n: 123 } }), {
+        new Response(JSON.stringify({ n: 123 }), {
           status: 200,
           statusText: 'OK',
           headers: { 'Content-Type': 'application/json' },
@@ -106,10 +102,7 @@ describe('realApi.requestJson', () => {
       )
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await requestJson('/api/v1/health', { schema: z.object({ n: z.number() }) })
-    expect(env.success).toBe(true)
-    if (!env.success) return
-    expect(env.data).toEqual({ n: 123 })
+    await expect(requestJson('/api/v1/health', { schema: z.object({ n: z.number() }) })).resolves.toEqual({ n: 123 })
   })
 
   it('throws ApiException(INVALID_RESPONSE) when schema validation fails', async () => {
@@ -117,7 +110,7 @@ describe('realApi.requestJson', () => {
     meta.env.VITE_API_BASE_URL = ''
 
     const fetchMock = vi.fn(async () =>
-        new Response(JSON.stringify({ success: true, data: { n: 'oops' } }), {
+        new Response(JSON.stringify({ n: 'oops' }), {
           status: 200,
           statusText: 'OK',
           headers: { 'Content-Type': 'application/json' },
@@ -133,12 +126,12 @@ describe('realApi.requestJson', () => {
     })
   })
 
-  it('does not block success:false envelopes even if schema is provided', async () => {
+  it('gives an old {success, data} envelope no meaning: it is data, and the schema refuses it', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
 
     const fetchMock = vi.fn(async () =>
-        new Response(JSON.stringify({ success: false, error: { code: 'NOPE', message: 'Nope' } }), {
+        new Response(JSON.stringify({ success: true, data: { n: 123 } }), {
           status: 200,
           statusText: 'OK',
           headers: { 'Content-Type': 'application/json' },
@@ -146,8 +139,9 @@ describe('realApi.requestJson', () => {
       )
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await requestJson('/api/v1/health', { schema: z.object({ n: z.number() }), toast: false })
-    expect(env.success).toBe(false)
+    await expect(
+      requestJson('/api/v1/health', { schema: z.object({ n: z.number() }), toast: false }),
+    ).rejects.toMatchObject({ name: 'ApiException', code: 'INVALID_RESPONSE' })
   })
 })
 
@@ -174,17 +168,18 @@ describe('realApi bottleneck threshold transport', () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify({ success: false, error: { code: 'EXPECTED', message: 'stop' } }), {
-        status: 200,
+      new Response(JSON.stringify({ error: { code: 'EXPECTED', message: 'stop' } }), {
+        status: 409,
         headers: { 'Content-Type': 'application/json' },
       }),
     )
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
     const threshold = '0.10000000000000001'
 
-    await realApi.trustlineBottlenecks({ threshold })
-    await realApi.liquiditySummary({ threshold })
-    await realApi.participantMetrics('PID_A', { threshold })
+    // Only the URL is under test; the stub refuses every call, so each one rejects.
+    await realApi.trustlineBottlenecks({ threshold }).catch(() => undefined)
+    await realApi.liquiditySummary({ threshold }).catch(() => undefined)
+    await realApi.participantMetrics('PID_A', { threshold }).catch(() => undefined)
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       `/api/v1/admin/trustlines/bottlenecks?threshold=${threshold}&limit=10`,
@@ -208,10 +203,9 @@ describe('realApi liquidity summary decoder (028 F-028-37)', () => {
       vi.fn(async () => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })),
     )
 
-    const env = await realApi.liquiditySummary({})
+    const summary = await realApi.liquiditySummary({})
 
-    expect(env.success).toBe(true)
-    expect(env.success && [env.data.total_limit, env.data.total_used, env.data.total_available]).toEqual([null, null, null])
-    expect(env.success && env.data.active_trustlines).toBe(2)
+    expect([summary.total_limit, summary.total_used, summary.total_available]).toEqual([null, null, null])
+    expect(summary.active_trustlines).toBe(2)
   })
 })

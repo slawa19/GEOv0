@@ -1,7 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 import { t } from '../i18n'
 import { COUNT_MEASURED, collectionConfidence, makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import { isRatioBelowThreshold, isUnitIntervalDecimalString } from '../utils/decimal'
@@ -173,7 +172,7 @@ export function useGraphAnalytics(opts: {
     try {
       const res = await api.participantMetrics(pid, { equivalent: eqCode, threshold: thr })
       if (!request.isCurrent()) return
-      const m = assertSuccess(res) as ParticipantMetrics
+      const m = res as ParticipantMetrics
       metricsCache.value.set(key, m)
     } catch (e: unknown) {
       if (!request.isCurrent()) return

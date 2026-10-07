@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
 import { IntegrityStatusResponseSchema } from './adminContracts'
-import fixture from '../../public/admin-fixtures/v1/datasets/integrity-status.json'
 
 // T1402 of programme 014: the backend stopped publishing zero-sum as a passed check, because
 // `check_zero_sum` sums the same debt rows grouped by creditor and by debtor and returns the
@@ -85,32 +84,6 @@ describe('integrity: a withdrawn check decodes, and cannot be read as a verdict'
   })
 })
 
-describe('integrity: the mock says what the server says', () => {
-  it('the shipped fixture publishes the withdrawal, not a pass', () => {
-    // A mock that still answered `passed: true` here would put the operator in front of a green
-    // Zero-sum tag that the real service no longer claims - the mock/real divergence recorded as
-    // `R-C4-002` and confirmed by T1400 on the very same day.
-    const equivalents = (fixture as { equivalents: Record<string, Record<string, unknown>> })
-      .equivalents
-    const codes = Object.keys(equivalents)
-    expect(codes.length).toBeGreaterThan(0)
-
-    for (const code of codes) {
-      const entry = equivalents[code]
-      expect(entry, code).toBeDefined()
-      const invariants = (entry as Record<string, unknown>).invariants as Record<
-        string,
-        Record<string, unknown> | undefined
-      >
-      const zeroSum = invariants.zero_sum
-      expect(zeroSum, code).toEqual({ status: 'not_verified', reason: 'check_withdrawn' })
-      expect(zeroSum?.passed, code).toBeUndefined()
-      expect((entry as Record<string, unknown>).unverified, code).toEqual(['zero_sum'])
-    }
-  })
-
-  it('the fixture decodes under the same schema the real client uses', () => {
-    const parsed = IntegrityStatusResponseSchema.safeParse(fixture)
-    expect(parsed.success).toBe(true)
-  })
-})
+// 032 S4 (2026-10-07): the two cases that held the Admin mock's integrity fixture to the server's
+// withdrawal of zero-sum were removed with the mock and its fixtures. That the SERVER publishes the
+// withdrawal is held by tests/integration/test_p014_t1402_zero_sum_is_not_published_as_a_check.py; the decoder cases above stay.

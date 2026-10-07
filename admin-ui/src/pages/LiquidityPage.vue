@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 
 import type { Equivalent, LiquiditySummary, Trustline } from '../types/domain'
 
@@ -112,12 +111,12 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const eqRes = assertSuccess(await api.listEquivalents({ include_inactive: false }))
+    const eqRes = await api.listEquivalents({ include_inactive: false })
     if (!request.isCurrent()) return
     equivalentsList.value = (eqRes.items || []) as Equivalent[]
 
-    const nextSummary = assertSuccess(
-      await api.liquiditySummary({ equivalent: requestEq, threshold: requestThreshold, limit: 10 }),
+    const nextSummary = (
+      await api.liquiditySummary({ equivalent: requestEq, threshold: requestThreshold, limit: 10 })
     ) as LiquiditySummary
     if (!request.isCurrent()) return
     summary.value = nextSummary

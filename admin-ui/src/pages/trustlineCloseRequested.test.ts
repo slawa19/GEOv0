@@ -25,8 +25,8 @@ function row(to: string, closeRequestedAt: string | null): Trustline {
 describe('TrustlinesPage: requested close', () => {
   it('marks only the line whose close is requested', async () => {
     const items = [row('REQUESTED', '2026-10-02T08:00:00Z'), row('PLAIN_ZERO', null)]
-    apiMock.listTrustlines.mockResolvedValue({ success: true, data: { items, page: 1, per_page: 20, total: 2 } })
-    apiMock.listEquivalents.mockResolvedValue({ success: true, data: { items: [{ code: 'UAH', precision: 2 }] } })
+    apiMock.listTrustlines.mockResolvedValue({ items, page: 1, per_page: 20, total: 2 })
+    apiMock.listEquivalents.mockResolvedValue({ items: [{ code: 'UAH', precision: 2 }] })
     setActivePinia(createPinia())
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/trustlines', component: TrustlinesPage }] })
     await router.push('/trustlines')

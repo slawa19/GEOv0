@@ -1,6 +1,6 @@
 import { z, type ZodType } from 'zod'
 
-import { ApiException } from './envelope'
+import { ApiException } from './apiException'
 
 export const ADMIN_CONFIG_KEYS = [
   'RATE_LIMIT_ENABLED',
@@ -45,14 +45,6 @@ export const AdminConfigPatchResponseSchema = z
     updated: z.array(AdminConfigKeySchema),
   })
   .passthrough()
-
-export const AdminFeatureFlagsSchema = z
-  .object({
-    multipath_enabled: z.boolean(),
-    full_multipath_enabled: z.boolean(),
-    clearing_enabled: z.boolean(),
-  })
-  .strict()
 
 export const AdminParticipantActionResponseSchema = z
   .object({
@@ -211,7 +203,6 @@ export const IntegrityVerifyResponseSchema = z
 
 export type AdminConfigResponse = z.infer<typeof AdminConfigResponseSchema>
 export type AdminConfigPatchResponse = z.infer<typeof AdminConfigPatchResponseSchema>
-export type AdminFeatureFlags = z.infer<typeof AdminFeatureFlagsSchema>
 export type AdminParticipantActionResponse = z.infer<typeof AdminParticipantActionResponseSchema>
 export type AdminAbortTxResponse = z.infer<typeof AdminAbortTxResponseSchema>
 export type AdminEquivalentMutationResponse = z.infer<typeof AdminEquivalentMutationResponseSchema>

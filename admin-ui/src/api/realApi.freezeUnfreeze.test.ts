@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { ApiEnvelope } from './envelope'
+import { ApiException } from './apiException'
 import { normalizeAdminStatusToUi } from './statusMapping'
 import { realApi } from './realApi'
 
@@ -9,39 +9,30 @@ afterEach(() => {
 })
 
 describe('realApi.freeze/unfreeze', () => {
-  it('does not mask success:false envelopes (freeze)', async () => {
+  it('turns a refused freeze into ApiException with the server code, not a value', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
 
-    const env: ApiEnvelope<{ pid: string; status: string }> = {
-      success: false,
-      error: { code: 'VALIDATION_ERROR', message: 'reason required' },
-    }
-
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(env), { status: 200, statusText: 'OK' }))
+    const body = { error: { code: 'E009', message: 'reason required' } }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 400, statusText: 'Bad Request' }))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const res = await realApi.freezeParticipant('PID_X', '')
-    expect(res).toEqual(env)
+    const failure = realApi.freezeParticipant('PID_X', '')
+    await expect(failure).rejects.toBeInstanceOf(ApiException)
+    await expect(failure).rejects.toMatchObject({ status: 400, code: 'E009' })
   })
 
-  it('normalizes status on success:true (unfreeze)', async () => {
+  it('normalizes the status of the returned participant (unfreeze)', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
 
-    const env: ApiEnvelope<{ pid: string; status: string }> = {
-      success: true,
-      data: { pid: 'PID_X', status: 'suspended' },
-    }
-
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(env), { status: 200, statusText: 'OK' }))
+    const body = { pid: 'PID_X', status: 'suspended' }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200, statusText: 'OK' }))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const res = await realApi.unfreezeParticipant('PID_X', 'because')
-    expect(res.success).toBe(true)
-    if (res.success) {
-      expect(res.data.pid).toBe('PID_X')
-      expect(res.data.status).toBe(normalizeAdminStatusToUi('suspended'))
-    }
+    await expect(realApi.unfreezeParticipant('PID_X', 'because')).resolves.toEqual({
+      pid: 'PID_X',
+      status: normalizeAdminStatusToUi('suspended'),
+    })
   })
 })

@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
@@ -57,7 +56,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listIncidents({ page: requestPage, per_page: requestPerPage }))
+    const data = await api.listIncidents({ page: requestPage, per_page: requestPerPage })
     if (!request.isCurrent()) return
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
@@ -93,7 +92,7 @@ async function forceAbort(row: Incident) {
   lastAbortTxId.value = null
   abortingTxId.value = row.tx_id
   try {
-    assertSuccess(await api.abortTx(row.tx_id, reason))
+    await api.abortTx(row.tx_id, reason)
     if (!pageActive) return
     ElMessage.success(t('incidents.aborted', { txId: row.tx_id }))
     lastAbortTxId.value = row.tx_id

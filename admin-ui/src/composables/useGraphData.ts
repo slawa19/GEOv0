@@ -2,7 +2,6 @@ import { computed, ref, watch, type Ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 import { t } from '../i18n'
 import { buildFocusModeQuery } from '../pages/graph/graphPageHelpers'
 import { useLatestRequest } from './useLatestRequest'
@@ -29,7 +28,7 @@ import type {
 // "asked" while the user is reading it. The cost of asking unconditionally is bounded and measured:
 // the server caps this collection at ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS (50) rows of eight scalar
 // fields, which is 25,569 B against a 196,738 B SERIALIZED FOUR-KEY FIXTURE BASE - 13.0% - measured
-// over the first 50 rows of the shipped fixtures in `admin-ui/public/admin-fixtures/v1/datasets/`.
+// over the first 50 rows of the Admin mock datasets the UI shipped until 2026-10-07 (032 S4).
 // "Four-key base" is the exact object the recorded method serializes (participants, trustlines,
 // debts, equivalents); calling it a "snapshot body" was loose, because the real response carries
 // more keys and the number would not reproduce against it.
@@ -278,7 +277,7 @@ export function useGraphData(opts: {
           (reason: unknown) => ({ status: 'rejected' as const, reason }),
         ),
       ])
-      const s = assertSuccess(snap)
+      const s = snap
       const payload: GraphSnapshotPayload = {
         participants: (s.participants || []) as Participant[],
         trustlines: (s.trustlines || []) as Trustline[],
@@ -305,7 +304,7 @@ export function useGraphData(opts: {
       if (cycleRequest.isCurrent()) {
         try {
           if (cycleResult.status === 'rejected') throw cycleResult.reason
-          const nextClearingCycles = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+          const nextClearingCycles = (cycleResult.value as ClearingCycles | null) ?? null
           fullClearingCycles = nextClearingCycles
           if (cycleDisplayOwner.value.kind === 'full') {
             clearingCycles.value = nextClearingCycles
@@ -336,7 +335,7 @@ export function useGraphData(opts: {
       const snapEq = normalizeEqCode(opts.eq.value)
       const snap = await api.graphSnapshot({ equivalent: snapEq || undefined, include: GRAPH_INCLUDE })
       if (!request.isCurrent()) return false
-      const s = assertSuccess(snap)
+      const s = snap
       const payload: GraphSnapshotPayload = {
         participants: (s.participants || []) as Participant[],
         trustlines: (s.trustlines || []) as Trustline[],
@@ -412,7 +411,7 @@ export function useGraphData(opts: {
         ),
       ])
 
-      const e = assertSuccess(ego) as Partial<GraphSnapshotPayload>
+      const e = ego as Partial<GraphSnapshotPayload>
       const payload: GraphSnapshotPayload = {
         participants: (e.participants || []) as Participant[],
         trustlines: (e.trustlines || []) as Trustline[],
@@ -429,7 +428,7 @@ export function useGraphData(opts: {
         try {
           if (cycleResult.status === 'rejected') throw cycleResult.reason
           if (!activeParticipantPid.value) {
-            clearingCycles.value = (assertSuccess(cycleResult.value) as ClearingCycles | null) ?? null
+            clearingCycles.value = (cycleResult.value as ClearingCycles | null) ?? null
           }
           focusCycleError.value = null
         } catch (e: unknown) {
@@ -472,7 +471,7 @@ export function useGraphData(opts: {
     try {
       const cc = await api.clearingCycles({ participant_pid: pid })
       if (!participantRequest.isCurrent() || activeParticipantPid.value !== pid) return false
-      clearingCycles.value = (assertSuccess(cc) as ClearingCycles | null) ?? null
+      clearingCycles.value = (cc as ClearingCycles | null) ?? null
       cycleDisplayOwner.value = { kind: 'participant', pid }
       participantCycleState.value = 'visible'
       participantCycleError.value = null
