@@ -65,10 +65,14 @@ class SseBroadcast:
         return sum(len(r._subs) for r in self._runs.values())
 
     def next_event_id(self, run: RunRecord) -> str:
-        """Legacy allocation helper for tests that construct payloads directly.
+        """Allocate the next event id of a run, apart from dispatching a payload.
 
-        Production producers must use ``publish_event`` so ID allocation, replay
-        admission and subscriber delivery share one ordering boundary.
+        Transport API for a producer that builds a payload by itself and hands it to
+        ``broadcast``: the tests that construct payloads directly, and the ``_publish``
+        fallback of ``SseEventEmitter`` for emitters without ``publish_event``. Runtime
+        producers use ``publish_event`` so ID allocation, replay admission and subscriber
+        delivery share one ordering boundary; a separate allocation and dispatch is not
+        indivisible.
         """
         with self._lock:
             run._event_seq += 1
@@ -274,10 +278,12 @@ class SseBroadcast:
         return payload
 
     def broadcast(self, run_id: str, payload: dict[str, Any]) -> None:
-        """Compatibility path for already-ID'd test payloads.
+        """Dispatch a payload that already carries its event id (see ``next_event_id``).
 
-        Runtime producers use ``publish_event`` to make allocation and dispatch
-        indivisible. This method still serializes buffer/queue delivery.
+        Transport API used by the tests that construct payloads directly and by the
+        ``_publish`` fallback of ``SseEventEmitter``. Runtime producers use
+        ``publish_event`` to make allocation and dispatch indivisible; this method
+        still serializes buffer/queue delivery.
         """
         artifact_payload: dict[str, Any] | None = None
         with self._lock:
