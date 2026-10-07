@@ -3,11 +3,14 @@ import { ElMessage } from 'element-plus'
 
 import { api } from '../api'
 import { describeError } from '../api/describeError'
-import { buildFocusModeQuery } from '../pages/graph/graphPageHelpers'
+import { buildFocusModeQuery } from './graph/graphQueries'
 import { normalizeEquivalentCode } from '../utils/equivalent'
 import { buildPrecisionByEquivalent } from './useEquivalentPrecision'
 import { useLatestRequest } from './useLatestRequest'
-import type { Equivalent, GraphSnapshotPayload, Participant, Trustline } from '../pages/graph/graphTypes'
+import type { Equivalent, GraphSnapshot, Participant, Trustline } from '../types/domain'
+
+/** The collections of a snapshot the graph page reads; the optional `audit_log` / `transactions` are not requested. */
+type GraphSnapshotPayload = Pick<GraphSnapshot, 'participants' | 'trustlines' | 'equivalents'>
 
 // 032 S5 (F-1). The page asks for no optional snapshot collection: `transactions` was requested
 // only for the drawer's activity card, `incidents` fed the incident overlay, and both are removed
@@ -117,9 +120,9 @@ export function useGraphData(opts: {
 
   function toPayload(src: Partial<GraphSnapshotPayload>): GraphSnapshotPayload {
     return {
-      participants: (src.participants || []) as Participant[],
-      trustlines: (src.trustlines || []) as Trustline[],
-      equivalents: (src.equivalents || []) as Equivalent[],
+      participants: src.participants || [],
+      trustlines: src.trustlines || [],
+      equivalents: src.equivalents || [],
     }
   }
 

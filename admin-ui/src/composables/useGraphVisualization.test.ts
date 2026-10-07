@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Participant, Trustline } from '../pages/graph/graphTypes'
+import type { Participant, Trustline } from '../types/domain'
 import { graphSelectionAnnouncement, useGraphVisualization, type SelectedInfo } from './useGraphVisualization'
 
 function mountGraph(input?: {

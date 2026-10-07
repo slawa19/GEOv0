@@ -2,7 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
 import { describeError } from '../api/describeError'
-import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
+import { makeMetricsKey } from './graph/graphQueries'
 import type { BalanceRow, ParticipantMetrics } from '../types/domain'
 import type { SelectedInfo } from './useGraphVisualization'
 import { normalizeEquivalentCode } from '../utils/equivalent'

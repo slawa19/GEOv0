@@ -13,7 +13,7 @@ import {
   filterTrustlinesByEqAndStatus,
   useGraphData,
 } from './useGraphData'
-import type { Equivalent, Trustline } from '../pages/graph/graphTypes'
+import type { Equivalent, Trustline } from '../types/domain'
 
 type Deferred<T> = {
   promise: Promise<T>

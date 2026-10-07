@@ -1,15 +1,16 @@
 import { ElMessage } from 'element-plus'
-import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type LayoutOptions, type NodeSingular } from 'cytoscape'
+import cytoscape, { type Core, type EdgeSingular, type LayoutOptions, type NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import { computed, onBeforeUnmount, watch, type ComputedRef, type Ref } from 'vue'
 
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
 import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS, GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
-import { isRatioBelowThreshold } from '../utils/decimal'
 import { normalizeEquivalentCode } from '../utils/equivalent'
-import type { Participant, Trustline } from '../pages/graph/graphTypes'
+import type { Participant, Trustline } from '../types/domain'
 import { t } from '../i18n'
-import { installGraphDevHooks } from '../pages/graph/graphDevHooks'
+import { buildGraphElements, type GraphElements } from './graph/graphElements'
+import { installGraphDevHooks } from './graph/graphDevHooks'
+import { buildGraphStylesheet, zoomStyleRules } from './graph/graphStyle'
 
 cytoscape.use(fcose as unknown as cytoscape.Ext)
 
@@ -115,7 +116,7 @@ export function useGraphVisualization(options: {
 }): {
   getCy: () => Core | null
   canFind: ComputedRef<boolean>
-  buildElements: () => { nodes: ElementDefinition[]; edges: ElementDefinition[] }
+  buildElements: () => GraphElements
   initCy: () => boolean
   destroyCy: () => void
 
@@ -225,10 +226,6 @@ export function useGraphVisualization(options: {
     cy.nodes('.connection-node').removeClass('connection-node')
   }
 
-  function isBottleneck(t: Trustline): boolean {
-    return isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: options.threshold.value })
-  }
-
   function getDrawerClientRect(): DOMRect | null {
     // GraphAnalyticsDrawer sets data-testid on <el-drawer>.
     const byTestId = document.querySelector('[data-testid="graph-drawer"]') as HTMLElement | null
@@ -317,238 +314,21 @@ export function useGraphVisualization(options: {
     { flush: 'post' }
   )
 
-  function buildElements() {
-    // 1) Start from trustlines filtered by non-type filters (equivalent/status/...).
-    //    IMPORTANT: type filter must NOT affect isolate detection.
-    const edgeCandidates = options.filteredTrustlines.value
-
-    const allowedTypes = new Set((options.typeFilter.value || []).map((t) => String(t).toLowerCase()).filter(Boolean))
-    const focusEnabled = Boolean(options.focusMode.value)
-    const focusRoot = String(options.focusRootPid.value || '').trim()
-    const focusD = options.focusDepth.value
-    const minDeg = focusEnabled ? 0 : Math.max(0, Number(options.minDegree.value) || 0)
-    const focusedPid = String(options.focusPid.value || '').trim()
-
-    const pIndex = new Map<string, Participant>()
-    for (const p of options.participants.value || []) {
-      if (p?.pid) pIndex.set(p.pid, p)
-    }
-
-    const typeOf = (pid: string): string => String(pIndex.get(pid)?.type || '').toLowerCase()
-    const isTypeAllowed = (pid: string): boolean => {
-      if (!allowedTypes.size) return true
-      const t = typeOf(pid)
-      if (!t) return false
-      // Keep types strict: person|business|hub
-      return allowedTypes.has(t)
-    }
-
-    // Type filter applies to nodes and edges.
-    // IMPORTANT (regression guard): do NOT drop trustline edges only because endpoint
-    // types differ. When multiple types are selected (e.g. person+business), cross-type
-    // trustlines are required to keep the graph connected. When a single type is selected,
-    // cross-type edges are naturally filtered out because one endpoint won't be allowed.
-    const isEdgeAllowedByType = (tl: Trustline): boolean => {
-      return isTypeAllowed(tl.from) && isTypeAllowed(tl.to)
-    }
-
-    // 2) Global "has any edge" map: based on candidate trustlines ONLY (no type filter).
-    //    This prevents "pseudo-isolates" when a node has edges, but only to hidden types.
-    const hasAnyEdgeByPid = new Set<string>()
-    for (const t of edgeCandidates) {
-      hasAnyEdgeByPid.add(t.from)
-      hasAnyEdgeByPid.add(t.to)
-    }
-
-    // 3) Visible edges = candidate trustlines filtered by type.
-    const visibleEdges = edgeCandidates.filter(isEdgeAllowedByType)
-
-    // 4) Visible nodes: endpoints of visible edges + (optionally) true isolates.
-    let pidSet = new Set<string>()
-    for (const t of visibleEdges) {
-      pidSet.add(t.from)
-      pidSet.add(t.to)
-    }
-
-    // Focus Mode (ego graph): keep a small neighborhood around a root PID.
-    // Depth is computed on the currently visible (type+status+eq filtered) edges.
-    if (focusEnabled && focusRoot) {
-      const adj = new Map<string, Set<string>>()
-      for (const t of visibleEdges) {
-        if (!adj.has(t.from)) adj.set(t.from, new Set())
-        if (!adj.has(t.to)) adj.set(t.to, new Set())
-        adj.get(t.from)!.add(t.to)
-        adj.get(t.to)!.add(t.from)
-      }
-
-      const focusPids = new Set<string>()
-      const q: Array<{ pid: string; depth: number }> = [{ pid: focusRoot, depth: 0 }]
-      focusPids.add(focusRoot)
-
-      while (q.length) {
-        const cur = q.shift()!
-        if (cur.depth >= focusD) continue
-        const nb = adj.get(cur.pid)
-        if (!nb) continue
-        for (const n of nb) {
-          if (focusPids.has(n)) continue
-          focusPids.add(n)
-          q.push({ pid: n, depth: cur.depth + 1 })
-        }
-      }
-
-      // Always keep the root node (even if it has no edges under current filters).
-      if (pIndex.has(focusRoot) && isTypeAllowed(focusRoot)) focusPids.add(focusRoot)
-      pidSet = focusPids
-    } else {
-      // Add isolates ONLY if they have no trustlines at all (under non-type filters).
-      // Do NOT add nodes that have trustlines but all of them go to hidden types.
-      if (!options.hideIsolates.value) {
-        for (const p of options.participants.value || []) {
-          if (!p?.pid) continue
-          if (!isTypeAllowed(p.pid)) continue
-          if (hasAnyEdgeByPid.has(p.pid)) continue
-          pidSet.add(p.pid)
-        }
-      }
-    }
-
-    const prelim = new Set<string>()
-    for (const pid of pidSet) {
-      if (!isTypeAllowed(pid)) continue
-      prelim.add(pid)
-    }
-
-    const filteredEdges = visibleEdges.filter((t) => prelim.has(t.from) && prelim.has(t.to))
-
-    const degreeByPid = new Map<string, number>()
-    for (const t of filteredEdges) {
-      degreeByPid.set(t.from, (degreeByPid.get(t.from) || 0) + 1)
-      degreeByPid.set(t.to, (degreeByPid.get(t.to) || 0) + 1)
-    }
-
-    const finalPids = new Set<string>()
-    const pinnedPid = focusEnabled ? focusRoot : focusedPid
-    for (const pid of prelim) {
-      const deg = degreeByPid.get(pid) || 0
-      if (minDeg > 0 && deg < minDeg && pid !== pinnedPid) continue
-      finalPids.add(pid)
-    }
-
-    const nodes = Array.from(finalPids).map((pid) => {
-      const p = pIndex.get(pid)
-      const name = (p?.display_name || '').trim()
-      const typeKey = String(p?.type || '').toLowerCase()
-
-      const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
-      const darkenHex = (hex: string, factor: number): string => {
-        const h = String(hex || '').trim().toLowerCase()
-        const m = /^#([0-9a-f]{6})$/.exec(h)
-        const v = m?.[1]
-        if (!v) return '#111318'
-        const r = parseInt(v.slice(0, 2), 16)
-        const g = parseInt(v.slice(2, 4), 16)
-        const b = parseInt(v.slice(4, 6), 16)
-        const f = clamp01(factor)
-        const rr = Math.round(r * f)
-        const gg = Math.round(g * f)
-        const bb = Math.round(b * f)
-        return `#${rr.toString(16).padStart(2, '0')}${gg.toString(16).padStart(2, '0')}${bb.toString(16).padStart(2, '0')}`
-      }
-
-      const statusKey = String(p?.status || '').toLowerCase()
-      const vizColorKeyRaw = String(p?.viz_color_key || '').toLowerCase()
-      const baseColorByVizKey: Record<string, string> = {
-        person: '#3b82f6',
-        business: '#10b981',
-        debt: '#f97316',
-        'debt-0': '#f2e8c4',
-        'debt-1': '#eadca8',
-        'debt-2': '#e2cf8d',
-        'debt-3': '#d8c073',
-        'debt-4': '#cfae62',
-        'debt-5': '#c79459',
-        'debt-6': '#be7a52',
-        'debt-7': '#b05f4b',
-        'debt-8': '#9a4444',
-        suspended: '#e6a23c',
-        left: '#909399',
-        deleted: '#606266',
-      }
-
-      const baseColor = (() => {
-        // Keep precedence aligned with applyStyle(): status overrides everything.
-        if (statusKey === 'suspended' || statusKey === 'frozen') return '#e6a23c'
-        if (statusKey === 'left') return '#909399'
-        if (statusKey === 'deleted' || statusKey === 'banned') return '#606266'
-
-        if (vizColorKeyRaw && baseColorByVizKey[vizColorKeyRaw]) return baseColorByVizKey[vizColorKeyRaw]
-        if (typeKey && baseColorByVizKey[typeKey]) return baseColorByVizKey[typeKey]
-        return '#409eff'
-      })()
-
-      // Selected contour should match node color but be much darker.
-      const selectionBorderColor = darkenHex(baseColor, 0.35)
-      const baseW = typeKey === 'business' ? 26 : 16
-      const baseH = typeKey === 'business' ? 22 : 16
-      const vizW = typeof p?.viz_size?.w === 'number' ? p.viz_size.w : baseW
-      const vizH = typeof p?.viz_size?.h === 'number' ? p.viz_size.h : baseH
-      const vizColorKey = vizColorKeyRaw
-      return {
-        data: {
-          id: pid,
-          label: '',
-          pid,
-          display_name: name,
-          status: statusKey,
-          type: (p?.type || '').toLowerCase(),
-
-          viz_w: vizW,
-          viz_h: vizH,
-          viz_color_key: vizColorKey,
-          sel_border_color: selectionBorderColor,
-        },
-        classes: [
-          statusKey ? `p-${statusKey}` : '',
-          (p?.type || '').toLowerCase() ? `type-${(p?.type || '').toLowerCase()}` : '',
-          vizColorKey ? `viz-${vizColorKey}` : '',
-        ]
-          .filter(Boolean)
-          .join(' '),
-      }
+  function buildElements(): GraphElements {
+    return buildGraphElements({
+      participants: options.participants.value,
+      trustlines: options.filteredTrustlines.value,
+      typeFilter: options.typeFilter.value,
+      minDegree: options.minDegree.value,
+      hideIsolates: options.hideIsolates.value,
+      focus: {
+        enabled: Boolean(options.focusMode.value),
+        rootPid: options.focusRootPid.value,
+        depth: options.focusDepth.value,
+      },
+      focusedPid: options.focusPid.value,
+      threshold: options.threshold.value,
     })
-
-    const edges = filteredEdges
-      .filter((t) => finalPids.has(t.from) && finalPids.has(t.to))
-      .map((t, idx) => {
-        const bottleneck = t.status === 'active' && isBottleneck(t)
-        const id = `tl_${idx}_${t.from}_${t.to}_${normalizeEquivalentCode(t.equivalent)}`
-        const classes = [
-          `tl-${String(t.status || '').toLowerCase()}`,
-          bottleneck ? 'bottleneck' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')
-
-        return {
-          data: {
-            id,
-            source: t.from,
-            target: t.to,
-            equivalent: normalizeEquivalentCode(t.equivalent),
-            status: String(t.status || '').toLowerCase(),
-            limit: t.limit,
-            used: t.used,
-            available: t.available,
-            created_at: t.created_at,
-            close_requested_at: t.close_requested_at ?? null,
-            bottleneck: bottleneck ? 1 : 0,
-          },
-          classes,
-        }
-      })
-
-    return { nodes, edges }
   }
 
   function graphElementOptions(): GraphElementOption[] {
@@ -651,232 +431,17 @@ export function useGraphVisualization(options: {
   function updateZoomStyles() {
     const cy = getCy()
     if (!cy) return
-    const z = cy.zoom()
 
-    // Cytoscape scales stroke/labels by zoom; to avoid "fat" edges/text when zoomed in,
-    // scale style values inversely with zoom.
-    const inv = 1 / Math.max(0.15, z)
-    const s = zoomScale(inv)
-
-    // For strokes (edges, selection contour), we want *less noise* when zoomed out,
-    // and also avoid "fat" strokes when zoomed in.
-    // - zoomed out (z < 1): scale down with z
-    // - zoomed in (z > 1): scale down with 1/z
-    const strokeScale = z >= 1 ? 1 / z : z
-
-    const nodeFont = clamp(11 * inv, 3.2, 12)
-    const outlineW = clamp(2 * s, 0.6, 2.4)
-    const marginY = clamp(6 * inv, 1, 8)
-
-    const edgeW = clamp(1.2 * strokeScale, 0.12, 1.4)
-    const edgeWBottleneck = clamp(2.4 * strokeScale, 0.28, 2.6)
-    const edgeWConnection = clamp(3.0 * strokeScale, 0.34, 3.2)
-    const arrowScale = clamp(0.9 * strokeScale, 0.16, 1.0)
-    const arrowScaleBottleneck = clamp(1.05 * strokeScale, 0.18, 1.15)
-    const arrowScaleConnection = clamp(1.1 * strokeScale, 0.2, 1.25)
-
-    const selectedBorderW = clamp(3.5 * strokeScale, 1.2, 3.5)
-
-    cy.style()
-      .selector('node')
-      .style({
-        'font-size': nodeFont,
-        'text-outline-width': outlineW,
-        'text-margin-y': marginY,
-      })
-      .selector('node.selected-node')
-      .style({
-        'border-width': selectedBorderW,
-      })
-      .selector('edge')
-      .style({
-        width: edgeW,
-        'arrow-scale': arrowScale,
-      })
-      .selector('edge.bottleneck')
-      .style({
-        width: edgeWBottleneck,
-        'arrow-scale': arrowScaleBottleneck,
-      })
-      .selector('edge.connection-highlight')
-      .style({
-        width: edgeWConnection,
-        'arrow-scale': arrowScaleConnection,
-      })
-      .update()
+    const style = cy.style()
+    for (const rule of zoomStyleRules(cy.zoom())) style.selector(rule.selector).style(rule.style)
+    style.update()
   }
 
   function applyStyle() {
     const cy = getCy()
     if (!cy) return
 
-    const SUSPENDED_PATTERN =
-      'url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%278%27%20height%3D%278%27%3E%3Ccircle%20cx%3D%272%27%20cy%3D%272%27%20r%3D%271%27%20fill%3D%27%23000000%27%20fill-opacity%3D%270.18%27/%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%271%27%20fill%3D%27%23000000%27%20fill-opacity%3D%270.18%27/%3E%3C/svg%3E")'
-
-    cy.style([
-      // Ensure built-in Cytoscape active/selection visuals never show up.
-      {
-        selector: 'node:active, node:selected',
-        style: {
-          'overlay-opacity': 0,
-          'overlay-padding': 0,
-          'underlay-opacity': 0,
-          'underlay-padding': 0,
-          'active-bg-opacity': 0,
-          'active-bg-size': 0,
-        },
-      },
-      { selector: 'edge:selected', style: { 'overlay-opacity': 0, 'overlay-padding': 0, 'underlay-opacity': 0 } },
-      {
-        selector: 'node',
-        style: {
-          'background-color': '#409eff',
-          label: options.showLabels.value ? 'data(label)' : '',
-          color: '#cfd3dc',
-          // Disable Cytoscape default "active" background (removes dark square artifact on tap).
-          'active-bg-opacity': 0,
-          'active-bg-size': 0,
-          // Base values; real sizes are adjusted by updateZoomStyles().
-          'font-size': 11,
-          // Allow fonts to become small when zoomed out.
-          'min-zoomed-font-size': 4,
-          'text-outline-width': 2,
-          'text-outline-color': '#111318',
-          'text-wrap': 'wrap',
-          'text-max-width': '180px',
-          'text-background-opacity': 0,
-          'text-halign': 'center',
-          'text-valign': 'bottom',
-          'text-margin-y': 6,
-          'border-width': 1,
-          'border-color': '#2b2f36',
-          width: 'data(viz_w)',
-          height: 'data(viz_h)',
-        },
-      },
-      // Default palette by type (no backend viz_* required). Backend viz_color_key may
-      // override this via viz-* classes.
-      { selector: 'node.type-person', style: { 'background-color': '#3b82f6' } },
-      { selector: 'node.type-business', style: { 'background-color': '#10b981' } },
-      // Net-based (backend-provided) node colors. Status colors remain in legend and can be
-      // applied via viz_color_key to avoid frontend-side precedence logic.
-      { selector: 'node.viz-person', style: { 'background-color': '#3b82f6' } },
-      { selector: 'node.viz-business', style: { 'background-color': '#10b981' } },
-      // Debtor gradient bins (light yellow -> red). Keep viz-debt for backwards compatibility.
-      { selector: 'node.viz-debt', style: { 'background-color': '#f97316' } },
-      // Softer palette to avoid overly bright nodes.
-      { selector: 'node.viz-debt-0', style: { 'background-color': '#f2e8c4' } },
-      { selector: 'node.viz-debt-1', style: { 'background-color': '#eadca8' } },
-      { selector: 'node.viz-debt-2', style: { 'background-color': '#e2cf8d' } },
-      { selector: 'node.viz-debt-3', style: { 'background-color': '#d8c073' } },
-      { selector: 'node.viz-debt-4', style: { 'background-color': '#cfae62' } },
-      { selector: 'node.viz-debt-5', style: { 'background-color': '#c79459' } },
-      { selector: 'node.viz-debt-6', style: { 'background-color': '#be7a52' } },
-      { selector: 'node.viz-debt-7', style: { 'background-color': '#b05f4b' } },
-      { selector: 'node.viz-debt-8', style: { 'background-color': '#9a4444' } },
-      { selector: 'node.viz-suspended', style: { 'background-color': '#e6a23c' } },
-      { selector: 'node.viz-left', style: { 'background-color': '#909399' } },
-      { selector: 'node.viz-deleted', style: { 'background-color': '#606266' } },
-      // Participant status (DB vocabulary). Keep legacy aliases for backward compatibility.
-      { selector: 'node.p-suspended, node.p-frozen', style: { 'background-color': '#e6a23c' } },
-      { selector: 'node.p-left', style: { 'background-color': '#909399' } },
-      { selector: 'node.p-deleted, node.p-banned', style: { 'background-color': '#606266' } },
-
-      // Type shapes only; size comes from backend-provided viz_w/viz_h.
-      { selector: 'node.type-person', style: { shape: 'ellipse' } },
-      {
-        selector: 'node.type-business',
-        style: {
-          shape: 'round-rectangle',
-          'border-width': 0,
-        },
-      },
-
-      // Suspended: add a subtle fill pattern (dots) instead of a border-only cue.
-      {
-        selector: 'node.viz-suspended, node.p-suspended, node.p-frozen',
-        style: {
-          'background-image': SUSPENDED_PATTERN,
-          'background-repeat': 'repeat',
-          'background-width': 8,
-          'background-height': 8,
-        },
-      },
-
-      {
-        selector: 'node.search-hit',
-        style: {
-          'border-width': 4,
-          'border-color': '#e6a23c',
-        },
-      },
-
-      {
-        selector: 'edge',
-        style: {
-          // Base values; real widths are adjusted by updateZoomStyles().
-          width: 1.4,
-          'curve-style': 'bezier',
-          'line-color': '#606266',
-          'target-arrow-shape': 'triangle',
-          'target-arrow-color': '#606266',
-          'arrow-scale': 0.8,
-          opacity: 0.85,
-        },
-      },
-      { selector: 'edge.tl-active', style: { 'line-color': '#409eff', 'target-arrow-color': '#409eff' } },
-      { selector: 'edge.tl-closed', style: { 'line-color': '#a3a6ad', 'target-arrow-color': '#a3a6ad', opacity: 0.45 } },
-
-      {
-        selector: 'edge.bottleneck',
-        style: { 'line-color': '#f56c6c', 'target-arrow-color': '#f56c6c', width: 2.8, 'arrow-scale': 0.95, opacity: 1 },
-      },
-
-      {
-        selector: 'edge.connection-highlight',
-        style: {
-          'line-color': '#67c23a',
-          'target-arrow-color': '#67c23a',
-          width: 3.0,
-          opacity: 1,
-          'arrow-scale': 1.05,
-        },
-      },
-      {
-        selector: 'node.connection-node',
-        style: {
-          'underlay-color': '#67c23a',
-          'underlay-opacity': 0.35,
-          'underlay-padding': 6,
-        },
-      },
-
-      // Selected contour: blink the border (no glow).
-      // Keep this block near the end so it overrides other highlight layers (connection/search).
-      // selected-pulse is toggled on/off by JS timer.
-      {
-        selector: 'node.selected-node, node.selected-pulse',
-        style: {
-          'overlay-opacity': 0,
-          'overlay-padding': 0,
-          'underlay-opacity': 0,
-          'underlay-padding': 0,
-        },
-      },
-      // Keep border-width constant to avoid the "node expands" effect.
-      // Base state: contour hidden.
-      {
-        selector: 'node.selected-node',
-        style: {
-          'border-width': 4,
-          'border-opacity': 0,
-          'border-color': 'data(sel_border_color)',
-        },
-      },
-      // Pulse ON: show contour (opacity only).
-      { selector: 'node.selected-pulse', style: { 'border-opacity': 1 } },
-
-    ])
+    cy.style(buildGraphStylesheet({ showLabels: options.showLabels.value }) as unknown as cytoscape.StylesheetJson)
 
     updateZoomStyles()
   }
@@ -1448,13 +1013,4 @@ export function useGraphVisualization(options: {
     applyZoom,
     syncZoomFromControl,
   }
-}
-
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n))
-}
-
-function zoomScale(z: number): number {
-  // Smooth curve: zoom 0.25..3 => scale ~0.5..1.7
-  return Math.sqrt(Math.max(0.05, z))
 }
