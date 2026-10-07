@@ -473,8 +473,7 @@ def load_recipe(community_id: str, *, root: Path | None = None) -> dict[str, Any
 
     The caller must have ``seeds/communities`` importable, which every existing
     consumer of `community_schema` already arranges by putting that directory on
-    ``sys.path`` (`scripts/generate_simulator_seed_scenarios.py:33-34`,
-    `admin-fixtures/tools/extract_community_description.py:41-42`). A caller that
+    ``sys.path`` (`scripts/generate_simulator_seed_scenarios.py:33-34`). A caller that
     loads this file by path instead should call :func:`validate_recipe` directly
     with a description it read itself.
     """

@@ -314,6 +314,7 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
             if isinstance(job, dict)
             and not _is_scheduled_only(job)
             and _has_postgres_service(job)
+            and _tier_steps(job)
         )
 
     # 1. The service container disappears.
@@ -380,24 +381,27 @@ def test_the_counter_check_is_not_vacuous() -> None:
     """The mutations above must be reachable: the committed workflow must have what they break."""
 
     workflow = _load_workflow()
-    postgres_job_ids = [
+    required_postgres_job_ids = [
         job_id
         for job_id, job in workflow["jobs"].items()
         if isinstance(job, dict)
         and not _is_scheduled_only(job)
         and _has_postgres_service(job)
     ]
+    # NOT EVERY REQUIRED POSTGRESQL JOB RUNS THE TIER SINCE 2026-10-07 (032 S4). `ui-smoke` got a
+    # `postgres:` service to back the real backend of the Admin UI smoke; it runs no pytest. The
+    # mutations above edit the first required PostgreSQL job THAT RUNS THE TIER
+    # (`_required_postgres_job_id`), independent of job order in the file; what keeps them meaningful
+    # is that such a job exists (asserted here) and that every job running the tier carries none of
+    # the things mutations 4-8 add (the loop).
+    postgres_job_ids = [job_id for job_id in required_postgres_job_ids if _tier_steps(workflow["jobs"][job_id])]
 
     assert postgres_job_ids, (
-        "There is no required job with a PostgreSQL service to mutate, so the counter-check above "
-        "would have proved nothing." + _LIMITS
+        "There is no required job with a PostgreSQL service running the backend tier to mutate, so "
+        "the counter-check above would have proved nothing." + _LIMITS
     )
     for job_id in postgres_job_ids:
         marker_steps = _tier_steps(workflow["jobs"][job_id])
-        assert marker_steps, (
-            f"Job '{job_id}' has a PostgreSQL service but runs no backend tier "
-            "(verify_local.ps1 -BackendOnly), so its URL mutation would flip nothing." + _LIMITS
-        )
         # Mutations 4-7 only prove something if the committed workflow does NOT already carry the
         # thing they add. An `if:` or a `continue-on-error:` already present would make those four
         # assertions pass by doing nothing.

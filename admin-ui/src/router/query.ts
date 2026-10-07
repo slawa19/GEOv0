@@ -50,7 +50,3 @@ export function pickQueryStrings(
   }
   return out
 }
-
-export function carryScenarioQuery(query: LocationQuery | Record<string, unknown>): Record<string, string> {
-  return pickQueryStrings(query, ['scenario'])
-}

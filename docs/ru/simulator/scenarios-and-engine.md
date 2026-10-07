@@ -297,8 +297,10 @@ flowchart LR
 
 Эта секция отвечает на вопросы:
 - что такое **seed‑сценарий** и чем он отличается от «обычного» сценария;
-- что такое **фикстуры** (fixtures) в этом репозитории;
+- что такое **описание сообщества** и **фикстуры симулятора** в этом репозитории;
 - какой **полный процесс** подготовки данных: от человекочитаемой задумки сообщества → до `scenario.json` симулятора.
+
+(2026-10-07, 032 S4: пакет `admin-fixtures/`, его генераторы и копия в `admin-ui/public/` удалены вместе с mock-режимом Admin UI; раздел описывает текущий процесс. Прежние шаги «сгенерировать canonical admin fixtures» и «синхронизировать fixtures в Admin UI» больше не существуют.)
 
 #### 2.9.1 Терминология (быстро и без двусмысленности)
 
@@ -307,33 +309,30 @@ flowchart LR
 - Живёт в `docs/ru/seeds/*`.
 - Регламент: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
 
-**Fixtures (фикстуры)**
-- В этом проекте это «готовые наборы JSON‑данных», которые используются как *детерминированный источник* для UI/генераторов/демо.
-- Важно: fixtures ≠ данные продакшена, это **контролируемые** (reproducible) датасеты.
+**Описание сообщества (community description)**
+- Структура сообщества в машиночитаемом виде: `seeds/communities/<id>/community.json` (участники, группы, линии, эквиваленты) и рецепт операций `recipe.json`. Правится руками.
+- Из него выводятся и seed‑сценарии симулятора, и данные в базе (рецепт исполняется через доменные сервисы: `scripts/seed_db.py --source recipe --community <id>`).
+- Регламент: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
 
-**Canonical admin fixtures (каноничные фикстуры админки)**
-- Source of truth для демо‑сообщества в админке: `admin-fixtures/v1/datasets/*.json`.
-- Генерируются детерминированно из seed‑логики.
-- Регламент пакета: [../../../admin-fixtures/README.md](../../../admin-fixtures/README.md), генераторы: [../../../admin-fixtures/tools/README.md](../../../admin-fixtures/tools/README.md).
+**Fixtures симулятора (фикстуры)**
+- Это `fixtures/simulator/<scenario_id>/scenario.json` и демо-снимки Simulator UI (`simulator-ui/v2/public/simulator-fixtures/`; статические версионируемые файлы) — *детерминированный источник* для генераторов/демо.
+- Важно: fixtures ≠ данные продакшена, это **контролируемые** (reproducible) датасеты.
 
 **Seed‑сценарий симулятора (seed scenario)**
 - Это `fixtures/simulator/<scenario_id>/scenario.json`, который:
   - валиден по schema `fixtures/simulator/scenario.schema.json`;
-  - детерминированно построен из canonical admin fixtures;
-  - отражает ту же «модель сообщества», что и админ‑фикстуры (те же участники/лимиты/эквиваленты).
+  - детерминированно построен из описания сообщества;
+  - отражает ту же «модель сообщества», что и данные в базе после рецепта (те же участники/лимиты/эквиваленты).
 
 Простое правило: 
 - seed docs → «почему и как устроено сообщество»;
-- admin fixtures → «каноничные JSON‑датасеты для Admin UI»;
+- описание сообщества → «структура: кто есть кто и кто кому доверяет»;
 - seed scenarios → «каноничный `scenario.json` симулятора для тех же данных».
 
 #### 2.9.2 Из чего конкретно строятся seed‑сценарии
 
-Seed‑сценарии собираются **детерминированно** из canonical admin fixtures:
-- **Вход (source of truth):** [../../../admin-fixtures/v1/datasets/](../../../admin-fixtures/v1/datasets/)
-  - `participants.json`
-  - `trustlines.json`
-  - `equivalents.json`
+Seed‑сценарии собираются **детерминированно** из описания сообщества:
+- **Вход (source of truth):** `seeds/communities/<id>/community.json`
 - **Правила mapping:** [backend/fixtures-mapping.md](backend/fixtures-mapping.md)
 - **Генератор seed‑сценариев:** [../../../scripts/generate_simulator_seed_scenarios.py](../../../scripts/generate_simulator_seed_scenarios.py)
 - **Контракт выхода (schema):** [../../../fixtures/simulator/scenario.schema.json](../../../fixtures/simulator/scenario.schema.json)
@@ -342,39 +341,21 @@ Seed‑сценарии собираются **детерминированно*
 
 Ниже — «канонический» pipeline для Greenfield/Riverside (и любых последующих seed‑наборов).
 
-**Шаг 0. Спроектировать сообщество (seed doc)**
+**Шаг 0. Спроектировать сообщество (seed doc) и перенести замысел в описание**
 - Внести/обновить seed‑документ в `docs/ru/seeds/`.
 - Проверить семантику направлений trustlines (creditor → debtor).
+- Описать структуру в `seeds/communities/<id>/community.json` (и рецепт в `recipe.json`).
 - Регламент и чек‑листы: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
 
-**Шаг 1. Сгенерировать canonical admin fixtures (v1)**
-
-Команда (Windows):
-```powershell
-./.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100
-# или
-./.venv/Scripts/python.exe admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50
-```
-
-Результат:
-- обновляются файлы в `admin-fixtures/v1/datasets/*.json`.
-
-Регламент:
-- пакет фикстур: [../../../admin-fixtures/README.md](../../../admin-fixtures/README.md)
-- детерминизм/семантика: [../../../admin-fixtures/tools/README.md](../../../admin-fixtures/tools/README.md)
-
-**Шаг 2. Синхронизировать fixtures в Admin UI (для демо админки)**
+**Шаг 1. Засеять базу рецептом (для Admin UI и real mode)**
 
 ```powershell
-cd admin-ui
-npm run sync:fixtures
-npm run validate:fixtures
+./.venv/Scripts/python.exe scripts/seed_db.py --source recipe --community riverside-town-50
 ```
 
-Как работает sync: [../../../admin-ui/scripts/sync-fixtures.mjs](../../../admin-ui/scripts/sync-fixtures.mjs).
-Валидация фикстур: [../../../admin-ui/scripts/validate-fixtures.mjs](../../../admin-ui/scripts/validate-fixtures.mjs).
+Рецепт исполняет настоящие операции через доменные сервисы; Admin UI затем читает эту базу через backend. Подробнее: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md).
 
-**Шаг 3. Сгенерировать seed‑сценарии симулятора из canonical fixtures**
+**Шаг 2. Сгенерировать seed‑сценарии симулятора из описания сообщества**
 
 ```powershell
 ./.venv/Scripts/python.exe scripts/generate_simulator_seed_scenarios.py
@@ -387,7 +368,7 @@ npm run validate:fixtures
 
 В генераторе дополнительно есть встроенная проверка формы сценария по JSON schema.
 
-**Шаг 4. Запуск симулятора и проверка поведения**
+**Шаг 3. Запуск симулятора и проверка поведения**
 
 Дальше вы выбираете сценарий в Simulator UI и запускаете его в `fixtures` или `real` mode.
 Быстрый старт полного стека:
@@ -398,17 +379,12 @@ npm run validate:fixtures
 Если вы не видите сценарий в UI — проверьте allowlist:
 - `SIMULATOR_SCENARIO_ALLOWLIST=all` или список id.
 
-#### 2.9.4 Диаграмма процесса (seed → fixtures → scenario)
+#### 2.9.4 Диаграмма процесса (seed → описание → scenario)
 
 ```mermaid
 flowchart TD
-  A[Seed docs\n docs/ru/seeds/*] -->|design rules| B[Deterministic generators\n admin-fixtures/tools/*]
-  B -->|write canonical datasets| C[Canonical admin fixtures\n admin-fixtures/v1/datasets/*.json]
-
-  C -->|sync copy| D[Admin UI public fixtures\n admin-ui/public/admin-fixtures/v1]
-  D -->|npm run validate:fixtures| Dv[Validation\n admin-ui/scripts/validate-fixtures.mjs]
-
-  B -->|structure extracted once| CD[Community description\n seeds/communities/*/community.json]
+  A[Seed docs\n docs/ru/seeds/*] -->|design rules, by hand| CD[Community description\n seeds/communities/*/community.json]
+  CD -->|recipe through domain services| DB[Seeded database\n scripts/seed_db.py --source recipe]
   CD -->|structure| E[Simulator seed-scenarios generator\n scripts/generate_simulator_seed_scenarios.py]
   E -->|write| F[Seed scenarios\n fixtures/simulator/*/scenario.json]
   F -->|schema validation| Fs[scenario.schema.json]
@@ -429,9 +405,8 @@ flowchart TD
 #### 2.9.6 Где закреплены правила (что «регламентирует» процесс)
 
 - Терминология и дизайн сообщества: [../../../docs/ru/seeds/README.md](../../../docs/ru/seeds/README.md)
-- Каноничные fixtures админки: [../../../admin-fixtures/README.md](../../../admin-fixtures/README.md)
-- Детерминированные генераторы: [../../../admin-fixtures/tools/README.md](../../../admin-fixtures/tools/README.md)
-- Mapping fixtures → scenario (контракт): [backend/fixtures-mapping.md](backend/fixtures-mapping.md)
+- Описание сообщества и рецепт: `seeds/communities/<id>/community.json`, `recipe.json`
+- Mapping описания → scenario (контракт): [backend/fixtures-mapping.md](backend/fixtures-mapping.md)
 - Генератор seed‑сценариев: [../../../scripts/generate_simulator_seed_scenarios.py](../../../scripts/generate_simulator_seed_scenarios.py)
 - Schema сценария: [../../../fixtures/simulator/scenario.schema.json](../../../fixtures/simulator/scenario.schema.json)
 

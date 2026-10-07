@@ -103,14 +103,14 @@ describe('realApi list response contracts', () => {
     },
   ])('accepts canonical $label payload', async ({ payload, call }) => {
     respondWith(payload)
-    await expect(call()).resolves.toMatchObject({ success: true })
+    await expect(call()).resolves.toBeDefined()
   })
 
   // 026 `T2602`: a limit lowered below the debt makes `available` negative; the decoder keeps the sign.
   it('keeps a negative trustline available signed', async () => {
     respondWith({ items: [{ ...trustline, limit: '0', used: '30.00000000', available: '-30.00000000' }], page: 1, per_page: 20, total: 1 })
     const result = await realApi.listTrustlines({ page: 1, per_page: 20 })
-    expect(result).toMatchObject({ success: true, data: { items: [{ available: '-30.00000000' }] } })
+    expect(result).toMatchObject({ items: [{ available: '-30.00000000' }] })
   })
 
   it.each([

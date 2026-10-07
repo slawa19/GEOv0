@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 
 import type { Equivalent, LiquiditySummary, Trustline } from '../types/domain'
 
@@ -20,7 +19,7 @@ import {
 } from '../composables/useEquivalentPrecision'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { buildLiquidityAdvice } from '../advice/operatorAdvice'
-import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useConfigStore } from '../stores/config'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { debounce } from '../utils/debounce'
@@ -112,12 +111,12 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const eqRes = assertSuccess(await api.listEquivalents({ include_inactive: false }))
+    const eqRes = await api.listEquivalents({ include_inactive: false })
     if (!request.isCurrent()) return
     equivalentsList.value = (eqRes.items || []) as Equivalent[]
 
-    const nextSummary = assertSuccess(
-      await api.liquiditySummary({ equivalent: requestEq, threshold: requestThreshold, limit: 10 }),
+    const nextSummary = (
+      await api.liquiditySummary({ equivalent: requestEq, threshold: requestThreshold, limit: 10 })
     ) as LiquiditySummary
     if (!request.isCurrent()) return
     summary.value = nextSummary
@@ -190,7 +189,6 @@ function goTrustlinesEdge(row: Trustline) {
   void router.push({
     path: '/trustlines',
     query: toLocationQueryRaw({
-      ...carryScenarioQuery(route.query),
       equivalent: String(row.equivalent || '').toUpperCase(),
       creditor: row.from,
       debtor: row.to,
@@ -200,14 +198,13 @@ function goTrustlinesEdge(row: Trustline) {
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ q: pid }) })
 }
 
 function goGraph() {
   void router.push({
     path: '/graph',
     query: toLocationQueryRaw({
-      ...carryScenarioQuery(route.query),
       ...(selectedEq.value ? { equivalent: selectedEq.value } : {}),
       threshold: threshold.value,
     }),
@@ -405,7 +402,7 @@ function money(v: string, equivalent: unknown): string {
               <div class="hdr__right">
                 <el-button
                   size="small"
-                  @click="router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), ...(selectedEq ? { equivalent: selectedEq } : {}), threshold }) })"
+                  @click="router.push({ path: '/trustlines', query: toLocationQueryRaw({ ...(selectedEq ? { equivalent: selectedEq } : {}), threshold }) })"
                 >
                   {{ t('liquidity.actions.openTrustlines') }}
                 </el-button>

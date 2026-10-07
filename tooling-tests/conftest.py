@@ -81,8 +81,18 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-05, 029 S4 F-029-20: portable 198 -> 199. One case added,
 #: `portable/test_p029_s4_demo_fixtures_of_every_equivalent_are_current.py`: the committed Simulator
 #: demo snapshots of every equivalent carry no signed `net_balance_atoms` and no `frozen` trust line.
+#:
+#: 2026-10-07, 032 S4 (022 `T2207`): portable 199 -> 196. The three cases of
+#: `portable/test_p017_s1_demo_fixture_generator_needs_no_database.py` are deleted with the generator
+#: they checked (`admin-fixtures/tools/generate_simulator_demo_snapshots.py`): the Simulator demo
+#: snapshots are static versioned assets now, and no build step runs a generator.
+#:
+#: 2026-10-07, 032 S4: portable 196 -> 192. `admin-fixtures/` is deleted, and with it the two bridge
+#: tests of `portable/test_p017_t1712_community_descriptions.py` that compared the community
+#: descriptions with the v2 generators and the extraction script living there (two functions, each
+#: run for two communities). They said they would die with the generators.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 199,
+    "portable": 192,
     "powershell": 223,
 }
 

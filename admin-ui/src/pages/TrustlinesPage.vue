@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
@@ -18,7 +17,7 @@ import { t } from '../i18n'
 import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
 import { buildTrustlinesAdvice } from '../advice/operatorAdvice'
-import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { useLatestRequest } from '../composables/useLatestRequest'
 
@@ -144,16 +143,14 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(
-      await api.listTrustlines({
-        page: requestPage,
-        per_page: requestPerPage,
-        equivalent: equivalent.value || undefined,
-        creditor: creditor.value || undefined,
-        debtor: debtor.value || undefined,
-        status: status.value || undefined,
-      }),
-    )
+    const data = await api.listTrustlines({
+      page: requestPage,
+      per_page: requestPerPage,
+      equivalent: equivalent.value || undefined,
+      creditor: creditor.value || undefined,
+      debtor: debtor.value || undefined,
+      status: status.value || undefined,
+    })
     if (!request.isCurrent()) return
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
@@ -177,11 +174,11 @@ function openRow(row: Trustline) {
 }
 
 function goParticipant(pid: string) {
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ q: pid }) })
 }
 
 function goEquivalent(eq: string) {
-  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: eq }) })
+  void router.push({ path: '/equivalents', query: toLocationQueryRaw({ q: eq }) })
 }
 
 onMounted(() => {

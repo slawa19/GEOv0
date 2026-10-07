@@ -17,6 +17,7 @@ import {
   useGraphData,
 } from './useGraphData'
 import type { Equivalent, Incident, Trustline } from '../pages/graph/graphTypes'
+import { ApiException } from '../api/apiException'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -36,8 +37,6 @@ function deferred<T>(): Deferred<T> {
 
 function snapshotEnvelope(pid: string) {
   return {
-    success: true as const,
-    data: {
       participants: [{ pid }],
       trustlines: [],
       incidents: [],
@@ -45,19 +44,15 @@ function snapshotEnvelope(pid: string) {
       debts: [],
       audit_log: [],
       transactions: [],
-    },
-  }
+    }
 }
 
 function cyclesEnvelope(code: string) {
   return {
-    success: true as const,
-    data: {
       equivalents: {
         [code]: { cycles: [] },
       },
-    },
-  }
+    }
 }
 
 describe('useGraphData', () => {
@@ -134,13 +129,12 @@ describe('useGraphData', () => {
 
   it('availableEquivalents merges dataset + trustlines (no ALL option)', () => {
     const eq = ref('')
-    const isRealMode = ref(false)
     const focusMode = ref(false)
     const focusRootPid = ref('')
     const focusDepth = ref(1)
     const statusFilter = ref<string[]>([])
 
-    const g = useGraphData({ eq, isRealMode, focusMode, focusRootPid, focusDepth, statusFilter })
+    const g = useGraphData({ eq, focusMode, focusRootPid, focusDepth, statusFilter })
     g.equivalents.value = [{ code: 'eur', precision: 2, description: '', is_active: true } satisfies Equivalent]
     const tlBase = {
       from: 'A',
@@ -163,7 +157,7 @@ describe('useGraphData', () => {
     apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('A'))
     apiMock.clearingCycles.mockResolvedValueOnce(cyclesEnvelope('EUR'))
     const eq = ref('')
-    const g = useGraphData({ eq, isRealMode: ref(false), focusMode: ref(false), focusRootPid: ref(''),
+    const g = useGraphData({ eq, focusMode: ref(false), focusRootPid: ref(''),
       focusDepth: ref(1), statusFilter: ref<string[]>([]) })
     await g.loadData()
     expect(eq.value).toBe('EUR')
@@ -171,31 +165,6 @@ describe('useGraphData', () => {
     eq.value = 'UAH'
     await nextTick()
     expect(g.eqAutoSelected.value).toBe(false)
-  })
-
-  it('does not claim mock focus data is ready while the full snapshot is loading', async () => {
-    const snapshot = deferred<ReturnType<typeof snapshotEnvelope>>()
-    const cycles = deferred<ReturnType<typeof cyclesEnvelope>>()
-    apiMock.graphSnapshot.mockReturnValueOnce(snapshot.promise)
-    apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
-    const graph = useGraphData({
-      eq: ref('EUR'),
-      isRealMode: ref(false),
-      focusMode: ref(true),
-      focusRootPid: ref('PID_A'),
-      focusDepth: ref(1),
-      statusFilter: ref<string[]>([]),
-    })
-
-    const pending = graph.loadData()
-    expect(graph.loading.value).toBe(true)
-    await expect(graph.refreshForFocusMode()).resolves.toBe(false)
-
-    snapshot.resolve(snapshotEnvelope('READY'))
-    cycles.resolve(cyclesEnvelope('READY'))
-    await pending
-
-    await expect(graph.refreshForFocusMode()).resolves.toBe(true)
   })
 
   it('keeps the newest graph load when an older load rejects last', async () => {
@@ -208,7 +177,6 @@ describe('useGraphData', () => {
 
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -222,7 +190,7 @@ describe('useGraphData', () => {
     await latestLoad
 
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST'))
     expect(g.error.value).toBeNull()
     expect(g.loading.value).toBe(false)
 
@@ -230,20 +198,18 @@ describe('useGraphData', () => {
     await olderLoad
 
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST'))
     expect(g.error.value).toBeNull()
     expect(g.loading.value).toBe(false)
   })
 
   it('keeps a successful graph snapshot visible when clearing cycles fail', async () => {
     apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('SNAPSHOT'))
-    apiMock.clearingCycles.mockResolvedValueOnce({
-      success: false,
-      error: { code: 'cycles_unavailable', message: 'clearing cycles unavailable' },
-    })
+    apiMock.clearingCycles.mockRejectedValueOnce(
+      new ApiException({ status: 503, code: 'cycles_unavailable', message: 'clearing cycles unavailable' }),
+    )
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -266,7 +232,6 @@ describe('useGraphData', () => {
     const eq = ref('EUR')
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -291,7 +256,7 @@ describe('useGraphData', () => {
     await latestCycleRefresh
     olderCycles.resolve(cyclesEnvelope('STALE'))
     await olderCycleRefresh
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST'))
   })
 
   it.each(['participant-first', 'load-first'] as const)(
@@ -307,7 +272,6 @@ describe('useGraphData', () => {
 
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -331,7 +295,7 @@ describe('useGraphData', () => {
         expect(await participantRefresh).toBe(false)
       }
 
-      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD'))
     },
   )
 
@@ -342,7 +306,6 @@ describe('useGraphData', () => {
     apiMock.clearingCycles.mockReturnValueOnce(cycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -358,7 +321,7 @@ describe('useGraphData', () => {
     await expect(fullLoad).resolves.toBe(true)
 
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LOAD'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LOAD'))
     expect(g.error.value).toBeNull()
   })
 
@@ -370,7 +333,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantCycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -383,7 +345,7 @@ describe('useGraphData', () => {
     participantCycles.resolve(cyclesEnvelope('PARTICIPANT'))
 
     await expect(pendingParticipant).resolves.toBe(false)
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(apiMock.clearingCycles.mock.calls).toEqual([[], [{ participant_pid: 'PID_A' }]])
   })
 
@@ -397,7 +359,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantCycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -415,7 +376,7 @@ describe('useGraphData', () => {
     await expect(fullLoad).resolves.toBe(true)
 
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FULL'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(g.error.value).toBeNull()
     expect(g.loading.value).toBe(false)
   })
@@ -432,7 +393,6 @@ describe('useGraphData', () => {
         .mockReturnValueOnce(participantCycles.promise)
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -454,7 +414,7 @@ describe('useGraphData', () => {
       await expect(pendingParticipant).resolves.toBe(false)
 
       expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FULL'])
-      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
       expect(g.error.value).toBeNull()
       expect(g.loading.value).toBe(false)
     },
@@ -475,7 +435,6 @@ describe('useGraphData', () => {
         .mockReturnValueOnce(participantCycles.promise)
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -500,11 +459,11 @@ describe('useGraphData', () => {
         await expect(pendingParticipant).resolves.toBe(true)
       }
 
-      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT').data)
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT'))
       expect(g.error.value).toBeNull()
 
       await expect(g.refreshClearingCyclesForParticipant('')).resolves.toBe(true)
-      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('BASE').data)
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('BASE'))
       expect(g.error.value).toBe('full cycles failed')
     },
   )
@@ -524,7 +483,6 @@ describe('useGraphData', () => {
         .mockReturnValueOnce(participantCycles.promise)
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode: ref(false),
         focusRootPid: ref(''),
         focusDepth: ref(1),
@@ -538,7 +496,7 @@ describe('useGraphData', () => {
       if (resolutionOrder === 'participant-first') {
         participantCycles.reject(new Error('participant cycles failed'))
         await expect(pendingParticipant).resolves.toBe(false)
-        expect(g.clearingCycles.value).toEqual(cyclesEnvelope('BASE').data)
+        expect(g.clearingCycles.value).toEqual(cyclesEnvelope('BASE'))
         fullSnapshot.resolve(snapshotEnvelope('FULL'))
         fullCycles.resolve(cyclesEnvelope('FULL'))
         await expect(pendingFull).resolves.toBe(true)
@@ -550,7 +508,7 @@ describe('useGraphData', () => {
         await expect(pendingParticipant).resolves.toBe(false)
       }
 
-      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+      expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
       expect(g.error.value).toBe('participant cycles failed')
       expect(g.loading.value).toBe(false)
     },
@@ -565,7 +523,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantB.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -574,16 +531,16 @@ describe('useGraphData', () => {
     await g.loadData()
     await g.refreshClearingCyclesForParticipant('PID_A')
 
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A'))
 
     const pendingParticipantB = g.refreshClearingCyclesForParticipant('PID_B')
 
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(g.error.value).toBeNull()
 
     participantB.resolve(cyclesEnvelope('PARTICIPANT_B'))
     await expect(pendingParticipantB).resolves.toBe(true)
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_B').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_B'))
   })
 
   it('clears a prior participant error when another participant request starts', async () => {
@@ -595,7 +552,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantB.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -608,7 +564,7 @@ describe('useGraphData', () => {
     const pendingParticipantB = g.refreshClearingCyclesForParticipant('PID_B')
 
     expect(g.error.value).toBeNull()
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
 
     participantB.resolve(cyclesEnvelope('PARTICIPANT_B'))
     await expect(pendingParticipantB).resolves.toBe(true)
@@ -630,7 +586,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantB.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -643,19 +598,19 @@ describe('useGraphData', () => {
     await g.refreshClearingCyclesForParticipant('PID_A')
     const pendingParticipantB = g.refreshClearingCyclesForParticipant('PID_B')
 
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL_1').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL_1'))
     expect(g.error.value).toBe('cached full failure')
 
     latestFullSnapshot.resolve(snapshotEnvelope('LATEST_FULL'))
     latestFullCycles.resolve(cyclesEnvelope('FULL_2'))
     await expect(pendingFull).resolves.toBe(true)
 
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL_2').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL_2'))
     expect(g.error.value).toBeNull()
 
     participantB.resolve(cyclesEnvelope('PARTICIPANT_B'))
     await expect(pendingParticipantB).resolves.toBe(true)
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_B').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_B'))
   })
 
   it('retains displayed cycles while the same participant is refreshed', async () => {
@@ -667,7 +622,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(participantRetry.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -677,12 +631,12 @@ describe('useGraphData', () => {
     await g.refreshClearingCyclesForParticipant('PID_A')
 
     const pendingRetry = g.refreshClearingCyclesForParticipant('PID_A')
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A'))
     expect(g.error.value).toBeNull()
 
     participantRetry.reject(new Error('participant retry failed'))
     await expect(pendingRetry).resolves.toBe(false)
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('PARTICIPANT_A'))
     expect(g.error.value).toBe('participant retry failed')
   })
 
@@ -691,13 +645,11 @@ describe('useGraphData', () => {
     apiMock.graphSnapshot
       .mockResolvedValueOnce(snapshotEnvelope('INITIAL'))
       .mockResolvedValueOnce(snapshotEnvelope('PRIMARY_EQ'))
-    apiMock.clearingCycles.mockResolvedValueOnce({
-      success: false,
-      error: { code: 'cycles_unavailable', message: 'clearing cycles unavailable' },
-    })
+    apiMock.clearingCycles.mockRejectedValueOnce(
+      new ApiException({ status: 503, code: 'cycles_unavailable', message: 'clearing cycles unavailable' }),
+    )
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -737,7 +689,6 @@ describe('useGraphData', () => {
     const eq = ref('EUR')
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -781,7 +732,6 @@ describe('useGraphData', () => {
     const focusMode = ref(false)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -811,13 +761,11 @@ describe('useGraphData', () => {
 
   it('keeps a successful focus snapshot visible when clearing cycles fail', async () => {
     apiMock.graphEgo.mockResolvedValueOnce(snapshotEnvelope('FOCUS'))
-    apiMock.clearingCycles.mockResolvedValueOnce({
-      success: false,
-      error: { code: 'cycles_unavailable', message: 'focus cycles unavailable' },
-    })
+    apiMock.clearingCycles.mockRejectedValueOnce(
+      new ApiException({ status: 503, code: 'cycles_unavailable', message: 'focus cycles unavailable' }),
+    )
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(true),
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -845,7 +793,6 @@ describe('useGraphData', () => {
       .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid,
       focusDepth: ref(1),
@@ -854,21 +801,21 @@ describe('useGraphData', () => {
 
     await expect(g.loadData()).resolves.toBe(true)
     await expect(g.loadData()).resolves.toBe(true)
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(g.error.value).toBe('global cycles failed')
 
     focusMode.value = true
     focusRootPid.value = 'PID_FOCUS'
     await expect(g.refreshForFocusMode()).resolves.toBe(true)
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FOCUS'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FOCUS').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FOCUS'))
     expect(g.error.value).toBeNull()
 
     focusMode.value = false
     focusRootPid.value = ''
     await expect(g.refreshForFocusMode()).resolves.toBe(true)
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST_FULL'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(g.error.value).toBe('global cycles failed')
   })
 
@@ -889,7 +836,6 @@ describe('useGraphData', () => {
       .mockResolvedValueOnce(cyclesEnvelope('FOCUS'))
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid,
       focusDepth: ref(1),
@@ -914,7 +860,7 @@ describe('useGraphData', () => {
     focusRootPid.value = ''
     await expect(g.refreshForFocusMode()).resolves.toBe(true)
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FAILED_FULL'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(g.error.value).toBe('cached full failure')
   })
 
@@ -930,7 +876,6 @@ describe('useGraphData', () => {
         .mockResolvedValueOnce(cyclesEnvelope('GLOBAL'))
       const g = useGraphData({
         eq: ref('EUR'),
-        isRealMode: ref(true),
         focusMode,
         focusRootPid: ref('PID_FOCUS'),
         focusDepth: ref(1),
@@ -972,7 +917,6 @@ describe('useGraphData', () => {
       .mockReturnValueOnce(focusCycles.promise)
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid: ref('PID_FOCUS'),
       focusDepth: ref(1),
@@ -988,7 +932,7 @@ describe('useGraphData', () => {
 
     await expect(pendingFocus).resolves.toBe(false)
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['FULL'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('FULL'))
     expect(g.loading.value).toBe(false)
   })
 
@@ -1001,7 +945,6 @@ describe('useGraphData', () => {
     apiMock.graphSnapshot.mockResolvedValueOnce(snapshotEnvelope('GLOBAL'))
     const g = useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode,
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -1039,7 +982,6 @@ describe('useGraphData', () => {
     const statusFilter = ref<string[]>(['active'])
     const g = useGraphData({
       eq,
-      isRealMode: ref(true),
       focusMode: ref(true),
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),
@@ -1073,7 +1015,7 @@ describe('useGraphData', () => {
       include: ['transactions'],
     })
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST'])
-    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST').data)
+    expect(g.clearingCycles.value).toEqual(cyclesEnvelope('LATEST'))
     expect(g.error.value).toBeNull()
     expect(g.loading.value).toBe(false)
   })
@@ -1086,7 +1028,6 @@ describe('useGraphData', () => {
     const scope = effectScope()
     const graph = scope.run(() => useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(false),
       focusRootPid: ref(''),
       focusDepth: ref(1),
@@ -1116,7 +1057,6 @@ describe('useGraphData', () => {
     const scope = effectScope()
     const graph = scope.run(() => useGraphData({
       eq: ref('EUR'),
-      isRealMode: ref(true),
       focusMode: ref(true),
       focusRootPid: ref('PID_A'),
       focusDepth: ref(1),

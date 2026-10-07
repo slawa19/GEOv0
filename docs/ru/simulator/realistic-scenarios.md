@@ -89,7 +89,7 @@
     - `services (person) → retail (business)`
   - Эти связи помогают закрывать циклы долгов и давать клирингу материал.
 
-Результат зафиксирован в описании сообщества `seeds/communities/<id>/community.json`, откуда его читает генератор сценариев (`T1712`, 2026-09-21). Исходная реализация — функция `_add_extra_uah_service_links` в `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py`; она по-прежнему собирает канонические admin-фикстуры, но входом сценария больше не является.
+Результат зафиксирован в описании сообщества `seeds/communities/<id>/community.json`, откуда его читает генератор сценариев (`T1712`, 2026-09-21). Исходная реализация — функция `_add_extra_uah_service_links` в `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py`; генераторы удалены вместе с `admin-fixtures/` 2026-10-07 (032 S4) и доступны в git-истории.
 
 Минимальный sanity-check результата:
 - сумма `tx_failed_by_code.ROUTING_NO_ROUTE + tx_failed_by_code.ROUTING_NO_CAPACITY` должна падать (а не расти) после усиления UAH-графа. Смотреть нужно оба кода вместе: появление частично доступного маршрута переводит отказ из `ROUTING_NO_ROUTE` в `ROUTING_NO_CAPACITY`, и один этот счётчик при улучшении может вырасти.

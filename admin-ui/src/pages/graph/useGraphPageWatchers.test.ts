@@ -1,4 +1,4 @@
-import { computed, effectScope, nextTick, ref } from 'vue'
+import { effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { SelectedInfo } from '../../composables/useGraphVisualization'
@@ -28,7 +28,6 @@ describe('useGraphPageWatchers', () => {
       const graphEffectRequests = useLatestRequest()
       mountRequest = graphEffectRequests.begin()
       useGraphPageWatchers({
-        isRealMode: computed(() => false),
         eq,
         statusFilter: ref<string[]>(['active']),
         threshold: ref('0.10'),
@@ -104,7 +103,6 @@ describe('useGraphPageWatchers', () => {
       const graphEffectRequests = useLatestRequest()
       mountRequest = graphEffectRequests.begin()
       useGraphPageWatchers({
-        isRealMode: computed(() => false),
         eq,
         statusFilter: ref<string[]>(['active']),
         threshold: ref('0.10'),
@@ -179,7 +177,6 @@ describe('useGraphPageWatchers', () => {
 
     scope.run(() => {
       useGraphPageWatchers({
-        isRealMode: computed(() => true),
         eq,
         statusFilter,
         threshold: ref('0.10'),
@@ -261,7 +258,6 @@ describe('useGraphPageWatchers', () => {
 
     scope.run(() => {
       useGraphPageWatchers({
-        isRealMode: computed(() => true),
         eq: ref('EUR'),
         statusFilter: ref<string[]>(['active']),
         threshold: ref('0.10'),
@@ -348,7 +344,6 @@ describe('useGraphPageWatchers', () => {
 
       scope.run(() => {
         useGraphPageWatchers({
-          isRealMode: computed(() => true),
           eq: ref('USD'),
           statusFilter: ref<string[]>(['active']),
           threshold: ref('0.10'),
@@ -427,7 +422,6 @@ describe('useGraphPageWatchers', () => {
 
     scope.run(() => {
       useGraphPageWatchers({
-        isRealMode: computed(() => true),
         eq,
         statusFilter: ref<string[]>(['active']),
         threshold: ref('0.10'),

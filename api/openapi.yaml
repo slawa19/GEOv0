@@ -4659,9 +4659,9 @@ components:
           nullable: true
         error:
           # NULL is the common case on the wire: `tx.error` is copied raw out of the column
-          # (app/api/v1/admin.py:255) and only an aborted transaction ever has one. The seed
-          # pack ships the null explicitly - most of its rows carry `"error": null`
-          # (admin-fixtures/packs/greenfield-village-100-v2/v1/datasets/transactions.json).
+          # (app/api/v1/admin.py:255) and only an aborted transaction ever has one. The Admin seed
+          # pack, deleted with the Admin UI mock mode in 032 S4, shipped the null explicitly on most
+          # of its rows.
           #
           # The null is a BRANCH, not a sibling `nullable: true`. In OpenAPI 3.0.3 `nullable`
           # modifies a sibling `type` and nothing else, so beside a bare `oneOf` it is inert and

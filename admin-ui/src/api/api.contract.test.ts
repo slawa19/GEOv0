@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ClearingCycles, GraphSnapshot } from '../types/domain'
-import { mockApi, __resetMockApiForTests } from './mockApi'
 import { realApi } from './realApi'
 
 // The schema-drift tests below make realApi reject on purpose, and a rejection calls toastApiError, which mounts a real
@@ -70,63 +69,10 @@ function assertClearingCyclesShape(c: ClearingCycles) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  __resetMockApiForTests()
 })
 
 describe('API contract invariants', () => {
-  it('mockApi.graphSnapshot and mockApi.graphEgo return GraphSnapshot-like shapes', async () => {
-    const url = new URL('http://localhost/?scenario=happy')
-    vi.stubGlobal('window', { ...window, location: url } as unknown as Window)
-
-    const scenario = { name: 'happy', latency_ms: { min: 0, max: 0 } }
-
-    const participants = [
-      { pid: 'PID_A', display_name: 'Alice', type: 'person', status: 'active' },
-      { pid: 'PID_B', display_name: 'Bob', type: 'person', status: 'active' },
-    ]
-    const equivalents = [{ code: 'GEO', precision: 2, description: 'GEO', is_active: true }]
-    const trustlines = [
-      {
-        equivalent: 'GEO',
-        from: 'PID_A',
-        to: 'PID_B',
-        from_display_name: 'Alice',
-        to_display_name: 'Bob',
-        limit: '100.00',
-        used: '0.00',
-        available: '100.00',
-        status: 'active',
-        created_at: new Date().toISOString(),
-        policy: {},
-      },
-    ]
-
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-        const u = String(input)
-        if (u.includes('/admin-fixtures/v1/scenarios/happy.json')) return jsonResponse(scenario)
-        if (u.includes('/admin-fixtures/v1/datasets/participants.json')) return jsonResponse(participants)
-        if (u.includes('/admin-fixtures/v1/datasets/equivalents.json')) return jsonResponse(equivalents)
-        if (u.includes('/admin-fixtures/v1/datasets/trustlines.json')) return jsonResponse(trustlines)
-        if (u.includes('/admin-fixtures/v1/datasets/incidents.json')) return jsonResponse({ items: [] })
-        // Optional datasets:
-        if (u.includes('/admin-fixtures/v1/datasets/debts.json')) return jsonResponse([])
-        if (u.includes('/admin-fixtures/v1/datasets/audit-log.json')) return jsonResponse([])
-        if (u.includes('/admin-fixtures/v1/datasets/transactions.json')) return jsonResponse([])
-        return new Response('Not Found', { status: 404, statusText: 'Not Found' })
-      })
-
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    const snapEnv = await mockApi.graphSnapshot()
-    expect(snapEnv.success).toBe(true)
-    if (snapEnv.success) assertGraphSnapshotShape(snapEnv.data)
-
-    const egoEnv = await mockApi.graphEgo({ pid: 'PID_A', depth: 1, equivalent: 'GEO', status: ['active'] })
-    expect(egoEnv.success).toBe(true)
-    if (egoEnv.success) assertGraphSnapshotShape(egoEnv.data)
-  })
-
-  it('realApi.graphSnapshot returns GraphSnapshot-like shape (envelope stub)', async () => {
+  it('realApi.graphSnapshot returns GraphSnapshot-like shape (raw payload)', async () => {
     const meta = import.meta as unknown as { env: Record<string, unknown> }
     meta.env.VITE_API_BASE_URL = ''
     meta.env.PROD = false
@@ -144,12 +90,10 @@ describe('API contract invariants', () => {
         created_at: '2026-10-04T00:00:00Z', updated_at: '2026-10-04T00:00:00Z', edges: [{ debtor: 'PID_A', creditor: 'PID_B' }] }],
     }
 
-    const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: payload }))
+    const fetchMock = vi.fn(async () => jsonResponse(payload))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await realApi.graphSnapshot()
-    expect(env.success).toBe(true)
-    if (env.success) assertGraphSnapshotShape(env.data)
+    assertGraphSnapshotShape(await realApi.graphSnapshot())
   })
 
   it('realApi.graphSnapshot coerces decimal-like numbers to strings', async () => {
@@ -182,17 +126,15 @@ describe('API contract invariants', () => {
       transactions: [],
     } as unknown as GraphSnapshot
 
-    const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: payload }))
+    const fetchMock = vi.fn(async () => jsonResponse(payload))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await realApi.graphSnapshot()
-    expect(env.success).toBe(true)
-    if (!env.success) return
+    const snapshot = await realApi.graphSnapshot()
 
-    expect(typeof env.data.trustlines[0]?.limit).toBe('string')
-    expect(typeof env.data.trustlines[0]?.used).toBe('string')
-    expect(typeof env.data.trustlines[0]?.available).toBe('string')
-    expect(typeof env.data.debts[0]?.amount).toBe('string')
+    expect(typeof snapshot.trustlines[0]?.limit).toBe('string')
+    expect(typeof snapshot.trustlines[0]?.used).toBe('string')
+    expect(typeof snapshot.trustlines[0]?.available).toBe('string')
+    expect(typeof snapshot.debts[0]?.amount).toBe('string')
   })
 
   it('realApi.graphSnapshot rejects invalid payload shapes (schema drift guard)', async () => {
@@ -211,7 +153,7 @@ describe('API contract invariants', () => {
       transactions: [],
     }
 
-    const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: badPayload }))
+    const fetchMock = vi.fn(async () => jsonResponse(badPayload))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     await expect(realApi.graphSnapshot()).rejects.toBeInstanceOf(Error)
@@ -236,14 +178,10 @@ describe('API contract invariants', () => {
       },
     }
 
-    const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: payload }))
+    const fetchMock = vi.fn(async () => jsonResponse(payload))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const env = await realApi.clearingCycles()
-    expect(env.success).toBe(true)
-    if (!env.success) return
-
-    assertClearingCyclesShape(env.data)
+    assertClearingCyclesShape(await realApi.clearingCycles())
   })
 
   it('realApi.clearingCycles rejects invalid payload shapes (schema drift guard)', async () => {
@@ -260,7 +198,7 @@ describe('API contract invariants', () => {
       },
     }
 
-    const fetchMock = vi.fn(async () => jsonResponse({ success: true, data: badPayload }))
+    const fetchMock = vi.fn(async () => jsonResponse(badPayload))
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     await expect(realApi.clearingCycles()).rejects.toBeInstanceOf(Error)

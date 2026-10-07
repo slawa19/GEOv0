@@ -1,5 +1,4 @@
 import { defineStore } from 'pinia'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
 import { t } from '../i18n'
@@ -98,9 +97,9 @@ export const useHealthStore = defineStore('health', {
 
       this._refreshPromise = (async () => {
         try {
-          this.health = assertSuccess(await api.health())
-          this.healthDb = assertSuccess(await api.healthDb())
-          this.migrations = assertSuccess(await api.migrations())
+          this.health = await api.health()
+          this.healthDb = await api.healthDb()
+          this.migrations = await api.migrations()
           this.error = null
         } catch (e: unknown) {
           this.error = e instanceof Error ? e.message : t('health.loadFailed')

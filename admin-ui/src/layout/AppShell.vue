@@ -2,14 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
-import { useAuthStore } from '../stores/auth'
 import { useConfigStore } from '../stores/config'
 import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
 import { locale, setLocale, t } from '../i18n'
 import { getTooltipContent } from '../content/tooltips'
-import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { toLocationQueryRaw } from '../router/query'
 import type { TooltipKey } from '../content/tooltips'
-import { apiModeFromEnv, apiModeFromOverride, effectiveApiMode, setApiModeOverride, type ApiMode } from '../api/apiMode'
 
 type NavItem = {
   path: string
@@ -33,23 +31,7 @@ const navItems: NavItem[] = [
 const route = useRoute()
 const router = useRouter()
 
-const apiMode = computed(() => effectiveApiMode())
-const isMockMode = computed(() => apiMode.value !== 'real')
-const isApiModeOverridden = computed(() => apiModeFromOverride() !== null)
-
-type ApiModeCommand = ApiMode | 'reset'
-
-function applyApiModeCommand(cmd: ApiModeCommand) {
-  if (cmd === 'reset') {
-    setApiModeOverride(null)
-  } else {
-    setApiModeOverride(cmd)
-  }
-  window.location.reload()
-}
-
 const apiBaseLabel = computed(() => {
-  if (isMockMode.value) return t('app.apiBase.fixtures', { path: '/admin-fixtures/v1' })
   const env = import.meta.env as unknown as Record<string, unknown>
   const envVal = env.VITE_API_BASE_URL
   const raw = (envVal === undefined || envVal === null ? '' : String(envVal)).trim()
@@ -58,22 +40,11 @@ const apiBaseLabel = computed(() => {
   return t('app.apiBase.sameOrigin')
 })
 
-const apiModeBadge = computed(() => (isMockMode.value ? t('app.apiMode.mock') : t('app.apiMode.real')))
-const apiModeBadgeType = computed(() => {
-  if (isApiModeOverridden.value) return 'info'
-  return isMockMode.value ? 'warning' : 'success'
-})
-
-const apiModeDefault = computed(() => apiModeFromEnv())
-
 const healthStore = useHealthStore()
-const authStore = useAuthStore()
 const configStore = useConfigStore()
 
 onMounted(() => {
   healthStore.startPolling(HEALTH_POLL_INTERVAL_MS)
-  authStore.load()
-  if (!isMockMode.value) authStore.role = 'admin'
   void configStore.load()
 })
 
@@ -86,21 +57,6 @@ if (import.meta.hot) {
     healthStore.stopPolling()
   })
 }
-
-const scenario = computed({
-  get: () => readQueryString(route.query.scenario) || 'happy',
-  set: (v: string) => {
-    void router.replace({ query: toLocationQueryRaw({ ...route.query, scenario: v }) })
-  },
-})
-
-// Scenario is a mock-only UI feature; strip it in real mode.
-onMounted(() => {
-  if (isMockMode.value) return
-  if (!('scenario' in (route.query || {}))) return
-  const { scenario: _ignored, ...rest } = route.query || {}
-  void router.replace({ query: toLocationQueryRaw(rest) })
-})
 
 const THEME_KEY = 'admin-ui.theme'
 const dark = ref(true)
@@ -157,17 +113,17 @@ function goQuickJumpDefault() {
 function goParticipants() {
   const q = normQuickJump(quickJump.value)
   if (!q) return
-  void router.push({ path: '/participants', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q }) })
+  void router.push({ path: '/participants', query: toLocationQueryRaw({ q }) })
 }
 
 function goAuditLog() {
   const q = normQuickJump(quickJump.value)
   if (!q) return
-  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q }) })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ q }) })
 }
 
 function navigate(path: string) {
-  void router.push({ path, query: toLocationQueryRaw({ ...carryScenarioQuery(route.query) }) })
+  void router.push({ path })
 }
 </script>
 
@@ -185,7 +141,7 @@ function navigate(path: string) {
           GEO Hub
         </div>
         <div class="brand__subtitle">
-          {{ t('app.brand.subtitle') }}<span v-if="isMockMode"> {{ t('app.brand.prototype') }}</span>
+          {{ t('app.brand.subtitle') }}
         </div>
       </div>
 
@@ -272,41 +228,17 @@ function navigate(path: string) {
               popper-class="geoTooltip geoTooltip--menu"
             >
               <template #content>
-                <div class="geoTooltipText geoTooltipText--clamp2">{{ t('app.status.apiSource', { label: apiBaseLabel }) }}</div>
-                <div class="geoTooltipText geoTooltipText--clamp2">{{ t('app.apiMode.switch.defaultLabel', { label: apiModeDefault === 'real' ? t('app.apiMode.real') : t('app.apiMode.mock') }) }}</div>
+                <div class="geoTooltipText geoTooltipText--clamp2">
+                  {{ t('app.status.apiSource', { label: apiBaseLabel }) }}
+                </div>
               </template>
-              <el-dropdown
-                trigger="click"
-                @command="applyApiModeCommand"
+              <el-tag
+                type="success"
+                effect="plain"
               >
-                <el-tag
-                  :type="apiModeBadgeType"
-                  effect="plain"
-                  class="apiModeTag"
-                >
-                  {{ apiModeBadge }}<span v-if="isApiModeOverridden" class="apiModeTag__override">*</span>
-                </el-tag>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="mock">{{ t('app.apiMode.switch.useMock') }}</el-dropdown-item>
-                    <el-dropdown-item command="real">{{ t('app.apiMode.switch.useReal') }}</el-dropdown-item>
-                    <el-dropdown-item
-                      divided
-                      command="reset"
-                    >
-                      {{ t('app.apiMode.switch.reset') }}
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+                {{ t('app.api.real') }}
+              </el-tag>
             </el-tooltip>
-
-            <el-tag
-              v-if="isMockMode"
-              type="info"
-            >
-              {{ t('app.status.scenario', { scenario }) }}
-            </el-tag>
           </div>
         </div>
 
@@ -334,76 +266,6 @@ function navigate(path: string) {
             <el-option
               :label="t('app.locale.ru')"
               value="ru"
-            />
-          </el-select>
-
-          <el-select
-            v-if="isMockMode"
-            v-model="authStore.role"
-            size="small"
-            style="width: 150px"
-          >
-            <el-option
-              :label="t('app.role.admin')"
-              value="admin"
-            />
-            <el-option
-              :label="t('app.role.operator')"
-              value="operator"
-            />
-            <el-option
-              :label="t('app.role.auditor')"
-              value="auditor"
-            />
-          </el-select>
-
-          <el-tooltip
-            v-else
-            placement="bottom"
-            effect="dark"
-            :show-after="850"
-            popper-class="geoTooltip geoTooltip--menu"
-          >
-            <template #content>
-              <span class="geoTooltipText geoTooltipText--clamp3">{{ t('app.role.realModeDisclaimer') }}</span>
-            </template>
-            <el-tag
-              type="info"
-              effect="plain"
-            >
-              {{ t('app.role.realModeLocked', { role: t('app.role.admin') }) }}
-            </el-tag>
-          </el-tooltip>
-
-          <el-select
-            v-if="isMockMode"
-            v-model="scenario"
-            size="small"
-            style="width: 190px"
-          >
-            <el-option
-              label="happy"
-              value="happy"
-            />
-            <el-option
-              label="empty"
-              value="empty"
-            />
-            <el-option
-              label="error500"
-              value="error500"
-            />
-            <el-option
-              label="admin_forbidden403"
-              value="admin_forbidden403"
-            />
-            <el-option
-              label="integrity_unauthorized401"
-              value="integrity_unauthorized401"
-            />
-            <el-option
-              label="slow"
-              value="slow"
             />
           </el-select>
 
@@ -458,15 +320,6 @@ function navigate(path: string) {
 .brand__subtitle {
   font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
-}
-
-.apiModeTag {
-  cursor: pointer;
-}
-
-.apiModeTag__override {
-  margin-left: 4px;
-  opacity: 0.8;
 }
 
 .header {

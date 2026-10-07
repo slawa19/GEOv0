@@ -1,18 +1,13 @@
 # Admin UI → Real API integration
 
-This Admin UI currently runs against deterministic JSON fixtures via a mock API layer.
-
-Goal: make switching to real GEO Hub endpoints low-friction, without rewriting pages.
+This Admin UI always calls the real GEO Hub backend. The mock API layer, its fixtures and the mode switch were
+deleted on 2026-10-07 (programme 032, slice S4); there is no `VITE_API_MODE` and no mock to fall back on.
 
 ## 1) Current architecture
-- Pages should import `api` from `src/api/index.ts` (single entrypoint).
-- `api` can be backed by:
-  - `mockApi` (fixtures) for UI prototyping
-  - `realApi` (fetch) for real backend
+- Pages import `api` from `src/api/index.ts` (single entrypoint); it is `realApi` (fetch) and nothing else
+  (`src/api/singleClient.guard.test.ts` keeps it that way).
 
-As of 2026-01-12, pages/stores no longer import `mockApi` directly.
-
-## 2) Configure API mode
+## 2) Configure the backend address
 ### Option B: direct base URL (recommended in this repo)
 Set a direct API base URL:
 
@@ -45,19 +40,19 @@ Recommended approach for UI:
 Keys:
 - `admin-ui.adminToken` (string)
 
-UI role note (not auth):
-- The role selector in the header (`admin/operator/auditor`) is a **UI-only** convenience stored in `localStorage` (`admin-ui.role`).
-- It may hide/disable some actions, but it is not a security boundary.
-- Real permissions must be enforced by the backend.
+Roles (not auth):
+- The UI has no role selector and no read-only mode: the `admin/operator/auditor` selector (`admin-ui.role`) was mock-only and was removed on 2026-10-07 (032 S4).
+- RBAC is not implemented (recorded decision of programme 022); the backend enforces the admin token.
+
+Without a token:
+- A production build refuses admin requests with 401 `ADMIN_TOKEN_MISSING`.
 
 Dev convenience (intentional):
-- In `real` mode, when running the UI in dev (`import.meta.env.DEV`), if no token is set yet the UI auto-seeds localStorage with the backend default token: `dev-admin-token-change-me`.
+- When running the UI in dev (`import.meta.env.DEV`), if no token is set yet the UI uses the backend default token: `dev-admin-token-change-me`.
 - This is a dev-only ergonomics hack to avoid first-run 403 spam and make "just open the UI" testing frictionless.
 - Override it with `VITE_ADMIN_TOKEN=...` (recommended for teams) or by setting `localStorage['admin-ui.adminToken']`.
 
 ## 4) Endpoint mapping
-The `realApi` skeleton is expected to implement the same surface as `mockApi`, but using real endpoints.
-
 Use [api/openapi.yaml](../../api/openapi.yaml) as the contract source of truth.
 
 Common endpoints used by pages:
@@ -66,8 +61,6 @@ Common endpoints used by pages:
 - `GET /api/v1/admin/migrations`
 - `GET /api/v1/admin/config` (+ `X-Admin-Token`)
 - `PATCH /api/v1/admin/config` (+ `X-Admin-Token`)
-- `GET /api/v1/admin/feature-flags` (+ `X-Admin-Token`)
-- `PATCH /api/v1/admin/feature-flags` (+ `X-Admin-Token`)
 - `GET /api/v1/admin/participants`
 - `GET /api/v1/admin/trustlines`
 - `GET /api/v1/admin/audit-log`
@@ -88,9 +81,9 @@ Integrity:
 - `GET /api/v1/integrity/status`
 - `POST /api/v1/integrity/verify`
 
-Previously fixtures-only, now available in backend:
-- Incidents list and abort-tx are implemented as admin endpoints; `realApi` calls them directly.
-- Graph snapshot/ego and admin clearing cycles are implemented; `realApi` calls them directly.
+Feature flags are config keys: the Config page edits them through `PATCH /api/v1/admin/config`. The UI no longer
+uses `/admin/feature-flags` (the `FeatureFlagsPage` and its client methods were deleted on 2026-10-07, 032 S4;
+`/feature-flags` in the UI redirects to `/config`).
 
 ## 5) Error/envelope expectations
 UI expects an `ApiEnvelope<T>` shape:
@@ -110,10 +103,9 @@ Audit log note:
 ## 6) Development checklist
 - Start backend at `http://127.0.0.1:18000` (runner default) or `http://127.0.0.1:8000` (Docker default)
 - Ensure admin token is configured (if required by endpoint)
-- Switch `VITE_API_MODE=real`
 - Verify pages:
   - Dashboard loads health + migrations
-  - Config/Feature Flags load and save
+  - Config (including the feature-flag keys) loads and saves
   - Participants/Trustlines paginate
   - Audit log loads
 
@@ -126,7 +118,6 @@ If you see `ERR_CONNECTION_REFUSED` on `http://localhost:5173/`, use the repo ru
 ```
 
 Note: `run_local.ps1 start` writes/updates `admin-ui/.env.local` with:
-- `VITE_API_MODE=real`
 - `VITE_API_BASE_URL=http://127.0.0.1:<backendPort>` (default `18000`)
 
 Pick a community (its recipe is run through the domain services; `riverside-town-50` is the default):
@@ -138,7 +129,8 @@ Pick a community (its recipe is run through the domain services; `riverside-town
 
 Seeding by importing fixture packs into the database (`seed_db.py --source fixtures` / `--source seeds`) was
 removed by programme 030 S2 (`F-030-3`): demo data goes through the real API with the same checks. The
-`admin-fixtures/` datasets stay the mock-mode data of Admin UI.
+`admin-fixtures/` datasets, which were the mock-mode data of the Admin UI, were deleted together with the mock
+mode on 2026-10-07 (032 S4).
 
 ### 7.1 Start backend + DB (Docker Compose)
 From repo root:
@@ -183,10 +175,9 @@ Quick DB sanity check:
   - `python -m uvicorn app.main:app --reload --port 18000`
   - If `18000` is unavailable on Windows, use another port and set `VITE_API_BASE_URL` accordingly.
 
-### 7.2 Configure Admin UI for real-mode
+### 7.2 Configure Admin UI
 Create `admin-ui/.env.local` (or copy from `admin-ui/.env.local.example`) with:
 
-- `VITE_API_MODE=real`
 - `VITE_API_BASE_URL=http://127.0.0.1:18000` (runner default)
   - or `VITE_API_BASE_URL=http://127.0.0.1:8000` (Docker default)
 
@@ -209,6 +200,7 @@ Default token on backend: `dev-admin-token-change-me` (env var `ADMIN_TOKEN`).
 
 You should not need to do anything for local dev:
 - In dev, the UI auto-uses the default token (`dev-admin-token-change-me`) if nothing is configured yet.
+- A production build with no token configured refuses admin requests with 401 `ADMIN_TOKEN_MISSING`.
 
 If your backend uses a different token, set one of:
 - `VITE_ADMIN_TOKEN=...` in `admin-ui/.env.local` (preferred)
@@ -217,3 +209,6 @@ If your backend uses a different token, set one of:
 ### 7.4 URL to open
 - `http://localhost:5173/`
 
+### 7.5 E2E and manual check
+Every Admin e2e runs against a real seeded backend: `scripts/verify_admin_e2e.ps1 -TaskSlug <slug>` (`-Smoke` for the
+blocking smoke only). Manual check in a browser: [`docs/ru/admin-ui/manual-smoke-real-mode.md`](../../docs/ru/admin-ui/manual-smoke-real-mode.md).

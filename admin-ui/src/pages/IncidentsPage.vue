@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
@@ -10,7 +9,6 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { formatIsoInTimeZone } from '../utils/datetime'
 import { useConfigStore } from '../stores/config'
-import { useAuthStore } from '../stores/auth'
 import type { Incident } from '../types/domain'
 import { t } from '../i18n'
 import { toLocationQueryRaw } from '../router/query'
@@ -36,7 +34,6 @@ const selected = ref<Incident | null>(null)
 let pageActive = true
 
 const configStore = useConfigStore()
-const authStore = useAuthStore()
 const timeZone = computed(() => String(configStore.config['ui.timezone'] || 'UTC'))
 
 function fmtTs(iso: string | undefined): string {
@@ -59,7 +56,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listIncidents({ page: requestPage, per_page: requestPerPage }))
+    const data = await api.listIncidents({ page: requestPage, per_page: requestPerPage })
     if (!request.isCurrent()) return
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
@@ -78,10 +75,6 @@ async function load() {
 }
 
 async function forceAbort(row: Incident) {
-  if (authStore.isReadOnly) {
-    ElMessage.error(t('incidents.readOnlyAbortDisabled'))
-    return
-  }
   let reason: string
   try {
     reason = await ElMessageBox.prompt(t('incidents.abort.reasonRequired'), t('incidents.abort.title'), {
@@ -99,7 +92,7 @@ async function forceAbort(row: Incident) {
   lastAbortTxId.value = null
   abortingTxId.value = row.tx_id
   try {
-    assertSuccess(await api.abortTx(row.tx_id, reason))
+    await api.abortTx(row.tx_id, reason)
     if (!pageActive) return
     ElMessage.success(t('incidents.aborted', { txId: row.tx_id }))
     lastAbortTxId.value = row.tx_id
@@ -343,7 +336,6 @@ const stuckCount = computed(() => total.value)
               size="small"
               type="danger"
               :loading="abortingTxId === scope.row.tx_id"
-              :disabled="authStore.isReadOnly"
               @click.stop="forceAbort(scope.row)"
             >
               {{ t('incidents.forceAbort') }}

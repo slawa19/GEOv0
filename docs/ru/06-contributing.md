@@ -77,13 +77,12 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec app alembic 
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Запуск Admin UI (реальный режим, обращается к backend Admin API):
+Запуск Admin UI (всегда обращается к backend Admin API; режима mock нет):
 
 ```bash
 npm --prefix admin-ui install
 
 # В PowerShell:
-#   $env:VITE_API_MODE = 'real'
 #   $env:VITE_API_BASE_URL = 'http://localhost:8000'   # Docker default
 #   # Если вы меняли GEO_API_PORT (например 18000), используйте его здесь.
 #   # Если запускаете локально через scripts/run_local.ps1, дефолт: http://127.0.0.1:18000

@@ -3,11 +3,12 @@
 Programme 017, `T1712`. Three things are asserted here, and each of them is a
 thing that used to be true only by accident:
 
-1. The descriptions under ``seeds/communities/`` still carry exactly the v2
-   topology that lived in ``admin-fixtures/tools/generate_seed_*_v2.py``
-   (100 participants / 523 trustlines and 50 / 316). While those generators are
-   still in the tree this is a real comparison against them; it is what makes
-   their later deletion a deletion and not a loss.
+1. The descriptions under ``seeds/communities/`` carry the v2 topology
+   (100 participants / 523 trustlines and 50 / 316). Until 2026-10-07 this was
+   also compared, line by line, against the generators it was extracted from
+   (``admin-fixtures/tools/generate_seed_*_v2.py``) and the extraction bridge;
+   those two tests died with the generators in 032 S4, as they said they would.
+   The counts below are what remains of that evidence.
 2. The committed simulator scenarios are generated from the descriptions, byte
    for byte, and generating twice gives the same bytes. Nobody keeps a second
    copy of the same people by hand.
@@ -31,7 +32,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMUNITIES_DIR = REPO_ROOT / "seeds" / "communities"
-TOOLS_DIR = REPO_ROOT / "admin-fixtures" / "tools"
 SCENARIOS_DIR = REPO_ROOT / "fixtures" / "simulator"
 
 if str(COMMUNITIES_DIR) not in sys.path:
@@ -44,9 +44,9 @@ from community_schema import (  # noqa: E402
 )
 
 
-# The topology carried forward is v2, measured on 2026-09-21 and re-measured by
-# `test_the_description_still_equals_the_v2_generator_topology` below. If a
-# number here moves, the description changed: update the constant *and* say why.
+# The topology carried forward is v2, measured on 2026-09-21 against the v2
+# generators (deleted 2026-10-07, 032 S4). If a number here moves, the
+# description changed: update the constant *and* say why.
 EXPECTED: dict[str, dict[str, Any]] = {
     "greenfield-village-100": {
         "participants": 100,
@@ -61,7 +61,6 @@ EXPECTED: dict[str, dict[str, Any]] = {
             "agents": 5,
         },
         "households_the_name_rule_misses": 13,
-        "generator": "generate_seed_greenfield_village_100_v2.py",
         "scenario_id": "greenfield-village-100-realistic-v2",
     },
     "riverside-town-50": {
@@ -77,7 +76,6 @@ EXPECTED: dict[str, dict[str, Any]] = {
             "agents": 2,
         },
         "households_the_name_rule_misses": 0,
-        "generator": "generate_seed_riverside_town_50_v2.py",
         "scenario_id": "riverside-town-50-realistic-v2",
     },
 }
@@ -225,68 +223,6 @@ def test_the_v2_routing_and_clearing_policy_is_what_the_seed_documents_claim(
     assert any(
         t["policy"]["can_be_intermediate"] and type_by_ref[t["from"]] == "person" for t in other
     )
-
-
-# --- The description still equals the v2 topology it was extracted from -------
-#
-# This is a bridge assertion and it dies with the generators it reads. Until
-# they are deleted it is the evidence that the extraction lost nothing.
-
-
-@pytest.mark.parametrize("community_id", COMMUNITY_IDS)
-def test_the_description_still_equals_the_v2_generator_topology(community_id: str, descriptions) -> None:
-    generator = _load_module(TOOLS_DIR / EXPECTED[community_id]["generator"], f"_t1712_v2_{community_id}")
-
-    participants = generator.build_participants()
-    trustlines = generator.build_trustlines(participants)
-
-    doc = descriptions[community_id]
-    pid_by_ref = {p["ref"]: p["pid"] for p in doc["participants"]}
-
-    described_roster = {(p["pid"], p["name"], p["type"], p["status"]) for p in doc["participants"]}
-    generated_roster = {(p.pid, p.display_name, p.type, p.status) for p in participants}
-    assert described_roster == generated_roster
-
-    def _key(equivalent: str, from_pid: str, to_pid: str, limit: str, status: str, policy: dict) -> tuple:
-        return (
-            equivalent,
-            from_pid,
-            to_pid,
-            limit,
-            status,
-            bool(policy.get("auto_clearing", False)),
-            bool(policy.get("can_be_intermediate", False)),
-        )
-
-    described_lines = {
-        _key(t["equivalent"], pid_by_ref[t["from"]], pid_by_ref[t["to"]], t["limit"], t["status"], t["policy"])
-        for t in doc["trustlines"]
-    }
-    generated_lines = {
-        _key(
-            t["equivalent"],
-            t["from"],
-            t["to"],
-            str(t["limit"]),
-            str(t.get("status") or "active"),
-            t.get("policy") or {},
-        )
-        for t in trustlines
-    }
-    assert described_lines == generated_lines
-
-
-@pytest.mark.parametrize("community_id", COMMUNITY_IDS)
-def test_the_extraction_bridge_still_reproduces_the_committed_description(community_id: str) -> None:
-    """Re-running the bridge must rewrite the same bytes, or it has rotted.
-
-    Dies with the generators, like the assertion above it.
-    """
-    extractor = _load_module(TOOLS_DIR / "extract_community_description.py", "_t1712_extractor")
-
-    produced = extractor.build_description(community_id)
-    committed = json.loads((COMMUNITIES_DIR / community_id / "community.json").read_text(encoding="utf-8"))
-    assert produced == committed
 
 
 # --- The simulator scenario is generated from the description -----------------

@@ -122,11 +122,10 @@ function Invoke-DiagnosticStep {
     }
 }
 
-# The runner resolves Python only for work it drives itself. That is NOT the same as "-UiOnly needs
-# no Python": the Simulator UI v2 production build has a prebuild step (sync:demo-fixtures:strict)
-# whose generator imports app.core.simulator, and it finds its own interpreter on PATH. Measured
-# 2026-09-21 by the first run of the split gate, which died on ModuleNotFoundError: pydantic. A UI
-# job that installs no Python dependencies will fail there, not here.
+# The runner resolves Python only for work it drives itself. Under -UiOnly it drives none: since
+# 2026-10-07 (032 S4, 022 T2207) no UI build step runs Python - the Simulator UI v2 demo snapshots are
+# static versioned assets and the prebuild generator is deleted. The required-ui job still installs
+# Python, for the tooling tier it runs in a separate step.
 $pythonExe = $null
 if ((-not $UiOnly) -or $StaticDiagnostics) {
     $pythonExe = Resolve-PythonExecutable

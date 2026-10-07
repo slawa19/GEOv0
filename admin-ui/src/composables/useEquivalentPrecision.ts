@@ -1,7 +1,6 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 import type { Equivalent } from '../types/domain'
 import { formatDecimalMinScale } from '../utils/decimal'
 
@@ -110,7 +109,7 @@ export function useEquivalentPrecision(): EquivalentPrecisionSource {
 
   async function loadEquivalentPrecision(): Promise<void> {
     try {
-      const res = assertSuccess(await api.listEquivalents({ include_inactive: true }))
+      const res = await api.listEquivalents({ include_inactive: true })
       equivalents.value = (res.items || []) as Equivalent[]
     } finally {
       catalogueSettled.value = true

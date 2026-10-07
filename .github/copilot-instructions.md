@@ -8,8 +8,8 @@
 # Запуск всего стека с одной команды:
 .\scripts\run_full_stack.ps1 -Action start
 
-# С пересозданием БД и загрузкой fixtures:
-.\scripts\run_full_stack.ps1 -Action start -ResetDb -FixturesCommunity greenfield-village-100
+# С пересозданием БД и сидированием рецептом сообщества:
+.\scripts\run_full_stack.ps1 -Action start -ResetDb -SeedCommunity greenfield-village-100
 
 # Статус, остановка, рестарт:
 .\scripts\run_full_stack.ps1 -Action status
@@ -54,7 +54,7 @@
 - Typography & text styles (must-follow):
   - `docs/ru/admin-ui/typography.md`
 
-## Seed communities and fixtures
+## Seed communities
 
 - Seed authoring guide (principles + workflow):
   - `docs/ru/seeds/README.md`
@@ -62,17 +62,12 @@
 - Current demo community seed (with role audit table):
   - `docs/ru/seeds/seed-greenfield-village-100.md`
 
-- Deterministic fixture generators:
-  - `admin-fixtures/tools/README.md`
-  - `admin-fixtures/tools/generate_fixtures.py`
+- Community descriptions and recipes (source of truth for seeding and simulator scenarios):
+  - `seeds/communities/<id>/community.json`, `seeds/communities/<id>/recipe.json`
+  - seed a database: `python scripts/seed_db.py --source recipe --community <id>`
+  - simulator scenarios: `scripts/generate_simulator_seed_scenarios.py`
 
-- Canonical fixtures (source of truth):
-  - `admin-fixtures/v1/datasets/*.json`
-
-- Admin UI runtime fixtures (synced copy):
-  - `admin-ui/public/admin-fixtures/v1/datasets/*.json`
-  - sync script: `admin-ui/scripts/sync-fixtures.mjs`
-  - validation: `admin-ui/scripts/validate-fixtures.mjs`
+- The Admin UI has no mock mode and no fixtures (`admin-fixtures/` was deleted on 2026-10-07, 032 S4): it always calls a real, seeded backend.
 
 ## Guardrails
 
@@ -119,7 +114,7 @@ Goal: minimize back-and-forth for routine refactors while staying safe.
 - Ask clarifying questions only when:
   - there are multiple plausible implementations with different UX/semantics,
   - the change could realistically alter visuals/behavior (not obviously behavior-preserving),
-  - it touches backend/protocol/fixtures/regeneration or any data contract.
+  - it touches backend/protocol/seed regeneration or any data contract.
 - If uncertainty is minor: pick the simplest option, state the assumption in one short line, and proceed.
 - Gates are non-negotiable: after each micro-batch of changes, run the required checks (e.g. `typecheck` + `vitest`). Only stop/ask if gates fail or a high-risk decision is needed.
 - Prefer batching: accumulate 3–10 safe “small items”, then run gates once, then update docs once.
@@ -131,7 +126,7 @@ Goal: minimize back-and-forth for routine refactors while staying safe.
 - If a clickable file reference is needed, prefer the repo-relative path exactly as it appears in the workspace.
 
 - TrustLine direction is `from → to` = creditor → debtor (risk limit), *not* the reverse.
-- Keep changes deterministic and validate fixtures (`npm run validate:fixtures`) after regeneration.
+- Keep changes deterministic; after regenerating simulator scenarios, run the portable tooling tier (`scripts/verify_local.ps1 -ToolingOnly -ToolingPartition portable`).
 - Canonical decisions and data contracts must be recorded in stable docs under `docs/ru/*` (e.g. `docs/ru/09-decisions-and-defaults.md` and the relevant domain docs like `docs/ru/simulator/backend/*`). Do not leave “single source of truth” rules only in `plans/*` or code-review notes.
 ### Pydantic alias serialization (CRITICAL)
 
@@ -162,7 +157,7 @@ evt.model_dump(mode="json", by_alias=True)
 
 ### Backend restart for UI validation (Copilot must do this)
 
-- If changes affect backend behavior that the UI depends on (routes, schemas, auth, SSE/events, config/env flags, DB/fixtures seeding, dependency changes), Copilot MUST restart the backend (or full stack) before validating in the browser.
+- If changes affect backend behavior that the UI depends on (routes, schemas, auth, SSE/events, config/env flags, DB seeding, dependency changes), Copilot MUST restart the backend (or full stack) before validating in the browser.
 - Preferred command: `\.\scripts\run_full_stack.ps1 -Action restart`.
 - If only frontend code changed (UI rendering, CSS, client-only state), no restart is required.
 - When in doubt, restart first to avoid testing against stale server code.

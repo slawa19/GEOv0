@@ -50,7 +50,6 @@ import GraphKeyboardNavigator from './graph/GraphKeyboardNavigator.vue'
 import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { useLatestRequest } from '../composables/useLatestRequest'
-import { effectiveApiMode } from '../api/apiMode'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,7 +136,6 @@ const layoutSpacing = ref<number>(DEFAULT_LAYOUT_SPACING)
 
 const toolbarTab = ref<'filters' | 'display'>('filters')
 
-const isRealMode = computed(() => effectiveApiMode() === 'real')
 const selected = ref<SelectedInfo | null>(null)
 
 const MAX_AUTO_RENDER_NODES = 1500
@@ -192,7 +190,6 @@ const {
   reloadCurrentView,
 } = useGraphData({
   eq,
-  isRealMode,
   focusMode,
   focusRootPid,
   focusDepth,
@@ -209,7 +206,6 @@ function moneyByEquivalent(value: string, equivalent: unknown): string {
 }
 
 const graphAnalytics = useGraphAnalytics({
-  isRealMode,
   threshold,
   analyticsEq,
 
@@ -412,7 +408,6 @@ function reloadDrawer() {
 }
 
 useGraphPageWatchers({
-  isRealMode,
   eq,
   statusFilter,
   threshold,

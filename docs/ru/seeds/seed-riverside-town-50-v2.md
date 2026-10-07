@@ -35,4 +35,4 @@ v2 переписала политику **исключительно на `UAH`
 
 Ростер и линии v2 живут в описании сообщества: [seeds/communities/riverside-town-50/community.json](../../../seeds/communities/riverside-town-50/community.json) — 50 участников и 316 линий против 222 у базовой версии. Разбивка по эквивалентам и сами эти числа закреплены константами в `tests/unit/test_p017_t1712_community_descriptions.py`.
 
-Реализация, из которой описание извлечено: [admin-fixtures/tools/generate_seed_riverside_town_50_v2.py](../../../admin-fixtures/tools/generate_seed_riverside_town_50_v2.py). Генератор ещё собирает исторический пакет фикстур Admin UI (`admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50-v2`, опционально `--pack --activate`); этот путь выводится из обращения — см. [README](README.md#исторический-путь-пакет-фикстур-admin-ui).
+Реализация, из которой описание было извлечено (генератор `admin-fixtures/tools/generate_seed_riverside_town_50_v2.py`), удалена вместе с `admin-fixtures/` 2026-10-07 (032 S4); теперь `seeds/communities/riverside-town-50/community.json` и `recipe.json` — единственный источник. См. [README](README.md#исторический-путь-пакет-фикстур-admin-ui).

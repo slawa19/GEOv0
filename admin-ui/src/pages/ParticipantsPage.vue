@@ -2,19 +2,17 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import { toastApiError } from '../api/errorToast'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import { useAuthStore } from '../stores/auth'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
-import { carryScenarioQuery, readQueryString, toLocationQueryRaw } from '../router/query'
+import { readQueryString, toLocationQueryRaw } from '../router/query'
 import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
 import { useLatestRequest } from '../composables/useLatestRequest'
 import {
@@ -29,8 +27,6 @@ const route = useRoute()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-
-const authStore = useAuthStore()
 
 const q = ref('')
 const status = ref<string>('')
@@ -107,15 +103,13 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(
-      await api.listParticipants({
-        page: requestPage,
-        per_page: requestPerPage,
-        status: status.value || undefined,
-        type: type.value || undefined,
-        q: q.value || undefined,
-      }),
-    )
+    const data = await api.listParticipants({
+      page: requestPage,
+      per_page: requestPerPage,
+      status: status.value || undefined,
+      type: type.value || undefined,
+      q: q.value || undefined,
+    })
     if (!request.isCurrent()) return
     total.value = data.total
     const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
@@ -152,7 +146,7 @@ async function freeze(row: Participant) {
   const reason = await promptReason(t('participant.prompt.freezeTitle', { pid: row.pid }))
   if (!reason || !pageActive) return
   try {
-    const result = assertSuccess(await api.freezeParticipant(row.pid, reason))
+    const result = await api.freezeParticipant(row.pid, reason)
     if (!pageActive) return
     const updated = { ...row, status: result.status }
     const index = items.value.findIndex((item) => item.pid === row.pid)
@@ -171,7 +165,7 @@ async function unfreeze(row: Participant) {
   const reason = await promptReason(t('participant.prompt.unfreezeTitle', { pid: row.pid }))
   if (!reason || !pageActive) return
   try {
-    const result = assertSuccess(await api.unfreezeParticipant(row.pid, reason))
+    const result = await api.unfreezeParticipant(row.pid, reason)
     if (!pageActive) return
     const updated = { ...row, status: result.status }
     const index = items.value.findIndex((item) => item.pid === row.pid)
@@ -194,19 +188,19 @@ function openRow(row: Participant) {
 function goTrustlines(pid: string) {
   void router.push({
     path: '/trustlines',
-    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), creditor: pid, debtor: undefined }),
+    query: toLocationQueryRaw({ creditor: pid, debtor: undefined }),
   })
 }
 
 function goTrustlinesAsDebtor(pid: string) {
   void router.push({
     path: '/trustlines',
-    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), creditor: undefined, debtor: pid }),
+    query: toLocationQueryRaw({ creditor: undefined, debtor: pid }),
   })
 }
 
 function goAuditLog(pid: string) {
-  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), q: pid }) })
+  void router.push({ path: '/audit-log', query: toLocationQueryRaw({ q: pid }) })
 }
 
 onMounted(() => {
@@ -426,7 +420,6 @@ const typeOptions = computed(() => [
               v-if="scope.row.status === 'active'"
               size="small"
               type="warning"
-              :disabled="authStore.isReadOnly"
               data-testid="participants-freeze-btn"
               @click.stop="freeze(scope.row)"
             >
@@ -436,7 +429,6 @@ const typeOptions = computed(() => [
               v-else-if="scope.row.status === 'suspended'"
               size="small"
               type="success"
-              :disabled="authStore.isReadOnly"
               data-testid="participants-unfreeze-btn"
               @click.stop="unfreeze(scope.row)"
             >
@@ -558,7 +550,6 @@ const typeOptions = computed(() => [
           v-if="selected.status === 'active'"
           type="warning"
           size="small"
-          :disabled="authStore.isReadOnly"
           @click="freeze(selected)"
         >
           {{ t('participant.drawer.freezeParticipant') }}
@@ -567,7 +558,6 @@ const typeOptions = computed(() => [
           v-else-if="selected.status === 'suspended'"
           type="success"
           size="small"
-          :disabled="authStore.isReadOnly"
           @click="unfreeze(selected)"
         >
           {{ t('participant.drawer.unfreezeParticipant') }}

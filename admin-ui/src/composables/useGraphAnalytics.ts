@@ -1,7 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
-import { assertSuccess } from '../api/envelope'
 import { t } from '../i18n'
 import { COUNT_MEASURED, collectionConfidence, makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import { isRatioBelowThreshold, isUnitIntervalDecimalString } from '../utils/decimal'
@@ -103,7 +102,6 @@ function hhiLevel(hhi: number): { label: string; type: 'success' | 'warning' | '
 }
 
 export function useGraphAnalytics(opts: {
-  isRealMode: ComputedRef<boolean>
   threshold: Ref<string>
   analyticsEq: ComputedRef<string | null>
 
@@ -148,11 +146,6 @@ export function useGraphAnalytics(opts: {
 
   async function loadSelectedMetrics() {
     const request = metricsRequests.begin()
-    if (!opts.isRealMode.value) {
-      metricsLoading.value = false
-      metricsError.value = null
-      return
-    }
     const pid = selectedPid.value
     if (!pid) {
       metricsLoading.value = false
@@ -179,7 +172,7 @@ export function useGraphAnalytics(opts: {
     try {
       const res = await api.participantMetrics(pid, { equivalent: eqCode, threshold: thr })
       if (!request.isCurrent()) return
-      const m = assertSuccess(res) as ParticipantMetrics
+      const m = res as ParticipantMetrics
       metricsCache.value.set(key, m)
     } catch (e: unknown) {
       if (!request.isCurrent()) return

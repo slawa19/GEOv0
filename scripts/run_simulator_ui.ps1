@@ -205,22 +205,6 @@ if (Test-TcpOpen $HostName $selectedPort) {
         Write-Host 'GEO Simulator UI already running.'
         Write-Host "Open in browser: $url"
         Write-Host ''
-        Write-Host 'Resyncing demo fixtures (so demo visualization stays in sync)...' -ForegroundColor Yellow
-
-        try {
-          # Ensure we run it from appDir so npm scripts resolve correctly.
-          Push-Location $appDir
-          try {
-            npm run sync:demo-fixtures
-          } finally {
-            Pop-Location
-          }
-        } catch {
-          Write-Warning "Demo fixtures sync failed: $($_.Exception.Message). Using cached."
-        }
-
-        Write-Host ''
-        Write-Host 'Fixtures sync attempted. Reload the page (Ctrl+R).' -ForegroundColor Gray
         Write-Host "Demo link: ${url}?mode=demo" -ForegroundColor Cyan
         Write-Host ''
         exit 0

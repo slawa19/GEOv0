@@ -107,7 +107,6 @@ function analyticsFor(input: {
   auditLog?: AuditLogEntry[]
   included?: string[]
   truncated?: string[]
-  realMode?: boolean
   /**
    * The equivalent the operator has selected. Defaults to EUR, as every test above assumes; the
    * F-013-R6 block below needs the other two settings of this control - a DIFFERENT equivalent,
@@ -117,7 +116,6 @@ function analyticsFor(input: {
 }) {
   const eq = input.eq === undefined ? 'EUR' : input.eq
   return useGraphAnalytics({
-    isRealMode: computed(() => input.realMode ?? true),
     threshold: ref('0.10'),
     analyticsEq: computed(() => eq),
 
@@ -170,7 +168,7 @@ function metricsEnvelope(activity: NonNullable<ParticipantMetrics['activity']>) 
     balance_rows: [],
     activity,
   }
-  return { success: true as const, data: metrics }
+  return metrics
 }
 
 const QUIET_SYSTEM = {

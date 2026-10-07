@@ -450,4 +450,4 @@ REMEMBER: The one who "gives first" (goods/services/liquidity)
 
 *Document version: 1.0*
 *Created: 2026-01-12*
-*Generator (entrypoint): `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50`*
+*Generator (entrypoint, до 2026-10-07): `admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50` — удалён (032 S4); сидирование — `python scripts/seed_db.py --source recipe --community riverside-town-50`*

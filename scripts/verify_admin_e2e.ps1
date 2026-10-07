@@ -1,0 +1,216 @@
+# The Admin UI e2e against a real, seeded backend on a disposable PostgreSQL database.
+#
+# 032 S4, 2026-10-07: the Admin UI has no mock mode any more, so every Admin e2e needs a backend.
+# This script is the local entry; CI repeats the same sequence in `.github/workflows/quality.yml`
+# (jobs `ui-smoke` and `admin-e2e`). It creates the database, migrates it, seeds the community
+# `riverside-town-50` through the recipe, starts uvicorn, waits for /health, and runs Playwright with
+# ADMIN_E2E_BACKEND_ORIGIN and ADMIN_E2E_TOKEN; Playwright's own webServer starts Vite on -UiPort.
+# -Smoke runs only the blocking smoke (`npm run test:e2e:smoke`). Until 2026-10-07 this file was
+# `scripts/verify_admin_phase4_real_contract.ps1` and ran the separate `admin-ui/e2e-real` suite.
+[CmdletBinding()]
+param(
+    [string]$TaskSlug = 'admin_e2e',
+    [int]$BackendPort = 18141,
+    [int]$UiPort = 41741,
+    [switch]$Smoke,
+    # The interpreter that migrates, seeds and serves; defaults to the repository's virtual environment.
+    [string]$Python = ''
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+if ($TaskSlug -notmatch '^[a-z0-9][a-z0-9_-]{2,63}$') {
+    throw 'TaskSlug must contain only lowercase letters, digits, underscores, or hyphens.'
+}
+if ($BackendPort -eq $UiPort -or $BackendPort -lt 1024 -or $UiPort -lt 1024) {
+    throw 'BackendPort and UiPort must be distinct non-privileged ports.'
+}
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$artifactRoot = Join-Path $repoRoot ".local-run\test-runs\$TaskSlug"
+$runId = [guid]::NewGuid().ToString('N')
+$runRoot = Join-Path $artifactRoot "run-$runId"
+$expectedArtifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot '.local-run\test-runs'))
+$resolvedRunRoot = [System.IO.Path]::GetFullPath($runRoot)
+if (-not $resolvedRunRoot.StartsWith($expectedArtifactRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Resolved output path escaped the approved test-runs root.'
+}
+
+New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+
+$pythonExe = if ([string]::IsNullOrWhiteSpace($Python)) { Join-Path $repoRoot '.venv\Scripts\python.exe' } else { $Python }
+if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+    throw "Python interpreter was not found: $pythonExe"
+}
+$nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+if (-not $nodeCommand) {
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+}
+if (-not $nodeCommand) {
+    throw 'Node.js executable was not found.'
+}
+$nodeExe = $nodeCommand.Source
+$playwrightCli = Join-Path $repoRoot 'admin-ui\node_modules\@playwright\test\cli.js'
+if (-not (Test-Path -LiteralPath $playwrightCli -PathType Leaf)) {
+    throw 'Admin UI dependencies are not installed.'
+}
+
+$listeners = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+$backendPortFree = -not ($listeners.Port -contains $BackendPort)
+$uiPortFree = -not ($listeners.Port -contains $UiPort)
+Write-Host "Port preflight: backend_free=$backendPortFree ui_free=$uiPortFree"
+if (-not $backendPortFree -or -not $uiPortFree) {
+    throw 'A required Admin e2e port is already in use.'
+}
+
+# Programme 017 `T1710`: the Admin e2e runs on a disposable PostgreSQL database created for this run
+# and dropped in the `finally`. The name carries the run id so two runs cannot collide, and it obeys
+# the same contract every launcher database obeys - `scripts/dev_database.py` refuses anything else,
+# which is what makes the drop below safe.
+$databaseName = "geov0_dev_$($TaskSlug -replace '_', '-')-$($runId.Substring(0, 8))"
+$pgHost = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_HOST)) { '127.0.0.1' } else { $env:GEO_DEV_PG_HOST }
+$pgPort = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PORT)) { '5432' } else { $env:GEO_DEV_PG_PORT }
+$pgUser = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_USER)) { 'geo' } else { $env:GEO_DEV_PG_USER }
+$pgPassword = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PASSWORD)) { 'geo' } else { $env:GEO_DEV_PG_PASSWORD }
+$databaseUrl = "postgresql+asyncpg://${pgUser}:${pgPassword}@${pgHost}:${pgPort}/${databaseName}"
+$backendOrigin = "http://127.0.0.1:$BackendPort"
+$adminToken = 'admin-e2e-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+$jwtSecret = 'admin-e2e-jwt-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+
+$environment = @{
+    ENV = 'test'
+    DATABASE_URL = $databaseUrl
+    ADMIN_TOKEN = $adminToken
+    JWT_SECRET = $jwtSecret
+    PYTHONPATH = $repoRoot
+    ADMIN_E2E_BACKEND_ORIGIN = $backendOrigin
+    ADMIN_E2E_TOKEN = $adminToken
+    PW_E2E_PORT = [string]$UiPort
+    GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR = (Join-Path $runRoot 'playwright')
+    GEO_ADMIN_PLAYWRIGHT_REPORT_DIR = (Join-Path $runRoot 'playwright-report')
+}
+$previousEnvironment = @{}
+foreach ($key in $environment.Keys) {
+    $previousEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+    [Environment]::SetEnvironmentVariable($key, $environment[$key], 'Process')
+}
+
+$backendProcess = $null
+$databaseCreated = $false
+
+function Wait-LocalEndpoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [int]$TimeoutSeconds = 90
+    )
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+                Write-Host "$Name readiness: true"
+                return
+            }
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw "$Name readiness: false"
+}
+
+try {
+    Push-Location $repoRoot
+    try {
+        # `create`, not `ensure`: `ensure` also answers 0 for a database it merely FOUND, and the
+        # `finally` below drops what this run created. `create` answers 0 only to the call that
+        # created the database; a name that is already taken is refused, and then nothing is dropped.
+        & $pythonExe scripts/dev_database.py create
+        if ($LASTEXITCODE -ne 0) { throw "Creating the disposable database failed (exit $LASTEXITCODE)." }
+        $databaseCreated = $true
+
+        # The one migration entry, the same one `docker/docker-entrypoint.sh` calls. The
+        # `alembic_version` precondition comes from `migrations/env.py` inside this run.
+        & $pythonExe -m alembic -c migrations/alembic.ini upgrade head
+        if ($LASTEXITCODE -ne 0) { throw 'alembic upgrade head failed.' }
+
+        # Real operations through the domain services, not rows written past them: participants,
+        # trust lines, payments and a clearing, with the reconciliation baseline taken on empty
+        # debts before the first payment (`scripts/seed_recipe.py`).
+        & $pythonExe scripts/seed_db.py --source recipe --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw 'Recipe seed failed.' }
+
+        # The seed writes one ref -> PID table per community, overwritten by the next run of that
+        # community. This disposable database takes its own copy so the readiness probe below is
+        # checking ITS population - and so that this run does not invalidate the launcher's.
+        & $pythonExe scripts/dev_database.py adopt --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw "Adopting the seed's ref -> PID table failed." }
+
+        # The seed asserts its own acceptance; this asserts the same of the database the backend is
+        # about to be pointed at, which is the check that would catch a half-written seed.
+        & $pythonExe scripts/dev_database.py ready --community riverside-town-50
+        if ($LASTEXITCODE -ne 0) { throw "The seeded database is not ready (exit $LASTEXITCODE)." }
+    } finally {
+        Pop-Location
+    }
+
+    $backendProcess = Start-Process -FilePath $pythonExe `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', [string]$BackendPort) `
+        -WorkingDirectory $repoRoot `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $runRoot 'backend.stdout.log') `
+        -RedirectStandardError (Join-Path $runRoot 'backend.stderr.log') `
+        -PassThru
+
+    Wait-LocalEndpoint -Uri "$backendOrigin/health" -Name 'Backend'
+
+    Push-Location (Join-Path $repoRoot 'admin-ui')
+    try {
+        if ($Smoke) {
+            & $nodeExe $playwrightCli test participants --grep 'participants page loads and shows table' --project=chromium --reporter=list
+        } else {
+            & $nodeExe $playwrightCli test
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Admin e2e failed (exit $LASTEXITCODE)." }
+    } finally {
+        Pop-Location
+    }
+
+    Write-Host 'Admin e2e: passed'
+} finally {
+    if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
+        Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue
+        $backendProcess.WaitForExit(5000) | Out-Null
+    }
+
+    # The backend is stopped ABOVE this line, and the drop below is a plain DROP DATABASE that
+    # `scripts/dev_database.py` refuses while any session is still connected. A database this run
+    # did not create is never dropped - `$databaseCreated` is set only after `create` succeeded, and
+    # `create` succeeds only for the call that actually created the database. Playwright stops the
+    # Vite server it started itself.
+    $databaseDropped = $false
+    if ($databaseCreated) {
+        Push-Location $repoRoot
+        try {
+            & $pythonExe scripts/dev_database.py drop
+            $databaseDropped = ($LASTEXITCODE -eq 0)
+        } finally {
+            Pop-Location
+        }
+    }
+
+    foreach ($key in $environment.Keys) {
+        [Environment]::SetEnvironmentVariable($key, $previousEnvironment[$key], 'Process')
+    }
+    Write-Host 'Owned-process cleanup: complete'
+    if (-not $databaseCreated) {
+        Write-Host 'Disposable database cleanup: nothing was created'
+    } elseif ($databaseDropped) {
+        Write-Host "Disposable database cleanup: complete ($databaseName dropped)"
+    } else {
+        # Named, not swallowed: a database left behind is a leak the operator has to know about.
+        Write-Warning "Disposable database cleanup: FAILED, $databaseName still exists. Drop it by hand."
+    }
+}

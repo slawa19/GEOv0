@@ -41,7 +41,7 @@ const apiMock = vi.hoisted(() => ({
 vi.mock('../api', () => ({ api: apiMock }))
 
 function ok<T>(data: T) {
-  return { success: true as const, data }
+  return data
 }
 
 const PRECISION_BY_EQUIVALENT: Record<string, number> = { HOUR: 1, UAH: 2 }
@@ -183,7 +183,6 @@ function analyticsFixture(analyticsEq: string | null) {
   ])
 
   return useGraphAnalytics({
-    isRealMode: computed(() => false),
     threshold: ref('0.10'),
     analyticsEq: computed(() => analyticsEq),
     precisionByEq: computed(() => new Map(Object.entries(PRECISION_BY_EQUIVALENT))),

@@ -11,6 +11,7 @@ import LiquidityPage from './LiquidityPage.vue'
 import DashboardPage from './DashboardPage.vue'
 import ParticipantsPage from './ParticipantsPage.vue'
 import TrustlinesPage from './TrustlinesPage.vue'
+import { ApiException } from '../api/apiException'
 
 const apiMock = vi.hoisted(() => ({
   listParticipants: vi.fn(),
@@ -69,7 +70,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 function ok<T>(data: T) {
-  return { success: true as const, data }
+  return data
 }
 
 function paginated<T>(items: T[]) {
@@ -631,7 +632,7 @@ describe('selected non-Graph operator and navigation paths', () => {
     wrapper.unmount()
   })
 
-  it('covers Equivalent state change, usage-guard failure, scenario navigation, and late unmount', async () => {
+  it('covers Equivalent state change, usage-guard failure, navigation, and late unmount', async () => {
     const inactive = { ...equivalentNew, is_active: false }
     apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
     apiMock.setEquivalentActive.mockResolvedValue(ok({ updated: inactive }))
@@ -647,10 +648,9 @@ describe('selected non-Graph operator and navigation paths', () => {
       debts: 0,
       integrity_checkpoints: 0,
     }))
-    apiMock.deleteEquivalent.mockResolvedValue({
-      success: false,
-      error: { code: 'CONFLICT', message: 'equivalent is in use' },
-    })
+    apiMock.deleteEquivalent.mockRejectedValue(
+      new ApiException({ status: 409, code: 'CONFLICT', message: 'equivalent is in use' }),
+    )
     await state.deleteEq(state.items[0])
     expect(apiMock.getEquivalentUsage).toHaveBeenCalledWith(equivalentNew.code)
     expect(ui.error).toHaveBeenCalled()
@@ -658,7 +658,7 @@ describe('selected non-Graph operator and navigation paths', () => {
     state.goAudit(state.items[0])
     expect(routing.push).toHaveBeenLastCalledWith({
       path: '/audit-log',
-      query: { scenario: 'slow', code: equivalentNew.code, q: equivalentNew.code },
+      query: { code: equivalentNew.code, q: equivalentNew.code },
     })
 
     const pending = deferred<any>()
@@ -778,7 +778,7 @@ describe('selected non-Graph operator and navigation paths', () => {
     state.goGraph()
     expect(routing.push).toHaveBeenLastCalledWith({
       path: '/graph',
-      query: { scenario: 'slow', equivalent: 'EUR', threshold: '0.25' },
+      query: { equivalent: 'EUR', threshold: '0.25' },
     })
     wrapper.unmount()
   })

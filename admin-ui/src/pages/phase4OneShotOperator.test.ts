@@ -7,13 +7,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ConfigPage from './ConfigPage.vue'
 import IntegrityPage from './IntegrityPage.vue'
-import { useAuthStore } from '../stores/auth'
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
   patchConfig: vi.fn(),
-  getFeatureFlags: vi.fn(),
-  patchFeatureFlags: vi.fn(),
   integrityStatus: vi.fn(),
   integrityVerify: vi.fn(),
 }))
@@ -43,11 +40,9 @@ const debtSymmetryFailure = {
 async function mountPage(
   component: object,
   path: string,
-  role: 'admin' | 'auditor' = 'admin',
 ): Promise<{ wrapper: VueWrapper; router: Router }> {
   const pinia = createPinia()
   setActivePinia(pinia)
-  useAuthStore(pinia).role = role
 
   const router = createRouter({
     history: createMemoryHistory(),
@@ -75,10 +70,7 @@ beforeEach(() => {
 
 describe('Phase 4 Config operator workflow', () => {
   it('keeps untouched runtime config rows clean', async () => {
-    apiMock.getConfig.mockResolvedValue({
-      success: true,
-      data: { ROUTING_MAX_PATHS: 3, CLEARING_ENABLED: true },
-    })
+    apiMock.getConfig.mockResolvedValue({ ROUTING_MAX_PATHS: 3, CLEARING_ENABLED: true })
 
     const { wrapper } = await mountPage(ConfigPage, '/config')
 
@@ -92,9 +84,9 @@ describe('Phase 4 Config operator workflow', () => {
     const initial = { ROUTING_MAX_PATHS: 3, ROUTING_MAX_HOPS: 6 }
     const changed = { ROUTING_MAX_PATHS: 4, ROUTING_MAX_HOPS: 6 }
     apiMock.getConfig
-      .mockResolvedValueOnce({ success: true, data: initial })
-      .mockResolvedValueOnce({ success: true, data: changed })
-    apiMock.patchConfig.mockResolvedValue({ success: true, data: { updated: ['ROUTING_MAX_PATHS'] } })
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(changed)
+    apiMock.patchConfig.mockResolvedValue({ updated: ['ROUTING_MAX_PATHS'] })
     vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
 
     const { wrapper } = await mountPage(ConfigPage, '/config')
@@ -113,9 +105,9 @@ describe('Phase 4 Config operator workflow', () => {
 
   it('saves one changed value and reloads the durable visible result', async () => {
     apiMock.getConfig
-      .mockResolvedValueOnce({ success: true, data: { CLEARING_ENABLED: false } })
-      .mockResolvedValueOnce({ success: true, data: { CLEARING_ENABLED: true } })
-    apiMock.patchConfig.mockResolvedValue({ success: true, data: { updated: ['CLEARING_ENABLED'] } })
+      .mockResolvedValueOnce({ CLEARING_ENABLED: false })
+      .mockResolvedValueOnce({ CLEARING_ENABLED: true })
+    apiMock.patchConfig.mockResolvedValue({ updated: ['CLEARING_ENABLED'] })
     const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
 
     const { wrapper } = await mountPage(ConfigPage, '/config')
@@ -135,22 +127,11 @@ describe('Phase 4 Config operator workflow', () => {
     expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
-
-  it('makes auditor mode read-only without issuing a mutation', async () => {
-    apiMock.getConfig.mockResolvedValue({ success: true, data: { CLEARING_ENABLED: false } })
-    const { wrapper } = await mountPage(ConfigPage, '/config', 'auditor')
-
-    expect(wrapper.find('.el-switch').classes()).toContain('is-disabled')
-    expect(primaryButton(wrapper).attributes('disabled')).toBeDefined()
-    await primaryButton(wrapper).trigger('click')
-    expect(apiMock.patchConfig).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
 })
 
 describe('Phase 4 feature-flag operator workflow', () => {
   it('preserves the reachable Config flag value and avoids false success when PATCH is rejected', async () => {
-    apiMock.getConfig.mockResolvedValue({ success: true, data: { CLEARING_ENABLED: true } })
+    apiMock.getConfig.mockResolvedValue({ CLEARING_ENABLED: true })
     apiMock.patchConfig.mockRejectedValue(new Error('flag update rejected'))
     const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
     const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => undefined as never)
@@ -174,9 +155,9 @@ describe('Phase 4 feature-flag operator workflow', () => {
 describe('Phase 4 Integrity operator workflow', () => {
   it('verifies after confirmation and reloads the visible status', async () => {
     apiMock.integrityStatus
-      .mockResolvedValueOnce({ success: true, data: debtSymmetryFailure })
-      .mockResolvedValueOnce({ success: true, data: healthyStatus })
-    apiMock.integrityVerify.mockResolvedValue({ success: true, data: healthyStatus })
+      .mockResolvedValueOnce(debtSymmetryFailure)
+      .mockResolvedValueOnce(healthyStatus)
+    apiMock.integrityVerify.mockResolvedValue(healthyStatus)
     vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
     const success = vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
 
@@ -192,8 +173,6 @@ describe('Phase 4 Integrity operator workflow', () => {
 
   it('still explains detected issues but offers no repair action (018/T1806)', async () => {
     apiMock.integrityStatus.mockResolvedValue({
-      success: true,
-      data: {
         ...debtSymmetryFailure,
         status: 'critical',
         equivalents: {
@@ -206,8 +185,7 @@ describe('Phase 4 Integrity operator workflow', () => {
             },
           },
         },
-      },
-    })
+      })
 
     const { wrapper } = await mountPage(IntegrityPage, '/integrity')
 

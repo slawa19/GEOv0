@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { assertSuccess } from '../api/envelope'
 import { api } from '../api'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
@@ -64,7 +63,7 @@ async function load() {
   try {
     // NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
     const searchQ = q.value.trim()
-    const data = assertSuccess(await api.listAuditLog({
+    const data = (await api.listAuditLog({
       page: requestPage,
       per_page: requestPerPage,
       q: searchQ || undefined,

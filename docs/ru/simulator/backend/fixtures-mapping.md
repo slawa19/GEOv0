@@ -1,8 +1,8 @@
-# Mapping admin-fixtures → simulator scenario (MVP)
+# Mapping описания сообщества → simulator scenario (MVP; ранее admin-fixtures → scenario)
 
-**Статус:** done (2026-01-28)
+**Статус:** done (2026-01-28); источник входа заменён 2026-09-21 (`T1712`), `admin-fixtures/` удалён 2026-10-07 (032 S4)
 
-Цель: зафиксировать правила, по которым canonical fixtures из `admin-fixtures/v1/datasets/*.json` превращаются в валидный `fixtures/simulator/*/scenario.json` (по схеме `fixtures/simulator/scenario.schema.json`).
+Цель: зафиксировать правила, по которым описание сообщества `seeds/communities/<id>/community.json` (до 2026-10-07 — canonical fixtures `admin-fixtures/v1/datasets/*.json`, удалены в 032 S4) превращается в валидный `fixtures/simulator/*/scenario.json` (по схеме `fixtures/simulator/scenario.schema.json`).
 
 Документ специально написан так, чтобы по нему можно было реализовать/поддерживать генератор seed-сценариев `scripts/generate_simulator_seed_scenarios.py`.
 
@@ -10,10 +10,9 @@
 
 ## 0) Источники
 
-Входные данные (canonical fixtures, source of truth):
-- `admin-fixtures/v1/datasets/participants.json`
-- `admin-fixtures/v1/datasets/trustlines.json`
-- `admin-fixtures/v1/datasets/equivalents.json`
+Входные данные (source of truth): `seeds/communities/<id>/community.json` (участники, группы, линии, эквиваленты).
+
+Таблицы в разделе 2 написаны для прежнего входа — датасетов `participants.json` / `trustlines.json` / `equivalents.json` пакета `admin-fixtures/v1/datasets/` (удалён 2026-10-07, 032 S4). Правила копирования и нормализации остались теми же; поля описания называются иначе (`name` вместо `display_name`, символический `ref` рядом с `pid`, `groups[]` и `participants[].group` задаются явно).
 
 Контракт выхода:
 - `fixtures/simulator/scenario.schema.json`
@@ -24,7 +23,7 @@
 - `docs/ru/seeds/seed-greenfield-village-100.md`
 - `docs/ru/seeds/README.md`
 
-**Исторически** структура жила в генераторах `admin-fixtures/tools/generate_seed_greenfield_village_100.py` и `generate_seed_riverside_town_50.py`; они пока существуют и по-прежнему собирают канонические admin-фикстуры, но входом сценария больше не являются.
+**Исторически** структура жила в генераторах `admin-fixtures/tools/generate_seed_greenfield_village_100.py` и `generate_seed_riverside_town_50.py`; они собирали канонические admin-фикстуры и были удалены вместе с `admin-fixtures/` 2026-10-07 (032 S4).
 
 ---
 
@@ -50,10 +49,10 @@ TrustLine direction фиксирована:
 
 ---
 
-## 2) Mapping таблица (fixtures → scenario)
+## 2) Mapping таблица (прежние fixtures / описание → scenario)
 
 ### 2.1 participants
-Источник: `admin-fixtures/v1/datasets/participants.json`
+Источник (исторически): `admin-fixtures/v1/datasets/participants.json`; сегодня — `participants[]` описания
 
 | Fixtures поле | Scenario поле | Правило |
 |---|---|---|
@@ -65,21 +64,21 @@ TrustLine direction фиксирована:
 Примечание: в fixtures встречается `status="frozen"`, а в schema participant.status это допустимо.
 
 ### 2.2 equivalents
-Источник: `admin-fixtures/v1/datasets/equivalents.json`
+Источник (исторически): `admin-fixtures/v1/datasets/equivalents.json`; сегодня — `equivalents[]` описания
 
 В `scenario.json` используем один из вариантов:
 - **обязательный для текущего runtime**: `equivalents: string[]`
 - `baseEquivalent: string` допускается оставить как метаданные/shorthand схемы, но не использовать как единственный источник правды
 
 Правило для `equivalents`:
-1) собрать все `equivalent` из `admin-fixtures/v1/datasets/trustlines.json` (уникально)
-2) оставить только те, которые присутствуют в `admin-fixtures/v1/datasets/equivalents.json` и `is_active=true`
+1) собрать все `equivalent` из линий (уникально)
+2) оставить только те, которые присутствуют в списке эквивалентов и `is_active=true`
 3) отсортировать лексикографически
 
 Если итоговый список пустой — это ошибка конвертации.
 
 ### 2.3 trustlines
-Источник: `admin-fixtures/v1/datasets/trustlines.json`
+Источник (исторически): `admin-fixtures/v1/datasets/trustlines.json`; сегодня — `trustlines[]` описания
 
 | Fixtures поле | Scenario поле | Правило |
 |---|---|---|
@@ -109,7 +108,7 @@ TrustLine direction фиксирована:
 - добавить “business-intermediate backbone”: UAH trustlines `anchors/retail (business) → services/producers/agents (person)`.
   - такие ребра дают маршрутам intermediates, потому что у business-кредитора обычно `policy.can_be_intermediate=true`.
 
-Результат этой логики **перенесён в описание** (`seeds/communities/<id>/community.json`, `T1712`), откуда его и читает генератор сценариев. Исходная реализация — `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py`.
+Результат этой логики **перенесён в описание** (`seeds/communities/<id>/community.json`, `T1712`), откуда его и читает генератор сценариев. Исходная реализация — `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py` и `generate_seed_riverside_town_50_v2.py` (удалены 2026-10-07, 032 S4; доступны в git-истории).
 
 **Правило посредничества измерено 2026-09-21 и оказалось шире, чем описывалось раньше:** `can_be_intermediate` решает **кредитор один** (`bool(from_is_business)`), а не пара «business ↔ business». В Greenfield это 147 линий `business → person` против 48 `business ↔ business`; в Riverside 63 против 18.
 

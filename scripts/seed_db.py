@@ -9,8 +9,8 @@ The two direct-insert sources - `--source fixtures` (admin fixture datasets: equ
 lines, debts as one `SEED` operation, transactions and audit rows written as rows) and `--source seeds` (the legacy
 `seeds/*.json`) - were deleted by programme 030 S2 (`F-030-3`, owner decisions В1 and В4 of 2026-10-05): demo data
 goes through the real API with the same checks, and the system is not adapted to demo data. A database seeded by
-them is reseeded, not converted. `admin-fixtures/` stays the Admin UI's mock-mode data; only its import into a
-database is gone.
+them is reseeded, not converted. `admin-fixtures/` itself, kept until then as the Admin UI's mock-mode data, was
+deleted with that mode by programme 032 S4 (2026-10-07).
 """
 
 import argparse

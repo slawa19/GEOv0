@@ -34,8 +34,7 @@
 
 - Стартует backend на `http://127.0.0.1:18000` (по умолчанию)
 - Стартует Admin UI на `http://localhost:5173/` (по умолчанию)
-- Пишет `admin-ui/.env.local` так, чтобы UI работал в **real mode**:
-  - `VITE_API_MODE=real`
+- Пишет `admin-ui/.env.local` с адресом backend-а (Admin UI всегда ходит в реальный backend; режима mock нет с 2026-10-07, 032 S4):
   - `VITE_API_BASE_URL=http://127.0.0.1:<backendPort>`
 - Держит состояние в `.local-run/` (PID, логи)
 
@@ -139,7 +138,7 @@ Production-like запуск использует только base Compose, н�
 
 - Backend отвечает на `GET /api/v1/health`
 - Swagger UI открывается (`/docs`)
-- Admin UI в real mode (в `admin-ui/.env.local` выставлены `VITE_API_MODE=real` и `VITE_API_BASE_URL=...`)
+- Admin UI смотрит на этот backend (в `admin-ui/.env.local` выставлен `VITE_API_BASE_URL=...`)
 
 ### 5.2 Симуляторный control plane (когда endpoints реализованы)
 
@@ -175,12 +174,13 @@ Production-like запуск использует только base Compose, н�
 - Активировать: `./.venv/Scripts/Activate.ps1`
 - Установить deps: `pip install -r requirements.txt -r requirements-dev.txt`
 
-### 6.3 Admin UI неожиданно в mock mode
+### 6.3 Admin UI не видит backend или получает 401/403
 
-Проверьте `admin-ui/.env.local`:
+Режима mock у Admin UI больше нет (удалён 2026-10-07, 032 S4): он всегда обращается к реальному backend-у. Если экраны пусты или с ошибкой, проверьте `admin-ui/.env.local`:
 
-- Должно быть `VITE_API_MODE=real`
 - Должно быть `VITE_API_BASE_URL=http://127.0.0.1:<порт backend>`
+- Токен — `VITE_ADMIN_TOKEN` (или localStorage `admin-ui.adminToken`); production-сборка без токена отказывает в admin-запросах с 401 `ADMIN_TOKEN_MISSING`
+- База должна быть засеяна: `python scripts/seed_db.py --source recipe --community riverside-town-50`
 
 Проще всего: запускать через `./scripts/run_local.ps1 start`.
 

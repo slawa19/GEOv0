@@ -14,7 +14,7 @@
  *      anything about transactions" from `transactions.length`, which cannot tell "we did not ask"
  *      from "we asked and there are none".
  *
- * WHY THIS FILE BUILDS ITS ROWS BY HAND. `mockApi` returns transactions unconditionally AND with a
+ * WHY THIS FILE BUILDS ITS ROWS BY HAND. The mock client (deleted 2026-10-07, 032 S4) returned transactions unconditionally AND with a
  * `payload` key, so a test written against the mock fixture is green under every one of the three
  * defects above and proves nothing. That trap is recorded in specs/013-frontend-data-honesty/spec.md
  * (reconnaissance note 4) as a forbidden method of proof. Every row below is the shape
@@ -56,7 +56,6 @@ function analyticsFor(input: {
   truncated: string[]
 }) {
   return useGraphAnalytics({
-    isRealMode: computed(() => true),
     threshold: ref('0.10'),
     analyticsEq: computed(() => 'EUR'),
 
@@ -220,14 +219,11 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     meta.env.DEV = true
 
     const fetchMock = vi.fn(async (_url: unknown) =>
-      jsonResponse({
-        success: true,
-        data: snapshotBody({
+      jsonResponse(snapshotBody({
           transactions: [producerRow()],
           included: ['transactions'],
           truncated: ['transactions'],
-        }),
-      }),
+        })),
     )
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
@@ -239,12 +235,10 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
     // The row above has no `payload`. While TransactionSchema required one, this call rejected the
     // WHOLE response and the graph page blanked - which is why the include and the schema could
     // never have shipped as two commits.
-    expect(env.success).toBe(true)
-    if (!env.success) return
-    expect(env.data.transactions).toHaveLength(1)
-    expect(env.data.transactions[0]?.equivalent).toBe('EUR')
-    expect(env.data.included).toEqual(['transactions'])
-    expect(env.data.truncated).toEqual(['transactions'])
+    expect(env.transactions).toHaveLength(1)
+    expect(env.transactions[0]?.equivalent).toBe('EUR')
+    expect(env.included).toEqual(['transactions'])
+    expect(env.truncated).toEqual(['transactions'])
   })
 
   it('a server that omits included/truncated is read as "we were told nothing", not as "all present"', async () => {
@@ -259,15 +253,13 @@ describe('F-013-1 / T1302: transactions - "not asked" is not "zero"', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ success: true, data: body })) as unknown as typeof fetch,
+      vi.fn(async () => jsonResponse(body)) as unknown as typeof fetch,
     )
 
     // The canon does not mark these two fields required, so their absence is a legal response and
     // must not be a decode failure - the mistake TransactionSchema used to make with `payload`.
     const env = await realApi.graphSnapshot({ include: ['transactions'] })
-    expect(env.success).toBe(true)
-    if (!env.success) return
-    expect(env.data.included).toBeUndefined()
+    expect(env.included).toBeUndefined()
 
     const g = analyticsFor({ transactions: [], included: [], truncated: [] })
     expect(g.selectedActivity.value!.payments.known).toBe(false)

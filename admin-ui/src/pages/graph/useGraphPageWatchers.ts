@@ -1,4 +1,4 @@
-import { onScopeDispose, watch, type ComputedRef, type Ref } from 'vue'
+import { onScopeDispose, watch, type Ref } from 'vue'
 
 import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../../constants/timing'
 import { throttle } from '../../utils/throttle'
@@ -7,7 +7,6 @@ import { useLatestRequest } from '../../composables/useLatestRequest'
 import type { GraphRebuildOptions, LabelMode, SelectedInfo } from '../../composables/useGraphVisualization'
 
 export function useGraphPageWatchers(opts: {
-  isRealMode: ComputedRef<boolean>
 
   eq: Ref<string>
   statusFilter: Ref<string[]>
@@ -146,7 +145,7 @@ export function useGraphPageWatchers(opts: {
       opts.graphViz.clearConnectionHighlight()
       opts.graphViz.applySelectedHighlight(pid)
 
-      if (opts.isRealMode.value && !opts.focusMode.value) {
+      if (!opts.focusMode.value) {
         const p = String(pid || '').trim()
         void opts.refreshClearingCyclesForParticipant(p).catch(() => {
           // Keep the current cycle data; visual selection is independent of this fetch.

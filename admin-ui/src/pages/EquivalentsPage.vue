@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRoute, useRouter } from 'vue-router'
-import { assertSuccess } from '../api/envelope'
+import { useRouter } from 'vue-router'
 import { api } from '../api'
-import { useAuthStore } from '../stores/auth'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
 import { useLatestRequest } from '../composables/useLatestRequest'
-import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
+import { toLocationQueryRaw } from '../router/query'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
@@ -23,8 +21,6 @@ const loadRequests = useLatestRequest()
 let pageActive = true
 
 const router = useRouter()
-const route = useRoute()
-const authStore = useAuthStore()
 
 const createOpen = ref(false)
 const editOpen = ref(false)
@@ -44,7 +40,7 @@ async function warmUsage(code: string) {
 
   usageLoadingByCode[key] = true
   try {
-    const usage = assertSuccess(await api.getEquivalentUsage(key))
+    const usage = await api.getEquivalentUsage(key)
     if (!pageActive) return
     const u = usage as unknown as Record<string, unknown>
     usageByCode[key] = {
@@ -71,7 +67,7 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const data = assertSuccess(await api.listEquivalents({ include_inactive: requestIncludeInactive }))
+    const data = await api.listEquivalents({ include_inactive: requestIncludeInactive })
     if (!request.isCurrent()) return
     items.value = data.items
   } catch (e: unknown) {
@@ -100,13 +96,13 @@ function openEdit(row: Equivalent) {
 
 async function createEq() {
   try {
-    const created = assertSuccess(
+    const created = (
       await api.createEquivalent({
         code: createForm.code,
         precision: Number(createForm.precision),
         description: createForm.description,
         is_active: Boolean(createForm.is_active),
-      }),
+      })
     ).created
     if (!pageActive) return
     ElMessage.success(t('equivalents.created', { code: created.code }))
@@ -123,11 +119,11 @@ async function createEq() {
 async function saveEdit() {
   if (!editing.value) return
   try {
-    const updated = assertSuccess(
+    const updated = (
       await api.updateEquivalent(editing.value.code, {
         precision: Number(editForm.precision),
         description: editForm.description,
-      }),
+      })
     ).updated
     if (!pageActive) return
     ElMessage.success(t('equivalents.updated', { code: updated.code }))
@@ -160,7 +156,7 @@ async function setActive(row: Equivalent, next: boolean) {
 
   if (!pageActive) return
   try {
-    const updated = assertSuccess(await api.setEquivalentActive(row.code, next, reason)).updated
+    const updated = (await api.setEquivalentActive(row.code, next, reason)).updated
     if (!pageActive) return
     const index = items.value.findIndex((item) => item.code === row.code)
     if (index >= 0) items.value[index] = updated
@@ -177,7 +173,7 @@ async function setActive(row: Equivalent, next: boolean) {
 async function deleteEq(row: Equivalent) {
   let usageLine = ''
   try {
-    const usage = assertSuccess(await api.getEquivalentUsage(row.code))
+    const usage = await api.getEquivalentUsage(row.code)
     const u = usage as unknown as Record<string, unknown>
     const tl = Number(u.trustlines ?? 0)
     const inc = u.incidents
@@ -216,7 +212,7 @@ async function deleteEq(row: Equivalent) {
 
   if (!pageActive) return
   try {
-    assertSuccess(await api.deleteEquivalent(row.code, reason))
+    await api.deleteEquivalent(row.code, reason)
     if (!pageActive) return
     ElMessage.success(t('equivalents.deleted', { code: row.code }))
     includeInactive.value = true
@@ -250,7 +246,7 @@ async function deleteEq(row: Equivalent) {
 function goAudit(row: Equivalent) {
   void router.push({
     path: '/audit-log',
-    query: toLocationQueryRaw({ ...carryScenarioQuery(route.query), code: row.code, q: row.code }),
+    query: toLocationQueryRaw({ code: row.code, q: row.code }),
   })
 }
 
@@ -273,7 +269,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
         />
         <div class="hdr__actions">
           <el-button
-            :disabled="authStore.isReadOnly"
             type="primary"
             @click="openCreate"
           >
@@ -399,7 +394,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
             <div class="eqActions">
               <el-button
                 size="small"
-                :disabled="authStore.isReadOnly"
                 @click="openEdit(scope.row)"
               >
                 {{ t('common.edit') }}
@@ -408,7 +402,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="scope.row.is_active"
                 size="small"
                 type="warning"
-                :disabled="authStore.isReadOnly"
                 @click="setActive(scope.row, false)"
               >
                 {{ t('common.deactivate') }}
@@ -417,7 +410,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-else
                 size="small"
                 type="success"
-                :disabled="authStore.isReadOnly"
                 @click="setActive(scope.row, true)"
               >
                 {{ t('common.activate') }}
@@ -426,7 +418,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="!scope.row.is_active"
                 size="small"
                 type="danger"
-                :disabled="authStore.isReadOnly"
                 @click="deleteEq(scope.row)"
               >
                 {{ t('common.delete') }}
@@ -483,7 +474,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </el-button>
       <el-button
         type="primary"
-        :disabled="authStore.isReadOnly"
         @click="createEq"
       >
         {{ t('common.create') }}
@@ -521,7 +511,6 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </el-button>
       <el-button
         type="primary"
-        :disabled="authStore.isReadOnly"
         @click="saveEdit"
       >
         {{ t('common.save') }}

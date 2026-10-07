@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ApiException, assertSuccess } from '../api/envelope'
+import { ApiException } from '../api/apiException'
 import { api } from '../api'
 import { isUnitIntervalDecimalString } from '../utils/decimal'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
@@ -10,7 +10,7 @@ import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
-import { carryScenarioQuery, toLocationQueryRaw } from '../router/query'
+import { toLocationQueryRaw } from '../router/query'
 import { labelParticipantStatus, normalizeParticipantStatusKey } from '../ui/participantStatus'
 
 const router = useRouter()
@@ -51,7 +51,7 @@ async function loadParticipantStats() {
   participantsStatsLoading.value = true
   participantsStatsError.value = null
   try {
-    const stats = assertSuccess(await api.participantsStats())
+    const stats = await api.participantsStats()
 
     const byStatus = new Map<string, number>()
     for (const [k, v] of Object.entries(stats.participants_by_status || {})) {
@@ -79,9 +79,9 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    health.value = assertSuccess(await api.health())
-    healthDb.value = assertSuccess(await api.healthDb())
-    migrations.value = assertSuccess(await api.migrations())
+    health.value = await api.health()
+    healthDb.value = await api.healthDb()
+    migrations.value = await api.migrations()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     error.value = msg || t('dashboard.loadFailed')
@@ -94,7 +94,7 @@ async function loadAudit() {
   auditLoading.value = true
   auditError.value = null
   try {
-    const page = assertSuccess(await api.listAuditLog({ page: 1, per_page: 10 }))
+    const page = await api.listAuditLog({ page: 1, per_page: 10 })
     auditItems.value = page.items
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -130,7 +130,7 @@ async function loadBottlenecks() {
   bottlenecksLoading.value = true
   bottlenecksError.value = null
   try {
-    const r = assertSuccess(await api.trustlineBottlenecks({ threshold: threshold.value, limit: 10 }))
+    const r = await api.trustlineBottlenecks({ threshold: threshold.value, limit: 10 })
     bottleneckItems.value = (r.items || []) as Trustline[]
   } catch (e: unknown) {
     if (e instanceof ApiException) {
@@ -148,7 +148,7 @@ async function loadIncidents() {
   incidentsLoading.value = true
   incidentsError.value = null
   try {
-    const page = assertSuccess(await api.listIncidents({ page: 1, per_page: 200 }))
+    const page = await api.listIncidents({ page: 1, per_page: 200 })
     // Второй экземпляр того же тавтологического предиката, снят вместе с первым (`F-013-5`).
     // `.filter(age > sla)` не убирал ни одной строки: маршрут возвращает только просроченные
     // (`app/api/v1/admin.py:1011,1019`), что запинено `tests/unit/test_admin_incidents_list.py:84-85`.
@@ -190,7 +190,6 @@ function goTrustlinesWithThreshold() {
   void router.push({
     path: '/trustlines',
     query: toLocationQueryRaw({
-      ...carryScenarioQuery(route.query),
       ...(thresholdValue ? { threshold: thresholdValue } : {}),
     }),
   })

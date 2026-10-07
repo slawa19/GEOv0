@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 
 import { __resetApiErrorToastForTests, toastApiError } from './errorToast'
-import { ApiException } from './envelope'
+import { ApiException } from './apiException'
 
 vi.mock('element-plus', () => {
   return {
