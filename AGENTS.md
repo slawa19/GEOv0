@@ -86,7 +86,7 @@ git grep -n $contractMarker
 - backend: `app/`, `api/openapi.yaml`, `migrations/`, `tests/`;
 - Admin UI: `admin-ui/`;
 - Simulator UI: `simulator-ui/v2/`;
-- canonical data generators and fixtures: `admin-fixtures/`, `seeds/`, релевантные `scripts/`;
+- canonical data and generators: `seeds/` (описания сообществ и рецепты сида), `fixtures/simulator/`, релевантные `scripts/`;
 - актуальная документация: прежде всего `README.md`, `docs/ru/00-overview.md`, `docs/ru/09-decisions-and-defaults.md` и доменные документы под `docs/ru/`.
 
 Защищённые/read-only по умолчанию:
@@ -162,12 +162,12 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 |---|---|---|
 | `required-backend` (одна сессия всего тира `verify_local.ps1 -BackendOnly` на сервисе `postgres:16`, ubuntu) | PR, push в main, dispatch, schedule | да |
 | `required-ui` (`verify_local.ps1 -UiOnly` и шаг `-ToolingOnly -ToolingPartition powershell`, windows) | те же | да |
-| `ui-smoke` (Chromium smoke обоих UI) | PR, push в main, dispatch, schedule | да |
+| `ui-smoke` (Chromium smoke обоих UI; админка — на настоящем бэкенде: `postgres:16`, сид `riverside-town-50`, uvicorn) | PR, push в main, dispatch, schedule | да |
 | `static-diagnostics` (Ruff, тир инструментов `-ToolingPartition portable`, Black) | те же | Ruff и тир инструментов — **да**; Black — **нет** (`continue-on-error`) |
 | `simulator-super-smoke`, `admin-e2e`, `simulator-visual-e2e` | только schedule / workflow_dispatch | — |
 | `container-smoke` | только schedule / workflow_dispatch | — |
 
-Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` сервиса Postgres не имеет (причина — `specs/BACKLOG.md`) и после снятия SQLite-тира без него не проходит. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
+Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` сервиса Postgres не имеет (причина — `specs/BACKLOG.md`) и после снятия SQLite-тира без него не проходит. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует; с 2026-10-07 (032 S4) smoke админки идёт против засеянного бэкенда и утверждает участника сида, mock-режима у админки нет. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
 
 - не заявляйте «CI green» или «все gates green» — называйте конкретный job, SHA и exit code;
 - не превращайте текущие Black findings в блокер несвязанной задачи (см. храповик, §6);
@@ -219,11 +219,13 @@ $env:GEO_TEST_ALLOW_DB_RESET = "1"
 ### E2E и дорогие проверки
 
 ```powershell
-npm --prefix admin-ui run e2e
+.\scripts\verify_admin_e2e.ps1 -TaskSlug agent_admin_e2e -BackendPort <свободный> -UiPort <свободный>
 npm --prefix simulator-ui/v2 run test:e2e
 .\scripts\verify_local.ps1 -TaskSlug agent_simulator_super_smoke -BackendOnly `
   -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
+
+Admin e2e без бэкенда не запускается: `admin-ui/playwright.config.ts` требует `ADMIN_E2E_BACKEND_ORIGIN` и `ADMIN_E2E_TOKEN`; `scripts/verify_admin_e2e.ps1` поднимает одноразовую базу `geov0_dev_<slug>-<id>`, сид и uvicorn и выставляет обе переменные (`-Smoke` — только блокирующий smoke). Мутационные тесты идут отдельным сериализованным проектом после read-only.
 
 Это milestone после unit/component gates, перед merge затрагивающего их контракта или по явному запросу. Обновление screenshots допустимо только после ручной проверки, что визуальное изменение намеренно.
 
@@ -311,8 +313,7 @@ $taskSlug = "agent_payments_review"
 
 ## 10. Fixtures и generated copies
 
-- Канонические Admin fixtures находятся в `admin-fixtures/`.
-- `admin-ui/public/admin-fixtures/` — синхронизированная public-копия; не редактировать вручную. Использовать `npm --prefix admin-ui run sync:fixtures`, затем `npm --prefix admin-ui run validate:fixtures`.
+- Admin UI фикстур не имеет: mock-режим, `admin-fixtures/` и public-копия удалены 2026-10-07 (032 S4); админка проверяется на засеянном бэкенде, редкие состояния — подменой ответа `page.route` в e2e. Демо-данные базы — рецепты `seeds/communities/<id>/` через `scripts/seed_db.py --source recipe`.
 - Simulator demo fixtures в `simulator-ui/v2/public/simulator-fixtures/` — статические версионируемые ассеты (снимки и плейлисты событий); генератор удалён 2026-10-07 (032 S4, 022 `T2207`). Правка — осознанный дифф с ревью; форму держит `tooling-tests/portable/test_p029_s4_demo_fixtures_of_every_equivalent_are_current.py`.
 - Регенерация обязана быть детерминированной: до/после проверить diff, metadata/counts и валидатор. Не включать случайные timestamps/order, если они не часть контракта.
 - Runtime DB, logs, PID, NDJSON, Playwright output и test dumps не являются fixtures и не коммитятся.

@@ -1,115 +1,26 @@
 # Админка (прототип) — демо‑скрипт для ревью
 
-Цель: быстро пройтись по всем экранам админки‑прототипа, проверить UX/структуру/состояния (loading/empty/error/403/401/slow) и убедиться, что данные берутся из общего fixture‑pack.
+Цель: быстро пройтись по всем экранам админки, проверить UX/структуру/состояния (loading/empty/error/403/401/slow) на **реальном засеянном backend-е**.
+
+(2026-10-07, 032 S4: удалено — режим mock, `mockApi`, пакет фикстур `admin-fixtures/` и его копия в `admin-ui/public/`, сценарии `?scenario=...`, скрипты `sync:fixtures` / `validate:fixtures`, переключатель роли. Прежний раздел «fixture-driven prototyping» описывал именно их; в git он доступен по истории файла.)
 
 ---
 
-## Как устроена разработка админки сейчас (fixture-driven prototyping)
-
-В проекте админка разрабатывается в подходе **fixture-driven prototyping** (иногда его же можно назвать *fixture-first UI*):
-
-- UI строится поверх **каноничного набора JSON-фикстур** (fixtures), которые имитируют ответы API.
-- Поведение API (ошибки/пустые списки/задержки/403/401) задаётся **сценариями** (scenario-based mocking).
-
-Это позволяет быстро и воспроизводимо развивать UI **без поднятого backend**, но так, чтобы переключение на реальный API в будущем было минимальным.
-
-### Где лежат данные и что является source of truth
-
-1) **Канонические фикстуры** (source of truth):
-- `admin-fixtures/v1/datasets/*.json`
-- `admin-fixtures/v1/scenarios/*.json`
-
-2) **Публичная копия для SPA** (то, что реально читает браузер в runtime):
-- `admin-ui/public/admin-fixtures/v1/...`
-
-Эта копия **перезаписывается** скриптом синхронизации (см. ниже).
-
-### Как это подключено в админке (Mock API)
-
-- UI-страницы (`admin-ui/src/pages/*.vue`) обращаются к клиенту `mockApi`:
-  - `admin-ui/src/api/mockApi.ts`
-- `mockApi` грузит JSON из `public/admin-fixtures/v1/...` через `fetch`, применяет выбранный сценарий и возвращает ответы в envelope-формате:
-
-Дополнительно:
-- Для части экранов, которые читают фикстуры напрямую (например, `/graph`), используется загрузчик:
-  - `admin-ui/src/api/fixtures.ts`
-
-```json
-{ "success": true, "data": { "...": "..." } }
-```
-
-или
-
-```json
-{ "success": false, "error": { "code": "FORBIDDEN", "message": "..." } }
-```
-
-Сценарий задаётся в URL как `?scenario=...` (и переключается в Header), после чего `mockApi`:
-- может добавлять искусственную latency;
-- может возвращать ошибки для отдельных endpoints через overrides;
-- может возвращать пустые списки для list-эндпоинтов.
-
-Важно: при навигации мы сохраняем `scenario` в query (`...route.query`), чтобы вся админка оставалась в одном режиме.
-
-### Синхронизация и валидация фикстур (dev/build)
-
-Скрипты и команды (выполнять из папки `admin-ui`):
-
-- `npm run sync:fixtures` — копирует `../admin-fixtures/v1` → `public/admin-fixtures/v1`
-- `npm run validate:fixtures` — проверяет, что фикстуры корректны/парсятся и соответствуют ожидаемой структуре
-
-Автоматизация:
-- `npm run dev` запускает `predev` → *sync + validate*.
-- `npm run build` запускает `prebuild` → *clean + sync + validate*.
-
-### Генерация фикстур (Python)
-
-Фикстуры можно:
-- править вручную в `admin-fixtures/v1/...` (быстро для мелких изменений), или
-- генерировать детерминированно Python-скриптами в `admin-fixtures/tools/` (рекомендуемо для больших наборов).
-
-Полезная точка входа (единый генератор):
-
-- `admin-fixtures/tools/generate_fixtures.py` — единый детерминированный генератор каноничных community seeds:
-	- `--seed greenfield-village-100` (100 участников)
-	- `--seed riverside-town-50` (50 участников)
-
-Общее:
-- `admin-fixtures/tools/seedlib.py` — общие утилиты и производные датасеты (debts/cycles/meta) для seed-генераторов.
-
-См. также:
-- Спека fixture-pack (архив): `docs/ru/admin-ui/specs/archive/admin-ui-prototype-fixtures-spec.md`
-- Подход к seed-документам и генерации: `docs/ru/seeds/README.md`
-
-#### Guardrails валидатора (важно для демо)
-
-Скрипт `admin-ui/scripts/validate-fixtures.mjs` проверяет ряд ожидаемых ограничений. В частности:
-- equivalents в «каноничном» режиме ожидаются ровно `UAH/EUR/HOUR`;
-- `participants.length` обычно должен быть 50 или 100 (если не задан `EXPECTED_PARTICIPANTS`).
-
-Поэтому seed-генераторы дают валидируемый набор.
-
-#### Примеры команд для генерации
-
-Рекомендуемые команды:
-- `python admin-fixtures/tools/generate_fixtures.py --seed greenfield-village-100`
-- `python admin-fixtures/tools/generate_fixtures.py --seed riverside-town-50`
-
-После любой генерации (или ручной правки канонических JSON):
-- `cd admin-ui; npm run sync:fixtures; npm run validate:fixtures`
-
 ## 1) Как запустить
 
-Из папки `admin-ui`:
+Админка всегда ходит в реальный backend. Рекомендуемый способ на Windows — `scripts/run_local.ps1 start`: он поднимает backend, сидирует базу рецептом `riverside-town-50` и Admin UI, и пишет `admin-ui/.env.local`.
 
-- `npm run dev`
-- открыть `http://localhost:5173/` (если порт занят — Vite выведет другой, например `5174`)
+Без runner-а:
+
+- backend с базой, засеянной `python scripts/seed_db.py --source recipe --community riverside-town-50`;
+- из папки `admin-ui`: `VITE_API_BASE_URL=http://127.0.0.1:18000` (и `VITE_ADMIN_TOKEN`, если токен backend-а не дефолтный), затем `npm run dev`;
+- открыть `http://localhost:5173/` (если порт занят — Vite выведет другой, например `5174`).
 
 Примечание про Node.js:
 - Проект проверяет версию Node на установке зависимостей (preinstall).
 - Требование: `^20.19.0 || >=22.13.0`.
 
-Фикстуры автоматически синхронизируются в `admin-ui/public/admin-fixtures/v1` на `predev`.
+Подробнее: [README.md](README.md), ручной прогон — [manual-smoke-real-mode.md](manual-smoke-real-mode.md).
 
 ## Где открыть этот файл
 
@@ -119,26 +30,17 @@
 - нажмите `Ctrl+Shift+V` (Preview)
 - или команду: “Markdown: Open Preview to the Side”
 
-## 2) Управление сценариями
+## 2) Состояния ошибок и пустых данных
 
-Сценарий выбирается в верхней панели (Scenario) и сохраняется в URL как `?scenario=...`.
+Сценариев `?scenario=...` больше нет. Вручную деградации воспроизводятся так: остановить backend (ошибка сети), задать неверный `VITE_ADMIN_TOKEN` (401/403), открыть экран на пустой базе. Автоматически 500/403/401, пустые списки, integrity warning/critical и медленный ответ создаёт Playwright через `page.route` (`admin-ui/e2e/states.spec.ts`); запуск — `scripts/verify_admin_e2e.ps1`.
 
-Рекомендуемый порядок:
-
-1. `happy` — базовая функциональность
-2. `empty` — пустые списки
-3. `error500` — ошибки API на ряде эндпоинтов
-4. `admin_forbidden403` — запрет на `/api/v1/admin/*`
-5. `integrity_unauthorized401` — 401 на `/api/v1/integrity/*`
-6. `slow` — повышенная задержка
-
-## 3) Чеклист по экранам (happy)
+## 3) Чеклист по экранам
 
 ### Dashboard
 - Проверить: Health/DB/Migrations карточки отрисовываются, без падений.
 - Проверить: блок “Trustline bottlenecks” показывает топ узких мест (подсветка по порогу).
 - Проверить: блок “Incidents over SLA” показывает транзакции, которые просрочили SLA.
-- Проверить: кнопки “View all” ведут на соответствующие экраны, сохраняя `?scenario=`.
+- Проверить: кнопки “View all” ведут на соответствующие экраны, сохраняя текущие query-параметры.
 
 ### Trustlines
 - Проверить: фильтры (eq / creditor / debtor / status).
@@ -169,7 +71,7 @@
 - Проверить: Save отправляет patch и обновляет данные.
 
 ### Feature Flags
-- Проверить: toggle подтверждается confirm‑диалогом; отмена возвращает значение.
+- Отдельной страницы нет: `/feature-flags` перенаправляет на `/config`, флаги правятся там как ключи конфигурации (2026-10-07, 032 S4).
 
 ### Equivalents
 - Проверить: список активных, toggle “Include inactive”.
@@ -182,20 +84,15 @@
 - Проверить: статус грузится.
 - Проверить: Verify подтверждается диалогом; отмена не вызывает запрос.
 
-## 4) Чеклист по сценариям (быстро)
+## 4) Чеклист по состояниям (быстро)
 
-- `empty`: экраны списков показывают `ElEmpty` вместо таблиц.
-- `error500`: показать “error” alert/сообщения на затронутых экранах.
-- `admin_forbidden403`: все admin‑экраны должны деградировать понятной ошибкой.
-- `integrity_unauthorized401`: только Integrity должен дать 401‑ошибку.
-- `slow`: увидеть skeleton/loading и отсутствие “дерганий” при переключении.
+- Пустая база: экраны списков показывают `ElEmpty` вместо таблиц.
+- Backend остановлен или отвечает 500: на затронутых экранах виден «error» alert/сообщение.
+- Неверный admin-токен (403/401): admin-экраны деградируют понятной ошибкой.
+- Медленный ответ: видны skeleton/loading и нет «дерганий» при переключении.
 
-Быстрая проверка ролей:
-- Переключить роль на `auditor (read-only)` и убедиться, что destructive actions скрыты/заблокированы.
+Ролей в UI нет (переключатель `admin/operator/auditor` удалён 2026-10-07): доступ определяет admin-токен, его проверяет backend.
 
 ## 5) Где лежат данные
 
-- Канонический набор: `admin-fixtures/v1/...`
-- То, что реально читает SPA: `admin-ui/public/admin-fixtures/v1/...`
-
-Ожидаемая проверка: поменять что-то в `admin-fixtures/v1/datasets/*`, перезапустить dev — и увидеть изменение в UI.
+Данные приходят с backend-а. База наполняется рецептом сообщества (`seeds/communities/<id>/community.json` и `recipe.json`) командой `python scripts/seed_db.py --source recipe --community <id>`; подробнее — [../seeds/README.md](../seeds/README.md). Пакета фикстур Admin UI больше нет.

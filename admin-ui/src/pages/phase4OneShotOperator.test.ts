@@ -11,8 +11,6 @@ import IntegrityPage from './IntegrityPage.vue'
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
   patchConfig: vi.fn(),
-  getFeatureFlags: vi.fn(),
-  patchFeatureFlags: vi.fn(),
   integrityStatus: vi.fn(),
   integrityVerify: vi.fn(),
 }))

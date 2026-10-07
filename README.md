@@ -505,9 +505,21 @@ npm --prefix simulator-ui/v2 run test:unit
 npm --prefix simulator-ui/v2 run build
 
 # Expensive/manual or scheduled jobs (Simulator visual baselines are Windows-specific)
-npm --prefix admin-ui run e2e
 npm --prefix simulator-ui/v2 run test:e2e
 ```
+
+Every Admin UI e2e runs against a real seeded backend (there is no mock mode); Playwright refuses to start
+without `ADMIN_E2E_BACKEND_ORIGIN` and `ADMIN_E2E_TOKEN`. The local entry brings the backend up on a disposable
+`geov0_dev_<slug>-<id>` database, seeds `riverside-town-50` and runs Playwright:
+
+```powershell
+.\scripts\verify_admin_e2e.ps1 -TaskSlug agent_admin_e2e          # the whole Admin e2e
+.\scripts\verify_admin_e2e.ps1 -TaskSlug agent_admin_e2e -Smoke   # only the blocking smoke
+```
+
+Degraded states (500, 403, 401, empty, integrity warning/critical, slow) are produced in the tests by
+`page.route`, not by scenarios. A manual check in a browser:
+[`docs/ru/admin-ui/manual-smoke-real-mode.md`](docs/ru/admin-ui/manual-smoke-real-mode.md).
 
 Update Playwright screenshots only after intentional visual review. Agent isolation,
 protected-contract and evidence rules are in `AGENTS.md`; do not duplicate them here.
@@ -540,14 +552,11 @@ For the canonical contract, see `api/openapi.yaml`.
 
 ---
 
-## Admin UI (real-mode)
+## Admin UI
 
-Admin UI lives in `admin-ui/` and can run in two modes:
-
-- `mock` (fixtures) — deterministic JSON datasets
-- `real` — calls the backend Admin API (`/api/v1/admin/*`)
-
-Recommended (current repo setup): run real-mode using `VITE_API_BASE_URL`.
+Admin UI lives in `admin-ui/` and always calls the backend Admin API (`/api/v1/admin/*`). It has no mock
+mode and no fixtures: the mock mode and its fixture pack were removed on 2026-10-07 (programme 032, slice
+S4). The backend address comes from `VITE_API_BASE_URL`, the admin token from `VITE_ADMIN_TOKEN`.
 
 Quickstart:
 
@@ -588,7 +597,6 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # 2) Run Admin UI
 npm --prefix admin-ui install
-$env:VITE_API_MODE = 'real'
 $env:VITE_API_BASE_URL = 'http://localhost:8000'
 npm --prefix admin-ui run dev
 ```
@@ -612,7 +620,6 @@ python scripts/dev_database.py ready
 python -m uvicorn app.main:app --reload --port 18000
 
 npm --prefix admin-ui install
-$env:VITE_API_MODE = 'real'
 $env:VITE_API_BASE_URL = 'http://127.0.0.1:18000'
 $env:VITE_ADMIN_TOKEN = 'dev-admin-token-change-me'
 npm --prefix admin-ui run dev
@@ -640,8 +647,8 @@ Two refusals are deliberate: a database that is not empty (the earlier run's key
 participants cannot be addressed again), and `greenfield-village-100`, whose description declares
 nine `frozen` trust lines that no product operation can write (`specs/BACKLOG.md`, 2026-09-22).
 
-Note: the Admin UI role selector (`admin/operator/auditor`) is a **UI-only** convenience (stored in localStorage) that hides/disables some actions.
-It is not an authorization boundary; the backend must enforce permissions.
+Note: the Admin UI has no role selector and no read-only mode (the `admin/operator/auditor` selector was mock-only and
+was removed on 2026-10-07, 032 S4). Access is the admin token: the backend enforces it, and RBAC is not implemented.
 
 Then open:
 

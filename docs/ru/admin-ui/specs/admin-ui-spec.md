@@ -34,6 +34,8 @@
 - `operator` — операции и конфиг, без критичных действий (может быть ограничено политикой).
 - `auditor` — только чтение.
 
+(2026-10-07, 032 S4: роли в UI нет — переключатель `admin/operator/auditor` и `isReadOnly` существовали только в mock-режиме и удалены. RBAC не реализован, это зафиксированное решение программы 022; доступ определяет admin-токен, его проверяет backend. Раздел описывает намерение, а не текущую реализацию.)
+
 ### 2.2. Ошибки доступа (нормативно)
 - `401` → токен отсутствует/истёк (UI предлагает заново войти).
 - `403` → недостаточно прав (UI показывает read-only либо «Недостаточно прав»).
@@ -79,7 +81,7 @@ Phase 2:
 - `Trustlines`/`Graph` = drill-down и диагностика конкретных рёбер/узлов.
 
 MVP (без историчности):
-- Источник данных: `GraphSnapshot` (в mock режиме — fixtures).
+- Источник данных: `GraphSnapshot` с backend-а.
 - Управляющие параметры: `equivalent` (или `ALL`), `threshold` (bottleneck).
 - KPI: active trustlines / bottlenecks / incidents over SLA / total limit-used-available (суммы decimal-safe).
 - Watchlist: top bottleneck edges, top net positions (из `debts`).
@@ -88,7 +90,7 @@ MVP (без историчности):
 ### 3.3. Header
 - Breadcrumbs.
 - Индикатор состояния Hub (минимум: успешность root `/health` или эквивалентный агрегированный статус).
-- Текущая роль/аккаунт.
+- Текущая роль/аккаунт (в реализации ролей нет, см. 2.1).
 - Logout.
 
 ---
@@ -117,9 +119,9 @@ MVP дополнение: **Network Health виджеты** (быстрый ст
 
 ### 4.2. Network Graph
 
-Статус: **Реализовано в прототипе (fixture-based)**.
+Статус: **Реализовано** (данные с backend-а; fixture-режим удалён 2026-10-07, 032 S4).
 
-Цель: визуализация сети доверия на клиенте **без изменений бэкенда** (данные берутся из фикстур).
+Цель: визуализация сети доверия на клиенте (данные берутся из `GET /admin/graph/snapshot` и `GET /admin/graph/ego`).
 
 Роут и навигация:
 - Route: `/graph`
@@ -127,12 +129,7 @@ MVP дополнение: **Network Health виджеты** (быстрый ст
 
 Техническая реализация:
 - Рендер: Cytoscape.js + layout-плагин `fcose`.
-- Источник данных (фикстуры):
-	- `admin-fixtures/v1/datasets/participants.json`
-	- `admin-fixtures/v1/datasets/trustlines.json`
-	- `admin-fixtures/v1/datasets/incidents.json`
-	- `admin-fixtures/v1/datasets/equivalents.json`
-- Загрузка: модуль `admin-ui/src/api/fixtures.ts` (кэширует `fetch` по относительному пути).
+- Источник данных: `GET /api/v1/admin/graph/snapshot` и `GET /api/v1/admin/graph/ego` (`admin-ui/src/api/realApi.ts`). Файлов фикстур (`admin-fixtures/v1/datasets/*.json`) и загрузчика `admin-ui/src/api/fixtures.ts` больше нет.
 
 Модель графа:
 - Узлы (nodes): участники, `id = pid`.
@@ -143,7 +140,7 @@ UI (MVP) — что должно быть на странице:
 - Панель управления (фильтры/переключатели):
 	- `Equivalent`:
 		- `ALL` (все)
-		- конкретный код (из `equivalents.json` и/или из trustlines)
+		- конкретный код (из списка эквивалентов и/или из trustlines)
 	- `Status` (multi-select): `active`, `closed` (статуса линии `frozen` нет с 2026-10-04, 028 `F-028-29`)
 	- `Threshold` (строка/число, по умолчанию `0.10`): используется для подсветки bottleneck
 	- `Layout`: `fcose (force)`, `grid`, `circle`
@@ -169,11 +166,11 @@ UI (MVP) — что должно быть на странице:
 	- условие: `available/limit < threshold` (только для `active`)
 	- стиль: красное ребро, увеличенная толщина
 - Incidents overlay:
-	- источник: `incidents.json`
+	- источник: инциденты с backend-а
 	- узел-инициатор (`initiator_pid`) подсвечивается (border)
 	- рёбра, исходящие от инициатора, выделяются пунктиром
 
-Дополнительные подсветки (fixtures-first прототип):
+Дополнительные подсветки:
 - `Search-hit`: узел временно получает оранжевую рамку.
 - `Selected`: выбранный узел имеет пульсирующее «свечение» (overlay), не меняя цвет рамок.
 - `Connections`: при выборе связи в drawer подсвечиваются ребро и два узла (зелёным).
@@ -219,7 +216,7 @@ UI:
 UI:
 - Поиск по PID.
 - Действия: Freeze/Unfreeze (с причиной).
-- Для `auditor` — только просмотр.
+- Для `auditor` — только просмотр (в реализации ролей нет, см. 2.1).
 
 Примечание:
 - Operator Advice может вести на `Participants` как на следующий шаг диагностики (например, открыть карточку участника после выявления bottleneck-ребра).
@@ -372,7 +369,7 @@ Drill-down ребра:
 - `PATCH /admin/config` → `{updated: string[]}`.
 
 UI правила:
-- Редактирование разрешено только если роль позволяет (минимум: `admin`/`operator`).
+- Редактирование разрешено только если роль позволяет (минимум: `admin`/`operator`) — намерение; в реализации ролей нет, см. 2.1.
 - После успешного `PATCH` UI обновляет таблицу конфигурации и отображает список обновлённых ключей.
 
 ### 6.2. Feature Flags

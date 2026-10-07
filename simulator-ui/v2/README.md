@@ -107,6 +107,8 @@ There are two relevant modes controlled by Vite env vars:
 - `VITE_TEST_MODE` (default: **0**) — enables deterministic behavior for screenshot tests.
 	Some interactive UI is hidden in test-mode to avoid non-deterministic diffs.
 
+The demo snapshots behind `VITE_DEMO_FIXTURES` (`public/simulator-fixtures/v1/<EQ>/snapshot.json`, `events/demo-tx.json`, `events/demo-clearing.json`) are static, versioned assets. Their generator, `scripts/sync_demo_fixtures.ps1` and the `predev` / `prebuild` hooks (`npm run sync:demo-fixtures`) were deleted on 2026-10-07 (programme 032, slice S4): edit the files directly when a demo needs to change. The Simulator UI's own fixtures mode stays.
+
 ### Enable test-mode manually (PowerShell)
 
 From `simulator-ui/v2`:

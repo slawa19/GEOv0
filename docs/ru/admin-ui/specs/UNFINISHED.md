@@ -34,6 +34,8 @@
    `isRatioBelowThreshold` (`admin-ui/src/api/mockApi.ts:1060-1062` → `utils/decimal.ts:104-129`).
    На рёбрах, стоящих ровно на пороге, KPI может разойтись между режимами — это нарушает
    MVP-критерий «расчёты: детерминированные, decimal-safe (без float)».
+   (2026-10-07, 032 S4: mock-клиент `mockApi.ts` удалён вместе с mock-режимом, так что расхождения
+   «mock против real» больше нет; остаётся серверное сравнение через float.)
    Зарегистрировано в [`specs/BACKLOG.md`](../../../../specs/BACKLOG.md) как узкая правка.
 
 Второстепенное: поле порога — свободный `el-input` без клиентской проверки
@@ -198,7 +200,7 @@ Clearing impact) осознанно вне MVP. HHI/top-shares реализов�
 - `Graph` и `Trustlines` = **drill-down** и расследование конкретных узлов/рёбер.
 
 Минимальный срез (MVP) стоит начинать со **snapshot-аналитики без истории** и без новых API:
-- источник данных: уже существующий snapshot графа (`/api/v1/admin/graph/snapshot`, в mock режиме — fixtures);
+- источник данных: уже существующий snapshot графа (`/api/v1/admin/graph/snapshot`);
 - расчёты: детерминированные, decimal-safe (без float), чтобы метрики воспроизводились.
 
 Acceptance criteria (MVP):

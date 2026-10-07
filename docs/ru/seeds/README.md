@@ -229,7 +229,7 @@ creditor → debtor
 
 ### 6) Перенос замысла в описание
 
-Замысел становится машиночитаемым в `seeds/communities/<community>/community.json` — см. [Описание сообщества](#описание-сообщества-communityjson). Для нового сообщества описание пишется и правится руками. Единственное, что его перезаписывает, — временный мост `admin-fixtures/tools/extract_community_description.py`, и он знает только два существующих сообщества.
+Замысел становится машиночитаемым в `seeds/communities/<community>/community.json` — см. [Описание сообщества](#описание-сообщества-communityjson). Для нового сообщества описание пишется и правится руками. Ничто его не перезаписывает: временный мост `extract_community_description.py` и генераторы, из которых описание было извлечено, удалены вместе с `admin-fixtures/` 2026-10-07 (032 S4).
 
 ## Описание сообщества (`community.json`)
 
@@ -268,13 +268,7 @@ Seed‑документ — это замысел. **Описание сообщ
 ./scripts/verify_local.ps1 -TaskSlug <slug> -ToolingOnly -ToolingPartition portable
 ```
 
-Пока генераторы `admin-fixtures/tools/generate_seed_*_v2.py` ещё в дереве, описание можно и **пересобрать** из них — так оно и появилось:
-
-```powershell
-./.venv/Scripts/python.exe admin-fixtures/tools/extract_community_description.py
-```
-
-Этот мост временный и умрёт вместе с генераторами. Пока он жив, тест сверяет описание с тем, что генераторы производят, — именно это делает их будущее удаление удалением, а не потерей.
+Генераторов, из которых описание можно было бы пересобрать, больше нет (удалены 2026-10-07, 032 S4): `community.json` и `recipe.json` — единственный источник, правятся руками.
 
 ## Кто читает описание
 
@@ -365,16 +359,8 @@ Seed‑документ — это замысел. **Описание сообщ
 
 ## Исторический путь: пакет фикстур Admin UI
 
-**Статус: исторический, выводится из обращения.** Раздел оставлен, потому что путь ещё работает и ещё кому‑то нужен, а не потому, что по нему стоит строить новое.
+**Статус: удалён 2026-10-07 (032 S4).** Раздел сохранён как запись о том, что было, и о причине замены; пути ниже больше не существуют.
 
-До описания сообществ Admin UI читал заготовленный пакет JSON, который собирали seed‑генераторы:
+До описания сообществ Admin UI читал заготовленный пакет JSON (`admin-fixtures/`, его копия `admin-ui/public/admin-fixtures/`), который собирали seed‑генераторы (`admin-fixtures/tools/generate_fixtures.py`, `generate_seed_*.py`, `seedlib.py`). Пакет, генераторы, скрипты `sync:fixtures` / `validate:fixtures` и сам mock-режим Admin UI удалены.
 
-- единая точка входа — `admin-fixtures/tools/generate_fixtures.py --seed <seed_id>` (варианты `--pack`, `--pack --activate`);
-- seed‑скрипты `admin-fixtures/tools/generate_seed_*.py` (базовые и `_v2`) и общий `admin-fixtures/tools/seedlib.py`;
-- canonical‑пакет — `admin-fixtures/v1/datasets/*.json` плюс `_meta.json`;
-- публичная копия для UI — `admin-ui/public/admin-fixtures/v1/datasets/*.json`, её перезаписывает `admin-ui/scripts/sync-fixtures.mjs` (`npm --prefix admin-ui run sync:fixtures`, затем `validate:fixtures`; `npm run dev` делает это через `predev`);
-- allow‑list `seed_id` — `admin-ui/scripts/validate-fixtures.mjs`.
-
-**Почему выводится.** Пакет кладёт в UI *выдуманный результат*: `debts.json` выводится из `trustlines.used`, а `transactions.json` собирается отдельно и ролей не знает, так что засеянные транзакции не объясняют засеянные долги. Замена — данные, произведённые самим продуктом: описание сообщества плюс рецепт операций (`specs/017-postgres-only-engine/spec.md`, `T1711`).
-
-Структурная часть этих генераторов уже перенесена в `seeds/communities/*/community.json`; удаление самих генераторов — отдельный срез той же программы. Генерируемые копии руками не правятся: их источник — генератор.
+**Почему заменён.** Пакет клал в UI *выдуманный результат*: `debts.json` выводился из `trustlines.used`, а `transactions.json` собирался отдельно и ролей не знал, так что засеянные транзакции не объясняли засеянные долги. Замена — данные, произведённые самим продуктом: описание сообщества плюс рецепт операций (`specs/017-postgres-only-engine/spec.md`, `T1711`). Admin UI теперь всегда читает реальный backend, база которого засеяна командой `python scripts/seed_db.py --source recipe --community <id>`.
