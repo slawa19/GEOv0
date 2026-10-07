@@ -1,4 +1,5 @@
 import { ApiException } from '../api/apiException'
+import { describeError } from '../api/describeError'
 import { t } from '../i18n'
 
 /**
@@ -12,8 +13,7 @@ import { t } from '../i18n'
  */
 export function describeHoldClearRefusal(e: unknown): string {
   if (!(e instanceof ApiException)) {
-    const msg = e instanceof Error ? e.message : String(e ?? '')
-    return t('integrity.holds.refusal.other', { code: msg || 'error' })
+    return t('integrity.holds.refusal.other', { code: describeError(e).text })
   }
   const outer = e.details && typeof e.details === 'object' ? (e.details as Record<string, unknown>) : {}
   const inner = outer.details && typeof outer.details === 'object' ? (outer.details as Record<string, unknown>) : {}

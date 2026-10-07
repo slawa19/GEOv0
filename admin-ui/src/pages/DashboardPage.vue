@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
@@ -52,8 +53,7 @@ async function loadParticipantStats() {
     participantsByStatus.value = byStatus
     participantsByType.value = byType
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    participantsStatsError.value = msg || t('dashboard.participantsStatsLoadFailed')
+    participantsStatsError.value = describeError(e, 'dashboard.participantsStatsLoadFailed').text
   } finally {
     participantsStatsLoading.value = false
   }
@@ -66,8 +66,7 @@ async function loadAudit() {
     const page = await api.listAuditLog({ page: 1, per_page: 10 })
     auditItems.value = page.items
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    auditError.value = msg || t('auditLog.loadFailed')
+    auditError.value = describeError(e, 'auditLog.loadFailed').text
   } finally {
     auditLoading.value = false
   }
@@ -96,14 +95,12 @@ async function loadEquivalentRows() {
         try {
           return { code, isActive, summary: await api.liquiditySummary({ equivalent: code }), error: null }
         } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e)
-          return { code, isActive, summary: null, error: msg || t('dashboard.equivalents.loadFailed') }
+          return { code, isActive, summary: null, error: describeError(e, 'dashboard.equivalents.loadFailed').text }
         }
       }),
     )
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    equivalentsError.value = msg || t('dashboard.equivalents.loadFailed')
+    equivalentsError.value = describeError(e, 'dashboard.equivalents.loadFailed').text
     equivalentRows.value = []
   } finally {
     equivalentsLoading.value = false
@@ -125,8 +122,7 @@ async function loadHolds() {
     const res = await api.integritySummary()
     heldEquivalents.value = res.equivalents.filter((e) => e.hold).map((e) => e.equivalent)
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    holdsError.value = msg || t('dashboard.holds.loadFailed')
+    holdsError.value = describeError(e, 'dashboard.holds.loadFailed').text
     heldEquivalents.value = []
   }
 }

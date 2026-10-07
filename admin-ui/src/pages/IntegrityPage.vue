@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { formatApiError } from '../api/errorFormat'
+import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
@@ -105,8 +105,7 @@ async function load() {
   try {
     status.value = await api.integrityStatus()
   } catch (e: unknown) {
-    const f = formatApiError(e)
-    error.value = f.hint ? `${f.title} — ${f.hint}` : f.title
+    error.value = describeError(e).text
   } finally {
     loading.value = false
   }
@@ -133,8 +132,7 @@ async function verify() {
     ElMessage.success(t('integrity.verify.finished'))
     await load()
   } catch (e: unknown) {
-    const f = formatApiError(e)
-    ElMessage.error(f.hint ? `${f.title} — ${f.hint}` : f.title)
+    ElMessage.error(describeError(e).text)
   } finally {
     verifyLoading.value = false
   }
@@ -161,8 +159,7 @@ async function loadHolds() {
   try {
     holdRows.value = (await api.integritySummary()).equivalents
   } catch (e: unknown) {
-    const f = formatApiError(e)
-    holdsError.value = f.hint ? `${f.title} — ${f.hint}` : f.title
+    holdsError.value = describeError(e).text
   } finally {
     holdsLoading.value = false
   }

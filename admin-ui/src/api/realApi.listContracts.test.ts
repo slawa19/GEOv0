@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { realApi } from './realApi'
 
-vi.mock('./errorToast', () => ({ toastApiError: vi.fn() }))
 
 function respondWith(payload: unknown): void {
   const meta = import.meta as unknown as { env: Record<string, unknown> }

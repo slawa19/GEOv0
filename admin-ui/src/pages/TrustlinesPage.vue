@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import { isRatioBelowThreshold } from '../utils/decimal'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import { formatIsoInTimeZone } from '../utils/datetime'
@@ -159,8 +160,7 @@ async function load() {
     items.value = data.items
   } catch (e: unknown) {
     if (!request.isCurrent()) return
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('trustlines.loadFailed')
+    error.value = describeError(e, 'trustlines.loadFailed').text
   } finally {
     if (request.isCurrent()) loading.value = false
   }

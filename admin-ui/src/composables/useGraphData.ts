@@ -2,7 +2,7 @@ import { computed, ref, watch, type Ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { api } from '../api'
-import { t } from '../i18n'
+import { describeError } from '../api/describeError'
 import { buildFocusModeQuery } from '../pages/graph/graphPageHelpers'
 import { useLatestRequest } from './useLatestRequest'
 import type { Equivalent, GraphSnapshotPayload, Participant, Trustline } from '../pages/graph/graphTypes'
@@ -161,8 +161,7 @@ export function useGraphData(opts: {
       return true
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
-      const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      error.value = describeError(e, 'graph.data.loadFailed').text
       return false
     } finally {
       if (viewRequest.isCurrent()) loading.value = false
@@ -184,8 +183,7 @@ export function useGraphData(opts: {
       return true
     } catch (e: unknown) {
       if (!request.isCurrent()) return false
-      const msg = e instanceof Error ? e.message : String(e)
-      error.value = msg || t('graph.data.loadFailed')
+      error.value = describeError(e, 'graph.data.loadFailed').text
       return false
     } finally {
       if (request.isCurrent()) loading.value = false
@@ -227,8 +225,7 @@ export function useGraphData(opts: {
       return true
     } catch (e: unknown) {
       if (!viewRequest.isCurrent()) return false
-      const msg = e instanceof Error ? e.message : String(e)
-      const failure = msg || t('graph.focusMode.loadFailed')
+      const failure = describeError(e, 'graph.focusMode.loadFailed').text
       error.value = failure
       ElMessage.warning(failure)
       return false

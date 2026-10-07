@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { setLocale } from '../i18n'
 import { copyToClipboard } from './copyToClipboard'
 
 describe('copyToClipboard', () => {
@@ -56,5 +57,21 @@ describe('copyToClipboard', () => {
 
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error).toBeTruthy()
+  })
+
+  // 032 S6 (E-18): the failure text was an English literal ('Copy failed') beside a localized UI.
+  it('words a failed copy in the language of the interface', async () => {
+    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    Object.defineProperty(document, 'execCommand', { value: () => false, configurable: true })
+
+    try {
+      setLocale('ru')
+      expect(await copyToClipboard('x')).toEqual({ ok: false, error: 'Не удалось скопировать' })
+      setLocale('en')
+      expect(await copyToClipboard('x')).toEqual({ ok: false, error: 'Copy failed' })
+    } finally {
+      setLocale('en')
+    }
   })
 })

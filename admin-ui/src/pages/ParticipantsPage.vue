@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { toastApiError } from '../api/errorToast'
+import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
@@ -120,8 +120,7 @@ async function load() {
     items.value = data.items
   } catch (e: unknown) {
     if (!request.isCurrent()) return
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('participant.loadFailed')
+    error.value = describeError(e, 'participant.loadFailed').text
   } finally {
     if (request.isCurrent()) loading.value = false
   }
@@ -156,8 +155,7 @@ async function freeze(row: Participant) {
     await load()
   } catch (e: unknown) {
     if (!pageActive) return
-    const msg = e instanceof Error ? e.message : String(e)
-    void toastApiError(e, { fallbackTitle: msg || t('participant.freezeFailed') })
+    ElMessage.error(describeError(e, 'participant.freezeFailed').text)
   }
 }
 
@@ -175,8 +173,7 @@ async function unfreeze(row: Participant) {
     await load()
   } catch (e: unknown) {
     if (!pageActive) return
-    const msg = e instanceof Error ? e.message : String(e)
-    void toastApiError(e, { fallbackTitle: msg || t('participant.unfreezeFailed') })
+    ElMessage.error(describeError(e, 'participant.unfreezeFailed').text)
   }
 }
 

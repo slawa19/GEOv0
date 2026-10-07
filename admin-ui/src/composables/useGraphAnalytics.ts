@@ -1,7 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
-import { t } from '../i18n'
+import { describeError } from '../api/describeError'
 import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import type { BalanceRow, ParticipantMetrics } from '../types/domain'
 import type { SelectedInfo } from './useGraphVisualization'
@@ -65,8 +65,7 @@ export function useGraphAnalytics(opts: {
       metricsCache.value.set(key, res)
     } catch (e: unknown) {
       if (!request.isCurrent()) return
-      const msg = e instanceof Error ? e.message : String(e)
-      metricsError.value = msg || t('graph.analytics.metricsLoadFailed')
+      metricsError.value = describeError(e, 'graph.analytics.metricsLoadFailed').text
     } finally {
       if (request.isCurrent()) metricsLoading.value = false
     }

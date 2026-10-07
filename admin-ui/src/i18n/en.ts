@@ -45,6 +45,18 @@ export const EN: Record<string, string> = {
   'common.copyFailed': 'Copy failed',
   'common.copyToClipboard': 'Copy to clipboard',
   'common.copyLabel': 'Copy {label}',
+
+  // describeError (api/describeError.ts): the one wording of a failed request.
+  'error.unknown': 'Unknown error',
+  'error.ref': '(ref: {id})',
+  'error.hint.notAuthorized':
+    'Not authorized. Ensure the admin token is set (localStorage key "admin-ui.adminToken" or VITE_ADMIN_TOKEN) and matches backend config.',
+  'error.hint.devServer':
+    'Looks like the request went to the Admin UI dev server (Vite) instead of the backend. Check admin-ui/.env.local: VITE_API_BASE_URL=http://127.0.0.1:18000, then restart the UI.',
+  'error.hint.endpointNotFound': 'Endpoint not found on backend. Check backend version and the API base URL.',
+  'error.network.title': 'Network error: failed to reach backend',
+  'error.network.hint':
+    'Ensure backend is running and reachable at VITE_API_BASE_URL. If running locally, scripts/run_local.ps1 should expose http://127.0.0.1:18000.',
   'common.helpTitle': 'Help: {title}',
   'common.helpForLabel': 'Help for {label}',
 

@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
@@ -78,8 +79,7 @@ async function load() {
     items.value = data.items
   } catch (e: unknown) {
     if (!request.isCurrent()) return
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('auditLog.loadFailed')
+    error.value = describeError(e, 'auditLog.loadFailed').text
   } finally {
     if (request.isCurrent()) loading.value = false
   }

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
@@ -71,8 +72,7 @@ async function load() {
     original.value = { ...cfg }
     rows.value = toRows(cfg)
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('config.loadFailed')
+    error.value = describeError(e, 'config.loadFailed').text
   } finally {
     loading.value = false
   }
@@ -218,8 +218,7 @@ async function save() {
     ElMessage.success(t('config.savedKeys', { n: keys.length }))
     await load()
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    ElMessage.error(msg || t('config.saveFailed'))
+    ElMessage.error(describeError(e, 'config.saveFailed').text)
   } finally {
     saving.value = false
   }

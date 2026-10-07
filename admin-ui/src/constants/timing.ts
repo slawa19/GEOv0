@@ -10,6 +10,12 @@ export const THROTTLE_LAYOUT_SPACING_MS = 250
 
 // Polling / transient UI timings.
 export const HEALTH_POLL_INTERVAL_MS = 15000
+
+// A request that has not answered (headers AND body) by then ends with ApiException(TIMEOUT). The health
+// probes answer from memory or one trivial query, so they get a shorter bound: the header status and the
+// poll must not wait half a minute on a dead hub.
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+export const HEALTH_REQUEST_TIMEOUT_MS = 5_000
 export const TOAST_DEDUPE_MS = 2000
 export const GRAPH_SEARCH_HIT_FLASH_MS = 900
 

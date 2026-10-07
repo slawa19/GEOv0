@@ -45,6 +45,18 @@ export const RU: Record<string, string> = {
   'common.copyFailed': 'Не удалось скопировать',
   'common.copyToClipboard': 'Копировать в буфер',
   'common.copyLabel': 'Копировать {label}',
+
+  // describeError (api/describeError.ts): единая формулировка неудавшегося запроса.
+  'error.unknown': 'Неизвестная ошибка',
+  'error.ref': '(ref: {id})',
+  'error.hint.notAuthorized':
+    'Нет доступа. Проверьте, что токен администратора задан (ключ localStorage "admin-ui.adminToken" или VITE_ADMIN_TOKEN) и совпадает с настройкой бэкенда.',
+  'error.hint.devServer':
+    'Похоже, запрос ушёл на dev-сервер Admin UI (Vite), а не на бэкенд. Проверьте admin-ui/.env.local: VITE_API_BASE_URL=http://127.0.0.1:18000, затем перезапустите UI.',
+  'error.hint.endpointNotFound': 'Маршрут не найден на бэкенде. Проверьте версию бэкенда и базовый URL API.',
+  'error.network.title': 'Ошибка сети: не удалось связаться с бэкендом',
+  'error.network.hint':
+    'Убедитесь, что бэкенд запущен и доступен по VITE_API_BASE_URL. При локальном запуске scripts/run_local.ps1 открывает http://127.0.0.1:18000.',
   'common.helpTitle': 'Справка: {title}',
   'common.helpForLabel': 'Справка для {label}',
 
