@@ -1,4 +1,4 @@
-import type { LocationQuery, LocationQueryRaw, LocationQueryValueRaw } from 'vue-router'
+import type { LocationQueryRaw, LocationQueryValueRaw } from 'vue-router'
 
 export function readQueryString(v: unknown): string {
   if (typeof v === 'string') return v
@@ -34,19 +34,6 @@ export function toLocationQueryRaw(query: Record<string, unknown>): LocationQuer
     const normalized = normalizeLocationQueryValue(value)
     if (normalized === undefined) continue
     out[key] = normalized
-  }
-  return out
-}
-
-export function pickQueryStrings(
-  query: LocationQuery | Record<string, unknown>,
-  keys: string[],
-): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const key of keys) {
-    const v = (query as Record<string, unknown>)[key]
-    const s = readQueryString(v).trim()
-    if (s) out[key] = s
   }
   return out
 }

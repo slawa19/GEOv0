@@ -42,39 +42,6 @@ function formatBigIntFixed(i: bigint, scale: number): string {
   return (neg ? '-' : '') + head + '.' + frac
 }
 
-export function addDecimalStrings(a: string, b: string): string {
-  const da = parseDecimal(String(a ?? ''))
-  const db = parseDecimal(String(b ?? ''))
-  if (!da || !db) return String(a ?? '')
-  const [ai, bi, s] = align(da, db)
-  return formatBigIntFixed(ai + bi, s)
-}
-
-export function subDecimalStrings(a: string, b: string): string {
-  const da = parseDecimal(String(a ?? ''))
-  const db = parseDecimal(String(b ?? ''))
-  if (!da || !db) return String(a ?? '')
-  const [ai, bi, s] = align(da, db)
-  return formatBigIntFixed(ai - bi, s)
-}
-
-export function absDecimalString(v: string): string {
-  const d = parseDecimal(String(v ?? ''))
-  if (!d) return String(v ?? '')
-  const abs = d.i < 0n ? -d.i : d.i
-  return formatBigIntFixed(abs, d.scale)
-}
-
-/** Exact order of two shares `aNum/aDen` and `bNum/bDen` (positive denominators); 0 when unreadable. */
-export function compareDecimalRatios(aNum: string, aDen: string, bNum: string, bDen: string): number {
-  const [an, ad, bn, bd] = [aNum, aDen, bNum, bDen].map((v) => parseDecimal(String(v ?? '')))
-  if (!an || !ad || !bn || !bd || ad.i <= 0n || bd.i <= 0n) return 0
-  // a/b with scales: (an.i/10^an.s)/(ad.i/10^ad.s) vs ..., cross-multiplied with every scale cleared.
-  const left = an.i * pow10(ad.scale + bn.scale) * bd.i
-  const right = bn.i * pow10(bd.scale + an.scale) * ad.i
-  return left === right ? 0 : left < right ? -1 : 1
-}
-
 export function isUnitIntervalDecimalString(value: unknown): boolean {
   const dec = parseDecimal(String(value ?? ''))
   if (!dec || dec.i < 0n) return false

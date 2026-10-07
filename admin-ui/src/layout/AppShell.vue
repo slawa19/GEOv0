@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHealthStore } from '../stores/health'
-import { useConfigStore } from '../stores/config'
 import { HEALTH_POLL_INTERVAL_MS } from '../constants/timing'
 import { locale, setLocale, t } from '../i18n'
 import { getTooltipContent } from '../content/tooltips'
@@ -39,11 +38,9 @@ const apiBaseLabel = computed(() => {
 })
 
 const healthStore = useHealthStore()
-const configStore = useConfigStore()
 
 onMounted(() => {
   healthStore.startPolling(HEALTH_POLL_INTERVAL_MS)
-  void configStore.load()
 })
 
 onBeforeUnmount(() => {

@@ -24,8 +24,6 @@ export const AdminConfigSchema = z
   })
   .strict()
 
-export const AdminConfigPatchSchema = AdminConfigSchema.partial().strict()
-
 export const AdminConfigResponseSchema = z
   .object({
     items: z.array(
@@ -65,26 +63,6 @@ export const AdminEquivalentCodeSchema = z.string().regex(/^[A-Z0-9_]{1,16}$/)
 // the list and repairable through PATCH instead of failing to decode.
 export const AdminEquivalentPrecisionSchema = z.number().int().min(0).max(8)
 const DateTimeSchema = z.string().datetime({ offset: true })
-
-export const AdminAuditLogEntrySchema = z
-  .object({
-    id: z.string().uuid(),
-    timestamp: DateTimeSchema,
-    actor_id: z.string().uuid().nullable().optional(),
-    actor_role: z.string().nullable().optional(),
-    action: z.string(),
-    object_type: z.string().nullable().optional(),
-    object_id: z.string().nullable().optional(),
-    reason: z.string().nullable().optional(),
-    before_state: z.record(z.string(), z.unknown()).nullable().optional(),
-    after_state: z.record(z.string(), z.unknown()).nullable().optional(),
-    request_id: z.string().nullable().optional(),
-    ip_address: z.string().nullable().optional(),
-    user_agent: z.string().nullable().optional(),
-  })
-  .strict()
-
-export const AdminAuditLogSchema = z.array(AdminAuditLogEntrySchema)
 
 export const AdminEquivalentWireResponseSchema = z
   .object({

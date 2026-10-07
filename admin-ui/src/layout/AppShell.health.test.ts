@@ -345,3 +345,16 @@ describe('RT-013-3 — индикатор здоровья AppShell выдаёт
     ).not.toBe(healthy.type)
   })
 })
+
+// 032 S6 (E-11): the shell used to ask `/admin/config` at start for a store whose only reader wanted
+// `ui.timezone` - a key the server does not have. Nothing in the shell reads the runtime config.
+describe('AppShell start (032 S6, E-11)', () => {
+  it('does not ask the server for the runtime config', async () => {
+    track(mountShell())
+    await flushPromises()
+    await nextTick()
+
+    expect(apiMock.health).toHaveBeenCalled()
+    expect(apiMock.getConfig).not.toHaveBeenCalled()
+  })
+})
