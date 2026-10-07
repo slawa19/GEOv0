@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
 from pydantic import BaseModel, TypeAdapter, ValidationError, WithJsonSchema
-from sqlalchemy import case, String, cast, desc, func, select, and_, union_all
+from sqlalchemy import String, cast, desc, func, select, and_, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -25,7 +25,6 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.db.models.transaction import Transaction
 from app.schemas.admin import (
-    AdminAuditLogItem,
     AdminAuditLogListResponse,
     AdminAbortTxRequest,
     AdminAbortTxResponse,
@@ -56,18 +55,20 @@ from app.schemas.graph import (
     AdminClearingCycleEdge,
     AdminClearingCyclesForEquivalent,
     AdminClearingCyclesResponse,
-    AdminGraphDebt,
     AdminGraphEgoResponse,
-    AdminGraphParticipant,
     AdminGraphSnapshotResponse,
 )
 from app.schemas.trustline import TrustLine as TrustLineSchema
 from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
+from app.core.admin.graph import (
+    ego_participant_ids,
+    load_graph,
+    trustline_page_statements,
+    trustline_schema,
+)
 from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
-from app.core.simulator.net_balance_utils import net_decimal_to_atoms
 from app.core.participants.service import ParticipantService
-from app.core.trustlines.service import TrustLineService
 from app.core import equivalents as equivalents_core
 from app.utils.exceptions import (
     BadRequestException,
@@ -80,30 +81,6 @@ from app.utils.validation import validate_equivalent_code
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
 
-
-# Live rows first, then a stable tie-break.  Used by the admin graph queries: since
-# migration 019 a closed incarnation may share (from, to, equivalent) with the live one, so
-# a query that does not order deterministically returns them in planner order, and a query
-# that does not de-duplicate emits BOTH as graph edges -- attaching the same `Debt` row to
-# each and doubling `used`/`available`.
-_TRUSTLINE_LIVE_FIRST = case((TrustLine.status == "closed", 1), else_=0)
-
-
-def _dedupe_trustline_rows(rows, *, equivalent_index: int, from_index: int, to_index: int):
-    """Keep one row per (equivalent, from, to) -- the live one when it exists.
-
-    Restores the "one edge per triple" shape the graph had while the unique constraint was
-    unconditional, without hiding pairs whose only incarnation is closed.
-    """
-    seen: set[tuple] = set()
-    out = []
-    for row in rows:
-        key = (row[equivalent_index], row[from_index], row[to_index])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(row)
-    return out
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
 
@@ -158,156 +135,6 @@ def _participant_status_db_values_for_filter(status: str | None) -> list[str] | 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _parse_include_csv(value: str | None) -> set[str]:
-    if value is None:
-        return set()
-    raw = str(value).strip()
-    if not raw:
-        return set()
-    out: set[str] = set()
-    for part in raw.split(","):
-        p = part.strip().lower()
-        if p:
-            out.add(p)
-    return out
-
-
-async def _graph_optional_collections(
-    db: AsyncSession, include: str | None
-) -> tuple[list[Any], list[Any], list[Any], list[str], list[str]]:
-    """The optional collections of a graph read, plus what the wire must say about them.
-
-    F-013-1 / T1302, 2026-09-10. Two things are returned beyond the data, and both exist because
-    an empty list is ambiguous:
-
-      * ``included`` - which collections this response actually carries. Without it, "you did not
-        ask" and "you asked and there are none" are byte-identical, and the consumer counting
-        payments reported zero for a period it was never told about.
-      * ``truncated`` - which of them hit the include limit. A count over a cut list is a lower
-        bound presented as a total, and nothing on the wire admitted the cut.
-
-    Truncation is detected by asking for one row more than the limit and trimming: the fetch
-    helpers order deterministically, so the extra row is proof of "there is more" and never
-    reaches the client.
-
-    THIS FUNCTION EXISTS BECAUSE THE BLOCK IT REPLACES WAS WRITTEN TWICE - once in the snapshot
-    route and once in the ego route, which share the mechanism and shared the defect. Fixing one
-    would have left the other, and the identical bug in a second copy is exactly what this
-    programme keeps finding.
-    """
-
-    include_set = _parse_include_csv(include)
-    incidents: list[Any] = []
-    audit_log: list[Any] = []
-    transactions: list[Any] = []
-    included: list[str] = []
-    truncated: list[str] = []
-
-    async def _take(name: str, fetch, limit: int) -> list[Any]:
-        rows = await fetch(db, limit=limit + 1)
-        included.append(name)
-        if len(rows) > limit:
-            truncated.append(name)
-            return list(rows[:limit])
-        return list(rows)
-
-    if "incidents" in include_set:
-        incidents = await _take(
-            "incidents",
-            _graph_fetch_incidents,
-            int(settings.ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS or 50),
-        )
-    if "audit_log" in include_set:
-        audit_log = await _take(
-            "audit_log",
-            _graph_fetch_audit_log,
-            int(settings.ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS or 50),
-        )
-    if "transactions" in include_set:
-        transactions = await _take(
-            "transactions",
-            _graph_fetch_transactions,
-            int(settings.ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS or 50),
-        )
-
-    return incidents, audit_log, transactions, included, truncated
-
-
-async def _graph_fetch_incidents(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
-    # No stuck payment exists since migration 030; compatibility until П4 (see the note above).
-    return []
-
-
-async def _graph_fetch_audit_log(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
-    limit = max(0, int(limit))
-    if limit <= 0:
-        return []
-    stmt = select(AuditLog).order_by(desc(AuditLog.timestamp)).limit(limit)
-    items = (await db.execute(stmt)).scalars().all()
-    return [AdminAuditLogItem.model_validate(x).model_dump() for x in items]
-
-
-async def _graph_fetch_transactions(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
-    limit = max(0, int(limit))
-    if limit <= 0:
-        return []
-    stmt = (
-        select(Transaction, Participant.pid)
-        .outerjoin(Participant, Transaction.initiator_id == Participant.id)  # a CLEARING has none (028 F-028-45)
-        .order_by(desc(Transaction.updated_at))
-        .limit(limit)
-    )
-    rows = (await db.execute(stmt)).all()
-    out: list[dict[str, Any]] = []
-    for tx, initiator_pid in rows:
-        payload = tx.payload or {}
-        item: dict[str, Any] = {
-            "tx_id": tx.tx_id,
-            "type": tx.type,
-            "state": tx.state,
-            "initiator_pid": None if initiator_pid is None else str(initiator_pid),
-            "created_at": tx.created_at,
-            "updated_at": tx.updated_at,
-            "equivalent": payload.get("equivalent"),
-            "error": tx.error,
-        }
-
-        # WHO THIS TRANSACTION IS ABOUT (F-013-1 / T1302, 2026-09-10).
-        #
-        # `initiator_pid` alone cannot answer it. A consumer asking "was this participant party to
-        # this payment" gets "the initiator was someone else", which is not an answer, and a screen
-        # that turns that into a count reports zero for people who were paid. The spec prescribes
-        # exactly this projection: `from`/`to` for a payment, minimal `edges` for a clearing.
-        #
-        # THE FULL `payload` IS DELIBERATELY NOT PUBLISHED. It is internal and versionless
-        # (`Transaction.payload`), so only the named keys cross the wire, and the clearing edges are
-        # cut down to the two pids - no amounts, no `debt_id`, which belong to the audit surface and
-        # not to a graph read.
-        if tx.type == "PAYMENT":
-            sender = payload.get("from")
-            recipient = payload.get("to")
-            if isinstance(sender, str) and sender:
-                item["from"] = sender
-            if isinstance(recipient, str) and recipient:
-                item["to"] = recipient
-        elif tx.type == "CLEARING":
-            raw_edges = payload.get("edges")
-            if isinstance(raw_edges, list):
-                edges: list[dict[str, str]] = []
-                for edge in raw_edges:
-                    if not isinstance(edge, dict):
-                        continue
-                    debtor = edge.get("debtor")
-                    creditor = edge.get("creditor")
-                    if isinstance(debtor, str) and isinstance(creditor, str) and debtor and creditor:
-                        edges.append({"debtor": debtor, "creditor": creditor})
-                if edges:
-                    item["edges"] = edges
-
-        out.append(item)
-    return out
 
 
 def _runtime_config_items() -> list[tuple[str, bool]]:
@@ -1229,28 +1056,25 @@ async def admin_list_trustlines(
     per_page: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminTrustLinesListResponse:
-    service = TrustLineService(db)
-    offset = (page - 1) * per_page
-
-    total = await service.count_all(
+    # 029 F-029-5, matrix row 9: the Admin API keeps the stored scale of every amount (`trustline_schema`).
+    page_stmt, count_stmt = trustline_page_statements(
         equivalent=equivalent,
-        creditor_pid=creditor,
-        debtor_pid=debtor,
-        status=status,
-    )
-
-    items = await service.list_all(
-        equivalent=equivalent,
-        creditor_pid=creditor,
-        debtor_pid=debtor,
+        creditor=creditor,
+        debtor=debtor,
         status=status,
         limit=per_page,
-        offset=offset,
+        offset=(page - 1) * per_page,
     )
+    total = (await db.execute(count_stmt)).scalar_one()
+    items = [trustline_schema(row) for row in (await db.execute(page_stmt)).all()]
     return AdminTrustLinesListResponse(items=items, page=page, per_page=per_page, total=int(total))
 
 
-@router.get("/graph/snapshot", response_model=AdminGraphSnapshotResponse)
+@router.get(
+    "/graph/snapshot",
+    response_model=AdminGraphSnapshotResponse,
+    responses={400: {"model": ErrorEnvelope, "description": "`equivalent` is not a valid equivalent code"}},
+)
 async def admin_graph_snapshot(
     equivalent: str | None = Query(None, description="Optional equivalent code for net visualization"),
     include: str | None = Query(
@@ -1259,319 +1083,33 @@ async def admin_graph_snapshot(
     ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphSnapshotResponse:
-    """Return a GraphPage-compatible snapshot.
+    """Return a GraphPage-compatible snapshot: the whole network, every line and every debt.
 
+    The same read as the ego route with no scope and no filters (`app/core/admin/graph.py`).
     Guardrail: TrustLine direction in output is from→to = creditor→debtor.
     """
 
     if equivalent is not None:
         validate_equivalent_code(equivalent)
 
-    # Participants
-    participants_rows = (
-        await db.execute(
-            select(Participant.pid, Participant.display_name, Participant.type, Participant.status)
-            .order_by(Participant.pid.asc())
-        )
-    ).all()
-    participants = []
-    for pid, display_name, type_, status in participants_rows:
-        participants.append(
-            AdminGraphParticipant(
-                pid=pid,
-                display_name=display_name,
-                type=type_,
-                status=str(status or "").strip().lower(),
-                net_balance_atoms=None,
-                net_sign=None,
-                viz_color_key=None,
-                viz_size=None,
-            )
-        )
-
-    # Equivalents
-    eq_models = (
-        await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
-    ).scalars().all()
-    equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
-
-    def _eq_precision(code: str) -> int:
-        c = str(code or "").strip().upper()
-        for e in equivalents:
-            if str(e.code).strip().upper() == c:
-                try:
-                    return int(e.precision)
-                except Exception:
-                    return 0
-        return 0
-
-    async def _attach_net_viz(participants_list: list[AdminGraphParticipant], eq_code: str | None) -> None:
-        # Variant A: if no equivalent, keep viz fields null.
-        eqc = str(eq_code or "").strip().upper()
-        if not eqc:
-            return
-
-        precision = _eq_precision(eqc)
-
-        # Build participant id map for aggregation.
-        pid_list = [p.pid for p in participants_list if p.pid]
-        if not pid_list:
-            return
-
-        # Aggregate credits/debts for the selected equivalent.
-        eq_id = (await db.execute(select(EquivalentModel.id).where(EquivalentModel.code == eqc))).scalar_one_or_none()
-        if not eq_id:
-            return
-
-        debt_by_pid: dict[str, Decimal] = {}
-        credit_by_pid: dict[str, Decimal] = {}
-
-        d_rows = (
-            await db.execute(
-                select(p_debtor.pid, func.coalesce(func.sum(Debt.amount), 0))
-                .select_from(Debt)
-                .join(p_debtor, Debt.debtor_id == p_debtor.id)
-                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_debtor.pid.in_(pid_list))
-                .group_by(p_debtor.pid)
-            )
-        ).all()
-        for pid0, s in d_rows:
-            debt_by_pid[str(pid0)] = s
-
-        c_rows = (
-            await db.execute(
-                select(p_creditor.pid, func.coalesce(func.sum(Debt.amount), 0))
-                .select_from(Debt)
-                .join(p_creditor, Debt.creditor_id == p_creditor.id)
-                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_creditor.pid.in_(pid_list))
-                .group_by(p_creditor.pid)
-            )
-        ).all()
-        for pid0, s in c_rows:
-            credit_by_pid[str(pid0)] = s
-
-        # Compute atoms + magnitudes for percentile-based sizing.
-        net_atoms_by_pid: dict[str, int] = {}
-        mags: list[int] = []
-        debt_mags: list[int] = []
-
-        for p in participants_list:
-            deb = debt_by_pid.get(p.pid, Decimal(0))
-            cre = credit_by_pid.get(p.pid, Decimal(0))
-            net_dec = cre - deb
-            atoms = net_decimal_to_atoms(net_dec, precision=precision)
-            net_atoms_by_pid[p.pid] = atoms
-            mags.append(abs(atoms))
-            if atoms < 0:
-                debt_mags.append(abs(atoms))
-
-        mags_sorted = sorted(mags)
-        n = len(mags_sorted)
-        debt_mags_sorted = sorted(debt_mags)
-        dn = len(debt_mags_sorted)
-
-        def _percentile(mag: int) -> float:
-            if n <= 1:
-                return 0.0
-            # Use bisect-right so equal magnitudes share percentile towards the right.
-            import bisect
-
-            i = bisect.bisect_right(mags_sorted, mag) - 1
-            i = max(0, min(i, n - 1))
-            return i / (n - 1)
-
-        DEBT_BINS = 9
-
-        def _debt_bin(mag: int) -> int:
-            if dn <= 1:
-                return 0
-            import bisect
-
-            i = bisect.bisect_right(debt_mags_sorted, mag) - 1
-            i = max(0, min(i, dn - 1))
-            pct = i / (dn - 1)
-            b = int(round(pct * (DEBT_BINS - 1)))
-            return max(0, min(b, DEBT_BINS - 1))
-
-        max_scale = 1.90
-        gamma = 0.75
-
-        def _scale_from_pct(pct: float) -> float:
-            if pct <= 0:
-                return 1.0
-            if pct >= 1:
-                return max_scale
-            return 1.0 + (max_scale - 1.0) * (pct**gamma)
-
-        for p in participants_list:
-            atoms = net_atoms_by_pid.get(p.pid, 0)
-            p.net_balance_atoms = str(atoms)
-            p.net_sign = -1 if atoms < 0 else (1 if atoms > 0 else 0)
-
-            status_key = str(p.status or "").strip().lower()
-            type_key = str(p.type or "").strip().lower()
-
-            if status_key in {"suspended", "frozen"}:
-                p.viz_color_key = "suspended"
-            elif status_key == "left":
-                p.viz_color_key = "left"
-            elif status_key in {"deleted", "banned"}:
-                p.viz_color_key = "deleted"
-            else:
-                if p.net_sign == -1:
-                    p.viz_color_key = f"debt-{_debt_bin(abs(atoms))}"
-                else:
-                    p.viz_color_key = "business" if type_key == "business" else "person"
-
-            pct = _percentile(abs(atoms))
-            s = _scale_from_pct(pct)
-
-            # Base sizes align with current Cytoscape styling.
-            if type_key == "business":
-                w0, h0 = 26, 22
-            else:
-                w0, h0 = 16, 16
-
-            p.viz_size = {"w": int(round(w0 * s)), "h": int(round(h0 * s))}
-
-    # Net visualization (backend-only) for selected equivalent
-    if equivalent:
-        # Reuse aliased Participants declared later in function.
-        p_debtor = aliased(Participant)
-        p_creditor = aliased(Participant)
-        await _attach_net_viz(participants, equivalent)
-
-    # Trustlines + used/available (no N+1)
-    p_from = aliased(Participant)
-    p_to = aliased(Participant)
-    tl_stmt = (
-        select(
-            TrustLine.id,
-            TrustLine.limit,
-            TrustLine.status,
-            TrustLine.created_at,
-            TrustLine.updated_at,
-            TrustLine.policy,
-            EquivalentModel.code.label("equivalent"),
-            p_from.pid.label("from_pid"),
-            p_from.display_name.label("from_display_name"),
-            p_to.pid.label("to_pid"),
-            p_to.display_name.label("to_display_name"),
-            func.coalesce(Debt.amount, 0).label("used"),
-            TrustLine.close_requested_at,
-        )
-        .select_from(TrustLine)
-        .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
-        .join(p_from, TrustLine.from_participant_id == p_from.id)
-        .join(p_to, TrustLine.to_participant_id == p_to.id)
-        .outerjoin(
-            Debt,
-            and_(
-                Debt.debtor_id == TrustLine.to_participant_id,
-                Debt.creditor_id == TrustLine.from_participant_id,
-                Debt.equivalent_id == TrustLine.equivalent_id,
-            ),
-        )
-        .order_by(
-            EquivalentModel.code.asc(),
-            p_from.pid.asc(),
-            p_to.pid.asc(),
-            _TRUSTLINE_LIVE_FIRST.asc(),
-            TrustLine.id.asc(),
-        )
-    )
-
-    tl_rows = _dedupe_trustline_rows(
-        (await db.execute(tl_stmt)).all(),
-        equivalent_index=6,
-        from_index=7,
-        to_index=9,
-    )
-    trustlines: list[TrustLineSchema] = []
-    for (
-        tl_id,
-        limit,
-        status,
-        created_at,
-        updated_at,
-        policy,
-        equivalent_code,
-        from_pid,
-        from_display_name,
-        to_pid,
-        to_display_name,
-        used,
-        close_requested_at,
-    ) in tl_rows:
-        used_dec = used
-        available = limit - used_dec
-        trustlines.append(
-            TrustLineSchema.model_validate(
-                {
-                    "id": tl_id,
-                    "from_pid": from_pid,
-                    "to_pid": to_pid,
-                    "from_display_name": from_display_name,
-                    "to_display_name": to_display_name,
-                    "equivalent_code": equivalent_code,
-                    "limit": limit,
-                    "used": used_dec,
-                    "available": available,
-                    "status": status,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "close_requested_at": close_requested_at,
-                    "policy": policy,
-                }
-            )
-        )
-
-    # Debts
-    p_debtor = aliased(Participant)
-    p_creditor = aliased(Participant)
-    debt_stmt = (
-        select(
-            EquivalentModel.code.label("equivalent"),
-            p_debtor.pid.label("debtor"),
-            p_creditor.pid.label("creditor"),
-            Debt.amount,
-        )
-        .select_from(Debt)
-        .join(EquivalentModel, Debt.equivalent_id == EquivalentModel.id)
-        .join(p_debtor, Debt.debtor_id == p_debtor.id)
-        .join(p_creditor, Debt.creditor_id == p_creditor.id)
-        .where(Debt.amount > 0)
-        .order_by(EquivalentModel.code.asc(), p_debtor.pid.asc(), p_creditor.pid.asc())
-    )
-    debt_rows = (await db.execute(debt_stmt)).all()
-    debts = [
-        AdminGraphDebt(equivalent=eq, debtor=debtor, creditor=creditor, amount=amount)
-        for eq, debtor, creditor, amount in debt_rows
-    ]
-
-    incidents, audit_log, transactions, included, truncated = await _graph_optional_collections(
-        db, include
-    )
-
-    return AdminGraphSnapshotResponse(
-        participants=participants,
-        trustlines=trustlines,
-        incidents=incidents,
-        equivalents=equivalents,
-        debts=debts,
-        audit_log=audit_log,
-        transactions=transactions,
-        included=included,
-        truncated=truncated,
-    )
+    return AdminGraphSnapshotResponse(**await load_graph(db, net_equivalent=equivalent, include=include))
 
 
-@router.get("/graph/ego", response_model=AdminGraphEgoResponse)
+@router.get(
+    "/graph/ego",
+    response_model=AdminGraphEgoResponse,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "`pid` is blank, or `equivalent` is not a valid equivalent code"},
+        404: {"model": ErrorEnvelope, "description": "No participant has this `pid`"},
+    },
+)
 async def admin_graph_ego(
     pid: str = Query(..., description="Root participant PID"),
     depth: int = Query(1, ge=1, le=2, description="Neighborhood depth (1–2)"),
     equivalent: str | None = Query(None, description="Optional equivalent code filter"),
-    status: list[str] | None = Query(None, description="Optional trustline statuses filter (repeatable)"),
+    status: list[Literal["active", "closed"]] | None = Query(
+        None, description="Optional trustline statuses filter (repeatable)"
+    ),
     include: str | None = Query(
         None,
         description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
@@ -1592,350 +1130,21 @@ async def admin_graph_ego(
     if equivalent is not None:
         validate_equivalent_code(equivalent)
 
-    status_filter = status
-
-    root = (
-        await db.execute(select(Participant).where(Participant.pid == root_pid))
-    ).scalar_one_or_none()
+    root = (await db.execute(select(Participant).where(Participant.pid == root_pid))).scalar_one_or_none()
     if not root:
         raise NotFoundException("Participant not found")
 
-    visited_ids: set[Any] = {root.id}
-    frontier_ids: set[Any] = {root.id}
-
-    for _ in range(int(depth)):
-        if not frontier_ids:
-            break
-
-        tl_pairs_stmt = (
-            select(TrustLine.from_participant_id, TrustLine.to_participant_id)
-            .select_from(TrustLine)
-            .where(
-                (TrustLine.from_participant_id.in_(list(frontier_ids)))
-                | (TrustLine.to_participant_id.in_(list(frontier_ids)))
-            )
-        )
-
-        if equivalent:
-            tl_pairs_stmt = tl_pairs_stmt.join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id).where(
-                EquivalentModel.code == equivalent
-            )
-        if status:
-            tl_pairs_stmt = tl_pairs_stmt.where(TrustLine.status.in_(list(status)))
-
-        tl_pairs = (await db.execute(tl_pairs_stmt)).all()
-
-        next_frontier: set[Any] = set()
-        for from_id, to_id in tl_pairs:
-            if from_id in frontier_ids and to_id not in visited_ids:
-                next_frontier.add(to_id)
-            if to_id in frontier_ids and from_id not in visited_ids:
-                next_frontier.add(from_id)
-
-        visited_ids |= next_frontier
-        frontier_ids = next_frontier
-
-    # Participants
-    participants_rows = (
-        await db.execute(
-            select(Participant.pid, Participant.display_name, Participant.type, Participant.status)
-            .where(Participant.id.in_(list(visited_ids)))
-            .order_by(Participant.pid.asc())
-        )
-    ).all()
-    participants = []
-    for pid, display_name, type_, participant_status in participants_rows:
-        participants.append(
-            AdminGraphParticipant(
-                pid=pid,
-                display_name=display_name,
-                type=type_,
-                status=str(participant_status or "").strip().lower(),
-                net_balance_atoms=None,
-                net_sign=None,
-                viz_color_key=None,
-                viz_size=None,
-            )
-        )
-
-    # Equivalents (keep full list for UI dropdown)
-    eq_models = (
-        await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))
-    ).scalars().all()
-    equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
-
-    def _eq_precision_ego(code: str) -> int:
-        c = str(code or "").strip().upper()
-        for e in equivalents:
-            if str(e.code).strip().upper() == c:
-                try:
-                    return int(e.precision)
-                except Exception:
-                    return 0
-        return 0
-
-    async def _attach_net_viz_ego(participants_list: list[AdminGraphParticipant], eq_code: str | None) -> None:
-        eqc = str(eq_code or "").strip().upper()
-        if not eqc:
-            return
-
-        precision = _eq_precision_ego(eqc)
-
-        pid_list = [p.pid for p in participants_list if p.pid]
-        if not pid_list:
-            return
-
-        eq_id = (
-            await db.execute(select(EquivalentModel.id).where(EquivalentModel.code == eqc))
-        ).scalar_one_or_none()
-        if not eq_id:
-            return
-
-        p_debtor = aliased(Participant)
-        p_creditor = aliased(Participant)
-
-        debt_by_pid: dict[str, Decimal] = {}
-        credit_by_pid: dict[str, Decimal] = {}
-
-        d_rows = (
-            await db.execute(
-                select(p_debtor.pid, func.coalesce(func.sum(Debt.amount), 0))
-                .select_from(Debt)
-                .join(p_debtor, Debt.debtor_id == p_debtor.id)
-                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_debtor.pid.in_(pid_list))
-                .group_by(p_debtor.pid)
-            )
-        ).all()
-        for pid0, s in d_rows:
-            debt_by_pid[str(pid0)] = s
-
-        c_rows = (
-            await db.execute(
-                select(p_creditor.pid, func.coalesce(func.sum(Debt.amount), 0))
-                .select_from(Debt)
-                .join(p_creditor, Debt.creditor_id == p_creditor.id)
-                .where(Debt.equivalent_id == eq_id, Debt.amount > 0, p_creditor.pid.in_(pid_list))
-                .group_by(p_creditor.pid)
-            )
-        ).all()
-        for pid0, s in c_rows:
-            credit_by_pid[str(pid0)] = s
-
-        mags: list[int] = []
-        debt_mags: list[int] = []
-        net_atoms_by_pid: dict[str, int] = {}
-        for p in participants_list:
-            deb = debt_by_pid.get(p.pid, Decimal(0))
-            cre = credit_by_pid.get(p.pid, Decimal(0))
-            # 028 F-028-39: the shared rule keeps the sign of a sub-quantum net (T1210).
-            atoms = net_decimal_to_atoms(cre - deb, precision=precision)
-            net_atoms_by_pid[p.pid] = atoms
-            mags.append(abs(atoms))
-            if atoms < 0:
-                debt_mags.append(abs(atoms))
-
-        mags_sorted = sorted(mags)
-        n = len(mags_sorted)
-        debt_mags_sorted = sorted(debt_mags)
-        dn = len(debt_mags_sorted)
-
-        def _percentile(mag: int) -> float:
-            if n <= 1:
-                return 0.0
-            import bisect
-
-            i = bisect.bisect_right(mags_sorted, mag) - 1
-            i = max(0, min(i, n - 1))
-            return i / (n - 1)
-
-        DEBT_BINS = 9
-
-        def _debt_bin(mag: int) -> int:
-            if dn <= 1:
-                return 0
-            import bisect
-
-            i = bisect.bisect_right(debt_mags_sorted, mag) - 1
-            i = max(0, min(i, dn - 1))
-            pct = i / (dn - 1)
-            b = int(round(pct * (DEBT_BINS - 1)))
-            return max(0, min(b, DEBT_BINS - 1))
-
-        max_scale = 1.90
-        gamma = 0.75
-
-        def _scale_from_pct(pct: float) -> float:
-            if pct <= 0:
-                return 1.0
-            if pct >= 1:
-                return max_scale
-            return 1.0 + (max_scale - 1.0) * (pct**gamma)
-
-        for p in participants_list:
-            atoms = net_atoms_by_pid.get(p.pid, 0)
-            p.net_balance_atoms = str(atoms)
-            p.net_sign = -1 if atoms < 0 else (1 if atoms > 0 else 0)
-
-            status_key = str(p.status or "").strip().lower()
-            type_key = str(p.type or "").strip().lower()
-
-            if status_key in {"suspended", "frozen"}:
-                p.viz_color_key = "suspended"
-            elif status_key == "left":
-                p.viz_color_key = "left"
-            elif status_key in {"deleted", "banned"}:
-                p.viz_color_key = "deleted"
-            else:
-                if p.net_sign == -1:
-                    p.viz_color_key = f"debt-{_debt_bin(abs(atoms))}"
-                else:
-                    p.viz_color_key = "business" if type_key == "business" else "person"
-
-            pct = _percentile(abs(atoms))
-            s = _scale_from_pct(pct)
-
-            if type_key == "business":
-                w0, h0 = 26, 22
-            else:
-                w0, h0 = 16, 16
-            p.viz_size = {"w": int(round(w0 * s)), "h": int(round(h0 * s))}
-
-    if equivalent:
-        await _attach_net_viz_ego(participants, equivalent)
-
-    # Trustlines + used/available (no N+1)
-    p_from = aliased(Participant)
-    p_to = aliased(Participant)
-    tl_stmt = (
-        select(
-            TrustLine.id,
-            TrustLine.limit,
-            TrustLine.status,
-            TrustLine.created_at,
-            TrustLine.updated_at,
-            TrustLine.policy,
-            EquivalentModel.code.label("equivalent"),
-            p_from.pid.label("from_pid"),
-            p_from.display_name.label("from_display_name"),
-            p_to.pid.label("to_pid"),
-            p_to.display_name.label("to_display_name"),
-            func.coalesce(Debt.amount, 0).label("used"),
-            TrustLine.close_requested_at,
-        )
-        .select_from(TrustLine)
-        .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
-        .join(p_from, TrustLine.from_participant_id == p_from.id)
-        .join(p_to, TrustLine.to_participant_id == p_to.id)
-        .outerjoin(
-            Debt,
-            and_(
-                Debt.debtor_id == TrustLine.to_participant_id,
-                Debt.creditor_id == TrustLine.from_participant_id,
-                Debt.equivalent_id == TrustLine.equivalent_id,
-            ),
-        )
-        .where(
-            TrustLine.from_participant_id.in_(list(visited_ids)),
-            TrustLine.to_participant_id.in_(list(visited_ids)),
-        )
-        .order_by(EquivalentModel.code.asc(), p_from.pid.asc(), p_to.pid.asc())
+    scope_ids = await ego_participant_ids(db, root.id, depth=depth, equivalent=equivalent, statuses=status)
+    data = await load_graph(
+        db,
+        net_equivalent=equivalent,
+        include=include,
+        scope_ids=scope_ids,
+        line_equivalent=equivalent,
+        statuses=status,
     )
+    return AdminGraphEgoResponse(root_pid=root_pid, **data)
 
-    if equivalent:
-        tl_stmt = tl_stmt.where(EquivalentModel.code == equivalent)
-    if status_filter:
-        tl_stmt = tl_stmt.where(TrustLine.status.in_(list(status_filter)))
-    tl_stmt = tl_stmt.order_by(_TRUSTLINE_LIVE_FIRST.asc(), TrustLine.id.asc())
-    tl_rows = _dedupe_trustline_rows(
-        (await db.execute(tl_stmt)).all(),
-        equivalent_index=6,
-        from_index=7,
-        to_index=9,
-    )
-    trustlines: list[TrustLineSchema] = []
-    for (
-        tl_id,
-        limit,
-        tl_status,
-        created_at,
-        updated_at,
-        policy,
-        equivalent_code,
-        from_pid,
-        from_display_name,
-        to_pid,
-        to_display_name,
-        used,
-        close_requested_at,
-    ) in tl_rows:
-        available = limit - used
-        trustlines.append(
-            TrustLineSchema.model_validate(
-                {
-                    "id": tl_id,
-                    "from_pid": from_pid,
-                    "to_pid": to_pid,
-                    "from_display_name": from_display_name,
-                    "to_display_name": to_display_name,
-                    "equivalent_code": equivalent_code,
-                    "limit": limit,
-                    "used": used,
-                    "available": available,
-                    "status": tl_status,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "close_requested_at": close_requested_at,
-                    "policy": policy,
-                }
-            )
-        )
-
-    # Debts
-    p_debtor = aliased(Participant)
-    p_creditor = aliased(Participant)
-    debt_stmt = (
-        select(
-            EquivalentModel.code.label("equivalent"),
-            p_debtor.pid.label("debtor"),
-            p_creditor.pid.label("creditor"),
-            Debt.amount,
-        )
-        .select_from(Debt)
-        .join(EquivalentModel, Debt.equivalent_id == EquivalentModel.id)
-        .join(p_debtor, Debt.debtor_id == p_debtor.id)
-        .join(p_creditor, Debt.creditor_id == p_creditor.id)
-        .where(
-            Debt.amount > 0,
-            Debt.debtor_id.in_(list(visited_ids)),
-            Debt.creditor_id.in_(list(visited_ids)),
-        )
-        .order_by(EquivalentModel.code.asc(), p_debtor.pid.asc(), p_creditor.pid.asc())
-    )
-
-    if equivalent:
-        debt_stmt = debt_stmt.where(EquivalentModel.code == equivalent)
-    debt_rows = (await db.execute(debt_stmt)).all()
-    debts = [
-        AdminGraphDebt(equivalent=eq, debtor=debtor, creditor=creditor, amount=amount)
-        for eq, debtor, creditor, amount in debt_rows
-    ]
-
-    incidents, audit_log, transactions, included, truncated = await _graph_optional_collections(
-        db, include
-    )
-
-    return AdminGraphEgoResponse(
-        root_pid=root_pid,
-        participants=participants,
-        trustlines=trustlines,
-        equivalents=equivalents,
-        debts=debts,
-        incidents=incidents,
-        audit_log=audit_log,
-        transactions=transactions,
-        included=included,
-        truncated=truncated,
-    )
 
 
 @router.get("/clearing/cycles", response_model=AdminClearingCyclesResponse)

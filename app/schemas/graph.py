@@ -35,8 +35,8 @@ class AdminGraphDebt(BaseModel):
 #: `list[str]` and admin-ui accepted arbitrary strings - so the contract was narrower than either
 #: implementation, and nothing would have caught a fourth name appearing on the wire.
 #:
-#: The set really is closed here: `_graph_optional_collections` appends a name only inside the
-#: branch that fetched that collection, so a token from `_parse_include_csv` that matches nothing
+#: The set really is closed here: `fetch_optional_collections` (`app/core/admin/graph.py`) appends a name only
+#: inside the branch that fetched that collection, so a token from `_parse_include_csv` that matches nothing
 #: never reaches the response. The type now says what the code already guarantees.
 GraphOptionalCollection = Literal["incidents", "audit_log", "transactions"]
 

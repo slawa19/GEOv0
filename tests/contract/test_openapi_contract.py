@@ -552,8 +552,17 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # path code; DELETE and usage raised it undeclared before). `POST /admin/equivalents` gains its `409` (A-2,
 # `code_exists`) on both halves too and does not enter. Measured with a per-entry dump on `44aac655` and on this tree:
 # the new ledger with those equal pairs removed, plus the removed keys, hashes to the previous digest.
+# 2026-10-07 / programme 032 S2 (B-9): count HOLDS at 47 (after S1's 51 -> 47), digest moves. `GET /admin/graph/snapshot` and
+# `GET /admin/graph/ego` now declare the refusals they always gave (400 for a malformed equivalent code or a blank
+# `pid`; 404 for an unknown `pid` on the ego route), in the canon AND on the decorators, so the two documents agree on
+# them. The ego operation therefore stays OUT of this dictionary (measured: with the canon changed and the decorators
+# not, it entered it and the count read one higher); the snapshot operation was already in it for its older difference (the
+# canon omits the 422 FastAPI adds to a route with query parameters) and only its content changes. Measured by the
+# count (47 before and after) and by the keys (the same 47 operations; `GET /admin/graph/ego` is not among them): the
+# set is the one the previous digest `cd9f78db...2b26` described. Recomputed on the tree rebased onto main `cf498aa5`,
+# not carried over from the pre-rebase value.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "cd9f78db5acb8f179d8f395788c2128635986ab377dd35c0665a4184d9412b26"
+    "488bb1a0f2616fe20231cf3b21cc515db4a0c5c05884efe801469e734bd04250"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 47
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

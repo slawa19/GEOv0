@@ -2,8 +2,8 @@ import re
 from datetime import datetime, timezone
 from uuid import UUID
 from decimal import Decimal
-from typing import Iterable, List, Literal
-from sqlalchemy import event, func, select, and_, or_
+from typing import Iterable, List
+from sqlalchemy import event, select, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money_boundary import MoneyBoundary
@@ -935,109 +935,6 @@ class TrustLineService:
         if not trustline:
             raise NotFoundException("Trustline not found")
         return await self._hydrate_trustline(trustline)
-
-    async def list_all(
-        self,
-        *,
-        equivalent: str | None = None,
-        creditor_pid: str | None = None,
-        debtor_pid: str | None = None,
-        status: Literal["active", "closed"] | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> list[TrustLine]:
-        query = select(TrustLine)
-
-        if status:
-            query = query.where(TrustLine.status == status)
-
-        if creditor_pid:
-            creditor_id = (
-                await self.session.execute(
-                    select(Participant.id).where(Participant.pid == creditor_pid)
-                )
-            ).scalar_one_or_none()
-            if creditor_id is None:
-                return []
-            query = query.where(TrustLine.from_participant_id == creditor_id)
-
-        if debtor_pid:
-            debtor_id = (
-                await self.session.execute(
-                    select(Participant.id).where(Participant.pid == debtor_pid)
-                )
-            ).scalar_one_or_none()
-            if debtor_id is None:
-                return []
-            query = query.where(TrustLine.to_participant_id == debtor_id)
-
-        if equivalent:
-            eq = (
-                await self.session.execute(select(Equivalent).where(Equivalent.code == equivalent))
-            ).scalar_one_or_none()
-            if eq is None:
-                return []
-            query = query.where(TrustLine.equivalent_id == eq.id)
-
-        # `created_at` is not unique -- fixtures write identical values in bulk, and since
-        # migration 019 a triple can hold several rows.  Without a unique tie-break the
-        # offset/limit pages below may repeat or skip rows between requests.
-        query = query.order_by(TrustLine.created_at.desc(), TrustLine.id.asc())
-
-        if offset is not None:
-            query = query.offset(offset)
-        if limit is not None:
-            query = query.limit(limit)
-
-        result = await self.session.execute(query)
-        trustlines = result.scalars().all()
-        # 029 F-029-5, matrix row 9: the Admin API (this method's only caller) keeps the stored scale.
-        return [await self._hydrate_trustline(tl, in_step=False) for tl in trustlines]
-
-    async def count_all(
-        self,
-        *,
-        equivalent: str | None = None,
-        creditor_pid: str | None = None,
-        debtor_pid: str | None = None,
-        status: Literal["active", "closed"] | None = None,
-    ) -> int:
-        query = select(func.count()).select_from(TrustLine)
-
-        if status:
-            query = query.where(TrustLine.status == status)
-
-        if creditor_pid:
-            creditor_id = (
-                await self.session.execute(
-                    select(Participant.id).where(Participant.pid == creditor_pid)
-                )
-            ).scalar_one_or_none()
-            if creditor_id is None:
-                return 0
-            query = query.where(TrustLine.from_participant_id == creditor_id)
-
-        if debtor_pid:
-            debtor_id = (
-                await self.session.execute(
-                    select(Participant.id).where(Participant.pid == debtor_pid)
-                )
-            ).scalar_one_or_none()
-            if debtor_id is None:
-                return 0
-            query = query.where(TrustLine.to_participant_id == debtor_id)
-
-        if equivalent:
-            eq = (
-                await self.session.execute(
-                    select(Equivalent).where(Equivalent.code == equivalent)
-                )
-            ).scalar_one_or_none()
-            if eq is None:
-                return 0
-            query = query.where(TrustLine.equivalent_id == eq.id)
-
-        return int((await self.session.execute(query)).scalar_one())
 
     async def _hydrate_trustline(self, trustline: TrustLine, *, in_step: bool = True) -> TrustLine:
         state = sa_inspect(trustline)

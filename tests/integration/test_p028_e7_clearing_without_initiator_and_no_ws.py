@@ -21,7 +21,7 @@ from httpx import AsyncClient
 from sqlalchemy import select, text
 from starlette.websockets import WebSocketDisconnect
 
-from app.api.v1.admin import _graph_fetch_transactions
+from app.core.admin.graph import fetch_graph_transactions
 from app.core.trustlines.service import CHECKPOINT_SCOPE_CALLER_TRANSACTION, INITIAL_STATUSES
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -71,7 +71,7 @@ async def test_a_clearing_records_no_initiator_and_the_admin_graph_still_lists_i
     rows = (await db_session.execute(select(Transaction).where(Transaction.type == "CLEARING"))).scalars().all()
     rows = [r for r in rows if (r.payload or {}).get("equivalent") == code]
     assert len(rows) == 1, rows
-    items = [i for i in await _graph_fetch_transactions(db_session, limit=1000) if i["tx_id"] == rows[0].tx_id]
+    items = [i for i in await fetch_graph_transactions(db_session, limit=1000) if i["tx_id"] == rows[0].tx_id]
     assert len(items) == 1, "the Admin graph dropped the clearing"  # an inner join on the initiator would
     # The row and the Admin graph item, together: neither names an initiator.
     assert (rows[0].initiator_id, items[0]["initiator_pid"]) == (None, None)
