@@ -1,119 +1,78 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api } from '../api'
-import { describeError } from '../api/describeError'
-import { isRatioBelowThreshold } from '../utils/decimal'
+import { isUnitIntervalDecimalString } from '../utils/decimal'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import { formatTs } from '../utils/datetime'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
+import ListState from '../ui/ListState.vue'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelTrustlineStatus } from '../i18n/labels'
 import type { Trustline } from '../types/domain'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
-import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
-import { useLatestRequest } from '../composables/useLatestRequest'
+import { toLocationQueryRaw } from '../router/query'
+import { usePagedList } from '../composables/usePagedList'
+import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
+import { isTrustlineBottleneck } from './trustlineBottleneck'
 
 const router = useRouter()
 const route = useRoute()
 
-const loading = ref(false)
-const error = ref<string | null>(null)
+const DEFAULT_THRESHOLD = '0.10'
 
 const equivalent = ref('')
 const creditor = ref('')
 const debtor = ref('')
 const status = ref('')
-const threshold = ref('0.10')
+const threshold = ref(DEFAULT_THRESHOLD)
 
-const page = ref(1)
-const perPage = ref(20)
-const total = ref(0)
-const items = ref<Trustline[]>([])
-const loadRequests = useLatestRequest()
+const { page, perPage, total, items, loading, error, reload, reloadFromFirstPage } = usePagedList<Trustline>(
+  ({ page: requestPage, perPage: requestPerPage }) =>
+    api.listTrustlines({
+      page: requestPage,
+      per_page: requestPerPage,
+      equivalent: equivalent.value || undefined,
+      creditor: creditor.value || undefined,
+      debtor: debtor.value || undefined,
+      status: status.value || undefined,
+    }),
+  { errorKey: 'trustlines.loadFailed' },
+)
 
 const drawerOpen = ref(false)
 const selected = ref<Trustline | null>(null)
 
-const { isApplying: applyingRouteQuery, isActive: isTrustlinesRoute, run: withRouteHydration } =
-  useRouteHydrationGuard(route, '/trustlines')
+const debouncedReload = debounce(reloadFromFirstPage, DEBOUNCE_FILTER_MS)
 
-function applyRouteQueryToFilters(): boolean {
-  const reloadChanged = withRouteHydration(() => {
-    const nextEq = readQueryString(route.query.equivalent).trim()
-    const nextCreditor = readQueryString(route.query.creditor).trim()
-    const nextDebtor = readQueryString(route.query.debtor).trim()
-    const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
-    const nextThr = readQueryString(route.query.threshold).trim()
+// NOTE: the threshold is a UI-only highlight knob: it is linked in the URL but never reloads the list.
+const { applyRoute } = useRouteQueryFilters({
+  route,
+  router,
+  path: '/trustlines',
+  filters: {
+    equivalent: { model: equivalent },
+    creditor: { model: creditor },
+    debtor: { model: debtor },
+    status: { model: status, fromQuery: (raw) => raw.trim().toLowerCase() },
+    threshold: {
+      model: threshold,
+      fromQuery: (raw) => raw.trim() || DEFAULT_THRESHOLD,
+      toQuery: (value) => (value.trim() === DEFAULT_THRESHOLD ? '' : value.trim()),
+      reloads: false,
+    },
+  },
+  onRouteChange: reloadFromFirstPage,
+  onUserChange: debouncedReload,
+})
 
-    let didChange = false
-    if (equivalent.value !== nextEq) {
-      equivalent.value = nextEq
-      didChange = true
-    }
-    if (creditor.value !== nextCreditor) {
-      creditor.value = nextCreditor
-      didChange = true
-    }
-    if (debtor.value !== nextDebtor) {
-      debtor.value = nextDebtor
-      didChange = true
-    }
-    if (status.value !== nextStatus) {
-      status.value = nextStatus
-      didChange = true
-    }
-    if (nextThr && threshold.value !== nextThr) threshold.value = nextThr
-    return didChange
-  })
-
-  return Boolean(reloadChanged)
-}
-
-function syncFiltersToRouteQuery() {
-  // When leaving the page, route changes first; avoid calling router.replace on the next route.
-  if (!isTrustlinesRoute.value) return
-  const query: Record<string, unknown> = { ...route.query }
-
-  const eq = String(equivalent.value || '').trim()
-  const cr = String(creditor.value || '').trim()
-  const db = String(debtor.value || '').trim()
-  const st = String(status.value || '').trim()
-  const thr = String(threshold.value || '').trim()
-
-  if (eq) query.equivalent = eq
-  else delete query.equivalent
-
-  if (cr) query.creditor = cr
-  else delete query.creditor
-
-  if (db) query.debtor = db
-  else delete query.debtor
-
-  if (st) query.status = st
-  else delete query.status
-
-  if (thr && thr !== '0.10') query.threshold = thr
-  else delete query.threshold
-
-  const curr = route.query as unknown as Record<string, unknown>
-  const same =
-    String(curr.equivalent ?? '') === String(query.equivalent ?? '') &&
-    String(curr.creditor ?? '') === String(query.creditor ?? '') &&
-    String(curr.debtor ?? '') === String(query.debtor ?? '') &&
-    String(curr.status ?? '') === String(query.status ?? '') &&
-    String(curr.threshold ?? '') === String(query.threshold ?? '')
-
-  if (!same) void router.replace({ query: toLocationQueryRaw(query) })
-}
+const thresholdValid = computed(() => isUnitIntervalDecimalString(threshold.value))
 
 function isBottleneck(row: Trustline): boolean {
-  return isRatioBelowThreshold({ numerator: row.available, denominator: row.limit, threshold: threshold.value })
+  return isTrustlineBottleneck(row, threshold.value)
 }
 
 const { money, catalogueSettled, hasUnknownPrecision, loadEquivalentPrecision } = useEquivalentPrecision()
@@ -124,41 +83,6 @@ async function loadEquivalents() {
   } catch {
     // The catalogue is the only source of precision; without it money cells stay '—'
     // (see precisionMissing) instead of asserting a digit count nobody declared.
-  }
-}
-
-function fmtTs(iso: string): string {
-  return formatTs(iso)
-}
-
-async function load() {
-  const request = loadRequests.begin()
-  const requestPage = page.value
-  const requestPerPage = perPage.value
-  loading.value = true
-  error.value = null
-  try {
-    const data = await api.listTrustlines({
-      page: requestPage,
-      per_page: requestPerPage,
-      equivalent: equivalent.value || undefined,
-      creditor: creditor.value || undefined,
-      debtor: debtor.value || undefined,
-      status: status.value || undefined,
-    })
-    if (!request.isCurrent()) return
-    total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
-    if (requestPage > maxPage) {
-      page.value = maxPage
-      return
-    }
-    items.value = data.items
-  } catch (e: unknown) {
-    if (!request.isCurrent()) return
-    error.value = describeError(e, 'trustlines.loadFailed').text
-  } finally {
-    if (request.isCurrent()) loading.value = false
   }
 }
 
@@ -176,45 +100,12 @@ function goEquivalent(eq: string) {
 }
 
 onMounted(() => {
-  applyRouteQueryToFilters()
+  applyRoute()
   void loadEquivalents()
-  void load()
+  void reload()
 })
-watch(page, () => void load())
-watch(perPage, () => {
-  page.value = 1
-  void load()
-})
-
-watch(
-  () => [route.query.equivalent, route.query.creditor, route.query.debtor, route.query.status, route.query.threshold],
-  () => {
-    const reloadChanged = applyRouteQueryToFilters()
-    if (reloadChanged) {
-      page.value = 1
-      void load()
-    }
-  },
-)
-
-const debouncedReload = debounce(() => {
-  page.value = 1
-  void load()
-}, DEBOUNCE_FILTER_MS)
 
 onBeforeUnmount(() => debouncedReload.cancel())
-
-// NOTE: threshold is a UI-only highlight knob; do not reload the list when it changes.
-watch([equivalent, creditor, debtor, status], () => {
-  if (applyingRouteQuery.value) return
-  syncFiltersToRouteQuery()
-  debouncedReload()
-})
-
-watch(threshold, () => {
-  if (applyingRouteQuery.value) return
-  syncFiltersToRouteQuery()
-})
 
 const statusOptions = computed(() => [
   { label: t('common.any'), value: '' },
@@ -274,30 +165,21 @@ const precisionMissing = computed(
             v-model="threshold"
             size="small"
             :placeholder="t('trustlines.filter.thresholdPlaceholder')"
+            :aria-invalid="!thresholdValid"
+            :class="{ 'threshold--invalid': !thresholdValid }"
             style="width: 110px"
           />
         </div>
       </div>
     </template>
 
-    <LoadErrorAlert
-      v-if="error"
-      :title="error"
-      :busy="loading"
-      @retry="load"
-    />
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="10"
-    />
-
-    <el-empty
-      v-else-if="items.length === 0"
-      :description="t('trustlines.none')"
-    />
-
-    <div v-else>
+    <ListState
+      :error="error"
+      :loading="loading"
+      :empty="items.length === 0"
+      :empty-text="t('trustlines.none')"
+      @retry="reload"
+    >
       <el-alert
         v-if="precisionMissing"
         data-testid="trustlines-precision-unavailable"
@@ -423,13 +305,13 @@ const precisionMissing = computed(
             />
           </template>
           <template #default="scope">
-            {{ scope.row.status }}
+            {{ labelTrustlineStatus(scope.row.status) }}
             <el-tag
               v-if="scope.row.close_requested_at"
               type="warning"
               size="small"
               data-testid="tl-close-requested"
-              :title="fmtTs(scope.row.close_requested_at)"
+              :title="formatTs(scope.row.close_requested_at)"
             >
               {{ t('trustlines.closeRequested') }}
             </el-tag>
@@ -446,7 +328,7 @@ const precisionMissing = computed(
             />
           </template>
           <template #default="scope">
-            {{ fmtTs(scope.row.created_at) }}
+            {{ formatTs(scope.row.created_at) }}
           </template>
         </el-table-column>
       </el-table>
@@ -464,7 +346,7 @@ const precisionMissing = computed(
           background
         />
       </div>
-    </div>
+    </ListState>
   </el-card>
 
   <el-drawer
@@ -556,11 +438,11 @@ const precisionMissing = computed(
             size="small"
             style="margin-left: 8px"
           >
-            {{ t('trustlines.closeRequested') }} · {{ fmtTs(selected.close_requested_at) }}
+            {{ t('trustlines.closeRequested') }} · {{ formatTs(selected.close_requested_at) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.createdAt')">
-          {{ fmtTs(selected.created_at) }}
+          {{ formatTs(selected.created_at) }}
         </el-descriptions-item>
         <el-descriptions-item :label="t('trustlines.policy')">
           <pre class="json">{{ JSON.stringify(selected.policy, null, 2) }}</pre>
@@ -633,6 +515,9 @@ const precisionMissing = computed(
 .pager__hint {
   color: var(--el-text-color-secondary);
   font-size: var(--geo-font-size-sub);
+}
+.threshold--invalid :deep(.el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
 }
 .bottleneck {
   color: var(--el-color-danger);

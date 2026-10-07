@@ -1,111 +1,43 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
-import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
+import ListState from '../ui/ListState.vue'
 import { debounce } from '../utils/debounce'
+import { formatTs } from '../utils/datetime'
+import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import { t } from '../i18n'
 import type { AuditLogEntry } from '../types/domain'
-import { useLatestRequest } from '../composables/useLatestRequest'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
-import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
-
-const loading = ref(false)
-const error = ref<string | null>(null)
+import { usePagedList } from '../composables/usePagedList'
+import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
 
 const route = useRoute()
 const router = useRouter()
 const q = ref('')
 let scheduledSearchQ = ''
 
-const page = ref(1)
-const perPage = ref(20)
-const total = ref(0)
-const items = ref<AuditLogEntry[]>([])
-const loadRequests = useLatestRequest()
+// NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
+const { page, perPage, total, items, loading, error, reload, reloadFromFirstPage } = usePagedList<AuditLogEntry>(
+  ({ page: requestPage, perPage: requestPerPage }) =>
+    api.listAuditLog({ page: requestPage, per_page: requestPerPage, q: q.value.trim() || undefined }),
+  { errorKey: 'auditLog.loadFailed' },
+)
 
 const drawerOpen = ref(false)
 const selected = ref<AuditLogEntry | null>(null)
-
-const { isApplying: applyingRouteQuery, isActive: isAuditRoute, run: withRouteHydration } =
-  useRouteHydrationGuard(route, '/audit-log')
-
-function applyRouteQueryToFilter(): boolean {
-  const changed = withRouteHydration(() => {
-    const nextQ = readQueryString(route.query.q)
-    if (q.value === nextQ) return false
-    q.value = nextQ
-    return true
-  })
-  return Boolean(changed)
-}
-
-function syncFilterToRouteQuery() {
-  if (!isAuditRoute.value) return
-  const query: Record<string, unknown> = { ...route.query }
-  const nextQ = q.value
-  if (nextQ !== '') query.q = nextQ
-  else delete query.q
-  if (readQueryString(route.query.q) !== nextQ) {
-    void router.replace({ query: toLocationQueryRaw(query) })
-  }
-}
-
-async function load() {
-  const request = loadRequests.begin()
-  const requestPage = page.value
-  const requestPerPage = perPage.value
-  loading.value = true
-  error.value = null
-  try {
-    // NOTE: audit-log search must be server-side. Client-side filtering of a single loaded page is misleading.
-    const searchQ = q.value.trim()
-    const data = (await api.listAuditLog({
-      page: requestPage,
-      per_page: requestPerPage,
-      q: searchQ || undefined,
-    }))
-    if (!request.isCurrent()) return
-    total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
-    if (requestPage > maxPage) {
-      page.value = maxPage
-      return
-    }
-    items.value = data.items
-  } catch (e: unknown) {
-    if (!request.isCurrent()) return
-    error.value = describeError(e, 'auditLog.loadFailed').text
-  } finally {
-    if (request.isCurrent()) loading.value = false
-  }
-}
 
 function openRow(row: AuditLogEntry) {
   selected.value = row
   drawerOpen.value = true
 }
 
-onMounted(() => {
-  applyRouteQueryToFilter()
-  scheduledSearchQ = q.value.trim()
-  void load()
-})
-watch(page, () => void load())
-watch(perPage, () => {
-  page.value = 1
-  void load()
-})
+const debouncedReload = debounce(reloadFromFirstPage, DEBOUNCE_SEARCH_MS)
 
-const debouncedReload = debounce(() => {
-  if (page.value !== 1) page.value = 1
-  else void load()
-}, 250)
-
+// The search is shown and linked as typed (whitespace included) but searched trimmed: a change that does not change
+// the trimmed text asks the server nothing.
 function scheduleReloadIfNormalizedSearchChanged() {
   const nextSearchQ = q.value.trim()
   if (nextSearchQ === scheduledSearchQ) return
@@ -113,23 +45,22 @@ function scheduleReloadIfNormalizedSearchChanged() {
   debouncedReload()
 }
 
-onBeforeUnmount(() => debouncedReload.cancel())
-
-watch(
-  () => route.query.q,
-  () => {
-    const changed = applyRouteQueryToFilter()
-    if (changed) {
-      scheduleReloadIfNormalizedSearchChanged()
-    }
-  },
-)
-
-watch(q, () => {
-  if (applyingRouteQuery.value) return
-  syncFilterToRouteQuery()
-  scheduleReloadIfNormalizedSearchChanged()
+const { applyRoute } = useRouteQueryFilters({
+  route,
+  router,
+  path: '/audit-log',
+  filters: { q: { model: q, fromQuery: (raw) => raw, toQuery: (value) => value } },
+  onRouteChange: scheduleReloadIfNormalizedSearchChanged,
+  onUserChange: scheduleReloadIfNormalizedSearchChanged,
 })
+
+onMounted(() => {
+  applyRoute()
+  scheduledSearchQ = q.value.trim()
+  void reload()
+})
+
+onBeforeUnmount(() => debouncedReload.cancel())
 </script>
 
 <template>
@@ -150,24 +81,13 @@ watch(q, () => {
       </div>
     </template>
 
-    <LoadErrorAlert
-      v-if="error"
-      :title="error"
-      :busy="loading"
-      @retry="load"
-    />
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="10"
-    />
-
-    <el-empty
-      v-else-if="items.length === 0"
-      :description="t('auditLog.none')"
-    />
-
-    <div v-else>
+    <ListState
+      :error="error"
+      :loading="loading"
+      :empty="items.length === 0"
+      :empty-text="t('auditLog.none')"
+      @retry="reload"
+    >
       <el-table
         :data="items"
         size="small"
@@ -206,6 +126,9 @@ watch(q, () => {
               :label="t('auditLog.timestamp')"
               tooltip-key="audit.timestamp"
             />
+          </template>
+          <template #default="scope">
+            {{ formatTs(scope.row.timestamp) }}
           </template>
         </el-table-column>
         <el-table-column
@@ -317,7 +240,7 @@ watch(q, () => {
           background
         />
       </div>
-    </div>
+    </ListState>
   </el-card>
 
   <el-drawer
@@ -343,7 +266,7 @@ watch(q, () => {
               </span>
             </el-descriptions-item>
             <el-descriptions-item :label="t('auditLog.timestamp')">
-              {{ selected.timestamp }}
+              {{ formatTs(selected.timestamp) }}
             </el-descriptions-item>
             <el-descriptions-item :label="t('auditLog.actor')">
               <span class="geoInlineRow">

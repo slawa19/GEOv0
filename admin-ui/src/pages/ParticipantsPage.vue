@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import ListState from '../ui/ListState.vue'
+import { promptReason } from '../ui/promptReason'
 import { debounce } from '../utils/debounce'
+import { formatTs } from '../utils/datetime'
 import { DEBOUNCE_SEARCH_MS } from '../constants/timing'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
 import type { Participant } from '../types/domain'
-import { readQueryString, toLocationQueryRaw } from '../router/query'
-import { useRouteHydrationGuard } from '../composables/useRouteHydrationGuard'
-import { useLatestRequest } from '../composables/useLatestRequest'
+import { toLocationQueryRaw } from '../router/query'
+import { usePagedList } from '../composables/usePagedList'
+import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
 import {
   isLockedParticipantStatus,
   labelParticipantStatus,
@@ -25,157 +28,84 @@ import {
 const router = useRouter()
 const route = useRoute()
 
-const loading = ref(false)
-const error = ref<string | null>(null)
-
 const q = ref('')
 const status = ref<string>('')
 const type = ref<string>('')
 
-const page = ref(1)
-const perPage = ref(20)
-const total = ref(0)
-const items = ref<Participant[]>([])
-const loadRequests = useLatestRequest()
-
-const drawerOpen = ref(false)
-const selected = ref<Participant | null>(null)
-let pageActive = true
-
-const { isApplying: applyingRouteQuery, isActive: isParticipantsRoute, run: withRouteHydration } =
-  useRouteHydrationGuard(route, '/participants')
-
-function applyRouteQueryToFilters(): boolean {
-  const changed = withRouteHydration(() => {
-    const nextQ = readQueryString(route.query.q).trim()
-    const nextStatus = readQueryString(route.query.status).trim().toLowerCase()
-    const nextType = readQueryString(route.query.type).trim().toLowerCase()
-
-    let didChange = false
-    if (q.value !== nextQ) {
-      q.value = nextQ
-      didChange = true
-    }
-    if (status.value !== nextStatus) {
-      status.value = nextStatus
-      didChange = true
-    }
-    if (type.value !== nextType) {
-      type.value = nextType
-      didChange = true
-    }
-    return didChange
-  })
-  return Boolean(changed)
-}
-
-function syncFiltersToRouteQuery() {
-  // Avoid calling router.replace after the user navigated away (prevents double navigation/flicker).
-  if (!isParticipantsRoute.value) return
-  const query: Record<string, unknown> = { ...route.query }
-
-  const qq = String(q.value || '').trim()
-  const st = String(status.value || '').trim()
-  const ty = String(type.value || '').trim()
-
-  if (qq) query.q = qq
-  else delete query.q
-
-  if (st) query.status = st
-  else delete query.status
-
-  if (ty) query.type = ty
-  else delete query.type
-
-  const curr = route.query as unknown as Record<string, unknown>
-  const same =
-    String(curr.q ?? '') === String(query.q ?? '') &&
-    String(curr.status ?? '') === String(query.status ?? '') &&
-    String(curr.type ?? '') === String(query.type ?? '')
-
-  if (!same) void router.replace({ query: toLocationQueryRaw(query) })
-}
-
-async function load() {
-  const request = loadRequests.begin()
-  const requestPage = page.value
-  const requestPerPage = perPage.value
-  loading.value = true
-  error.value = null
-  try {
-    const data = await api.listParticipants({
+const { page, perPage, total, items, loading, error, reload, reloadFromFirstPage } = usePagedList<Participant>(
+  ({ page: requestPage, perPage: requestPerPage }) =>
+    api.listParticipants({
       page: requestPage,
       per_page: requestPerPage,
       status: status.value || undefined,
       type: type.value || undefined,
       q: q.value || undefined,
-    })
-    if (!request.isCurrent()) return
-    total.value = data.total
-    const maxPage = Math.max(1, Math.ceil(total.value / requestPerPage))
-    if (requestPage > maxPage) {
-      page.value = maxPage
-      return
-    }
-    items.value = data.items
-  } catch (e: unknown) {
-    if (!request.isCurrent()) return
-    error.value = describeError(e, 'participant.loadFailed').text
-  } finally {
-    if (request.isCurrent()) loading.value = false
-  }
-}
+    }),
+  { errorKey: 'participant.loadFailed' },
+)
 
-async function promptReason(title: string): Promise<string | null> {
-  try {
-    const r = await ElMessageBox.prompt(t('common.reasonRequired'), title, {
-      confirmButtonText: t('common.confirm'),
-      cancelButtonText: t('common.cancel'),
-      inputPlaceholder: t('participant.prompt.reasonPlaceholder'),
-      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
-      type: 'warning',
-    })
-    return r.value
-  } catch {
-    return null
-  }
-}
+const drawerOpen = ref(false)
+const selected = ref<Participant | null>(null)
+let pageActive = true
 
-async function freeze(row: Participant) {
-  const reason = await promptReason(t('participant.prompt.freezeTitle', { pid: row.pid }))
+const debouncedReload = debounce(reloadFromFirstPage, DEBOUNCE_SEARCH_MS)
+
+const lowerTrimmed = (raw: string) => raw.trim().toLowerCase()
+const { applyRoute } = useRouteQueryFilters({
+  route,
+  router,
+  path: '/participants',
+  filters: {
+    q: { model: q },
+    status: { model: status, fromQuery: lowerTrimmed },
+    type: { model: type, fromQuery: lowerTrimmed },
+  },
+  onRouteChange: reloadFromFirstPage,
+  onUserChange: debouncedReload,
+})
+
+// The two operator actions are one flow that differs in the call and the words.
+const STATUS_ACTIONS = {
+  freeze: {
+    call: (pid: string, reason: string) => api.freezeParticipant(pid, reason),
+    titleKey: 'participant.prompt.freezeTitle',
+    done: 'participant.frozen',
+    failed: 'participant.freezeFailed',
+  },
+  unfreeze: {
+    call: (pid: string, reason: string) => api.unfreezeParticipant(pid, reason),
+    titleKey: 'participant.prompt.unfreezeTitle',
+    done: 'participant.unfrozen',
+    failed: 'participant.unfreezeFailed',
+  },
+} as const
+
+async function changeStatus(row: Participant, action: keyof typeof STATUS_ACTIONS) {
+  const words = STATUS_ACTIONS[action]
+  const reason = await promptReason(
+    t(words.titleKey, { pid: row.pid }),
+    '',
+    'common.confirm',
+    'participant.prompt.reasonPlaceholder',
+  )
   if (!reason || !pageActive) return
   try {
-    const result = await api.freezeParticipant(row.pid, reason)
+    const result = await words.call(row.pid, reason)
     if (!pageActive) return
     const updated = { ...row, status: result.status }
     const index = items.value.findIndex((item) => item.pid === row.pid)
     if (index >= 0) items.value[index] = updated
     if (selected.value?.pid === row.pid) selected.value = updated
-    ElMessage.success(t('participant.frozen', { pid: row.pid }))
-    await load()
+    ElMessage.success(t(words.done, { pid: row.pid }))
+    await reload()
   } catch (e: unknown) {
     if (!pageActive) return
-    ElMessage.error(describeError(e, 'participant.freezeFailed').text)
+    ElMessage.error(describeError(e, words.failed).text)
   }
 }
 
-async function unfreeze(row: Participant) {
-  const reason = await promptReason(t('participant.prompt.unfreezeTitle', { pid: row.pid }))
-  if (!reason || !pageActive) return
-  try {
-    const result = await api.unfreezeParticipant(row.pid, reason)
-    if (!pageActive) return
-    const updated = { ...row, status: result.status }
-    const index = items.value.findIndex((item) => item.pid === row.pid)
-    if (index >= 0) items.value[index] = updated
-    if (selected.value?.pid === row.pid) selected.value = updated
-    ElMessage.success(t('participant.unfrozen', { pid: row.pid }))
-    await load()
-  } catch (e: unknown) {
-    if (!pageActive) return
-    ElMessage.error(describeError(e, 'participant.unfreezeFailed').text)
-  }
-}
+const freeze = (row: Participant) => changeStatus(row, 'freeze')
+const unfreeze = (row: Participant) => changeStatus(row, 'unfreeze')
 
 function openRow(row: Participant) {
   selected.value = row
@@ -201,41 +131,13 @@ function goAuditLog(pid: string) {
 }
 
 onMounted(() => {
-  applyRouteQueryToFilters()
-  void load()
+  applyRoute()
+  void reload()
 })
-
-watch(
-  () => [route.query.q, route.query.status, route.query.type],
-  () => {
-    const changed = applyRouteQueryToFilters()
-    if (changed) {
-      page.value = 1
-      void load()
-    }
-  },
-)
-
-watch(page, () => void load())
-watch(perPage, () => {
-  page.value = 1
-  void load()
-})
-
-const debouncedReload = debounce(() => {
-  page.value = 1
-  void load()
-}, DEBOUNCE_SEARCH_MS)
 
 onBeforeUnmount(() => {
   pageActive = false
   debouncedReload.cancel()
-})
-
-watch([q, status, type], () => {
-  if (applyingRouteQuery.value) return
-  syncFiltersToRouteQuery()
-  debouncedReload()
 })
 
 const statusOptions = computed(() => participantStatusOptions())
@@ -297,36 +199,13 @@ const typeOptions = computed(() => [
       </div>
     </template>
 
-    <el-alert
-      v-if="error"
-      :title="error"
-      type="error"
-      show-icon
-      :closable="false"
-      class="mb"
+    <ListState
+      :error="error"
+      :loading="loading"
+      :empty="items.length === 0"
+      :empty-text="t('participant.none')"
+      @retry="reload"
     >
-      <template #default>
-        <el-button
-          size="small"
-          type="primary"
-          @click="load"
-        >
-          {{ t('common.refresh') }}
-        </el-button>
-      </template>
-    </el-alert>
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="10"
-    />
-
-    <el-empty
-      v-else-if="items.length === 0"
-      :description="t('participant.none')"
-    />
-
-    <div v-else>
       <el-table
         :data="items"
         size="small"
@@ -454,7 +333,7 @@ const typeOptions = computed(() => [
           background
         />
       </div>
-    </div>
+    </ListState>
   </el-card>
 
   <el-drawer
@@ -500,7 +379,7 @@ const typeOptions = computed(() => [
           v-if="selected.created_at"
           :label="t('participant.drawer.createdAt')"
         >
-          {{ selected.created_at }}
+          {{ formatTs(selected.created_at) }}
         </el-descriptions-item>
         <el-descriptions-item
           v-if="selected.meta && Object.keys(selected.meta).length > 0"
