@@ -163,7 +163,7 @@ function moneyByEquivalent(value: string, equivalent: unknown): string {
   return money(value, equivalent, precisionByEq.value)
 }
 
-const { metricsLoading, metricsError, selectedBalanceRows } = useGraphAnalytics({
+const { metricsLoading, metricsError, selectedBalanceRows, reloadSelectedMetrics } = useGraphAnalytics({
   analyticsEq,
   selected,
 })
@@ -317,6 +317,8 @@ function reloadAll() {
 }
 
 function reloadDrawer() {
+  // The drawer's "Refresh" refreshes what the drawer shows: the graph and the selected participant's balance rows.
+  void reloadSelectedMetrics()
   return reloadGraph({ fit: false, preserveViewport: true })
 }
 

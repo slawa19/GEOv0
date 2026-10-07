@@ -68,6 +68,13 @@ export function useGraphAnalytics(opts: {
     }
   }
 
+  // The operator's explicit "Refresh" (033 B, item 4): forget every cached answer and ask again for the selected
+  // participant - also when the last request failed, which the watcher never retries (nothing about the selection changed).
+  async function reloadSelectedMetrics() {
+    metricsCache.value.clear()
+    await loadSelectedMetrics()
+  }
+
   watch([selectedPid, selectedEqCode], () => {
     void loadSelectedMetrics()
   })
@@ -78,6 +85,7 @@ export function useGraphAnalytics(opts: {
     metricsLoading,
     metricsError,
     loadSelectedMetrics,
+    reloadSelectedMetrics,
 
     selectedBalanceRows,
   }

@@ -5,6 +5,7 @@ import { api } from '../api'
 import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import ListState from '../ui/ListState.vue'
+import EquivalentCatalogueAlert from '../ui/EquivalentCatalogueAlert.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { promptReason } from '../ui/promptReason'
 import { t } from '../i18n'
@@ -49,7 +50,7 @@ const alertsCount = computed(() => status.value?.alerts.length ?? 0)
 const detectedIssues = computed(() => detectIssues(equivalents.value))
 
 // The money of an over-limit debt is printed at the precision of the equivalent of its row.
-const { money, loadEquivalentPrecision } = useEquivalentPrecision()
+const { money, catalogueError, catalogueLoading, loadEquivalentPrecision } = useEquivalentPrecision()
 
 const invariantColumns: ReadonlyArray<{ name: InvariantName; labelKey: string; minWidth: number }> = [
   { name: 'debt_symmetry', labelKey: 'integrity.columns.debtSymmetry', minWidth: 200 },
@@ -167,7 +168,10 @@ async function clearHold(code: string) {
   } catch (e: unknown) {
     holdRefusal.value = { code, text: describeHoldClearRefusal(e) }
   }
-  // The server's answer decides what is held, not the outcome of this click.
+  // The server's answer decides what is held, not the outcome of this click - and what the status says: a lifted
+  // hold changes the verdict above the list, so both are read again, after a refusal too (another session may
+  // have cleared it). Each read owns and reports its own failure (033 B, item 1).
+  void load()
   try {
     await loadHolds()
   } finally {
@@ -181,8 +185,9 @@ async function loadCatalogue() {
   try {
     await loadEquivalentPrecision()
   } catch {
-    // Not fatal and not hidden: without the catalogue the over-limit amounts print '—' (the project's rule for an
-    // unknown precision) instead of a guessed digit count; the status itself does not depend on it.
+    // Not fatal, and shown: `catalogueError` is rendered with its ref and a retry. Without the catalogue the
+    // over-limit amounts print '—' (the project's rule for an unknown precision) instead of a guessed digit
+    // count; the status itself does not depend on it.
   }
 }
 
@@ -277,6 +282,13 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <EquivalentCatalogueAlert
+      v-if="catalogueError"
+      :error="catalogueError"
+      :busy="catalogueLoading"
+      @retry="loadCatalogue"
+    />
 
     <ListState
       :error="error"
