@@ -314,6 +314,7 @@ def test_the_guard_notices_a_gate_that_lost_postgres() -> None:
             if isinstance(job, dict)
             and not _is_scheduled_only(job)
             and _has_postgres_service(job)
+            and _tier_steps(job)
         )
 
     # 1. The service container disappears.
@@ -389,19 +390,15 @@ def test_the_counter_check_is_not_vacuous() -> None:
     ]
     # NOT EVERY REQUIRED POSTGRESQL JOB RUNS THE TIER SINCE 2026-10-07 (032 S4). `ui-smoke` got a
     # `postgres:` service to back the real backend of the Admin UI smoke; it runs no pytest. The
-    # mutations above edit the FIRST required PostgreSQL job (`_required_postgres_job_id`), so what
-    # keeps them meaningful is that this first job is one that runs the tier - checked here - and
-    # that every job running the tier carries none of the things mutations 4-8 add (the loop).
+    # mutations above edit the first required PostgreSQL job THAT RUNS THE TIER
+    # (`_required_postgres_job_id`), independent of job order in the file; what keeps them meaningful
+    # is that such a job exists (asserted here) and that every job running the tier carries none of
+    # the things mutations 4-8 add (the loop).
     postgres_job_ids = [job_id for job_id in required_postgres_job_ids if _tier_steps(workflow["jobs"][job_id])]
 
     assert postgres_job_ids, (
         "There is no required job with a PostgreSQL service running the backend tier to mutate, so "
         "the counter-check above would have proved nothing." + _LIMITS
-    )
-    assert required_postgres_job_ids[0] in postgres_job_ids, (
-        f"The first required PostgreSQL job, '{required_postgres_job_ids[0]}', runs no backend tier "
-        "(verify_local.ps1 -BackendOnly); the mutations above edit that job, so they would flip "
-        "nothing." + _LIMITS
     )
     for job_id in postgres_job_ids:
         marker_steps = _tier_steps(workflow["jobs"][job_id])
