@@ -91,9 +91,14 @@ _HERE = Path(__file__).resolve().parent
 #: tests of `portable/test_p017_t1712_community_descriptions.py` that compared the community
 #: descriptions with the v2 generators and the extraction script living there (two functions, each
 #: run for two communities). They said they would die with the generators.
+#:
+#: 2026-10-07, 033 A item 6: powershell 223 -> 235. Twelve cases added,
+#: `powershell/test_p033_launchers_write_vite_api_mode_only_for_the_simulator.py`: `Update-EnvLocal` of
+#: `run_full_stack.ps1` and `run_local.ps1` leaves no `VITE_API_MODE` in the Admin UI's `.env.local` (two launchers x
+#: two initial states x two hosts = 8) and keeps it in the Simulator UI's (two states x two hosts = 4).
 EXPECTED_CASES: dict[str, int] = {
     "portable": 192,
-    "powershell": 223,
+    "powershell": 235,
 }
 
 _PARTITIONS = tuple(EXPECTED_CASES)
