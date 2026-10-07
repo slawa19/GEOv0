@@ -10,7 +10,8 @@ import { useLatestRequest } from '../composables/useLatestRequest'
 import { toLocationQueryRaw } from '../router/query'
 
 type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
-type UsageCounts = { trustlines?: number; incidents?: number; debts?: number; integrity_checkpoints?: number }
+// 032 S5 (A-4): the server never sent `incidents` here (`AdminEquivalentUsageResponse` is strict); the dead key is gone.
+type UsageCounts = { trustlines?: number; debts?: number; integrity_checkpoints?: number }
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -45,7 +46,6 @@ async function warmUsage(code: string) {
     const u = usage as unknown as Record<string, unknown>
     usageByCode[key] = {
       trustlines: Number(u.trustlines ?? 0),
-      incidents: typeof u.incidents === 'number' ? Number(u.incidents) : undefined,
       debts: typeof u.debts === 'number' ? Number(u.debts) : undefined,
       integrity_checkpoints:
         typeof u.integrity_checkpoints === 'number' ? Number(u.integrity_checkpoints) : undefined,
@@ -176,12 +176,10 @@ async function deleteEq(row: Equivalent) {
     const usage = await api.getEquivalentUsage(row.code)
     const u = usage as unknown as Record<string, unknown>
     const tl = Number(u.trustlines ?? 0)
-    const inc = u.incidents
     const debts = u.debts
     const ic = u.integrity_checkpoints
     const parts: string[] = []
     parts.push(t('equivalents.delete.usage.trustlines', { n: tl }))
-    if (typeof inc === 'number') parts.push(t('equivalents.delete.usage.incidents', { n: inc }))
     if (typeof debts === 'number') parts.push(t('equivalents.delete.usage.debts', { n: debts }))
     if (typeof ic === 'number') parts.push(t('equivalents.delete.usage.integrityCheckpoints', { n: ic }))
     usageLine = parts.length ? t('equivalents.delete.usage.usedBy', { parts: parts.join(', ') }) : ''
@@ -222,17 +220,15 @@ async function deleteEq(row: Equivalent) {
     const err = e as { message?: unknown; details?: Record<string, unknown> }
     const details = err?.details
     const tl = details?.trustlines
-    const inc = details?.incidents
     const debts = details?.debts
     const ic = details?.integrity_checkpoints
     const msg = e instanceof Error ? e.message : String(err?.message ?? e)
 
-    if ([tl, inc, debts, ic].some((v) => typeof v === 'number')) {
+    if ([tl, debts, ic].some((v) => typeof v === 'number')) {
       ElMessage.error(
         t('equivalents.deleteFailedWithDetails', {
           msg: msg || t('equivalents.deleteFailed'),
           trustlines: Number(tl ?? 0),
-          incidents: Number(inc ?? 0),
           debts: Number(debts ?? 0),
           ic: Number(ic ?? 0),
         }),
@@ -324,23 +320,13 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="usageByCode[scope.row.code]"
                 class="code__sub"
               >
-                <template v-if="typeof usageByCode[scope.row.code]!.debts === 'number' || typeof usageByCode[scope.row.code]!.integrity_checkpoints === 'number'">
-                  {{
-                    t('equivalents.usage.tlDebtsIc', {
-                      trustlines: usageByCode[scope.row.code]!.trustlines ?? 0,
-                      debts: usageByCode[scope.row.code]!.debts ?? 0,
-                      ic: usageByCode[scope.row.code]!.integrity_checkpoints ?? 0,
-                    })
-                  }}
-                </template>
-                <template v-else>
-                  {{
-                    t('equivalents.usage.tlInc', {
-                      trustlines: usageByCode[scope.row.code]!.trustlines ?? 0,
-                      incidents: usageByCode[scope.row.code]!.incidents ?? 0,
-                    })
-                  }}
-                </template>
+                {{
+                  t('equivalents.usage.tlDebtsIc', {
+                    trustlines: usageByCode[scope.row.code]!.trustlines ?? 0,
+                    debts: usageByCode[scope.row.code]!.debts ?? 0,
+                    ic: usageByCode[scope.row.code]!.integrity_checkpoints ?? 0,
+                  })
+                }}
               </div>
               <div
                 v-else-if="usageLoadingByCode[scope.row.code]"

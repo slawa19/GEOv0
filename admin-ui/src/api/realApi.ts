@@ -4,31 +4,28 @@ import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 import {
   AdminConfigPatchResponseSchema,
   AdminConfigResponseSchema,
-  AdminAbortTxResponseSchema,
   AdminEquivalentDeleteResponseSchema,
   AdminEquivalentMutationResponseSchema,
   AdminEquivalentUsageResponseSchema,
   AdminParticipantActionResponseSchema,
   IntegrityStatusResponseSchema,
+  IntegritySummaryResponseSchema,
   IntegrityVerifyResponseSchema,
   flattenAdminConfig,
-  type AdminAbortTxResponse,
   type AdminConfigPatchResponse,
   type AdminConfigResponse,
   type AdminEquivalentDeleteResponse,
   type AdminEquivalentUsageResponse,
   type AdminParticipantActionResponse,
   type IntegrityStatusResponse,
+  type IntegritySummaryResponse,
   type IntegrityVerifyResponse,
 } from './adminContracts'
 import { z, type ZodTypeAny } from 'zod'
-import { isUnitIntervalDecimalString } from '../utils/decimal'
 import type {
   AuditLogEntry,
-  ClearingCycles,
   Equivalent,
   GraphSnapshot,
-  Incident,
   LiquiditySummary,
   Paginated,
   Participant,
@@ -102,18 +99,6 @@ const TrustlineSchema = z
     created_at: z.string(),
     policy: z.record(z.string(), z.unknown()).nullable().optional(),
     close_requested_at: z.string().nullable().optional(),
-  })
-  .passthrough()
-
-const IncidentSchema = z
-  .object({
-    tx_id: z.string(),
-    state: z.string(),
-    initiator_pid: z.string(),
-    equivalent: z.string(),
-    age_seconds: z.number(),
-    sla_seconds: z.number(),
-    created_at: z.string().nullable().optional(),
   })
   .passthrough()
 
@@ -197,7 +182,6 @@ const GraphSnapshotSchema = z
   .object({
     participants: z.array(ParticipantSchema),
     trustlines: z.array(TrustlineSchema),
-    incidents: z.array(IncidentSchema),
     equivalents: z.array(EquivalentSchema),
     debts: z.array(DebtSchema),
     audit_log: z.array(AuditLogEntrySchema),
@@ -207,35 +191,14 @@ const GraphSnapshotSchema = z
     // and demanding a field the canon does not declare is the exact defect this task removes from
     // TransactionSchema above. Absent means "this server says nothing about them", which the
     // consumer must treat as "not asked" - never as "asked, and there are none".
-    // The three names are a CLOSED set, and the canon says so (`api/openapi.yaml`,
+    // The names are a CLOSED set, and the canon says so (`api/openapi.yaml`,
     // `AdminGraphSnapshotResponse.included`). Declared as an enum after external review found the
     // canon narrower than both implementations: `z.string()` here and `list[str]` on the server
     // would have accepted a fourth name silently, on a field whose entire purpose is to be trusted
     // when a consumer decides whether it may draw a conclusion.
-    included: z.array(z.enum(['incidents', 'audit_log', 'transactions'])).optional(),
-    truncated: z.array(z.enum(['incidents', 'audit_log', 'transactions'])).optional(),
-  })
-  .passthrough()
-
-const ClearingCycleEdgeSchema = z
-  .object({
-    equivalent: z.string(),
-    debtor: z.string(),
-    creditor: z.string(),
-    amount: DecimalString,
-  })
-  .passthrough()
-
-const ClearingCyclesSchema = z
-  .object({
-    equivalents: z.record(
-      z.string(),
-      z
-        .object({
-          cycles: z.array(z.array(ClearingCycleEdgeSchema)),
-        })
-        .passthrough(),
-    ),
+    // 032 S5 (A-4): `incidents` left the set with the incidents surface (always empty since 019 stage 4).
+    included: z.array(z.enum(['audit_log', 'transactions'])).optional(),
+    truncated: z.array(z.enum(['audit_log', 'transactions'])).optional(),
   })
   .passthrough()
 
@@ -256,13 +219,8 @@ const ParticipantMetricsSchema = z
   .object({
     pid: z.string(),
     equivalent: z.string().nullable(),
+    // 032 S5 (F-1): the balance rows are the whole answer; the participant analytics were removed.
     balance_rows: z.array(BalanceRowSchema),
-    counterparty: z.unknown().nullable().optional(),
-    concentration: z.unknown().nullable().optional(),
-    distribution: z.unknown().nullable().optional(),
-    rank: z.unknown().nullable().optional(),
-    capacity: z.unknown().nullable().optional(),
-    activity: z.unknown().nullable().optional(),
   })
   .passthrough()
 
@@ -274,37 +232,16 @@ const ParticipantsStatsSchema = z
   })
   .passthrough()
 
-const TrustlineBottlenecksSchema = z
-  .object({
-    threshold: z.number(),
-    items: z.array(TrustlineSchema),
-  })
-  .passthrough()
-
-const LiquidityNetRowSchema = z
-  .object({
-    pid: z.string(),
-    display_name: z.string(),
-    net: DecimalString,
-  })
-  .passthrough()
-
+// 032 S5 (F-2, F-3): the Dashboard's row of one equivalent - its active lines and their money.
 const LiquiditySummarySchema = z
   .object({
     equivalent: z.string().nullable(),
-    threshold: z.number(),
     updated_at: z.string(),
     active_trustlines: z.number(),
-    bottlenecks: z.number(),
-    incidents_over_sla: z.number(),
     // 028 F-028-37: без эквивалента сервер не суммирует деньги — `null`, а не сумма разных единиц.
     total_limit: DecimalString.nullable(),
     total_used: DecimalString.nullable(),
     total_available: DecimalString.nullable(),
-    top_creditors: z.array(LiquidityNetRowSchema),
-    top_debtors: z.array(LiquidityNetRowSchema),
-    top_by_abs_net: z.array(LiquidityNetRowSchema),
-    top_bottleneck_edges: z.array(TrustlineSchema),
   })
   .passthrough()
 
@@ -322,7 +259,6 @@ function paginatedSchema(itemSchema: ZodTypeAny) {
 const ParticipantsListSchema = paginatedSchema(ParticipantSchema)
 const TrustlinesListSchema = paginatedSchema(TrustlineSchema)
 const AuditLogListSchema = paginatedSchema(AuditLogEntrySchema)
-const IncidentsListSchema = paginatedSchema(IncidentSchema)
 const EquivalentsListSchema = z.object({ items: z.array(EquivalentSchema) }).passthrough()
 
 function isProdBuild(): boolean {
@@ -611,20 +547,6 @@ export function buildQuery(pathname: string, params: Record<string, unknown>): s
   return u.pathname + u.search
 }
 
-function validatedOptionalThreshold(value: string | number | null | undefined): string | undefined {
-  if (value === null || value === undefined) return undefined
-  const threshold = String(value).trim()
-  if (!threshold) return undefined
-  if (!isUnitIntervalDecimalString(threshold)) {
-    throw new ApiException({
-      status: 422,
-      code: 'VALIDATION_ERROR',
-      message: 'Threshold must be a decimal between 0 and 1',
-    })
-  }
-  return threshold
-}
-
 export const realApi = {
   health(): Promise<Record<string, unknown>> {
     return requestJson('/api/v1/health')
@@ -658,6 +580,25 @@ export const realApi = {
 
   integrityStatus(): Promise<IntegrityStatusResponse> {
     return requestJson('/api/v1/integrity/status', { admin: true, schema: IntegrityStatusResponseSchema })
+  },
+
+  // 032 S5 (F-4): which equivalents are on an integrity hold. The admin token is accepted by this
+  // participant-or-admin route (`require_participant_or_admin`).
+  integritySummary(): Promise<IntegritySummaryResponse> {
+    return requestJson('/api/v1/integrity/summary', { admin: true, schema: IntegritySummaryResponseSchema })
+  },
+
+  // 032 S5 (F-4): lift an equivalent's integrity hold, with the operator's reason (required, audited). The
+  // refusals (409 `no_integrity_hold`, `no_later_passed_reconciliation_result`) are shown by the Integrity screen
+  // as text, so no generic toast is raised here.
+  clearIntegrityHold(code: string, reason: string): Promise<Equivalent> {
+    return requestJson<Equivalent>(`/api/v1/admin/equivalents/${encodeURIComponent(code)}/integrity-hold/clear`, {
+      method: 'POST',
+      body: { reason },
+      admin: true,
+      schema: AdminEquivalentMutationResponseSchema,
+      toast: false,
+    })
   },
 
   integrityVerify(): Promise<IntegrityVerifyResponse> {
@@ -703,23 +644,10 @@ export const realApi = {
     return requestJson<ParticipantsStats>('/api/v1/admin/participants/stats', { admin: true, schema: ParticipantsStatsSchema })
   },
 
-  trustlineBottlenecks(params: { threshold?: string; limit?: number; equivalent?: string }): Promise<{ threshold: number; items: Trustline[] }> {
-    const threshold = validatedOptionalThreshold(params.threshold)
-    const limit = params.limit ?? 10
-    const equivalent = String(params.equivalent ?? '').trim() || undefined
-    return requestJson<{ threshold: number; items: Trustline[] }>(
-      buildQuery('/api/v1/admin/trustlines/bottlenecks', { threshold, limit, equivalent }),
-      { admin: true, schema: TrustlineBottlenecksSchema },
-    )
-  },
-
-  liquiditySummary(params: { equivalent?: string; threshold?: string; limit?: number }): Promise<LiquiditySummary> {
-    const threshold = validatedOptionalThreshold(params.threshold)
-    const limit = params.limit ?? 10
-    const equivalentRaw = String(params.equivalent ?? '').trim().toUpperCase()
-    const equivalent = equivalentRaw && equivalentRaw !== 'ALL' ? equivalentRaw : undefined
+  liquiditySummary(params: { equivalent?: string }): Promise<LiquiditySummary> {
+    const equivalent = String(params.equivalent || '').trim() || undefined
     return requestJson<LiquiditySummary>(
-      buildQuery('/api/v1/admin/liquidity/summary', { equivalent, threshold, limit }),
+      buildQuery('/api/v1/admin/liquidity/summary', { equivalent }),
       { admin: true, schema: LiquiditySummarySchema },
     )
   },
@@ -866,25 +794,6 @@ export const realApi = {
     })
   },
 
-  listIncidents(params: {
-    page?: number
-    per_page?: number
-  }): Promise<Paginated<Incident>> {
-    const page = params.page ?? 1
-    const per_page = params.per_page ?? 20
-    return requestJson<Paginated<Incident>>(
-      buildQuery('/api/v1/admin/incidents', { page, per_page }),
-      { admin: true, schema: IncidentsListSchema },
-    )
-  },
-
-  abortTx(txId: string, reason: string): Promise<AdminAbortTxResponse> {
-    return requestJson<AdminAbortTxResponse>(
-      `/api/v1/admin/transactions/${encodeURIComponent(txId)}/abort`,
-      { method: 'POST', body: { reason }, admin: true, schema: AdminAbortTxResponseSchema },
-    )
-  },
-
   graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<GraphSnapshot> {
     const equivalent = String(params?.equivalent || '').trim().toUpperCase()
     const include = normalizeGraphInclude(params?.include)
@@ -919,23 +828,12 @@ export const realApi = {
     })
   },
 
-  clearingCycles(params?: { participant_pid?: string }): Promise<ClearingCycles> {
-    const participant_pid = String(params?.participant_pid || '').trim()
-    return requestJson<ClearingCycles>(buildQuery('/api/v1/admin/clearing/cycles', { participant_pid }), {
-      admin: true,
-      schema: ClearingCyclesSchema,
-    })
-  },
-
-  async participantMetrics(
-    pid: string,
-    params?: { equivalent?: string | null; threshold?: string | number | null },
-  ): Promise<ParticipantMetrics> {
+  async participantMetrics(pid: string, params?: { equivalent?: string | null }): Promise<ParticipantMetrics> {
     const eq = params?.equivalent ? String(params.equivalent) : undefined
-    const threshold = validatedOptionalThreshold(params?.threshold)
-
     const pathname = `/api/v1/admin/participants/${encodeURIComponent(pid)}/metrics`
-    const url = buildQuery(pathname, { equivalent: eq, threshold })
-    return await requestJson<ParticipantMetrics>(url, { admin: true, schema: ParticipantMetricsSchema })
+    return await requestJson<ParticipantMetrics>(buildQuery(pathname, { equivalent: eq }), {
+      admin: true,
+      schema: ParticipantMetricsSchema,
+    })
   },
 }

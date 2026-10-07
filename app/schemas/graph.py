@@ -38,7 +38,11 @@ class AdminGraphDebt(BaseModel):
 #: The set really is closed here: `fetch_optional_collections` (`app/core/admin/graph.py`) appends a name only
 #: inside the branch that fetched that collection, so a token from `_parse_include_csv` that matches nothing
 #: never reaches the response. The type now says what the code already guarantees.
-GraphOptionalCollection = Literal["incidents", "audit_log", "transactions"]
+#:
+#: 032 S5 (A-4): `incidents` left the set with the incidents surface - the reader had answered an empty list since
+#: programme 019, stage 4 (a payment is never durable in a non-terminal state). An `include=incidents` token now
+#: matches nothing and is ignored, like any unknown token.
+GraphOptionalCollection = Literal["audit_log", "transactions"]
 
 
 class AdminGraphSnapshotResponse(BaseModel):
@@ -48,13 +52,12 @@ class AdminGraphSnapshotResponse(BaseModel):
     debts: list[AdminGraphDebt]
 
     # Present for UI compatibility (GraphPage reads these keys).
-    incidents: list[Any] = Field(default_factory=list)
     audit_log: list[Any] = Field(default_factory=list)
     transactions: list[Any] = Field(default_factory=list)
 
-    # F-013-1 / T1302, 2026-09-10. WHAT THE THREE LISTS ABOVE CANNOT SAY BY THEMSELVES.
+    # F-013-1 / T1302, 2026-09-10. WHAT THE LISTS ABOVE CANNOT SAY BY THEMSELVES.
     #
-    # Each of them is an empty list in two unrelated situations - "you did not ask for it" and
+    # (Three when this was written; `incidents` left in 032 S5.) Each of them is an empty list in two unrelated situations - "you did not ask for it" and
     # "you asked, and there are none" - and until these two fields the wire could not tell them
     # apart. The consumer that counts committed payments read the length and reported zero for a
     # period it had never been told about (`admin-ui/src/composables/useGraphAnalytics.ts`).
@@ -70,21 +73,6 @@ class AdminGraphSnapshotResponse(BaseModel):
     # standing next to the other two. Recorded in the spec rather than decided silently.
     included: list[GraphOptionalCollection] = Field(default_factory=list)
     truncated: list[GraphOptionalCollection] = Field(default_factory=list)
-
-
-class AdminClearingCycleEdge(BaseModel):
-    equivalent: str
-    debtor: str
-    creditor: str
-    amount: PlainDecimal
-
-
-class AdminClearingCyclesForEquivalent(BaseModel):
-    cycles: list[list[AdminClearingCycleEdge]]
-
-
-class AdminClearingCyclesResponse(BaseModel):
-    equivalents: dict[str, AdminClearingCyclesForEquivalent]
 
 
 class AdminGraphEgoResponse(AdminGraphSnapshotResponse):

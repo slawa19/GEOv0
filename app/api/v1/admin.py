@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -11,9 +10,8 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi import Path as PathParam
 from pydantic import BaseModel, TypeAdapter, ValidationError, WithJsonSchema
-from sqlalchemy import String, cast, desc, func, select, and_, union_all
+from sqlalchemy import String, cast, desc, func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.api import deps
 from app.api.audit import add_audit_entry, audited
@@ -23,11 +21,8 @@ from app.db.models.equivalent import Equivalent as EquivalentModel
 from app.db.models.debt import Debt
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.db.models.transaction import Transaction
 from app.schemas.admin import (
     AdminAuditLogListResponse,
-    AdminAbortTxRequest,
-    AdminAbortTxResponse,
     AdminConfigPatchRequest,
     AdminConfigPatchResponse,
     AdminConfigResponse,
@@ -41,25 +36,17 @@ from app.schemas.admin import (
     AdminParticipantActionRequest,
     AdminParticipantStatusResponse,
     AdminParticipantsListResponse,
-    AdminIncidentsListResponse,
     AdminLiquiditySummaryResponse,
-    AdminLiquidityNetRow,
     AdminParticipantsStatsResponse,
-    AdminTrustLinesBottlenecksResponse,
     AdminTrustLinesListResponse,
 )
 from app.schemas.equivalents import Equivalent as EquivalentSchema
 from app.schemas.equivalents import EquivalentsList, StoredEquivalent
 from app.schemas.common import ErrorEnvelope
 from app.schemas.graph import (
-    AdminClearingCycleEdge,
-    AdminClearingCyclesForEquivalent,
-    AdminClearingCyclesResponse,
     AdminGraphEgoResponse,
     AdminGraphSnapshotResponse,
 )
-from app.schemas.trustline import TrustLine as TrustLineSchema
-from app.core.clearing.service import ClearingService
 from app.core.payments.router import PaymentRouter
 from app.core.admin.graph import (
     ego_participant_ids,
@@ -67,15 +54,13 @@ from app.core.admin.graph import (
     trustline_page_statements,
     trustline_schema,
 )
-from app.core.admin.metrics import compute_participant_metrics, is_ratio_below_threshold
+from app.core.admin.metrics import compute_participant_metrics
 from app.core.participants.service import ParticipantService
 from app.core import equivalents as equivalents_core
 from app.utils.exceptions import (
     BadRequestException,
-    ConflictException,
     NotFoundException,
 )
-from app.utils.metrics import PAYMENT_EVENTS_TOTAL
 from app.utils.validation import validate_equivalent_code
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
@@ -87,26 +72,6 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(deps.require_admin)])
 logger = logging.getLogger(__name__)
 
 _runtime_config_lock = asyncio.Lock()
-
-
-#: THE "STUCK PAYMENT" READERS ARE A COMPATIBILITY SURFACE (programme 019, stage 4; owner decision Q2).
-#: A stuck payment was a durable `NEW`/`PREPARED` row between the payment's commits. Since stage 4 the
-#: hub executes a payment as one transaction and inserts it `COMMITTED` or `ABORTED`, and migration 030
-#: refuses any other `PAYMENT` state (`chk_transaction_payment_terminal`). So the three readers - the
-#: incidents list, the liquidity summary's `incidents_over_sla` and the graph's `include=incidents` - have
-#: nothing to find and answer empty/zero without reading. They stay on the wire, unchanged in shape,
-#: until the fate of the incidents screen and admin abort is decided after 019 (П4, `T1911`).
-
-_DecimalThreshold = Annotated[
-    Decimal,
-    Query(ge=0.0, le=1.0),
-    WithJsonSchema({"type": "number", "minimum": 0, "maximum": 1}),
-]
-_OptionalDecimalThreshold = Annotated[
-    Decimal | None,
-    Query(ge=0.0, le=1.0),
-    WithJsonSchema({"type": "number", "minimum": 0, "maximum": 1}),
-]
 
 
 def _participant_status_db_values_for_filter(status: str | None) -> list[str] | None:
@@ -139,7 +104,8 @@ def _utc_now() -> datetime:
 
 def _runtime_config_items() -> list[tuple[str, bool]]:
     # (key, mutable). 029 `F-029-4`: a key is mutable only if changing it at runtime does what its name says.
-    # LOG_LEVEL and the integrity job's switch and period are taken once at start; the recovery three have no reader.
+    # LOG_LEVEL and the integrity job's switch and period are taken once at start. The three recovery keys, which had
+    # no reader since programme 019, were removed with the incidents surface (032 S5, A-4).
     return [
         ("LOG_LEVEL", False),
         ("RATE_LIMIT_ENABLED", True),
@@ -147,9 +113,6 @@ def _runtime_config_items() -> list[tuple[str, bool]]:
         ("ROUTING_MAX_PATHS", True),
         ("INTEGRITY_CHECKPOINT_ENABLED", False),
         ("INTEGRITY_CHECKPOINT_INTERVAL_SECONDS", False),
-        ("RECOVERY_ENABLED", False),
-        ("RECOVERY_INTERVAL_SECONDS", False),
-        ("PAYMENT_TX_STUCK_TIMEOUT_SECONDS", False),
         ("FEATURE_FLAGS_MULTIPATH_ENABLED", True),
         ("FEATURE_FLAGS_FULL_MULTIPATH_ENABLED", True),
         ("CLEARING_ENABLED", True),
@@ -374,147 +337,26 @@ async def admin_participants_stats(
     )
 
 
-async def _load_admin_trustline_bottlenecks(
-    *,
-    threshold: Decimal,
-    limit: int,
-    equivalent: str | None,
-    db: AsyncSession,
-) -> tuple[int, list[TrustLineSchema]]:
-    p_from = aliased(Participant)
-    p_to = aliased(Participant)
-    used_expr = func.coalesce(Debt.amount, 0)
-    available_expr = TrustLine.limit - used_expr
-
-    stmt = (
-        select(
-            TrustLine.id,
-            TrustLine.limit,
-            TrustLine.status,
-            TrustLine.created_at,
-            TrustLine.updated_at,
-            TrustLine.policy,
-            EquivalentModel.code.label("equivalent"),
-            p_from.pid.label("from_pid"),
-            p_from.display_name.label("from_display_name"),
-            p_to.pid.label("to_pid"),
-            p_to.display_name.label("to_display_name"),
-            used_expr.label("used"),
-            available_expr.label("available"),
-            TrustLine.close_requested_at,
-        )
-        .select_from(TrustLine)
-        .join(EquivalentModel, TrustLine.equivalent_id == EquivalentModel.id)
-        .join(p_from, TrustLine.from_participant_id == p_from.id)
-        .join(p_to, TrustLine.to_participant_id == p_to.id)
-        .outerjoin(
-            Debt,
-            and_(
-                Debt.debtor_id == TrustLine.to_participant_id,
-                Debt.creditor_id == TrustLine.from_participant_id,
-                Debt.equivalent_id == TrustLine.equivalent_id,
-            ),
-        )
-        .where(
-            TrustLine.status == "active",
-            TrustLine.limit > 0,
-        )
-    )
-
-    if equivalent:
-        stmt = stmt.where(EquivalentModel.code == equivalent).order_by(available_expr.asc(), TrustLine.created_at.asc())
-    else:
-        # 028 F-028-38 (owner В-3): without an equivalent the rows mix units, and ordering by the
-        # amount compared 0.5 hours with 10 hryvnias. The share available/limit is unitless.
-        stmt = stmt.order_by((available_expr / TrustLine.limit).asc(), TrustLine.created_at.asc())
-
-    rows = (await db.execute(stmt)).all()
-    total = 0
-    items: list[TrustLineSchema] = []
-    for (
-        tl_id,
-        limit_value,
-        status,
-        created_at,
-        updated_at,
-        policy,
-        equivalent_code,
-        from_pid,
-        from_display_name,
-        to_pid,
-        to_display_name,
-        used,
-        available,
-        close_requested_at,
-    ) in rows:
-        if not is_ratio_below_threshold(
-            numerator=available,
-            denominator=limit_value,
-            threshold=threshold,
-        ):
-            continue
-        total += 1
-        if len(items) >= limit:
-            continue
-        items.append(
-            TrustLineSchema.model_validate(
-                {
-                    "id": tl_id,
-                    "from_pid": from_pid,
-                    "to_pid": to_pid,
-                    "from_display_name": from_display_name,
-                    "to_display_name": to_display_name,
-                    "equivalent_code": equivalent_code,
-                    "limit": limit_value,
-                    "used": used,
-                    "available": available,
-                    "status": status,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "close_requested_at": close_requested_at,
-                    "policy": policy,
-                }
-            )
-        )
-
-    return total, items
-
-
-@router.get("/trustlines/bottlenecks", response_model=AdminTrustLinesBottlenecksResponse)
-async def admin_trustlines_bottlenecks(
-    threshold: _DecimalThreshold = 0.10,
-    limit: int = Query(10, ge=1, le=50),
-    equivalent: str | None = Query(None, description="Equivalent code (optional)"),
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminTrustLinesBottlenecksResponse:
-    eq_code = str(equivalent or "").strip().upper() or None
-    threshold_dec = Decimal(str(threshold))
-    _, items = await _load_admin_trustline_bottlenecks(
-        threshold=threshold_dec,
-        limit=limit,
-        equivalent=eq_code,
-        db=db,
-    )
-
-    return AdminTrustLinesBottlenecksResponse(threshold=float(threshold_dec), items=items)
-
-
 @router.get("/liquidity/summary", response_model=AdminLiquiditySummaryResponse)
 async def admin_liquidity_summary(
     equivalent: str | None = Query(None, description="Equivalent code (optional; omitted: counters only, money null)"),
-    threshold: _DecimalThreshold = 0.10,
-    limit: int = Query(10, ge=1, le=50, description="Top-N size for ranked lists"),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminLiquiditySummaryResponse:
+    """The Dashboard's row of one equivalent: its active lines and their money (032 S5, F-2, F-3).
+
+    Narrowed by the owner's decision of 2026-10-07: the ranked lists, the bottleneck count and edges and the
+    incidents counter left with the Liquidity screen. The equivalent is not required to be active - a stopped
+    equivalent still shows its own sums.
+    """
+
     eq_code = str(equivalent or "").strip().upper() or None
-    threshold_dec = Decimal(str(threshold))
     now = _utc_now()
 
     used_expr = func.coalesce(Debt.amount, 0)
     available_expr = TrustLine.limit - used_expr
 
-    # 028 F-028-37 (owner В-3): money is summed and ranked only within one equivalent. Without one only the lines are
-    # counted - no money SUM runs at all (§15 review of E5) - the totals are null and the net lists empty.
+    # 028 F-028-37 (owner В-3): money is summed only within one equivalent. Without one only the lines are
+    # counted - no money SUM runs at all (§15 review of E5) - and the totals are null.
     money_sums = (
         [
             func.coalesce(func.sum(TrustLine.limit), 0).label("total_limit"),
@@ -542,82 +384,14 @@ async def admin_liquidity_summary(
         totals_stmt = totals_stmt.where(EquivalentModel.code == eq_code)
 
     totals = (await db.execute(totals_stmt)).one()
-    active_trustlines = int(totals.active_trustlines or 0)
-    total_limit = totals.total_limit if eq_code else None
-    total_used = totals.total_used if eq_code else None
-    total_available = totals.total_available if eq_code else None
-
-    # Incidents over SLA ("stuck" payments): none exists since migration 030; compatibility until П4.
-    incidents_over_sla = 0
-
-    # Net positions (Debt direction: debtor -> creditor).
-    debt_base = (
-        select(Debt)
-        .join(EquivalentModel, Debt.equivalent_id == EquivalentModel.id)
-        .where(Debt.amount > 0)
-    )
-    if eq_code:
-        debt_base = debt_base.where(EquivalentModel.code == eq_code)
-    debt_subq = debt_base.subquery()
-
-    pos = select(debt_subq.c.creditor_id.label("participant_id"), debt_subq.c.amount.label("delta"))
-    neg = select(debt_subq.c.debtor_id.label("participant_id"), (-debt_subq.c.amount).label("delta"))
-    delta = union_all(pos, neg).subquery()
-
-    net_stmt = (
-        select(
-            Participant.pid.label("pid"),
-            Participant.display_name.label("display_name"),
-            func.coalesce(func.sum(delta.c.delta), 0).label("net"),
-        )
-        .select_from(delta)
-        .join(Participant, Participant.id == delta.c.participant_id)
-        .group_by(Participant.pid, Participant.display_name)
-    )
-
-    net = net_stmt.subquery()
-    net_base = select(net.c.pid, net.c.display_name, net.c.net)
-
-    top_creditors_rows: list = []
-    top_debtors_rows: list = []
-    top_abs_rows: list = []
-    if eq_code:
-        top_creditors_rows = (
-            await db.execute(net_base.where(net.c.net > 0).order_by(net.c.net.desc()).limit(limit))
-        ).all()
-        top_debtors_rows = (
-            await db.execute(net_base.where(net.c.net < 0).order_by(net.c.net.asc()).limit(limit))
-        ).all()
-        top_abs_rows = (
-            await db.execute(net_base.order_by(func.abs(net.c.net).desc()).limit(limit))
-        ).all()
-
-    top_creditors = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_creditors_rows]
-    top_debtors = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_debtors_rows]
-    top_by_abs_net = [AdminLiquidityNetRow(pid=pid, display_name=dn, net=netv) for pid, dn, netv in top_abs_rows]
-
-    # Top bottleneck edges with computed used/available.
-    bottlenecks, bottleneck_items = await _load_admin_trustline_bottlenecks(
-        threshold=threshold_dec,
-        limit=limit,
-        equivalent=eq_code,
-        db=db,
-    )
 
     return AdminLiquiditySummaryResponse(
         equivalent=eq_code,
-        threshold=float(threshold_dec),
         updated_at=now,
-        active_trustlines=active_trustlines,
-        bottlenecks=bottlenecks,
-        incidents_over_sla=int(incidents_over_sla),
-        total_limit=total_limit,
-        total_used=total_used,
-        total_available=total_available,
-        top_creditors=top_creditors,
-        top_debtors=top_debtors,
-        top_by_abs_net=top_by_abs_net,
-        top_bottleneck_edges=bottleneck_items,
+        active_trustlines=int(totals.active_trustlines or 0),
+        total_limit=totals.total_limit if eq_code else None,
+        total_used=totals.total_used if eq_code else None,
+        total_available=totals.total_available if eq_code else None,
     )
 
 
@@ -748,76 +522,6 @@ async def list_audit_log(
     )
     items = (await db.execute(stmt)).scalars().all()
     return AdminAuditLogListResponse(items=items, page=page, per_page=per_page, total=int(total))
-
-
-@router.get("/incidents", response_model=AdminIncidentsListResponse)
-async def list_incidents(
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=200),
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminIncidentsListResponse:
-    """The "stuck" payments list - always empty since programme 019, stage 4 (compatibility until П4).
-
-    A stuck payment was a durable `NEW`/`PREPARED` row; migration 030 refuses one. The route and its
-    paginated shape stay for the incidents screen until its fate is decided (`T1911`).
-    """
-
-    return AdminIncidentsListResponse(items=[], page=page, per_page=per_page, total=0)
-
-
-@router.post("/transactions/{tx_id}/abort", response_model=AdminAbortTxResponse)
-async def abort_transaction(
-    tx_id: str,
-    body: AdminAbortTxRequest,
-    request: Request,
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminAbortTxResponse:
-    """Admin abort - a COMPATIBILITY SURFACE since programme 019, stage 4 (owner decision Q2).
-
-    There is no active payment work left to abort: the hub executes a payment as one transaction, and
-    migration 030 refuses a `PAYMENT` row that is not `COMMITTED`/`ABORTED`. So, with no money effect
-    and without the removed payment engine:
-
-    * unknown `tx_id` - `404`;
-    * `COMMITTED` - `409` (as before);
-    * `ABORTED` - the former idempotent answer `aborted`: an audit row is written, the metric
-      `abort/already_aborted` counts it, and the STORED error is kept as it is (a replay of the same
-      `tx_id` keeps answering the refusal it was given);
-    * any other state (only a non-`PAYMENT` type can hold one, and none of them is ever durable in a
-      non-terminal state on the supported path) - `409`, nothing is changed: this endpoint never
-      terminalises another writer's transaction.
-
-    A stale row selected on the incidents screen gets one of these answers. The endpoint's fate is
-    decided with the screen after 019 (П4, `T1911`).
-    """
-
-    tx = (
-        await db.execute(select(Transaction).where(Transaction.tx_id == tx_id))
-    ).scalar_one_or_none()
-    if tx is None:
-        raise NotFoundException(f"Transaction {tx_id} not found")
-    state = tx.state  # read before a rollback expires the row
-    if state == "COMMITTED":
-        await db.rollback()
-        raise ConflictException("Transaction is already committed")
-    if state != "ABORTED":
-        await db.rollback()
-        raise ConflictException(
-            f"Transaction is {state}; there is no active payment work to abort"
-        )
-
-    stored = {"state": tx.state, "error": tx.error}
-    async with audited(db, request=request, action="admin.transactions.abort", object_type="transaction",
-                       object_id=tx_id, reason=body.reason) as audit:
-        audit.before_state = stored
-        audit.after_state = stored
-
-    try:
-        PAYMENT_EVENTS_TOTAL.labels(event="abort", result="already_aborted").inc()
-    except Exception:
-        pass
-
-    return AdminAbortTxResponse(tx_id=tx_id, status="aborted")
 
 
 @router.get("/equivalents", response_model=EquivalentsList)
@@ -1079,7 +783,7 @@ async def admin_graph_snapshot(
     equivalent: str | None = Query(None, description="Optional equivalent code for net visualization"),
     include: str | None = Query(
         None,
-        description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
+        description="Optional extras to include (comma-separated): audit_log,transactions",
     ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphSnapshotResponse:
@@ -1112,7 +816,7 @@ async def admin_graph_ego(
     ),
     include: str | None = Query(
         None,
-        description="Optional extras to include (comma-separated): incidents,audit_log,transactions",
+        description="Optional extras to include (comma-separated): audit_log,transactions",
     ),
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminGraphEgoResponse:
@@ -1147,87 +851,23 @@ async def admin_graph_ego(
 
 
 
-@router.get("/clearing/cycles", response_model=AdminClearingCyclesResponse)
-async def admin_clearing_cycles(
-    participant_pid: str | None = Query(
-        None,
-        description="Optional PID filter: return only cycles that touch this participant",
-    ),
-    equivalent: str | None = Query(
-        None,
-        description="Optional equivalent code (if omitted, returns cycles for all equivalents)",
-    ),
-    max_depth: int = Query(6, ge=3, le=10),
-    db: AsyncSession = Depends(deps.get_db),
-) -> AdminClearingCyclesResponse:
-    if equivalent is not None:
-        validate_equivalent_code(equivalent)
-
-    codes: list[str]
-    if equivalent:
-        codes = [equivalent]
-    else:
-        codes = (
-            await db.execute(select(EquivalentModel.code).order_by(EquivalentModel.code.asc()))
-        ).scalars().all()
-
-    service = ClearingService(db)
-    pid_filter = str(participant_pid or "").strip() or None
-
-    out: dict[str, AdminClearingCyclesForEquivalent] = {}
-    for code in codes:
-        try:
-            raw_cycles = await service.find_cycles(code, max_depth=max_depth)
-        except Exception:
-            raw_cycles = []
-
-        cycles: list[list[AdminClearingCycleEdge]] = []
-        for cycle in raw_cycles:
-            edges: list[AdminClearingCycleEdge] = []
-            for e in cycle:
-                debtor = str((e or {}).get("debtor") or "")
-                creditor = str((e or {}).get("creditor") or "")
-                amount_raw = (e or {}).get("amount")
-                try:
-                    amount = amount_raw if hasattr(amount_raw, "as_tuple") else str(amount_raw)
-                except Exception:
-                    amount = str(amount_raw)
-
-                edges.append(
-                    AdminClearingCycleEdge(
-                        equivalent=code,
-                        debtor=debtor,
-                        creditor=creditor,
-                        amount=amount,
-                    )
-                )
-
-            if pid_filter and not any(
-                (edge.debtor == pid_filter or edge.creditor == pid_filter) for edge in edges
-            ):
-                continue
-            cycles.append(edges)
-
-        out[code] = AdminClearingCyclesForEquivalent(cycles=cycles)
-
-    # If the user requested a single equivalent, keep output deterministic but complete.
-    # (GraphPage fixture shape includes other equivalents too.)
-    if equivalent and not pid_filter:
-        # Optionally include other equivalents as empty cycles for UI parity.
-        other_codes = (
-            await db.execute(select(EquivalentModel.code).order_by(EquivalentModel.code.asc()))
-        ).scalars().all()
-        for code in other_codes:
-            out.setdefault(code, AdminClearingCyclesForEquivalent(cycles=[]))
-
-    return AdminClearingCyclesResponse(equivalents=out)
-
-
-@router.get("/participants/{pid}/metrics", response_model=AdminParticipantMetricsResponse)
+@router.get(
+    "/participants/{pid}/metrics",
+    response_model=AdminParticipantMetricsResponse,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "`equivalent` is not a valid equivalent code"},
+        404: {"model": ErrorEnvelope, "description": "No participant has this `pid`, or no equivalent has this code"},
+    },
+)
 async def admin_participant_metrics(
     pid: str,
     equivalent: str | None = Query(default=None),
-    threshold: _OptionalDecimalThreshold = None,
     db: AsyncSession = Depends(deps.get_db),
 ) -> AdminParticipantMetricsResponse:
-    return await compute_participant_metrics(db, pid=pid, equivalent=equivalent, threshold=threshold)
+    """The participant's balance rows per equivalent - the graph drawer's «Баланс» table (032 S5, F-1).
+
+    Narrowed by the owner's decision of 2026-10-07: the rank, distribution, concentration, counterparties,
+    capacity and activity analytics were removed.
+    """
+
+    return await compute_participant_metrics(db, pid=pid, equivalent=equivalent)

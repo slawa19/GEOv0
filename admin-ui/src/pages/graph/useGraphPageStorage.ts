@@ -1,13 +1,10 @@
 import { watch, type Ref } from 'vue'
 
-import type { AnalyticsToggles } from './graphAnalyticsToggles'
-
 export const STORAGE_KEYS = {
   showLegend: 'geo.graph.showLegend',
   layoutSpacing: 'geo.graph.layoutSpacing',
   toolbarTab: 'geo.graph.toolbarTab',
   drawerEq: 'geo.graph.analytics.drawerEq',
-  analyticsToggles: 'geo.graph.analytics.toggles.v1',
 } as const
 
 type ToolbarTab = 'filters' | 'display'
@@ -17,7 +14,6 @@ export function useGraphPageStorage(input: {
   layoutSpacing: Ref<number>
   toolbarTab: Ref<ToolbarTab>
   drawerEq: Ref<string>
-  analytics: Ref<AnalyticsToggles>
 
   storage?: Storage
 }) {
@@ -40,15 +36,6 @@ export function useGraphPageStorage(input: {
 
       const rawDrawerEq = storage.getItem(STORAGE_KEYS.drawerEq)
       if (rawDrawerEq) input.drawerEq.value = String(rawDrawerEq)
-
-      const rawToggles = storage.getItem(STORAGE_KEYS.analyticsToggles)
-      if (rawToggles) {
-        const parsed = JSON.parse(rawToggles) as Partial<AnalyticsToggles>
-        input.analytics.value = {
-          ...input.analytics.value,
-          ...parsed,
-        }
-      }
     } catch {
       // ignore storage errors (private mode / blocked)
     }
@@ -77,18 +64,6 @@ export function useGraphPageStorage(input: {
       // ignore
     }
   })
-
-  watch(
-    input.analytics,
-    (v) => {
-      try {
-        storage.setItem(STORAGE_KEYS.analyticsToggles, JSON.stringify(v))
-      } catch {
-        // ignore
-      }
-    },
-    { deep: true }
-  )
 
   watch(input.toolbarTab, (v) => {
     try {

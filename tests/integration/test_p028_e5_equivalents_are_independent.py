@@ -147,21 +147,20 @@ async def test_liquidity_summary_without_an_equivalent_sums_no_money(client, db_
 
     event.listen(connection.sync_connection, "before_cursor_execute", _record)
     try:
-        r = await client.get("/api/v1/admin/liquidity/summary", headers=_ADMIN, params={"threshold": "0.10"})
+        r = await client.get("/api/v1/admin/liquidity/summary", headers=_ADMIN)
     finally:
         event.remove(connection.sync_connection, "before_cursor_execute", _record)
     assert r.status_code == 200, r.text
     assert statements and not [s for s in statements if "sum(" in s], [s for s in statements if "sum(" in s]
     body = r.json()
     assert body["equivalent"] is None
-    assert (body["active_trustlines"], body["bottlenecks"]) == (2, 2)
+    assert body["active_trustlines"] == 2
     assert (body["total_limit"], body["total_used"], body["total_available"]) == (None, None, None)
-    assert (body["top_creditors"], body["top_debtors"], body["top_by_abs_net"]) == ([], [], [])
-    assert [e["equivalent"] for e in body["top_bottleneck_edges"]] == ["UAH", "HOUR"]
+    # 032 S5 (F-2): the ranked net lists and the bottleneck edges left the summary with the Liquidity screen.
 
     # Positive control: one equivalent keeps its money.
     r = await client.get(
-        "/api/v1/admin/liquidity/summary", headers=_ADMIN, params={"threshold": "0.10", "equivalent": "HOUR"}
+        "/api/v1/admin/liquidity/summary", headers=_ADMIN, params={"equivalent": "HOUR"}
     )
     body = r.json()
     assert (Decimal(body["total_limit"]), Decimal(body["total_used"]), Decimal(body["total_available"])) == (
@@ -169,24 +168,6 @@ async def test_liquidity_summary_without_an_equivalent_sums_no_money(client, db_
         Decimal("9.5"),
         Decimal("0.5"),
     )
-    assert {row["pid"]: Decimal(row["net"]) for row in body["top_by_abs_net"]} == {
-        "carol": Decimal("9.5"),
-        "bob": Decimal("-9.5"),
-    }
-
-
-@pytest.mark.asyncio
-async def test_bottlenecks_without_an_equivalent_are_ordered_by_share_not_by_amount(client, db_session):
-    await _liquidity_world(db_session)
-
-    r = await client.get("/api/v1/admin/trustlines/bottlenecks", headers=_ADMIN, params={"threshold": "0.10"})
-    assert r.status_code == 200, r.text
-    # By amount the HOUR line (0.5) would come first against the UAH line (10): 0.5 hours vs 10
-    # hryvnias is not a comparison. By share UAH (1 %) is tighter than HOUR (5 %).
-    assert [(e["equivalent"], Decimal(e["available"])) for e in r.json()["items"]] == [
-        ("UAH", Decimal("10")),
-        ("HOUR", Decimal("0.5")),
-    ]
 
 
 # F-028-39 / F-028-40 - graph net sign and the net ranking, within one equivalent
@@ -208,21 +189,3 @@ async def test_graph_net_sign_keeps_a_sub_quantum_net(client, db_session, route)
     assert signs == {"alice": (1, "1"), "bob": (-1, "-1")}
 
 
-@pytest.mark.asyncio
-async def test_rank_net_subtracts_before_it_truncates(client, db_session):
-    alice, bob, carol = _person("alice", "A"), _person("bob", "B"), _person("carol", "C")
-    db_session.add_all([alice, bob, carol])
-    uah, _hour = await _two_equivalents(db_session)
-    db_session.add_all([_line(alice, bob, uah, "100"), _line(carol, alice, uah, "100")])
-    await db_session.flush()
-    # alice: credit 0.015, debt 0.006 -> net +0.009; bob -0.015; carol +0.006.
-    await _seed_debts(db_session, "sub-quantum", [_debt(bob, alice, uah, "0.015"), _debt(alice, carol, uah, "0.006")])
-
-    r = await client.get("/api/v1/admin/participants/alice/metrics", headers=_ADMIN, params={"equivalent": "UAH"})
-    assert r.status_code == 200, r.text
-    rank = r.json()["rank"]
-    # 0.015 - 0.006 = 0.009, truncated at precision 2 -> 0.00. Truncating each side first gave
-    # 0.01 - 0.00 = 0.01: one atom that is in neither the ledger nor the truncated net.
-    assert rank["net"] == "0.00", rank
-    # Ranked by the exact net: carol 0.006 < alice 0.009, so alice is first.
-    assert (rank["rank"], rank["n"]) == (1, 3), rank

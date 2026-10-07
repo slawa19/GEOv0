@@ -73,10 +73,17 @@ describe('real Admin mutation and integrity response contracts', () => {
       expected: { pid: 'PID_A', status: 'active' },
     },
     {
-      name: 'transaction abort',
-      data: { tx_id: 'TX_1', status: 'aborted' },
-      call: () => realApi.abortTx('TX_1', 'reason'),
-      expected: { tx_id: 'TX_1', status: 'aborted' },
+      // 032 S5 (F-4): the hold is cleared on the Integrity screen; the answer is the equivalent.
+      name: 'integrity hold clear',
+      data: equivalentWire({ code: 'UAH' }),
+      call: () => realApi.clearIntegrityHold('UAH', 'reason'),
+      expected: { code: 'UAH', precision: 2, description: 'Token', is_active: true },
+    },
+    {
+      name: 'integrity summary',
+      data: { equivalents: [{ equivalent: 'UAH', status: 'critical', checked_at: null, hold: true }] },
+      call: () => realApi.integritySummary(),
+      expected: { equivalents: [{ equivalent: 'UAH', status: 'critical', checked_at: null, hold: true }] },
     },
     {
       name: 'equivalent create with nullable backend description',
@@ -137,9 +144,19 @@ describe('real Admin mutation and integrity response contracts', () => {
       call: () => realApi.freezeParticipant('PID_A', 'reason'),
     },
     {
-      name: 'transaction abort extra field',
-      data: { tx_id: 'TX_1', status: 'aborted', debug: true },
-      call: () => realApi.abortTx('TX_1', 'reason'),
+      name: 'integrity hold clear invalid timestamp',
+      data: equivalentWire({ code: 'UAH', updated_at: 'yesterday' }),
+      call: () => realApi.clearIntegrityHold('UAH', 'reason'),
+    },
+    {
+      name: 'integrity summary extra field',
+      data: { equivalents: [{ equivalent: 'UAH', status: 'critical', checked_at: null, hold: true, debug: true }] },
+      call: () => realApi.integritySummary(),
+    },
+    {
+      name: 'integrity summary hold not boolean',
+      data: { equivalents: [{ equivalent: 'UAH', status: 'critical', checked_at: null, hold: 'yes' }] },
+      call: () => realApi.integritySummary(),
     },
     {
       name: 'equivalent create missing timestamp',

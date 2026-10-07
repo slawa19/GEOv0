@@ -66,10 +66,9 @@ trustline-update и `PATCH` кредитора — читают долг без 
   `ADMIN_DEV_MODE`, `ADMIN_DEV_ALLOWLIST`;
 - payments: `PREPARE_TIMEOUT_SECONDS`, `COMMIT_TIMEOUT_SECONDS`,
   `PAYMENT_TOTAL_TIMEOUT_SECONDS`, `COMMIT_RETRY_*`. С 2026-09-25 (программа 019,
-  стадия 4) восстановления застрявших платежей нет: `RECOVERY_ENABLED`,
-  `RECOVERY_INTERVAL_SECONDS`, `PAYMENT_TX_STUCK_TIMEOUT_SECONDS` инертны и
-  остаются только ради конфиг-контракта admin UI (до П4), а
-  `PREPARE_LOCK_TTL_SECONDS` удалён;
+  стадия 4) восстановления застрявших платежей нет: `PREPARE_LOCK_TTL_SECONDS` удалён тогда же, а
+  инертные `RECOVERY_ENABLED`, `RECOVERY_INTERVAL_SECONDS`, `PAYMENT_TX_STUCK_TIMEOUT_SECONDS` —
+  2026-10-07 вместе с экраном инцидентов (программа 032 S5); в `.env` они игнорируются;
 - routing/balance: `ROUTING_*`, `MAX_FLOW_MAX_HOPS`,
   `BALANCE_SUMMARY_CACHE_TTL_SECONDS`;
 - service controls: `RATE_LIMIT_*`, `METRICS_ENABLED`, `CLEARING_ENABLED`,
@@ -88,7 +87,8 @@ trustline-update и `PATCH` кредитора — читают долг без 
 - версия для `/health`: `GEO_APP_VERSION`, при его отсутствии — `APP_VERSION`, иначе `dev`. Оговорка (§15-ревью
   `T2414`, `specs/BACKLOG.md`): имя `GEO_APP_VERSION` из `.env` побеждает `APP_VERSION` процессного окружения —
   задавайте версию одним именем в одном месте;
-- Admin graph include limits: `ADMIN_GRAPH_INCLUDE_MAX_*`.
+- Admin graph include limits: `ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS`, `ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS`
+  (`ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS` удалён 2026-10-07 вместе с коллекцией `incidents`, программа 032 S5).
 
 In-memory fallback rate limiter хранит не более `10_000` bucket/host-записей
 (`app/api/deps.py`, константа `_RATE_LIMIT_MAX_ENTRIES`). Это защитный внутренний

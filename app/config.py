@@ -182,15 +182,6 @@ class Settings(BaseSettings):
     # Challenge
     AUTH_CHALLENGE_EXPIRE_SECONDS: int = 300
 
-    # Recovery of stuck payments - INERT since programme 019, stage 4. The hub executes a payment as
-    # one transaction and persists no intermediate state (migration 030), so the recovery loop and
-    # its reservation TTL (`PREPARE_LOCK_TTL_SECONDS`, removed) are gone. The three keys stay readable
-    # and writable through `/admin/config` only because the admin UI's config contract names them;
-    # nothing reads them. Their fate is decided with the incidents screen after 019 (П4, `T1911`).
-    RECOVERY_ENABLED: bool = True
-    RECOVERY_INTERVAL_SECONDS: int = 60
-    PAYMENT_TX_STUCK_TIMEOUT_SECONDS: int = 120
-
     # Payment Routing (MVP limits)
     ROUTING_MAX_HOPS: int = 6
     ROUTING_MAX_PATHS: int = 3
@@ -297,7 +288,6 @@ class Settings(BaseSettings):
     ADMIN_DEV_ALLOWLIST: str = "127.0.0.1,::1"
 
     # Graph extras include caps (for /admin/graph/*?include=...)
-    ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS: int = 50
     ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS: int = 50
     ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS: int = 50
 

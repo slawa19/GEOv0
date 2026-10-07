@@ -77,10 +77,15 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 22
 # /admin/feature-flags`, `GET /admin/whoami`. Measured with a per-entry dump of every ledger on `44aac655` and on
 # this tree (a scratch script, not committed): the new ledger plus the removed keys hashes to the previous digest,
 # so no other entry changed.
+# 2026-10-07 / programme 032 S5: 62 -> 58, FOUR entries leave and none enters - the admin routes removed by the owner's
+# decision of 2026-10-07 (032 F-1, F-2, F-4, A-4): `GET /admin/incidents`, `POST /admin/transactions/{tx_id}/abort`, `GET /admin/trustlines/bottlenecks`,
+# `GET /admin/clearing/cycles`. Measured with a per-entry dump of
+# every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
+# the removed keys equals the new one entry by entry, so no other entry changed.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "0aa1a11e7796ce1428d8a2222c67e7a25185e28592c8f522b159bb28fff9bb84"
+    "8e3f2b8bf9aed9dc93d5db28e9ffde8dc5f49f804f58cd407db078e7d5063bc9"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 62
+TRANSPORT_HEADER_DRIFT_COUNT = 58
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -122,10 +127,14 @@ TRANSPORT_HEADER_DRIFT_COUNT = 62
 # them (400 `E005` `signed_payload_incomplete`). Measured with a per-entry dump of both ledgers on `d5764a39` and on
 # this tree (`.local-run/s5/dump_ledgers.py`, not committed): no other entry differs; the base dump equals the
 # previous `3dcb8cda...bcd5`, count 13.
+# 2026-10-07 / programme 032 S5: 14 -> 13, ONE entry leave and none enters - the admin routes removed by the owner's
+# decision of 2026-10-07 (032 F-1, F-2, F-4, A-4): `POST /admin/transactions/{tx_id}/abort`. Measured with a per-entry dump of
+# every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
+# the removed keys equals the new one entry by entry, so no other entry changed.
 REQUEST_SCHEMA_DRIFT_SHA256 = (
-    "f35d6cc0459bf07b0dc28edd5897884b5a23844c3424cbba3952047a3b607d6e"
+    "e703c754c81bfcf565ac1136d5a7fccc758567e919e6781d161522286acc28bc"
 )
-REQUEST_SCHEMA_DRIFT_COUNT = 14
+REQUEST_SCHEMA_DRIFT_COUNT = 13
 # 2026-08-20 / p007_unblock_f0071: MetricPoint.v became nullable on both sides
 # (canonical YAML and generated schema) so "not measured" is distinguishable from
 # a measured zero. The GET /simulator/runs/{run_id}/metrics entry already carried
@@ -397,10 +406,19 @@ REQUEST_SCHEMA_DRIFT_COUNT = 14
 # `/unban`, `GET`/`PATCH /admin/feature-flags`, `GET /admin/whoami` (the other four were not in this ledger).
 # Measured with a per-entry dump of every ledger on `44aac655` and on this tree (a scratch script, not committed):
 # the new ledger plus the removed keys hashes to the previous digest, so no other entry changed.
+# 2026-10-07 / programme 032 S5: 62 -> 61, ONE entry leaves and none enters: `GET /admin/trustlines/bottlenecks`, removed by
+# the owner's decision of 2026-10-07 (032 F-2; `/admin/incidents`, `/admin/transactions/{tx_id}/abort` and
+# `/admin/clearing/cycles` were not in this ledger). FOUR entries change content, each by losing differences, none by
+# gaining one: `GET /admin/liquidity/summary` (narrowed to six fields: 10 differences -> 2, the `required` list of a
+# defaulted model and `active_trustlines.default`), `GET /admin/participants/{pid}/metrics` (narrowed to the balance
+# rows: 12 -> 1, `required` of `equivalent`), `GET /admin/graph/snapshot` and `/ego` (the `incidents` collection and
+# its enum value removed on both halves: 21 -> 18, the ego `allOf` difference unchanged). Measured with a per-entry
+# dump of every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed), differences
+# listed path by path for each changed entry: no other entry of any ledger differs.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "ebfd97e5c6d0845649e046abdfe27fde957276bf3430e4bc89fac9ca8c49d402"
+    "69e65521edd83f28063b397ee292fafd37d21c74551d616fbc49e08d8e04713d"
 )
-SUCCESS_SCHEMA_DRIFT_COUNT = 62
+SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;
 # the new admin diagnostic operation matches generated responses, so count stays 84.
 # 2026-08-20 / p007_unblock_f0071: simulator metrics/bottlenecks declare 503 in the
@@ -561,10 +579,16 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 62
 # count (47 before and after) and by the keys (the same 47 operations; `GET /admin/graph/ego` is not among them): the
 # set is the one the previous digest `cd9f78db...2b26` described. Recomputed on the tree rebased onto main `cf498aa5`,
 # not carried over from the pre-rebase value.
+# 2026-10-07 / programme 032 S5 (B-9 for the narrowed metrics): 47 -> 46, ONE entry leaves and none enters:
+# `POST /admin/transactions/{tx_id}/abort`, removed by the owner's decision of 2026-10-07 (032 A-4; the other three
+# removed routes were not in this ledger). `GET /admin/participants/{pid}/metrics` now declares the 400 and 404 it
+# always gave, in the canon AND on the decorator, so it stays out of this dictionary. Measured with a per-entry dump of
+# every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
+# the removed key equals the new one entry by entry.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "488bb1a0f2616fe20231cf3b21cc515db4a0c5c05884efe801469e734bd04250"
+    "7d2ff6d9a1a4e412f1b49ae0fcc643d4165bf46a47c5b555816e0608ac6dd971"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 47
+ERROR_RESPONSE_DRIFT_COUNT = 46
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
@@ -584,10 +608,15 @@ ERROR_RESPONSE_DRIFT_COUNT = 47
 # /admin/feature-flags`, `GET /admin/whoami`. Measured with a per-entry dump of every ledger on `44aac655` and on
 # this tree (a scratch script, not committed): the new ledger plus the removed keys hashes to the previous digest,
 # so no other entry changed.
+# 2026-10-07 / programme 032 S5: 62 -> 58, FOUR entries leave and none enters - the admin routes removed by the owner's
+# decision of 2026-10-07 (032 F-1, F-2, F-4, A-4): `GET /admin/incidents`, `POST /admin/transactions/{tx_id}/abort`, `GET /admin/trustlines/bottlenecks`,
+# `GET /admin/clearing/cycles`. Measured with a per-entry dump of
+# every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
+# the removed keys equals the new one entry by entry, so no other entry changed.
 SECURITY_DRIFT_SHA256 = (
-    "d24860fa65d6b277d024282d4dcad8537657979d099c1ad45f93d9063156aec6"
+    "89e20f730962890958e4643e3191098541816061414793c42f3a75572119efd6"
 )
-SECURITY_DRIFT_COUNT = 62
+SECURITY_DRIFT_COUNT = 58
 
 
 def _repo_root() -> Path:
@@ -998,7 +1027,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     operation_refs = {
         ("post", "/admin/participants/{pid}/freeze"): "AdminParticipantStatusResponse",
         ("post", "/admin/participants/{pid}/unfreeze"): "AdminParticipantStatusResponse",
-        ("post", "/admin/transactions/{tx_id}/abort"): "AdminAbortTxResponse",
         ("post", "/admin/equivalents"): "Equivalent",
         ("patch", "/admin/equivalents/{code}"): "Equivalent",
         ("delete", "/admin/equivalents/{code}"): "AdminDeleteResponse",
@@ -1017,9 +1045,37 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
         "/admin/participants/{pid}/unban",
         "/admin/feature-flags",
         "/admin/whoami",
+        # 032 S5 (F-1, F-2, F-4, A-4): the incidents list, admin abort, the bottlenecks list and the admin copy of the
+        # cycle search are removed by the owner's decision of 2026-10-07; the public `/clearing/cycles` stays.
+        "/admin/incidents",
+        "/admin/transactions/{tx_id}/abort",
+        "/admin/trustlines/bottlenecks",
+        "/admin/clearing/cycles",
     ):
         assert removed not in canonical["paths"]
         assert f"/api/v1{removed}" not in generated["paths"]
+    assert "/clearing/cycles" in canonical["paths"]
+    for component in (
+        "AdminAbortTxResponse",
+        "AdminIncidentsListResponse",
+        "AdminIncidentItem",
+        "AdminGraphIncidentItem",
+        "AdminTrustLinesBottlenecksResponse",
+        "AdminClearingCyclesResponse",
+        "AdminParticipantActivity",
+    ):
+        assert component not in schemas
+        assert component not in generated_schemas
+    # 032 S5: the two narrowed reads carry exactly the surviving fields on both halves.
+    for component, properties in {
+        "AdminLiquiditySummaryResponse": {
+            "equivalent", "updated_at", "active_trustlines", "total_limit", "total_used", "total_available",
+        },
+        "AdminParticipantMetricsResponse": {"pid", "equivalent", "balance_rows"},
+    }.items():
+        assert set(schemas[component]["properties"]) == properties
+        assert set(schemas[component]["required"]) == properties
+        assert set(generated_schemas[component]["properties"]) == properties
     for (method, path), component in operation_refs.items():
         expected_ref = f"#/components/schemas/{component}"
         canonical_schema = canonical["paths"][path][method]["responses"]["200"][
@@ -1036,7 +1092,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
             {"pid", "status"},
             {"pid", "status"},
         ),
-        "AdminAbortTxResponse": ({"tx_id", "status"}, {"tx_id", "status"}),
         "AdminDeleteResponse": ({"deleted"}, {"deleted"}),
         "AdminEquivalentUsageResponse": (
             {"code", "trustlines", "debts", "integrity_checkpoints"},
@@ -1061,7 +1116,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
 
     generated_exact_components = {
         "AdminParticipantStatusResponse",
-        "AdminAbortTxResponse",
         "AdminDeleteResponse",
         "AdminEquivalentUsageResponse",
     }
@@ -1088,9 +1142,6 @@ def test_selected_admin_and_integrity_success_schemas_are_exact() -> None:
     assert schemas["AdminParticipantStatusResponse"]["properties"]["status"][
         "enum"
     ] == ["active", "suspended"]
-    assert schemas["AdminAbortTxResponse"]["properties"]["status"]["pattern"] == (
-        "^aborted$"
-    )
     assert schemas["Equivalent"]["properties"]["code"] == {
         "$ref": "#/components/schemas/EquivalentCode"
     }

@@ -61,6 +61,8 @@ test('graph: loads, supports equivalent filter, and opens node details by keyboa
   const drawerContent = page.getByTestId('graph-drawer-content')
   await expect(drawerContent).toBeVisible()
   await expect(drawerContent).toContainText(pid)
+  // 032 S5 (F-1): the participant analytics are removed; three tabs remain.
+  await expect(drawerContent.getByRole('tab')).toHaveText(['Summary', 'Connections', 'Balance'])
 
   await page.keyboard.press('Escape')
   await expect(drawerContent).toBeHidden()

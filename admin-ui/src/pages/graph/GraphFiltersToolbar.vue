@@ -44,7 +44,6 @@ type Props = {
   personLabelParts: LabelPart[]
   showLabels: boolean
   autoLabelsByZoom: boolean
-  showIncidents: boolean
   hideIsolates: boolean
   showLegend: boolean
 
@@ -80,7 +79,6 @@ const emit = defineEmits<{
   (e: 'update:personLabelParts', v: LabelPart[]): void
   (e: 'update:showLabels', v: boolean): void
   (e: 'update:autoLabelsByZoom', v: boolean): void
-  (e: 'update:showIncidents', v: boolean): void
   (e: 'update:hideIsolates', v: boolean): void
   (e: 'update:showLegend', v: boolean): void
 
@@ -150,11 +148,6 @@ const showLabelsModel = computed({
 const autoLabelsByZoomModel = computed({
   get: () => props.autoLabelsByZoom,
   set: (v) => emit('update:autoLabelsByZoom', v),
-})
-
-const showIncidentsModel = computed({
-  get: () => props.showIncidents,
-  set: (v) => emit('update:showIncidents', v),
 })
 
 const hideIsolatesModel = computed({
@@ -508,17 +501,6 @@ const focusDepthFieldWidth = computed(() =>
             </div>
 
             <div class="displayToggleGroup">
-              <div class="displayToggle">
-                <TooltipLabel
-                  class="toolbarLabel"
-                  :label="t('graph.display.incidents')"
-                  tooltip-key="graph.incidents"
-                />
-                <el-switch
-                  v-model="showIncidentsModel"
-                  size="small"
-                />
-              </div>
               <div class="displayToggle">
                 <TooltipLabel
                   class="toolbarLabel"

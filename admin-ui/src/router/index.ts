@@ -9,12 +9,6 @@ const routes: RouteRecordRaw[] = [
     meta: { titleKey: 'dashboard.title' },
   },
   {
-    path: '/liquidity',
-    name: 'Liquidity',
-    component: () => import('../pages/LiquidityPage.vue'),
-    meta: { titleKey: 'liquidity.title' },
-  },
-  {
     path: '/integrity',
     name: 'Integrity',
     component: () => import('../pages/IntegrityPage.vue'),
@@ -22,9 +16,9 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/incidents',
-    name: 'Incidents',
-    component: () => import('../pages/IncidentsPage.vue'),
-    meta: { titleKey: 'incidents.title' },
+    // The incidents screen is gone (032 S5, F-4): the equivalents on an integrity hold are shown and cleared on
+    // the Integrity screen, so an old link lands there.
+    redirect: '/integrity',
   },
   {
     path: '/trustlines',

@@ -4,7 +4,6 @@ import { useLatestRequest } from '../../composables/useLatestRequest'
 import { renderWithPrecisionAsMaximum } from '../../test/precisionAsMaximum'
 
 import {
-  atomsToDecimal,
   buildFocusModeQuery,
   computeSeedLabel,
   createDebouncedGraphElementSearch,
@@ -15,7 +14,6 @@ import {
   makeMetricsKey,
   modeToLabelParts,
   money,
-  pct,
   reloadGraphView,
   syncGraphCoreForView,
   waitForLatestPendingGraphLoad,
@@ -50,9 +48,9 @@ describe('graphPageHelpers', () => {
     expect(settled).toBe(true)
   })
 
-  it('makeMetricsKey is stable and trims inputs', () => {
-    expect(makeMetricsKey(' alice ', 'USD', ' 0.2 ')).toBe('alice|USD|thr=0.2')
-    expect(makeMetricsKey('alice', null, '')).toBe('alice|ALL|thr=')
+  it('makeMetricsKey is stable and trims inputs; the metrics request has no threshold (032 S5)', () => {
+    expect(makeMetricsKey(' alice ', 'USD')).toBe('alice|USD')
+    expect(makeMetricsKey('alice', null)).toBe('alice|ALL')
   })
 
   it('label mode helpers are consistent', () => {
@@ -296,21 +294,6 @@ describe('graphPageHelpers', () => {
     expect(extractPidFromText('no pid here')).toBeNull()
   })
 
-  it('pct clamps and formats', () => {
-    expect(pct(0)).toBe('0%')
-    expect(pct(1)).toBe('100%')
-    expect(pct(2)).toBe('100%')
-    expect(pct(0.1234, 1)).toBe('12.3%')
-  })
-
-  it('atomsToDecimal formats with precision', () => {
-    expect(atomsToDecimal(0n, 2)).toBe('0.00')
-    expect(atomsToDecimal(12n, 0)).toBe('12')
-    expect(atomsToDecimal(12n, 2)).toBe('0.12')
-    expect(atomsToDecimal(-12n, 2)).toBe('-0.12')
-    expect(atomsToDecimal(1234n, 2)).toBe('12.34')
-  })
-
   it('buildFocusModeQuery returns null when disabled or missing pid', () => {
     expect(buildFocusModeQuery({ enabled: false, rootPid: 'alice', depth: 1, equivalent: 'USD', statusFilter: [] })).toBeNull()
     expect(buildFocusModeQuery({ enabled: true, rootPid: '  ', depth: 1, equivalent: 'USD', statusFilter: [] })).toBeNull()
@@ -329,7 +312,6 @@ describe('graphPageHelpers', () => {
       pid: 'alice',
       depth: 2,
       status: ['active', 'frozen'],
-      participant_pid: 'alice',
     })
 
     const q2 = buildFocusModeQuery({
@@ -340,7 +322,7 @@ describe('graphPageHelpers', () => {
       statusFilter: undefined,
     })
 
-    expect(q2).toEqual({ pid: 'bob', depth: 1, equivalent: 'USD', participant_pid: 'bob' })
+    expect(q2).toEqual({ pid: 'bob', depth: 1, equivalent: 'USD' })
   })
 })
 

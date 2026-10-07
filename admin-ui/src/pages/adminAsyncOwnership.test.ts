@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AuditLogPage from './AuditLogPage.vue'
 import EquivalentsPage from './EquivalentsPage.vue'
-import IncidentsPage from './IncidentsPage.vue'
-import LiquidityPage from './LiquidityPage.vue'
-import DashboardPage from './DashboardPage.vue'
 import ParticipantsPage from './ParticipantsPage.vue'
 import TrustlinesPage from './TrustlinesPage.vue'
 import { ApiException } from '../api/apiException'
@@ -19,16 +16,12 @@ const apiMock = vi.hoisted(() => ({
   unfreezeParticipant: vi.fn(),
   listTrustlines: vi.fn(),
   listAuditLog: vi.fn(),
-  listIncidents: vi.fn(),
-  abortTx: vi.fn(),
   listEquivalents: vi.fn(),
   getEquivalentUsage: vi.fn(),
   createEquivalent: vi.fn(),
   updateEquivalent: vi.fn(),
   setEquivalentActive: vi.fn(),
   deleteEquivalent: vi.fn(),
-  liquiditySummary: vi.fn(),
-  trustlineBottlenecks: vi.fn(),
 }))
 
 const routing = vi.hoisted(() => ({
@@ -75,12 +68,6 @@ function ok<T>(data: T) {
 
 function paginated<T>(items: T[]) {
   return ok({ items, page: 1, per_page: 20, total: items.length })
-}
-
-/** Сколько дробных знаков реально напечатано — ожидание выводится из precision, а не вписано. */
-function fractionDigits(rendered: string): number {
-  const dot = rendered.indexOf('.')
-  return dot < 0 ? 0 : rendered.length - dot - 1
 }
 
 function setupState(wrapper: VueWrapper) {
@@ -226,16 +213,6 @@ const auditOld = {
 }
 const auditNew = { ...auditOld, id: 'NEW', action: 'new' }
 
-const incidentOld = {
-  tx_id: 'OLD',
-  state: 'PREPARED',
-  initiator_pid: 'P1',
-  equivalent: 'USD',
-  age_seconds: 200,
-  sla_seconds: 120,
-}
-const incidentNew = { ...incidentOld, tx_id: 'NEW' }
-
 const equivalentOld = { code: 'OLD', precision: 2, description: 'Old', is_active: true }
 const equivalentNew = { code: 'NEW', precision: 2, description: 'New', is_active: true }
 
@@ -287,18 +264,6 @@ describe('mounted non-Graph list request ownership', () => {
     })
   })
 
-  it('Incidents keeps the latest result and ignores pending work after unmount', async () => {
-    await proveListOwner({
-      component: IncidentsPage,
-      path: '/incidents',
-      request: apiMock.listIncidents,
-      oldEnvelope: paginated([incidentOld]),
-      newEnvelope: paginated([incidentNew]),
-      currentValue: (state) => state.items.map((item: typeof incidentNew) => item.tx_id),
-      expected: ['NEW'],
-    })
-  })
-
   it('Equivalents keeps the latest result and ignores pending work after unmount', async () => {
     await proveListOwner({
       component: EquivalentsPage,
@@ -309,220 +274,6 @@ describe('mounted non-Graph list request ownership', () => {
       currentValue: (state) => state.items.map((item: typeof equivalentNew) => item.code),
       expected: ['NEW'],
     })
-  })
-
-  it('Liquidity keeps the latest composite result and ignores pending work after unmount', async () => {
-    const staleSuccess = deferred<any>()
-    const staleFailure = deferred<any>()
-    const latest = deferred<any>()
-    const afterUnmount = deferred<any>()
-    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
-    apiMock.liquiditySummary
-      .mockImplementationOnce(() => staleSuccess.promise)
-      .mockImplementationOnce(() => staleFailure.promise)
-      .mockImplementationOnce(() => latest.promise)
-      .mockImplementationOnce(() => afterUnmount.promise)
-
-    const oldSummary = { updated_at: '2026-08-08T10:00:00Z', total_limit: '1' }
-    const newSummary = { updated_at: '2026-08-08T11:00:00Z', total_limit: '2' }
-    const wrapper = mountPage(LiquidityPage, '/liquidity')
-    await settle()
-    const state = setupState(wrapper)
-    const staleFailureTask = state.load()
-    await settle()
-    const latestTask = state.load()
-    await settle()
-
-    latest.resolve(ok(newSummary))
-    await latestTask
-    staleSuccess.resolve(ok(oldSummary))
-    await settle()
-    staleFailure.reject(new Error('stale failure'))
-    await staleFailureTask
-    expect(state.summary.total_limit).toBe('2')
-    expect(state.error).toBeNull()
-    expect(state.loading).toBe(false)
-
-    const pendingTask = state.load()
-    await settle()
-    const beforeUnmount = { summary: state.summary, error: state.error, loading: state.loading }
-    wrapper.unmount()
-    afterUnmount.resolve(ok(oldSummary))
-    await pendingTask
-    expect({ summary: state.summary, error: state.error, loading: state.loading }).toEqual(beforeUnmount)
-  })
-
-  it('Liquidity does not render fabricated KPI zeros when summary loading fails', async () => {
-    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
-    apiMock.liquiditySummary.mockRejectedValueOnce(new Error('summary unavailable'))
-    const wrapper = mountPage(LiquidityPage, '/liquidity')
-    await settle()
-    await settle()
-    const state = setupState(wrapper)
-
-    expect(state.summary).toBeNull()
-    expect(state.error).toBe('summary unavailable')
-    expect(state.activeTrustlinesCount).toBeUndefined()
-    expect(state.totalLimit).toBeNull()
-
-    apiMock.liquiditySummary.mockResolvedValueOnce(ok({
-      updated_at: '2026-08-08T11:00:00Z',
-      active_trustlines: 0,
-      bottlenecks: 0,
-      incidents_over_sla: 0,
-      total_limit: '0',
-      total_used: '0',
-      total_available: '0',
-    }))
-    await state.load()
-    await nextTick()
-
-    expect(state.error).toBeNull()
-    expect(state.summary).not.toBeNull()
-    expect(state.activeTrustlinesCount).toBe(0)
-    expect(state.totalLimit).toBe('0')
-    wrapper.unmount()
-  })
-
-  it('Liquidity formats with normalized loaded precision and degrades when it is missing', async () => {
-    // `T1211`. Здесь стояла одна величина `1.23456` и оракул «ровно `precision` знаков» —
-    // тот же неверный оракул, что закрепляли `graphPageHelpers.test.ts` и `RT-012-6`.
-    // `Equivalent.precision` задаёт МИНИМУМ знаков, никогда не максимум, поэтому величина
-    // точнее объявленной точности обязана дойти до оператора целиком, а не округлиться.
-    //
-    // Одной величины здесь и не хватало для контрпроверки подменой: под верным правилом
-    // `1.23456` печатается одинаково при precision 4 и 1 (обе меньше её масштаба), так что
-    // подмена точности перестала бы что-либо менять. Различает точности величина ГРУБЕЕ их —
-    // на ней работает добивка.
-    const AMOUNT_FINE = '1.23456'
-    const AMOUNT_COARSE = '1.2'
-
-    apiMock.listEquivalents.mockResolvedValue(ok({
-      items: [{ code: 'NEW', precision: 4, description: 'New', is_active: true }],
-    }))
-    apiMock.liquiditySummary.mockResolvedValue(ok({
-      equivalent: 'NEW',
-      updated_at: '2026-08-11T12:00:00Z',
-      active_trustlines: 0,
-      bottlenecks: 0,
-      incidents_over_sla: 0,
-      total_limit: '1.2345',
-      total_used: '0.0001',
-      total_available: '1.2344',
-      top_creditors: [],
-      top_debtors: [],
-      top_by_abs_net: [],
-      top_bottleneck_edges: [],
-    }))
-    const wrapper = mountPage(LiquidityPage, '/liquidity', { equivalent: 'new' }, true)
-    await settle()
-    await settle()
-    const state = setupState(wrapper)
-
-    expect(state.selectedEq).toBe('NEW')
-    expect(state.selectedPrecision).toBe(4)
-
-    // T1208: раньше здесь стояло `expect(state.money('0.0001')).toBe('0.0001')` — вход дословно
-    // равен ожиданию, поэтому ассерт устоял бы и на форматтере-тождестве, то есть ровно на том
-    // режиме отказа, который у форматтера есть (`C-C3-2-002`: неразобранный вход возвращается
-    // как есть). Поэтому величина ГРУБЕЕ точности несёт основной вердикт: её ожидание не равно
-    // входу дословно, а выводится из объявленной precision добивкой.
-    const coarseAtFour = state.money(AMOUNT_COARSE, 'NEW')
-    expect(coarseAtFour, 'precision 4 объявляет минимум четыре знака').toBe('1.2000')
-    expect(fractionDigits(coarseAtFour)).toBe(4)
-
-    // Величина точнее объявленной точности доходит целиком: `precision` — минимум, не максимум.
-    expect(
-      state.money(AMOUNT_FINE, 'NEW'),
-      'Округление до объявленной точности изменило бы величину, а не её написание.',
-    ).toBe(AMOUNT_FINE)
-
-    // Контрпроверка подменой: другая объявленная precision обязана изменить вывод, иначе тест
-    // неотличим от своего отсутствия.
-    state.equivalentsList = [{ code: 'NEW', precision: 1, description: 'New', is_active: true }]
-    await nextTick()
-    expect(state.selectedPrecision).toBe(1)
-    const coarseAtOne = state.money(AMOUNT_COARSE, 'NEW')
-    expect(coarseAtOne).toBe('1.2')
-    expect(fractionDigits(coarseAtOne)).toBe(1)
-    expect(coarseAtOne).not.toBe(coarseAtFour)
-    expect(state.money(AMOUNT_FINE, 'NEW')).toBe(AMOUNT_FINE)
-
-    state.equivalentsList = [{ code: 'NEW', precision: 4, description: 'New', is_active: true }]
-    await nextTick()
-    expect(state.showCountKpis).toBe(true)
-    expect(state.showMoneyKpis).toBe(true)
-    expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="liquidity-money-kpis"]').exists()).toBe(true)
-
-    state.equivalentsList = []
-    await nextTick()
-    expect(state.selectedPrecision).toBeNull()
-    expect(state.money(AMOUNT_FINE, 'NEW')).toBe('—')
-    expect(state.showCountKpis).toBe(true)
-    expect(state.showMoneyKpis).toBe(false)
-    expect(wrapper.find('[data-testid="liquidity-count-kpis"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="liquidity-money-kpis"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('028 F-028-48: Liquidity money totals are text at the precision, never a float', async () => {
-    apiMock.listEquivalents.mockResolvedValue(ok({ items: [{ code: 'UAH', precision: 2, description: '', is_active: true }] }))
-    apiMock.liquiditySummary.mockResolvedValue(ok({ equivalent: 'UAH', updated_at: '2026-10-04T00:00:00Z',
-      active_trustlines: 1, bottlenecks: 0, incidents_over_sla: 0, total_limit: '12345678901234567.89',
-      total_used: '0.1', total_available: '12345678901234567.79', top_creditors: [], top_debtors: [],
-      top_by_abs_net: [], top_bottleneck_edges: [] }))
-    const wrapper = mountPage(LiquidityPage, '/liquidity', { equivalent: 'UAH' }, true)
-    await settle()
-    await settle()
-    const text = wrapper.find('[data-testid="liquidity-money-kpis"]').text().replace(/\s+/g, ' ')
-    expect(text).toContain('12345678901234567.89')
-    expect(text).toContain('0.10')
-    wrapper.unmount()
-  })
-
-  it('blocks invalid Liquidity thresholds and preserves a valid high-precision threshold', async () => {
-    const wrapper = mountPage(LiquidityPage, '/liquidity', { threshold: '1.00000000000000001' })
-    await settle()
-    const state = setupState(wrapper)
-
-    expect(state.thresholdValid).toBe(false)
-    expect(state.error).toBeTruthy()
-    expect(apiMock.listEquivalents).not.toHaveBeenCalled()
-    expect(apiMock.liquiditySummary).not.toHaveBeenCalled()
-
-    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
-    apiMock.liquiditySummary.mockResolvedValue(ok({ updated_at: '2026-08-11T12:00:00Z' }))
-    state.threshold = '0.10000000000000001'
-    await state.load()
-    expect(apiMock.liquiditySummary).toHaveBeenLastCalledWith({
-      equivalent: 'ALL',
-      threshold: '0.10000000000000001',
-      limit: 10,
-    })
-    wrapper.unmount()
-  })
-
-  it('blocks invalid Dashboard thresholds and preserves a valid high-precision threshold', async () => {
-    apiMock.trustlineBottlenecks.mockResolvedValue(ok({ threshold: 0.1, items: [] }))
-    const wrapper = mountPage(DashboardPage, '/dashboard')
-    await settle()
-    const state = setupState(wrapper)
-    const initialCalls = apiMock.trustlineBottlenecks.mock.calls.length
-
-    state.threshold = '1.00000000000000001'
-    await state.loadBottlenecks()
-    expect(state.thresholdValid).toBe(false)
-    expect(state.bottlenecksError).toBeTruthy()
-    expect(apiMock.trustlineBottlenecks).toHaveBeenCalledTimes(initialCalls)
-
-    state.threshold = '0.10000000000000001'
-    await state.loadBottlenecks()
-    expect(apiMock.trustlineBottlenecks).toHaveBeenLastCalledWith({
-      threshold: '0.10000000000000001',
-      limit: 10,
-    })
-    wrapper.unmount()
   })
 
   it('cancels pending page debounces on unmount before they can start late requests', async () => {
@@ -559,17 +310,6 @@ describe('mounted non-Graph list request ownership', () => {
     wrapper.unmount()
     await vi.runAllTimersAsync()
     expect(apiMock.listAuditLog).toHaveBeenCalledTimes(auditCalls)
-
-    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
-    apiMock.liquiditySummary.mockResolvedValue(ok({ updated_at: '2026-08-08T11:00:00Z' }))
-    wrapper = mountPage(LiquidityPage, '/liquidity')
-    await settle()
-    routing.route.query = { equivalent: 'EUR', threshold: '0.25' }
-    await nextTick()
-    const liquidityCalls = apiMock.liquiditySummary.mock.calls.length
-    wrapper.unmount()
-    await vi.runAllTimersAsync()
-    expect(apiMock.liquiditySummary).toHaveBeenCalledTimes(liquidityCalls)
   })
 })
 
@@ -607,29 +347,6 @@ describe('selected non-Graph operator and navigation paths', () => {
     await task
     expect(apiMock.listParticipants).toHaveBeenCalledTimes(2)
     expect(ui.success).toHaveBeenCalledTimes(1)
-  })
-
-  it('trusts the backend Incident reload after abort and leaves no false success after failure', async () => {
-    apiMock.listIncidents
-      .mockResolvedValueOnce(paginated([incidentNew]))
-      .mockResolvedValueOnce(paginated([incidentNew, incidentOld]))
-    apiMock.abortTx.mockResolvedValueOnce(ok({ tx_id: incidentNew.tx_id, status: 'aborted' }))
-    const wrapper = mountPage(IncidentsPage, '/incidents')
-    await settle()
-    const state = setupState(wrapper)
-    await state.forceAbort(incidentNew)
-    expect(state.items.map((item: typeof incidentNew) => item.tx_id)).toEqual([incidentNew.tx_id, incidentOld.tx_id])
-    expect(state.total).toBe(2)
-    expect(state.lastAbortTxId).toBe(incidentNew.tx_id)
-    expect(apiMock.listIncidents).toHaveBeenCalledTimes(2)
-    expect(ui.success).toHaveBeenCalledTimes(1)
-
-    apiMock.abortTx.mockRejectedValueOnce(new Error('abort rejected'))
-    await state.forceAbort(incidentOld)
-    expect(state.lastAbortTxId).toBeNull()
-    expect(ui.success).toHaveBeenCalledTimes(1)
-    expect(ui.error).toHaveBeenCalledWith('abort rejected')
-    wrapper.unmount()
   })
 
   it('covers Equivalent state change, usage-guard failure, navigation, and late unmount', async () => {
@@ -757,29 +474,4 @@ describe('selected non-Graph operator and navigation paths', () => {
     wrapper.unmount()
   })
 
-  it('reloads Liquidity after a route filter change and carries threshold to Graph', async () => {
-    vi.useFakeTimers()
-    apiMock.listEquivalents.mockResolvedValue(ok({ items: [equivalentNew] }))
-    apiMock.liquiditySummary.mockResolvedValue(ok({
-      updated_at: '2026-08-08T11:00:00Z',
-      total_limit: '2',
-      total_used: '1',
-      total_available: '1',
-    }))
-    const wrapper = mountPage(LiquidityPage, '/liquidity', { scenario: 'slow' })
-    await settle()
-    routing.route.query = { scenario: 'slow', equivalent: 'EUR', threshold: '0.25' }
-    await nextTick()
-    await vi.runAllTimersAsync()
-    await settle()
-    expect(apiMock.liquiditySummary).toHaveBeenLastCalledWith({ equivalent: 'EUR', threshold: '0.25', limit: 10 })
-
-    const state = setupState(wrapper)
-    state.goGraph()
-    expect(routing.push).toHaveBeenLastCalledWith({
-      path: '/graph',
-      query: { equivalent: 'EUR', threshold: '0.25' },
-    })
-    wrapper.unmount()
-  })
 })

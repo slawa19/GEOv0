@@ -6,6 +6,8 @@ import { formatApiError } from '../api/errorFormat'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
 import { t } from '../i18n'
+import type { IntegritySummaryResponse } from '../api/adminContracts'
+import { describeHoldClearRefusal } from './integrityHold'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -138,7 +140,72 @@ async function verify() {
   }
 }
 
-onMounted(() => void load())
+// 032 S5 (F-4): the equivalents on an integrity hold, from `GET /integrity/summary` (`hold: true`), and the
+// operator's action to lift one. Loaded apart from the status: a failing status check must not hide a hold.
+type HoldRow = IntegritySummaryResponse['equivalents'][number]
+
+const holdsLoading = ref(false)
+const holdsError = ref<string | null>(null)
+const holdRows = ref<HoldRow[]>([])
+// Codes whose clear is in flight. Per code, not one slot: two prompts can be confirmed one after the other, and a
+// single slot let the second overwrite the first (unblocking it) and the first's end release the second (032 S5 review).
+// A code stays here until the summary has been read again, so its button cannot be pressed on a stale row.
+const holdClearing = ref(new Set<string>())
+const holdRefusal = ref<{ code: string; text: string } | null>(null)
+
+const heldCount = computed(() => holdRows.value.filter((r) => r.hold).length)
+
+async function loadHolds() {
+  holdsLoading.value = true
+  holdsError.value = null
+  try {
+    holdRows.value = (await api.integritySummary()).equivalents
+  } catch (e: unknown) {
+    const f = formatApiError(e)
+    holdsError.value = f.hint ? `${f.title} — ${f.hint}` : f.title
+  } finally {
+    holdsLoading.value = false
+  }
+}
+
+async function clearHold(code: string) {
+  let reason: string
+  try {
+    reason = await ElMessageBox.prompt(t('common.reasonRequired'), t('integrity.holds.clearTitle', { code }), {
+      confirmButtonText: t('integrity.holds.clear'),
+      cancelButtonText: t('common.cancel'),
+      inputPlaceholder: t('integrity.holds.reasonPlaceholder'),
+      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
+      type: 'warning',
+    }).then((r) => String(r.value || '').trim())
+  } catch {
+    return
+  }
+
+  // A prompt opened before this code's clear started can be confirmed while it is in flight: refuse the repeat.
+  if (holdClearing.value.has(code)) return
+  holdClearing.value = new Set(holdClearing.value).add(code)
+  holdRefusal.value = null
+  try {
+    await api.clearIntegrityHold(code, reason)
+    ElMessage.success(t('integrity.holds.cleared', { code }))
+  } catch (e: unknown) {
+    holdRefusal.value = { code, text: describeHoldClearRefusal(e) }
+  }
+  // The server's answer decides what is held, not the outcome of this click.
+  try {
+    await loadHolds()
+  } finally {
+    const next = new Set(holdClearing.value)
+    next.delete(code)
+    holdClearing.value = next
+  }
+}
+
+onMounted(() => {
+  void load()
+  void loadHolds()
+})
 </script>
 
 <template>
@@ -158,6 +225,73 @@ onMounted(() => void load())
         </el-button>
       </div>
     </template>
+
+    <div
+      class="mb"
+      data-testid="integrity-holds"
+    >
+      <div class="sub geoLabel">
+        <TooltipLabel
+          :label="t('integrity.holds.title')"
+          :tooltip-text="t('integrity.holds.hint')"
+        />
+      </div>
+      <LoadErrorAlert
+        v-if="holdsError"
+        :title="holdsError"
+        :busy="holdsLoading"
+        @retry="loadHolds"
+      />
+      <el-alert
+        v-else-if="heldCount > 0"
+        type="error"
+        show-icon
+        :closable="false"
+        class="mb"
+        :title="t('integrity.holds.heldSummary', { n: heldCount })"
+        :description="t('integrity.holds.hint')"
+      />
+      <el-alert
+        v-if="holdRefusal"
+        type="warning"
+        show-icon
+        class="mb"
+        data-testid="integrity-hold-refusal"
+        :title="`${holdRefusal.code}: ${holdRefusal.text}`"
+        @close="holdRefusal = null"
+      />
+      <div
+        v-if="!holdsError"
+        class="pillRow"
+      >
+        <div
+          v-for="row in holdRows"
+          :key="row.equivalent"
+          class="holdItem"
+          :data-testid="`integrity-hold-${row.equivalent}`"
+        >
+          <span class="mono">{{ row.equivalent }}</span>
+          <el-tag
+            :type="row.hold ? 'danger' : 'success'"
+            effect="plain"
+            size="small"
+          >
+            {{ row.hold ? t('integrity.holds.held') : t('integrity.holds.notHeld') }}
+          </el-tag>
+          <el-button
+            v-if="row.hold"
+            size="small"
+            type="warning"
+            data-testid="integrity-hold-clear"
+            :loading="holdClearing.has(row.equivalent)"
+            :disabled="holdClearing.has(row.equivalent)"
+            @click="clearHold(row.equivalent)"
+          >
+            {{ t('integrity.holds.clear') }}
+          </el-button>
+        </div>
+      </div>
+    </div>
 
     <LoadErrorAlert
       v-if="error"
@@ -479,6 +613,14 @@ onMounted(() => void load())
   margin-top: 8px;
   font-size: var(--geo-font-size-sub);
   color: var(--el-text-color-secondary);
+}
+.holdItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 4px 8px;
 }
 .tbl {
   width: 100%;

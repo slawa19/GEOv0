@@ -11,7 +11,6 @@ export function useGraphPageWatchers(opts: {
   eq: Ref<string>
   statusFilter: Ref<string[]>
   threshold: Ref<string>
-  showIncidents: Ref<boolean>
   hideIsolates: Ref<boolean>
 
   typeFilter: Ref<string[]>
@@ -23,7 +22,6 @@ export function useGraphPageWatchers(opts: {
   ensureFocusRootPid: () => void
   refreshForFocusMode: () => Promise<boolean>
   refreshSnapshotForEq: () => Promise<boolean>
-  refreshClearingCyclesForParticipant: (pid: string) => Promise<boolean>
   invalidateDataOwnership: () => void
   waitForPendingGraphLoad?: () => Promise<void>
 
@@ -50,7 +48,6 @@ export function useGraphPageWatchers(opts: {
     rebuildGraph: (opts?: GraphRebuildOptions) => void
     runLayout: () => void
 
-    clearCycleHighlight: () => void
     clearConnectionHighlight: () => void
     applySelectedHighlight: (pid: string) => void
 
@@ -81,7 +78,7 @@ export function useGraphPageWatchers(opts: {
     throttledLayoutSpacing.cancel()
   })
 
-  watch([opts.threshold, opts.showIncidents, opts.hideIsolates], () => {
+  watch([opts.threshold, opts.hideIsolates], () => {
     throttledRebuild()
   })
 
@@ -141,16 +138,8 @@ export function useGraphPageWatchers(opts: {
   watch(
     () => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''),
     (pid) => {
-      opts.graphViz.clearCycleHighlight()
       opts.graphViz.clearConnectionHighlight()
       opts.graphViz.applySelectedHighlight(pid)
-
-      if (!opts.focusMode.value) {
-        const p = String(pid || '').trim()
-        void opts.refreshClearingCyclesForParticipant(p).catch(() => {
-          // Keep the current cycle data; visual selection is independent of this fetch.
-        })
-      }
     },
   )
 

@@ -31,16 +31,6 @@ export type Trustline = {
   close_requested_at?: string | null
 }
 
-export type Incident = {
-  tx_id: string
-  state: string
-  initiator_pid: string
-  equivalent: string
-  age_seconds: number
-  sla_seconds: number
-  created_at?: string
-}
-
 export type Equivalent = {
   code: string
   precision: number
@@ -71,27 +61,15 @@ export type Debt = {
   amount: string
 }
 
-export type LiquidityNetRow = {
-  pid: string
-  display_name: string
-  net: string
-}
-
+// 032 S5 (F-2, F-3): one equivalent's active lines and their money - the Dashboard row.
 export type LiquiditySummary = {
   equivalent: string | null
-  threshold: number
   updated_at: string
   active_trustlines: number
-  bottlenecks: number
-  incidents_over_sla: number
-  // 028 F-028-37: null without an equivalent; the net lists are then empty.
+  // 028 F-028-37: null without an equivalent - money is never summed across equivalents.
   total_limit: string | null
   total_used: string | null
   total_available: string | null
-  top_creditors: LiquidityNetRow[]
-  top_debtors: LiquidityNetRow[]
-  top_by_abs_net: LiquidityNetRow[]
-  top_bottleneck_edges: Trustline[]
 }
 
 // F-013-1 / T1302. The graph snapshot's projection of a transaction. `payload` is NOT on that
@@ -124,7 +102,6 @@ export type Transaction = {
 export type GraphSnapshot = {
   participants: Participant[]
   trustlines: Trustline[]
-  incidents: Incident[]
   equivalents: Equivalent[]
   debts: Debt[]
   audit_log: AuditLogEntry[]
@@ -135,17 +112,6 @@ export type GraphSnapshot = {
   // nothing, which is not the same as telling us the collection was empty.
   included?: string[]
   truncated?: string[]
-}
-
-export type ClearingCycleEdge = {
-  equivalent: string
-  debtor: string
-  creditor: string
-  amount: string
-}
-
-export type ClearingCycles = {
-  equivalents: Record<string, { cycles: ClearingCycleEdge[][] }>
 }
 
 export type BalanceRow = {
@@ -159,56 +125,9 @@ export type BalanceRow = {
   net: string
 }
 
-export type CounterpartySplitRow = {
-  pid: string
-  display_name: string
-  amount: string
-  share: number
-}
-
+// 032 S5 (F-1): the participant metrics are the balance rows; the analytics were removed.
 export type ParticipantMetrics = {
   pid: string
   equivalent: string | null
   balance_rows: BalanceRow[]
-  counterparty?: {
-    eq: string
-    totalDebt: string
-    totalCredit: string
-    creditors: CounterpartySplitRow[]
-    debtors: CounterpartySplitRow[]
-  } | null
-  concentration?: {
-    eq: string
-    outgoing: { top1: number; top5: number; hhi: number }
-    incoming: { top1: number; top5: number; hhi: number }
-  } | null
-  distribution?: {
-    eq: string
-    min_atoms: string
-    max_atoms: string
-    bins: Array<{ from_atoms: string; to_atoms: string; count: number }>
-  } | null
-  rank?: {
-    eq: string
-    rank: number
-    n: number
-    percentile: number
-    net: string
-  } | null
-  capacity?: {
-    eq: string
-    out: { limit: string; used: string; pct: number }
-    inc: { limit: string; used: string; pct: number }
-    bottlenecks: Array<{ dir: 'out' | 'in'; other: string; trustline: Trustline }>
-  } | null
-  activity?: {
-    windows: number[]
-    trustline_created: Record<number, number>
-    trustline_closed: Record<number, number>
-    incident_count: Record<number, number>
-    participant_ops: Record<number, number>
-    payment_committed: Record<number, number>
-    clearing_committed: Record<number, number>
-    has_transactions: boolean
-  } | null
 }

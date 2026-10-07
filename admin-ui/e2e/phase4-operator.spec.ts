@@ -6,17 +6,69 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('liquidity to trustlines preserves the active query contract', async ({ page }) => {
-  await page.goto('/liquidity?equivalent=UAH&threshold=0.42')
-  await page.getByRole('button', { name: 'Open Trustlines', exact: true }).click()
+// 032 S5 (F-3): the Dashboard shows one row per seeded equivalent, read from the real backend - never an empty table.
+test('dashboard shows a row per seeded equivalent with its own sums', async ({ page }) => {
+  await page.goto('/dashboard')
+  const card = page.getByTestId('dashboard-equivalents')
+  const rows = card.locator('.el-table__body-wrapper tbody tr')
+  await expect(rows.first()).toBeVisible()
+  for (const code of ['EUR', 'HOUR', 'UAH']) {
+    const row = rows.filter({ hasText: code }).first()
+    await expect(row).toBeVisible()
+    // The total limit column carries a decimal amount, not the "no precision" dash.
+    await expect(row.locator('td').nth(3)).toHaveText(/^\d+(\.\d+)?$/)
+  }
+})
 
-  await expect(page).toHaveURL((url) => {
-    return (
-      url.pathname === '/trustlines' &&
-      url.searchParams.get('equivalent') === 'UAH' &&
-      url.searchParams.get('threshold') === '0.42'
-    )
+// 032 S5 (F-4): the old incidents address lands on Integrity, where the holds live.
+test('the removed incidents screen redirects to Integrity', async ({ page }) => {
+  await page.goto('/incidents')
+  await expect(page).toHaveURL((url) => url.pathname === '/integrity')
+  await expect(page.getByTestId('integrity-holds')).toBeVisible()
+})
+
+// 032 S5 (F-4): a hold and a refused clear, by substituting the two answers (`page.route`) - the seed holds no
+// equivalent, and holding one for real needs a FAILED reconciliation, i.e. a corrupted ledger.
+test('integrity shows a held equivalent and explains a refused clear as text', async ({ page }) => {
+  await page.route('**/api/v1/integrity/summary', (route) =>
+    route.fulfill({
+      json: {
+        equivalents: [
+          { equivalent: 'UAH', status: 'critical', checked_at: '2026-10-07T10:00:00Z', hold: true },
+          { equivalent: 'HOUR', status: 'healthy', checked_at: '2026-10-07T10:00:00Z', hold: false },
+        ],
+      },
+    }),
+  )
+  let clearBody: unknown = null
+  await page.route('**/api/v1/admin/equivalents/UAH/integrity-hold/clear', (route) => {
+    clearBody = route.request().postDataJSON()
+    return route.fulfill({
+      status: 409,
+      json: {
+        error: {
+          code: 'E010',
+          message: 'Equivalent UAH can be cleared only after a later PASSED reconciliation result',
+          details: { reason: 'no_later_passed_reconciliation_result', latest_status: 'FAILED', recheck_status: null },
+        },
+      },
+    })
   })
+
+  await page.goto('/integrity')
+  const held = page.getByTestId('integrity-hold-UAH')
+  await expect(held).toContainText('on hold')
+  await expect(page.getByTestId('integrity-hold-HOUR').getByTestId('integrity-hold-clear')).toHaveCount(0)
+
+  await held.getByTestId('integrity-hold-clear').click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('textbox').fill('reconciled again')
+  await dialog.getByRole('button', { name: 'Clear', exact: true }).click()
+
+  await expect(page.getByTestId('integrity-hold-refusal')).toContainText(
+    'The latest reconciliation is not PASSED; wait for the next one',
+  )
+  expect(clearBody).toEqual({ reason: 'reconciled again' })
 })
 
 /**

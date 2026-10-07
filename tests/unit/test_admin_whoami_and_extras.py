@@ -60,8 +60,7 @@ async def test_admin_graph_snapshot_include_extras_smoke(client, db_session, mon
     db_session.add(alice)
     await db_session.flush()
 
-    now = datetime.now(timezone.utc)
-    stuck_at = now - timedelta(seconds=int(getattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120) or 120) + 10)
+    old = datetime.now(timezone.utc) - timedelta(seconds=130)
 
     tx = Transaction(
         tx_id="tx_test_1",
@@ -73,8 +72,8 @@ async def test_admin_graph_snapshot_include_extras_smoke(client, db_session, mon
         # A PAYMENT row is terminal since migration 030 (019 stage 4).
         state="COMMITTED",
         error=None,
-        created_at=stuck_at,
-        updated_at=stuck_at,
+        created_at=old,
+        updated_at=old,
     )
     db_session.add(tx)
 
@@ -97,13 +96,12 @@ async def test_admin_graph_snapshot_include_extras_smoke(client, db_session, mon
     await db_session.commit()
 
     # Keep payloads small and deterministic in unit tests
-    monkeypatch.setattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS", 10, raising=False)
     monkeypatch.setattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_AUDIT_EVENTS", 10, raising=False)
     monkeypatch.setattr(settings, "ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS", 10, raising=False)
 
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
-    # Act
+    # Act. `incidents` was removed by 032 S5 (A-4); the token is now unknown and ignored like any other.
     r = await client.get(
         "/api/v1/admin/graph/snapshot?include=incidents,audit_log,transactions",
         headers=headers,
@@ -112,12 +110,10 @@ async def test_admin_graph_snapshot_include_extras_smoke(client, db_session, mon
     payload = r.json()
 
     # Assert: keys exist and are non-empty
-    assert isinstance(payload.get("incidents"), list)
+    assert "incidents" not in payload
+    assert payload["included"] == ["audit_log", "transactions"]
     assert isinstance(payload.get("audit_log"), list)
     assert isinstance(payload.get("transactions"), list)
 
-    # No stuck payment exists since migration 030: the incidents extra is empty (compatibility
-    # until П4), even with an old terminal payment present.
-    assert payload["incidents"] == []
     assert len(payload["audit_log"]) >= 1
     assert len(payload["transactions"]) >= 1

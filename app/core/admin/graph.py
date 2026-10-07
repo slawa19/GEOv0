@@ -211,7 +211,7 @@ def _parse_include_csv(value: str | None) -> set[str]:
 
 async def fetch_optional_collections(
     db: AsyncSession, include: str | None
-) -> tuple[list[Any], list[Any], list[Any], list[str], list[str]]:
+) -> tuple[list[Any], list[Any], list[str], list[str]]:
     """The optional collections of a graph read, plus what the wire must say about them.
 
     F-013-1 / T1302, 2026-09-10. Two things are returned beyond the data, and both exist because
@@ -229,7 +229,6 @@ async def fetch_optional_collections(
     """
 
     include_set = _parse_include_csv(include)
-    incidents: list[Any] = []
     audit_log: list[Any] = []
     transactions: list[Any] = []
     included: list[str] = []
@@ -243,12 +242,6 @@ async def fetch_optional_collections(
             return list(rows[:limit])
         return list(rows)
 
-    if "incidents" in include_set:
-        incidents = await _take(
-            "incidents",
-            fetch_graph_incidents,
-            int(settings.ADMIN_GRAPH_INCLUDE_MAX_INCIDENTS or 50),
-        )
     if "audit_log" in include_set:
         audit_log = await _take(
             "audit_log",
@@ -262,16 +255,7 @@ async def fetch_optional_collections(
             int(settings.ADMIN_GRAPH_INCLUDE_MAX_TRANSACTIONS or 50),
         )
 
-    return incidents, audit_log, transactions, included, truncated
-
-
-#: THE "STUCK PAYMENT" READER IS A COMPATIBILITY SURFACE (programme 019, stage 4; owner decision Q2).
-#: A stuck payment was a durable `NEW`/`PREPARED` row between the payment's commits. Since stage 4 the
-#: hub executes a payment as one transaction and inserts it `COMMITTED` or `ABORTED`, and migration 030
-#: refuses any other `PAYMENT` state (`chk_transaction_payment_terminal`). So the reader has nothing to find
-#: and answers empty without reading. It stays on the wire, unchanged in shape, until programme 032 S5.
-async def fetch_graph_incidents(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
-    return []
+    return audit_log, transactions, included, truncated
 
 
 async def fetch_graph_audit_log(db: AsyncSession, *, limit: int) -> list[dict[str, Any]]:
@@ -541,12 +525,11 @@ async def load_graph(
         for eq, debtor, creditor, amount in (await db.execute(debt_stmt)).all()
     ]
 
-    incidents, audit_log, transactions, included, truncated = await fetch_optional_collections(db, include)
+    audit_log, transactions, included, truncated = await fetch_optional_collections(db, include)
 
     return {
         "participants": participants,
         "trustlines": trustlines,
-        "incidents": incidents,
         "equivalents": equivalents,
         "debts": debts,
         "audit_log": audit_log,

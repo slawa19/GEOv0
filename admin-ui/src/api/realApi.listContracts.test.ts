@@ -64,16 +64,6 @@ const equivalent = {
   is_active: true,
 }
 
-const incident = {
-  tx_id: 'tx-1',
-  state: 'PREPARED',
-  initiator_pid: 'alice',
-  equivalent: 'UAH',
-  age_seconds: 61,
-  sla_seconds: 60,
-  created_at: null,
-}
-
 describe('realApi list response contracts', () => {
   it.each([
     {
@@ -95,11 +85,6 @@ describe('realApi list response contracts', () => {
       label: 'equivalents',
       payload: { items: [equivalent] },
       call: () => realApi.listEquivalents({ include_inactive: true }),
-    },
-    {
-      label: 'incidents',
-      payload: { items: [incident], page: 1, per_page: 20, total: 1 },
-      call: () => realApi.listIncidents({ page: 1, per_page: 20 }),
     },
   ])('accepts canonical $label payload', async ({ payload, call }) => {
     respondWith(payload)
@@ -148,16 +133,6 @@ describe('realApi list response contracts', () => {
       label: 'equivalent nullable description type',
       payload: { items: [{ ...equivalent, description: 42 }] },
       call: () => realApi.listEquivalents({ include_inactive: true }),
-    },
-    {
-      label: 'incidents pagination',
-      payload: { items: [incident], page: '1', per_page: 20, total: 1 },
-      call: () => realApi.listIncidents({ page: 1, per_page: 20 }),
-    },
-    {
-      label: 'incident nullable created_at type',
-      payload: { items: [{ ...incident, created_at: 42 }], page: 1, per_page: 20, total: 1 },
-      call: () => realApi.listIncidents({ page: 1, per_page: 20 }),
     },
   ])('rejects malformed 2xx $label payload', async ({ payload, call }) => {
     respondWith(payload)

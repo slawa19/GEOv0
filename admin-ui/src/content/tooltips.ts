@@ -1,19 +1,12 @@
 export type TooltipKey =
   | 'nav.dashboard'
-  | 'nav.liquidity'
   | 'nav.integrity'
-  | 'nav.incidents'
   | 'nav.trustlines'
   | 'nav.graph'
   | 'nav.participants'
   | 'nav.config'
   | 'nav.auditLog'
   | 'nav.equivalents'
-  | 'dashboard.api'
-  | 'dashboard.db'
-  | 'dashboard.migrations'
-  | 'dashboard.bottlenecks'
-  | 'dashboard.incidentsOverSla'
   | 'dashboard.recentAudit'
   | 'participants.pid'
   | 'participants.displayName'
@@ -27,12 +20,6 @@ export type TooltipKey =
   | 'trustlines.available'
   | 'trustlines.status'
   | 'trustlines.createdAt'
-  | 'incidents.txId'
-  | 'incidents.state'
-  | 'incidents.initiator'
-  | 'incidents.eq'
-  | 'incidents.age'
-  | 'incidents.sla'
   | 'graph.eq'
   | 'graph.status'
   | 'graph.threshold'
@@ -40,11 +27,9 @@ export type TooltipKey =
   | 'graph.type'
   | 'graph.minDegree'
   | 'graph.labels'
-  | 'graph.incidents'
   | 'graph.hideIsolates'
   | 'graph.search'
   | 'graph.zoom'
-  | 'graph.actions'
   | 'graph.spacing'
   | 'graph.legend'
   | 'audit.timestamp'
@@ -73,16 +58,7 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
   // Navigation section tooltips
   'nav.dashboard': {
     title: 'Dashboard',
-    body: ['Quick system overview:', 'backend, database, schema status.', 'Operational lists:', 'bottlenecks and incidents over SLA.'],
-  },
-  'nav.liquidity': {
-    title: 'Liquidity analytics',
-    body: [
-      'Liquidity = how easily payments move through the network',
-      'without hitting credit limits.',
-      'Shows bottlenecks (near limit) and net positions (who is mostly creditor/debtor).',
-      'Use it to decide where to raise limits or investigate participants.',
-    ],
+    body: ['Quick overview:', 'participants, one row per equivalent (its lines and sums),', 'equivalents on an integrity hold, recent audit entries.'],
   },
   'nav.integrity': {
     title: 'Integrity',
@@ -91,11 +67,8 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
       'Examples: balances add up (zero-sum); limits and derived values match.',
       'If this page shows issues, analytics may be misleading',
       'and operations can be risky.',
+      'Equivalents on an integrity hold are listed here and cleared with a reason.',
     ],
-  },
-  'nav.incidents': {
-    title: 'Incidents',
-    body: ['Transactions that appear stuck and may need manual action.', 'Sorted by age; operators can force-abort when appropriate.'],
   },
   'nav.trustlines': {
     title: 'Trustlines',
@@ -122,32 +95,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     body: ['Catalog of units/currencies used in the network (e.g., UAH, HOUR).', 'Each has precision and description.'],
   },
 
-
-  'dashboard.api': {
-    title: 'API',
-    body: ['Backend service health.', 'Use it to confirm the system is reachable and responsive.'],
-  },
-  'dashboard.db': {
-    title: 'DB',
-    body: ['Database connectivity and latency.', 'Helps quickly spot database-side outages or slowness.'],
-  },
-  'dashboard.migrations': {
-    title: 'Migrations',
-    body: ['Database schema version status.', 'Healthy deployments should be up to date (no pending migrations).'],
-  },
-  'dashboard.bottlenecks': {
-    title: 'Trustline bottlenecks',
-    body: [
-      'Trustlines where the remaining capacity is low relative to the limit.',
-      'These edges are likely to block payments and create “stuck” routes.',
-    ],
-    links: [{ label: 'Open Trustlines', to: { path: '/trustlines' } }],
-  },
-  'dashboard.incidentsOverSla': {
-    title: 'Incidents over SLA',
-    body: ['Transactions that exceeded their expected time window (SLA).', 'Usually require investigation or a manual abort.'],
-    links: [{ label: 'Open Incidents', to: { path: '/incidents' } }],
-  },
   'dashboard.recentAudit': {
     title: 'Recent audit log',
     body: ['Latest administrative actions.', 'Useful for understanding recent changes and troubleshooting.'],
@@ -217,32 +164,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     body: ['When the trustline was created.'],
   },
 
-  'incidents.txId': {
-    title: 'tx_id',
-    body: ['Transaction identifier.'],
-  },
-  'incidents.state': {
-    title: 'state',
-    body: ['Current state of the stuck transaction.'],
-  },
-  'incidents.initiator': {
-    title: 'initiator',
-    body: ['PID of the transaction initiator.'],
-  },
-  'incidents.eq': {
-    title: 'Equivalent',
-    body: ['Equivalent involved in the transaction.'],
-    links: [{ label: 'Open Equivalents', to: { path: '/equivalents' } }],
-  },
-  'incidents.age': {
-    title: 'age',
-    body: ['How long the transaction has been stuck.'],
-  },
-  'incidents.sla': {
-    title: 'sla',
-    body: ['Expected time window for completion.', 'If age exceeds SLA, treat as “over SLA”.'],
-  },
-
   'graph.eq': {
     title: 'Equivalent filter',
     body: ['Shows trustlines for a specific unit/currency.', 'Use ALL to see the whole network.'],
@@ -276,11 +197,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     title: 'Labels',
     body: ['Shows names/IDs on nodes.', 'Disable if labels make the view too noisy.'],
   },
-  'graph.incidents': {
-    title: 'Incidents',
-    body: ['Highlights nodes/edges related to incidents.', 'Use it to quickly find who is involved in stuck operations.'],
-    links: [{ label: 'Open Incidents', to: { path: '/incidents' } }],
-  },
   'graph.hideIsolates': {
     title: 'Hide isolates',
     body: ['Hides participants with no visible trustlines in the current view.'],
@@ -298,15 +214,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     body: ['Use the slider or mouse wheel to zoom.', 'Zoom helps inspect local neighborhoods and crowded areas.'],
   },
 
-  'graph.actions': {
-    title: 'Graph actions',
-    body: [
-      'Find: center on the focus participant and keep it highlighted.',
-      'Fit: show the whole graph in the viewport.',
-      'Re-layout: re-run layout after changing filters/spacing.',
-      'Zoom: scale the view for overview vs details.',
-    ],
-  },
 
   'graph.spacing': {
     title: 'Layout spacing',
@@ -350,16 +257,7 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
 export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   'nav.dashboard': {
     title: 'Дашборд',
-    body: ['Быстрый обзор:', 'бэкенд, база данных, статус схемы.', 'Операционные списки:', 'узкие места и инциденты сверх SLA.'],
-  },
-  'nav.liquidity': {
-    title: 'Ликвидность',
-    body: [
-      'Ликвидность — насколько легко проходят платежи в сети',
-      'без упора в лимиты.',
-      'Экран показывает узкие места (почти исчерпанные лимиты)',
-      'и чистые позиции (кто чаще кредитор/должник).',
-    ],
+    body: ['Быстрый обзор:', 'участники, строка на эквивалент (его линии и суммы),', 'эквиваленты на удержании, последние записи аудита.'],
   },
   'nav.integrity': {
     title: 'Целостность',
@@ -368,11 +266,8 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
       'и им можно доверять.',
       'Если здесь есть ошибки, аналитика может быть неверной',
       'и операции — рискованными.',
+      'Здесь же отмечены эквиваленты на удержании и снимается удержание (с причиной).',
     ],
-  },
-  'nav.incidents': {
-    title: 'Инциденты',
-    body: ['Транзакции, которые выглядят зависшими и могут требовать ручного действия.', 'Отсортированы по возрасту; можно принудительно отменить при необходимости.'],
   },
   'nav.trustlines': {
     title: 'Трастлайны',
@@ -399,29 +294,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
     body: ['Каталог единиц/валют сети (например, UAH, HOUR).', 'У каждой есть точность и описание.'],
   },
 
-
-  'dashboard.api': {
-    title: 'API',
-    body: ['Состояние бэкенда.', 'Помогает быстро понять, доступна ли система и отвечает ли она.'],
-  },
-  'dashboard.db': {
-    title: 'DB',
-    body: ['Доступность и задержка базы данных.', 'Помогает выявлять сбои или деградацию со стороны БД.'],
-  },
-  'dashboard.migrations': {
-    title: 'Миграции',
-    body: ['Статус версии схемы базы данных.', 'В норме миграции должны быть применены (нет “pending”).'],
-  },
-  'dashboard.bottlenecks': {
-    title: 'Узкие места trustline',
-    body: ['Трастлайны, где остаётся мало доступного лимита.', 'Такие рёбра чаще всего блокируют маршруты платежей.'],
-    links: [{ label: 'Открыть трастлайны', to: { path: '/trustlines' } }],
-  },
-  'dashboard.incidentsOverSla': {
-    title: 'Инциденты сверх SLA',
-    body: ['Транзакции, которые превысили ожидаемое время выполнения (SLA).', 'Обычно требуют расследования или ручной отмены.'],
-    links: [{ label: 'Открыть инциденты', to: { path: '/incidents' } }],
-  },
   'dashboard.recentAudit': {
     title: 'Последние действия',
     body: ['Последние административные действия.', 'Полезно для понимания недавних изменений и расследований.'],
@@ -491,32 +363,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
     body: ['Когда трастлайн был создан.'],
   },
 
-  'incidents.txId': {
-    title: 'tx_id',
-    body: ['Идентификатор транзакции.'],
-  },
-  'incidents.state': {
-    title: 'state',
-    body: ['Текущее состояние зависшей транзакции.'],
-  },
-  'incidents.initiator': {
-    title: 'initiator',
-    body: ['PID инициатора транзакции.'],
-  },
-  'incidents.eq': {
-    title: 'Эквивалент',
-    body: ['Эквивалент, задействованный в транзакции.'],
-    links: [{ label: 'Открыть эквиваленты', to: { path: '/equivalents' } }],
-  },
-  'incidents.age': {
-    title: 'age',
-    body: ['Сколько времени транзакция находится в зависшем состоянии.'],
-  },
-  'incidents.sla': {
-    title: 'sla',
-    body: ['Ожидаемое окно времени для выполнения.', 'Если age больше SLA — считаем “сверх SLA”.'],
-  },
-
   'graph.eq': {
     title: 'Фильтр эквивалента',
     body: ['Показывает трастлайны только для выбранной единицы/валюты.', 'ALL — весь граф целиком.'],
@@ -550,11 +396,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
     title: 'Подписи',
     body: ['Показывает имена/ID на узлах.', 'Отключите, если подписи мешают чтению.'],
   },
-  'graph.incidents': {
-    title: 'Инциденты',
-    body: ['Подсвечивает узлы/рёбра, связанные с инцидентами.', 'Помогает быстро понять, кто вовлечён в зависшие операции.'],
-    links: [{ label: 'Открыть инциденты', to: { path: '/incidents' } }],
-  },
   'graph.hideIsolates': {
     title: 'Скрыть изолятов',
     body: ['Скрывает участников без видимых трастлайнов в текущем представлении.'],
@@ -570,15 +411,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   'graph.zoom': {
     title: 'Масштабирование',
     body: ['Используйте слайдер или колёсико мыши.', 'Масштаб помогает переключаться между обзором и деталями.'],
-  },
-  'graph.actions': {
-    title: 'Действия графа',
-    body: [
-      'Find: центрирует на фокусном участнике и оставляет его подсвеченным.',
-      'Fit: вписывает весь граф в область просмотра.',
-      'Re-layout: перестроить раскладку после фильтров/плотности.',
-      'Zoom: масштабировать обзор vs детали.',
-    ],
   },
   'graph.spacing': {
     title: 'Плотность раскладки',

@@ -8,6 +8,15 @@
 
 Этот список фиксирует **незавершённые** элементы из активных спецификаций в `docs/ru/admin-ui/specs/`.
 
+## Удалено 2026-10-07 (программа 032 S5, решение владельца)
+
+Экран `Liquidity analytics` (вместе с советами оператору и `GET /admin/trustlines/bottlenecks`), экран `Incidents`
+(`GET /admin/incidents`, `POST /admin/transactions/{tx_id}/abort`), аналитика участника на графе (рейтинг,
+распределение, концентрация/HHI, контрагенты, ёмкость, активность, циклы; `GET /admin/clearing/cycles`) удалены.
+Ниже они описаны **исторически**: их чеклисты, отклонения и «Phase 2» больше не являются незавершённой работой.
+Суммы по эквиваленту — строка эквивалента на Dashboard; удержания эквивалентов показываются и снимаются на экране
+`Integrity`. См. `docs/ru/admin-ui/specs/admin-ui-spec.md` (3.2, 4.1–4.4).
+
 ## Сверка с кодом 2026-08-11
 
 Документ не трогали с 2026-01-18. Проверено по текущему коду:
@@ -16,7 +25,7 @@
 |---|---|---|
 | `Liquidity analytics` (MVP, чеклист ниже) | ✅ **Реализован (9/9 функционально), с двумя отклонениями от критериев приёмки** — см. врезку ниже | роут `admin-ui/src/router/index.ts:12-14` → `LiquidityPage.vue`; меню `AppShell.vue:22`; бэкенд `app/api/v1/admin.py:645 GET /admin/liquidity/summary`; советы `advice/operatorAdvice.ts`; i18n `i18n/en.ts:77-106` (блок заканчивается `liquidity.empty.noDebts`; подпись пункта меню отдельно — `:723`) |
 | `Events` (timeline) | 🔴 **Открыт — и это не фронтовая работа** | Эндпоинта `GET /admin/events` не существует в `app/api/v1/admin.py` (перечислены все 27 маршрутов). Нет страницы, нет роута (`router/index.ts` — 12 записей, среди них нет `/events`), нет пункта меню (`AppShell.vue:21-30`). `/events` у симулятора (`simulator.py:2345,2407,2579`) — другой домен: SSE/poll в рамках прогона, не аудиторская лента. Объём работы, впрочем, меньше, чем следует из §1 «Зависимости» — см. примечание там |
-| `Transactions / Clearing` (глобальные списки) | 🔴 **Открыт — и это не фронтовая работа** | Есть только `POST /admin/transactions/{tx_id}/abort` (`admin.py:996`) и `GET /admin/clearing/cycles` (`:2056`). Списочных `GET /admin/transactions` и `GET /admin/transactions/{tx_id}` нет. Но `GET /payments` (`app/api/v1/payments.py:107`) и `GET /payments/{tx_id}` (`:91`) уже есть с фильтрами `direction/status/equivalent/from_date/to_date/page/per_page` — они лишь заскоуплены на запрашивающего (`app/core/payments/service.py:1054-1070`, ветки `is_admin` нет). Задача = снять requester-scoping за админским маршрутом |
+| `Transactions / Clearing` (глобальные списки) | 🔴 **Открыт — и это не фронтовая работа** | Было только `POST /admin/transactions/{tx_id}/abort` (`admin.py:996`) и `GET /admin/clearing/cycles` (`:2056`) — оба удалены 2026-10-07 (032 S5). Списочных `GET /admin/transactions` и `GET /admin/transactions/{tx_id}` нет. Но `GET /payments` (`app/api/v1/payments.py:107`) и `GET /payments/{tx_id}` (`:91`) уже есть с фильтрами `direction/status/equivalent/from_date/to_date/page/per_page` — они лишь заскоуплены на запрашивающего (`app/core/payments/service.py:1054-1070`, ветки `is_admin` нет). Задача = снять requester-scoping за админским маршрутом |
 
 ### Liquidity: два отклонения от критериев приёмки
 

@@ -17,9 +17,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { path: '/dashboard', labelKey: 'nav.dashboard.label', tooltipKey: 'nav.dashboard' },
-  { path: '/liquidity', labelKey: 'nav.liquidity.label', tooltipKey: 'nav.liquidity' },
   { path: '/integrity', labelKey: 'nav.integrity.label', tooltipKey: 'nav.integrity' },
-  { path: '/incidents', labelKey: 'nav.incidents.label', tooltipKey: 'nav.incidents' },
   { path: '/trustlines', labelKey: 'nav.trustlines.label', tooltipKey: 'nav.trustlines' },
   { path: '/graph', labelKey: 'nav.graph.label', tooltipKey: 'nav.graph' },
   { path: '/participants', labelKey: 'nav.participants.label', tooltipKey: 'nav.participants' },

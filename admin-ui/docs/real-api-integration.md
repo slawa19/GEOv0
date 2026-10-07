@@ -64,11 +64,15 @@ Common endpoints used by pages:
 - `GET /api/v1/admin/participants`
 - `GET /api/v1/admin/trustlines`
 - `GET /api/v1/admin/audit-log`
-- `GET /api/v1/admin/incidents`
-- `POST /api/v1/admin/transactions/{tx_id}/abort`
+- `GET /api/v1/admin/participants/stats`
+- `GET /api/v1/admin/liquidity/summary?equivalent=...` (Dashboard: one row per equivalent)
 - `GET /api/v1/admin/graph/snapshot`
 - `GET /api/v1/admin/graph/ego?pid=...&depth=1|2`
-- `GET /api/v1/admin/clearing/cycles` (optional: `participant_pid`, `equivalent`, `max_depth`)
+- `GET /api/v1/admin/participants/{pid}/metrics?equivalent=...` (graph drawer: balance rows)
+
+Removed on 2026-10-07 (032 S5, owner decision): `GET /admin/incidents`, `POST /admin/transactions/{tx_id}/abort`,
+`GET /admin/trustlines/bottlenecks`, `GET /admin/clearing/cycles` and the Liquidity and Incidents pages; the
+equivalent holds are shown and cleared on the Integrity page.
 
 Equivalents (admin):
 - `GET /api/v1/admin/equivalents`
@@ -80,6 +84,8 @@ Equivalents (admin):
 Integrity:
 - `GET /api/v1/integrity/status`
 - `POST /api/v1/integrity/verify`
+- `GET /api/v1/integrity/summary` (which equivalents are on hold)
+- `POST /api/v1/admin/equivalents/{code}/integrity-hold/clear` (lift a hold, reason required)
 
 Feature flags are config keys: the Config page edits them through `PATCH /api/v1/admin/config`. The UI no longer
 uses `/admin/feature-flags` (the `FeatureFlagsPage` and its client methods were deleted on 2026-10-07, 032 S4;

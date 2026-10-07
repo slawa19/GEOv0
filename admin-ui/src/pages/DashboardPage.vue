@@ -1,42 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ApiException } from '../api/apiException'
 import { api } from '../api'
-import { isUnitIntervalDecimalString } from '../utils/decimal'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import type { AuditLogEntry, Incident, Trustline } from '../types/domain'
+import type { AuditLogEntry, LiquiditySummary } from '../types/domain'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
 import { toLocationQueryRaw } from '../router/query'
 import { labelParticipantStatus, normalizeParticipantStatusKey } from '../ui/participantStatus'
 
+// 032 S5 (F-3, owner decision 2026-10-07): the Dashboard is the participant counters, one row per equivalent,
+// a warning about integrity holds and the latest audit rows. The API/DB/migrations cards (the header already
+// polls health, `stores/health.ts`) and the bottlenecks card were removed.
+
 const router = useRouter()
 const route = useRoute()
-
-const loading = ref(false)
-const error = ref<string | null>(null)
-
-const health = ref<Record<string, unknown> | null>(null)
-const healthDb = ref<Record<string, unknown> | null>(null)
-const migrations = ref<Record<string, unknown> | null>(null)
 
 const auditLoading = ref(false)
 const auditError = ref<string | null>(null)
 const auditItems = ref<AuditLogEntry[]>([])
-
-const threshold = ref('0.10')
-const thresholdValid = computed(() => isUnitIntervalDecimalString(threshold.value))
-
-const bottlenecksLoading = ref(false)
-const bottlenecksError = ref<string | null>(null)
-const bottleneckItems = ref<Trustline[]>([])
-
-const incidentsLoading = ref(false)
-const incidentsError = ref<string | null>(null)
-const incidentsOverSla = ref<Incident[]>([])
 
 const participantsStatsLoading = ref(false)
 const participantsStatsError = ref<string | null>(null)
@@ -75,21 +59,6 @@ async function loadParticipantStats() {
   }
 }
 
-async function load() {
-  loading.value = true
-  error.value = null
-  try {
-    health.value = await api.health()
-    healthDb.value = await api.healthDb()
-    migrations.value = await api.migrations()
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    error.value = msg || t('dashboard.loadFailed')
-  } finally {
-    loading.value = false
-  }
-}
-
 async function loadAudit() {
   auditLoading.value = true
   auditError.value = null
@@ -104,67 +73,61 @@ async function loadAudit() {
   }
 }
 
-const { money, catalogueSettled, hasUnknownPrecision, loadEquivalentPrecision } = useEquivalentPrecision()
+// D-3: precision comes from the catalogue WITH the inactive equivalents - a stopped equivalent's lines and debts
+// still exist, and its row prints its own sums at its own precision, not a dash.
+const { equivalents, money, loadEquivalentPrecision } = useEquivalentPrecision()
 
-// Пока каталог не ответил, «точность неизвестна» — ещё не вывод, а состояние загрузки.
-const bottlenecksPrecisionMissing = computed(
-  () => catalogueSettled.value && hasUnknownPrecision(bottleneckItems.value.map((row) => row.equivalent)),
-)
+type EquivalentRow = { code: string; isActive: boolean; summary: LiquiditySummary | null; error: string | null }
 
-async function loadEquivalents() {
+const equivalentsLoading = ref(false)
+const equivalentsError = ref<string | null>(null)
+const equivalentRows = ref<EquivalentRow[]>([])
+
+// One request per equivalent: the server sums money only within one equivalent (028 F-028-37), so the rows are
+// never added up across equivalents here either.
+async function loadEquivalentRows() {
+  equivalentsLoading.value = true
+  equivalentsError.value = null
   try {
     await loadEquivalentPrecision()
-  } catch {
-    // The catalogue is the only source of precision: without it money cells stay '—'
-    // (see bottlenecksPrecisionMissing), which is honest. The dashboard itself keeps working.
+    const codes = equivalents.value.map((e) => ({ code: String(e.code), isActive: Boolean(e.is_active) }))
+    equivalentRows.value = await Promise.all(
+      codes.map(async ({ code, isActive }) => {
+        try {
+          return { code, isActive, summary: await api.liquiditySummary({ equivalent: code }), error: null }
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          return { code, isActive, summary: null, error: msg || t('dashboard.equivalents.loadFailed') }
+        }
+      }),
+    )
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    equivalentsError.value = msg || t('dashboard.equivalents.loadFailed')
+    equivalentRows.value = []
+  } finally {
+    equivalentsLoading.value = false
   }
 }
 
-async function loadBottlenecks() {
-  if (!thresholdValid.value) {
-    bottlenecksLoading.value = false
-    bottlenecksError.value = t('validation.thresholdUnitInterval')
-    bottleneckItems.value = []
-    return
-  }
-  bottlenecksLoading.value = true
-  bottlenecksError.value = null
-  try {
-    const r = await api.trustlineBottlenecks({ threshold: threshold.value, limit: 10 })
-    bottleneckItems.value = (r.items || []) as Trustline[]
-  } catch (e: unknown) {
-    if (e instanceof ApiException) {
-      bottlenecksError.value = `${e.message} (${e.status} ${e.code})`
-    } else {
-      const msg = e instanceof Error ? e.message : String(e)
-      bottlenecksError.value = msg || t('dashboard.bottlenecksLoadFailed')
-    }
-  } finally {
-    bottlenecksLoading.value = false
-  }
+function rowMoney(row: EquivalentRow, value: string | null | undefined): string {
+  if (!row.summary || value === null || value === undefined) return '—'
+  return money(value, row.code)
 }
 
-async function loadIncidents() {
-  incidentsLoading.value = true
-  incidentsError.value = null
+// F-4: the equivalents on an integrity hold (`GET /integrity/summary`); clearing them is the Integrity screen's.
+const heldEquivalents = ref<string[]>([])
+const holdsError = ref<string | null>(null)
+
+async function loadHolds() {
+  holdsError.value = null
   try {
-    const page = await api.listIncidents({ page: 1, per_page: 200 })
-    // Второй экземпляр того же тавтологического предиката, снят вместе с первым (`F-013-5`).
-    // `.filter(age > sla)` не убирал ни одной строки: маршрут возвращает только просроченные
-    // (`app/api/v1/admin.py:1011,1019`), что запинено `tests/unit/test_admin_incidents_list.py:84-85`.
-    // Поведение не меняется — меняется то, что код перестаёт утверждать несуществующее деление.
-    const stuck = (page.items as Incident[]).slice()
-    stuck.sort((a, b) => b.age_seconds - a.age_seconds)
-    incidentsOverSla.value = stuck.slice(0, 10)
+    const res = await api.integritySummary()
+    heldEquivalents.value = res.equivalents.filter((e) => e.hold).map((e) => e.equivalent)
   } catch (e: unknown) {
-    if (e instanceof ApiException) {
-      incidentsError.value = `${e.message} (${e.status} ${e.code})`
-    } else {
-      const msg = e instanceof Error ? e.message : String(e)
-      incidentsError.value = msg || t('incidents.loadFailed')
-    }
-  } finally {
-    incidentsLoading.value = false
+    const msg = e instanceof Error ? e.message : String(e)
+    holdsError.value = msg || t('dashboard.holds.loadFailed')
+    heldEquivalents.value = []
   }
 }
 
@@ -181,56 +144,11 @@ function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
   void router.push({ path: '/participants', query: toLocationQueryRaw(q) })
 }
 
-function goTrustlinesWithThreshold() {
-  if (!thresholdValid.value) {
-    bottlenecksError.value = t('validation.thresholdUnitInterval')
-    return
-  }
-  const thresholdValue = String(threshold.value || '').trim()
-  void router.push({
-    path: '/trustlines',
-    query: toLocationQueryRaw({
-      ...(thresholdValue ? { threshold: thresholdValue } : {}),
-    }),
-  })
-}
-
 onMounted(() => {
-  void load()
   void loadAudit()
-  void loadEquivalents()
-  void loadBottlenecks()
-  void loadIncidents()
+  void loadEquivalentRows()
+  void loadHolds()
   void loadParticipantStats()
-})
-
-const statusText = computed(() => String(health.value?.status ?? t('common.unknown')))
-
-const migrationsCurrent = computed(() => {
-  const m = migrations.value
-  if (!m) return '—'
-  const rec = m as Record<string, unknown>
-  return String(rec.current_revision ?? '—')
-})
-const migrationsHead = computed(() => {
-  const m = migrations.value
-  if (!m) return '—'
-  const rec = m as Record<string, unknown>
-  return String(rec.head_revision ?? '—')
-})
-const migrationsUpToDateLabel = computed(() => {
-  const m = migrations.value
-  if (!m) return t('common.unknown')
-  const rec = m as Record<string, unknown>
-  const cur = rec.current_revision
-  const head = rec.head_revision
-  if (!cur && !head) return t('common.unknown')
-  return rec.is_up_to_date ? t('common.yes') : t('common.no')
-})
-
-const healthDbInfo = computed(() => {
-  const db = healthDb.value?.db
-  return db && typeof db === 'object' ? (db as Record<string, unknown>) : null
 })
 
 const statusRows = computed(() => {
@@ -255,91 +173,36 @@ const typeRows = computed(() => {
 <template>
   <div>
     <el-alert
-      v-if="error"
-      :title="error"
+      v-if="heldEquivalents.length"
       type="error"
       show-icon
       :closable="false"
       class="mb"
+      data-testid="dashboard-holds"
+      :title="t('dashboard.holds.title', { codes: heldEquivalents.join(', ') })"
     >
       <template #default>
-        <el-button
-          size="small"
-          type="primary"
-          @click="load"
-        >
-          {{ t('common.refresh') }}
-        </el-button>
+        <div class="holdsBody">
+          <span>{{ t('dashboard.holds.text') }}</span>
+          <el-button
+            size="small"
+            type="primary"
+            data-testid="dashboard-holds-open"
+            @click="go('/integrity')"
+          >
+            {{ t('dashboard.holds.open') }}
+          </el-button>
+        </div>
       </template>
     </el-alert>
-
-    <el-row
-      :gutter="12"
+    <el-alert
+      v-else-if="holdsError"
+      type="warning"
+      show-icon
+      :closable="false"
       class="mb"
-    >
-      <el-col :span="8">
-        <el-card class="geoCard">
-          <template #header>
-            <TooltipLabel
-              :label="t('dashboard.card.api')"
-              tooltip-key="dashboard.api"
-            />
-          </template>
-          <el-skeleton
-            v-if="loading"
-            animated
-            :rows="3"
-          />
-          <div v-else>
-            <div><span class="geoLabel">{{ t('dashboard.field.status') }}:</span> {{ statusText }}</div>
-            <div><span class="geoLabel">{{ t('dashboard.field.version') }}:</span> {{ health?.version }}</div>
-            <div><span class="geoLabel">{{ t('dashboard.field.uptime') }}:</span> {{ health?.uptime_seconds }}s</div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <el-col :span="8">
-        <el-card class="geoCard">
-          <template #header>
-            <TooltipLabel
-              :label="t('dashboard.card.db')"
-              tooltip-key="dashboard.db"
-            />
-          </template>
-          <el-skeleton
-            v-if="loading"
-            animated
-            :rows="3"
-          />
-          <div v-else>
-            <div><span class="geoLabel">{{ t('dashboard.field.status') }}:</span> {{ healthDb?.status }}</div>
-            <div><span class="geoLabel">{{ t('dashboard.field.reachable') }}:</span> {{ healthDbInfo?.reachable }}</div>
-            <div><span class="geoLabel">{{ t('dashboard.field.latency') }}:</span> {{ healthDbInfo?.latency_ms }}ms</div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <el-col :span="8">
-        <el-card class="geoCard">
-          <template #header>
-            <TooltipLabel
-              :label="t('dashboard.card.migrations')"
-              tooltip-key="dashboard.migrations"
-            />
-          </template>
-          <el-skeleton
-            v-if="loading"
-            animated
-            :rows="3"
-          />
-          <div v-else>
-            <div><span class="geoLabel">{{ t('dashboard.field.upToDate') }}:</span> {{ migrationsUpToDateLabel }}</div>
-            <div><span class="geoLabel">{{ t('dashboard.field.current') }}:</span> {{ migrationsCurrent }}</div>
-            <div><span class="geoLabel">{{ t('dashboard.field.head') }}:</span> {{ migrationsHead }}</div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+      :title="holdsError"
+    />
 
     <el-row
       :gutter="12"
@@ -483,226 +346,121 @@ const typeRows = computed(() => {
       </el-col>
     </el-row>
 
-    <el-row
-      :gutter="12"
-      class="mb"
+    <el-card
+      class="geoCard mb"
+      data-testid="dashboard-equivalents"
     >
-      <el-col :span="12">
-        <el-card class="geoCard">
-          <template #header>
-            <div class="hdr">
-              <TooltipLabel
-                :label="t('dashboard.card.bottlenecks')"
-                tooltip-key="dashboard.bottlenecks"
-              />
-              <div class="hdr__right">
-                <div class="hdr__threshold">
-                  <TooltipLabel
-                    :label="t('dashboard.controls.threshold.label')"
-                    :tooltip-text="t('dashboard.controls.threshold.help')"
-                    :max-lines="4"
-                  />
-                  <el-input
-                    v-model="threshold"
-                    size="small"
-                    style="width: 120px"
-                    :aria-invalid="!thresholdValid"
-                    :placeholder="t('dashboard.controls.threshold.placeholder')"
-                  />
-                </div>
-                <el-button
-                  size="small"
-                  :disabled="!thresholdValid"
-                  @click="goTrustlinesWithThreshold()"
-                >
-                  {{ t('common.viewAll') }}
-                </el-button>
-              </div>
-            </div>
-          </template>
-
-          <el-alert
-            v-if="bottlenecksPrecisionMissing"
-            data-testid="dashboard-precision-unavailable"
-            :title="t('money.precisionUnavailable')"
-            type="warning"
-            show-icon
-            :closable="false"
-            class="mb"
+      <template #header>
+        <div class="hdr">
+          <TooltipLabel
+            :label="t('dashboard.card.equivalents')"
+            :tooltip-text="t('dashboard.equivalents.help')"
           />
-
-          <el-alert
-            v-if="bottlenecksError"
-            :title="bottlenecksError"
-            type="warning"
-            show-icon
-            :closable="false"
-            class="mb"
-          >
-            <template #default>
-              <el-button
-                size="small"
-                type="primary"
-                @click="loadBottlenecks"
-              >
-                {{ t('common.refresh') }}
-              </el-button>
-            </template>
-          </el-alert>
-          <el-skeleton
-            v-else-if="bottlenecksLoading"
-            animated
-            :rows="6"
-          />
-
-          <el-empty
-            v-else-if="bottleneckItems.length === 0"
-            :description="t('dashboard.empty.noBottlenecks')"
-          />
-
-          <el-table
-            v-else
-            :data="bottleneckItems"
+          <el-button
             size="small"
-            height="360"
-            table-layout="fixed"
-            class="geoTable"
+            @click="go('/equivalents')"
           >
-            <el-table-column
-              prop="equivalent"
-              :label="t('trustlines.equivalent')"
-              width="110"
-            />
-            <el-table-column
-              prop="from"
-              :label="t('trustlines.from')"
-              min-width="180"
-              show-overflow-tooltip
-            >
-              <template #default="scope">
-                <TableCellEllipsis :text="scope.row.from" />
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="to"
-              :label="t('trustlines.to')"
-              min-width="180"
-              show-overflow-tooltip
-            >
-              <template #default="scope">
-                <TableCellEllipsis :text="scope.row.to" />
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="limit"
-              :label="t('trustlines.limit')"
-              width="110"
-            >
-              <template #default="scope">
-                {{ money(scope.row.limit, scope.row.equivalent) }}
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="available"
-              :label="t('trustlines.available')"
-              width="110"
-            >
-              <template #default="scope">
-                <span class="bad">{{ money(scope.row.available, scope.row.equivalent) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="status"
-              :label="t('common.status')"
-              width="100"
-            />
-          </el-table>
-        </el-card>
-      </el-col>
+            {{ t('common.viewAll') }}
+          </el-button>
+        </div>
+      </template>
 
-      <el-col :span="12">
-        <el-card class="geoCard">
-          <template #header>
-            <div class="hdr">
-              <TooltipLabel
-                :label="t('dashboard.card.incidentsOverSla')"
-                tooltip-key="dashboard.incidentsOverSla"
-              />
-              <div class="hdr__right">
-                <el-button
-                  size="small"
-                  @click="go('/incidents')"
-                >
-                  {{ t('common.viewAll') }}
-                </el-button>
-              </div>
-            </div>
-          </template>
-
-          <el-alert
-            v-if="incidentsError"
-            :title="incidentsError"
-            type="warning"
-            show-icon
-            class="mb"
-          />
-          <el-skeleton
-            v-if="incidentsLoading"
-            animated
-            :rows="6"
-          />
-
-          <el-empty
-            v-else-if="incidentsOverSla.length === 0"
-            :description="t('dashboard.empty.noIncidentsOverSla')"
-          />
-
-          <el-table
-            v-else
-            :data="incidentsOverSla"
+      <el-alert
+        v-if="equivalentsError"
+        :title="equivalentsError"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="mb"
+      >
+        <template #default>
+          <el-button
             size="small"
-            height="360"
-            table-layout="fixed"
-            class="geoTable"
+            type="primary"
+            @click="loadEquivalentRows"
           >
-            <el-table-column
-              prop="tx_id"
-              :label="t('incidents.columns.txId')"
-              min-width="200"
-              show-overflow-tooltip
+            {{ t('common.refresh') }}
+          </el-button>
+        </template>
+      </el-alert>
+      <el-skeleton
+        v-else-if="equivalentsLoading"
+        animated
+        :rows="3"
+      />
+      <el-empty
+        v-else-if="equivalentRows.length === 0"
+        :description="t('dashboard.equivalents.empty')"
+      />
+      <el-table
+        v-else
+        :data="equivalentRows"
+        size="small"
+        table-layout="fixed"
+        class="geoTable"
+      >
+        <el-table-column
+          prop="code"
+          :label="t('trustlines.equivalent')"
+          width="120"
+        />
+        <el-table-column
+          :label="t('common.status')"
+          width="130"
+        >
+          <template #default="scope">
+            <el-tag
+              :type="scope.row.isActive ? 'success' : 'info'"
+              effect="plain"
+              size="small"
             >
-              <template #default="scope">
-                <TableCellEllipsis :text="scope.row.tx_id" />
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="state"
-              :label="t('incidents.columns.state')"
-              width="180"
-            />
-            <el-table-column
-              prop="equivalent"
-              :label="t('incidents.columns.equivalent')"
-              width="110"
-            />
-            <el-table-column
-              prop="age_seconds"
-              :label="t('dashboard.incidents.ageSeconds')"
-              width="110"
-            >
-              <template #default="scope">
-                <span class="bad">{{ scope.row.age_seconds }}s</span>
-              </template>
-            </el-table-column>
-            <el-table-column
-              prop="sla_seconds"
-              :label="t('dashboard.incidents.slaSeconds')"
-              width="90"
-            />
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
+              {{ scope.row.isActive ? t('dashboard.equivalents.active') : t('dashboard.equivalents.inactive') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('dashboard.equivalents.activeTrustlines')"
+          width="140"
+        >
+          <template #default="scope">
+            {{ scope.row.summary ? scope.row.summary.active_trustlines : '—' }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('dashboard.equivalents.totalLimit')"
+          min-width="130"
+        >
+          <template #default="scope">
+            {{ rowMoney(scope.row, scope.row.summary?.total_limit) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('dashboard.equivalents.totalUsed')"
+          min-width="130"
+        >
+          <template #default="scope">
+            {{ rowMoney(scope.row, scope.row.summary?.total_used) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('dashboard.equivalents.totalAvailable')"
+          min-width="130"
+        >
+          <template #default="scope">
+            {{ rowMoney(scope.row, scope.row.summary?.total_available) }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-alert
+        v-for="row in equivalentRows.filter((r) => r.error)"
+        :key="row.code"
+        :title="`${row.code}: ${row.error}`"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="mt"
+      />
+    </el-card>
 
     <el-card class="geoCard">
       <template #header>
@@ -816,10 +574,15 @@ const typeRows = computed(() => {
   gap: 10px;
 }
 
-.hdr__threshold {
+.mt {
+  margin-top: 8px;
+}
+
+.holdsBody {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .tags {
@@ -830,10 +593,5 @@ const typeRows = computed(() => {
 
 .tag {
   cursor: pointer;
-}
-
-.bad {
-  color: var(--el-color-danger);
-  font-weight: 700;
 }
 </style>

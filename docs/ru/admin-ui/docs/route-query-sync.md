@@ -103,6 +103,5 @@ Vue может запланировать реакции watcher’ов не с�
 
 - `Participants` — query‑фильтры + reload: `admin-ui/src/pages/ParticipantsPage.vue`
 - `Trustlines` — несколько фильтров + threshold (UI‑only): `admin-ui/src/pages/TrustlinesPage.vue`
-- `Liquidity` — фильтры без reload: `admin-ui/src/pages/LiquidityPage.vue`
 - `Graph` — фильтры без reload (но с rebuild графа): `admin-ui/src/pages/GraphPage.vue`
 - общий guard: `admin-ui/src/composables/useRouteHydrationGuard.ts`

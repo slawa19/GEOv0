@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -9,7 +8,6 @@ from app.config import settings
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
-from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
@@ -22,9 +20,8 @@ async def test_admin_liquidity_summary_requires_admin_token(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
+async def test_admin_liquidity_summary_smoke(client, db_session):
     # Arrange
-    monkeypatch.setattr(settings, "PAYMENT_TX_STUCK_TIMEOUT_SECONDS", 120, raising=False)
 
     alice = Participant(pid="alice", display_name="Alice", public_key="A" * 64, type="person", status="active")
     bob = Participant(pid="bob", display_name="Bob", public_key="B" * 64, type="person", status="active")
@@ -55,7 +52,7 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
     await db_session.flush()
 
     # Debts:
-    # - bob owes alice 95 (bottleneck on tl1)
+    # - bob owes alice 95
     # - alice owes carol 1 (small usage on tl2)
     async with debt_fixture_setup(db_session, label="setup"):
         db_session.add_all(
@@ -65,31 +62,13 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
             ]
         )
 
-    now = datetime.now(timezone.utc)
-    old = now - timedelta(seconds=121)
-    db_session.add(
-        Transaction(
-            tx_id="tx_stuck_1",
-            idempotency_key=None,
-            type="PAYMENT",
-            initiator_id=alice.id,
-            payload={"equivalent": "UAH"},
-            signatures=[],
-            # A PAYMENT row is terminal since migration 030 (019 stage 4): an old one is not "stuck".
-            state="COMMITTED",
-            error=None,
-            created_at=old,
-            updated_at=old,
-        )
-    )
-
     await db_session.commit()
 
     headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
     # Act
     r = await client.get(
-        "/api/v1/admin/liquidity/summary?equivalent=UAH&threshold=0.10&limit=10",
+        "/api/v1/admin/liquidity/summary?equivalent=UAH",
         headers=headers,
     )
     assert r.status_code == 200
@@ -98,95 +77,12 @@ async def test_admin_liquidity_summary_smoke(client, db_session, monkeypatch):
     # Assert: totals
     assert payload["equivalent"] == "UAH"
     assert payload["active_trustlines"] == 2
-    assert payload["bottlenecks"] == 1
-    # No stuck payment exists since migration 030: compatibility zero until П4 (019 stage 4).
-    assert payload["incidents_over_sla"] == 0
-
     assert Decimal(payload["total_limit"]) == Decimal("200.00")
     assert Decimal(payload["total_used"]) == Decimal("96.00")
     assert Decimal(payload["total_available"]) == Decimal("104.00")
 
-    # Assert: net positions (Debt direction: debtor -> creditor)
-    # alice: +95 (creditor) -1 (debtor) = +94
-    # bob: -95
-    # carol: +1
-    top_creditors = payload["top_creditors"]
-    assert {r["pid"] for r in top_creditors} >= {"alice", "carol"}
-
-    by_pid = {r["pid"]: r for r in payload["top_by_abs_net"]}
-    assert Decimal(by_pid["alice"]["net"]) == Decimal("94.00")
-    assert Decimal(by_pid["bob"]["net"]) == Decimal("-95.00")
-    assert Decimal(by_pid["carol"]["net"]) == Decimal("1.00")
-
-    # Assert: bottleneck edges list is present and matches threshold
-    assert isinstance(payload["top_bottleneck_edges"], list)
-    assert len(payload["top_bottleneck_edges"]) == 1
-    edge = payload["top_bottleneck_edges"][0]
-    assert edge["from"] == "alice"
-    assert edge["to"] == "bob"
-    assert edge["equivalent"] == "UAH"
-
-
-@pytest.mark.asyncio
-async def test_admin_liquidity_summary_keeps_high_precision_threshold(client, db_session):
-    alice = Participant(
-        pid="alice_boundary",
-        display_name="Alice Boundary",
-        public_key="D" * 64,
-        type="person",
-        status="active",
-    )
-    bob = Participant(
-        pid="bob_boundary",
-        display_name="Bob Boundary",
-        public_key="E" * 64,
-        type="person",
-        status="active",
-    )
-    uah = Equivalent(
-        code="UAH_BOUNDARY",
-        symbol="UB",
-        description="Boundary equivalent",
-        precision=2,
-        metadata_={},
-        is_active=True,
-    )
-    db_session.add_all([alice, bob, uah])
-    await db_session.flush()
-    db_session.add(
-        TrustLine(
-            from_participant_id=alice.id,
-            to_participant_id=bob.id,
-            equivalent_id=uah.id,
-            limit=Decimal("100.00"),
-            policy={},
-            status="active",
-        )
-    )
-    async with debt_fixture_setup(db_session, label="setup"):
-        db_session.add(
-            Debt(
-                debtor_id=bob.id,
-                creditor_id=alice.id,
-                equivalent_id=uah.id,
-                amount=Decimal("90.00"),
-            )
-        )
-    await db_session.commit()
-
-    headers = {"X-Admin-Token": settings.ADMIN_TOKEN}
-    exact = await client.get(
-        "/api/v1/admin/liquidity/summary?equivalent=UAH_BOUNDARY&threshold=0.10",
-        headers=headers,
-    )
-    above = await client.get(
-        "/api/v1/admin/liquidity/summary?equivalent=UAH_BOUNDARY&threshold=0.10000000000000001",
-        headers=headers,
-    )
-
-    assert exact.status_code == 200
-    assert exact.json()["bottlenecks"] == 0
-    assert exact.json()["top_bottleneck_edges"] == []
-    assert above.status_code == 200
-    assert above.json()["bottlenecks"] == 1
-    assert len(above.json()["top_bottleneck_edges"]) == 1
+    # 032 S5 (F-2, owner decision 2026-10-07): the ranked net lists, the bottleneck count and edges and the
+    # incidents counter left with the Liquidity screen; the six per-equivalent fields are the whole answer.
+    assert set(payload) == {
+        "equivalent", "updated_at", "active_trustlines", "total_limit", "total_used", "total_available",
+    }

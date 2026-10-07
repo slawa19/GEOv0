@@ -13,6 +13,7 @@ const apiMock = vi.hoisted(() => ({
   patchConfig: vi.fn(),
   integrityStatus: vi.fn(),
   integrityVerify: vi.fn(),
+  integritySummary: vi.fn(),
 }))
 
 vi.mock('../api', () => ({ api: apiMock }))
@@ -66,6 +67,7 @@ function primaryButton(wrapper: VueWrapper) {
 beforeEach(() => {
   localStorage.clear()
   for (const mock of Object.values(apiMock)) mock.mockReset()
+  apiMock.integritySummary.mockResolvedValue({ equivalents: [] })
 })
 
 describe('Phase 4 Config operator workflow', () => {
