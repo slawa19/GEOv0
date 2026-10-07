@@ -6,6 +6,8 @@ import { describeError } from '../api/describeError'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
+import ListState from '../ui/ListState.vue'
+import { formatTs } from '../utils/datetime'
 import type { AuditLogEntry, LiquiditySummary } from '../types/domain'
 import { t } from '../i18n'
 import { labelParticipantType } from '../i18n/labels'
@@ -41,13 +43,13 @@ async function loadParticipantStats() {
     const byStatus = new Map<string, number>()
     for (const [k, v] of Object.entries(stats.participants_by_status || {})) {
       const key = normKey(k) || 'unknown'
-      byStatus.set(key, Number(v) || 0)
+      byStatus.set(key, v)
     }
 
     const byType = new Map<string, number>()
     for (const [k, v] of Object.entries(stats.participants_by_type || {})) {
       const key = String(k || '').trim().toLowerCase() || 'unknown'
-      byType.set(key, Number(v) || 0)
+      byType.set(key, v)
     }
 
     participantsByStatus.value = byStatus
@@ -140,11 +142,10 @@ function goParticipantsWithFilter(filter: { status?: string; type?: string }) {
   void router.push({ path: '/participants', query: toLocationQueryRaw(q) })
 }
 
+// Four independent requests, one per card: each loader owns its own loading and error state and never throws, so a
+// card that fails shows its failure and does not hold back, blank or replace the others.
 onMounted(() => {
-  void loadAudit()
-  void loadEquivalentRows()
-  void loadHolds()
-  void loadParticipantStats()
+  void Promise.all([loadAudit(), loadEquivalentRows(), loadHolds(), loadParticipantStats()])
 })
 
 const statusRows = computed(() => {
@@ -474,80 +475,79 @@ const typeRows = computed(() => {
         </div>
       </template>
 
-      <el-alert
-        v-if="auditError"
-        :title="auditError"
-        type="warning"
-        show-icon
-        class="mb"
-      />
-      <el-skeleton
-        v-if="auditLoading"
-        animated
-        :rows="6"
-      />
-
-      <el-table
-        v-else
-        :data="auditItems"
-        size="small"
-        height="360"
-        table-layout="fixed"
-        class="geoTable"
+      <ListState
+        :error="auditError"
+        :loading="auditLoading"
+        :empty="auditItems.length === 0"
+        :empty-text="t('auditLog.none')"
+        :skeleton-rows="6"
+        @retry="loadAudit"
       >
-        <el-table-column
-          prop="timestamp"
-          :label="t('auditLog.timestamp')"
-          width="200"
-          show-overflow-tooltip
-        />
-        <el-table-column
-          prop="actor_id"
-          :label="t('auditLog.actor')"
-          width="110"
-          show-overflow-tooltip
+        <el-table
+          :data="auditItems"
+          size="small"
+          height="360"
+          table-layout="fixed"
+          class="geoTable"
         >
-          <template #default="scope">
-            <TableCellEllipsis :text="scope.row.actor_id" />
-          </template>
-        </el-table-column>
-        <el-table-column
-          prop="actor_role"
-          :label="t('auditLog.role')"
-          width="130"
-          show-overflow-tooltip
-        >
-          <template #default="scope">
-            <TableCellEllipsis :text="scope.row.actor_role" />
-          </template>
-        </el-table-column>
-        <el-table-column
-          prop="action"
-          :label="t('auditLog.action')"
-          min-width="280"
-          show-overflow-tooltip
-        >
-          <template #default="scope">
-            <TableCellEllipsis :text="scope.row.action" />
-          </template>
-        </el-table-column>
-        <el-table-column
-          prop="object_type"
-          :label="t('auditLog.object')"
-          width="140"
-          show-overflow-tooltip
-        />
-        <el-table-column
-          prop="object_id"
-          :label="t('auditLog.objectId')"
-          min-width="360"
-          show-overflow-tooltip
-        >
-          <template #default="scope">
-            <TableCellEllipsis :text="scope.row.object_id" />
-          </template>
-        </el-table-column>
-      </el-table>
+          <el-table-column
+            prop="timestamp"
+            :label="t('auditLog.timestamp')"
+            width="200"
+            show-overflow-tooltip
+          >
+            <template #default="scope">
+              {{ formatTs(scope.row.timestamp) }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="actor_id"
+            :label="t('auditLog.actor')"
+            width="110"
+            show-overflow-tooltip
+          >
+            <template #default="scope">
+              <TableCellEllipsis :text="scope.row.actor_id" />
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="actor_role"
+            :label="t('auditLog.role')"
+            width="130"
+            show-overflow-tooltip
+          >
+            <template #default="scope">
+              <TableCellEllipsis :text="scope.row.actor_role" />
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="action"
+            :label="t('auditLog.action')"
+            min-width="280"
+            show-overflow-tooltip
+          >
+            <template #default="scope">
+              <TableCellEllipsis :text="scope.row.action" />
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="object_type"
+            :label="t('auditLog.object')"
+            width="140"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            prop="object_id"
+            :label="t('auditLog.objectId')"
+            min-width="360"
+            show-overflow-tooltip
+          >
+            <template #default="scope">
+              <TableCellEllipsis :text="scope.row.object_id" />
+            </template>
+          </el-table-column>
+        </el-table>
+      </ListState>
     </el-card>
   </div>
 </template>

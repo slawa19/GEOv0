@@ -127,6 +127,12 @@ describe('buildGraphElements: bottlenecks', () => {
     expect(flags([line('A', 'B', { limit: '10.00', available: '0.50', status: 'closed' })])).toEqual([[0, false]])
     expect(flags([line('A', 'B', { limit: '10.00', available: '3.00' })], '0.5')).toEqual([[1, true]])
   })
+
+  it('marks nothing when the threshold is not a share (a number from 0 to 1)', () => {
+    const shortLine = [line('A', 'B', { limit: '10.00', available: '0.50' })]
+    expect(flags(shortLine, '0.10')).toEqual([[1, true]])
+    for (const invalid of ['5', '-0.1', 'abc', '']) expect(flags(shortLine, invalid), invalid).toEqual([[0, false]])
+  })
 })
 
 describe('buildGraphElements: element data', () => {

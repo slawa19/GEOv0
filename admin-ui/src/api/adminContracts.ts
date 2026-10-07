@@ -129,13 +129,22 @@ const InvariantWithdrawnSchema = z
 
 // 026 `T2601`: `trust_limits` lists debt above a lowered limit as allowed and says growth is not
 // verified by a snapshot (OpenAPI `TrustLimitsResult`).
-const OverLimitKeys = ['debtor_id', 'creditor_id', 'equivalent_id', 'debt_amount', 'trust_limit', 'excess']
+const OverLimitAllowedDebtSchema = z
+  .object({
+    debtor_id: z.string(),
+    creditor_id: z.string(),
+    equivalent_id: z.string(),
+    debt_amount: z.string(),
+    trust_limit: z.string(),
+    excess: z.string(),
+  })
+  .strict()
 const TrustLimitsResultSchema = z
   .object({
     passed: z.boolean(),
     violations: z.number().int().nonnegative(),
     details: z.record(z.string(), z.unknown()).nullable(),
-    over_limit_allowed: z.array(z.object(Object.fromEntries(OverLimitKeys.map((k) => [k, z.string()]))).strict()),
+    over_limit_allowed: z.array(OverLimitAllowedDebtSchema),
     growth: z.object({ status: z.literal('not_verified'), reason: z.literal('requires_operation_prestate') }).strict(),
   })
   .strict()

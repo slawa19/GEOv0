@@ -1,7 +1,7 @@
 import type { ElementDefinition } from 'cytoscape'
 
 import type { Participant, Trustline } from '../../types/domain'
-import { isRatioBelowThreshold } from '../../utils/decimal'
+import { isTrustlineBottleneck } from '../../utils/bottleneck'
 import { normalizeEquivalentCode } from '../../utils/equivalent'
 import { nodeBaseColor, selectionBorderColor } from './graphStyle'
 
@@ -185,9 +185,7 @@ export function buildGraphElements(input: GraphElementsInput): GraphElements {
   const edges = filteredEdges
     .filter((t) => finalPids.has(t.from) && finalPids.has(t.to))
     .map((t, idx): ElementDefinition => {
-      const bottleneck =
-        t.status === 'active' &&
-        isRatioBelowThreshold({ numerator: t.available, denominator: t.limit, threshold: input.threshold })
+      const bottleneck = isTrustlineBottleneck(t, input.threshold)
       const id = `tl_${idx}_${t.from}_${t.to}_${normalizeEquivalentCode(t.equivalent)}`
       const classes = [`tl-${String(t.status || '').toLowerCase()}`, bottleneck ? 'bottleneck' : ''].filter(Boolean).join(' ')
 

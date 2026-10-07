@@ -22,163 +22,53 @@ type LabelPart = 'name' | 'pid'
 
 type FetchSuggestionsFn = (query: string, cb: (results: ParticipantSuggestion[]) => void) => void
 
-type Props = {
-  toolbarTab: ToolbarTab
+// What the operator edits here is the page state, passed as `v-model`s (032 S7, D-15: these were eighteen
+// hand-written computed get/set pairs over a prop and an `update:` emit each).
+const toolbarTab = defineModel<ToolbarTab>('toolbarTab', { required: true })
 
-  // Filters
-  eq: string
+// Filters
+const eq = defineModel<string>('eq', { required: true })
+const statusFilter = defineModel<string[]>('statusFilter', { required: true })
+const threshold = defineModel<string>('threshold', { required: true })
+const typeFilter = defineModel<string[]>('typeFilter', { required: true })
+const minDegree = defineModel<number>('minDegree', { required: true })
+
+// Display
+const layoutName = defineModel<LayoutName>('layoutName', { required: true })
+const layoutSpacing = defineModel<number>('layoutSpacing', { required: true })
+const businessLabelParts = defineModel<LabelPart[]>('businessLabelParts', { required: true })
+const personLabelParts = defineModel<LabelPart[]>('personLabelParts', { required: true })
+const showLabels = defineModel<boolean>('showLabels', { required: true })
+const autoLabelsByZoom = defineModel<boolean>('autoLabelsByZoom', { required: true })
+const hideIsolates = defineModel<boolean>('hideIsolates', { required: true })
+const showLegend = defineModel<boolean>('showLegend', { required: true })
+
+// Search / focus
+const searchQuery = defineModel<string>('searchQuery', { required: true })
+const focusPid = defineModel<string>('focusPid', { required: true })
+const focusMode = defineModel<boolean>('focusMode', { required: true })
+const focusDepth = defineModel<1 | 2>('focusDepth', { required: true })
+
+const props = defineProps<{
   availableEquivalents: string[]
   /** 028 F-028-49 (C2): the equivalent was chosen by the page (most active trust lines), not by the operator. */
   eqAutoSelected?: boolean
-  statusFilter: string[]
   statuses: Option[]
-  threshold: string
-  typeFilter: string[]
-  minDegree: number
-
-  // Display
-  layoutName: LayoutName
   layoutOptions: Option[]
-  layoutSpacing: number
-  businessLabelParts: LabelPart[]
-  personLabelParts: LabelPart[]
-  showLabels: boolean
-  autoLabelsByZoom: boolean
-  hideIsolates: boolean
-  showLegend: boolean
-
-  // Search / Focus
-  searchQuery: string
-  focusPid: string
+  /** The autocomplete of the search box calls this with a callback; it is a function by the contract of that component. */
   fetchSuggestions: FetchSuggestionsFn
   canFind: boolean
-  focusMode: boolean
-  focusDepth: 1 | 2
   focusRootPid: string
   canUseSelectedForFocus: boolean
-
-  // Actions
-  onFocusSearch: () => void
-  onUseSelectedForFocus: () => void
-  onClearFocusMode: () => void
-}
-
-const props = defineProps<Props>()
-
-const emit = defineEmits<{
-  (e: 'update:toolbarTab', v: ToolbarTab): void
-  (e: 'update:eq', v: string): void
-  (e: 'update:statusFilter', v: string[]): void
-  (e: 'update:threshold', v: string): void
-  (e: 'update:typeFilter', v: string[]): void
-  (e: 'update:minDegree', v: number): void
-
-  (e: 'update:layoutName', v: LayoutName): void
-  (e: 'update:layoutSpacing', v: number): void
-  (e: 'update:businessLabelParts', v: LabelPart[]): void
-  (e: 'update:personLabelParts', v: LabelPart[]): void
-  (e: 'update:showLabels', v: boolean): void
-  (e: 'update:autoLabelsByZoom', v: boolean): void
-  (e: 'update:hideIsolates', v: boolean): void
-  (e: 'update:showLegend', v: boolean): void
-
-  (e: 'update:searchQuery', v: string): void
-  (e: 'update:focusPid', v: string): void
-
-  (e: 'update:focusMode', v: boolean): void
-  (e: 'update:focusDepth', v: 1 | 2): void
 }>()
 
-const toolbarTabModel = computed({
-  get: () => props.toolbarTab,
-  set: (v) => emit('update:toolbarTab', v),
-})
+const emit = defineEmits<{
+  focusSearch: []
+  useSelectedForFocus: []
+  clearFocus: []
+}>()
 
-const eqModel = computed({
-  get: () => props.eq,
-  set: (v) => emit('update:eq', v),
-})
-
-const statusFilterModel = computed({
-  get: () => props.statusFilter,
-  set: (v) => emit('update:statusFilter', v),
-})
-
-const thresholdModel = computed({
-  get: () => props.threshold,
-  set: (v) => emit('update:threshold', v),
-})
-const thresholdValid = computed(() => isUnitIntervalDecimalString(props.threshold))
-
-const typeFilterModel = computed({
-  get: () => props.typeFilter,
-  set: (v) => emit('update:typeFilter', v),
-})
-
-const minDegreeModel = computed({
-  get: () => props.minDegree,
-  set: (v) => emit('update:minDegree', v),
-})
-
-const layoutNameModel = computed({
-  get: () => props.layoutName,
-  set: (v) => emit('update:layoutName', v),
-})
-
-const layoutSpacingModel = computed({
-  get: () => props.layoutSpacing,
-  set: (v) => emit('update:layoutSpacing', v),
-})
-
-const businessLabelPartsModel = computed({
-  get: () => props.businessLabelParts,
-  set: (v) => emit('update:businessLabelParts', v),
-})
-
-const personLabelPartsModel = computed({
-  get: () => props.personLabelParts,
-  set: (v) => emit('update:personLabelParts', v),
-})
-
-const showLabelsModel = computed({
-  get: () => props.showLabels,
-  set: (v) => emit('update:showLabels', v),
-})
-
-const autoLabelsByZoomModel = computed({
-  get: () => props.autoLabelsByZoom,
-  set: (v) => emit('update:autoLabelsByZoom', v),
-})
-
-const hideIsolatesModel = computed({
-  get: () => props.hideIsolates,
-  set: (v) => emit('update:hideIsolates', v),
-})
-
-const showLegendModel = computed({
-  get: () => props.showLegend,
-  set: (v) => emit('update:showLegend', v),
-})
-
-const searchQueryModel = computed({
-  get: () => props.searchQuery,
-  set: (v) => emit('update:searchQuery', v),
-})
-
-const focusPidModel = computed({
-  get: () => props.focusPid,
-  set: (v) => emit('update:focusPid', v),
-})
-
-const focusModeModel = computed({
-  get: () => props.focusMode,
-  set: (v) => emit('update:focusMode', v),
-})
-
-const focusDepthModel = computed({
-  get: () => props.focusDepth,
-  set: (v) => emit('update:focusDepth', v),
-})
+const thresholdValid = computed(() => isUnitIntervalDecimalString(threshold.value))
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n))
@@ -203,7 +93,7 @@ const focusDepthFieldWidth = computed(() =>
 <template>
   <div class="toolbar">
     <el-tabs
-      v-model="toolbarTabModel"
+      v-model="toolbarTab"
       type="card"
       class="toolbarTabs"
     >
@@ -214,11 +104,11 @@ const focusDepthFieldWidth = computed(() =>
         <div class="filtersLayout">
           <div class="filtersLayout__search">
             <GraphSearchBar
-              v-model:search-query="searchQueryModel"
-              v-model:focus-pid="focusPidModel"
+              v-model:search-query="searchQuery"
+              v-model:focus-pid="focusPid"
               :can-find="canFind"
               :fetch-suggestions="fetchSuggestions"
-              :on-focus-search="onFocusSearch"
+              @focus-search="emit('focusSearch')"
             />
           </div>
 
@@ -231,14 +121,14 @@ const focusDepthFieldWidth = computed(() =>
                   :tooltip-text="t('graph.navigate.focusMode.tooltip')"
                 />
                 <el-switch
-                  v-model="focusModeModel"
+                  v-model="focusMode"
                   size="small"
                 />
               </div>
 
               <div class="focusRow__controls">
                 <el-select
-                  v-model="focusDepthModel"
+                  v-model="focusDepth"
                   size="small"
                   class="ctl__field ctl__field--compact focus__depth"
                   :disabled="!focusMode"
@@ -265,14 +155,14 @@ const focusDepthFieldWidth = computed(() =>
                 <el-button
                   size="small"
                   :disabled="!canUseSelectedForFocus"
-                  @click="onUseSelectedForFocus"
+                  @click="emit('useSelectedForFocus')"
                 >
                   {{ t('graph.navigate.useSelected') }}
                 </el-button>
                 <el-button
                   size="small"
                   :disabled="!focusMode"
-                  @click="onClearFocusMode"
+                  @click="emit('clearFocus')"
                 >
                   {{ t('graph.navigate.clear') }}
                 </el-button>
@@ -283,25 +173,25 @@ const focusDepthFieldWidth = computed(() =>
           <div class="filtersLayout__filters">
             <div class="filtersRow">
               <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.filters.equivalent')"
-              tooltip-key="graph.eq"
-            />
-            <el-select
-              v-model="eqModel"
-              size="small"
-              class="ctl__field ctl__field--compact"
-              :style="{ '--geo-ctl-width': eqFieldWidth }"
-              data-testid="graph-filter-eq"
-            >
-              <el-option
-                v-for="c in availableEquivalents"
-                :key="c"
-                :label="c"
-                :value="c"
-              />
-            </el-select>
+                <TooltipLabel
+                  class="toolbarLabel ctl__label"
+                  :label="t('graph.filters.equivalent')"
+                  tooltip-key="graph.eq"
+                />
+                <el-select
+                  v-model="eq"
+                  size="small"
+                  class="ctl__field ctl__field--compact"
+                  :style="{ '--geo-ctl-width': eqFieldWidth }"
+                  data-testid="graph-filter-eq"
+                >
+                  <el-option
+                    v-for="c in availableEquivalents"
+                    :key="c"
+                    :label="c"
+                    :value="c"
+                  />
+                </el-select>
                 <el-tag
                   v-if="eqAutoSelected"
                   size="small"
@@ -314,79 +204,79 @@ const focusDepthFieldWidth = computed(() =>
               </div>
 
               <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.filters.status')"
-              tooltip-key="graph.status"
-            />
-            <el-select
-              v-model="statusFilterModel"
-              multiple
-              collapse-tags
-              collapse-tags-tooltip
-              size="small"
-              class="ctl__field ctl__field--compact"
-              :style="{ '--geo-ctl-width': statusFieldWidth }"
-            >
-              <el-option
-                v-for="s in statuses"
-                :key="s.value"
-                :label="s.label"
-                :value="s.value"
-              />
-            </el-select>
+                <TooltipLabel
+                  class="toolbarLabel ctl__label"
+                  :label="t('graph.filters.status')"
+                  tooltip-key="graph.status"
+                />
+                <el-select
+                  v-model="statusFilter"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  size="small"
+                  class="ctl__field ctl__field--compact"
+                  :style="{ '--geo-ctl-width': statusFieldWidth }"
+                >
+                  <el-option
+                    v-for="s in statuses"
+                    :key="s.value"
+                    :label="s.label"
+                    :value="s.value"
+                  />
+                </el-select>
               </div>
 
               <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.filters.bottleneck')"
-              tooltip-key="graph.threshold"
-            />
-            <el-input
-              v-model="thresholdModel"
-              size="small"
-              class="ctl__field ctl__field--compact"
-              :style="{ '--geo-ctl-width': thresholdFieldWidth }"
-              :aria-invalid="!thresholdValid"
-              :placeholder="t('graph.filters.bottleneckPlaceholder')"
-            />
+                <TooltipLabel
+                  class="toolbarLabel ctl__label"
+                  :label="t('graph.filters.bottleneck')"
+                  tooltip-key="graph.threshold"
+                />
+                <el-input
+                  v-model="threshold"
+                  size="small"
+                  class="ctl__field ctl__field--compact"
+                  :style="{ '--geo-ctl-width': thresholdFieldWidth }"
+                  :aria-invalid="!thresholdValid"
+                  :placeholder="t('graph.filters.bottleneckPlaceholder')"
+                />
               </div>
 
               <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.filters.type')"
-              tooltip-key="graph.type"
-            />
-            <el-checkbox-group
-              v-model="typeFilterModel"
-              size="small"
-            >
-              <el-checkbox-button value="person">
-                {{ t('participant.type.person') }}
-              </el-checkbox-button>
-              <el-checkbox-button value="business">
-                {{ t('participant.type.business') }}
-              </el-checkbox-button>
-            </el-checkbox-group>
+                <TooltipLabel
+                  class="toolbarLabel ctl__label"
+                  :label="t('graph.filters.type')"
+                  tooltip-key="graph.type"
+                />
+                <el-checkbox-group
+                  v-model="typeFilter"
+                  size="small"
+                >
+                  <el-checkbox-button value="person">
+                    {{ t('participant.type.person') }}
+                  </el-checkbox-button>
+                  <el-checkbox-button value="business">
+                    {{ t('participant.type.business') }}
+                  </el-checkbox-button>
+                </el-checkbox-group>
               </div>
 
               <div class="ctl">
-            <TooltipLabel
-              class="toolbarLabel ctl__label"
-              :label="t('graph.filters.minDegree')"
-              tooltip-key="graph.minDegree"
-            />
-            <el-input-number
-              v-model="minDegreeModel"
-              size="small"
-              :min="0"
-              :max="20"
-              controls-position="right"
-              class="ctl__field ctl__field--compact"
-              :style="{ '--geo-ctl-width': minDegreeFieldWidth }"
-            />
+                <TooltipLabel
+                  class="toolbarLabel ctl__label"
+                  :label="t('graph.filters.minDegree')"
+                  tooltip-key="graph.minDegree"
+                />
+                <el-input-number
+                  v-model="minDegree"
+                  size="small"
+                  :min="0"
+                  :max="20"
+                  controls-position="right"
+                  class="ctl__field ctl__field--compact"
+                  :style="{ '--geo-ctl-width': minDegreeFieldWidth }"
+                />
               </div>
             </div>
           </div>
@@ -405,7 +295,7 @@ const focusDepthFieldWidth = computed(() =>
               tooltip-key="graph.layout"
             />
             <el-select
-              v-model="layoutNameModel"
+              v-model="layoutName"
               size="small"
               class="ctl__field ctl__field--compact"
               :style="{ '--geo-ctl-width': layoutFieldWidth }"
@@ -426,7 +316,7 @@ const focusDepthFieldWidth = computed(() =>
               tooltip-key="graph.spacing"
             />
             <el-slider
-              v-model="layoutSpacingModel"
+              v-model="layoutSpacing"
               :min="1"
               :max="3"
               :step="0.1"
@@ -442,7 +332,7 @@ const focusDepthFieldWidth = computed(() =>
                 tooltip-key="graph.labels"
               />
               <el-checkbox-group
-                v-model="businessLabelPartsModel"
+                v-model="businessLabelParts"
                 size="small"
               >
                 <el-checkbox-button value="name">
@@ -461,7 +351,7 @@ const focusDepthFieldWidth = computed(() =>
                 tooltip-key="graph.labels"
               />
               <el-checkbox-group
-                v-model="personLabelPartsModel"
+                v-model="personLabelParts"
                 size="small"
               >
                 <el-checkbox-button value="name">
@@ -483,7 +373,7 @@ const focusDepthFieldWidth = computed(() =>
                   tooltip-key="graph.labels"
                 />
                 <el-switch
-                  v-model="showLabelsModel"
+                  v-model="showLabels"
                   size="small"
                 />
               </div>
@@ -494,7 +384,7 @@ const focusDepthFieldWidth = computed(() =>
                   tooltip-key="graph.labels"
                 />
                 <el-switch
-                  v-model="autoLabelsByZoomModel"
+                  v-model="autoLabelsByZoom"
                   size="small"
                 />
               </div>
@@ -508,7 +398,7 @@ const focusDepthFieldWidth = computed(() =>
                   tooltip-key="graph.hideIsolates"
                 />
                 <el-switch
-                  v-model="hideIsolatesModel"
+                  v-model="hideIsolates"
                   size="small"
                 />
               </div>
@@ -522,7 +412,7 @@ const focusDepthFieldWidth = computed(() =>
                   tooltip-key="graph.legend"
                 />
                 <el-switch
-                  v-model="showLegendModel"
+                  v-model="showLegend"
                   size="small"
                 />
               </div>

@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
-import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
+import ListState from '../ui/ListState.vue'
 import { t, te } from '../i18n'
-
-type RowKind = 'boolean' | 'number' | 'string' | 'json'
-type Row = { key: string; kind: RowKind; value: unknown }
+import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
+import { buildPatch, dirtyKeysOf, sectionForKey, toRows, unitHintKey, type Row, type SectionId } from './configModel'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -20,48 +19,13 @@ const route = useRoute()
 const router = useRouter()
 const filterKey = ref('')
 
-type ScopeTag = 'runtime'
-
 const original = ref<Record<string, unknown>>({})
 const rows = ref<Row[]>([])
-
-type SectionId =
-  | 'featureFlags'
-  | 'logging'
-  | 'rateLimit'
-  | 'routing'
-  | 'integrity'
-  | 'other'
 
 type Section = {
   id: SectionId
   title: string
   rows: Row[]
-}
-
-function kindOf(value: unknown): RowKind {
-  if (typeof value === 'boolean') return 'boolean'
-  if (typeof value === 'number') return 'number'
-  if (typeof value === 'string') return 'string'
-  return 'json'
-}
-
-function toRows(obj: Record<string, unknown>): Row[] {
-  return Object.entries(obj)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => {
-      const kind = kindOf(value)
-      if (kind === 'json') {
-        return { key, kind, value: JSON.stringify(value, null, 2) }
-      }
-      return { key, kind, value }
-    })
-}
-
-function toObject(rs: Row[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const r of rs) out[r.key] = r.value
-  return out
 }
 
 async function load() {
@@ -94,15 +58,7 @@ const visibleRows = computed(() => {
   })
 })
 
-const dirtyKeys = computed(() => {
-  const dirty: string[] = []
-  for (const row of rows.value) {
-    const originalValue = original.value[row.key]
-    const comparableOriginal = row.kind === 'json' ? JSON.stringify(originalValue, null, 2) : originalValue
-    if (comparableOriginal !== row.value) dirty.push(row.key)
-  }
-  return dirty
-})
+const dirtyKeys = computed(() => dirtyKeysOf(rows.value, original.value))
 
 function configLabel(key: string): string {
   const k = String(key || '').trim()
@@ -122,7 +78,6 @@ function configTooltipTextForRow(row: Row): string {
   const explicit = configTooltipText(row.key)
   if (explicit) return explicit
 
-  const kUpper = String(row.key || '').trim().toUpperCase()
   const section = sectionForKey(row.key)
 
   const lines: string[] = []
@@ -132,32 +87,13 @@ function configTooltipTextForRow(row: Row): string {
   const sectionKey = `config.helpFallback.section.${section}`
   if (te(sectionKey)) lines.push(t(sectionKey as never))
 
-  if (kUpper.endsWith('_SECONDS')) {
-    lines.push(t('config.helpFallback.units.seconds'))
-  } else if (kUpper.includes('_REQUESTS') || kUpper.endsWith('_COUNT') || kUpper.includes('_MAX_')) {
-    lines.push(t('config.helpFallback.units.count'))
-  }
+  const unitKey = unitHintKey(row.key)
+  if (unitKey) lines.push(t(unitKey))
 
   lines.push(t('config.helpFallback.apply'))
   lines.push(t('config.helpFallback.safeDefault'))
 
   return lines.filter(Boolean).slice(0, 4).join('\n')
-}
-
-function appliesForKey(key: string): ScopeTag[] {
-  // The API facade hands this page only the keys the backend marks `mutable` (029 F-029-4).
-  void key
-  return ['runtime']
-}
-
-function sectionForKey(key: string): SectionId {
-  const k = String(key || '').trim().toUpperCase()
-  if (k.startsWith('FEATURE_FLAGS_') || k === 'CLEARING_ENABLED') return 'featureFlags'
-  if (k === 'LOG_LEVEL') return 'logging'
-  if (k.startsWith('RATE_LIMIT_')) return 'rateLimit'
-  if (k.startsWith('ROUTING_')) return 'routing'
-  if (k.startsWith('INTEGRITY_CHECKPOINT_')) return 'integrity'
-  return 'other'
 }
 
 const sections = computed((): Section[] => {
@@ -177,10 +113,8 @@ const sections = computed((): Section[] => {
 
   const ordered: Section[] = [
     mk('featureFlags', 'config.sections.featureFlags'),
-    mk('logging', 'config.sections.logging'),
     mk('rateLimit', 'config.sections.rateLimit'),
     mk('routing', 'config.sections.routing'),
-    mk('integrity', 'config.sections.integrity'),
     mk('other', 'config.sections.other'),
   ]
   return ordered.filter((s) => s.rows.length > 0)
@@ -193,28 +127,15 @@ async function save() {
     return
   }
 
+  const built = buildPatch(rows.value, keys)
+  if ('invalidJsonKey' in built) {
+    ElMessage.error(t('config.invalidJsonForKey', { key: built.invalidJsonKey }))
+    return
+  }
+
   saving.value = true
   try {
-    const now = toObject(rows.value)
-    const rowByKey = new Map(rows.value.map((r) => [r.key, r] as const))
-    const patch: Record<string, unknown> = {}
-
-    for (const k of keys) {
-      const r = rowByKey.get(k)
-      if (!r) continue
-      if (r.kind === 'json') {
-        try {
-          patch[k] = JSON.parse(String(r.value))
-        } catch {
-          ElMessage.error(t('config.invalidJsonForKey', { key: k }))
-          return
-        }
-      } else {
-        patch[k] = now[k]
-      }
-    }
-
-    await api.patchConfig(patch)
+    await api.patchConfig(built.patch)
     ElMessage.success(t('config.savedKeys', { n: keys.length }))
     await load()
   } catch (e: unknown) {
@@ -228,25 +149,14 @@ onMounted(() => {
   void load()
 })
 
-watch(
-  () => route.query.key,
-  (v) => {
-    filterKey.value = typeof v === 'string' ? v : ''
-  },
-  { immediate: true },
-)
-
-watch(
-  filterKey,
-  (v) => {
-    const key = String(v || '').trim()
-    const nextQuery = { ...route.query } as Record<string, any>
-    if (key) nextQuery.key = key
-    else delete nextQuery.key
-    void router.replace({ query: nextQuery as any })
-  },
-  { flush: 'post' },
-)
+// The key filter is linked in the URL (`/config?key=ROUTING_MAX_HOPS`), which is how other screens point at one key.
+const { applyRoute } = useRouteQueryFilters({
+  route,
+  router,
+  path: '/config',
+  filters: { key: { model: filterKey } },
+})
+applyRoute()
 </script>
 
 <template>
@@ -280,144 +190,106 @@ watch(
       </div>
     </template>
 
-    <LoadErrorAlert
-      v-if="error"
-      :title="error"
-      :busy="loading"
+    <ListState
+      :error="error"
+      :loading="loading"
+      :empty="sections.length === 0"
       @retry="load"
-    />
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="10"
-    />
-
-    <div v-else>
-      <el-empty
-        v-if="sections.length === 0"
-        :description="t('common.noData')"
-      />
-
-      <template v-else>
-        <section
-          v-for="section in sections"
-          :key="section.id"
-          class="cfgSection"
-        >
-          <div class="cfgSection__title">
-            {{ section.title }}
-          </div>
-
-          <el-table
-            :data="section.rows"
-            size="small"
-            table-layout="fixed"
-            class="geoTable"
-            :show-header="sections.indexOf(section) === 0"
-          >
-            <el-table-column
-              :label="t('config.columns.key')"
-              min-width="300"
-            >
-              <template #default="scope">
-                <div class="cfgName">
-                  <TooltipLabel
-                    :label="configLabel(scope.row.key)"
-                    :tooltip-text="configTooltipTextForRow(scope.row)"
-                  />
-                  <div
-                    v-if="configLabel(scope.row.key) !== scope.row.key"
-                    class="cfgKey geoHint"
-                  >
-                    <span :class="{ focus: focusKey && scope.row.key === focusKey }">
-                      <TableCellEllipsis :text="scope.row.key" />
-                    </span>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-
-            <el-table-column
-              :label="t('config.columns.scope')"
-              width="160"
-            >
-              <template #default="scope">
-                <template v-if="appliesForKey(scope.row.key).length">
-                  <el-tag
-                    v-for="tag in appliesForKey(scope.row.key)"
-                    :key="tag"
-                    size="small"
-                    type="success"
-                    style="margin-right: 6px"
-                  >
-                    {{ t(`config.applies.${tag}`) }}
-                  </el-tag>
-                </template>
-                <span
-                  v-else
-                  class="geoHint"
-                >{{ t('common.na') }}</span>
-              </template>
-            </el-table-column>
-
-            <el-table-column
-              :label="t('common.value')"
-              min-width="300"
-            >
-              <template #default="scope">
-                <div class="cfgValueRow">
-                  <template v-if="scope.row.kind === 'boolean'">
-                    <span
-                      class="cfgBoolLabel"
-                      :class="{ 'cfgBoolLabel--active': scope.row.value === false }"
-                    >{{ t('common.false') }}</span>
-                    <el-switch
-                      v-model="scope.row.value"
-                    />
-                    <span
-                      class="cfgBoolLabel"
-                      :class="{ 'cfgBoolLabel--active': scope.row.value === true }"
-                    >{{ t('common.true') }}</span>
-                  </template>
-
-                  <el-input-number
-                    v-else-if="scope.row.kind === 'number'"
-                    v-model="scope.row.value"
-                    controls-position="right"
-                    class="cfgNumber"
-                    style="width: 160px"
-                  />
-
-                  <template v-else-if="scope.row.kind === 'string'">
-                    <el-input
-                      v-model="scope.row.value"
-                      size="small"
-                      :placeholder="t('common.valuePlaceholder')"
-                      class="cfgText"
-                    />
-                  </template>
-
-                  <el-input
-                    v-else
-                    v-model="scope.row.value"
-                    size="small"
-                    type="textarea"
-                    :rows="2"
-                    :placeholder="t('config.jsonStringifiedPlaceholder')"
-                    class="cfgJson"
-                  />
-
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-
-        <div class="count geoHint">
-          {{ t('config.showingKeys', { shown: visibleRows.length, total: rows.length }) }}
+    >
+      <section
+        v-for="section in sections"
+        :key="section.id"
+        class="cfgSection"
+      >
+        <div class="cfgSection__title">
+          {{ section.title }}
         </div>
-      </template>
-    </div>
+
+        <el-table
+          :data="section.rows"
+          size="small"
+          table-layout="fixed"
+          class="geoTable"
+          :show-header="sections.indexOf(section) === 0"
+        >
+          <el-table-column
+            :label="t('config.columns.key')"
+            min-width="300"
+          >
+            <template #default="scope">
+              <div class="cfgName">
+                <TooltipLabel
+                  :label="configLabel(scope.row.key)"
+                  :tooltip-text="configTooltipTextForRow(scope.row)"
+                />
+                <div
+                  v-if="configLabel(scope.row.key) !== scope.row.key"
+                  class="cfgKey geoHint"
+                >
+                  <span :class="{ focus: focusKey && scope.row.key === focusKey }">
+                    <TableCellEllipsis :text="scope.row.key" />
+                  </span>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            :label="t('common.value')"
+            min-width="300"
+          >
+            <template #default="scope">
+              <div class="cfgValueRow">
+                <template v-if="scope.row.kind === 'boolean'">
+                  <span
+                    class="cfgBoolLabel"
+                    :class="{ 'cfgBoolLabel--active': scope.row.value === false }"
+                  >{{ t('common.false') }}</span>
+                  <el-switch
+                    v-model="scope.row.value"
+                  />
+                  <span
+                    class="cfgBoolLabel"
+                    :class="{ 'cfgBoolLabel--active': scope.row.value === true }"
+                  >{{ t('common.true') }}</span>
+                </template>
+
+                <el-input-number
+                  v-else-if="scope.row.kind === 'number'"
+                  v-model="scope.row.value"
+                  controls-position="right"
+                  class="cfgNumber"
+                  style="width: 160px"
+                />
+
+                <template v-else-if="scope.row.kind === 'string'">
+                  <el-input
+                    v-model="scope.row.value"
+                    size="small"
+                    :placeholder="t('common.valuePlaceholder')"
+                    class="cfgText"
+                  />
+                </template>
+
+                <el-input
+                  v-else
+                  v-model="scope.row.value"
+                  size="small"
+                  type="textarea"
+                  :rows="2"
+                  :placeholder="t('config.jsonStringifiedPlaceholder')"
+                  class="cfgJson"
+                />
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
+
+      <div class="count geoHint">
+        {{ t('config.showingKeys', { shown: visibleRows.length, total: rows.length }) }}
+      </div>
+    </ListState>
   </el-card>
 </template>
 

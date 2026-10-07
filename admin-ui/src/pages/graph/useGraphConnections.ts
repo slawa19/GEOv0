@@ -2,7 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { Core } from 'cytoscape'
 
 import type { SelectedInfo } from '../../composables/useGraphVisualization'
-import { isRatioBelowThreshold } from '../../utils/decimal'
+import { isTrustlineBottleneck } from '../../utils/bottleneck'
 import { normalizeEquivalentCode } from '../../utils/equivalent'
 
 type ParticipantLike = { display_name?: string | null }
@@ -19,10 +19,6 @@ export type ConnectionRow = {
   used: string
   available: string
   bottleneck: boolean
-}
-
-function isBottleneck(args: { available: string; limit: string; threshold: string }): boolean {
-  return isRatioBelowThreshold({ numerator: args.available, denominator: args.limit, threshold: args.threshold })
 }
 
 function connectionRowsFromCy(args: {
@@ -59,7 +55,7 @@ function connectionRowsFromCy(args: {
       limit,
       used,
       available,
-      bottleneck: status === 'active' && isBottleneck({ available, limit, threshold: args.threshold }),
+      bottleneck: isTrustlineBottleneck({ status, limit, available }, args.threshold),
     }
 
     if (isOut) outgoing.push(row)

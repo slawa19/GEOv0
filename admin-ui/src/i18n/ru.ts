@@ -29,7 +29,6 @@ export const RU: Record<string, string> = {
   'common.status': 'Статус',
   'common.passed': 'пройдено',
   'common.failed': 'ошибка',
-  'common.passedPrefix': 'пройдено:',
   'common.violationsPrefix': 'нарушений:',
   'common.true': 'true',
   'common.value': 'Значение',
@@ -95,6 +94,10 @@ export const RU: Record<string, string> = {
   'equivalents.usage.loading': 'Загрузка…',
   'equivalents.usage.tlDebtsIc': 'Используется: {trustlines}\u00A0TL / {debts}\u00A0Debts / {ic}\u00A0IC',
   'equivalents.warning.deletePermanent': 'Это навсегда удалит эквивалент. Отменить нельзя.',
+
+  'notFound.title': 'Страница не найдена',
+  'notFound.text': 'Страницы {path} не существует.',
+  'notFound.toDashboard': 'На дашборд',
 
   'dashboard.title': 'Дашборд',
   'dashboard.card.participantsByType': 'Участники по типам',
@@ -217,31 +220,21 @@ export const RU: Record<string, string> = {
   'config.loadFailed': 'Не удалось загрузить конфиг',
   'config.saveFailed': 'Не удалось сохранить',
   'config.columns.key': 'Название',
-  'config.columns.scope': 'Применение',
   'config.filterByKeyPlaceholder': 'Фильтр по ключу',
   'config.jsonStringifiedPlaceholder': 'JSON (строкой)',
   'config.invalidJsonForKey': 'Невалидный JSON для {key}',
   'config.savedKeys': 'Сохранено ({n} ключей)',
   'config.showingKeys': 'Показано {shown} / {total} ключей',
 
-  'config.applies.runtime': 'Сразу',
 
   'config.sections.featureFlags': 'Флаги функций',
-  'config.sections.logging': 'Логи',
   'config.sections.rateLimit': 'Rate limiting',
   'config.sections.routing': 'Маршрутизация',
-  'config.sections.integrity': 'Integrity checkpoints',
   'config.sections.other': 'Прочее',
 
-  'config.labels.LOG_LEVEL': 'Уровень логов',
-  'config.help.LOG_LEVEL': 'Управляет подробностью логов backend.\nОбычно: INFO. DEBUG — только для диагностики.',
 
   'config.labels.RATE_LIMIT_ENABLED': 'Ограничение запросов (rate limit)',
   'config.help.RATE_LIMIT_ENABLED': 'Включает best-effort in-memory rate limiting для API (защита от всплесков).',
-  'config.labels.RATE_LIMIT_WINDOW_SECONDS': 'Окно rate limit (сек.)',
-  'config.help.RATE_LIMIT_WINDOW_SECONDS': 'Интервал времени, в котором считаются запросы для лимита.',
-  'config.labels.RATE_LIMIT_REQUESTS_PER_WINDOW': 'Запросов на окно',
-  'config.help.RATE_LIMIT_REQUESTS_PER_WINDOW': 'Максимум запросов на окно (на один процесс).',
 
   'config.labels.ROUTING_MAX_HOPS': 'Маршрутизация: макс. hops',
   'config.help.ROUTING_MAX_HOPS': 'Максимальное число рёбер trustline в поиске маршрута.',
@@ -249,10 +242,6 @@ export const RU: Record<string, string> = {
   'config.help.ROUTING_MAX_PATHS': 'Максимальное число альтернативных путей, учитываемых для платежа.',
 
 
-  'config.labels.INTEGRITY_CHECKPOINT_ENABLED': 'Integrity checkpoints',
-  'config.help.INTEGRITY_CHECKPOINT_ENABLED': 'Включает периодический расчёт integrity checkpoints в фоне.',
-  'config.labels.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS': 'Интервал checkpoints (сек.)',
-  'config.help.INTEGRITY_CHECKPOINT_INTERVAL_SECONDS': 'Как часто пересчитываются integrity checkpoints.',
 
   'config.labels.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Мульти-маршрутизация',
   'config.help.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Разрешает искать маршрут по нескольким путям для набора нужной ёмкости.',
@@ -266,10 +255,8 @@ export const RU: Record<string, string> = {
   'config.helpFallback.kind.string': 'Тип: строка.',
   'config.helpFallback.kind.json': 'Тип: JSON (валидный JSON строкой).',
   'config.helpFallback.section.featureFlags': 'Влияет на включение/отключение функций (feature flags).',
-  'config.helpFallback.section.logging': 'Влияет на логирование backend.',
   'config.helpFallback.section.rateLimit': 'Влияет на ограничение запросов (rate limit).',
   'config.helpFallback.section.routing': 'Влияет на поиск маршрутов платежа.',
-  'config.helpFallback.section.integrity': 'Влияет на фоновые расчёты/проверки целостности.',
   'config.helpFallback.section.other': 'Технический параметр backend.',
   'config.helpFallback.units.seconds': 'Единицы: секунды.',
   'config.helpFallback.units.count': 'Единицы: количество (шт.).',
@@ -319,6 +306,9 @@ export const RU: Record<string, string> = {
   'integrity.section.rawPayload': 'Сырые данные',
   'integrity.columns.debtSymmetry': 'Симметрия долгов',
   'integrity.notVerified': 'не проверяется',
+  'integrity.overLimitAllowed': 'Выше сниженного лимита (допустимо, не нарушение): {n}',
+  'integrity.overLimitItem': '{debtor} должен {creditor}: {debt} при лимите {limit} (превышение {excess})',
+  'integrity.growthNotVerified': 'Рост долга снимок не проверяет; он отказывается на пути записи (при платеже).',
   'integrity.columns.zeroSum': 'Нулевой баланс',
   'integrity.columns.trustLimits': 'Лимиты доверия',
   'integrity.holds.title': 'Удержания эквивалентов',

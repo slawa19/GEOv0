@@ -49,23 +49,6 @@ export function modeToLabelParts(mode: LabelMode): LabelPart[] {
   return []
 }
 
-type SeedParticipantLike = {
-  display_name?: string | null
-}
-
-export function computeSeedLabel(participants: SeedParticipantLike[] | null | undefined): string {
-  const n = (participants || []).length
-  const first = String(participants?.[0]?.display_name || '').toLowerCase()
-  if (!n) return 'Seed: (not loaded)'
-
-  if (n === 100 && first.includes('greenfield')) return 'Seed: Greenfield (100)'
-  if (n === 50 && first.includes('riverside')) return 'Seed: Riverside (50)'
-
-  // Fallback: still useful when experimenting with custom seeds.
-  const prefix = first ? `, first: ${participants?.[0]?.display_name}` : ''
-  return `Seed: ${n} participants${prefix}`
-}
-
 export function graphElementOptionsForSearch<T extends { key: string; label: string }>(options: {
   guarded: boolean
   query: string

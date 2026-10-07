@@ -17,7 +17,19 @@ export function useGraphPageStorage(input: {
 
   storage?: Storage
 }) {
-  const storage = input.storage ?? window.localStorage
+  // Reading `window.localStorage` itself throws when site data is blocked: that must not take the page down.
+  // A stand-in whose every call throws goes through the same `try` that every storage use here already has.
+  const blocked = {
+    getItem: () => { throw new Error('storage blocked') },
+    setItem: () => { throw new Error('storage blocked') },
+  } as unknown as Storage
+  const storage: Storage = (() => {
+    try {
+      return input.storage ?? window.localStorage
+    } catch {
+      return blocked
+    }
+  })()
 
   function restore() {
     try {

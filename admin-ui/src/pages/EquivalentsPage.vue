@@ -1,18 +1,23 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
+import { ApiException } from '../api/apiException'
+import type { AdminEquivalentUsageResponse } from '../api/adminContracts'
 import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
-import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
+import ListState from '../ui/ListState.vue'
+import { promptReason } from '../ui/promptReason'
 import { t } from '../i18n'
 import { useLatestRequest } from '../composables/useLatestRequest'
+import { useBusyKeys } from '../composables/useBusyKeys'
 import { toLocationQueryRaw } from '../router/query'
+import type { Equivalent } from '../types/domain'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 
-type Equivalent = { code: string; precision: number; description: string; is_active: boolean }
 // 032 S5 (A-4): the server never sent `incidents` here (`AdminEquivalentUsageResponse` is strict); the dead key is gone.
-type UsageCounts = { trustlines?: number; debts?: number; integrity_checkpoints?: number }
+type UsageCounts = Pick<AdminEquivalentUsageResponse, 'trustlines' | 'debts' | 'integrity_checkpoints'>
 
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -27,34 +32,46 @@ const router = useRouter()
 const createOpen = ref(false)
 const editOpen = ref(false)
 const editing = ref<Equivalent | null>(null)
+// A request in flight is not sent again: the dialog's button is busy until the answer (or the refusal) is in.
+const creating = ref(false)
+const saving = ref(false)
 
 const createForm = reactive({ code: '', precision: 2, description: '', is_active: true })
 const editForm = reactive({ precision: 2, description: '' })
 
 const usageByCode = reactive<Record<string, UsageCounts | undefined>>({})
 const usageLoadingByCode = reactive<Record<string, boolean | undefined>>({})
+// What the page knows about a code's usage is dropped when the code is changed; an answer that was already on its
+// way when that happened describes the old state and is not kept.
+const usageGeneration = new Map<string, number>()
+
+function forgetUsage(code: string) {
+  const key = normalizeEquivalentCode(code)
+  usageGeneration.set(key, (usageGeneration.get(key) ?? 0) + 1)
+  delete usageByCode[key]
+  usageLoadingByCode[key] = false
+}
 
 async function warmUsage(code: string) {
-  const key = String(code || '').trim().toUpperCase()
+  const key = normalizeEquivalentCode(code)
   if (!key) return
   if (usageByCode[key]) return
   if (usageLoadingByCode[key]) return
 
+  const generation = usageGeneration.get(key) ?? 0
   usageLoadingByCode[key] = true
   try {
     const usage = await api.getEquivalentUsage(key)
-    if (!pageActive) return
-    const u = usage as unknown as Record<string, unknown>
+    if (!pageActive || (usageGeneration.get(key) ?? 0) !== generation) return
     usageByCode[key] = {
-      trustlines: Number(u.trustlines ?? 0),
-      debts: typeof u.debts === 'number' ? Number(u.debts) : undefined,
-      integrity_checkpoints:
-        typeof u.integrity_checkpoints === 'number' ? Number(u.integrity_checkpoints) : undefined,
+      trustlines: usage.trustlines,
+      debts: usage.debts,
+      integrity_checkpoints: usage.integrity_checkpoints,
     }
   } catch {
     // best-effort only
   } finally {
-    if (pageActive) usageLoadingByCode[key] = false
+    if (pageActive && (usageGeneration.get(key) ?? 0) === generation) usageLoadingByCode[key] = false
   }
 }
 
@@ -79,6 +96,13 @@ async function load() {
   }
 }
 
+// After a change the list shows every equivalent, so the one just stopped does not vanish from under the operator.
+// Switching the filter on loads by itself (its watcher); when it is already on, load here - never both.
+async function reloadShowingAll() {
+  if (includeInactive.value) await load()
+  else includeInactive.value = true
+}
+
 function openCreate() {
   createForm.code = ''
   createForm.precision = 2
@@ -95,6 +119,8 @@ function openEdit(row: Equivalent) {
 }
 
 async function createEq() {
+  if (creating.value) return
+  creating.value = true
   try {
     const created = (
       await api.createEquivalent({
@@ -105,18 +131,21 @@ async function createEq() {
       })
     ).created
     if (!pageActive) return
+    forgetUsage(created.code)
     ElMessage.success(t('equivalents.created', { code: created.code }))
     createOpen.value = false
-    includeInactive.value = true
-    await load()
+    await reloadShowingAll()
   } catch (e: unknown) {
     if (!pageActive) return
     ElMessage.error(describeError(e, 'equivalents.createFailed').text)
+  } finally {
+    creating.value = false
   }
 }
 
 async function saveEdit() {
-  if (!editing.value) return
+  if (!editing.value || saving.value) return
+  saving.value = true
   try {
     const updated = (
       await api.updateEquivalent(editing.value.code, {
@@ -125,113 +154,109 @@ async function saveEdit() {
       })
     ).updated
     if (!pageActive) return
+    forgetUsage(updated.code)
     ElMessage.success(t('equivalents.updated', { code: updated.code }))
     editOpen.value = false
     await load()
   } catch (e: unknown) {
     if (!pageActive) return
     ElMessage.error(describeError(e, 'equivalents.updateFailed').text)
+  } finally {
+    saving.value = false
   }
 }
 
-async function setActive(row: Equivalent, next: boolean) {
-  let reason: string
-  try {
-    reason = await ElMessageBox.prompt(
-      t('common.reasonRequired'),
-      next ? `${t('common.activate')} ${row.code}` : `${t('common.deactivate')} ${row.code}`,
-      {
-        confirmButtonText: next ? t('common.activate') : t('common.deactivate'),
-        cancelButtonText: t('common.cancel'),
-        inputPlaceholder: t('equivalents.reasonPlaceholder.activate'),
-        inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
-        type: 'warning',
-      },
-    ).then((r) => r.value)
-  } catch {
-    return
-  }
+// Stopping, starting and deleting an equivalent run once at a time per code, prompt included: the row's buttons stay
+// busy until the answer is in, so a second press cannot send the same change again.
+const busy = useBusyKeys()
 
-  if (!pageActive) return
+function setActive(row: Equivalent, next: boolean) {
+  return busy.run(row.code, () => runSetActive(row, next))
+}
+
+function deleteEq(row: Equivalent) {
+  return busy.run(row.code, () => runDelete(row))
+}
+
+async function runSetActive(row: Equivalent, next: boolean) {
+  const reason = await promptReason(
+    `${next ? t('common.activate') : t('common.deactivate')} ${row.code}`,
+    '',
+    next ? 'common.activate' : 'common.deactivate',
+    'equivalents.reasonPlaceholder.activate',
+  )
+  if (!reason || !pageActive) return
   try {
     const updated = (await api.setEquivalentActive(row.code, next, reason)).updated
     if (!pageActive) return
+    forgetUsage(row.code)
     const index = items.value.findIndex((item) => item.code === row.code)
     if (index >= 0) items.value[index] = updated
     ElMessage.success(next ? t('equivalents.activated', { code: row.code }) : t('equivalents.deactivated', { code: row.code }))
-    includeInactive.value = true
-    await load()
+    await reloadShowingAll()
   } catch (e: unknown) {
     if (!pageActive) return
     ElMessage.error(describeError(e, 'equivalents.updateFailed').text)
   }
 }
 
-async function deleteEq(row: Equivalent) {
+// What the server says uses an equivalent it refused to delete. `requestJson` keeps the body's `details` one level
+// down (`ApiException.details.details`, next to the url and status it adds); `null` when the refusal names no counters
+// (a row that outlived the count, `referenced_by_existing_rows`).
+function refusalCounts(e: unknown): UsageCounts | null {
+  if (!(e instanceof ApiException)) return null
+  const outer = e.details && typeof e.details === 'object' ? (e.details as Record<string, unknown>) : null
+  const inner = outer?.details && typeof outer.details === 'object' ? (outer.details as Record<string, unknown>) : null
+  if (!inner) return null
+  const { trustlines, debts, integrity_checkpoints: checkpoints } = inner
+  if (typeof trustlines !== 'number' || typeof debts !== 'number' || typeof checkpoints !== 'number') return null
+  return { trustlines, debts, integrity_checkpoints: checkpoints }
+}
+
+async function runDelete(row: Equivalent) {
   let usageLine = ''
   try {
     const usage = await api.getEquivalentUsage(row.code)
-    const u = usage as unknown as Record<string, unknown>
-    const tl = Number(u.trustlines ?? 0)
-    const debts = u.debts
-    const ic = u.integrity_checkpoints
-    const parts: string[] = []
-    parts.push(t('equivalents.delete.usage.trustlines', { n: tl }))
-    if (typeof debts === 'number') parts.push(t('equivalents.delete.usage.debts', { n: debts }))
-    if (typeof ic === 'number') parts.push(t('equivalents.delete.usage.integrityCheckpoints', { n: ic }))
-    usageLine = parts.length ? t('equivalents.delete.usage.usedBy', { parts: parts.join(', ') }) : ''
+    usageLine = t('equivalents.delete.usage.usedBy', {
+      parts: [
+        t('equivalents.delete.usage.trustlines', { n: usage.trustlines }),
+        t('equivalents.delete.usage.debts', { n: usage.debts }),
+        t('equivalents.delete.usage.integrityCheckpoints', { n: usage.integrity_checkpoints }),
+      ].join(', '),
+    })
   } catch {
     usageLine = ''
   }
 
   if (!pageActive) return
 
-  let reason: string
-  try {
-    reason = await ElMessageBox.prompt(
-      [usageLine, t('equivalents.warning.deletePermanent'), '', t('common.reasonRequired')]
-        .filter(Boolean)
-        .join('\n'),
-      t('equivalents.delete.title', { code: row.code }),
-      {
-        confirmButtonText: t('common.delete'),
-        cancelButtonText: t('common.cancel'),
-        inputPlaceholder: t('equivalents.reasonPlaceholder.delete'),
-        inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
-        type: 'warning',
-      },
-    ).then((r) => r.value)
-  } catch {
-    return
-  }
-
-  if (!pageActive) return
+  const reason = await promptReason(
+    t('equivalents.delete.title', { code: row.code }),
+    [usageLine, t('equivalents.warning.deletePermanent')].filter(Boolean).join('\n'),
+    'common.delete',
+    'equivalents.reasonPlaceholder.delete',
+  )
+  if (!reason || !pageActive) return
   try {
     await api.deleteEquivalent(row.code, reason)
     if (!pageActive) return
+    forgetUsage(row.code)
     ElMessage.success(t('equivalents.deleted', { code: row.code }))
-    includeInactive.value = true
-    await load()
+    await reloadShowingAll()
   } catch (e: unknown) {
     if (!pageActive) return
-    const err = e as { message?: unknown; details?: Record<string, unknown> }
-    const details = err?.details
-    const tl = details?.trustlines
-    const debts = details?.debts
-    const ic = details?.integrity_checkpoints
-
-    if ([tl, debts, ic].some((v) => typeof v === 'number')) {
-      ElMessage.error(
-        t('equivalents.deleteFailedWithDetails', {
-          msg: describeError(e, 'equivalents.deleteFailed').text,
-          trustlines: Number(tl ?? 0),
-          debts: Number(debts ?? 0),
-          ic: Number(ic ?? 0),
-        }),
-      )
-    } else {
-      ElMessage.error(describeError(e, 'equivalents.deleteFailed').text)
-    }
+    const msg = describeError(e, 'equivalents.deleteFailed').text
+    const counts = refusalCounts(e)
+    ElMessage.error(
+      counts
+        ? t('equivalents.deleteFailedWithDetails', {
+            msg,
+            trustlines: counts.trustlines,
+            debts: counts.debts,
+            ic: counts.integrity_checkpoints,
+          })
+        : msg,
+    )
   }
 }
 
@@ -277,24 +302,13 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </div>
     </template>
 
-    <LoadErrorAlert
-      v-if="error"
-      :title="error"
-      :busy="loading"
+    <ListState
+      :error="error"
+      :loading="loading"
+      :empty="items.length === 0"
+      :empty-text="t('equivalents.none')"
       @retry="load"
-    />
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="10"
-    />
-
-    <el-empty
-      v-else-if="items.length === 0"
-      :description="t('equivalents.none')"
-    />
-
-    <div v-else>
+    >
       <el-table
         :data="items"
         size="small"
@@ -318,9 +332,9 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
               >
                 {{
                   t('equivalents.usage.tlDebtsIc', {
-                    trustlines: usageByCode[scope.row.code]!.trustlines ?? 0,
-                    debts: usageByCode[scope.row.code]!.debts ?? 0,
-                    ic: usageByCode[scope.row.code]!.integrity_checkpoints ?? 0,
+                    trustlines: usageByCode[scope.row.code]!.trustlines,
+                    debts: usageByCode[scope.row.code]!.debts,
+                    ic: usageByCode[scope.row.code]!.integrity_checkpoints,
                   })
                 }}
               </div>
@@ -384,6 +398,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="scope.row.is_active"
                 size="small"
                 type="warning"
+                :loading="busy.has(scope.row.code)"
                 @click="setActive(scope.row, false)"
               >
                 {{ t('common.deactivate') }}
@@ -392,6 +407,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-else
                 size="small"
                 type="success"
+                :loading="busy.has(scope.row.code)"
                 @click="setActive(scope.row, true)"
               >
                 {{ t('common.activate') }}
@@ -400,6 +416,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="!scope.row.is_active"
                 size="small"
                 type="danger"
+                :loading="busy.has(scope.row.code)"
                 @click="deleteEq(scope.row)"
               >
                 {{ t('common.delete') }}
@@ -414,7 +431,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
           </template>
         </el-table-column>
       </el-table>
-    </div>
+    </ListState>
   </el-card>
 
   <el-dialog
@@ -456,6 +473,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </el-button>
       <el-button
         type="primary"
+        :loading="creating"
         @click="createEq"
       >
         {{ t('common.create') }}
@@ -493,6 +511,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
       </el-button>
       <el-button
         type="primary"
+        :loading="saving"
         @click="saveEdit"
       >
         {{ t('common.save') }}

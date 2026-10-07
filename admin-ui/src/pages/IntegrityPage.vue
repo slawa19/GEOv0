@@ -4,110 +4,87 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { describeError } from '../api/describeError'
 import TooltipLabel from '../ui/TooltipLabel.vue'
+import ListState from '../ui/ListState.vue'
 import LoadErrorAlert from '../ui/LoadErrorAlert.vue'
+import { promptReason } from '../ui/promptReason'
 import { t } from '../i18n'
-import type { IntegritySummaryResponse } from '../api/adminContracts'
+import type { IntegrityStatusResponse, IntegritySummaryResponse } from '../api/adminContracts'
+import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
+import { useLatestRequest } from '../composables/useLatestRequest'
+import { formatTs } from '../utils/datetime'
 import { describeHoldClearRefusal } from './integrityHold'
+import {
+  detectedIssues as detectIssues,
+  growthNotVerified,
+  invariantOutcome,
+  issueLabelKey,
+  outcomeLabelKey,
+  outcomeTagType,
+  overLimitAllowed,
+  violationsOf,
+  type InvariantName,
+} from './integrityOutcome'
 
 const loading = ref(false)
 const error = ref<string | null>(null)
-const status = ref<Record<string, unknown> | null>(null)
+const status = ref<IntegrityStatusResponse | null>(null)
 
 const verifyLoading = ref(false)
 
-type IntegrityStatus = 'healthy' | 'warning' | 'critical'
+type IntegrityStatus = IntegrityStatusResponse['status']
+type EquivalentStatus = IntegrityStatusResponse['equivalents'][string]
 
-function asIntegrityStatus(v: unknown): IntegrityStatus {
-  if (v === 'healthy' || v === 'warning' || v === 'critical') return v
-  return 'warning'
-}
-
-function tagTypeForIntegrityStatus(s: IntegrityStatus): 'success' | 'warning' | 'danger' | 'info' {
+function tagTypeForIntegrityStatus(s: IntegrityStatus): 'success' | 'warning' | 'danger' {
   if (s === 'healthy') return 'success'
   if (s === 'warning') return 'warning'
-  if (s === 'critical') return 'danger'
-  return 'info'
+  return 'danger'
 }
 
-const overallStatus = computed<IntegrityStatus>(() => asIntegrityStatus(status.value?.status))
+const overallStatus = computed<IntegrityStatus>(() => status.value?.status ?? 'warning')
+const equivalents = computed(() => status.value?.equivalents ?? {})
+const equivalentRows = computed(() => Object.entries(equivalents.value).map(([code, eq]) => ({ code, eq })))
+const alertsCount = computed(() => status.value?.alerts.length ?? 0)
 
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' ? (v as Record<string, unknown>) : null
-}
+// Only a failed verdict is an issue: a check that is not verified, absent, or an allowed over-limit debt is not.
+const detectedIssues = computed(() => detectIssues(equivalents.value))
 
-const equivalents = computed<Record<string, unknown>>(() => {
-  const s = asRecord(status.value)
-  const v = s?.equivalents
-  return asRecord(v) ?? {}
-})
+// The money of an over-limit debt is printed at the precision of the equivalent of its row.
+const { money, loadEquivalentPrecision } = useEquivalentPrecision()
 
-const alertsCount = computed(() => {
-  const s = asRecord(status.value)
-  const alerts = s?.alerts
-  return Array.isArray(alerts) ? alerts.length : 0
-})
+const invariantColumns: ReadonlyArray<{ name: InvariantName; labelKey: string; minWidth: number }> = [
+  { name: 'debt_symmetry', labelKey: 'integrity.columns.debtSymmetry', minWidth: 200 },
+  { name: 'zero_sum', labelKey: 'integrity.columns.zeroSum', minWidth: 140 },
+  { name: 'trust_limits', labelKey: 'integrity.columns.trustLimits', minWidth: 300 },
+]
 
-type IssueKey = 'debt_symmetry' | 'trust_limits' | 'zero_sum'
-
-const detectedIssues = computed<IssueKey[]>(() => {
-  const found = new Set<IssueKey>()
-  for (const [, eq] of Object.entries(equivalents.value)) {
-    const inv = asRecord(asRecord(eq)?.invariants)
-    if (!inv) continue
-
-    const debt = asRecord(inv.debt_symmetry)
-    const trust = asRecord(inv.trust_limits)
-    const zero = asRecord(inv.zero_sum)
-
-    if (debt?.passed === false) found.add('debt_symmetry')
-    if (trust?.passed === false) found.add('trust_limits')
-    // A withdrawn check has no `passed` at all, so it can never be a DETECTED issue. Since T1402
-    // of programme 014 the server sends `{status: 'not_verified'}` for zero_sum; the branch stays
-    // because an older server, and every stored historical row, still carries a boolean.
-    if (zero?.passed === false) found.add('zero_sum')
+// One cell of the table: the outcome of one invariant of one equivalent, as decided by `integrityOutcome`.
+function cell(eq: EquivalentStatus, name: InvariantName) {
+  const entry = eq.invariants[name]
+  const outcome = invariantOutcome(entry)
+  return {
+    tagType: outcomeTagType(outcome),
+    label: t(outcomeLabelKey(outcome)),
+    violations: violationsOf(entry),
+    overLimit: overLimitAllowed(entry),
+    growthNotVerified: growthNotVerified(entry),
   }
-
-  // Show in a stable order.
-  return ['zero_sum', 'trust_limits', 'debt_symmetry'].filter((k) => found.has(k as IssueKey)) as IssueKey[]
-})
-
-function issueLabel(k: IssueKey): string {
-  if (k === 'zero_sum') return t('integrity.issue.zeroSum')
-  if (k === 'trust_limits') return t('integrity.issue.trustLimits')
-  return t('integrity.issue.debtSymmetry')
 }
 
-function tagTypeForPassed(passed: unknown): 'success' | 'danger' | 'info' {
-  if (passed === true) return 'success'
-  if (passed === false) return 'danger'
-  return 'info'
-}
-
-// A check the server declares it does not evaluate. Rendered as its own neutral state, never as
-// passed and never as failed: those two are verdicts and there is no verdict here.
-function isWithdrawn(entry: unknown): boolean {
-  return asRecord(entry)?.status === 'not_verified'
-}
-
-function outcomeTagType(entry: unknown): 'success' | 'danger' | 'info' {
-  if (isWithdrawn(entry)) return 'info'
-  return tagTypeForPassed(asRecord(entry)?.passed)
-}
-
-function outcomeLabel(entry: unknown): string {
-  if (isWithdrawn(entry)) return t('integrity.notVerified')
-  return asRecord(entry)?.passed ? t('common.passed') : t('common.failed')
-}
+// The latest read owns the screen: a verify that reloads while a first read is still in flight must not be
+// overwritten - or turned into an error - by the older answer.
+const statusRequests = useLatestRequest()
 
 async function load() {
+  const request = statusRequests.begin()
   loading.value = true
   error.value = null
   try {
-    status.value = await api.integrityStatus()
+    const answer = await api.integrityStatus()
+    if (request.isCurrent()) status.value = answer
   } catch (e: unknown) {
-    error.value = describeError(e).text
+    if (request.isCurrent()) error.value = describeError(e).text
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 
@@ -153,31 +130,32 @@ const holdRefusal = ref<{ code: string; text: string } | null>(null)
 
 const heldCount = computed(() => holdRows.value.filter((r) => r.hold).length)
 
+const holdsRequests = useLatestRequest()
+
+// The summary read last owns the rows: with two clears in flight, an older summary arriving late must not show a
+// code as held again.
 async function loadHolds() {
+  const request = holdsRequests.begin()
   holdsLoading.value = true
   holdsError.value = null
   try {
-    holdRows.value = (await api.integritySummary()).equivalents
+    const answer = (await api.integritySummary()).equivalents
+    if (request.isCurrent()) holdRows.value = answer
   } catch (e: unknown) {
-    holdsError.value = describeError(e).text
+    if (request.isCurrent()) holdsError.value = describeError(e).text
   } finally {
-    holdsLoading.value = false
+    if (request.isCurrent()) holdsLoading.value = false
   }
 }
 
 async function clearHold(code: string) {
-  let reason: string
-  try {
-    reason = await ElMessageBox.prompt(t('common.reasonRequired'), t('integrity.holds.clearTitle', { code }), {
-      confirmButtonText: t('integrity.holds.clear'),
-      cancelButtonText: t('common.cancel'),
-      inputPlaceholder: t('integrity.holds.reasonPlaceholder'),
-      inputValidator: (v) => (String(v || '').trim().length > 0 ? true : t('common.reasonIsRequired')),
-      type: 'warning',
-    }).then((r) => String(r.value || '').trim())
-  } catch {
-    return
-  }
+  const reason = await promptReason(
+    t('integrity.holds.clearTitle', { code }),
+    '',
+    'integrity.holds.clear',
+    'integrity.holds.reasonPlaceholder',
+  )
+  if (!reason) return
 
   // A prompt opened before this code's clear started can be confirmed while it is in flight: refuse the repeat.
   if (holdClearing.value.has(code)) return
@@ -199,9 +177,19 @@ async function clearHold(code: string) {
   }
 }
 
+async function loadCatalogue() {
+  try {
+    await loadEquivalentPrecision()
+  } catch {
+    // Not fatal and not hidden: without the catalogue the over-limit amounts print '—' (the project's rule for an
+    // unknown precision) instead of a guessed digit count; the status itself does not depend on it.
+  }
+}
+
 onMounted(() => {
   void load()
   void loadHolds()
+  void loadCatalogue()
 })
 </script>
 
@@ -290,19 +278,12 @@ onMounted(() => {
       </div>
     </div>
 
-    <LoadErrorAlert
-      v-if="error"
-      :title="error"
-      :busy="loading"
+    <ListState
+      :error="error"
+      :loading="loading"
+      :empty="!status"
       @retry="load"
-    />
-    <el-skeleton
-      v-if="loading"
-      animated
-      :rows="10"
-    />
-
-    <div v-else>
+    >
       <el-alert
         v-if="status"
         :type="overallStatus === 'critical' ? 'error' : overallStatus === 'warning' ? 'warning' : 'success'"
@@ -343,7 +324,7 @@ onMounted(() => {
                 effect="plain"
                 type="warning"
               >
-                {{ issueLabel(k) }}
+                {{ t(issueLabelKey(k)) }}
               </el-tag>
             </div>
           </div>
@@ -436,7 +417,7 @@ onMounted(() => {
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item :label="t('integrity.lastCheck')">
-          {{ status?.last_check }}
+          {{ formatTs(status?.last_check) }}
         </el-descriptions-item>
         <el-descriptions-item :label="t('integrity.alerts')">
           {{ alertsCount }}
@@ -455,7 +436,7 @@ onMounted(() => {
         />
       </div>
       <el-table
-        :data="Object.entries(equivalents)"
+        :data="equivalentRows"
         size="small"
         border
         table-layout="fixed"
@@ -465,8 +446,8 @@ onMounted(() => {
           :label="t('common.code')"
           width="110"
         >
-          <template #default="scope">
-            <span class="mono">{{ scope.row[0] }}</span>
+          <template #default="{ row }">
+            <span class="mono">{{ row.code }}</span>
           </template>
         </el-table-column>
 
@@ -474,61 +455,66 @@ onMounted(() => {
           :label="t('common.status')"
           width="120"
         >
-          <template #default="scope">
-            <el-tag :type="tagTypeForIntegrityStatus(asIntegrityStatus(scope.row[1]?.status))">
-              {{ asIntegrityStatus(scope.row[1]?.status) }}
+          <template #default="{ row }">
+            <el-tag :type="tagTypeForIntegrityStatus(row.eq.status)">
+              {{ row.eq.status }}
             </el-tag>
           </template>
         </el-table-column>
 
         <el-table-column
-          :label="t('integrity.columns.debtSymmetry')"
-          min-width="260"
+          v-for="col in invariantColumns"
+          :key="col.name"
+          :label="t(col.labelKey)"
+          :min-width="col.minWidth"
         >
-          <template #default="scope">
+          <template #default="{ row }">
             <div class="row">
               <el-tag
-                :type="tagTypeForPassed(scope.row[1]?.invariants?.debt_symmetry?.passed)"
+                :type="cell(row.eq, col.name).tagType"
                 effect="plain"
               >
-                {{ t('common.passedPrefix') }} {{ scope.row[1]?.invariants?.debt_symmetry?.passed ?? t('common.na') }}
+                {{ cell(row.eq, col.name).label }}
               </el-tag>
-              <span class="muted">
-                {{ t('common.violationsPrefix') }} {{ scope.row[1]?.invariants?.debt_symmetry?.violations ?? t('common.na') }}
+              <span
+                v-if="cell(row.eq, col.name).violations !== null"
+                class="muted"
+              >
+                {{ t('common.violationsPrefix') }} {{ cell(row.eq, col.name).violations }}
               </span>
             </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          :label="t('integrity.columns.zeroSum')"
-          width="140"
-        >
-          <template #default="scope">
-            <el-tag
-              :type="outcomeTagType(scope.row[1]?.invariants?.zero_sum)"
-              effect="plain"
+            <!-- 026 T2601: reported, not failed - an allowed state and a check a snapshot cannot make. -->
+            <div
+              v-if="cell(row.eq, col.name).overLimit.length"
+              class="overLimit"
+              data-testid="integrity-over-limit-allowed"
             >
-              {{ outcomeLabel(scope.row[1]?.invariants?.zero_sum) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          :label="t('integrity.columns.trustLimits')"
-          width="170"
-        >
-          <template #default="scope">
-            <div class="row">
-              <el-tag
-                :type="tagTypeForPassed(scope.row[1]?.invariants?.trust_limits?.passed)"
-                effect="plain"
-              >
-                {{ scope.row[1]?.invariants?.trust_limits?.passed ? t('common.passed') : t('common.failed') }}
-              </el-tag>
-              <span class="muted">
-                {{ t('common.violationsPrefix') }} {{ scope.row[1]?.invariants?.trust_limits?.violations ?? t('common.na') }}
-              </span>
+              <div class="muted">
+                {{ t('integrity.overLimitAllowed', { n: cell(row.eq, col.name).overLimit.length }) }}
+              </div>
+              <ul class="helpList">
+                <li
+                  v-for="debt in cell(row.eq, col.name).overLimit"
+                  :key="`${debt.debtor_id}|${debt.creditor_id}|${debt.equivalent_id}`"
+                >
+                  {{
+                    t('integrity.overLimitItem', {
+                      debtor: debt.debtor_id,
+                      creditor: debt.creditor_id,
+                      debt: money(debt.debt_amount, row.code),
+                      limit: money(debt.trust_limit, row.code),
+                      excess: money(debt.excess, row.code),
+                    })
+                  }}
+                </li>
+              </ul>
+            </div>
+            <div
+              v-if="cell(row.eq, col.name).growthNotVerified"
+              class="muted"
+              data-testid="integrity-growth-not-verified"
+            >
+              {{ t('integrity.growthNotVerified') }}
             </div>
           </template>
         </el-table-column>
@@ -540,7 +526,7 @@ onMounted(() => {
         {{ t('integrity.section.rawPayload') }}
       </div>
       <pre class="json">{{ JSON.stringify(status, null, 2) }}</pre>
-    </div>
+    </ListState>
   </el-card>
 </template>
 
@@ -618,6 +604,9 @@ onMounted(() => {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   padding: 4px 8px;
+}
+.overLimit {
+  margin-top: 4px;
 }
 .tbl {
   width: 100%;
