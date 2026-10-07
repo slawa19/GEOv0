@@ -107,23 +107,18 @@ jobs:
             admin-ui/package-lock.json
             simulator-ui/v2/package-lock.json
 
-      # The UI half needs Python even though it runs no backend test: the Simulator UI v2
-      # production build has a prebuild step (sync:demo-fixtures:strict) that runs
-      # admin-fixtures/tools/generate_simulator_demo_snapshots.py, which imports app.core.simulator
-      # and therefore pydantic. Measured 2026-09-21: without this the build dies on
-      # ModuleNotFoundError and -Strict turns the stale-fixture warning into a failure. The runner
-      # does not resolve Python for itself under -UiOnly; the generator picks it up from PATH.
+      # The UI half needs Python even though it runs no backend test: the PowerShell partition of the
+      # tooling tier runs here (below). Until 2026-10-07 the Simulator UI v2 production build also
+      # needed it - its prebuild ran the demo-snapshot generator - but 032 S4 (022 T2207) made the
+      # snapshots static versioned assets and deleted the generator and the hook.
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Both files, as the undivided job installed them. Measured 2026-09-21, requirements.txt alone
-      # was not enough: the generator then died on aiosqlite (requirements-dev.txt). Answered since:
-      # the generator opens no database (017 stage 1, pinned by
-      # tooling-tests/portable/test_p017_s1_demo_fixture_generator_needs_no_database.py), and aiosqlite left
-      # requirements-dev.txt in 017 stage 3 (slice S7).
-      - name: Install backend dependencies for the fixture generator
+      # Both files: the tooling tier runs on pytest (requirements-dev.txt) and its workflow checks import
+      # yaml, which arrives with uvicorn[standard] (requirements.txt).
+      - name: Install Python dependencies for the tooling tier
         shell: pwsh
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
 
