@@ -6,6 +6,7 @@ import { computed, onBeforeUnmount, watch, type ComputedRef, type Ref } from 'vu
 import { NODE_DOUBLE_TAP_MS } from '../constants/graph'
 import { DEV_GRAPH_DOUBLE_TAP_DELAY_MS, GRAPH_SEARCH_HIT_FLASH_MS } from '../constants/timing'
 import { isRatioBelowThreshold } from '../utils/decimal'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 import type { Participant, Trustline } from '../pages/graph/graphTypes'
 import { t } from '../i18n'
 import { installGraphDevHooks } from '../pages/graph/graphDevHooks'
@@ -69,10 +70,6 @@ export function graphSelectionAnnouncement(selected: SelectedInfo | null, drawer
     })
   }
   return null
-}
-
-function normEq(v: string): string {
-  return String(v || '').trim().toUpperCase()
 }
 
 export function useGraphVisualization(options: {
@@ -525,7 +522,7 @@ export function useGraphVisualization(options: {
       .filter((t) => finalPids.has(t.from) && finalPids.has(t.to))
       .map((t, idx) => {
         const bottleneck = t.status === 'active' && isBottleneck(t)
-        const id = `tl_${idx}_${t.from}_${t.to}_${normEq(t.equivalent)}`
+        const id = `tl_${idx}_${t.from}_${t.to}_${normalizeEquivalentCode(t.equivalent)}`
         const classes = [
           `tl-${String(t.status || '').toLowerCase()}`,
           bottleneck ? 'bottleneck' : '',
@@ -538,7 +535,7 @@ export function useGraphVisualization(options: {
             id,
             source: t.from,
             target: t.to,
-            equivalent: normEq(t.equivalent),
+            equivalent: normalizeEquivalentCode(t.equivalent),
             status: String(t.status || '').toLowerCase(),
             limit: t.limit,
             used: t.used,
@@ -635,13 +632,13 @@ export function useGraphVisualization(options: {
     if (!cy) return
     const from = String(fromPid || '').trim()
     const to = String(toPid || '').trim()
-    const eq = normEq(eqCode)
+    const eq = normalizeEquivalentCode(eqCode)
     if (!from || !to || !eq) return
 
     cy.edges().forEach((edge) => {
       const src = String(edge.data('source') || '')
       const dst = String(edge.data('target') || '')
-      const eeq = normEq(String(edge.data('equivalent') || ''))
+      const eeq = normalizeEquivalentCode(String(edge.data('equivalent') || ''))
       if (src === from && dst === to && eeq === eq) edge.addClass('connection-highlight')
     })
 

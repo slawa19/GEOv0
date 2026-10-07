@@ -5,11 +5,8 @@ import { describeError } from '../api/describeError'
 import { makeMetricsKey } from '../pages/graph/graphPageHelpers'
 import type { BalanceRow, ParticipantMetrics } from '../types/domain'
 import type { SelectedInfo } from './useGraphVisualization'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 import { useLatestRequest } from './useLatestRequest'
-
-function normEq(v: string): string {
-  return String(v || '').trim().toUpperCase()
-}
 
 /**
  * The drawer's balance rows of the selected participant (032 S5, F-1).
@@ -30,7 +27,7 @@ export function useGraphAnalytics(opts: {
 
   const selectedPid = computed(() => (opts.selected.value && opts.selected.value.kind === 'node' ? opts.selected.value.pid : ''))
   const selectedEqCode = computed(() => {
-    const eqCode = normEq(opts.analyticsEq.value || '')
+    const eqCode = normalizeEquivalentCode(opts.analyticsEq.value || '')
     return eqCode || null
   })
 

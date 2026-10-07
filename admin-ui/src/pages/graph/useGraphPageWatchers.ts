@@ -1,6 +1,7 @@
 import { onScopeDispose, watch, type Ref } from 'vue'
 
 import { THROTTLE_GRAPH_REBUILD_MS, THROTTLE_LAYOUT_SPACING_MS } from '../../constants/timing'
+import { normalizeEquivalentCode } from '../../utils/equivalent'
 import { throttle } from '../../utils/throttle'
 import { useLatestRequest } from '../../composables/useLatestRequest'
 
@@ -122,7 +123,7 @@ export function useGraphPageWatchers(opts: {
 
   watch(
     [
-      () => String(opts.eq.value || '').trim().toUpperCase(),
+      () => normalizeEquivalentCode(opts.eq.value),
       () => (opts.statusFilter.value || [])
         .map((status) => String(status || '').trim().toLowerCase())
         .filter(Boolean)

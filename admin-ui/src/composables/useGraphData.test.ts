@@ -11,7 +11,6 @@ vi.mock('../api', () => ({ api: apiMock }))
 import {
   computePrimaryEquivalent,
   filterTrustlinesByEqAndStatus,
-  normalizeEqCode,
   useGraphData,
 } from './useGraphData'
 import type { Equivalent, Trustline } from '../pages/graph/graphTypes'
@@ -46,10 +45,6 @@ function snapshotEnvelope(pid: string) {
 describe('useGraphData', () => {
   beforeEach(() => vi.resetAllMocks())
 
-  it('normalizeEqCode trims and uppercases', () => {
-    expect(normalizeEqCode(' eur ')).toBe('EUR')
-    expect(normalizeEqCode('')).toBe('')
-  })
 
   it('filterTrustlinesByEqAndStatus filters by eq and status', () => {
     const trustlines: Trustline[] = [
@@ -192,6 +187,34 @@ describe('useGraphData', () => {
     olderSnapshot.resolve(snapshotEnvelope('STALE'))
     await olderRefresh
     expect(g.participants.value.map((participant) => participant.pid)).toEqual(['LATEST'])
+  })
+
+  // 032 S6 (E-12): the graph kept its own precision map with a different predicate (any finite number); the one map
+  // is `buildPrecisionByEquivalent`, so a precision the contract does not allow is unknown here exactly as on the lists.
+  it('precisionByEq is the one precision map: normalized codes, only whole non-negative precisions', async () => {
+    apiMock.graphSnapshot.mockResolvedValueOnce({
+      ...snapshotEnvelope('A'),
+      equivalents: [
+        { code: ' uah ', precision: 2, description: '', is_active: true },
+        { code: 'HOUR', precision: 0, description: '', is_active: true },
+        { code: 'BAD1', precision: -1, description: '', is_active: true },
+        { code: 'BAD2', precision: 1.5, description: '', is_active: true },
+      ],
+    })
+    const g = useGraphData({
+      eq: ref('UAH'),
+      focusMode: ref(false),
+      focusRootPid: ref(''),
+      focusDepth: ref(1),
+      statusFilter: ref<string[]>([]),
+    })
+
+    await g.loadData()
+
+    expect([...g.precisionByEq.value]).toEqual([
+      ['UAH', 2],
+      ['HOUR', 0],
+    ])
   })
 
   it('asks the snapshot by equivalent only: no optional collection is requested (032 S5, F-1)', async () => {

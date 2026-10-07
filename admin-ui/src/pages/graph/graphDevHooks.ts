@@ -1,5 +1,7 @@
 import type { Core } from 'cytoscape'
 
+import { normalizeEquivalentCode } from '../../utils/equivalent'
+
 export type GeoDevHooks = {
   __GEO_CY__?: Core | null
   __GEO_TAP_NODE__?: (pid: string) => boolean
@@ -28,14 +30,14 @@ export function installGraphDevHooks(next: Core | null, doubleTapDelayMs: number
     if (!inst) return false
     const src = String(from || '').trim()
     const dst = String(to || '').trim()
-    const eeq = String(eq || '').trim().toUpperCase()
+    const eeq = normalizeEquivalentCode(eq)
     if (!src || !dst || !eeq) return false
 
     const match = inst
       .edges()
       .filter((e) => String(e.data('source') || '') === src)
       .filter((e) => String(e.data('target') || '') === dst)
-      .filter((e) => String(e.data('equivalent') || '').trim().toUpperCase() === eeq)
+      .filter((e) => normalizeEquivalentCode(e.data('equivalent')) === eeq)
       .first()
 
     if (!match || match.empty()) return false

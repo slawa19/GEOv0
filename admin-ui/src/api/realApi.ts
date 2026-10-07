@@ -1,4 +1,5 @@
 import { DEFAULT_REQUEST_TIMEOUT_MS, HEALTH_REQUEST_TIMEOUT_MS } from '../constants/timing'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 import { ApiException } from './apiException'
 import { mapUiStatusToAdmin, normalizeAdminStatusToUi } from './statusMapping'
 import {
@@ -617,7 +618,7 @@ export const realApi = {
   },
 
   graphSnapshot(params?: { equivalent?: string; include?: string[] }): Promise<GraphSnapshot> {
-    const equivalent = String(params?.equivalent || '').trim().toUpperCase()
+    const equivalent = normalizeEquivalentCode(params?.equivalent)
     const include = normalizeGraphInclude(params?.include)
     const url = buildQuery('/api/v1/admin/graph/snapshot', {
       equivalent: equivalent || undefined,

@@ -3,6 +3,7 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { api } from '../api'
 import type { Equivalent } from '../types/domain'
 import { formatDecimalMinScale } from '../utils/decimal'
+import { normalizeEquivalentCode } from '../utils/equivalent'
 
 /**
  * Единственный источник точности денежной ячейки admin-ui (F-012-7).
@@ -24,10 +25,6 @@ import { formatDecimalMinScale } from '../utils/decimal'
  * `simulator-ui/v2/src/utils/money.ts`; расхождение между тремя формами и было дефектом.
  */
 export const PRECISION_UNAVAILABLE = '—'
-
-export function normalizeEquivalentCode(value: unknown): string {
-  return String(value ?? '').trim().toUpperCase()
-}
 
 export function buildPrecisionByEquivalent(
   items: readonly Equivalent[] | null | undefined,

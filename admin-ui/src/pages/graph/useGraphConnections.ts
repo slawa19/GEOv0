@@ -3,6 +3,7 @@ import type { Core } from 'cytoscape'
 
 import type { SelectedInfo } from '../../composables/useGraphVisualization'
 import { isRatioBelowThreshold } from '../../utils/decimal'
+import { normalizeEquivalentCode } from '../../utils/equivalent'
 
 type ParticipantLike = { display_name?: string | null }
 
@@ -18,10 +19,6 @@ export type ConnectionRow = {
   used: string
   available: string
   bottleneck: boolean
-}
-
-function normEq(v: string): string {
-  return String(v || '').trim().toUpperCase()
 }
 
 function isBottleneck(args: { available: string; limit: string; threshold: string }): boolean {
@@ -42,7 +39,7 @@ function connectionRowsFromCy(args: {
     const to = String(e.data('target') || '')
     if (from !== args.pid && to !== args.pid) return
 
-    const eqCode = normEq(String(e.data('equivalent') || ''))
+    const eqCode = normalizeEquivalentCode(String(e.data('equivalent') || ''))
     const status = String(e.data('status') || '')
     const limit = String(e.data('limit') || '')
     const used = String(e.data('used') || '')
@@ -160,7 +157,7 @@ export function useGraphConnections(opts: {
     if (opts.selected.value && opts.selected.value.kind === 'node') {
       const basePid = opts.selected.value.pid
       const cp = String(row.counterparty_pid || '').trim()
-      const eqCode = normEq(row.equivalent)
+      const eqCode = normalizeEquivalentCode(row.equivalent)
 
       const fromPid = row.direction === 'outgoing' ? basePid : cp
       const toPid = row.direction === 'outgoing' ? cp : basePid
