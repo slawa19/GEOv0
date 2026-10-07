@@ -95,26 +95,21 @@ Stdout хранит result/JSON, stderr — progress и tracking URL; сохра
 
 Применяется, когда оркестратор — Claude Code.
 
-**Preflight.** В `bin` лежит несколько самостоятельных бинарников разных версий — верхний `bin\codex.exe` не обёртка, а отдельная старая сборка (проверено 2026-08-11: `0.130.0-alpha.5` против `0.147.0-alpha.6.5` в версионированном подкаталоге). Разница версий меняет доступные флаги, поэтому **выбор делается по фактическому `--version` каждого кандидата, а не по времени файла**. Не хардкодьте hash подкаталога и номер версии.
+**Preflight.** Codex вызывается **из `PATH`** (`codex`) либо явно как `$env:APPDATA\npm\codex.cmd` — это стабильная npm-сборка. Каталог `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\` принадлежит настольному приложению: его сборки автообновляются, в том числе до альфа-версий, и подкаталог меняется прямо между запусками. **Отсюда ревьюер не берётся.** Инцидент 2026-10-07 (программа 032): прежний сниппет выбирал «самую новую» сборку из этого каталога и взял `0.162.0-alpha.2`, у которой не поднималась Windows-песочница (`helper_unknown_error: setup refresh had errors`; `codex doctor` — `sandbox provisioning failed`; причина — Windows error 32 при обновлении прав на занятый `node_repl.exe`). Два ревью подряд вернулись `UNVERIFIED`: ревьюер не прочитал ни одного файла. Владелец поставил стабильную `0.160.1` (`codex doctor` — 0 отказов, права администратора не понадобились).
 
 ```powershell
-$candidates = Get-ChildItem "$env:LOCALAPPDATA\OpenAI\Codex\bin" -Recurse -Filter codex.exe
-$resolved = foreach ($c in $candidates) {
-    $v = (& $c.FullName --version 2>&1 | Select-Object -First 1)
-    # Без проверки $LASTEXITCODE: после `& codex.exe --version` он бывает пустым (проверено 2026-09-21,
-    # `0.155.0-alpha.9.2`), и условие с `-eq 0` отбрасывало все кандидаты — «Codex binary not found» при живом бинарнике.
-    if ($v -match '(\d+)\.(\d+)\.(\d+)') {
-        [pscustomobject]@{ Path = $c.FullName; Raw = $v
-                           Sort = [version]("{0}.{1}.{2}" -f $Matches[1],$Matches[2],$Matches[3]) }
-    }
-}
-$codexInfo = $resolved | Sort-Object Sort -Descending | Select-Object -First 1
-if (-not $codexInfo) { throw 'Codex binary not found' }
-$codex = $codexInfo.Path
-$codexInfo.Raw   # в evidence ledger вместе с $codex
+$codex = (Get-Command codex -ErrorAction SilentlyContinue).Source
+if (-not $codex) { $codex = Join-Path $env:APPDATA 'npm\codex.cmd' }
+if (-not (Test-Path $codex)) { throw 'Codex CLI not found in PATH or %APPDATA%\npm' }
+$codexVersion = (& $codex --version 2>&1 | Select-Object -First 1)
+if ($codexVersion -match 'alpha') { throw "Codex $codexVersion is an alpha build; install the stable npm release" }
+$codexVersion   # в evidence ledger вместе с $codex
+& $codex doctor --summary   # строка sandbox должна быть без отказа
 ```
 
-В ledger идут и путь, и строка версии: утверждения ниже про флаги верны для `0.147.x` и не переносятся на более старую сборку автоматически.
+**Если локальная песочница всё же не стартует** (ответ «не смог запустить shell» с маркерами — это `UNVERIFIED`, а не «находок нет»): допустим обход, проверенный 2026-10-07 на срезах S1 и S4 программы 032, — ревьюер читает код через GitHub на **точном SHA**. Смена механизма чтения объявляется первой строкой промпта, с ссылками `https://github.com/<owner>/<repo>/tree/<sha>`, `.../compare/<base>...<sha>` и `https://raw.githubusercontent.com/<owner>/<repo>/<sha>/<path>`; остальной текст промпта не меняется. Ветка для этого должна быть запушена.
+
+В ledger идут и путь, и строка версии: утверждения ниже про флаги проверены на `0.147.x`–`0.160.x` и не переносятся на другую сборку автоматически.
 
 **Прогон.** Оркестратор запускает Codex сам — так же, как Codex сам запускает Claude Code. Промпт подаётся на stdin, рабочий корень задаётся флагом, финальный ответ пишется **в отдельный файл**, прогресс — в лог. Каталог ревью живёт **внутри проекта**, в игнорируемом `.local-run/codex-review/<id>/` (решение владельца 2026-09-21: каталогов вне папки проекта не создаём); он не коммитится, а замороженный клон удаляется сразу после прогона.
 
