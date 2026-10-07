@@ -173,37 +173,18 @@ def test_no_production_path_calls_check_zero_sum() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Both of the following exist because the external review of this slice found them missing.
+# The following (two until 2026-10-07, see the note below) exist because the external review of this slice found them missing.
 # The first fix closed one of six sources and one of two schema shapes; these hold the other
 # halves to the code rather than to a commit message.
 # ---------------------------------------------------------------------------
 
 
-def test_no_checked_in_fixture_publishes_a_zero_sum_verdict() -> None:
-    """Every `integrity-status.json` in the tree, not just the one the mock happens to read.
-
-    The first edition of this slice edited `admin-ui/public/admin-fixtures/...`, which is a
-    DERIVED copy: `npm run dev` and `npm run build` both run `sync:fixtures`, which force-copies
-    over it from `admin-fixtures/v1`. Reproduced - one `npm run sync:fixtures` put the green
-    `passed: true` straight back, which would have reddened the fixture contract test on the next
-    build. Five sources were behind it: the canonical dataset, two scenario packs and two
-    generators. This walks the tree so a sixth cannot appear quietly.
-    """
-    found: list[str] = []
-    offenders: list[str] = []
-    for path in _ROOT.rglob("integrity-status.json"):
-        rel = path.relative_to(_ROOT)
-        if any(part in {"node_modules", "dist", ".local-run", ".git"} for part in rel.parts):
-            continue
-        found.append(str(rel))
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        for code, entry in (payload.get("equivalents") or {}).items():
-            zero_sum = (entry.get("invariants") or {}).get("zero_sum")
-            if zero_sum != _WITHDRAWN:
-                offenders.append(f"{rel}::{code} -> {zero_sum}")
-
-    assert found, "no fixture was scanned - an empty search is not a clean one"
-    assert offenders == [], offenders
+# `test_no_checked_in_fixture_publishes_a_zero_sum_verdict` was removed 2026-10-07 (032 S4, AGENTS.md
+# section 11: it checked a removed contract). It walked the tree for `integrity-status.json` and held
+# the Admin UI mock fixtures to the withdrawal; the only such files were the mock packs under
+# `admin-fixtures/` and their public copy, deleted with the mock mode, so its `assert found` could no
+# longer be met. What the server publishes is held above by
+# `test_status_endpoint_publishes_no_zero_sum_verdict` and `test_verify_endpoint_publishes_no_zero_sum_verdict`.
 
 
 def test_a_checkpoint_stored_before_the_withdrawal_still_conforms_to_the_canon() -> None:

@@ -45,9 +45,11 @@ THE DECISION THIS GUARDS (012 / S1; recorded 2026-09-10 as the orchestrator's, u
 delegation, after an external review that argued for keeping 18).  ``Equivalent.precision`` is narrowed to
 ``0..8``, matching the protocol and the column.  Real usage never needed more: across every
 shipped equivalent dataset (``seeds/equivalents.json``, ``admin-fixtures/**/equivalents.json``,
-``admin-ui/public/admin-fixtures/...``) the only declared precisions are ``2`` (14
+``admin-ui/public/admin-fixtures/...``) the only declared precisions were ``2`` (14
 occurrences) and ``1`` (one occurrence) - counted, not assumed, and re-counted by
-``test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep`` below.
+``test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep`` below.  Since
+2026-10-07 (032 S4) the Admin mock fixtures and their public copy are deleted, and the one shipped
+dataset left is ``seeds/equivalents.json`` (three rows, precision ``2``).
 
 THIS MODULE IS THE REGRESSION GUARD ON THAT DECISION.  ``test_the_equivalent_door_refuses...``
 was RED before the narrowing (the create answered 200) and is green after.  The other two tests
@@ -100,12 +102,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: backend dependencies only.  A guard whose verdict depends on whether someone built the front
 #: end is the false-red twin of a false green, and the copy under `admin-ui/public/` is the source
 #: that `dist` is generated FROM, so nothing is left unmeasured by dropping it.
+#:
+#: 2026-10-07, 032 S4: four entries removed - `admin-fixtures/` (three packs) and its public copy
+#: `admin-ui/public/admin-fixtures/` were deleted with the Admin UI mock mode. The walk below still
+#: runs over the whole tree, so a dataset added anywhere is still compared against this list.
 SHIPPED_EQUIVALENT_DATASETS = [
     "seeds/equivalents.json",
-    "admin-fixtures/v1/datasets/equivalents.json",
-    "admin-fixtures/packs/greenfield-village-100-v2/v1/datasets/equivalents.json",
-    "admin-fixtures/packs/riverside-town-50-v2/v1/datasets/equivalents.json",
-    "admin-ui/public/admin-fixtures/v1/datasets/equivalents.json",
 ]
 
 #: Directories that are not source: build output and installed dependencies.  A dataset found
@@ -379,7 +381,8 @@ def test_no_shipped_equivalent_declares_a_precision_the_ledger_cannot_keep() -> 
             )
         declared[relative] = [int(row["precision"]) for row in rows if "precision" in row]
 
-    assert sum(len(v) for v in declared.values()) == 15, (
+    # 15 until 2026-10-07: the Admin mock packs and their public copy carried 12 of them (032 S4).
+    assert sum(len(v) for v in declared.values()) == 3, (
         f"the shipped equivalent count changed: {[(k, len(v)) for k, v in declared.items()]}"
     )
     over = {k: [p for p in v if p > MONEY_MAX_SCALE] for k, v in declared.items()}
