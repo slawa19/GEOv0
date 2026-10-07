@@ -526,8 +526,12 @@ function Update-EnvLocal {
 
     foreach ($line in $content) {
         if ($line -match '^\s*VITE_API_MODE\s*=') {
-            $newContent += 'VITE_API_MODE=real'
-            $hasMode = $true
+            # VITE_API_MODE is the Simulator UI's own variable. The Admin UI reads none (032 S4 removed its mock
+            # mode; 033 A item 6): a line left by an older launcher is inert, so it is dropped there, not rewritten.
+            if ($IsSimulator) {
+                $newContent += 'VITE_API_MODE=real'
+                $hasMode = $true
+            }
         } elseif ($line -match '^\s*VITE_API_BASE_URL\s*=') {
             $newContent += "VITE_API_BASE_URL=$BaseUrl"
             $hasBase = $true
@@ -539,7 +543,7 @@ function Update-EnvLocal {
         }
     }
 
-    if (-not $hasMode) { $newContent += 'VITE_API_MODE=real' }
+    if ($IsSimulator -and -not $hasMode) { $newContent += 'VITE_API_MODE=real' }
     if (-not $hasBase) { $newContent += "VITE_API_BASE_URL=$BaseUrl" }
     if ($IsSimulator -and -not $hasBackendOrigin) { 
         $newContent += "VITE_GEO_BACKEND_ORIGIN=$BaseUrl" 

@@ -75,7 +75,11 @@ trustline-update и `PATCH` кредитора — читают долг без 
   `FEATURE_FLAGS_*`, `INTEGRITY_CHECKPOINT_*`, `CLEARING_PERIODIC_ENABLED`,
   `CLEARING_PERIODIC_INTERVAL_SECONDS`. Периодический клиринг (программа 023) по умолчанию выключен;
   его включает развёртывание **отдельного хаба** (`CLEARING_PERIODIC_ENABLED=true`, base Compose передаёт
-  переменную с умолчанием `false`), из `ENV` он не выводится;
+  переменную с умолчанием `false`), из `ENV` он не выводится. Флаги мультипути делают ровно следующее
+  (033 A, пункт 7): `FEATURE_FLAGS_MULTIPATH_ENABLED=false` ограничивает платёжную маршрутизацию одним путём,
+  что равносильно `ROUTING_MAX_PATHS=1` (`app/core/payments/service.py`), и не влияет на `GET /payments/max-flow`;
+  `FEATURE_FLAGS_FULL_MULTIPATH_ENABLED=true` лишь включает поле `paths` в ответе `GET /payments/max-flow`
+  (`app/core/payments/router.py`) — алгоритм, `max_amount` и маршрутизацию платежей не меняет;
 - simulator: `SIMULATOR_DB_ENABLED`, `SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS`,
   `SIMULATOR_SESSION_*`, `SIMULATOR_MAX_ACTIVE_RUNS_PER_OWNER`,
   `SIMULATOR_CSRF_ORIGIN_ALLOWLIST`, а с 2026-09-29 (024 `T2414.1`) и прежние прямые чтения

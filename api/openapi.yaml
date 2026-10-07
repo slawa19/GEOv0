@@ -500,7 +500,7 @@ paths:
           name: code
           required: true
           schema:
-            $ref: '#/components/schemas/EquivalentCode'
+            $ref: '#/components/schemas/EquivalentCodePath'
       requestBody:
         required: true
         content:
@@ -543,7 +543,7 @@ paths:
           name: code
           required: true
           schema:
-            $ref: '#/components/schemas/EquivalentCode'
+            $ref: '#/components/schemas/EquivalentCodePath'
       requestBody:
         required: true
         content:
@@ -596,7 +596,7 @@ paths:
           name: code
           required: true
           schema:
-            $ref: '#/components/schemas/EquivalentCode'
+            $ref: '#/components/schemas/EquivalentCodePath'
       responses:
         '200':
           description: Usage summary
@@ -639,7 +639,7 @@ paths:
           name: code
           required: true
           schema:
-            $ref: '#/components/schemas/EquivalentCode'
+            $ref: '#/components/schemas/EquivalentCodePath'
       requestBody:
         required: true
         content:
@@ -659,6 +659,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntegrityHoldClearRefusal'
+        '400':
+          # 033 A: the path code is normalised like the other three `/admin/equivalents/{code}...` routes
+          # (`EquivalentCodePath`); one that cannot exist after that is refused here, not looked up.
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -4038,6 +4042,13 @@ components:
       type: string
       pattern: '^[A-Z0-9_]{1,16}$'
       description: Equivalent code (1-16 chars; A-Z, 0-9, underscore)
+    EquivalentCodePath:
+      # 033 A: the INPUT form of the code in the path of the four `/admin/equivalents/{code}...` routes (PATCH,
+      # DELETE, usage, integrity-hold clear): any case, normalised to upper case (`canonical_code`) before the
+      # lookup. The STORED code stays `EquivalentCode`; a value that does not fit this pattern after trimming is a 400.
+      type: string
+      pattern: '^[A-Za-z0-9_]{1,16}$'
+      description: Equivalent code in a path (1-16 chars; A-Z, a-z, 0-9, underscore); normalised to upper case
     ErrorEnvelope:
       type: object
       required: [error]

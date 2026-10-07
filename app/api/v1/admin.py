@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi import Path as PathParam
 from pydantic import BaseModel, TypeAdapter, ValidationError, WithJsonSchema
 from sqlalchemy import String, cast, desc, func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -536,8 +535,9 @@ async def admin_list_equivalents(
     return EquivalentsList(items=[StoredEquivalent.model_validate(x) for x in items])
 
 
-#: 032 A-11: PATCH, DELETE and usage normalise the path code (`equivalents_core.canonical_code`); one that cannot
-#: exist after that is a 400, declared on both halves of the contract.
+#: 032 A-11, 033 A item 5: PATCH, DELETE, usage and the integrity-hold clear normalise the path code
+#: (`equivalents_core.canonical_code`); one that cannot exist after that is a 400, declared on both halves of the
+#: contract.
 _CODE_CANNOT_EXIST = {400: {"model": ErrorEnvelope, "description": "Not an equivalent code after normalisation"}}
 
 
@@ -636,6 +636,7 @@ class IntegrityHoldClearRefusal(BaseModel):
     "/equivalents/{code}/integrity-hold/clear",
     response_model=EquivalentSchema,
     responses={
+        **_CODE_CANNOT_EXIST,
         404: {"model": ErrorEnvelope, "description": "Equivalent not found"},
         409: {
             "model": IntegrityHoldClearRefusal,
@@ -644,9 +645,7 @@ class IntegrityHoldClearRefusal(BaseModel):
     },
 )
 async def admin_clear_equivalent_integrity_hold(
-    # The canon's `EquivalentCode`, stated on the generated side too, so this new operation enters no
-    # parameter-drift ledger. A malformed code is a 422 (declared), not a lookup.
-    code: Annotated[str, PathParam(pattern=r"^[A-Z0-9_]{1,16}$")],
+    code: str,
     body: AdminEquivalentIntegrityHoldClearRequest,
     request: Request,
     db: AsyncSession = Depends(deps.get_db),
@@ -657,9 +656,10 @@ async def admin_clear_equivalent_integrity_hold(
     hold is set by the core and lifted by it. A refusal leaves nothing behind - the frame rolls back, so the row
     locks end with the refusal, not when the request's session is torn down after the response was sent."""
 
+    normalized = equivalents_core.canonical_code(code)
     async with audited(db, request=request, action="admin.equivalents.integrity_hold.clear",
-                       object_type="equivalent", object_id=code, reason=body.reason) as audit:
-        eq, hold_result_id, cleared_on = await equivalents_core.clear_integrity_hold(db, code)
+                       object_type="equivalent", object_id=normalized, reason=body.reason) as audit:
+        eq, hold_result_id, cleared_on = await equivalents_core.clear_integrity_hold(db, normalized)
         result = EquivalentSchema.model_validate(eq)
         audit.before_state = {"integrity_hold_result_id": str(hold_result_id)}
         audit.after_state = {
