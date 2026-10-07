@@ -61,7 +61,7 @@
 | **Базовый режим** | Limited multipath (k-shortest paths) |
 | **Максимум путей** | 3 |
 | **Максимум хопов** | 6 |
-| **Full multipath** | Выключен по умолчанию (feature flag для бенчмарков) |
+| **Full multipath** | Отдельного режима нет: флаг `feature_flags.full_multipath_enabled` (по умолчанию выключен) лишь включает поле `paths` в ответе `GET /payments/max-flow`, маршрутизацию не меняет (см. 2.5) |
 | **Ёмкость платежа A→B** | `limit(B→A) − debt[A→B] + debt[B→A]`, только если у пары есть активная линия; иначе 0 (решение владельца 2026-09-29, GEO) |
 | **Политика хопа** | Конъюнкция всех активных линий пары: запрет посредничества владельца линии — на входе и выходе; `blocked_participants` — на маршрут |
 | **Пара с запрошенным закрытием** | Только если долг пары `debt[A→B] + debt[B→A]` строго уменьшается за операцию (дополнение 2026-10-02, 026 `T2603.1`, В2) |
@@ -659,8 +659,8 @@ requiredness), schemas, остальные responses и security фиксиру�
 
 | Параметр | Дефолт | Описание |
 |----------|--------|----------|
-| `feature_flags.multipath_enabled` | true | Limited multipath включён (`FEATURE_FLAGS_MULTIPATH_ENABLED`; во время работы меняется через `PATCH /admin/config` — отдельный `/admin/feature-flags` удалён 2026-10-07, программа 032 F-6) |
-| `feature_flags.full_multipath_enabled` | false | Full mode для бенчмарков |
+| `feature_flags.multipath_enabled` | true | Limited multipath включён (`FEATURE_FLAGS_MULTIPATH_ENABLED`; во время работы меняется через `PATCH /admin/config` — отдельный `/admin/feature-flags` удалён 2026-10-07, программа 032 F-6). Значение `false` ограничивает **платёжную** маршрутизацию одним путём и равносильно `ROUTING_MAX_PATHS=1` (`app/core/payments/service.py`, расчёт `server_max_paths`); на `GET /payments/max-flow` флаг не влияет |
+| `feature_flags.full_multipath_enabled` | false | Только включает поле `paths` в ответе `GET /payments/max-flow` (при `false` список пуст); `algorithm`, `max_amount` и маршрутизацию платежей не меняет (`app/core/payments/router.py`, `include_metadata`). Режима «full» нет; название ключа историческое, ключ остаётся частью конфигурации развёртывания (решение 2026-10-07, программа 033) |
 | `feature_flags.inter_hub_enabled` | false | Межхабовое взаимодействие |
 
 ---

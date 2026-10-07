@@ -223,7 +223,8 @@ UI:
   - `feature_flags.multipath_enabled`
   - `feature_flags.full_multipath_enabled`
   - `clearing.enabled` (из секции `clearing.*`, отображается как «Clearing enabled»)
-- Для экспериментальных (например, `full_multipath_enabled`) — warning.
+- Подсказка у `multipath_enabled`: при `false` платёжная маршрутизация ищет не больше одного пути (как `ROUTING_MAX_PATHS=1`); `GET /payments/max-flow` флаг не меняет.
+- Подсказка у `full_multipath_enabled`: только включает поле `paths` в ответе `GET /payments/max-flow`; маршрутизацию платежей и `max_amount` не меняет (033 A, пункт 7).
 
 Примечание: `clearing.enabled` технически находится в секции `clearing.*` конфига (см. `config-reference.md`), но для удобства UI отображается вместе с feature flags.
 
@@ -363,7 +364,9 @@ UI правила:
 ### 6.2. Feature Flags
 **Удалено 2026-10-07 (программа 032, F-6).** `GET`/`PATCH /admin/feature-flags` убраны: флаги
 `FEATURE_FLAGS_MULTIPATH_ENABLED`, `FEATURE_FLAGS_FULL_MULTIPATH_ENABLED`, `CLEARING_ENABLED` читаются и меняются
-как ключи `GET`/`PATCH /admin/config` (6.1).
+как ключи `GET`/`PATCH /admin/config` (6.1). Эффект флагов мультипути: `FEATURE_FLAGS_MULTIPATH_ENABLED=false` равносилен
+`ROUTING_MAX_PATHS=1` для платёжной маршрутизации; `FEATURE_FLAGS_FULL_MULTIPATH_ENABLED=true` лишь включает поле `paths`
+в ответе `GET /payments/max-flow` (`app/core/payments/router.py`, `app/core/payments/service.py`), маршрутизацию не меняет.
 
 UI правила:
 - Любая операция изменения должна требовать явного подтверждения (минимум: confirm dialog).
