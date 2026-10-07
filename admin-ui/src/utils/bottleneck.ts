@@ -1,7 +1,7 @@
-import { isRatioBelowThreshold, isUnitIntervalDecimalString } from '../utils/decimal'
+import { isRatioBelowThreshold, isUnitIntervalDecimalString } from './decimal'
 
 /**
- * The bottleneck mark of the Trustlines screen (032 S7, D-19): an ACTIVE line whose available share of a positive
+ * The bottleneck mark of the Trustlines screen and of the graph (032 S7, D-19): an ACTIVE line whose available share of a positive
  * limit is under the threshold.
  *
  * - A closed line has no capacity to be short of, whatever its numbers say.

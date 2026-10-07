@@ -502,3 +502,34 @@ describe('Audit search and the route', () => {
     wrapper.unmount()
   })
 })
+
+describe('participant state change in flight', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({ value: 'reason', action: 'confirm' } as never)
+    vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('Freeze runs once when pressed again before the answer, and the row button is busy', async () => {
+    apiMock.listParticipants.mockResolvedValue(paginated([participantNew]))
+    const pending = deferred<{ pid: string; status: string }>()
+    apiMock.freezeParticipant.mockImplementationOnce(() => pending.promise)
+    const { wrapper } = await mountPage(ParticipantsPage, '/participants')
+
+    const button = wrapper.find('[data-testid="participants-freeze-btn"]')
+    await button.trigger('click')
+    await settle()
+    await button.trigger('click')
+    await settle()
+
+    expect(apiMock.freezeParticipant).toHaveBeenCalledTimes(1)
+    expect(button.classes()).toContain('is-loading')
+    pending.resolve({ pid: 'NEW', status: 'suspended' })
+    await settle()
+    wrapper.unmount()
+  })
+})

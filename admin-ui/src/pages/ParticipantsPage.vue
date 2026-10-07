@@ -18,6 +18,7 @@ import type { Participant } from '../types/domain'
 import { toLocationQueryRaw } from '../router/query'
 import { usePagedList } from '../composables/usePagedList'
 import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
+import { useBusyKeys } from '../composables/useBusyKeys'
 import {
   isLockedParticipantStatus,
   labelParticipantStatus,
@@ -80,7 +81,14 @@ const STATUS_ACTIONS = {
   },
 } as const
 
-async function changeStatus(row: Participant, action: keyof typeof STATUS_ACTIONS) {
+// A participant's state change runs once at a time: the buttons stay busy until the answer is in.
+const busy = useBusyKeys()
+
+function changeStatus(row: Participant, action: keyof typeof STATUS_ACTIONS) {
+  return busy.run(row.pid, () => runStatusChange(row, action))
+}
+
+async function runStatusChange(row: Participant, action: keyof typeof STATUS_ACTIONS) {
   const words = STATUS_ACTIONS[action]
   const reason = await promptReason(
     t(words.titleKey, { pid: row.pid }),
@@ -297,6 +305,7 @@ const typeOptions = computed(() => [
               size="small"
               type="warning"
               data-testid="participants-freeze-btn"
+              :loading="busy.has(scope.row.pid)"
               @click.stop="freeze(scope.row)"
             >
               {{ t('participant.freeze') }}
@@ -306,6 +315,7 @@ const typeOptions = computed(() => [
               size="small"
               type="success"
               data-testid="participants-unfreeze-btn"
+              :loading="busy.has(scope.row.pid)"
               @click.stop="unfreeze(scope.row)"
             >
               {{ t('participant.unfreeze') }}

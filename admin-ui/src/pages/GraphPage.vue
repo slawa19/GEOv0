@@ -76,7 +76,12 @@ const { applyRoute } = useRouteQueryFilters({
       toQuery: (value) => value,
       keepWhenAbsent: true,
     },
-    threshold: { model: threshold, keepWhenAbsent: true },
+    // The default is not written to the URL (as on Trustlines): a link carries what was chosen.
+    threshold: {
+      model: threshold,
+      toQuery: (value) => (value.trim() === DEFAULT_THRESHOLD ? '' : value.trim()),
+      keepWhenAbsent: true,
+    },
   },
 })
 applyRoute()

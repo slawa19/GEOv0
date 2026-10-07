@@ -11,6 +11,7 @@ import ListState from '../ui/ListState.vue'
 import { promptReason } from '../ui/promptReason'
 import { t } from '../i18n'
 import { useLatestRequest } from '../composables/useLatestRequest'
+import { useBusyKeys } from '../composables/useBusyKeys'
 import { toLocationQueryRaw } from '../router/query'
 import type { Equivalent } from '../types/domain'
 import { normalizeEquivalentCode } from '../utils/equivalent'
@@ -165,7 +166,19 @@ async function saveEdit() {
   }
 }
 
-async function setActive(row: Equivalent, next: boolean) {
+// Stopping, starting and deleting an equivalent run once at a time per code, prompt included: the row's buttons stay
+// busy until the answer is in, so a second press cannot send the same change again.
+const busy = useBusyKeys()
+
+function setActive(row: Equivalent, next: boolean) {
+  return busy.run(row.code, () => runSetActive(row, next))
+}
+
+function deleteEq(row: Equivalent) {
+  return busy.run(row.code, () => runDelete(row))
+}
+
+async function runSetActive(row: Equivalent, next: boolean) {
   const reason = await promptReason(
     `${next ? t('common.activate') : t('common.deactivate')} ${row.code}`,
     '',
@@ -200,7 +213,7 @@ function refusalCounts(e: unknown): UsageCounts | null {
   return { trustlines, debts, integrity_checkpoints: checkpoints }
 }
 
-async function deleteEq(row: Equivalent) {
+async function runDelete(row: Equivalent) {
   let usageLine = ''
   try {
     const usage = await api.getEquivalentUsage(row.code)
@@ -385,6 +398,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="scope.row.is_active"
                 size="small"
                 type="warning"
+                :loading="busy.has(scope.row.code)"
                 @click="setActive(scope.row, false)"
               >
                 {{ t('common.deactivate') }}
@@ -393,6 +407,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-else
                 size="small"
                 type="success"
+                :loading="busy.has(scope.row.code)"
                 @click="setActive(scope.row, true)"
               >
                 {{ t('common.activate') }}
@@ -401,6 +416,7 @@ const activeCount = computed(() => items.value.filter((e) => e.is_active).length
                 v-if="!scope.row.is_active"
                 size="small"
                 type="danger"
+                :loading="busy.has(scope.row.code)"
                 @click="deleteEq(scope.row)"
               >
                 {{ t('common.delete') }}

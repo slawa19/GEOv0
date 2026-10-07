@@ -1,4 +1,5 @@
 import { flushPromises } from '@vue/test-utils'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import IntegrityPage from './IntegrityPage.vue'
@@ -12,7 +13,7 @@ import {
 } from './integrityOutcome'
 import type { IntegrityStatusResponse } from '../api/adminContracts'
 import { t } from '../i18n'
-import { mountPage } from '../test/pageHarness'
+import { deferred, mountPage } from '../test/pageHarness'
 
 /**
  * 032 S7 (D-4). One pure function decides the outcome of an invariant, and the Integrity screen renders only that
@@ -31,9 +32,9 @@ const OVER = {
   debtor_id: 'PID_DEBTOR',
   creditor_id: 'PID_CREDITOR',
   equivalent_id: 'eq-uuid',
-  debt_amount: '12.50000000',
+  debt_amount: '12.12340000',
   trust_limit: '10.00000000',
-  excess: '2.50000000',
+  excess: '2.12340000',
 }
 
 function equivalent(invariants: Invariants, status: Entry['status'] = 'healthy'): Entry {
@@ -169,9 +170,12 @@ describe('Integrity screen: the outcome of each invariant', () => {
     expect(over.exists()).toBe(true)
     expect(over.text()).toContain('PID_DEBTOR')
     expect(over.text()).toContain('PID_CREDITOR')
-    // The money is printed at the equivalent's precision, as the decimal string the server sent - never through Number.
-    expect(over.text()).toContain('12.50')
-    expect(over.text()).toContain('2.50')
+    // The money is printed from the decimal string the server sent with the precision of UAH (2) as the MINIMUM of digits:
+    // 12.1234 keeps its four digits (a rounding to 2 would say 12.12), 10.00000000 is padded down to 10.00.
+    expect(over.text()).toContain(
+      t('integrity.overLimitItem', { debtor: 'PID_DEBTOR', creditor: 'PID_CREDITOR', debt: '12.1234', limit: '10.00', excess: '2.1234' }),
+    )
+    expect(over.text()).not.toContain('12.12340000')
     expect(row.find('[data-testid="integrity-growth-not-verified"]').exists()).toBe(true)
     // An allowed state is not an issue: nothing detected, no failure written.
     expect(row.text()).not.toContain(t('common.failed'))
@@ -184,6 +188,31 @@ describe('Integrity screen: the outcome of each invariant', () => {
     const row = tableRow(wrapper, 'UAH')
     expect(row.find('[data-testid="integrity-over-limit-allowed"]').exists()).toBe(false)
     expect(row.find('[data-testid="integrity-growth-not-verified"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('Integrity screen: the latest read owns the status', () => {
+  it('an older read that fails late does not replace the status a verify has reloaded', async () => {
+    const first = deferred<IntegrityStatusResponse>()
+    apiMock.integrityStatus.mockImplementationOnce(() => first.promise)
+    apiMock.integritySummary.mockResolvedValue({ equivalents: [] })
+    apiMock.listEquivalents.mockResolvedValue({ items: [] })
+    apiMock.integrityVerify.mockResolvedValue({})
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+    apiMock.integrityStatus.mockResolvedValueOnce(status({ UAH: equivalent(HEALTHY) }))
+
+    const { wrapper } = await mountPage(IntegrityPage, '/integrity')
+    const verify = wrapper.findAll('button').find((b) => b.text() === t('integrity.verify.action'))!
+    await verify.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('UAH')
+
+    first.reject(new Error('late failure'))
+    await flushPromises()
+    expect(wrapper.find('.el-alert--error').exists()).toBe(false)
+    expect(wrapper.text()).toContain('UAH')
     wrapper.unmount()
   })
 })

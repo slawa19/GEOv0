@@ -17,7 +17,7 @@ import type { Trustline } from '../types/domain'
 import { toLocationQueryRaw } from '../router/query'
 import { usePagedList } from '../composables/usePagedList'
 import { useRouteQueryFilters } from '../composables/useRouteQueryFilters'
-import { isTrustlineBottleneck } from './trustlineBottleneck'
+import { isTrustlineBottleneck } from '../utils/bottleneck'
 
 const router = useRouter()
 const route = useRoute()

@@ -204,3 +204,71 @@ describe('Equivalents: the usage line follows the equivalent', () => {
     wrapper.unmount()
   })
 })
+
+describe('Equivalents: a change in flight is not sent again', () => {
+  it('Deactivate runs once when pressed again while the first is in flight, and the button is busy', async () => {
+    const pending = deferred<{ updated: typeof inactive }>()
+    apiMock.setEquivalentActive.mockImplementationOnce(() => pending.promise)
+    const { wrapper } = await mountPage(EquivalentsPage, '/equivalents')
+
+    const button = buttonByText(wrapper.element, t('common.deactivate'))
+    button.click()
+    await settle()
+    button.click()
+    await settle()
+
+    expect(apiMock.setEquivalentActive).toHaveBeenCalledTimes(1)
+    expect(ElMessageBox.prompt).toHaveBeenCalledTimes(1)
+    expect(button.classList.contains('is-loading')).toBe(true)
+
+    pending.resolve({ updated: inactive })
+    await settle()
+    expect(ElMessage.success).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('Delete runs once when pressed again while the first is in flight', async () => {
+    apiMock.listEquivalents.mockResolvedValue({ items: [inactive] })
+    apiMock.getEquivalentUsage.mockResolvedValue({ code: 'UAH', trustlines: 0, debts: 0, integrity_checkpoints: 0 })
+    const pending = deferred<{ deleted: string }>()
+    apiMock.deleteEquivalent.mockImplementationOnce(() => pending.promise)
+    const { wrapper } = await mountPage(EquivalentsPage, '/equivalents')
+
+    const button = buttonByText(wrapper.element, t('common.delete'))
+    button.click()
+    await settle()
+    button.click()
+    await settle()
+
+    expect(apiMock.deleteEquivalent).toHaveBeenCalledTimes(1)
+    pending.resolve({ deleted: 'UAH' })
+    await settle()
+    wrapper.unmount()
+  })
+})
+
+describe('Equivalents: a usage answer that was in flight during a change is not kept', () => {
+  it('shows the usage read after the change, not the one that was on its way when it happened', async () => {
+    const stale = deferred<{ code: string; trustlines: number; debts: number; integrity_checkpoints: number }>()
+    apiMock.getEquivalentUsage
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValueOnce({ code: 'UAH', trustlines: 7, debts: 0, integrity_checkpoints: 0 })
+    apiMock.setEquivalentActive.mockResolvedValue({ updated: inactive })
+    const { wrapper } = await mountPage(EquivalentsPage, '/equivalents')
+
+    await wrapper.find('.el-table__body td').trigger('mouseenter')
+    await settle()
+    await buttonByText(wrapper.element, t('common.deactivate')).click()
+    await settle()
+    stale.resolve({ code: 'UAH', trustlines: 1, debts: 0, integrity_checkpoints: 0 })
+    await settle()
+    // The old answer must not be shown ...
+    expect(wrapper.find('.code__sub').exists()).toBe(false)
+
+    await wrapper.find('.el-table__body td').trigger('mouseenter')
+    await settle()
+    // ... and the next look shows the fresh one.
+    expect(wrapper.find('.code__sub').text()).toContain('7')
+    wrapper.unmount()
+  })
+})

@@ -153,13 +153,30 @@ describe('useRouteQueryFilters', () => {
     h.unmount()
   })
 
-  it('writes nothing to the query of the page the operator has already left', async () => {
-    const h = await harness()
-    await h.router.push('/elsewhere')
-    h.q.value = 'late'
+  it('writes nothing to the query of the page the operator has already left (page still mounted)', async () => {
+    const q = ref('')
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/page', component: { template: '<div />' } },
+        { path: '/elsewhere', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/page')
+    await router.isReady()
+    const page = defineComponent({
+      setup() {
+        useRouteQueryFilters({ route: useRoute(), router: useRouter(), path: '/page', filters: { q: { model: q } } })
+        return () => null
+      },
+    })
+    // Mounted outside the router view: it outlives the navigation, as a page does while a transition runs.
+    const wrapper = mount(page, { global: { plugins: [router] } })
+    await router.push('/elsewhere')
+    q.value = 'late'
     await flush()
-    expect(h.router.currentRoute.value.path).toBe('/elsewhere')
-    expect(h.router.currentRoute.value.query).toEqual({})
-    h.unmount()
+    expect(router.currentRoute.value.path).toBe('/elsewhere')
+    expect(router.currentRoute.value.query).toEqual({})
+    wrapper.unmount()
   })
 })

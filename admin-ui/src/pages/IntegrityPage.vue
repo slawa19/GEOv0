@@ -10,6 +10,7 @@ import { promptReason } from '../ui/promptReason'
 import { t } from '../i18n'
 import type { IntegrityStatusResponse, IntegritySummaryResponse } from '../api/adminContracts'
 import { useEquivalentPrecision } from '../composables/useEquivalentPrecision'
+import { useLatestRequest } from '../composables/useLatestRequest'
 import { formatTs } from '../utils/datetime'
 import { describeHoldClearRefusal } from './integrityHold'
 import {
@@ -69,15 +70,21 @@ function cell(eq: EquivalentStatus, name: InvariantName) {
   }
 }
 
+// The latest read owns the screen: a verify that reloads while a first read is still in flight must not be
+// overwritten - or turned into an error - by the older answer.
+const statusRequests = useLatestRequest()
+
 async function load() {
+  const request = statusRequests.begin()
   loading.value = true
   error.value = null
   try {
-    status.value = await api.integrityStatus()
+    const answer = await api.integrityStatus()
+    if (request.isCurrent()) status.value = answer
   } catch (e: unknown) {
-    error.value = describeError(e).text
+    if (request.isCurrent()) error.value = describeError(e).text
   } finally {
-    loading.value = false
+    if (request.isCurrent()) loading.value = false
   }
 }
 
@@ -123,15 +130,21 @@ const holdRefusal = ref<{ code: string; text: string } | null>(null)
 
 const heldCount = computed(() => holdRows.value.filter((r) => r.hold).length)
 
+const holdsRequests = useLatestRequest()
+
+// The summary read last owns the rows: with two clears in flight, an older summary arriving late must not show a
+// code as held again.
 async function loadHolds() {
+  const request = holdsRequests.begin()
   holdsLoading.value = true
   holdsError.value = null
   try {
-    holdRows.value = (await api.integritySummary()).equivalents
+    const answer = (await api.integritySummary()).equivalents
+    if (request.isCurrent()) holdRows.value = answer
   } catch (e: unknown) {
-    holdsError.value = describeError(e).text
+    if (request.isCurrent()) holdsError.value = describeError(e).text
   } finally {
-    holdsLoading.value = false
+    if (request.isCurrent()) holdsLoading.value = false
   }
 }
 
