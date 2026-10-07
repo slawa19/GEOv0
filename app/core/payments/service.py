@@ -200,13 +200,31 @@ async def _drain_call(
     return (box[0] if box else None), error
 
 
-def _count_create_start() -> None:
-    try:
-        from app.utils.metrics import PAYMENT_EVENTS_TOTAL
+def _count_payment(event: str, result: str) -> None:
+    """One `PAYMENT_EVENTS_TOTAL` increment; a metrics failure never touches the payment (032 `P-8`).
 
-        PAYMENT_EVENTS_TOTAL.labels(event="create", result="start").inc()
+    The counter is read from the module at call time, not bound at import: the staged-payment tests
+    replace `app.utils.metrics.PAYMENT_EVENTS_TOTAL` and expect the replacement to receive the call.
+    A failure is logged at debug with its cause - it is not a payment outcome, but it is not silent.
+    """
+
+    try:
+        from app.utils import metrics
+
+        metrics.PAYMENT_EVENTS_TOTAL.labels(event=event, result=result).inc()
     except Exception:
-        pass
+        logger.debug("payment.metric_failed event=%s result=%s", event, result, exc_info=True)
+
+
+def _count_routing_failure(reason: str) -> None:
+    """One `ROUTING_FAILURES_TOTAL` increment, with the same contract as `_count_payment`."""
+
+    try:
+        from app.utils import metrics
+
+        metrics.ROUTING_FAILURES_TOTAL.labels(reason=reason).inc()
+    except Exception:
+        logger.debug("payment.metric_failed routing_failure_reason=%s", reason, exc_info=True)
 
 
 def _payment_deadline(deadline: float | None, total_timeout_s: float):
@@ -222,12 +240,7 @@ def _log_routing_timeout(stage: str, equivalent: str) -> None:
     search (the routing budget) - counted and logged apart."""
 
     logger.warning("event=payment.routing_timeout stage=%s equivalent=%s", stage, equivalent)
-    try:
-        from app.utils.metrics import ROUTING_FAILURES_TOTAL
-
-        ROUTING_FAILURES_TOTAL.labels(reason=f"timeout_{stage}").inc()
-    except Exception:
-        pass
+    _count_routing_failure(f"timeout_{stage}")
 
 
 def _refusal_error_payload(reason: str | None, code: str | None, details: dict | None) -> dict:
@@ -624,17 +637,12 @@ class PaymentPostCommitEffects:
         self._applied = True
         self.invalidate_routing_cache_once()
 
-        try:
-            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-            PAYMENT_EVENTS_TOTAL.labels(event="create", result="success").inc()
-            if self.include_engine_success_metrics:
-                # The commit's success, once per confirmed commit (019 stage 3, `FORK-9`). The
-                # `prepare` success that stood here is removed with the prepare phase (stage 4): a
-                # payment no longer has a durable prepare to succeed.
-                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="success").inc()
-        except Exception:
-            pass
+        _count_payment("create", "success")
+        if self.include_engine_success_metrics:
+            # The commit's success, once per confirmed commit (019 stage 3, `FORK-9`). The
+            # `prepare` success that stood here is removed with the prepare phase (stage 4): a
+            # payment no longer has a durable prepare to succeed.
+            _count_payment("commit", "success")
         # No `payment.received` publication: `/ws` and its bus are removed (028 F-028-46, owner В-9); a payment
         # notification is a future feature with its delivery mechanism open (`docs/ru/02-protocol-spec.md` §7.4.1).
         return True
@@ -872,12 +880,7 @@ class PaymentService:
                 str(existing_tx.tx_id),
                 str(existing_tx.state),
             )
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
-            except Exception:
-                pass
+            _count_payment("create", "conflict")
             raise ConflictException(
                 "tx_id already used by a stored payment whose request identity "
                 "cannot be verified",
@@ -927,12 +930,7 @@ class PaymentService:
                 )
                 raise RoutingException(insufficient_capacity=False, details={"reason": "no_route"})
 
-        try:
-            from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-            PAYMENT_EVENTS_TOTAL.labels(event="create", result="idempotent_hit").inc()
-        except Exception:
-            pass
+        _count_payment("create", "idempotent_hit")
         return PaymentService._tx_to_payment_result(existing_tx)
 
     async def create_payment(
@@ -1147,7 +1145,7 @@ class PaymentService:
         its commit.
         """
         if emit_start:
-            _count_create_start()
+            _count_payment("create", "start")
         attempt = self._attempt = _PaymentAttempt()
 
         try:
@@ -1162,12 +1160,7 @@ class PaymentService:
             )
         except BadRequestException:
             # Preserve existing metrics semantics for invalid user input.
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
-            except Exception:
-                pass
+            _count_payment("create", "bad_request")
             raise
 
         validate_equivalent_code(request.equivalent)
@@ -1184,24 +1177,12 @@ class PaymentService:
         # 1. Validation
         sender = await self.session.get(Participant, sender_id)
         if not sender:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="not_found").inc()
-            except Exception:
-                pass
+            _count_payment("create", "not_found")
             raise NotFoundException("Sender not found")
 
         if require_signature:
             if not isinstance(request.signature, str) or not request.signature:
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(
-                        event="create", result="bad_request"
-                    ).inc()
-                except Exception:
-                    pass
+                _count_payment("create", "bad_request")
                 raise InvalidSignatureException("Missing signature", details={"reason": "invalid_signature"})
 
         receiver = (
@@ -1210,21 +1191,11 @@ class PaymentService:
             )
         ).scalar_one_or_none()
         if not receiver:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="not_found").inc()
-            except Exception:
-                pass
+            _count_payment("create", "not_found")
             raise NotFoundException(f"Receiver {request.to} not found", details={"reason": "recipient_not_found"})
 
         if sender.id == receiver.id:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
-            except Exception:
-                pass
+            _count_payment("create", "bad_request")
             raise BadRequestException("Cannot pay to yourself", details={"reason": "self_payment"})
 
         equivalent = (
@@ -1233,12 +1204,7 @@ class PaymentService:
             )
         ).scalar_one_or_none()
         if not equivalent:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="not_found").inc()
-            except Exception:
-                pass
+            _count_payment("create", "not_found")
             raise NotFoundException(f"Equivalent {request.equivalent} not found", details={"reason": "equivalent_not_found"})
 
         # A rolled-back savepoint may expire the session identity map. Keep the validated wire identifiers as plain
@@ -1269,14 +1235,7 @@ class PaymentService:
             try:
                 verify_signature(sender.public_key, message, request.signature)
             except Exception:
-                try:
-                    from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                    PAYMENT_EVENTS_TOTAL.labels(
-                        event="create", result="invalid_signature"
-                    ).inc()
-                except Exception:
-                    pass
+                _count_payment("create", "invalid_signature")
                 raise InvalidSignatureException("Invalid signature", details={"reason": "invalid_signature"})
 
         # Idempotency: same tx_id + same canonical payload => return same result.
@@ -1309,12 +1268,7 @@ class PaymentService:
         try:
             require_money_step(amount, precision=equivalent.precision, equivalent=equivalent_code)
         except BadRequestException:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="bad_request").inc()
-            except Exception:
-                pass
+            _count_payment("create", "bad_request")
             raise
 
         # T1544: a deactivated equivalent takes no new payment. Best effort, on the row loaded above
@@ -1324,22 +1278,12 @@ class PaymentService:
         # deliberately does not lock: forbidding an admitted payment to proceed after the PATCH returns
         # would be a stronger rule than this task's.
         if not equivalent.is_active:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
-            except Exception:
-                pass
+            _count_payment("create", "conflict")
             raise MoneyBoundary.inactive_equivalent_conflict([equivalent_code])
         # Step 5c (`T1546`): the integrity hold, on the same row, with the same best-effort standing -
         # the binding read is the commit's. After the operator stop, so one reason per refusal.
         if equivalent.integrity_hold_result_id is not None:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="create", result="conflict").inc()
-            except Exception:
-                pass
+            _count_payment("create", "conflict")
             raise MoneyBoundary.integrity_hold_conflict([equivalent_code])
 
         # 2. Routing
@@ -1449,18 +1393,8 @@ class PaymentService:
                         self.router.calculate_max_flow, sender_pid, receiver_pid)).max_amount)
                     # §15 review `T2992`: code, reason and the metric label agree - nothing can be sent is `E001`.
                     reason = "insufficient_capacity" if available > 0 else "no_route"
-                    try:
-                        from app.utils.metrics import (
-                            PAYMENT_EVENTS_TOTAL,
-                            ROUTING_FAILURES_TOTAL,
-                        )
-
-                        PAYMENT_EVENTS_TOTAL.labels(
-                            event="create", result="routing_failed"
-                        ).inc()
-                        ROUTING_FAILURES_TOTAL.labels(reason=reason).inc()
-                    except Exception:
-                        pass
+                    _count_payment("create", "routing_failed")
+                    _count_routing_failure(reason)
                     raise RoutingException(
                         "No route found with sufficient capacity",
                         insufficient_capacity=available > 0,
@@ -1761,12 +1695,7 @@ class PaymentService:
                 tx_id_str,
                 type(e).__name__,
             )
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="prepare", result="error").inc()
-            except Exception:
-                pass
+            _count_payment("prepare", "error")
             _refuse_attempt(attempt, e, "prepare_nested_abort")
 
         # 2. The money.
@@ -1783,12 +1712,7 @@ class PaymentService:
                 tx_id_str,
                 type(e).__name__,
             )
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="commit", result="error").inc()
-            except Exception:
-                pass
+            _count_payment("commit", "error")
             _refuse_attempt(attempt, e, "commit_nested_abort")
 
     async def _bind_payment(
@@ -2345,7 +2269,7 @@ class PaymentService:
         never on a stored result's replay.
         """
 
-        _count_create_start()
+        _count_payment("create", "start")
         make_service = _service_for or cls
         loop = asyncio.get_running_loop()
         total_timeout_s = float(settings.PAYMENT_TOTAL_TIMEOUT_SECONDS or 10)
@@ -2932,12 +2856,7 @@ async def record_definitive_refusal(
                 await session.rollback()
                 raise
         if inserted is not None:
-            try:
-                from app.utils.metrics import PAYMENT_EVENTS_TOTAL
-
-                PAYMENT_EVENTS_TOTAL.labels(event="abort", result="success").inc()
-            except Exception:
-                pass
+            _count_payment("abort", "success")
             return None
         if existing is None:
             # Yielded to a row that is gone again: nothing to resolve against, try the insert again.
