@@ -357,7 +357,7 @@ equivalent; without it the stored result is `UNVERIFIABLE`.
 
 - **Fresh local database — automatic, and taken by the seed itself.** `scripts/run_local.ps1`
   (`start` on an empty database and `reset-db`), `scripts/run_full_stack.ps1` (an empty database and
-  `-ResetDb`) and `scripts/verify_admin_phase4_real_contract.ps1` all seed by running a community's
+  `-ResetDb`) and `scripts/verify_admin_e2e.ps1` all seed by running a community's
   recipe, and that recipe creates its equivalents through `POST /admin/equivalents`, which takes the
   baseline on empty debts in the creating transaction (since 2026-09-29, 024 `T2412.2`); the recipe
   checks it is still empty before its first payment (`scripts/seed_recipe.py`). They then re-check

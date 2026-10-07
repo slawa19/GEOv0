@@ -670,14 +670,71 @@ jobs:
           docker rm --force "$PHASE1_POSTGRES" 2>/dev/null || true
           docker network rm "$PHASE1_NETWORK" 2>/dev/null || true
 
+  # THE ADMIN SMOKE RUNS AGAINST A REAL BACKEND SINCE 2026-10-07 (032 S4). The Admin UI lost its mock
+  # mode, so the job got what `required-backend` has - a `postgres:16` service and Python - plus the
+  # sequence of `scripts/verify_admin_e2e.ps1`: migrate, seed `riverside-town-50` through the recipe,
+  # start uvicorn, wait for /health. The smoke asserts a participant of the seed, so a backend that is
+  # down or a database that is empty fails it (`admin-ui/e2e/participants.spec.ts`).
   ui-smoke:
     name: Active UI Chromium smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geov0_e2e_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_e2e_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ENV: test
+      DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_e2e_ci
+      ADMIN_E2E_BACKEND_ORIGIN: http://127.0.0.1:18141
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+
+      # The same sequence as scripts/verify_admin_e2e.ps1: the service container created the empty
+      # database; migrate it with the one migration entry, then seed riverside-town-50 through the
+      # recipe (operations through the domain services, ending in a reconciliation).
+      - name: Migrate and seed the Admin e2e database
+        run: |
+          python -m alembic -c migrations/alembic.ini upgrade head
+          python scripts/seed_db.py --source recipe --community riverside-town-50
+
+      # A disposable token per run, so nothing secret is written into the workflow.
+      - name: Start the backend and wait for /health
+        run: |
+          token="admin-e2e-$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          jwt="admin-e2e-jwt-$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          echo "::add-mask::$token"
+          echo "ADMIN_E2E_TOKEN=$token" >> "$GITHUB_ENV"
+          ADMIN_TOKEN="$token" JWT_SECRET="$jwt" nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 18141 > "$RUNNER_TEMP/admin-e2e-backend.log" 2>&1 &
+          for _ in $(seq 1 90); do
+            if curl -fsS "$ADMIN_E2E_BACKEND_ORIGIN/health" > /dev/null; then echo "Backend readiness: true"; exit 0; fi
+            sleep 1
+          done
+          echo "Backend readiness: false"
+          cat "$RUNNER_TEMP/admin-e2e-backend.log"
+          exit 1
 
       - name: Set up Node.js 22.13
         uses: actions/setup-node@v4
@@ -709,6 +766,10 @@ jobs:
         env:
           PW_E2E_PORT: "41732"
         run: npm --prefix simulator-ui/v2 run test:e2e:smoke
+
+      - name: Backend log
+        if: failure()
+        run: cat "$RUNNER_TEMP/admin-e2e-backend.log" || true
 
   # ON POSTGRESQL SINCE 2026-10-04 (programme 028, F-028-8). Until then this job ran on
   # `windows-latest`, which has no service containers, and pytest exited `4` on arrival (run
@@ -765,15 +826,70 @@ jobs:
           -IncludeExpensive
           -BackendOnly
 
+  # On a real backend since 2026-10-07 (032 S4), the same way as `ui-smoke` above. Tests that change
+  # server state run in the serialized `chromium-mutations` project after the read-only ones
+  # (`admin-ui/playwright.config.ts`).
   admin-e2e:
     name: Admin UI E2E (scheduled/manual)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geov0_e2e_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U geo -d geov0_e2e_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ENV: test
+      DATABASE_URL: postgresql+asyncpg://geo:geo@127.0.0.1:5432/geov0_e2e_ci
+      ADMIN_E2E_BACKEND_ORIGIN: http://127.0.0.1:18141
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+
+      # The same sequence as scripts/verify_admin_e2e.ps1: the service container created the empty
+      # database; migrate it with the one migration entry, then seed riverside-town-50 through the
+      # recipe (operations through the domain services, ending in a reconciliation).
+      - name: Migrate and seed the Admin e2e database
+        run: |
+          python -m alembic -c migrations/alembic.ini upgrade head
+          python scripts/seed_db.py --source recipe --community riverside-town-50
+
+      # A disposable token per run, so nothing secret is written into the workflow.
+      - name: Start the backend and wait for /health
+        run: |
+          token="admin-e2e-$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          jwt="admin-e2e-jwt-$(python -c 'import secrets; print(secrets.token_hex(32))')"
+          echo "::add-mask::$token"
+          echo "ADMIN_E2E_TOKEN=$token" >> "$GITHUB_ENV"
+          ADMIN_TOKEN="$token" JWT_SECRET="$jwt" nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 18141 > "$RUNNER_TEMP/admin-e2e-backend.log" 2>&1 &
+          for _ in $(seq 1 90); do
+            if curl -fsS "$ADMIN_E2E_BACKEND_ORIGIN/health" > /dev/null; then echo "Backend readiness: true"; exit 0; fi
+            sleep 1
+          done
+          echo "Backend readiness: false"
+          cat "$RUNNER_TEMP/admin-e2e-backend.log"
+          exit 1
 
       - name: Set up Node.js 22.13
         uses: actions/setup-node@v4
@@ -789,7 +905,13 @@ jobs:
         run: npm --prefix admin-ui exec -- playwright install --with-deps chromium
 
       - name: Run Admin UI E2E
+        env:
+          PW_E2E_PORT: "41731"
         run: npm --prefix admin-ui run e2e
+
+      - name: Backend log
+        if: failure()
+        run: cat "$RUNNER_TEMP/admin-e2e-backend.log" || true
 
   simulator-visual-e2e:
     name: Simulator visual E2E on baseline platform (scheduled/manual)

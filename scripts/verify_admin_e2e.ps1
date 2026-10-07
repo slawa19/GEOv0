@@ -1,8 +1,20 @@
+# The Admin UI e2e against a real, seeded backend on a disposable PostgreSQL database.
+#
+# 032 S4, 2026-10-07: the Admin UI has no mock mode any more, so every Admin e2e needs a backend.
+# This script is the local entry; CI repeats the same sequence in `.github/workflows/quality.yml`
+# (jobs `ui-smoke` and `admin-e2e`). It creates the database, migrates it, seeds the community
+# `riverside-town-50` through the recipe, starts uvicorn, waits for /health, and runs Playwright with
+# ADMIN_E2E_BACKEND_ORIGIN and ADMIN_E2E_TOKEN; Playwright's own webServer starts Vite on -UiPort.
+# -Smoke runs only the blocking smoke (`npm run test:e2e:smoke`). Until 2026-10-07 this file was
+# `scripts/verify_admin_phase4_real_contract.ps1` and ran the separate `admin-ui/e2e-real` suite.
 [CmdletBinding()]
 param(
-    [string]$TaskSlug = 'phase4_admin_real_contract',
+    [string]$TaskSlug = 'admin_e2e',
     [int]$BackendPort = 18141,
-    [int]$UiPort = 41741
+    [int]$UiPort = 41741,
+    [switch]$Smoke,
+    # The interpreter that migrates, seeds and serves; defaults to the repository's virtual environment.
+    [string]$Python = ''
 )
 
 Set-StrictMode -Version Latest
@@ -27,9 +39,9 @@ if (-not $resolvedRunRoot.StartsWith($expectedArtifactRoot + [System.IO.Path]::D
 
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 
-$pythonExe = Join-Path $repoRoot '.venv\Scripts\python.exe'
+$pythonExe = if ([string]::IsNullOrWhiteSpace($Python)) { Join-Path $repoRoot '.venv\Scripts\python.exe' } else { $Python }
 if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-    throw 'Repository Python virtual environment was not found.'
+    throw "Python interpreter was not found: $pythonExe"
 }
 $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $nodeCommand) {
@@ -39,9 +51,8 @@ if (-not $nodeCommand) {
     throw 'Node.js executable was not found.'
 }
 $nodeExe = $nodeCommand.Source
-$viteCli = Join-Path $repoRoot 'admin-ui\node_modules\vite\bin\vite.js'
 $playwrightCli = Join-Path $repoRoot 'admin-ui\node_modules\@playwright\test\cli.js'
-if (-not (Test-Path -LiteralPath $viteCli -PathType Leaf) -or -not (Test-Path -LiteralPath $playwrightCli -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $playwrightCli -PathType Leaf)) {
     throw 'Admin UI dependencies are not installed.'
 }
 
@@ -50,13 +61,13 @@ $backendPortFree = -not ($listeners.Port -contains $BackendPort)
 $uiPortFree = -not ($listeners.Port -contains $UiPort)
 Write-Host "Port preflight: backend_free=$backendPortFree ui_free=$uiPortFree"
 if (-not $backendPortFree -or -not $uiPortFree) {
-    throw 'A required Phase 4 smoke port is already in use.'
+    throw 'A required Admin e2e port is already in use.'
 }
 
-# Programme 017 `T1710`: this is the only Admin e2e with a real backend, and it now runs on a
-# disposable PostgreSQL database created for this run and dropped in the `finally`. The name carries
-# the run id so two runs cannot collide, and it obeys the same contract every launcher database
-# obeys - `scripts/dev_database.py` refuses anything else, which is what makes the drop below safe.
+# Programme 017 `T1710`: the Admin e2e runs on a disposable PostgreSQL database created for this run
+# and dropped in the `finally`. The name carries the run id so two runs cannot collide, and it obeys
+# the same contract every launcher database obeys - `scripts/dev_database.py` refuses anything else,
+# which is what makes the drop below safe.
 $databaseName = "geov0_dev_$($TaskSlug -replace '_', '-')-$($runId.Substring(0, 8))"
 $pgHost = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_HOST)) { '127.0.0.1' } else { $env:GEO_DEV_PG_HOST }
 $pgPort = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PORT)) { '5432' } else { $env:GEO_DEV_PG_PORT }
@@ -64,9 +75,8 @@ $pgUser = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_USER)) { 'geo' } else
 $pgPassword = if ([string]::IsNullOrWhiteSpace($env:GEO_DEV_PG_PASSWORD)) { 'geo' } else { $env:GEO_DEV_PG_PASSWORD }
 $databaseUrl = "postgresql+asyncpg://${pgUser}:${pgPassword}@${pgHost}:${pgPort}/${databaseName}"
 $backendOrigin = "http://127.0.0.1:$BackendPort"
-$uiOrigin = "http://127.0.0.1:$UiPort"
-$adminToken = 'phase4-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
-$jwtSecret = 'phase4-jwt-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+$adminToken = 'admin-e2e-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+$jwtSecret = 'admin-e2e-jwt-' + [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
 
 $environment = @{
     ENV = 'test'
@@ -74,13 +84,11 @@ $environment = @{
     ADMIN_TOKEN = $adminToken
     JWT_SECRET = $jwtSecret
     PYTHONPATH = $repoRoot
-    VITE_API_MODE = 'real'
-    VITE_API_BASE_URL = $backendOrigin
-    VITE_ADMIN_TOKEN = $adminToken
-    PHASE4_ADMIN_TOKEN = $adminToken
-    PHASE4_BACKEND_ORIGIN = $backendOrigin
-    PHASE4_UI_PORT = [string]$UiPort
-    PHASE4_PLAYWRIGHT_OUTPUT = (Join-Path $runRoot 'playwright')
+    ADMIN_E2E_BACKEND_ORIGIN = $backendOrigin
+    ADMIN_E2E_TOKEN = $adminToken
+    PW_E2E_PORT = [string]$UiPort
+    GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR = (Join-Path $runRoot 'playwright')
+    GEO_ADMIN_PLAYWRIGHT_REPORT_DIR = (Join-Path $runRoot 'playwright-report')
 }
 $previousEnvironment = @{}
 foreach ($key in $environment.Keys) {
@@ -89,7 +97,6 @@ foreach ($key in $environment.Keys) {
 }
 
 $backendProcess = $null
-$uiProcess = $null
 $databaseCreated = $false
 
 function Wait-LocalEndpoint {
@@ -103,7 +110,7 @@ function Wait-LocalEndpoint {
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         try {
             $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 2
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
                 Write-Host "$Name readiness: true"
                 return
             }
@@ -157,38 +164,32 @@ try {
         -RedirectStandardError (Join-Path $runRoot 'backend.stderr.log') `
         -PassThru
 
-    $uiProcess = Start-Process -FilePath $nodeExe `
-        -ArgumentList @($viteCli, '--host', '127.0.0.1', '--port', [string]$UiPort, '--strictPort') `
-        -WorkingDirectory (Join-Path $repoRoot 'admin-ui') `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $runRoot 'ui.stdout.log') `
-        -RedirectStandardError (Join-Path $runRoot 'ui.stderr.log') `
-        -PassThru
-
     Wait-LocalEndpoint -Uri "$backendOrigin/health" -Name 'Backend'
-    Wait-LocalEndpoint -Uri $uiOrigin -Name 'Admin UI'
 
     Push-Location (Join-Path $repoRoot 'admin-ui')
     try {
-        & $nodeExe $playwrightCli test --config playwright.phase4-real.config.ts
-        if ($LASTEXITCODE -ne 0) { throw 'Phase 4 real-contract Playwright smoke failed.' }
+        if ($Smoke) {
+            & $nodeExe $playwrightCli test participants --grep 'participants page loads and shows table' --project=chromium --reporter=list
+        } else {
+            & $nodeExe $playwrightCli test
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Admin e2e failed (exit $LASTEXITCODE)." }
     } finally {
         Pop-Location
     }
 
-    Write-Host 'Phase 4 real-contract smoke: passed'
+    Write-Host 'Admin e2e: passed'
 } finally {
-    foreach ($ownedProcess in @($uiProcess, $backendProcess)) {
-        if ($null -ne $ownedProcess -and -not $ownedProcess.HasExited) {
-            Stop-Process -Id $ownedProcess.Id -Force -ErrorAction SilentlyContinue
-            $ownedProcess.WaitForExit(5000) | Out-Null
-        }
+    if ($null -ne $backendProcess -and -not $backendProcess.HasExited) {
+        Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue
+        $backendProcess.WaitForExit(5000) | Out-Null
     }
 
-    # The processes are stopped ABOVE this line, and the drop below is a plain DROP DATABASE that
+    # The backend is stopped ABOVE this line, and the drop below is a plain DROP DATABASE that
     # `scripts/dev_database.py` refuses while any session is still connected. A database this run
     # did not create is never dropped - `$databaseCreated` is set only after `create` succeeded, and
-    # `create` succeeds only for the call that actually created the database.
+    # `create` succeeds only for the call that actually created the database. Playwright stops the
+    # Vite server it started itself.
     $databaseDropped = $false
     if ($databaseCreated) {
         Push-Location $repoRoot

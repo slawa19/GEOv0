@@ -1,18 +1,32 @@
 import { expect, test } from '@playwright/test'
 
-test('graph: loads, supports equivalent filter, and opens node details by keyboard', async ({ page, request }) => {
-  // Pick a PID that is guaranteed to exist when eq=EUR (from trustlines dataset).
-  const trustlinesRes = await request.get('/admin-fixtures/v1/datasets/trustlines.json')
-  expect(trustlinesRes.ok()).toBe(true)
-  const trustlines = (await trustlinesRes.json()) as Array<{ equivalent: string; from: string; to: string }>
-  const eur = trustlines.find((t) => String(t.equivalent).trim().toUpperCase() === 'EUR')
-  const pid = String(eur?.from || eur?.to || '').trim()
+import { adminApi, okJson } from './backend'
+
+type TrustlineList = {
+  items: Array<{ equivalent: string; from: string; to: string; from_display_name?: string | null }>
+}
+
+/** A trust line of the seed under EUR, read from the backend the UI is pointed at. */
+async function seededEurTrustline() {
+  const api = await adminApi()
+  try {
+    const list = await okJson<TrustlineList>(
+      await api.get('/api/v1/admin/trustlines', { params: { equivalent: 'EUR', page: 1, per_page: 1 } }),
+      'read EUR trust lines',
+    )
+    const line = list.items[0]
+    if (!line) throw new Error('The seed has no EUR trust line')
+    return line
+  } finally {
+    await api.dispose()
+  }
+}
+
+test('graph: loads, supports equivalent filter, and opens node details by keyboard', async ({ page }) => {
+  const eur = await seededEurTrustline()
+  const pid = String(eur.from).trim()
   expect(pid.length).toBeGreaterThan(0)
-  const participantsRes = await request.get('/admin-fixtures/v1/datasets/participants.json')
-  expect(participantsRes.ok()).toBe(true)
-  const participants = (await participantsRes.json()) as Array<{ pid: string; display_name?: string }>
-  const participant = participants.find((candidate) => candidate.pid === pid)
-  const nodeOptionName = `Node: ${String(participant?.display_name || pid).trim()} — ${pid}`
+  const nodeOptionName = `Node: ${String(eur.from_display_name || pid).trim()} — ${pid}`
 
   await page.goto('/graph')
 
@@ -53,14 +67,11 @@ test('graph: loads, supports equivalent filter, and opens node details by keyboa
   await expect(openButton).toBeFocused()
 })
 
-test('graph: opens edge details by keyboard', async ({ page, request }) => {
+test('graph: opens edge details by keyboard', async ({ page }) => {
   // Pick an edge that exists under EUR.
-  const trustlinesRes = await request.get('/admin-fixtures/v1/datasets/trustlines.json')
-  expect(trustlinesRes.ok()).toBe(true)
-  const trustlines = (await trustlinesRes.json()) as Array<{ equivalent: string; from: string; to: string }>
-  const eur = trustlines.find((t) => String(t.equivalent).trim().toUpperCase() === 'EUR')
-  const from = String(eur?.from || '').trim()
-  const to = String(eur?.to || '').trim()
+  const eur = await seededEurTrustline()
+  const from = String(eur.from).trim()
+  const to = String(eur.to).trim()
   expect(from.length).toBeGreaterThan(0)
   expect(to.length).toBeGreaterThan(0)
 

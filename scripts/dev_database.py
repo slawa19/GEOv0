@@ -1,7 +1,7 @@
 """The launcher's PostgreSQL database: its name contract, its lifecycle and its readiness probe.
 
 Programme 017 `T1710`. Both launchers (`scripts/run_local.ps1`, `scripts/run_full_stack.ps1`) and
-the Admin e2e (`scripts/verify_admin_phase4_real_contract.ps1`) run on PostgreSQL, and all three
+the Admin e2e (`scripts/verify_admin_e2e.ps1`) run on PostgreSQL, and all three
 need the same three answers: may this database be destroyed, does it exist, and is it ready. This
 module is the ONE place that answers them, for the same reason `migrations/env.py` is the one owner
 of the `alembic_version` precondition: three PowerShell copies of a destructive boundary are three
