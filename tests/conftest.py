@@ -101,7 +101,6 @@ from app.main import app  # noqa: E402
 
 # Tests should not start background jobs or best-effort throttling.
 settings.RATE_LIMIT_ENABLED = False
-settings.RECOVERY_ENABLED = False
 settings.INTEGRITY_CHECKPOINT_ENABLED = False
 
 

@@ -753,56 +753,14 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
-  /admin/trustlines/bottlenecks:
-    get:
-      tags: [Admin]
-      summary: Trustlines bottlenecks (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: threshold
-          required: false
-          schema:
-            type: number
-            minimum: 0
-            maximum: 1
-            default: 0.10
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 50
-            default: 10
-        - in: query
-          name: equivalent
-          required: false
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Bottlenecks list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminTrustLinesBottlenecksResponse'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
   /admin/liquidity/summary:
     get:
       tags: [Admin]
       summary: Liquidity summary (admin)
+      description: |
+        One equivalent's active trustlines and their money - the Dashboard shows one row per equivalent.
+        Narrowed by programme 032 S5 (owner decision 2026-10-07): the ranked net lists, the bottleneck
+        count and edges and the incidents counter were removed together with the Liquidity screen.
       security: []
       parameters:
         - in: header
@@ -815,22 +773,6 @@ paths:
           required: false
           schema:
             type: string
-        - in: query
-          name: threshold
-          required: false
-          schema:
-            type: number
-            minimum: 0
-            maximum: 1
-            default: 0.10
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 50
-            default: 10
       responses:
         '200':
           description: Liquidity summary
@@ -838,86 +780,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminLiquiditySummaryResponse'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
-  /admin/incidents:
-    get:
-      tags: [Admin]
-      summary: List incidents (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: page
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
-        - in: query
-          name: per_page
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 20
-      responses:
-        '200':
-          description: Incidents list
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminIncidentsListResponse'
-        '403':
-          $ref: '#/components/responses/Unauthorized'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
-  /admin/transactions/{tx_id}/abort:
-    post:
-      tags: [Admin]
-      summary: Abort transaction (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: tx_id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason:
-                  type: string
-      responses:
-        '200':
-          description: Aborted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminAbortTxResponse'
-        '404':
-          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -946,7 +808,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Comma-separated extras to include (incidents,audit_log,transactions)
+          description: Comma-separated extras to include (audit_log,transactions)
       responses:
         '200':
           description: Graph snapshot
@@ -1006,7 +868,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Comma-separated extras to include (incidents,audit_log,transactions)
+          description: Comma-separated extras to include (audit_log,transactions)
       responses:
         '200':
           description: Ego snapshot
@@ -2042,53 +1904,14 @@ paths:
         '422':
           $ref: '#/components/responses/SimulatorIdentityUnprocessable'
 
-  /admin/clearing/cycles:
-    get:
-      tags: [Admin]
-      summary: Find clearing cycles (admin)
-      security: []
-      parameters:
-        - in: header
-          name: X-Admin-Token
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: participant_pid
-          required: false
-          schema:
-            type: string
-        - in: query
-          name: equivalent
-          required: false
-          schema:
-            type: string
-        - in: query
-          name: max_depth
-          required: false
-          schema:
-            type: integer
-            minimum: 3
-            maximum: 10
-            default: 6
-      responses:
-        '200':
-          description: Clearing cycles
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminClearingCyclesResponse'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
   /admin/participants/{pid}/metrics:
     get:
       tags: [Admin]
-      summary: Participant analytics/metrics (admin)
+      summary: Participant balance rows (admin)
+      description: |
+        The participant's balance rows per equivalent (the graph drawer's balance table). Narrowed by
+        programme 032 S5 (owner decision 2026-10-07): rank, distribution, counterparties, concentration,
+        capacity and activity were removed.
       security: []
       parameters:
         - in: header
@@ -2102,13 +1925,6 @@ paths:
           required: false
           schema:
             type: string
-        - in: query
-          name: threshold
-          required: false
-          schema:
-            type: number
-            minimum: 0
-            maximum: 1
       responses:
         '200':
           description: Metrics
@@ -2116,6 +1932,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminParticipantMetricsResponse'
+        '400':
+          # `equivalent` is not a valid equivalent code (validate_equivalent_code).
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # No participant has this `pid`, or no equivalent has this code.
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -4303,45 +4125,6 @@ components:
         reason:
           type: string
 
-    # 011/T1102 (2026-08-23): five operations whose bodies the application already described
-    # and the canon did not. Transcribed by hand from the response models, in the style of this
-    # document - the canon is authority number one, not a build artifact of the code.
-    AdminClearingCycleEdge:
-      type: object
-      required: [equivalent, debtor, creditor, amount]
-      properties:
-        equivalent:
-          type: string
-        debtor:
-          type: string
-        creditor:
-          type: string
-        amount:
-          # Money stays an exact decimal string (AGENTS.md section 8), never a float.
-          type: string
-
-    AdminClearingCyclesForEquivalent:
-      type: object
-      required: [cycles]
-      properties:
-        cycles:
-          # A cycle is an ordered list of edges, so this is an array of arrays.
-          type: array
-          items:
-            type: array
-            items:
-              $ref: '#/components/schemas/AdminClearingCycleEdge'
-
-    AdminClearingCyclesResponse:
-      type: object
-      required: [equivalents]
-      properties:
-        equivalents:
-          # Keyed by equivalent code; the key set is data, not contract.
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/AdminClearingCyclesForEquivalent'
-
     # 011/T1102 (2026-08-23): the two admin graph reads, whose 200 bodies the canon declared as a
     # bare object. Transcribed by hand from AdminGraphSnapshotResponse and its ego subclass
     # (app/schemas/graph.py:12-63) and from the two handlers that fill them. The participant block
@@ -4425,8 +4208,7 @@ components:
             type: integer
 
     AdminGraphDebt:
-      # Structurally the same four fields as AdminClearingCycleEdge, but a different model on a
-      # different read; kept separate so one response cannot silently retype the other.
+      # One debt of the graph read (equivalent, debtor, creditor, amount).
       type: object
       required: [equivalent, debtor, creditor, amount]
       properties:
@@ -4502,7 +4284,7 @@ components:
         created_at:
           # Deliberately NOT `format: date-time` - see `F-011-9`. These values are copied raw from
           # the column into a list[Any] field, so the UTC-attaching validator never runs. The same
-          # row served by GET /admin/incidents goes through it. Declaring a format the service does
+          # row once served by GET /admin/incidents (removed by 032 S5) went through it. Declaring a format the service does
           # not guarantee is the defect this program exists to remove. (The offset-less value was
           # observed in 011 on an engine the service no longer supports; the columns are
           # `timezone=True` and PostgreSQL returns them aware - not re-measured here, 029 F-029-9.)
@@ -4543,7 +4325,7 @@ components:
 
     AdminGraphSnapshotResponse:
       type: object
-      required: [participants, trustlines, equivalents, debts, incidents, audit_log, transactions]
+      required: [participants, trustlines, equivalents, debts, audit_log, transactions]
       properties:
         participants:
           type: array
@@ -4564,13 +4346,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminGraphDebt'
-        # The three below are list[Any] on the model, so their item shape comes from the fetch
-        # helper. Each is present and empty unless named in the `include` CSV.
-        incidents:
-          type: array
-          items:
-            # NOT AdminIncidentItem: same row, same keys, different wire. See F-011-9.
-            $ref: '#/components/schemas/AdminGraphIncidentItem'
+        # The two below are list[Any] on the model, so their item shape comes from the fetch
+        # helper. Each is present and empty unless named in the `include` CSV. A third, `incidents`,
+        # was always empty since programme 019 stage 4 and was removed by 032 S5 (A-4).
         audit_log:
           type: array
           items:
@@ -4590,14 +4368,14 @@ components:
           type: array
           items:
             type: string
-            enum: [incidents, audit_log, transactions]
+            enum: [audit_log, transactions]
         truncated:
           # Which of the included collections hit their include limit. A count computed over a
           # truncated list is a lower bound, and must not be presented as a total.
           type: array
           items:
             type: string
-            enum: [incidents, audit_log, transactions]
+            enum: [audit_log, transactions]
 
     AdminGraphEgoResponse:
       # The ego read returns the snapshot body plus the root; the subclass appends its field, so
@@ -4609,97 +4387,6 @@ components:
             root_pid:
               type: string
               nullable: true
-
-    AdminGraphIncidentItem:
-      # 011/`F-011-9`: the very same stuck-payment row as AdminIncidentItem, with the very same
-      # keys, but served through the graph reads - and one field differs on the wire.
-      # `_graph_fetch_incidents` (now `fetch_graph_incidents`, app/core/admin/graph.py) puts `tx.created_at` into a plain dict
-      # which lands in a `list[Any]` field (app/schemas/graph.py:39), so the UTC-attaching
-      # validator on AdminIncidentItem never runs. For a NAIVE datetime the production models
-      # differ: the item model yields `2026-08-23T12:00:00Z`, the graph response
-      # `2026-08-23T12:00:00` (proved in 011 by running both on one naive value). PostgreSQL, the
-      # only engine (017), returns this `timezone=True` column aware; the naive case was the old
-      # second engine's and is not re-measured (029 F-029-9).
-      #
-      # Hence no `format: date-time` here. Declaring one would make authority number one promise
-      # something the service does not deliver, which is the defect this programme removes. The
-      # behavioural fix - making both paths agree - changes the wire and is therefore out of scope
-      # for 011 by its own Non-goals; it is recorded as a debt with no owner in this programme.
-      type: object
-      # 011/T1108: `created_at` used to be absent from `required` and declared nullable, while the
-      # sibling AdminGraphTransactionItem - fed from the same column by a helper written the same
-      # way - declared it required and non-nullable. At most one of those could be right. The
-      # helper always writes the key (app/api/v1/admin.py:217) and the column is NOT NULL with a
-      # server default (app/db/models/transaction.py:18), so the sibling was right.
-      required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds, created_at]
-      properties:
-        tx_id:
-          type: string
-        state:
-          # The six non-terminal states the stuck-payment query once filtered to (`_ACTIVE_PAYMENT_TX_STATES`,
-          # removed with programme 019 stage 4). Since migration 030 no PAYMENT row carries any of them, so
-          # the readers answer empty without reading (app/api/v1/admin.py, the "STUCK PAYMENT" note); the enum
-          # stays as the wire shape until П4 decides the incidents surface (024 `T2412.3`, B14 of `T2411`).
-          type: string
-          enum: [NEW, ROUTED, PREPARE_IN_PROGRESS, PREPARED, PROPOSED, WAITING]
-        initiator_pid:
-          type: string
-        equivalent:
-          type: string
-        age_seconds:
-          type: integer
-          minimum: 0
-        sla_seconds:
-          type: integer
-          minimum: 0
-        created_at:
-          # Deliberately without `format: date-time` - the offset is missing here. Same reasoning
-          # as AdminGraphTransactionItem.created_at, reached by a different route.
-          type: string
-
-    AdminIncidentItem:
-      # Served by GET /admin/incidents, where the response model does run and its validator
-      # attaches UTC. The graph reads use AdminGraphIncidentItem instead - see F-011-9.
-      type: object
-      required: [tx_id, state, initiator_pid, equivalent, age_seconds, sla_seconds]
-      properties:
-        tx_id:
-          type: string
-        state:
-          type: string
-        initiator_pid:
-          type: string
-        equivalent:
-          type: string
-        age_seconds:
-          type: integer
-          minimum: 0
-        sla_seconds:
-          type: integer
-          minimum: 0
-        created_at:
-          type: string
-          format: date-time
-          nullable: true
-
-    AdminIncidentsListResponse:
-      type: object
-      required: [page, per_page, total, items]
-      properties:
-        page:
-          type: integer
-          minimum: 1
-        per_page:
-          type: integer
-          minimum: 1
-          maximum: 200
-        total:
-          type: integer
-          minimum: 0
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminIncidentItem'
 
     AdminParticipantListItem:
       type: object
@@ -4807,17 +4494,6 @@ components:
         status:
           type: string
           enum: [active, suspended]
-      additionalProperties: false
-
-    AdminAbortTxResponse:
-      type: object
-      required: [tx_id, status]
-      properties:
-        tx_id:
-          type: string
-        status:
-          type: string
-          pattern: '^aborted$'
       additionalProperties: false
 
     AdminAuditLogItem:
@@ -5285,8 +4961,8 @@ components:
       # writes `policy=data.policy or {}` (app/core/trustlines/service.py:190) - which also means
       # the ORM column's five-key default (app/db/models/trustline.py:15-21) never fires for an
       # API-created line. The two display names are non-null wherever the query joins the
-      # participant rows, and null only on the metrics capacity path, exactly as
-      # AdminParticipantCapacityBottleneck says of itself.
+      # participant rows; the one path that served them null - the participant metrics' capacity
+      # bottlenecks - was removed by 032 S5, and the declaration keeps admitting null.
       required: [id, from, to, equivalent, limit, used, available, status, created_at, updated_at, close_requested_at]
       properties:
         id:
@@ -7853,7 +7529,7 @@ components:
 
     AdminTrustLinesListResponse:
       # GET /admin/trustlines (app/api/v1/admin.py, admin_list_trustlines). AdminPaginatedMeta + items, the same
-      # four-key shape as AdminParticipantsListResponse and AdminIncidentsListResponse.
+      # four-key shape as AdminParticipantsListResponse.
       type: object
       required: [page, per_page, total, items]
       properties:
@@ -7896,78 +7572,25 @@ components:
           items:
             $ref: '#/components/schemas/AdminAuditLogItem'
 
-    AdminTrustLinesBottlenecksResponse:
-      # GET /admin/trustlines/bottlenecks (app/api/v1/admin.py:693).
-      type: object
-      required: [threshold, items]
-      properties:
-        threshold:
-          # A NUMBER here, not a decimal string: the handler parses the query into a Decimal and
-          # then calls float() on it before building the response
-          # (app/api/v1/admin.py:709, AdminTrustLinesBottlenecksResponse.threshold: float).
-          # It is a ratio, not money, so AGENTS.md section 8 does not apply. Contrast
-          # AdminParticipantMetricsResponse.meta.threshold, which is the same query parameter
-          # served as a decimal string.
-          type: number
-          minimum: 0
-          maximum: 1
-        items:
-          # Active trustlines with limit > 0 whose available/limit ratio is strictly below
-          # `threshold`, capped at the `limit` query parameter. With `equivalent` the order is
-          # available ascending then created_at ascending; WITHOUT it the rows carry different
-          # units, so the order is the ratio available/limit ascending then created_at ascending
-          # (028 F-028-38, owner decision В-3: no comparison across equivalents). `used` is the matching Debt row (0 when there is none) and
-          # `available` is limit - used, both computed in the query, not stored.
-          type: array
-          items:
-            $ref: '#/components/schemas/TrustLine'
-
-    AdminLiquidityNetRow:
-      # One ranked participant in the three top-N lists of the liquidity summary.
-      type: object
-      required: [pid, display_name, net]
-      properties:
-        pid:
-          type: string
-        display_name:
-          type: string
-        net:
-          # Money: total credited minus total debited in the selected equivalent, as an exact
-          # decimal string (AGENTS.md section 8). Negative for a net debtor. NOT atoms - this is
-          # the raw Debt.amount sum in major units. Rows exist only when `equivalent` is given.
-          type: string
-
     AdminLiquiditySummaryResponse:
-      # GET /admin/liquidity/summary (app/api/v1/admin.py:712).
+      # GET /admin/liquidity/summary (app/api/v1/admin.py, admin_liquidity_summary). Narrowed by 032 S5
+      # (owner decision 2026-10-07) to the six fields of the Dashboard's per-equivalent row.
       type: object
       required:
         - equivalent
-        - threshold
         - updated_at
         - active_trustlines
-        - bottlenecks
-        - incidents_over_sla
         - total_limit
         - total_used
         - total_available
-        - top_creditors
-        - top_debtors
-        - top_by_abs_net
-        - top_bottleneck_edges
       properties:
         equivalent:
           # The `equivalent` query parameter, trimmed and upper-cased, or null when it was omitted
-          # or blank (app/api/v1/admin.py:719-720). Echoed with no lookup: an unknown code is a 200
-          # with this field set and every aggregate at zero, not a 404. Deliberately NOT
-          # $ref EquivalentCode - nothing validates the pattern on this route.
+          # or blank. Echoed with no lookup: an unknown code is a 200 with this field set and every
+          # aggregate at zero, not a 404. Deliberately NOT $ref EquivalentCode - nothing validates the
+          # pattern on this route. An inactive equivalent is summed like an active one.
           type: string
           nullable: true
-        threshold:
-          # A NUMBER, via float(Decimal(...)) - see the note on
-          # AdminTrustLinesBottlenecksResponse.threshold.
-          type: number
-          minimum: 0
-          maximum: 1
         updated_at:
           # datetime.now(timezone.utc) at handler entry, so it is always offset-aware and the
           # format is honest here (unlike the raw column copies in AdminGraphTransactionItem).
@@ -7977,23 +7600,10 @@ components:
           # COUNT over trustlines with status = 'active', filtered by equivalent when given.
           type: integer
           minimum: 0
-        bottlenecks:
-          # The TOTAL number of edges below the threshold, not the length of
-          # top_bottleneck_edges: the helper counts every match and only then applies `limit`
-          # (app/api/v1/admin.py:667-668).
-          type: integer
-          minimum: 0
-        incidents_over_sla:
-          # PAYMENT transactions still in a non-terminal state whose updated_at is older than
-          # PAYMENT_TX_STUCK_TIMEOUT_SECONDS. When `equivalent` is given the filter is applied in
-          # Python against payload["equivalent"], so a row with no equivalent in its payload is
-          # excluded from a filtered count but included in the unfiltered one.
-          type: integer
-          minimum: 0
         total_limit:
           # Money, exact decimal string: SUM of TrustLine.limit over the active lines of the ONE
           # selected equivalent. Null when `equivalent` is omitted: money is never summed across
-          # equivalents (028 F-028-37, owner decision В-3, 2026-10-04); the counters above stay.
+          # equivalents (028 F-028-37, owner decision В-3, 2026-10-04); the counter above stays.
           type: string
           nullable: true
         total_used:
@@ -8005,29 +7615,6 @@ components:
           # total_limit - total_used; null without `equivalent`.
           type: string
           nullable: true
-        top_creditors:
-          # Net > 0, descending, capped at the `limit` query parameter. Empty without
-          # `equivalent`: a net position is ranked only within one equivalent (028 F-028-37).
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminLiquidityNetRow'
-        top_debtors:
-          # Net < 0, ascending (most negative first), same cap; empty without `equivalent`.
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminLiquidityNetRow'
-        top_by_abs_net:
-          # Ranked by abs(net) with no sign filter, so its rows overlap the two lists above; empty
-          # without `equivalent`.
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminLiquidityNetRow'
-        top_bottleneck_edges:
-          # The same rows GET /admin/trustlines/bottlenecks returns for this threshold, limit and
-          # equivalent - one shared helper builds both (_load_admin_trustline_bottlenecks).
-          type: array
-          items:
-            $ref: '#/components/schemas/TrustLine'
 
     AdminParticipantBalanceRow:
       # One equivalent's aggregates for the participant. All six amounts are money as exact
@@ -8067,274 +7654,22 @@ components:
           # total_credit - total_debt; negative for a net debtor.
           type: string
 
-    AdminParticipantCounterpartySplitRow:
-      type: object
-      required: [pid, display_name, amount, share]
-      properties:
-        pid:
-          type: string
-        display_name:
-          # Never null: falls back to the pid when the column is blank
-          # (app/core/admin/metrics.py:324).
-          type: string
-        amount:
-          # Money, exact decimal string.
-          type: string
-        share:
-          # amount / total as a float, or 0.0 when the total is zero. A ratio, not money - the one
-          # place in this family where float(Decimal / Decimal) is applied to money-derived values.
-          type: number
-
-    AdminParticipantCounterpartySplit:
-      # Who the participant owes and who owes them, for the requested equivalent only.
-      type: object
-      required: [eq, totalDebt, totalCredit, creditors, debtors]
-      properties:
-        eq:
-          type: string
-        totalDebt:
-          # camelCase on the wire: the field is total_debt in Python with
-          # serialization_alias="totalDebt" (app/schemas/metrics.py:31-32), and FastAPI serializes
-          # responses with by_alias=True. Money, exact decimal string.
-          type: string
-        totalCredit:
-          # Same aliasing as totalDebt.
-          type: string
-        creditors:
-          # Counterparties the participant owes (participant is the debtor), sorted by amount
-          # descending then pid. `share` is of totalDebt.
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminParticipantCounterpartySplitRow'
-        debtors:
-          # Counterparties who owe the participant; `share` is of totalCredit.
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminParticipantCounterpartySplitRow'
-
-    AdminParticipantConcentrationSide:
-      type: object
-      required: [top1, top5, hhi]
-      properties:
-        top1:
-          # Largest single counterparty share, 0.0 when there are none.
-          type: number
-        top5:
-          # Sum of the five largest shares.
-          type: number
-        hhi:
-          # Herfindahl-Hirschman index as the sum of squared shares, so it is on the 0..1 scale,
-          # not the 0..10000 scale the name usually implies (app/core/admin/metrics.py:74-75).
-          type: number
-
-    AdminParticipantConcentration:
-      # Computed purely from the counterparty split - no extra query.
-      type: object
-      required: [eq, outgoing, incoming]
-      properties:
-        eq:
-          type: string
-        outgoing:
-          # Shares of the `creditors` list, i.e. concentration of what the participant owes.
-          $ref: '#/components/schemas/AdminParticipantConcentrationSide'
-        incoming:
-          # Shares of the `debtors` list.
-          $ref: '#/components/schemas/AdminParticipantConcentrationSide'
-
-    AdminParticipantNetDistributionBin:
-      type: object
-      required: [from_atoms, to_atoms, count]
-      properties:
-        from_atoms:
-          # Integer atoms via str(int): no decimal point, negative allowed. NOT a money amount -
-          # the major-unit value is this divided by 10 ** equivalent precision. Bin bounds are
-          # half-open [from_atoms, to_atoms) except the last bin, whose to_atoms is the maximum.
-          type: string
-        to_atoms:
-          type: string
-        count:
-          type: integer
-          minimum: 0
-
-    AdminParticipantNetDistribution:
-      # Net position of EVERY participant in the system for this equivalent, bucketed - the
-      # requested participant is one point in it, not the subject.
-      type: object
-      required: [eq, min_atoms, max_atoms, bins]
-      properties:
-        eq:
-          type: string
-        min_atoms:
-          # Same atoms-as-string convention as the bin bounds.
-          type: string
-        max_atoms:
-          type: string
-        bins:
-          # Exactly 20 bins of equal integer width, or a single degenerate bin holding every
-          # participant when max == min (app/core/admin/metrics.py:405-411).
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminParticipantNetDistributionBin'
-
-    AdminParticipantRank:
-      type: object
-      required: [eq, rank, n, percentile, net]
-      properties:
-        eq:
-          type: string
-        rank:
-          # 1-based, 1 = largest net. The code keeps a 0 branch for a pid missing from the
-          # participants table, which the handler's own earlier lookup makes unreachable.
-          type: integer
-          minimum: 0
-        n:
-          # Total participants ranked, i.e. every row of the participants table.
-          type: integer
-          minimum: 0
-        percentile:
-          # (n - rank) / (n - 1), and exactly 1.0 when n <= 1.
-          type: number
-        net:
-          # Money, exact decimal string: credits minus debts subtracted exactly in Decimal FIRST,
-          # then truncated toward zero at the equivalent's precision (028 F-028-40; truncating
-          # each side before subtracting could be off by one atom). It can differ from
-          # AdminParticipantBalanceRow.net only in the sub-precision digits and carries exactly
-          # `precision` decimal places. `rank` orders by the exact net.
-          type: string
-
-    AdminParticipantCapacitySide:
-      type: object
-      required: [limit, used, pct]
-      properties:
-        limit:
-          # Money, exact decimal string; live trustlines only (status != 'closed').
-          type: string
-        used:
-          type: string
-        pct:
-          # used / limit as a float, 0.0 when limit is 0. A ratio, not money.
-          type: number
-
-    AdminParticipantCapacityBottleneck:
-      type: object
-      required: [dir, other, trustline]
-      properties:
-        dir:
-          # Direction relative to the requested participant: "out" = they are the creditor.
-          type: string
-          enum: [out, in]
-        other:
-          # The counterparty PID, or the raw participant UUID as a string if the pid lookup misses
-          # (app/core/admin/metrics.py:503-504).
-          type: string
-        trustline:
-          # from_display_name and to_display_name are hard-coded to null on this path
-          # (app/core/admin/metrics.py:511-512) - unlike the same schema served by
-          # /admin/trustlines/bottlenecks, which joins the names.
-          $ref: '#/components/schemas/TrustLine'
-
-    AdminParticipantCapacity:
-      type: object
-      required: [eq, out, inc, bottlenecks]
-      properties:
-        eq:
-          type: string
-        out:
-          # Lines where the participant is the creditor.
-          $ref: '#/components/schemas/AdminParticipantCapacitySide'
-        inc:
-          # Lines where the participant is the debtor. Note the key is `inc`, not `in`.
-          $ref: '#/components/schemas/AdminParticipantCapacitySide'
-        bottlenecks:
-          # ALWAYS EMPTY unless the `threshold` query parameter is supplied: the guard is
-          # `thr is not None`, and threshold has no default on this route
-          # (app/api/v1/admin.py:2227, app/core/admin/metrics.py:527). Sorted by dir, then
-          # counterparty pid, then trustline id. A line the participant sits on both ends of
-          # would appear twice, once per direction.
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminParticipantCapacityBottleneck'
-
-    AdminParticipantActivity:
-      # Event counts in trailing windows. "Now" is not the clock: it is the maximum timestamp
-      # found among the participant's trustlines, their audit rows and ALL transactions, falling
-      # back to utcnow only when none exists (app/core/admin/metrics.py:608).
-      type: object
-      required:
-        - windows
-        - trustline_created
-        - trustline_closed
-        - incident_count
-        - participant_ops
-        - payment_committed
-        - clearing_committed
-        - has_transactions
-      properties:
-        windows:
-          # Always literally [7, 30, 90]; no parameter changes it.
-          type: array
-          items:
-            type: integer
-        trustline_created:
-          # Keys are the window sizes as decimal strings - "7", "30", "90" - because the Python
-          # type is dict[int, int] and JSON object keys are strings. Windows are cumulative and
-          # nested, so the 90 count includes the 30 count.
-          type: object
-          additionalProperties:
-            type: integer
-        trustline_closed:
-          type: object
-          additionalProperties:
-            type: integer
-        incident_count:
-          # Stuck PAYMENT transactions the participant initiated. Not filtered by equivalent.
-          type: object
-          additionalProperties:
-            type: integer
-        participant_ops:
-          # Audit rows against this pid whose action starts with PARTICIPANT_ or
-          # admin.participants. - two vocabularies, both matched.
-          type: object
-          additionalProperties:
-            type: integer
-        payment_committed:
-          type: object
-          additionalProperties:
-            type: integer
-        clearing_committed:
-          type: object
-          additionalProperties:
-            type: integer
-        has_transactions:
-          # True when the pre-filter query returned any committed PAYMENT/CLEARING row in the
-          # widest window AT ALL - it is not about this participant, so it can be true while every
-          # count above is zero (app/core/admin/metrics.py:683).
-          type: boolean
-
     AdminParticipantMetricsResponse:
-      # GET /admin/participants/{pid}/metrics (app/api/v1/admin.py:2223), assembled by
-      # compute_participant_metrics. Six of the nine keys are filled only when `equivalent` is
-      # supplied; without it the handler returns early and they are present-and-null
-      # (app/core/admin/metrics.py:120).
+      # GET /admin/participants/{pid}/metrics (app/api/v1/admin.py, admin_participant_metrics), assembled by
+      # compute_participant_metrics. Narrowed by 032 S5 (owner decision 2026-10-07) to the balance rows; the
+      # rank, distribution, counterparty split, concentration, capacity, activity and meta keys were removed.
       type: object
       required:
         - pid
         - equivalent
         - balance_rows
-        - counterparty
-        - concentration
-        - distribution
-        - rank
-        - capacity
-        - activity
-        - meta
       properties:
         pid:
           # The path parameter, trimmed. A blank or unknown pid is a 404, so this is never empty.
           type: string
         equivalent:
           # Trimmed and upper-cased, null when omitted. Unlike the liquidity summary this route
-          # DOES validate it: validate_equivalent_code enforces the format and an unknown code is
+          # DOES validate it: validate_equivalent_code enforces the format (400) and an unknown code is
           # a 404, so a non-null value here always names a real equivalent.
           type: string
           nullable: true
@@ -8345,64 +7680,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AdminParticipantBalanceRow'
-        counterparty:
-          # All six of these are `required` AND present-and-null whenever `equivalent` was
-          # omitted: compute_participant_metrics returns at app/core/admin/metrics.py:120 before
-          # any of them is computed, and each is `Optional[...] = None` on the response model
-          # (app/schemas/metrics.py:107-112) with no `exclude_none` anywhere on the route.
-          #
-          # `allOf` with a sibling `nullable: true` did NOT say that. In OpenAPI 3.0.3 `nullable`
-          # modifies a sibling `type` and nothing else, so beside a bare `allOf` it was inert and
-          # all six rejected the null they claimed to allow: a real 200 body from
-          # GET /admin/participants/{pid}/metrics failed validation against this document on all
-          # six properties, twice each - "None for not nullable" and "None is not of type
-          # 'object'" (`F-011-10`). The composition keyword therefore changes from `allOf` to
-          # `oneOf`: a null branch cannot be added to an `allOf`, where every branch must match.
-          oneOf:
-            - $ref: '#/components/schemas/AdminParticipantCounterpartySplit'
-            - nullable: true
-              enum: [null]
-        concentration:
-          oneOf:
-            - $ref: '#/components/schemas/AdminParticipantConcentration'
-            - nullable: true
-              enum: [null]
-        distribution:
-          oneOf:
-            - $ref: '#/components/schemas/AdminParticipantNetDistribution'
-            - nullable: true
-              enum: [null]
-        rank:
-          oneOf:
-            - $ref: '#/components/schemas/AdminParticipantRank'
-            - nullable: true
-              enum: [null]
-        capacity:
-          oneOf:
-            - $ref: '#/components/schemas/AdminParticipantCapacity'
-            - nullable: true
-              enum: [null]
-        activity:
-          oneOf:
-            - $ref: '#/components/schemas/AdminParticipantActivity'
-            - nullable: true
-              enum: [null]
-        meta:
-          # Declared dict[str, Any] "for forward compatibility", but there is exactly one writer
-          # and it stores exactly one key (app/core/admin/metrics.py:163-165). The object is empty
-          # when `equivalent` was omitted, because that path returns before meta is built.
-          # additionalProperties stays true to match the annotation.
-          type: object
-          additionalProperties: true
-          properties:
-            threshold:
-              # A decimal STRING here - the raw Decimal from the query parameter, serialized by
-              # pydantic's Any-field inference. The SAME query parameter is a `number` on
-              # /admin/liquidity/summary and /admin/trustlines/bottlenecks, which call float() on
-              # it. Null when the caller supplied `equivalent` but not `threshold`; the key is
-              # absent entirely when `equivalent` was omitted, so it is not required.
-              type: string
-              nullable: true
 
     IntegrityAuditLogClearingEdge:
       # One entry per edge of the cleared cycle (app/core/clearing/service.py:1649-1656).

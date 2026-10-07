@@ -40,17 +40,6 @@ class AdminParticipantStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class AdminAbortTxRequest(BaseModel):
-    reason: str = Field(..., min_length=1)
-
-
-class AdminAbortTxResponse(BaseModel):
-    tx_id: str
-    status: str = Field(..., pattern="^aborted$")
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class AdminAuditLogItem(BaseModel):
     id: UUID
     timestamp: datetime
@@ -96,55 +85,24 @@ class AdminAuditLogListResponse(AdminPaginatedMeta):
     items: list[AdminAuditLogItem]
 
 
-class AdminIncidentItem(BaseModel):
-    tx_id: str
-    state: str
-    initiator_pid: str
-    equivalent: str
-    age_seconds: StrictInt = Field(..., ge=0)
-    sla_seconds: StrictInt = Field(..., ge=0)
-    created_at: Optional[datetime] = None
-
-
-class AdminIncidentsListResponse(AdminPaginatedMeta):
-    items: list[AdminIncidentItem]
-
-
 class AdminParticipantsStatsResponse(BaseModel):
     participants_by_status: dict[str, StrictInt] = Field(default_factory=dict)
     participants_by_type: dict[str, StrictInt] = Field(default_factory=dict)
     total_participants: StrictInt = Field(0, ge=0)
 
 
-class AdminTrustLinesBottlenecksResponse(BaseModel):
-    threshold: float = Field(..., ge=0.0)
-    items: list[TrustLineSchema]
-
-
-class AdminLiquidityNetRow(BaseModel):
-    pid: str
-    display_name: str
-    net: PlainDecimal
-
-
 class AdminLiquiditySummaryResponse(BaseModel):
+    """One equivalent's active lines and their money - the Dashboard row (032 S5, F-2, F-3)."""
+
     equivalent: Optional[str] = None
-    threshold: float = Field(..., ge=0.0)
     updated_at: datetime
 
     active_trustlines: StrictInt = Field(0, ge=0)
-    bottlenecks: StrictInt = Field(0, ge=0)
-    incidents_over_sla: StrictInt = Field(0, ge=0)
 
     # 028 F-028-37 (owner В-3): null without an equivalent - money is never summed across them.
     total_limit: Optional[PlainDecimal] = None
     total_used: Optional[PlainDecimal] = None
     total_available: Optional[PlainDecimal] = None
-
-    top_creditors: list[AdminLiquidityNetRow] = Field(default_factory=list)
-    top_debtors: list[AdminLiquidityNetRow] = Field(default_factory=list)
-    top_by_abs_net: list[AdminLiquidityNetRow] = Field(default_factory=list)
-    top_bottleneck_edges: list[TrustLineSchema] = Field(default_factory=list)
 
 
 class AdminMigrationsStatus(BaseModel):

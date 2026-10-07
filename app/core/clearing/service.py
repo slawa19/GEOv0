@@ -611,7 +611,7 @@ class ClearingService:
 
         HISTORICAL since programme 023 slice (d), 2026-09-28: `auto_clear` is gone and no executor consumes this
         order - execution goes through the flow plan (`app/core/clearing/runner.py`). `find_cycles` is the
-        diagnostic of `GET /clearing/cycles` and `/admin/clearing/cycles` only; the order is its answer's.
+        diagnostic of `GET /clearing/cycles` only (its admin copy was removed by 032 S5); the order is its answer's.
         """
 
         def _executable_amount() -> Decimal:
@@ -1923,8 +1923,8 @@ class ClearingService:
         # equivalent` digests `debts` and `trust_lines` rows, never a payload), in no signature
         # (CLEARING rows are not signed), and in no key (`idempotency_key` is
         # `clearing:{tx_id}`, and `tx_id` is the occurrence id - a uuid5 of plan, equivalent and ordinal), and the
-        # only other CLEARING-payload readers - `app/core/admin/metrics.py:723` and
-        # `app/api/v1/admin.py:203,1035` - read `equivalent` and `edges[].debtor/creditor`.
+        # only other CLEARING-payload readers at the time - the admin participant activity (removed by 032 S5) and
+        # the admin graph's transactions collection - read `equivalent` and `edges[].debtor/creditor`.
         # `to_money_str` never drops a digit the value carries, so the amount a replay hands
         # back still equals the amount that was applied to the debts.  Rows written before this
         # change keep their old string and parse identically, so no backfill and no migration.

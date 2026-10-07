@@ -19,8 +19,9 @@ from app.db.models.equivalent import Equivalent
 from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
-# LOG_LEVEL and the integrity job's switch and period are taken once at start; the other three have no reader.
-NOT_RUNTIME = ("LOG_LEVEL", "RECOVERY_ENABLED", "RECOVERY_INTERVAL_SECONDS", "PAYMENT_TX_STUCK_TIMEOUT_SECONDS")
+# LOG_LEVEL and the integrity job's switch and period are taken once at start. The three recovery keys, which had no
+# reader, were removed with the incidents surface (032 S5, A-4).
+NOT_RUNTIME = ("LOG_LEVEL",)
 NOT_RUNTIME += ("INTEGRITY_CHECKPOINT_ENABLED", "INTEGRITY_CHECKPOINT_INTERVAL_SECONDS")
 
 
