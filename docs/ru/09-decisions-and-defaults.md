@@ -632,7 +632,7 @@ requiredness), schemas, остальные responses и security фиксиру�
 | `routing.max_path_length` | 6 | 3–10 |
 | `routing.max_paths_per_payment` | 3 | 1–10 |
 | `routing.path_finding_timeout_ms` | 500 | 100–2000 |
-| `routing.multipath_mode` | `limited` | limited, full |
+| `routing.multipath_mode` | `limited` | limited, full — **не реализовано** (2026-10-07, 033): ключа в коде нет, full-режима нет |
 
 ### 2.3. Клиринг
 

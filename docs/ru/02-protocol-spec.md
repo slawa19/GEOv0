@@ -602,6 +602,9 @@ def split_payment(amount, paths):
 - Предсказуемая сложность и объяснимость.
 
 **Опция: Full multipath mode (экспериментальный режим для бенчмарков)**
+
+> **Не реализовано (2026-10-07, программа 033).** Отдельного full-режима маршрутизации в коде нет: ключей `routing.multipath_mode`, `routing.full_multipath_budget_ms`, `routing.full_multipath_max_iterations` не существует. Флаг `FEATURE_FLAGS_FULL_MULTIPATH_ENABLED` лишь включает поле `paths` в ответе `GET /payments/max-flow` (`app/core/payments/router.py`), а `FEATURE_FLAGS_MULTIPATH_ENABLED=false` равносилен `ROUTING_MAX_PATHS=1`. Ниже — проектное намерение, а не описание текущего поведения.
+
 - Выключен по умолчанию, включается через конфигурацию (по сути feature‑flag).
 - Цель: перф‑тесты сети и сравнение алгоритмов маршрутизации, не усложняя основной режим.
 - Не гарантирует «математически оптимальный» max‑flow в условиях budget/таймаутов.
