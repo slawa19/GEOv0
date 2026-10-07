@@ -27,9 +27,9 @@ them. RECREATED on every attempt: the session and its transaction, the locks, th
 the routes, the capacity checks, the staged writes and the observation buffer.
 
 THE PLAN IS NEVER REUSED. The planner caps amounts by already-used debt
-(`real_payment_planner.py:614`, `:633`, `:655`), so a reused plan would size payments against a
+(`RealPaymentPlanner._capacity_limit` in `real_payment_planner.py`), so a reused plan would size payments against a
 picture the concurrent commit has already refuted. The tick's generator is seeded from `seed` and
-`tick_index` (`real_payment_planner.py:363`), so a replan is reproducible - and its result may
+`tick_index` (`tick_seed` in `RealPaymentPlanner.plan_payments`), so a replan is reproducible - and its result may
 legitimately differ, because this is regeneration of load that was never accepted. Nothing about
 an ACCEPTED payment is regenerated: its `payload` and `tx_id` are immutable.
 
