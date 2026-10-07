@@ -65,15 +65,6 @@ export function absDecimalString(v: string): string {
   return formatBigIntFixed(abs, d.scale)
 }
 
-export function compareDecimalStrings(a: string, b: string): number {
-  const da = parseDecimal(String(a ?? ''))
-  const db = parseDecimal(String(b ?? ''))
-  if (!da || !db) return 0
-  const [ai, bi] = align(da, db)
-  if (ai === bi) return 0
-  return ai < bi ? -1 : 1
-}
-
 /** Exact order of two shares `aNum/aDen` and `bNum/bDen` (positive denominators); 0 when unreadable. */
 export function compareDecimalRatios(aNum: string, aDen: string, bNum: string, bDen: string): number {
   const [an, ad, bn, bd] = [aNum, aDen, bNum, bDen].map((v) => parseDecimal(String(v ?? '')))

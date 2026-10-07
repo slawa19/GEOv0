@@ -84,13 +84,6 @@ EXPECTED_TOTAL_LIMIT = Decimal(BOTTLENECK_LIMIT) + Decimal(HEALTHY_LIMIT)
 EXPECTED_TOTAL_USED = Decimal(BOTTLENECK_PAYMENT) + Decimal(HEALTHY_PAYMENT)
 EXPECTED_TOTAL_AVAILABLE = EXPECTED_TOTAL_LIMIT - EXPECTED_TOTAL_USED
 
-_NUMBER_WHY = (
-    "WHY THIS MATTERS: api/openapi.yaml declares this field `type: number`. A canon that says "
-    "`number` has to be as falsifiable as one that says `string`, or 'we described it' means only "
-    "that somebody wrote it down. Clients generated from this schema hand the value straight to "
-    "arithmetic; a string there is a TypeError in their code, not a rounding nuisance. If this "
-    "fails, establish whether the implementation or the canon is wrong - do not relax it."
-)
 
 _ADMIN_HEADERS = {"X-Admin-Token": settings.ADMIN_TOKEN}
 
@@ -99,26 +92,6 @@ _ADMIN_HEADERS = {"X-Admin-Token": settings.ADMIN_TOKEN}
 # Wire-level checkers. `assert_exact_decimal_string` is imported; these are the ones this module
 # adds, and `test_the_admin_wire_checkers_reject_what_they_exist_to_catch` proves each can fail.
 # --------------------------------------------------------------------------------------------
-
-
-def assert_json_number(value: Any, *, where: str, expected: float | None = None) -> None:
-    """Assert a parsed JSON value is a number - the mirror image of the money checker."""
-
-    # bool before int: isinstance(True, int) is True, and `true` under `share` is its own bug.
-    assert not isinstance(value, bool), (
-        f"{where} is the JSON literal {str(value).lower()}, not a number.\n{_NUMBER_WHY}"
-    )
-    assert not isinstance(value, str), (
-        f"{where} reached the wire as a JSON STRING ({value!r}). The canon declares it a number; "
-        f"one of the two has moved.\n{_NUMBER_WHY}"
-    )
-    assert isinstance(value, (int, float)), (
-        f"{where} is {type(value).__name__} ({value!r}).\n{_NUMBER_WHY}"
-    )
-    if expected is not None:
-        assert float(value) == pytest.approx(expected), (
-            f"{where} is {value!r}, expected {expected!r}.\n{_NUMBER_WHY}"
-        )
 
 
 def assert_raw_key_is_quoted(
@@ -146,21 +119,6 @@ def assert_raw_key_is_quoted(
         assert first_char == '"', (
             f"{where}: occurrence {index} of {key!r} in the RAW response text is followed by "
             f"{first_char!r}, not a quote - the value is a bare JSON number.\n{_WHY}"
-        )
-
-
-def assert_raw_key_is_unquoted(raw: str, key: str, *, where: str) -> None:
-    """The mirror: every `"key":` in the raw text must be followed by something other than a quote."""
-
-    found = re.findall(rf'"{re.escape(key)}"\s*:\s*(.)', raw)
-    assert found, (
-        f"{where}: the raw response text contains no {key!r} key at all, so this check inspected "
-        f"nothing."
-    )
-    for index, first_char in enumerate(found):
-        assert first_char != '"', (
-            f"{where}: occurrence {index} of {key!r} in the RAW response text is followed by a "
-            f"quote - the canon declares it a number.\n{_NUMBER_WHY}"
         )
 
 
@@ -324,7 +282,10 @@ def _assert_trustline_updated_at(item: dict, *, where: str) -> None:
 
 
 def test_the_admin_wire_checkers_reject_what_they_exist_to_catch() -> None:
-    """Prove the three checkers added here can fail, before any green run below is trusted.
+    """Prove the checkers added here can fail, before any green run below is trusted.
+
+    032 S5: `assert_json_number` and `assert_raw_key_is_unquoted` were removed with the ratio and threshold
+    fields they guarded (the bottleneck list, the summary's ranked lists and the participant analytics).
 
     `assert_exact_decimal_string` is not re-proved: the module it is imported from does that, and
     a second copy of that proof would only give the two something to drift apart on.
@@ -332,19 +293,9 @@ def test_the_admin_wire_checkers_reject_what_they_exist_to_catch() -> None:
 
     # Positive controls first. A checker that rejects everything would make every test in this
     # module meaningless, which is the failure mode this pairing exists to rule out.
-    assert_json_number(0.1, where="control", expected=0.1)
-    assert_json_number(0, where="control")
     assert_raw_key_is_quoted('{"limit":"100.50000000"}', "limit", where="control", occurrences=1)
     assert_raw_key_is_quoted('{"a":{"net":"-1.00"},"b":[{"net":"2.00"}]}', "net", where="control")
-    assert_raw_key_is_unquoted('{"threshold":0.1}', "threshold", where="control")
     assert float_leaves({"a": 1, "b": "2", "c": True, "d": None, "e": [{"f": 3}]}) == []
-
-    # A number that became a string is the regression the canon's `number` claims can suffer.
-    for bad in ("0.1", "", True, False, None, [], {}):
-        with pytest.raises(AssertionError):
-            assert_json_number(bad, where="regressed")
-    with pytest.raises(AssertionError):
-        assert_json_number(0.2, where="regressed", expected=0.1)
 
     # The raw-text checkers must react to the exact byte shapes a serializer change produces,
     # including one bad occurrence hidden among good ones - the case a parsed-value loop that only
@@ -356,14 +307,11 @@ def test_the_admin_wire_checkers_reject_what_they_exist_to_catch() -> None:
     ):
         with pytest.raises(AssertionError):
             assert_raw_key_is_quoted(raw, "limit", where="regressed")
-    with pytest.raises(AssertionError):
-        assert_raw_key_is_unquoted('{"threshold":"0.10"}', "threshold", where="regressed")
 
     # A key that is simply absent must fail rather than pass vacuously: that is how a renamed or
     # dropped field would otherwise turn into a silent green.
-    for checker in (assert_raw_key_is_quoted, assert_raw_key_is_unquoted):
-        with pytest.raises(AssertionError):
-            checker('{"other":1}', "limit", where="absent")
+    with pytest.raises(AssertionError):
+        assert_raw_key_is_quoted('{"other":1}', "limit", where="absent")
     with pytest.raises(AssertionError):
         assert_raw_key_is_quoted('{"limit":"1.00"}', "limit", where="miscounted", occurrences=2)
 

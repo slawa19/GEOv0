@@ -210,3 +210,90 @@ describe('Integrity screen: equivalent holds (032 F-4)', () => {
     wrapper.unmount()
   })
 })
+
+describe('Integrity screen: one clear per equivalent at a time (032 S5 review, P2)', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    const promise = new Promise<T>((r) => { resolve = r })
+    return { promise, resolve }
+  }
+
+  it('a second clear of A is not sent while A is in flight, and B finishing does not release A', async () => {
+    holds = { UAH: true, EUR: true }
+    const pending = new Map<string, ReturnType<typeof deferred<Response>>>()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = String(init?.method || 'GET')
+        calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+        if (url.endsWith('/api/v1/integrity/status')) return json(200, healthyStatus)
+        if (url.endsWith('/api/v1/integrity/summary')) return json(200, summary(holds))
+        const m = /equivalents\/([A-Z]+)\/integrity-hold\/clear$/.exec(url)
+        if (m) {
+          const d = deferred<Response>()
+          pending.set(m[1]!, d)
+          return d.promise
+        }
+        return json(404, { error: { code: 'E404', message: `unexpected ${method} ${url}` } })
+      }),
+    )
+    // Both reason prompts are open at once: the second one is confirmed while the first POST is in flight.
+    const promptA = deferred<unknown>()
+    const promptB = deferred<unknown>()
+    vi.spyOn(ElMessageBox, 'prompt')
+      .mockReturnValueOnce(promptA.promise as never)
+      .mockReturnValueOnce(promptB.promise as never)
+      .mockResolvedValue({ value: 'again', action: 'confirm' } as never)
+    vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+    const posts = (code: string) => calls.filter((c) => c.url.endsWith(`/${code}/integrity-hold/clear`)).length
+    const clearButton = (code: string) => holdRow(wrapper, code).find('[data-testid="integrity-hold-clear"]')
+
+    const wrapper = await mountIntegrity()
+    await clearButton('UAH').trigger('click')
+    await clearButton('EUR').trigger('click')
+    promptA.resolve({ value: 'first', action: 'confirm' })
+    await flushPromises()
+    expect(posts('UAH')).toBe(1)
+    promptB.resolve({ value: 'second', action: 'confirm' })
+    await flushPromises()
+    expect(posts('EUR')).toBe(1)
+
+    // B finishes while A is still in flight.
+    pending.get('EUR')!.resolve(json(200, { ...equivalentUah, code: 'EUR' }))
+    await flushPromises()
+    await nextTick()
+
+    // A stays blocked: its button is disabled, and a click (even if it reached the handler) sends nothing.
+    expect(clearButton('UAH').attributes('disabled')).toBeDefined()
+    await clearButton('UAH').trigger('click')
+    await flushPromises()
+    expect(posts('UAH')).toBe(1)
+
+    pending.get('UAH')!.resolve(json(200, equivalentUah))
+    await flushPromises()
+    wrapper.unmount()
+  })
+  it('two prompts for the same equivalent confirmed in turn send one clear', async () => {
+    let release!: (r: Response) => void
+    clearResponse = () => new Promise<Response>((r) => { release = r }) as unknown as Response
+    const first = deferred<unknown>()
+    const second = deferred<unknown>()
+    vi.spyOn(ElMessageBox, 'prompt')
+      .mockReturnValueOnce(first.promise as never)
+      .mockReturnValueOnce(second.promise as never)
+    vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+    const wrapper = await mountIntegrity()
+    const button = holdRow(wrapper, 'UAH').find('[data-testid="integrity-hold-clear"]')
+    await button.trigger('click')
+    await button.trigger('click')
+    first.resolve({ value: 'first', action: 'confirm' })
+    await flushPromises()
+    second.resolve({ value: 'second', action: 'confirm' })
+    await flushPromises()
+    expect(calls.filter((c) => c.url.endsWith('/UAH/integrity-hold/clear'))).toHaveLength(1)
+    release(json(200, equivalentUah))
+    await flushPromises()
+    wrapper.unmount()
+  })
+})

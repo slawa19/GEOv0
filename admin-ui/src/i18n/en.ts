@@ -7,7 +7,6 @@ export const EN: Record<string, string> = {
   'common.cancel': 'Cancel',
   'common.code': 'Code',
   'common.confirm': 'Confirm',
-  'common.apply': 'Apply',
   'common.create': 'Create',
   'common.deactivate': 'Deactivate',
   'common.delete': 'Delete',
@@ -19,7 +18,6 @@ export const EN: Record<string, string> = {
   'common.na': '—',
   'common.n_a': 'n/a',
   'common.noData': 'No data',
-  'common.pending': 'Pending',
   'money.precisionUnavailable': 'Precision is not loaded for some equivalents on this screen, so their amounts are hidden.',
   'common.precision': 'Precision',
   'common.reasonIsRequired': 'reason is required',
@@ -28,9 +26,7 @@ export const EN: Record<string, string> = {
   'common.refreshHint': 'If the error is temporary, try refreshing.',
   'common.run': 'Run',
   'common.save': 'Save',
-  'common.saving': 'Saving…',
   'common.status': 'Status',
-  'common.synced': 'Synced',
   'common.passed': 'passed',
   'common.failed': 'failed',
   'common.passedPrefix': 'passed:',
@@ -51,12 +47,9 @@ export const EN: Record<string, string> = {
   'common.copyLabel': 'Copy {label}',
   'common.helpTitle': 'Help: {title}',
   'common.helpForLabel': 'Help for {label}',
-  'common.close': 'Close',
 
 
 
-  'liquidity.controls.equivalent': 'Equivalent',
-  'liquidity.controls.note': 'Mode',
 
 
 
@@ -83,17 +76,11 @@ export const EN: Record<string, string> = {
   'equivalents.loadFailed': 'Failed to load equivalents',
   'equivalents.none': 'No equivalents',
 
-  'app.runLocal.label': 'Run',
-  'app.runLocal.tooltip': 'Show the recommended scripts/run_local.ps1 command',
-  'app.runLocal.title': 'Local run',
-  'app.runLocal.hint': 'Recommended on Windows: run via scripts/run_local.ps1 (starts backend + Admin UI, manages ports and .env.local).',
   'equivalents.reasonPlaceholder.activate': 'e.g. enable new equivalent, deprecated unit',
   'equivalents.reasonPlaceholder.delete': 'e.g. cleanup unused unit',
   'equivalents.title': 'Equivalents',
   'equivalents.updateFailed': 'Update failed',
   'equivalents.updated': 'Updated {code}',
-  'equivalents.usage.debts': 'Debts',
-  'equivalents.usage.ic': 'IC',
   'equivalents.usage.loading': 'Loading usage…',
   'equivalents.usage.tlDebtsIc': 'Used by {trustlines}\u00A0TL / {debts}\u00A0Debts / {ic}\u00A0IC',
   'equivalents.warning.deletePermanent': 'This permanently deletes the equivalent. This cannot be undone.',
@@ -220,7 +207,6 @@ export const EN: Record<string, string> = {
   'config.columns.key': 'Name',
   'config.columns.scope': 'Applies',
   'config.filterByKeyPlaceholder': 'Filter by Key',
-  'config.logLevelPlaceholder': 'INFO',
   'config.jsonStringifiedPlaceholder': 'JSON (stringified)',
   'config.invalidJsonForKey': 'Invalid JSON for {key}',
   'config.savedKeys': 'Saved ({n} keys)',
@@ -280,9 +266,6 @@ export const EN: Record<string, string> = {
 
   'health.loadFailed': 'Failed to load health',
 
-  'fixtures.loadFailedOne': 'Failed to load fixture: {path} ({status})',
-  'fixtures.loadFailedPath': 'Failed to load {path}',
-  'fixtures.loadFailedMany': 'Failed to load fixtures: {path}',
 
   'integrity.title': 'Integrity',
   'integrity.lastCheck': 'Last Check',
@@ -382,12 +365,10 @@ export const EN: Record<string, string> = {
 
   'graph.toolbar.filtersTab': 'Filters',
   'graph.toolbar.displayTab': 'Display',
-  'graph.toolbar.navigateTab': 'Navigate',
 
   'graph.filters.equivalent': 'Equivalent',
   'graph.filters.equivalentAuto': 'auto',
   'graph.filters.equivalentAutoHint': 'Chosen automatically: the equivalent with the most active trust lines. The graph shows one equivalent; pick another to switch.',
-  'graph.filters.equivalentNetVizHint': 'Pick an equivalent (not ALL) to enable net-based size & debtor coloring.',
   'graph.filters.status': 'Status',
   'graph.filters.bottleneck': 'Bottleneck',
   'graph.filters.bottleneckPlaceholder': '0.10',
@@ -415,13 +396,11 @@ export const EN: Record<string, string> = {
   'graph.legend.sizeByAbsNet': 'Size ∝ |net| (capped), for selected equivalent (not ALL)',
   'graph.legend.bottleneck': 'Bottleneck',
 
-  'graph.navigate.actions': 'Actions',
   'graph.navigate.find': 'Find',
   'graph.navigate.fit': 'Fit',
   'graph.navigate.relayout': 'Re-layout',
   'graph.navigate.zoom': 'Zoom',
   'graph.navigate.focus': 'Focus',
-  'graph.navigate.focus.tooltip': 'Focus selected node',
   'graph.navigate.focusMode.tooltip': 'Focus Mode shows a small ego-subgraph (depth 1–2) around a participant to reduce noise.',
   'graph.navigate.depth1': 'Depth 1',
   'graph.navigate.depth2': 'Depth 2',
@@ -469,8 +448,6 @@ export const EN: Record<string, string> = {
   'graph.analytics.balance.columns.credit': 'Credit',
   'graph.analytics.balance.columns.net': 'Net',
 
-  'graph.analytics.counterparties.topCreditorsTooltip': 'Participants who are creditors of this participant (debts where you are the debtor).',
-  'graph.analytics.counterparties.topDebtorsTooltip': 'Participants who are debtors to this participant (debts where you are the creditor).',
 
 
 
@@ -490,13 +467,8 @@ export const EN: Record<string, string> = {
   'app.apiBase.defaultDev': '{url} (default)',
   'app.apiBase.sameOrigin': '(same origin)',
   'app.quickJump.placeholder': 'Quick jump: PID / TxID',
-  'app.quickJump.participants': 'Open Participants filtered by query',
-  'app.quickJump.trustlinesAsCreditor': 'Open Trustlines where PID is creditor (from)',
-  'app.quickJump.trustlinesAsDebtor': 'Open Trustlines where PID is debtor (to)',
-  'app.quickJump.auditLog': 'Open Audit Log filtered by query',
   'app.theme.dark': 'Dark',
   'app.theme.light': 'Light',
-  'app.locale.label': 'Language',
   'app.locale.en': 'English',
   'app.locale.ru': 'Русский',
   'nav.dashboard.label': 'Dashboard',

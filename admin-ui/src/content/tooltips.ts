@@ -30,7 +30,6 @@ export type TooltipKey =
   | 'graph.hideIsolates'
   | 'graph.search'
   | 'graph.zoom'
-  | 'graph.actions'
   | 'graph.spacing'
   | 'graph.legend'
   | 'audit.timestamp'
@@ -215,15 +214,6 @@ export const TOOLTIPS_EN: Record<TooltipKey, TooltipContent> = {
     body: ['Use the slider or mouse wheel to zoom.', 'Zoom helps inspect local neighborhoods and crowded areas.'],
   },
 
-  'graph.actions': {
-    title: 'Graph actions',
-    body: [
-      'Find: center on the focus participant and keep it highlighted.',
-      'Fit: show the whole graph in the viewport.',
-      'Re-layout: re-run layout after changing filters/spacing.',
-      'Zoom: scale the view for overview vs details.',
-    ],
-  },
 
   'graph.spacing': {
     title: 'Layout spacing',
@@ -421,15 +411,6 @@ export const TOOLTIPS_RU: Record<TooltipKey, TooltipContent> = {
   'graph.zoom': {
     title: 'Масштабирование',
     body: ['Используйте слайдер или колёсико мыши.', 'Масштаб помогает переключаться между обзором и деталями.'],
-  },
-  'graph.actions': {
-    title: 'Действия графа',
-    body: [
-      'Find: центрирует на фокусном участнике и оставляет его подсвеченным.',
-      'Fit: вписывает весь граф в область просмотра.',
-      'Re-layout: перестроить раскладку после фильтров/плотности.',
-      'Zoom: масштабировать обзор vs детали.',
-    ],
   },
   'graph.spacing': {
     title: 'Плотность раскладки',

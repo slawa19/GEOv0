@@ -7,7 +7,6 @@ export const RU: Record<string, string> = {
   'common.cancel': 'Отмена',
   'common.code': 'Код',
   'common.confirm': 'Подтвердить',
-  'common.apply': 'Применить',
   'common.create': 'Создать',
   'common.deactivate': 'Деактивировать',
   'common.delete': 'Удалить',
@@ -19,7 +18,6 @@ export const RU: Record<string, string> = {
   'common.na': '—',
   'common.n_a': 'н/д',
   'common.noData': 'Нет данных',
-  'common.pending': 'В ожидании',
   'money.precisionUnavailable': 'Для части эквивалентов на этом экране не загружена точность, поэтому их величины скрыты.',
   'common.precision': 'Точность',
   'common.reasonIsRequired': 'требуется причина',
@@ -28,9 +26,7 @@ export const RU: Record<string, string> = {
   'common.refreshHint': 'Если ошибка временная, попробуйте обновить.',
   'common.run': 'Запустить',
   'common.save': 'Сохранить',
-  'common.saving': 'Сохранение…',
   'common.status': 'Статус',
-  'common.synced': 'Синхронизировано',
   'common.passed': 'пройдено',
   'common.failed': 'ошибка',
   'common.passedPrefix': 'пройдено:',
@@ -51,12 +47,9 @@ export const RU: Record<string, string> = {
   'common.copyLabel': 'Копировать {label}',
   'common.helpTitle': 'Справка: {title}',
   'common.helpForLabel': 'Справка для {label}',
-  'common.close': 'Закрыть',
 
 
 
-  'liquidity.controls.equivalent': 'Эквивалент',
-  'liquidity.controls.note': 'Режим',
 
 
 
@@ -87,8 +80,6 @@ export const RU: Record<string, string> = {
   'equivalents.title': 'Эквиваленты',
   'equivalents.updateFailed': 'Не удалось обновить',
   'equivalents.updated': 'Обновлён {code}',
-  'equivalents.usage.debts': 'Долги',
-  'equivalents.usage.ic': 'IC',
   'equivalents.usage.loading': 'Загрузка…',
   'equivalents.usage.tlDebtsIc': 'Используется: {trustlines}\u00A0TL / {debts}\u00A0Debts / {ic}\u00A0IC',
   'equivalents.warning.deletePermanent': 'Это навсегда удалит эквивалент. Отменить нельзя.',
@@ -115,10 +106,6 @@ export const RU: Record<string, string> = {
   'dashboard.participants.openFiltered': 'Открыть Participants с фильтром',
   'dashboard.participantsStatsLoadFailed': 'Не удалось загрузить статистику участников',
 
-  'app.runLocal.label': 'Запуск',
-  'app.runLocal.tooltip': 'Показать команду запуска через scripts/run_local.ps1',
-  'app.runLocal.title': 'Локальный запуск',
-  'app.runLocal.hint': 'Рекомендуемый способ на Windows: запуск через scripts/run_local.ps1 (backend + Admin UI, фиксирует порты и .env.local).',
 
   'participant.frozen': 'Приостановлен {pid}',
   'participant.freeze': 'Приостановить',
@@ -220,7 +207,6 @@ export const RU: Record<string, string> = {
   'config.columns.key': 'Название',
   'config.columns.scope': 'Применение',
   'config.filterByKeyPlaceholder': 'Фильтр по ключу',
-  'config.logLevelPlaceholder': 'INFO',
   'config.jsonStringifiedPlaceholder': 'JSON (строкой)',
   'config.invalidJsonForKey': 'Невалидный JSON для {key}',
   'config.savedKeys': 'Сохранено ({n} ключей)',
@@ -280,9 +266,6 @@ export const RU: Record<string, string> = {
 
   'health.loadFailed': 'Не удалось загрузить health',
 
-  'fixtures.loadFailedOne': 'Не удалось загрузить фикстуру: {path} ({status})',
-  'fixtures.loadFailedPath': 'Не удалось загрузить {path}',
-  'fixtures.loadFailedMany': 'Не удалось загрузить фикстуры: {path}',
 
   'integrity.title': 'Целостность',
   'integrity.lastCheck': 'Последняя проверка',
@@ -382,12 +365,10 @@ export const RU: Record<string, string> = {
 
   'graph.toolbar.filtersTab': 'Фильтры',
   'graph.toolbar.displayTab': 'Отображение',
-  'graph.toolbar.navigateTab': 'Навигация',
 
   'graph.filters.equivalent': 'Эквивалент',
   'graph.filters.equivalentAuto': 'авто',
   'graph.filters.equivalentAutoHint': 'Выбран автоматически: эквивалент с наибольшим числом активных линий доверия. Граф показывает один эквивалент; выберите другой, чтобы переключить.',
-  'graph.filters.equivalentNetVizHint': 'Выбери эквивалент (не ALL), чтобы включить размер ∝ |net| и подсветку должников.',
   'graph.filters.status': 'Статус',
   'graph.filters.bottleneck': 'Узкое место',
   'graph.filters.bottleneckPlaceholder': '0.10',
@@ -415,13 +396,11 @@ export const RU: Record<string, string> = {
   'graph.legend.sizeByAbsNet': 'Размер ∝ |net| (с ограничением сверху), для выбранного эквивалента (не ALL)',
   'graph.legend.bottleneck': 'Узкое место',
 
-  'graph.navigate.actions': 'Действия',
   'graph.navigate.find': 'Найти',
   'graph.navigate.fit': 'Вписать',
   'graph.navigate.relayout': 'Переразложить',
   'graph.navigate.zoom': 'Зум',
   'graph.navigate.focus': 'Фокус',
-  'graph.navigate.focus.tooltip': 'Фокус на выбранном узле',
   'graph.navigate.focusMode.tooltip': 'Режим фокуса показывает небольшой ego-подграф (глубина 1–2) вокруг участника, чтобы уменьшить шум.',
   'graph.navigate.depth1': 'Глубина 1',
   'graph.navigate.depth2': 'Глубина 2',
@@ -467,8 +446,6 @@ export const RU: Record<string, string> = {
   'graph.analytics.balance.columns.credit': 'Кредит',
   'graph.analytics.balance.columns.net': 'Нетто',
 
-  'graph.analytics.counterparties.topCreditorsTooltip': 'Участники-кредиторы для этого участника (долги, где вы — должник).',
-  'graph.analytics.counterparties.topDebtorsTooltip': 'Участники-должники для этого участника (долги, где вы — кредитор).',
 
 
 
@@ -488,13 +465,8 @@ export const RU: Record<string, string> = {
   'app.apiBase.defaultDev': '{url} (по умолчанию)',
   'app.apiBase.sameOrigin': '(same origin)',
   'app.quickJump.placeholder': 'Быстрый переход: PID / TxID',
-  'app.quickJump.participants': 'Открыть Participants (поиск по запросу)',
-  'app.quickJump.trustlinesAsCreditor': 'Открыть Trustlines где PID = кредитор (from)',
-  'app.quickJump.trustlinesAsDebtor': 'Открыть Trustlines где PID = должник (to)',
-  'app.quickJump.auditLog': 'Открыть Audit Log (поиск по запросу)',
   'app.theme.dark': 'Тёмная',
   'app.theme.light': 'Светлая',
-  'app.locale.label': 'Язык',
   'app.locale.en': 'English',
   'app.locale.ru': 'Русский',
   'nav.dashboard.label': 'Дашборд',

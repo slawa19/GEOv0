@@ -147,7 +147,10 @@ type HoldRow = IntegritySummaryResponse['equivalents'][number]
 const holdsLoading = ref(false)
 const holdsError = ref<string | null>(null)
 const holdRows = ref<HoldRow[]>([])
-const holdClearing = ref<string | null>(null)
+// Codes whose clear is in flight. Per code, not one slot: two prompts can be confirmed one after the other, and a
+// single slot let the second overwrite the first (unblocking it) and the first's end release the second (032 S5 review).
+// A code stays here until the summary has been read again, so its button cannot be pressed on a stale row.
+const holdClearing = ref(new Set<string>())
 const holdRefusal = ref<{ code: string; text: string } | null>(null)
 
 const heldCount = computed(() => holdRows.value.filter((r) => r.hold).length)
@@ -179,18 +182,24 @@ async function clearHold(code: string) {
     return
   }
 
-  holdClearing.value = code
+  // A prompt opened before this code's clear started can be confirmed while it is in flight: refuse the repeat.
+  if (holdClearing.value.has(code)) return
+  holdClearing.value = new Set(holdClearing.value).add(code)
   holdRefusal.value = null
   try {
     await api.clearIntegrityHold(code, reason)
     ElMessage.success(t('integrity.holds.cleared', { code }))
   } catch (e: unknown) {
     holdRefusal.value = { code, text: describeHoldClearRefusal(e) }
-  } finally {
-    holdClearing.value = null
   }
   // The server's answer decides what is held, not the outcome of this click.
-  await loadHolds()
+  try {
+    await loadHolds()
+  } finally {
+    const next = new Set(holdClearing.value)
+    next.delete(code)
+    holdClearing.value = next
+  }
 }
 
 onMounted(() => {
@@ -274,7 +283,8 @@ onMounted(() => {
             size="small"
             type="warning"
             data-testid="integrity-hold-clear"
-            :loading="holdClearing === row.equivalent"
+            :loading="holdClearing.has(row.equivalent)"
+            :disabled="holdClearing.has(row.equivalent)"
             @click="clearHold(row.equivalent)"
           >
             {{ t('integrity.holds.clear') }}

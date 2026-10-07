@@ -7,7 +7,6 @@ windows (with `incident_count` and `has_transactions`): none of them led to an o
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -26,13 +25,6 @@ from app.utils.validation import validate_equivalent_code
 
 def _norm_eq(code: str) -> str:
     return str(code or "").strip().upper()
-
-
-@dataclass(frozen=True)
-class _EquivalentInfo:
-    id: Any
-    code: str
-    precision: int
 
 
 async def compute_participant_metrics(
@@ -55,18 +47,12 @@ async def compute_participant_metrics(
     if eq_code is not None:
         validate_equivalent_code(eq_code)
 
-    eq_rows = (
-        await db.execute(select(Equivalent.id, Equivalent.code, Equivalent.precision).order_by(Equivalent.code.asc()))
-    ).all()
-    eq_by_code: dict[str, _EquivalentInfo] = {
-        str(code): _EquivalentInfo(id=eq_id, code=str(code), precision=int(prec))
-        for (eq_id, code, prec) in eq_rows
-    }
+    all_codes = [str(code) for code in (await db.execute(select(Equivalent.code))).scalars().all()]
 
-    if eq_code is not None and eq_code not in eq_by_code:
+    if eq_code is not None and eq_code not in all_codes:
         raise NotFoundException(f"Equivalent {eq_code} not found")
 
-    balance_rows = await _compute_balance_rows(db, participant_id=participant.id, eq_code=eq_code, eq_by_code=eq_by_code)
+    balance_rows = await _compute_balance_rows(db, participant_id=participant.id, eq_code=eq_code, all_codes=all_codes)
     return AdminParticipantMetricsResponse(pid=pid, equivalent=eq_code, balance_rows=balance_rows)
 
 
@@ -75,7 +61,7 @@ async def _compute_balance_rows(
     *,
     participant_id: Any,
     eq_code: str | None,
-    eq_by_code: dict[str, _EquivalentInfo],
+    all_codes: list[str],
 ) -> list[AdminParticipantBalanceRow]:
     # Outgoing: participant is creditor (from_participant_id)
     tl = TrustLine
@@ -162,7 +148,7 @@ async def _compute_balance_rows(
         codes = [eq_code]
     else:
         # Deterministic, stable set from equivalents table.
-        codes = sorted(eq_by_code.keys())
+        codes = sorted(all_codes)
 
     out: list[AdminParticipantBalanceRow] = []
     for code in codes:
