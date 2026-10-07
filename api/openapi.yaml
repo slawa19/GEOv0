@@ -954,6 +954,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminGraphSnapshotResponse'
+        '400':
+          # `equivalent` is not a valid equivalent code (it is never looked up: an unknown but well-formed code
+          # colours no node and answers 200).
+          $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -994,6 +998,7 @@ paths:
             type: array
             items:
               type: string
+              enum: [active, closed]
           style: form
           explode: true
         - in: query
@@ -1009,6 +1014,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminGraphEgoResponse'
+        '400':
+          # `pid` is blank after trimming, or `equivalent` is not a valid equivalent code.
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          # No participant has this `pid`.
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -7841,7 +7852,7 @@ components:
     # `required:` lists below are exhaustive and the optionality shows up as `nullable: true`.
 
     AdminTrustLinesListResponse:
-      # GET /admin/trustlines (app/api/v1/admin.py:1396). AdminPaginatedMeta + items, the same
+      # GET /admin/trustlines (app/api/v1/admin.py, admin_list_trustlines). AdminPaginatedMeta + items, the same
       # four-key shape as AdminParticipantsListResponse and AdminIncidentsListResponse.
       type: object
       required: [page, per_page, total, items]
@@ -7854,7 +7865,7 @@ components:
           minimum: 1
           maximum: 200
         total:
-          # The unpaginated count from TrustLineService.count_all with the same filters.
+          # The unpaginated count with the same filters (app/core/admin/graph.py, trustline_page_statements).
           type: integer
           minimum: 0
         items:
