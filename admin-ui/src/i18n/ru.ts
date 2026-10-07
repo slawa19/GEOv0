@@ -18,10 +18,12 @@ export const RU: Record<string, string> = {
   'common.na': '—',
   'common.n_a': 'н/д',
   'common.noData': 'Нет данных',
+  'money.catalogueLoadFailed': 'Каталог эквивалентов не загружен, поэтому суммы скрыты (точность неизвестна): {error}',
   'money.precisionUnavailable': 'Для части эквивалентов на этом экране не загружена точность, поэтому их величины скрыты.',
   'common.precision': 'Точность',
   'common.reasonIsRequired': 'требуется причина',
   'common.reasonRequired': 'Причина (обязательно)',
+  'common.retry': 'Повторить',
   'common.refresh': 'Обновить',
   'common.refreshHint': 'Если ошибка временная, попробуйте обновить.',
   'common.run': 'Запустить',
@@ -244,9 +246,9 @@ export const RU: Record<string, string> = {
 
 
   'config.labels.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Мульти-маршрутизация',
-  'config.help.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Разрешает искать маршрут по нескольким путям для набора нужной ёмкости.',
-  'config.labels.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Полная мульти-маршрутизация (эксперимент)',
-  'config.help.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Более агрессивный режим multipath. Используйте осторожно: влияет на поведение маршрутизации сразу.',
+  'config.help.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Разрешает платежу идти по нескольким путям. Выключение равносильно ROUTING_MAX_PATHS=1: платёж ищет один путь.',
+  'config.labels.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Пути в ответе max-flow',
+  'config.help.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Только добавляет список путей (`paths`) в ответ расчёта максимального потока; маршрутизацию платежей не меняет.',
   'config.labels.CLEARING_ENABLED': 'Клиринг (циклы)',
   'config.help.CLEARING_ENABLED': 'Включает периодическую логику клиринга/settlement. Отключать только для тестов или аварийной изоляции.',
 
@@ -325,7 +327,7 @@ export const RU: Record<string, string> = {
   'integrity.holds.refusal.latestNotPassed': 'Последняя сверка не PASSED; дождитесь следующей',
   'integrity.holds.refusal.recheckFailed': 'Проверка при снятии не прошла, удержание остаётся',
   'integrity.holds.refusal.recheckUnverifiable': 'Проверить сейчас нельзя',
-  'integrity.holds.refusal.other': 'Снять удержание не удалось (код {code})',
+  'integrity.holds.refusal.other': 'Снять удержание не удалось: {text}',
 
 
   'graph.title': 'Граф сети',

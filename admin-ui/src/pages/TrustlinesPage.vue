@@ -9,6 +9,7 @@ import TooltipLabel from '../ui/TooltipLabel.vue'
 import CopyIconButton from '../ui/CopyIconButton.vue'
 import TableCellEllipsis from '../ui/TableCellEllipsis.vue'
 import ListState from '../ui/ListState.vue'
+import EquivalentCatalogueAlert from '../ui/EquivalentCatalogueAlert.vue'
 import { debounce } from '../utils/debounce'
 import { DEBOUNCE_FILTER_MS } from '../constants/timing'
 import { t } from '../i18n'
@@ -75,14 +76,15 @@ function isBottleneck(row: Trustline): boolean {
   return isTrustlineBottleneck(row, threshold.value)
 }
 
-const { money, catalogueSettled, hasUnknownPrecision, loadEquivalentPrecision } = useEquivalentPrecision()
+const { money, catalogueSettled, catalogueError, catalogueLoading, hasUnknownPrecision, loadEquivalentPrecision } =
+  useEquivalentPrecision()
 
 async function loadEquivalents() {
   try {
     await loadEquivalentPrecision()
   } catch {
-    // The catalogue is the only source of precision; without it money cells stay '—'
-    // (see precisionMissing) instead of asserting a digit count nobody declared.
+    // The catalogue is the only source of precision; without it money cells stay '—' instead of asserting a digit
+    // count nobody declared. The failure is shown with its ref and a retry (`catalogueError`).
   }
 }
 
@@ -173,6 +175,13 @@ const precisionMissing = computed(
       </div>
     </template>
 
+    <EquivalentCatalogueAlert
+      v-if="catalogueError"
+      :error="catalogueError"
+      :busy="catalogueLoading"
+      @retry="loadEquivalents"
+    />
+
     <ListState
       :error="error"
       :loading="loading"
@@ -181,7 +190,7 @@ const precisionMissing = computed(
       @retry="reload"
     >
       <el-alert
-        v-if="precisionMissing"
+        v-if="precisionMissing && !catalogueError"
         data-testid="trustlines-precision-unavailable"
         :title="t('money.precisionUnavailable')"
         type="warning"

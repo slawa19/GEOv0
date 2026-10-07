@@ -55,6 +55,8 @@ const equivalentUah = {
 }
 
 let calls: FetchCall[] = []
+let statusResponse: () => Response = () => json(200, healthyStatus)
+let summaryResponse: () => Response = () => json(200, summary(holds))
 let clearResponse: () => Response = () => json(200, equivalentUah)
 let holds: Record<string, boolean> = { UAH: true, HOUR: false }
 
@@ -65,14 +67,16 @@ beforeEach(() => {
   calls = []
   holds = { UAH: true, HOUR: false }
   clearResponse = () => json(200, equivalentUah)
+  statusResponse = () => json(200, healthyStatus)
+  summaryResponse = () => json(200, summary(holds))
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       const method = String(init?.method || 'GET')
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
-      if (url.endsWith('/api/v1/integrity/status')) return json(200, healthyStatus)
-      if (url.endsWith('/api/v1/integrity/summary')) return json(200, summary(holds))
+      if (url.endsWith('/api/v1/integrity/status')) return statusResponse()
+      if (url.endsWith('/api/v1/integrity/summary')) return summaryResponse()
       if (url.endsWith('/api/v1/admin/equivalents/UAH/integrity-hold/clear')) return clearResponse()
       return json(404, { error: { code: 'E404', message: `unexpected ${method} ${url}` } })
     }),
@@ -186,7 +190,7 @@ describe('Integrity screen: equivalent holds (032 F-4)', () => {
     wrapper.unmount()
   })
 
-  it('falls back to a general text that names the code for an unforeseen refusal', async () => {
+  it('falls back to a general text that names the failure for an unforeseen refusal', async () => {
     clearResponse = () => json(500, { error: { code: 'E999', message: 'boom' } })
     const wrapper = await mountIntegrity()
     await holdRow(wrapper, 'UAH').find('[data-testid="integrity-hold-clear"]').trigger('click')
@@ -194,7 +198,9 @@ describe('Integrity screen: equivalent holds (032 F-4)', () => {
     await nextTick()
     const shown = wrapper.find('[data-testid="integrity-hold-refusal"]')
     expect(shown.exists()).toBe(true)
-    expect(shown.text()).toContain('E999')
+    // 033 B, item 2: the unforeseen failure is worded by `describeError` (its message and ref), no longer by the bare
+    // code; the code stays in the error the screen received (`ApiException.code`).
+    expect(shown.text()).toContain('boom')
     wrapper.unmount()
   })
 
@@ -294,6 +300,127 @@ describe('Integrity screen: one clear per equivalent at a time (032 S5 review, P
     expect(calls.filter((c) => c.url.endsWith('/UAH/integrity-hold/clear'))).toHaveLength(1)
     release(json(200, equivalentUah))
     await flushPromises()
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 033 B, items 1 and 2. Red on `0c24f030`: after a clear only the list of holds was read again, so the status card
+ * above it kept saying `critical` for an equivalent whose hold was gone (`IntegrityPage.vue` `clearHold`), and a
+ * refusal carried no `(ref: ...)` - an operator could not quote the request to whoever reads the server log.
+ */
+const criticalUahStatus = {
+  status: 'critical',
+  last_check: '2026-10-07T10:00:00Z',
+  alerts: [],
+  equivalents: {
+    UAH: {
+      status: 'critical',
+      checksum: 'c',
+      invariants: {
+        zero_sum: { passed: false, violations: 1 },
+        trust_limits: { passed: true, violations: 0, details: null, over_limit_allowed: [], growth: { status: 'not_verified', reason: 'requires_operation_prestate' } },
+        debt_symmetry: { passed: true, violations: 0 },
+      },
+    },
+  },
+}
+
+async function clickClear(wrapper: VueWrapper) {
+  await holdRow(wrapper, 'UAH').find('[data-testid="integrity-hold-clear"]').trigger('click')
+  await flushPromises()
+  await nextTick()
+  await flushPromises()
+}
+
+function statusReads() {
+  return calls.filter((c) => c.url.endsWith('/integrity/status')).length
+}
+
+describe('Integrity screen: after a clear the status is read again (033 B, item 1)', () => {
+  it('drops the critical verdict of the equivalent whose hold was cleared', async () => {
+    vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+    statusResponse = () => json(200, criticalUahStatus)
+    const wrapper = await mountIntegrity()
+    expect(wrapper.find('.el-descriptions').text()).toContain('критично')
+    expect(wrapper.findAll('.el-table__row')).toHaveLength(1)
+
+    // The server's answer after the clear: no hold, and the status is healthy again.
+    holds = { UAH: false, HOUR: false }
+    statusResponse = () => json(200, healthyStatus)
+    await clickClear(wrapper)
+
+    expect(statusReads()).toBe(2)
+    expect(wrapper.find('.el-descriptions').text()).not.toContain('критично')
+    expect(wrapper.findAll('.el-table__row')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('reads the status again after a refused clear too: the answer decides, not the click', async () => {
+    clearResponse = () => refusal({ reason: 'no_integrity_hold' })
+    statusResponse = () => json(200, criticalUahStatus)
+    const wrapper = await mountIntegrity()
+    expect(statusReads()).toBe(1)
+
+    // The refusal says the hold was already gone: another session cleared it and the status healed meanwhile.
+    holds = { UAH: false, HOUR: false }
+    statusResponse = () => json(200, healthyStatus)
+    await clickClear(wrapper)
+
+    expect(statusReads()).toBe(2)
+    expect(wrapper.find('.el-descriptions').text()).not.toContain('критично')
+    expect(wrapper.find('[data-testid="integrity-hold-refusal"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows a failed status read and a failed holds read apart, each with its own ref', async () => {
+    vi.spyOn(ElMessage, 'success').mockImplementation(() => undefined as never)
+    const wrapper = await mountIntegrity()
+
+    statusResponse = () => json(500, { error: { code: 'E500', message: 'status down', request_id: 'rid-status' } })
+    await clickClear(wrapper)
+    // The status card shows its failure; the holds list is the fresh one and shows no error.
+    expect(wrapper.text()).toContain('rid-status')
+    expect(wrapper.find('[data-testid="integrity-holds"]').text()).not.toContain('rid-status')
+    expect(holdRow(wrapper, 'UAH').exists()).toBe(true)
+
+    statusResponse = () => json(200, healthyStatus)
+    summaryResponse = () => json(500, { error: { code: 'E500', message: 'summary down', request_id: 'rid-summary' } })
+    await clickClear(wrapper)
+    // The holds block shows its failure with its own ref; the status card is healthy again and shows none.
+    expect(wrapper.find('[data-testid="integrity-holds"]').text()).toContain('rid-summary')
+    expect(wrapper.find('.el-descriptions').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('rid-status')
+    wrapper.unmount()
+  })
+})
+
+describe('Integrity screen: a refused clear carries the ref of its request (033 B, item 2)', () => {
+  it('adds the ref to the text of a foreseen refusal', async () => {
+    clearResponse = () => refusal({ reason: 'no_integrity_hold' })
+    const wrapper = await mountIntegrity()
+    await clickClear(wrapper)
+    const shown = wrapper.find('[data-testid="integrity-hold-refusal"]').text()
+    expect(shown).toContain('Удержание уже снято')
+    expect(shown).toContain('(ref: rid-1)')
+    wrapper.unmount()
+  })
+
+  it('describes an unforeseen error through the common description, with its ref, not as a bare code', async () => {
+    clearResponse = () => json(500, { error: { code: 'E999', message: 'boom', request_id: 'rid-500' } })
+    const wrapper = await mountIntegrity()
+    await clickClear(wrapper)
+    const shown = wrapper.find('[data-testid="integrity-hold-refusal"]').text()
+    expect(shown).toContain('boom')
+    expect(shown).toContain('(ref: rid-500)')
+    wrapper.unmount()
+  })
+
+  it('names no ref when the server sent none', async () => {
+    clearResponse = () => json(409, { error: { code: 'E010', message: 'Conflict', details: { reason: 'no_integrity_hold' } } })
+    const wrapper = await mountIntegrity()
+    await clickClear(wrapper)
+    expect(wrapper.find('[data-testid="integrity-hold-refusal"]').text()).not.toContain('ref:')
     wrapper.unmount()
   })
 })

@@ -158,4 +158,55 @@ describe('useGraphAnalytics (032 S5: balance rows from the server only)', () => 
     expect(graph.selectedBalanceRows.value[0]?.net).not.toBe('9.00')
     expect(graph.metricsError.value).toBeNull()
   })
+
+  // 033 B, item 4. Red on `0c24f030`: the drawer's "Refresh" reloaded the graph only. The balance cache kept the old
+  // answer, and after a failed balance request nothing asked again, so the error stayed until another node was picked.
+  it('refresh asks again after a failed request, for the same selection', async () => {
+    apiMock.participantMetrics
+      .mockRejectedValueOnce(new Error('metrics unavailable'))
+      .mockResolvedValueOnce(metricsEnvelope('4.00'))
+    const graph = useGraphAnalytics({ analyticsEq: computed(() => 'EUR'), selected: ref(node('PID_A')) })
+
+    await graph.loadSelectedMetrics()
+    expect(graph.metricsError.value).toBe('metrics unavailable')
+
+    await graph.reloadSelectedMetrics()
+    expect(apiMock.participantMetrics).toHaveBeenCalledTimes(2)
+    expect(apiMock.participantMetrics).toHaveBeenLastCalledWith('PID_A', { equivalent: 'EUR' })
+    expect(graph.metricsError.value).toBeNull()
+    expect(graph.selectedBalanceRows.value.map((row) => row.net)).toEqual(['4.00'])
+  })
+
+  it('refresh drops the cached answer and shows the new one, not the old', async () => {
+    apiMock.participantMetrics
+      .mockResolvedValueOnce(metricsEnvelope('1.00'))
+      .mockResolvedValueOnce(metricsEnvelope('7.00'))
+    const graph = useGraphAnalytics({ analyticsEq: computed(() => 'EUR'), selected: ref(node('PID_A')) })
+
+    await graph.loadSelectedMetrics()
+    await graph.loadSelectedMetrics()
+    expect(apiMock.participantMetrics).toHaveBeenCalledTimes(1)
+
+    await graph.reloadSelectedMetrics()
+    expect(apiMock.participantMetrics).toHaveBeenCalledTimes(2)
+    expect(graph.selectedBalanceRows.value.map((row) => row.net)).toEqual(['7.00'])
+  })
+
+  it('refresh whose repeated request fails shows the error, not the old rows', async () => {
+    apiMock.participantMetrics
+      .mockResolvedValueOnce(metricsEnvelope('1.00'))
+      .mockRejectedValueOnce(new Error('down now'))
+    const graph = useGraphAnalytics({ analyticsEq: computed(() => 'EUR'), selected: ref(node('PID_A')) })
+
+    await graph.loadSelectedMetrics()
+    await graph.reloadSelectedMetrics()
+    expect(graph.metricsError.value).toBe('down now')
+    expect(graph.selectedBalanceRows.value).toEqual([])
+  })
+
+  it('refresh without a selected node asks nothing', async () => {
+    const graph = useGraphAnalytics({ analyticsEq: computed(() => 'EUR'), selected: ref<SelectedInfo | null>(null) })
+    await graph.reloadSelectedMetrics()
+    expect(apiMock.participantMetrics).not.toHaveBeenCalled()
+  })
 })

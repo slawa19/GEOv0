@@ -1,6 +1,7 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import { api } from '../api'
+import { describeError } from '../api/describeError'
 import type { Equivalent } from '../types/domain'
 import { formatDecimalMinScale } from '../utils/decimal'
 import { normalizeEquivalentCode } from '../utils/equivalent'
@@ -73,6 +74,10 @@ export type EquivalentPrecisionSource = {
   equivalents: Ref<Equivalent[]>
   /** Запрос каталога завершён — успехом или отказом. До этого «точность неизвестна» ещё не вывод. */
   catalogueSettled: Ref<boolean>
+  /** Text (with the request ref) of the last failed catalogue read, `null` after a successful one or before any. */
+  catalogueError: Ref<string | null>
+  /** A catalogue read is in flight (the mount read or a retry). */
+  catalogueLoading: Ref<boolean>
   precisionByEquivalent: ComputedRef<Map<string, number>>
   precisionOf: (equivalent: unknown) => number | null
   money: (value: string, equivalent: unknown) => string
@@ -89,6 +94,8 @@ export type EquivalentPrecisionSource = {
 export function useEquivalentPrecision(): EquivalentPrecisionSource {
   const equivalents = ref<Equivalent[]>([])
   const catalogueSettled = ref(false)
+  const catalogueError = ref<string | null>(null)
+  const catalogueLoading = ref(false)
 
   const precisionByEquivalent = computed(() => buildPrecisionByEquivalent(equivalents.value))
 
@@ -104,18 +111,29 @@ export function useEquivalentPrecision(): EquivalentPrecisionSource {
     return (codes || []).some((code) => precisionOf(code) === null)
   }
 
+  // The failure is kept for the page to show (033 B, item 3) and also thrown: a caller that needs the catalogue to
+  // go on (the Dashboard reads one summary per equivalent) still stops on it.
   async function loadEquivalentPrecision(): Promise<void> {
+    catalogueLoading.value = true
     try {
       const res = await api.listEquivalents({ include_inactive: true })
       equivalents.value = (res.items || []) as Equivalent[]
+      // Cleared by the answer, not by the start of a retry: the alert stays (its button busy) while it runs.
+      catalogueError.value = null
+    } catch (e: unknown) {
+      catalogueError.value = describeError(e).text
+      throw e
     } finally {
       catalogueSettled.value = true
+      catalogueLoading.value = false
     }
   }
 
   return {
     equivalents,
     catalogueSettled,
+    catalogueError,
+    catalogueLoading,
     precisionByEquivalent,
     precisionOf,
     money,

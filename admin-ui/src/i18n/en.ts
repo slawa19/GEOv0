@@ -18,10 +18,12 @@ export const EN: Record<string, string> = {
   'common.na': '—',
   'common.n_a': 'n/a',
   'common.noData': 'No data',
+  'money.catalogueLoadFailed': 'The equivalents catalogue did not load, so amounts are hidden (precision unknown): {error}',
   'money.precisionUnavailable': 'Precision is not loaded for some equivalents on this screen, so their amounts are hidden.',
   'common.precision': 'Precision',
   'common.reasonIsRequired': 'reason is required',
   'common.reasonRequired': 'Reason (required)',
+  'common.retry': 'Retry',
   'common.refresh': 'Refresh',
   'common.refreshHint': 'If the error is temporary, try refreshing.',
   'common.run': 'Run',
@@ -244,9 +246,9 @@ export const EN: Record<string, string> = {
 
 
   'config.labels.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Multipath routing',
-  'config.help.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Allows route search to use multiple paths to reach required capacity.',
-  'config.labels.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Full multipath routing (experimental)',
-  'config.help.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'More aggressive multipath mode. Use carefully; can change routing behavior immediately.',
+  'config.help.FEATURE_FLAGS_MULTIPATH_ENABLED': 'Lets a payment use several paths. Turning it off is the same as ROUTING_MAX_PATHS=1: a payment looks for one path.',
+  'config.labels.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Paths in the max-flow response',
+  'config.help.FEATURE_FLAGS_FULL_MULTIPATH_ENABLED': 'Only adds the list of paths (`paths`) to the max-flow calculation response; does not change payment routing.',
   'config.labels.CLEARING_ENABLED': 'Clearing cycles',
   'config.help.CLEARING_ENABLED': 'Enables periodic clearing/settlement logic. Turn off only for testing or emergency isolation.',
 
@@ -325,7 +327,7 @@ export const EN: Record<string, string> = {
   'integrity.holds.refusal.latestNotPassed': 'The latest reconciliation is not PASSED; wait for the next one',
   'integrity.holds.refusal.recheckFailed': 'The check run on clearing did not pass; the hold stays',
   'integrity.holds.refusal.recheckUnverifiable': 'It cannot be checked right now',
-  'integrity.holds.refusal.other': 'The hold could not be cleared (code {code})',
+  'integrity.holds.refusal.other': 'The hold could not be cleared: {text}',
 
 
   'graph.title': 'Network Graph',
