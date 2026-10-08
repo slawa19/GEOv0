@@ -1,5 +1,5 @@
 import { equivalentPrecision } from '../config/equivalentPrecision'
-import { extractErrorMessage } from './errorMessage'
+import { extractErrorMessage, withRequestRef } from './errorMessage'
 import { formatMoney, moneyText } from './money'
 
 /**
@@ -57,6 +57,18 @@ const CODE_GENERIC = new Set(['PAYMENT_REJECTED', 'INVALID_AMOUNT'])
 
 export const PAYMENT_REFUSAL_REASONS: readonly string[] = Object.freeze(Object.keys(REASONS))
 
+/**
+ * 034 S5a (review round 1, item 3): the text of a mutating action that got NO ANSWER in time. It is not a refusal -
+ * the server may have carried the action out - so the operator is told to look at the state before repeating it.
+ * (A second Confirm would pay twice if the first one was committed; the idempotency key for that belongs to 037.)
+ */
+export function actionOutcomeUnknownText(timeoutMs: number | undefined, locale: UiLocale = uiLocale()): string {
+  const seconds = timeoutMs && timeoutMs > 0 ? Math.round(timeoutMs / 1000) : null
+  return locale === 'ru'
+    ? `Ответ не получен${seconds ? ` за ${seconds} с` : ''}; результат неизвестен — действие могло быть выполнено. Проверьте состояние, прежде чем повторять.`
+    : `No answer${seconds ? ` within ${seconds} s` : ''}; the result is unknown - the action may have been carried out. Check the current state before repeating it.`
+}
+
 export function uiLocale(): UiLocale {
   const lang = typeof document === 'undefined' ? '' : document.documentElement.lang
   return lang.toLowerCase().startsWith('ru') ? 'ru' : 'en'
@@ -72,8 +84,8 @@ export function paymentRefusalText(error: unknown, equivalent: string, locale: U
     precision: String(details.precision ?? equivalentPrecision(eq)) }
   const reason = typeof details.reason === 'string' ? details.reason : ''
   const text = REASONS[reason] ?? REASONS[CODES[code] ?? '']
-  if (text) return text[locale](vars)
-  return CODE_GENERIC.has(code) ? GENERIC[locale] : extractErrorMessage(error)
+  if (text) return withRequestRef(text[locale](vars), error)
+  return CODE_GENERIC.has(code) ? withRequestRef(GENERIC[locale], error) : extractErrorMessage(error)
 }
 
 /**
@@ -96,7 +108,7 @@ export function clearingRefusalText(error: unknown, equivalent: string, locale: 
   const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown }
   const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>
   if (e.code === 'CLEARING_REFUSED' && details.reason === 'occurrence_amount_not_in_step') {
-    return clearingStepRefusalText(String(details.equivalent ?? equivalent), locale)
+    return withRequestRef(clearingStepRefusalText(String(details.equivalent ?? equivalent), locale), error)
   }
   return extractErrorMessage(error)
 }

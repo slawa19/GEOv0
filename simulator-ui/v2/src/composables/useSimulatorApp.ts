@@ -23,6 +23,7 @@ import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
+import { extractErrorMessage } from '../utils/errorMessage'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
@@ -30,7 +31,7 @@ import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
-import { ApiError } from '../api/http'
+import { ApiError, isTimeoutError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 import type { LayoutLink, LayoutNode, Point } from '../types/layout'
@@ -76,9 +77,7 @@ import { useRealTxFx } from './realFx/useRealTxFx'
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
 
 function getErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message
-  if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') return err.message
-  return String(err)
+  return extractErrorMessage(err)
 }
 
 export async function loadStrictRunRecoverySnapshot(input: {
@@ -104,6 +103,43 @@ export async function loadStrictRunRecoverySnapshot(input: {
   return {
     snapshot,
     sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`,
+  }
+}
+
+/**
+ * The snapshot of an ACTIVE run for the scene, or `null` when the caller should fall back to the scenario preview.
+ * A timeout is THROWN instead (034 S5a, review round 1, item 4); every other failure falls back, and a 404 first
+ * resets the stale run - the contract the inline code had before it was extracted.
+ */
+export async function loadActiveRunSnapshot(input: {
+  apiBase: string
+  accessToken: string
+  runId: string
+  equivalent: string
+  onStaleRun: () => void
+}): Promise<{ snapshot: GraphSnapshot; sourcePath: string } | null> {
+  try {
+    const snapshot = await getSnapshot({ apiBase: input.apiBase, accessToken: input.accessToken }, input.runId, input.equivalent)
+    // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
+    // can't accumulate too many particles (sparks + pulses + bursts).
+    if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
+    return {
+      snapshot,
+      sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(input.runId)}/graph/snapshot?equivalent=${encodeURIComponent(input.equivalent)}`,
+    }
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
+      // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
+      input.onStaleRun()
+    }
+    // A timeout is not "unreachable": the run is alive and its scene is on screen. Swapping that scene for the
+    // scenario preview would show a different graph as if it were the run; let the caller report the error and
+    // keep what is shown. Every other failure keeps falling back (existing contract).
+    if (isTimeoutError(e)) throw e
+    // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
+    console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
+    return null
   }
 }
 
@@ -1478,24 +1514,14 @@ export function useSimulatorApp(opts?: {
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
-      try {
-        const snapshot = await getSnapshot({ apiBase: real.apiBase, accessToken: real.accessToken }, runId, eq)
-        // Real snapshots currently don't declare FX limits; apply a sane default cap so long sessions
-        // can't accumulate too many particles (sparks + pulses + bursts).
-        if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
-        return {
-          snapshot,
-          sourcePath: `GET ${real.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(eq)}`,
-        }
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) {
-          // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
-          // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
-          resetStaleRunThroughOwner({ clearError: true })
-        }
-        // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
-        console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
-      }
+      const fromRun = await loadActiveRunSnapshot({
+        apiBase: real.apiBase,
+        accessToken: real.accessToken,
+        runId,
+        equivalent: eq,
+        onStaleRun: () => resetStaleRunThroughOwner({ clearError: true }),
+      })
+      if (fromRun) return fromRun
     }
 
     // Real mode: no run, but have scenario selected - show preview

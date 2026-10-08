@@ -29,6 +29,7 @@ import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/eq
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
+import { extractErrorMessage } from '../utils/errorMessage'
 import { toLower } from '../utils/stringHelpers'
 import { runErrorText } from '../utils/runErrorClassification'
 import {
@@ -108,9 +109,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 function getErrorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message
-  if (isRecord(e) && typeof e.message === 'string') return e.message
-  return String(e)
+  return extractErrorMessage(e)
 }
 
 function extractRunId(v: ActiveRunResponse | null | undefined): string {

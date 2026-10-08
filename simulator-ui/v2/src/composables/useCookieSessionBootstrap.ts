@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import { ref } from 'vue'
 import { ensureSession } from '../api/simulatorApi'
+import { extractErrorMessage } from '../utils/errorMessage'
 
 export function useCookieSessionBootstrap(deps: {
   isRealMode: Readonly<Ref<boolean>>
@@ -17,8 +18,7 @@ export function useCookieSessionBootstrap(deps: {
   const bootstrapping = ref(false)
 
   function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message
-    return String(error)
+    return extractErrorMessage(error)
   }
 
   async function tryEnsure(): Promise<void> {
