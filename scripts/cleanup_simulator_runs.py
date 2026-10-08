@@ -29,7 +29,7 @@ from app.db.models.simulator_storage import (  # noqa: E402
     SimulatorRunBottleneck,
     SimulatorRunMetric,
 )
-from app.config import settings  # noqa: E402
+from app.config import settings, simulator_state_dir  # noqa: E402
 from app.db.session import AsyncSessionLocal  # noqa: E402
 
 
@@ -37,8 +37,17 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _local_simulator_runs_dir(repo_root: Path) -> Path:
-    return repo_root / ".local-run" / "simulator" / "runs"
+def _local_simulator_runs_dir() -> Path:
+    """The run directories of the simulator state THE APPLICATION USES: `SIMULATOR_STATE_DIR`, by default the
+    checkout's `.local-run/simulator`. 034 S1c: this used to be a path of its own, hard-coded to the checkout, so
+    with the setting in use the script cleaned a directory the application was not writing to - and left alone
+    the one it was.
+
+    The rule is `app.config.simulator_state_dir()`, asked there and NOT through `app.core.simulator`: importing
+    that package starts the simulator runtime, whose constructor applies the start-up cleanup - this script would
+    delete run directories before reading `--dry-run` (it did, on `a08f85a4`)."""
+
+    return simulator_state_dir() / "runs"
 
 
 T = TypeVar("T")
@@ -178,7 +187,8 @@ async def main() -> int:
         "--artifacts",
         action="store_true",
         default=True,
-        help="Cleanup local artifacts under .local-run (default: enabled)",
+        help="Cleanup local artifacts under the simulator state directory - SIMULATOR_STATE_DIR, by default "
+             ".local-run/simulator (default: enabled)",
     )
     parser.add_argument(
         "--no-artifacts",
@@ -199,8 +209,7 @@ async def main() -> int:
         raise SystemExit("--retention-days must be >= 0")
 
     cutoff = _utc_now() - timedelta(days=retention_days)
-    repo_root = _repo_root()
-    runs_dir = _local_simulator_runs_dir(repo_root)
+    runs_dir = _local_simulator_runs_dir()
 
     planned_run_ids: list[str] = []
     db_usable = False
@@ -232,6 +241,7 @@ async def main() -> int:
 
     print(f"Retention days: {retention_days}")
     print(f"Cutoff (UTC): {cutoff.isoformat()}")
+    print(f"Artifacts: runs dir: {runs_dir}")
 
     if args.db:
         print(f"DB: would delete runs: {len(planned_run_ids)}")

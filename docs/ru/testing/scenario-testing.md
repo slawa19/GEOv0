@@ -48,7 +48,8 @@ D:/www/Projects/2025/GEOv0-PROJECT/.venv/Scripts/python.exe -m pytest -q tests/i
 
 Где смотреть артефакты:
 - `.local-run/analysis/<run_id>/` (скачанные файлы: `events.ndjson`, `summary.json`, ...)
-- `.local-run/simulator/runs/<run_id>/artifacts/` (runtime-артефакты)
+- `<каталог состояния симулятора>/runs/<run_id>/artifacts/` (runtime-артефакты): у dev-сервера по умолчанию
+  `.local-run/simulator`, у тестового процесса — `.local-run/test-runs/<TaskSlug>/artifacts/simulator`
 
 ## Что считается «сценарным тестом»
 

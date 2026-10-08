@@ -42,7 +42,7 @@
 
 3) Откуда runtime берёт сценарии:
 	- fixtures: `fixtures/simulator/*/scenario.json`
-	- uploaded: `.local-run/simulator/scenarios/<scenario_id>/scenario.json`
+	- uploaded: `.local-run/simulator/scenarios/<scenario_id>/scenario.json` (по умолчанию; корень задаётся `SIMULATOR_STATE_DIR`)
 
 4) Видимость сценариев в UI может быть отфильтрована allowlist’ом:
 	- по умолчанию показываются только демо-пресеты

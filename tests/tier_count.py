@@ -81,6 +81,15 @@ make the session green again:
   `tests/integration/test_p035_a4_neutrality_reads_the_cycle_as_a_set.py` (the statement count, two counterexamples,
   the set read against the per-participant read). Measured with `python -m pytest --collect-only -q -m "not slow"` on
   the branch merged with `dd019a31` (on `4a1768d5` the same four cases read 3219 -> 3223, by the guard's own refusal).
+* 2026-10-08, 034 slice S1c: 3233 -> 3239 (+6; 3254 with the 15 `slow` cases). One new module,
+  `tests/unit/test_p034_s1c_simulator_state_dir.py` (6). The slice first carried a retention mechanism with a module of 14
+  cases (the branch said 3247 then, never `main`); the mechanism and its tests were withdrawn after the section-15 review,
+  so that number is gone with them. Measured with `python -m pytest --collect-only -q -m "not slow"` on the branch merged
+  with `origin/main` `dd019a31`.
+* 2026-10-08, 034 slice S1c, fix-delta of the review of `a08f85a4`: 3239 -> 3243 (+4; 3258 with the 15 `slow` cases). One
+  new module, `tests/unit/test_p034_s1c_scripts_do_not_start_the_simulator_runtime.py`: one test parametrized over three
+  script invocations, and one more. Measured with `python -m pytest --collect-only -q -m "not slow"`.
+* 2026-10-08, 034 slice S1c merged after 035 A3 and A4 (`origin/main` `9cbc92ff`, 3239): 3239 -> 3249 (+10, the two S1c modules above; the numbers 3239 and 3243 in the two S1c lines are those of the branch on `dd019a31`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -123,7 +132,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3239
+EXPECTED_SELECTED_ITEMS = 3249
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
