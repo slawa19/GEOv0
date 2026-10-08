@@ -490,11 +490,15 @@ async def test_a_stop_during_a_blocked_patch_read_ends_at_once_and_costs_only_th
         runner = _runner(run, _scenario(world), sse)
         _install(monkeypatch, factory)
         plans = _record_plans(monkeypatch, runner)
-        monkeypatch.setattr(VizPatchHelper, "create", classmethod(lambda _cls, *a, **kw: _never_returns(*a, **kw)))
+        # Blocked AFTER the patch session's first query (`VizPatchHelper.create` has read the equivalent), so the
+        # session really holds a pooled connection when the stop arrives - its return is then something to show.
+        monkeypatch.setattr(VizPatchHelper, "maybe_refresh_quantiles", lambda _self, *a, **kw: _never_returns(*a, **kw))
+        pool = factory.kw["bind"].sync_engine.pool
 
         tick = asyncio.create_task(runner.tick_real_mode(run.run_id))
         try:
             await asyncio.wait_for(reading.wait(), timeout=60.0)
+            held_while_reading = pool.checkedout()
             # Control: the patches are being read AFTER the commit - the payment is already stored.
             assert list((await _transactions(factory, world)).values()) == ["COMMITTED"]
             assert sse.published("tx.updated") == 0, "the payment was published before its patches were read"
@@ -523,4 +527,7 @@ async def test_a_stop_during_a_blocked_patch_read_ends_at_once_and_costs_only_th
         f"after a stop during the patch read: committed_total, committed money ticks, committed money payments, "
         f"money attempts, ticks without money progress = {counters}; expected (1, 1, 1, 1, 0)"
     )
-    assert factory.kw["bind"].sync_engine.pool.checkedout() == 0, "the patch session kept its connection"
+    assert (held_while_reading, pool.checkedout()) == (1, 0), (
+        f"pooled connections held by the tick while its patch read was blocked, and after the stop: "
+        f"{(held_while_reading, pool.checkedout())}; expected (1, 0) - the patch session held one and gave it back"
+    )
