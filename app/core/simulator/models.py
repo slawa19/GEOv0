@@ -246,6 +246,12 @@ class RunRecord:
     _real_warned_tick: int = -(10**9)
     _real_warned_keys: set[str] = field(default_factory=set)
 
+    # 034 `F-034-1`: which launch of this run is ticking. `RunLifecycle.restart` resets `tick_index` under the same
+    # `run_id` and adds one here; a simulated payment's idempotency key carries it from the first restart on
+    # (`RealRunnerImpl._sim_idempotency_key`), so a restarted run never replays the stored payments of an earlier
+    # launch. In-memory, like the run itself: a run is created once (`RunLifecycle.create_run`) and never restored.
+    _launch_epoch: int = 0
+
     # Real-mode scenario timeline events state (best-effort, in-memory).
     _real_fired_scenario_event_indexes: set[int] = field(default_factory=set)
 

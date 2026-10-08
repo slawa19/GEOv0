@@ -495,6 +495,9 @@ class RunLifecycle:
 
             run.sim_time_ms = 0
             run.tick_index = 0
+            # 034 `F-034-1`: the tick numbers start again under the same `run_id`, so the launch is what tells this
+            # tick's payments from the stored payments of the same tick number before the restart.
+            run._launch_epoch += 1
             # 024 Sh6 fix-delta (§15 P2): the flush mark and the tail it refers to belong to the old tick
             # sequence; a retained mark >= the new tick numbers made the final flush skip a lost new tail.
             run._real_last_tick_storage_flushed_tick = -1

@@ -4,8 +4,8 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from dataclasses import dataclass, field, replace
+from typing import Any, Awaitable, Callable, Literal
 
 from sqlalchemy import select
 
@@ -47,6 +47,15 @@ class _PaymentObservation:
     closed_edges: tuple[tuple[str, str], ...] = ()
 
 
+@dataclass(frozen=True)
+class _PaymentPatches:
+    """The visual patches of one committed payment, read after its commit (034 `F-034-2`)."""
+
+    edge_patch: list[dict[str, Any]] | None = None
+    node_patch: list[dict[str, Any]] | None = None
+    closed_edges: tuple[tuple[str, str], ...] = ()
+
+
 @dataclass
 class DeferredRealPaymentEffects:
     """Ordered observations resolved after the enclosing transaction outcome."""
@@ -60,11 +69,52 @@ class DeferredRealPaymentEffects:
     items: list[_PaymentObservation] = field(default_factory=list)
     # 026 `T2603.2`: the closure publications this buffer's commit scheduled (re-read outside the commit callback).
     closed_publications: list[asyncio.Task] = field(default_factory=list)
+    # 034 `F-034-2`: builds the visual patches of the committed observations AFTER the commit, on a session of its
+    # own (`RealPaymentsExecutor.build_patches_after_commit`). (open_session, committed items) -> patches by seq.
+    patch_builder: Callable[[Callable[[], Any], list[_PaymentObservation]], Awaitable[dict[int, _PaymentPatches]]] | None = None
     _resolution: Literal["commit", "rollback", "unknown", "discarded"] | None = field(
         default=None,
         init=False,
         repr=False,
     )
+
+    async def build_post_commit_patches(self, open_session: Callable[[], Any]) -> None:
+        """Give the committed observations their `edge_patch` / `node_patch` / closed lines, read AFTER the commit.
+
+        034 `F-034-2`. Called by the owner of the money phase once its commit is CONFIRMED and before
+        `apply_after_commit` publishes (`money_replay._publish_committed`). The patches used to be built inside the
+        money transaction, on the money session: a PostgreSQL error in a patch query aborted that transaction, the
+        `COMMIT` that followed was answered with a rollback, and the tick still reported the payments as made.
+        Now nothing here can touch the money: it runs on `open_session()` and the money is already durable. A
+        failure costs the patches - the events are published without them - and is logged; it never raises.
+        """
+
+        if self._resolution is not None or self.patch_builder is None:
+            return
+        committed = [item for item in self.items if item.outcome == "committed"]
+        if not committed:
+            return
+        try:
+            patches = await self.patch_builder(open_session, committed)
+        except Exception:
+            self.logger.warning(
+                "simulator.real.payment_patches_failed run_id=%s committed=%d",
+                self.run_id,
+                len(committed),
+                exc_info=True,
+            )
+            return
+        self.items = [
+            replace(
+                item,
+                edge_patch=patches[item.seq].edge_patch,
+                node_patch=patches[item.seq].node_patch,
+                closed_edges=patches[item.seq].closed_edges,
+            )
+            if item.outcome == "committed" and item.seq in patches
+            else item
+            for item in self.items
+        ]
 
     def apply_once(self) -> bool:
         """Resolve this buffer as committed, once.
@@ -343,6 +393,9 @@ class RealPaymentsExecutor:
             utc_now=self._utc_now,
             run_id=str(run_id),
             run=run,
+            patch_builder=lambda open_session, items: self.build_patches_after_commit(
+                open_session=open_session, run=run, items=items
+            ),
         )
 
         # 027 stage 2: the caller owns the transaction AND its line locks - the tick's money phase takes its complete
@@ -417,6 +470,7 @@ class RealPaymentsExecutor:
                 equivalent=str(action.equivalent),
                 amount=str(action.amount),
                 seq=int(action.seq),
+                epoch=int(getattr(run, "_launch_epoch", 0) or 0),
             )
 
             async with sem:
@@ -556,8 +610,6 @@ class RealPaymentsExecutor:
                 dict[str, Any] | None,
                 float,
                 list[tuple[str, str]],
-                list[dict[str, Any]] | None,
-                list[dict[str, Any]] | None,
                 PaymentPostCommitEffects | None,
             ],
         ] = {}
@@ -591,8 +643,6 @@ class RealPaymentsExecutor:
                     err_details,
                     avg_route_len,
                     route_edges,
-                    edge_patch,
-                    node_patch,
                     payment_effects,
                 ) = item
 
@@ -648,12 +698,11 @@ class RealPaymentsExecutor:
                                 sender_pid=sender_pid,
                                 receiver_pid=receiver_pid,
                                 amount=amount,
+                                # `edge_patch`, `node_patch` and `closed_edges` are read AFTER the commit, on a
+                                # session of their own (034 `F-034-2`): `build_post_commit_patches`.
                                 edges=[
                                     {"from": a, "to": b} for a, b in edges_pairs
                                 ],
-                                edge_patch=edge_patch,
-                                node_patch=node_patch,
-                                closed_edges=tuple(sorted(closed_by_seq.pop(next_seq, ()))),
                             )
                         )
                     else:
@@ -697,18 +746,9 @@ class RealPaymentsExecutor:
 
         stop_requested = False
         timeout_stop_triggered = False
-        closed_by_seq: dict[int, set[tuple[str, str]]] = {}
 
         try:
             if tasks:
-                patch_session = session
-
-                per_tick_pid_to_participant_by_eq_and_pids: dict[
-                    tuple[str, tuple[str, ...]],
-                    dict[str, Participant],
-                ] = {}
-                per_tick_quantiles_refreshed_by_eq: set[str] = set()
-
                 emitted_since_yield = 0
 
                 for t in asyncio.as_completed(tasks):
@@ -729,96 +769,8 @@ class RealPaymentsExecutor:
                     if run.state != "running":
                         stop_requested = True
 
-                    edge_patch_list: list[dict[str, Any]] | None = None
-                    node_patch_list: list[dict[str, Any]] | None = None
-
-                    async with action_db_lock:
-                        try:
-                            if status == "COMMITTED" and not stop_requested:
-                                edges_pairs = route_edges or [(sender_pid, receiver_pid)]
-
-                                helper: VizPatchHelper | None
-                                with self._lock:
-                                    helper = run._real_viz_by_eq.get(str(eq))
-
-                                if helper is None:
-                                    helper = await VizPatchHelper.create(
-                                        patch_session,
-                                        equivalent_code=str(eq),
-                                        refresh_every_ticks=int(
-                                            settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS
-                                            or 10
-                                        ),
-                                    )
-                                    with self._lock:
-                                        run._real_viz_by_eq[str(eq)] = helper
-
-                                participant_ids: list[uuid.UUID] = []
-                                if run._real_participants:
-                                    participant_ids = [pid for (pid, _) in run._real_participants]
-                                if str(eq) not in per_tick_quantiles_refreshed_by_eq:
-                                    await helper.maybe_refresh_quantiles(
-                                        patch_session,
-                                        tick_index=int(run.tick_index),
-                                        participant_ids=participant_ids,
-                                    )
-                                    per_tick_quantiles_refreshed_by_eq.add(str(eq))
-
-                                pids = sorted({pid for ab in edges_pairs for pid in ab if pid})
-                                pids_key = (str(eq), tuple(pids))
-
-                                pid_to_participant = per_tick_pid_to_participant_by_eq_and_pids.get(pids_key)
-                                if pid_to_participant is None:
-                                    res = await patch_session.execute(
-                                        select(Participant).where(Participant.pid.in_(pids))
-                                    )
-                                    pid_to_participant = {p.pid: p for p in res.scalars().all()}
-                                    per_tick_pid_to_participant_by_eq_and_pids[pids_key] = pid_to_participant
-
-                                try:
-                                    # Do NOT cache node patches within a tick: net balances can
-                                    # change multiple times per tick, and caching would make UI
-                                    # updates appear delayed/stale.
-                                    node_patch_list = await helper.compute_node_patches(
-                                        patch_session,
-                                        pid_to_participant=pid_to_participant,
-                                        pids=pids,
-                                    )
-                                    if node_patch_list == []:
-                                        node_patch_list = None
-                                except Exception:
-                                    if self._should_warn_this_tick(run, key=f"node_patch_failed:{eq}"):
-                                        self._logger.warning(
-                                            "simulator.real.node_patch_failed run_id=%s tick=%s eq=%s",
-                                            str(run.run_id),
-                                            int(run.tick_index),
-                                            str(eq),
-                                            exc_info=True,
-                                        )
-                                    node_patch_list = None
-
-                                edge_patch_list = await self._edge_patch_builder.build_edge_patch_for_pairs(
-                                    session=patch_session,
-                                    helper=helper,
-                                    edges_pairs=edges_pairs,
-                                    pid_to_participant=pid_to_participant,
-                                    closed=closed_by_seq.setdefault(int(seq), set()),
-                                )
-                        except Exception:
-                            if self._should_warn_this_tick(run, key=f"edge_patch_failed:{eq}"):
-                                self._logger.warning(
-                                    "simulator.real.edge_patch_failed run_id=%s tick=%s eq=%s",
-                                    str(run.run_id),
-                                    int(run.tick_index),
-                                    str(eq),
-                                    exc_info=True,
-                                )
-                            edge_patch_list = None
-                            node_patch_list = None
-
-                    if edge_patch_list == []:
-                        edge_patch_list = None
-
+                    # 034 `F-034-2`: no visual patch is built here. This is the money transaction, under its line
+                    # locks; the patches are read after the commit (`build_patches_after_commit`).
                     ready[int(seq)] = (
                         str(eq),
                         str(sender_pid),
@@ -829,8 +781,6 @@ class RealPaymentsExecutor:
                         err_details,
                         float(avg_route_len),
                         route_edges,
-                        edge_patch_list,
-                        node_patch_list,
                         payment_effects,
                     )
                     _record_if_ready()
@@ -894,6 +844,114 @@ class RealPaymentsExecutor:
             stop_requested=stop_requested,
             staged_tx_ids=frozenset(staged_tx_ids),
         )
+
+    async def build_patches_after_commit(
+        self,
+        *,
+        open_session: Callable[[], Any],
+        run: RunRecord,
+        items: list[_PaymentObservation],
+    ) -> dict[int, _PaymentPatches]:
+        """The visual patches of a tick's COMMITTED payments, read on a session of their own (034 `F-034-2`).
+
+        The caller has confirmed the money commit, so every patch describes the rows as committed - the state
+        after ALL of the tick's payments - and nothing here shares a transaction with the money. A failure costs
+        that payment's patch (its `tx.updated` is published without it) and is logged; the session's read
+        transaction is ended by its owner, here, before the next payment's patch is read. Never raises.
+        """
+
+        patches: dict[int, _PaymentPatches] = {}
+        pid_to_participant_by_eq_and_pids: dict[tuple[str, tuple[str, ...]], dict[str, Participant]] = {}
+        quantiles_refreshed_by_eq: set[str] = set()
+
+        async def _end_failed_read(session, *, eq: str, what: str) -> None:
+            if self._should_warn_this_tick(run, key=f"{what}:{eq}"):
+                self._logger.warning(
+                    "simulator.real.%s run_id=%s tick=%s eq=%s",
+                    what,
+                    str(run.run_id),
+                    int(run.tick_index),
+                    str(eq),
+                    exc_info=True,
+                )
+            await session.rollback()
+
+        async def _one(session, item: _PaymentObservation) -> _PaymentPatches:
+            eq = str(item.equivalent)
+            edges_pairs = [(str(e["from"]), str(e["to"])) for e in item.edges]
+
+            helper: VizPatchHelper | None
+            with self._lock:
+                helper = run._real_viz_by_eq.get(eq)
+            if helper is None:
+                helper = await VizPatchHelper.create(
+                    session,
+                    equivalent_code=eq,
+                    refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
+                )
+                with self._lock:
+                    run._real_viz_by_eq[eq] = helper
+
+            participant_ids: list[uuid.UUID] = []
+            if run._real_participants:
+                participant_ids = [pid for (pid, _) in run._real_participants]
+            if eq not in quantiles_refreshed_by_eq:
+                await helper.maybe_refresh_quantiles(
+                    session,
+                    tick_index=int(run.tick_index),
+                    participant_ids=participant_ids,
+                )
+                quantiles_refreshed_by_eq.add(eq)
+
+            pids = sorted({pid for ab in edges_pairs for pid in ab if pid})
+            pids_key = (eq, tuple(pids))
+            pid_to_participant = pid_to_participant_by_eq_and_pids.get(pids_key)
+            if pid_to_participant is None:
+                res = await session.execute(select(Participant).where(Participant.pid.in_(pids)))
+                pid_to_participant = {p.pid: p for p in res.scalars().all()}
+                # Detached, so a rollback after a failed read below does not expire them: they are plain values
+                # for the builders, read once per pass.
+                for participant in pid_to_participant.values():
+                    session.expunge(participant)
+                pid_to_participant_by_eq_and_pids[pids_key] = pid_to_participant
+
+            node_patch: list[dict[str, Any]] | None
+            try:
+                node_patch = await helper.compute_node_patches(
+                    session, pid_to_participant=pid_to_participant, pids=pids
+                ) or None
+            except Exception:
+                # The node patch alone is lost; the edge patch below is still read, on a fresh transaction.
+                await _end_failed_read(session, eq=eq, what="node_patch_failed")
+                node_patch = None
+
+            closed: set[tuple[str, str]] = set()
+            edge_patch = await self._edge_patch_builder.build_edge_patch_for_pairs(
+                session=session,
+                helper=helper,
+                edges_pairs=edges_pairs,
+                pid_to_participant=pid_to_participant,
+                closed=closed,
+            ) or None
+            return _PaymentPatches(edge_patch=edge_patch, node_patch=node_patch, closed_edges=tuple(sorted(closed)))
+
+        try:
+            async with open_session() as session:
+                for item in sorted(items, key=lambda observation: observation.seq):
+                    try:
+                        patches[item.seq] = await _one(session, item)
+                    except Exception:
+                        await _end_failed_read(session, eq=str(item.equivalent), what="edge_patch_failed")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._logger.warning(
+                "simulator.real.payment_patch_session_failed run_id=%s tick=%s",
+                str(run.run_id),
+                int(run.tick_index),
+                exc_info=True,
+            )
+        return patches
 
     def _refusal_publisher(
         self,

@@ -363,15 +363,36 @@ async def test_a_real_tick_reads_its_payments_snapshot_under_the_owner_lock(
     snapshot_locks: list[_Observation] = []
     original_snapshot = runner._load_debt_snapshot_by_pid
 
+    # 034 `F-034-2` (2026-10-08): the snapshot is no longer read ON the money session - a failed planning read there
+    # aborted the money transaction - but on a session of its own, WHILE the money transaction holds the lines. The
+    # invariant this test keeps is unchanged: the plan is made against locked lines. So the question "are the lines
+    # held" is put to the tick's money session (the one that took them, captured below; it is idle while the
+    # snapshot is read), and the snapshot's own session is shown to be another one.
+    money_sessions: list[Any] = []
+    snapshot_sessions: list[Any] = []
+    original_lock = PaymentService.lock_staged_lines
+
+    async def _recording_lock(service, *args, **kwargs):
+        money_sessions.append(service.session)
+        return await original_lock(service, *args, **kwargs)
+
+    monkeypatch.setattr(PaymentService, "lock_staged_lines", _recording_lock)
+
     async def _observed_snapshot(session, participants, equivalents):
+        snapshot_sessions.append(session)
+        assert money_sessions, "the debt snapshot was read before the money transaction took its line locks"
         for eq in world.equivalents:
-            pid, held, error = await session.run_sync(lambda s, _id=eq.id: _holds(s, _id))
+            pid, held, error = await money_sessions[-1].run_sync(lambda s, _id=eq.id: _holds(s, _id))
             snapshot_locks.append(_Observation("debt snapshot", eq.id, pid, held, error))
         return await original_snapshot(session, participants, equivalents)
 
     monkeypatch.setattr(runner, "_load_debt_snapshot_by_pid", _observed_snapshot)
 
     await runner.tick_real_mode(run.run_id)
+
+    assert snapshot_sessions and all(s is not money_sessions[-1] for s in snapshot_sessions), (
+        "the planning snapshot was read on the money session (034 F-034-2)"
+    )
 
     stored = await _stored(observed_factory, world)
     assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, (

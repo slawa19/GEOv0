@@ -112,6 +112,12 @@ class TickPaymentsPhase:
             return False
         return self.deferred_effects.discard()
 
+    async def build_post_commit_patches(self, open_session: Callable[[], Any]) -> None:
+        """034 `F-034-2`: the visual patches of the committed payments, read after the commit on `open_session()`.
+        Awaited by the owner of the money phase before `apply_deferred_effects` publishes. Never raises."""
+        if self.deferred_effects is not None:
+            await self.deferred_effects.build_post_commit_patches(open_session)
+
     def apply_deferred_effects(self) -> bool:
         if self.deferred_effects is None:
             return False
@@ -516,6 +522,77 @@ class RealTick:
             run_money_attempt=_money_attempt,
         )
 
+    async def load_planning_inputs(
+        self,
+        *,
+        run: RunRecord,
+        participants: list[tuple[Any, str]],
+        equivalents: list[str],
+    ) -> tuple[dict[tuple[str, str, str], Decimal], dict[str, int]]:
+        """What the planner sizes amounts with - the debts and each equivalent's step - read on a session of its own.
+
+        034 `F-034-2`. Both reads used to run on the money session, inside the money transaction, behind
+        `except Exception`: a PostgreSQL error in one of them aborted that transaction and was swallowed, and the
+        payments after it failed on the aborted transaction. They now run on their own session, so their failure
+        can only cost the plan its inputs: the failed read's transaction is ended here, by its owner, and the
+        planner falls back - without the debts to the static limits, without the steps to cents (the payment door
+        refuses what is finer than an equivalent's step). Never raises.
+
+        WHAT THE PLANNER SEES IS UNCHANGED. The caller still holds the line locks of the money transaction when this
+        runs (`_open_money_phase`), every debt writer takes those line locks first (027 stage 2), and both the old
+        read and this one see committed rows at statement time (READ COMMITTED; the money transaction has written
+        nothing yet). So the debts read here are the debts the staged payments will meet. The plan is no monetary
+        basis either way: the payment service checks capacity itself, which is why planning without the snapshot
+        was always allowed.
+        """
+
+        rr = self._runner
+        debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
+        precision_by_eq: dict[str, int] = {}
+
+        async def _end_failed_read(session: Any, what: str) -> None:
+            if rr._should_warn_this_tick(run, key=what):
+                rr._logger.warning(
+                    "simulator.real.%s run_id=%s tick=%s",
+                    what,
+                    str(run.run_id),
+                    int(run.tick_index or 0),
+                    exc_info=True,
+                )
+            await session.rollback()
+
+        try:
+            async with db_session.AsyncSessionLocal() as planning_session:
+                # Phase 1.4: capacity-aware payment amounts, from the debts as they are AFTER the due events.
+                try:
+                    debt_snapshot = await rr._load_debt_snapshot_by_pid(planning_session, participants, equivalents)
+                except Exception:
+                    await _end_failed_read(planning_session, "planning_debt_snapshot_failed")
+                # 028 `F-028-32`: amounts in each equivalent's step.
+                try:
+                    precision_by_eq = {
+                        str(code): int(p)
+                        for code, p in (
+                            await planning_session.execute(
+                                select(Equivalent.code, Equivalent.precision).where(
+                                    Equivalent.code.in_(list(equivalents))
+                                )
+                            )
+                        ).all()
+                    }
+                except Exception:
+                    await _end_failed_read(planning_session, "planning_precision_failed")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            rr._logger.warning(
+                "simulator.real.planning_session_failed run_id=%s tick=%s",
+                str(run.run_id),
+                int(run.tick_index or 0),
+                exc_info=True,
+            )
+        return debt_snapshot, precision_by_eq
+
     async def run_payments_phase(
         self,
         *,
@@ -527,22 +604,9 @@ class RealTick:
         equivalents: list[str],
     ) -> tuple[TickPaymentsPhase, bool]:
         rr = self._runner
-        # Phase 1.4: capacity-aware payment amounts. The debt snapshot is loaded *after* events (which may mutate
-        # the DB). Best-effort: if the query fails, planning falls back to static limits.
-        debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
-        try:
-            debt_snapshot = await rr._load_debt_snapshot_by_pid(session, participants, equivalents)
-        except Exception:
-            rr._logger.debug("capacity_aware: debt snapshot load failed, falling back to static limits")
-
-        # 028 `F-028-32`: amounts in each equivalent's step (the payment door refuses finer ones). Best-effort like the
-        # snapshot: without it the planner picks cents, and the door refuses what is finer than an equivalent's step.
-        precision_by_eq: dict[str, int] = {}
-        try:
-            precision_by_eq = {str(code): int(p) for code, p in (await session.execute(
-                select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(list(equivalents))))).all()}
-        except Exception:
-            rr._logger.debug("planner: equivalent precision load failed, falling back to cents")
+        debt_snapshot, precision_by_eq = await self.load_planning_inputs(
+            run=run, participants=participants, equivalents=equivalents
+        )
         planned = rr._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot, precision_by_eq=precision_by_eq)
         with rr._lock:
             run.ops_sec = float(len(planned))

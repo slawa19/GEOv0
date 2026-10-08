@@ -19,9 +19,9 @@ Nothing of the application is replaced: the real `RunLifecycle.restart`, the rea
 service on PostgreSQL. `_heartbeat_tick` repeats the two lines of the heartbeat that advance the tick; the heartbeat
 itself waits on a wall clock.
 
-TARGET (red on the current tree): what the restarted tick reports as paid is what moved - a new `tx_id` and a real
-debt effect, or an honest refusal with nothing reported as paid.
-COUNTER-CHECK (green on the current tree, and it must stay green): the same `tx_id` repeated inside ONE launch is
+TARGET (red on 75dafc82; green since the launch epoch entered the key, 034 S1a): what the restarted tick reports as
+paid is what moved - a new `tx_id` and a real debt effect, or an honest refusal with nothing reported as paid.
+COUNTER-CHECK (green before and after, and it must stay green): the same `tx_id` repeated inside ONE launch is
 answered from its stored row and moves nothing.
 """
 

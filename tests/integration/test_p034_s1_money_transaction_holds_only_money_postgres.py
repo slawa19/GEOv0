@@ -7,8 +7,15 @@ was issued from - the payment service (`lock_staged_lines`, `create_payment_inte
 (`VizPatchHelper.create`, `.maybe_refresh_quantiles`, `.compute_node_patches`,
 `EdgePatchBuilder.build_edge_patch_for_pairs`) or the planning debt snapshot (`_load_debt_snapshot_by_pid`) - set by
 wrappers that call straight through. Two reads are inline and so carry no origin: the precision read of planning
-(`app/core/simulator/tick.py:541`) and the participants read of the patches (`real_payments_executor.py:772`).
-The MONEY TRANSACTION is the span that holds the staged payment's statements.
+and the participants read of the patches (on 75dafc82: `app/core/simulator/tick.py:541` and
+`real_payments_executor.py:772`; since the fix: `RealTick.load_planning_inputs` and
+`RealPaymentsExecutor.build_patches_after_commit`).
+The MONEY TRANSACTION is the span that holds the line locks and the staged payment's statements.
+
+SINCE THE FIX (034 S1a) the first two tests are green - measured on one payment: 52 statements in the money
+transaction (46 of the payment service, 6 of savepoint control) and none of anything else, against 63 and 11 before -
+and the tests below them hold what a failed read may cost: its own patch or the plan's inputs, never the money and
+never the report.
 
 POSITIVE WITNESS, NOT ABSENCE (spec, "Запрещено": proof by removed behaviour). Test 1 first shows that a payment
 was made, that every patch builder WAS called, that both published patches are non-empty and that the node patch
@@ -29,6 +36,7 @@ module does not wrap (a new builder shows up as a statement without an origin, w
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections import Counter
 from contextlib import contextmanager
@@ -58,6 +66,7 @@ from tests.integration.test_p015_p1_money_replay_postgres import (  # noqa: F401
     _transactions,
     factory,
 )
+from tests.integration.test_p034_s1_restart_repeats_the_idempotency_key_postgres import _scenario_with_a_bounded_amount
 from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - autouse fixture
 
 _ORIGIN: ContextVar[str | None] = ContextVar("p034_statement_origin", default=None)
@@ -203,11 +212,19 @@ def _name_the_origins(monkeypatch, runner) -> dict[str, int]:
 async def _one_tick(factory, monkeypatch, *, fail_when=None):  # noqa: F811
     """One real tick of the p015 stand (one line, one planned payment) under the witness."""
 
+    world, run, sse, plan, called, witness, debts, transactions = await _tick(factory, monkeypatch, fail_when=fail_when)
+    assert len(plan) == 1, plan
+    return world, run, sse, Decimal(plan[0].amount), called, witness, debts, transactions
+
+
+async def _tick(factory, monkeypatch, *, fail_when=None, payments: int = 1, scenario=_scenario):  # noqa: F811
+    """One real tick of the p015 stand under the witness, planning up to `payments` payments."""
+
     world = await _seed(factory)
     try:
         sse = _Sse()
         run = _run_record(world, f"p034-s1-{uuid.uuid4().hex[:8]}")
-        runner = _runner(run, _scenario(world), sse)
+        runner = _runner(run, scenario(world), sse, actions_per_tick_max=payments)
         _install(monkeypatch, factory)
         plans = _record_plans(monkeypatch, runner)
         called = _name_the_origins(monkeypatch, runner)
@@ -219,8 +236,8 @@ async def _one_tick(factory, monkeypatch, *, fail_when=None):  # noqa: F811
         transactions = await _transactions(factory, world)
     finally:
         _forget_the_route_cache(world)
-    assert len(plans) == 1 and len(plans[0]) == 1, plans
-    return world, run, sse, Decimal(plans[0][0].amount), called, witness, debts, transactions
+    assert len(plans) == 1, plans
+    return world, run, sse, plans[0], called, witness, debts, transactions
 
 
 @pytest.mark.asyncio
@@ -244,7 +261,8 @@ async def test_the_money_transaction_holds_no_planning_read_and_no_patch_builder
     updated = [e for e in sse.events if e.get("type") == "tx.updated"]
     assert len(updated) == 1, sse.events
     edge_patch, node_patch = updated[0].get("edge_patch"), updated[0].get("node_patch")
-    assert edge_patch and node_patch, updated[0]    # The patches describe the debts as committed: the payer's net balance is minus what it owes after the tick.
+    assert edge_patch and node_patch, updated[0]
+    # The patches describe the debts as committed: the payer's net balance is minus what it owes after the tick.
     payer = [n for n in node_patch if n["id"] == world.sender.pid]
     assert [(n["net_balance"], n["net_sign"]) for n in payer] == [(to_money_str(-(_OPENING + amount), 2), -1)], node_patch
     everywhere = [s for span in witness.spans for s in span.statements]
@@ -293,3 +311,114 @@ async def test_a_failed_last_patch_query_leaves_the_report_equal_to_the_rows(fac
         f"{span.ended_by!r} and held the staged payment: {bool(span.of(_STAGED))}; tx.failed published "
         f"{sse.published('tx.failed')}. Expected: reported == stored COMMITTED rows and debt moved == amount * reported"
     )
+
+
+# ── after the fix (034 S1a): what a failed read costs, and what it may not cost ─────────────────────────
+
+
+def _warnings(caplog, event: str) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING and event in r.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_a_patch_failure_after_payment_k_costs_that_patch_and_nothing_else(factory, monkeypatch, caplog) -> None:  # noqa: F811
+    """Three payments in one tick; the edge patch of the SECOND fails in PostgreSQL.
+
+    Before the fix the patch was read in the money transaction between the payments: the third payment met an
+    aborted transaction and the tick's `COMMIT` rolled all three back. Now every payment is stored and reported,
+    the second `tx.updated` is published WITHOUT a patch, the other two carry theirs, and the failure is logged.
+    """
+
+    line_reads: list[str] = []
+
+    def the_line_read_of_the_second_edge_patch(origin, sql) -> bool:
+        if origin == _LAST_PATCH_BUILDER and "trust_lines" in sql.lower():
+            line_reads.append(sql)
+            return len(line_reads) == 2
+        return False
+
+    with caplog.at_level(logging.WARNING):
+        world, run, sse, plan, called, witness, debts, transactions = await _tick(
+            factory, monkeypatch, fail_when=the_line_read_of_the_second_edge_patch, payments=3,
+            scenario=_scenario_with_a_bounded_amount,
+        )
+    pair = (world.sender.pid, world.receiver.pid)
+    amounts = [Decimal(a.amount) for a in plan]
+    money = witness.money_transaction()
+
+    # Controls: three payments were planned and staged, and PostgreSQL refused exactly one patch query - outside
+    # the money transaction, which holds nothing but the payment service's SQL and was committed.
+    assert len(amounts) == 3 and all(a > 0 for a in amounts) and called[_STAGED] == 3, (plan, dict(called))
+    assert len(witness.failed) == 1 and witness.server_errors == ["22012"], (witness.failed, witness.server_errors)
+    assert witness.failed[0] not in money.statements and money.not_money == [] and money.ended_by == "commit", (
+        money.by_origin(), money.ended_by)
+
+    # The money: all three stored, the debt moved by their sum, and the report says exactly that.
+    assert sorted(transactions.values()) == ["COMMITTED"] * 3, transactions
+    assert debts == {pair: _OPENING + sum(amounts)}, debts
+    updated = [e for e in sse.events if e.get("type") == "tx.updated"]
+    assert [Decimal(e["amount"]) for e in updated] == amounts, updated  # one per payment, in plan order
+    assert (run.committed_total, run.errors_total, run.last_error, sse.published("tx.failed")) == (3, 0, None, 0)
+    assert run._real_money_committed_ticks_total == 1
+
+    # The patches: the failed one is absent from its event, not invented; the others are read after the commit,
+    # so each carries the payer's net balance after ALL three payments.
+    assert [("edge_patch" in e, "node_patch" in e) for e in updated] == [(True, True), (False, False), (True, True)], updated
+    final = to_money_str(-(_OPENING + sum(amounts)), 2)
+    for event in (updated[0], updated[2]):
+        assert [n["net_balance"] for n in event["node_patch"] if n["id"] == world.sender.pid] == [final], event
+    assert len(_warnings(caplog, "simulator.real.edge_patch_failed")) == 1, [r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_node_patch_leaves_the_edge_patch_and_the_payment(factory, monkeypatch, caplog) -> None:  # noqa: F811
+    """The node patch fails in PostgreSQL; its read transaction is ended by its owner and the edge patch of the same
+    payment is still read (as before the fix, where the node patch had a handler of its own)."""
+
+    def the_first_read_of_the_node_patch(origin, _sql) -> bool:
+        return origin == _PATCH + "compute_node_patches"
+
+    with caplog.at_level(logging.WARNING):
+        world, run, sse, amount, called, witness, debts, transactions = await _one_tick(
+            factory, monkeypatch, fail_when=the_first_read_of_the_node_patch
+        )
+    assert witness.server_errors == ["22012"], witness.server_errors
+    assert list(transactions.values()) == ["COMMITTED"] and run.committed_total == 1, (transactions, run.committed_total)
+    assert debts == {(world.sender.pid, world.receiver.pid): _OPENING + amount}, debts
+    updated = [e for e in sse.events if e.get("type") == "tx.updated"]
+    assert [("edge_patch" in e, "node_patch" in e) for e in updated] == [(True, False)], updated
+    assert len(_warnings(caplog, "simulator.real.node_patch_failed")) == 1, [r.getMessage() for r in caplog.records]
+    assert _warnings(caplog, "simulator.real.edge_patch_failed") == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_planning_read_costs_the_plan_its_inputs_and_never_the_money(factory, monkeypatch, caplog) -> None:  # noqa: F811
+    """The debt snapshot of planning fails in PostgreSQL. The planner falls back to the static limits (as it always
+    could), the step of the equivalent is still read, and the payment goes through the payment service untouched."""
+
+    def the_debt_read_of_planning(origin, sql) -> bool:
+        return origin == _PLANNING + "debt_snapshot" and "debts" in sql.lower()
+
+    with caplog.at_level(logging.WARNING):
+        world, run, sse, amount, called, witness, debts, transactions = await _one_tick(
+            factory, monkeypatch, fail_when=the_debt_read_of_planning
+        )
+    pair = (world.sender.pid, world.receiver.pid)
+    money = witness.money_transaction()
+
+    assert len(witness.failed) == 1 and witness.server_errors == ["22012"], (witness.failed, witness.server_errors)
+    assert witness.failed[0] not in money.statements and money.not_money == [] and money.ended_by == "commit", (
+        money.by_origin(), money.ended_by)
+    everywhere = [s for span in witness.spans for s in span.statements]
+    after_the_failure = everywhere[everywhere.index(witness.failed[0]) + 1:]
+    assert any(s.origin is None and "equivalents.precision" in s.sql for s in after_the_failure), (
+        "the step of the equivalent was not read after the failed debt snapshot")
+    assert len(_warnings(caplog, "simulator.real.planning_debt_snapshot_failed")) == 1, [r.getMessage() for r in caplog.records]
+
+    # Whatever the payment service decided about the planned amount, the report equals the rows.
+    reported = sse.published("tx.updated")
+    stored = [state for state in transactions.values() if state == "COMMITTED"]
+    assert amount > 0 and called[_STAGED] == 1, (amount, dict(called))
+    assert reported == len(stored) == run.committed_total and debts[pair] - _OPENING == amount * reported, (
+        reported, transactions, debts, run.last_error)
+    assert reported + sse.published("tx.failed") == 1, sse.events
