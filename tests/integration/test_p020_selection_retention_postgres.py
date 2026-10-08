@@ -5,14 +5,12 @@ the spec's Verification plan §2 invariants that the current code already satisf
 red R-020-1 characterization (`test_p020_selection_amount_first_unique_cycles_postgres.py`) so a red here
 is a regression, never an expected failure.
 
-* DEPTH REACH - one disjoint cycle of every length 3..10; at depth d in {3, 4, 6, 7, 10} the answer holds
-  exactly the lengths 3..d: each planted cycle of a supported length is found, nothing longer than d is.
+* DEPTH REACH - REMOVED 2026-10-09 (035 A2b) with the detectors: nothing takes a depth any more.
 * ADMISSION BEFORE THE LIMIT - 101 EXCLUDED triangles with larger amounts than one eligible triangle, per
   exclusion class (consent refused, line `closed`, one vertex outside the perimeter). The eligible
   triangle is still returned (an excluded cycle does not consume the limit), and - the counter-check -
   no excluded triangle is.
-* SAME-LENGTH TIES - equal-amount triangles sharing their minimum debt id come out in full-identity order,
-  identically at depths 4 and 6.
+* SAME-LENGTH TIES - REMOVED 2026-10-09 (035 A2b): the order of the detectors' list (`_cycle_order_key`).
 """
 
 from __future__ import annotations
@@ -22,7 +20,6 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.transaction import Transaction
 from tests.conftest import MODE_B
@@ -35,33 +32,13 @@ from tests.integration.test_p020_selection_amount_first_unique_cycles_postgres i
 from tests.p020_support import Edge, debt_uuid, identity, identity_of, ring, seed_graph
 from tests.p023_support import auto_clear_http, fresh_read, planned_cycles, require_target
 
-_DEPTHS = [3, 4, 6, 7, 10]
-
-
-def _reach_edges():
-    edges, by_len = [], {}
-    for length in range(3, 11):
-        pids = [f"p020r{length:02d}{k}" for k in range(length)]
-        ids = [debt_uuid(0xD0 + length, k) for k in range(length)]
-        by_len[length] = identity_of(ids)
-        edges += ring(pids, ["10"] * length, ids)
-    return edges, by_len
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", _DEPTHS)
-async def test_retention_each_depth_finds_its_lengths_and_nothing_longer(db_session, max_depth) -> None:
-    edges, by_len = _reach_edges()
-    await seed_graph(db_session, "PZR", edges)
-
-    cycles = await ClearingService(db_session).find_cycles("PZR", max_depth=max_depth)
-    got = sorted(identity(c) for c in cycles)
-
-    assert got == sorted(by_len[n] for n in range(3, max_depth + 1)), (
-        f"depth {max_depth}: expected one cycle of each length 3..{max_depth}; "
-        f"got lengths {sorted(len(c) for c in cycles)}"
-    )
-
+# REMOVED 2026-10-09 (035 A2b): `test_retention_each_depth_finds_its_lengths_and_nothing_longer` (five depths) and
+# its stand `_reach_edges`. It asked `find_cycles(max_depth=d)` for exactly the lengths 3..d; the detector and its
+# depth are removed, and no caller has a depth. That a cycle longer than the old SQL reach is offered and cleared
+# with no depth asked is held by `tests/integration/test_clearing_max_depth_controls_long_cycles.py` (a 5-cycle,
+# over HTTP) and `tests/unit/test_p012_t1210_detector_union_default_tier.py::
+# test_the_ladder_widens_when_short_cycles_exist_but_none_executes` (the production pass). Lengths 6..10 on a
+# database stand are not pinned by a moved test: the planner's decomposition has no length parameter to regress.
 
 _EXCLUDED = 101
 
@@ -112,22 +89,12 @@ async def test_retention_excluded_cycles_do_not_consume_the_limit(db_session, ki
     assert not (set(got) & excluded), f"{kind}: an excluded triangle was returned"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", [4, 6])
-async def test_retention_same_length_ties_follow_the_full_identity(db_session, max_depth) -> None:
-    g = 0xF0
-    shared = debt_uuid(g, 1)
-    first = ring(["p020ta", "p020tb", "p020tc"], ["30"] * 3, [shared, debt_uuid(g, 50), debt_uuid(g, 51)])
-    second = ring(["p020ta", "p020tb", "p020td"], ["30"] * 3, [shared, debt_uuid(g, 20), debt_uuid(g, 21)])
-    await seed_graph(db_session, "PZT", first + second[1:])
-
-    cycles = await ClearingService(db_session).find_cycles("PZT", max_depth=max_depth)
-
-    assert [identity(c) for c in cycles] == [
-        identity_of(e.debt_id for e in second),
-        identity_of(e.debt_id for e in first),
-    ]
-
+# REMOVED 2026-10-09 (035 A2b): `test_retention_same_length_ties_follow_the_full_identity` (two depths). It pinned
+# the tie-break of the detectors' list - two equal-amount triangles over a shared debt come out in the order of
+# their full debt-id identity (`_cycle_order_key`). The list is removed and the plan gives the shared debt to ONE
+# of the two, so "the order of both" has no subject. What the plan does over a shared edge is pinned against the
+# oracle in `tests/unit/test_p012_t1210_detector_union_default_tier.py::
+# test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_the_small`.
 
 # ------------------------------------------------------------------ R-020-1's ordinary controls (023 slice (a))
 #

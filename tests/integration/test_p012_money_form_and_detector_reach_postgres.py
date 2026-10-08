@@ -77,6 +77,15 @@ is why NOTHING IN THIS MODULE COULD HAVE CAUGHT IT: the reproducer is
 on the default tier, which already asks at `max_depth=6` and counts cycles.  The fix is
 `ClearingService._debt_id_key`, which keys on the value rather than the spelling.
 
+REMOVED 2026-10-09 (035 A2b).  The detectors PART 2 is about - `find_cycles`, `find_triangles_sql`,
+`find_quadrangles_sql`, `_debt_id_key`, the reach constant - are gone from `app/`; the text above is the
+record of why the tests below exist, not a description of present code.  What was a property of the
+detectors alone left with them (`test_a_long_cycle_appears_exactly_when_the_caller_asks_deep_enough`:
+there is no depth to ask at).  What was a property of the clearing SURFACE was moved to the diagnostic's
+producer in 035 A2a, and the last two pieces in A2b: the exact string of an ordinary debt
+(`test_an_ordinary_debt_has_one_exact_string_on_the_diagnostic`) and "the executing route declares no
+depth" (`test_the_executing_route_declares_no_depth`).
+
 EVERY EQUIVALENT IS CREATED BY THE TEST.  `tests/conftest.py` builds the schema and never reads
 `seeds/equivalents.json`, so `precision` here is set explicitly; a test that inherited someone
 else's `UAH` would be measuring that fixture.
@@ -95,10 +104,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1 import clearing as clearing_route
 from app.core.balance.service import BalanceService
 from app.core.clearing.runner import planned_cycles_for_diagnostics
-from app.core.clearing.service import (
-    _SQL_DETECTOR_MAX_CYCLE_LENGTH,
-    ClearingService,
-)
+from app.core.clearing.service import ClearingService
 from app.db.models.audit_log import IntegrityAuditLog
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -116,26 +122,11 @@ from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fi
 from tests.debt_setup import transactions_of
 
 
-def _route_default(endpoint, name: str) -> int:
-    """The default a route publishes, read from the route.
-
-    Repeating `6` here would let the guard and the API drift apart silently, which is the
-    precise mechanism that hid this defect: the first-round tests named a depth of their own
-    and it was not the one users get.
-    """
-
-    marker = inspect.signature(endpoint).parameters[name].default
-    return int(getattr(marker, "default", marker))
-
-
-# 035 A1 (2026-10-08, owner decision П1-(а)): `GET /clearing/cycles` answers with the flow plan and has no `max_depth`,
-# so there is no route default to read. The detectors this module covers still have their own, with the same value
-# (6); it is read from `find_cycles`, still not repeated. The name is kept so no assertion below is touched.
-API_DEFAULT_MAX_DEPTH = _route_default(ClearingService.find_cycles, "max_depth")
-# MOVED 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3; decision 8): this module read the
-# default depth of `POST /clearing/auto` here and required it to equal the diagnostic's. Execution has no depth any
-# more - the route refuses the parameter - so there is no second default to agree with; the agreement assertion
-# below now requires its ABSENCE from the route's signature, and the reach tests keep the diagnostic's default.
+# REMOVED 2026-10-09 (035 A2b): `API_DEFAULT_MAX_DEPTH` and `_route_default`, which read a default depth - first from
+# the two clearing routes, then (035 A1) from `ClearingService.find_cycles`. Neither route has a depth and the
+# detector is gone, so there is nothing to read. History of the agreement assertion (023 slice (d), decision 8): it
+# required the two routes' defaults to be equal, then the ABSENCE of a depth on `POST /clearing/auto`; that last form
+# is the live one and stays in `test_the_executing_route_declares_no_depth`.
 
 _OPEN_POLICY = {
     "auto_clearing": True,
@@ -404,35 +395,33 @@ async def test_no_routed_answer_puts_an_exponent_on_the_wire(
     )
 
 
-async def test_one_debt_has_one_string_whichever_detector_answered(
+async def test_an_ordinary_debt_has_one_exact_string_on_the_diagnostic(
     db_session: AsyncSession,
 ) -> None:
-    """The SAME debts, asked of both producers, must come back byte for byte alike.
+    """An ordinary `0.01` under a precision-2 equivalent is the string `'0.01'`, on every edge.
 
-    This is the "two scales for one debt" half of the finding, and it needs the same rows on
-    both sides or it would be comparing fixtures rather than renderers.  So one triangle is
-    built once and read twice: through `find_triangles_sql`, where asyncpg hands back the
-    column's own scale, and through `find_cycles` at the route's default depth, where the ORM
-    DFS produces the answer.  A reader who cannot compare two responses as strings cannot use
-    them as identifiers, and one who parses them cannot tell which scale was meant.
+    MOVED 2026-10-09 (035 A2b). This was `test_one_debt_has_one_string_whichever_detector_answered`: one triangle
+    read twice - through `find_triangles_sql`, where asyncpg hands back the column's own scale (`'0.01000000'`
+    before the fix), and through `find_cycles`, where the ORM DFS answered - and both had to say exactly
+    `{"0.01"}`. The two producers are removed; "the two agree" has nothing left to compare. The exact form they had
+    to agree ON is a property of the clearing surface and stays, asked of the diagnostic's one producer: a reader
+    who compares responses as strings must get the declared precision and not the storage scale. No other test in
+    this module pins the precision-2 form of an ordinary amount (the parametrised one above pins `1E-8` and a
+    precision of 4).
     """
 
     eq = await _equivalent(db_session, "UAH", 2)
     triangle = await _ring(db_session, eq, ["p1", "p2", "p3"], Decimal("0.01"))
-    service = ClearingService(db_session)
 
-    via_sql = await service.find_triangles_sql(eq.id)
-    via_routed = await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH)
-    assert triangle in _cycle_sets(via_sql) and triangle in _cycle_sets(via_routed), (
-        "precondition: both producers must return the one triangle this test built"
+    cycles = await _diagnostic_cycles(db_session, "UAH")
+    assert _cycle_sets(cycles) == [triangle], (
+        f"precondition: the diagnostic must offer the one triangle this test built, once: {_cycle_sets(cycles)}"
     )
 
-    sql_forms = set(_all_amounts(via_sql))
-    routed_forms = set(_all_amounts(via_routed))
-    assert sql_forms == routed_forms == {"0.01"}, (
-        f"one debt, two renderings: find_triangles_sql -> {sorted(sql_forms)}, "
-        f"find_cycles -> {sorted(routed_forms)}. Which digits a caller sees must not depend "
-        "on which detector answered."
+    forms = set(_all_amounts(cycles))
+    assert forms == {"0.01"}, (
+        f"one stored 0.01 under a precision-2 equivalent, rendered as {sorted(forms)} on "
+        "GET /api/v1/clearing/cycles: the wire carries the declared precision, not the column's scale."
     )
 
 
@@ -474,23 +463,14 @@ async def test_precision_widens_the_clearing_amount_but_never_narrows_the_value(
 # --------------------------------------------------------------------------------------------
 
 
-def test_the_api_default_depth_is_past_what_the_sql_detectors_can_reach() -> None:
-    """The premise every reach test below rests on, asserted instead of assumed.
+def test_the_executing_route_declares_no_depth() -> None:
+    """`POST /clearing/auto` has no `max_depth` (programme 023, decision 8).
 
-    If someone lowers the route default to 4 or below, the SQL fast path can answer the whole
-    question and the early return becomes sound again - at which point the tests below stop
-    measuring anything and a reader must be told, not left with quietly vacuous assertions.
+    NARROWED 2026-10-09 (035 A2b). This was `test_the_api_default_depth_is_past_what_the_sql_detectors_can_reach`,
+    with two more assertions - the SQL detectors reach four edges, and the default depth exceeds that - which were
+    the premise of the detector reach tests and left with the detectors. This one is about a live route and stays.
     """
 
-    assert _SQL_DETECTOR_MAX_CYCLE_LENGTH == 4, (
-        "find_triangles_sql joins three debts rows and find_quadrangles_sql four; if that "
-        "changed, the constant and this module's reasoning must change together"
-    )
-    assert API_DEFAULT_MAX_DEPTH > _SQL_DETECTOR_MAX_CYCLE_LENGTH, (
-        f"GET /api/v1/clearing/cycles defaults to max_depth={API_DEFAULT_MAX_DEPTH}, which no "
-        f"longer exceeds the SQL detectors' reach of {_SQL_DETECTOR_MAX_CYCLE_LENGTH} edges. "
-        "The reach tests below now prove nothing; re-read them before trusting them."
-    )
     # 023 (d): the executing route has no depth to disagree about; a `max_depth` parameter there would be the
     # accepted-and-ignored (or MTCS-limiting) state decision 8 forbids.
     assert "max_depth" not in inspect.signature(clearing_route.auto_clear).parameters, (
@@ -526,44 +506,6 @@ async def test_at_the_api_default_depth_a_triangle_does_not_hide_a_long_cycle(
     assert long_cycle in found, (
         f"a 5-node cycle is missing while a 3-node one is reported: {len(found)} cycle(s) for two that exist"
     )
-
-
-@pytest.mark.parametrize("max_depth", [3, 4, 5, 6, 7])
-async def test_a_long_cycle_appears_exactly_when_the_caller_asks_deep_enough(
-    db_session: AsyncSession, max_depth: int
-) -> None:
-    """Across the boundary, not at one point on it.
-
-    The first round's guard asked only at `max_depth=3`, the single depth where the two
-    detectors have equal reach and the early return therefore cannot be wrong.  This walks
-    both sides: below 5 the 5-cycle is genuinely out of scope and must be absent, from 5 up it
-    was asked for and must be present - and the triangle must be reported at every depth,
-    which is what stops "always run the DFS and drop the SQL result" from passing as a fix.
-    """
-
-    eq = await _equivalent(db_session, "UAH", 2)
-    triangle = await _ring(db_session, eq, ["t1", "t2", "t3"], Decimal("0.01"))
-    long_cycle = await _ring(
-        db_session, eq, ["l1", "l2", "l3", "l4", "l5"], Decimal("50")
-    )
-
-    found = _cycle_sets(
-        await ClearingService(db_session).find_cycles("UAH", max_depth=max_depth)
-    )
-
-    assert triangle in found, (
-        f"the 3-node cycle is within reach at every depth >= 3 and is missing at "
-        f"{max_depth}: {found}"
-    )
-    if max_depth >= 5:
-        assert long_cycle in found, (
-            f"max_depth={max_depth} asks for cycles up to {max_depth} edges and the 5-node "
-            f"one is missing: {found}"
-        )
-    else:
-        assert long_cycle not in found, (
-            f"max_depth={max_depth} must not return a 5-edge cycle: {found}"
-        )
 
 
 async def test_the_long_cycle_is_reported_whether_or_not_a_short_one_exists(

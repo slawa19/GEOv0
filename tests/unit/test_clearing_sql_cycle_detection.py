@@ -5,7 +5,6 @@ import pytest
 from sqlalchemy import select
 
 from app.core.clearing.flow_planner import load_snapshot
-from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -20,8 +19,8 @@ from tests.p023_support import planned_cycles
 # while the eligible quadrangle beside it is - and now ask the PLANNER (`planned_cycles`), with their assertions on
 # the offered edges unchanged. They were `test_find_cycles_uses_sql_triangles`, `test_find_cycles_uses_sql_
 # quadrangles` and `test_find_cycles_filters_auto_clearing_policy_and_falls_back_to_quadrangles`. The fourth
-# (`test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d`) is a property of the SQL query alone; it still
-# calls it and leaves with it (A2b).
+# (`test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d`) was a property of the SQL query alone and left
+# with it 2026-10-09 (A2b; note at the end of the module).
 
 
 @pytest.mark.asyncio
@@ -192,33 +191,8 @@ async def test_a_triangle_blocked_by_policy_is_not_offered_and_the_eligible_quad
     assert len(cycles) == 1, offered
 
 
-@pytest.mark.asyncio
-async def test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d(db_session):
-    """Regression: exclude non-simple 4-edge patterns like A->B->C->B->A.
-
-    Such patterns repeat a vertex (B==D) and are not a simple quadrangle.
-    """
-
-    nonce = uuid.uuid4().hex[:10]
-    eq = Equivalent(code=("R" + nonce[:15]).upper(), symbol="R", description=None, precision=2, metadata_={}, is_active=True)
-    a = Participant(pid="A" + nonce, display_name="A", public_key="pkA-" + nonce, type="person", status="active", profile={})
-    b = Participant(pid="B" + nonce, display_name="B", public_key="pkB-" + nonce, type="person", status="active", profile={})
-    c = Participant(pid="C" + nonce, display_name="C", public_key="pkC-" + nonce, type="person", status="active", profile={})
-    db_session.add_all([eq, a, b, c])
-    await db_session.flush()
-
-    # Pattern: A -> B -> C -> B -> A (B repeats as the 4th vertex).
-    async with debt_fixture_setup(db_session, label="setup"):
-        db_session.add_all(
-            [
-                Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-                Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-                Debt(debtor_id=c.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-                Debt(debtor_id=b.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-            ]
-        )
-    await db_session.commit()
-
-    service = ClearingService(db_session)
-    cycles = await service.find_quadrangles_sql(eq.id)
-    assert cycles == []
+# REMOVED 2026-10-09 (035 A2b): `test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d` pinned one join
+# condition of the SQL quadrangle query - the four-edge walk A->B->C->B->A (the fourth vertex repeats the second)
+# must not be returned as a quadrangle. The query is removed. Nothing is moved: the stand had no trust lines, so the
+# planner's snapshot of it is empty for a different reason, and simplicity of the planner's cycles is its own
+# decomposition's property (`flow_planner`), covered by that module's tests.

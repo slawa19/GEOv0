@@ -312,50 +312,11 @@ async def test_execution_layer_refuses_a_cycle_outside_the_perimeter(db_session)
     )
 
 
-@pytest.mark.asyncio
-async def test_the_sql_producer_itself_is_scoped(db_session):
-    """Pin the SQL predicate directly, not through `find_cycles`.
-
-    `find_cycles` wraps the whole SQL block in a broad `except Exception` and falls through
-    to the DFS producer (`app/core/clearing/service.py:924`).  Since the DFS load is narrowed
-    too, a scoped-SQL that is simply BROKEN still yields a correct empty result - silently,
-    and by loading every debt of the equivalent instead of a handful.  So the route-level
-    and `find_cycles`-level tests cannot tell a working predicate from a broken one, and
-    this case exists to.
-    """
-
-    eq, _people = await _seed_two_runs(db_session)
-    service = ClearingService(db_session)
-
-    # The raw producer emits one row per starting vertex; `find_cycles` dedupes them later
-    # (`_deduplicate_cycles`).  Three rotations of the same triangle is the correct shape here.
-    unscoped = await service.find_triangles_sql(eq.id)
-    assert len(unscoped) == 3, f"the stand must have one triangle, three rotations: {unscoped}"
-
-    foreign_scope = set(
-        (
-            await db_session.execute(
-                select(Participant.id).where(Participant.pid.in_(["a1", "a2", "a3"]))
-            )
-        ).scalars().all()
-    )
-    assert len(foreign_scope) == 3
-
-    scoped = await service.find_triangles_sql(
-        eq.id, allowed_participant_ids=foreign_scope
-    )
-    assert scoped == [], f"the SQL producer returned another run's cycle: {scoped}"
-
-    own_scope = set(
-        (
-            await db_session.execute(
-                select(Participant.id).where(Participant.pid.in_(["b1", "b2", "b3"]))
-            )
-        ).scalars().all()
-    )
-    assert len(await service.find_triangles_sql(eq.id, allowed_participant_ids=own_scope)) == 3, (
-        "the predicate must admit the owning run, not reject everything"
-    )
+# REMOVED 2026-10-09 (035 A2b): `test_the_sql_producer_itself_is_scoped` pinned the perimeter predicate of
+# `find_triangles_sql` directly, because `find_cycles` swallowed a broken SQL producer and fell through to the DFS.
+# The query and the fall-through are removed. The perimeter of the one remaining producer - a foreign scope sees
+# nothing, the owning scope sees its cycle, a scope holding two of three vertices sees nothing - is
+# `test_detection_layer_does_not_return_a_foreign_cycle` above.
 
 
 # Found by external review of this batch: two ways the perimeter was still bypassable.
