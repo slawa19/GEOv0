@@ -1,6 +1,7 @@
 import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
+import { actionOutcomeUnknownText } from '../utils/paymentRefusalText'
 import {
   actionClearingReal,
   actionPaymentReal,
@@ -33,6 +34,11 @@ export type InteractActionError = {
   bodyText?: string
   /** Convenience flag for feature-flagged endpoints (SIMULATOR_ACTIONS_ENABLE=0). */
   actionsDisabled?: boolean
+  /**
+   * The server's correlation id (`X-Request-ID`): the simulator action errors have a flat body without
+   * `request_id`, so the header is the only source. Read by `extractErrorMessage` as `(ref: ...)`.
+   */
+  requestId?: string | null
 }
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
@@ -96,6 +102,7 @@ function mapToInteractActionError(e: unknown): InteractActionError {
       details,
       bodyText: e.bodyText,
       actionsDisabled: e.status === 403 && code === 'ACTIONS_DISABLED',
+      requestId: e.requestId,
     }
   }
 
@@ -182,7 +189,7 @@ export function useInteractActions(opts: {
     return id
   }
 
-  async function wrap<T>(fn: () => Promise<T>): Promise<T> {
+  async function wrap<T>(fn: () => Promise<T>, o?: { mutating?: boolean }): Promise<T> {
     try {
       // Do NOT clear `actionsDisabled` optimistically before awaiting.
       // If backend keeps rejecting with 403 ACTIONS_DISABLED, the UI should not flicker.
@@ -190,6 +197,12 @@ export function useInteractActions(opts: {
     } catch (e) {
       const mapped = mapToInteractActionError(e)
       if (mapped.actionsDisabled) actionsDisabled.value = true
+
+      // A mutating action that got no answer in time is NOT a refusal: it may have been carried out. Say so, in
+      // the client's own words, instead of the technical timeout line that reads like a failed request.
+      if (o?.mutating && e instanceof ApiError && e.outcomeUnknown) {
+        mapped.message = actionOutcomeUnknownText(e.timeoutMs)
+      }
 
       // If the run no longer exists, stop issuing run-scoped calls.
       // This can happen if a previously stored runId becomes stale (backend restart, TTL, cleanup).
@@ -202,7 +215,7 @@ export function useInteractActions(opts: {
   }
 
   async function wrapAction<T>(fn: () => Promise<T>): Promise<T> {
-    const res = await wrap(fn)
+    const res = await wrap(fn, { mutating: true })
     // Clear only after a successful *action* call (feature flag may have been re-enabled).
     actionsDisabled.value = false
     return res

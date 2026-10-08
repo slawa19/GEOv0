@@ -43,6 +43,8 @@ export const LONG_REQUEST_TIMEOUT_MS = 120_000
 
 /** `ApiError.code` of a request that did not finish in time. Status is 0: no HTTP answer completed. */
 export const API_TIMEOUT_CODE = 'TIMEOUT'
+/** `ApiError.code` of a 2xx answer whose body is not JSON (a proxy page, an empty body). */
+export const API_INVALID_JSON_CODE = 'INVALID_JSON'
 
 export type HttpRequestInit = RequestInit & {
   /** Bound of the whole exchange - headers AND body. Default `DEFAULT_REQUEST_TIMEOUT_MS`. */
@@ -56,16 +58,37 @@ export class ApiError extends Error {
   code?: string
   /** The server's correlation id (`X-Request-ID` header or `error.request_id` in the body); null when it gave none. */
   requestId: string | null
+  /**
+   * True when the request was SENT with a method that may change state and no answer came back in time: the server
+   * may or may not have applied it. Never true for a GET/HEAD (nothing to apply) and never for an answered request.
+   */
+  outcomeUnknown: boolean
+  /** The bound that expired, for a timeout; undefined otherwise. */
+  timeoutMs?: number
 
-  constructor(message: string, opts: { status: number; bodyText?: string; code?: string; requestId?: string | null }) {
+  constructor(
+    message: string,
+    opts: {
+      status: number
+      bodyText?: string
+      code?: string
+      requestId?: string | null
+      outcomeUnknown?: boolean
+      timeoutMs?: number
+    },
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = opts.status
     this.bodyText = opts.bodyText
     this.code = opts.code
     this.requestId = opts.requestId ? opts.requestId : null
+    this.outcomeUnknown = opts.outcomeUnknown === true
+    this.timeoutMs = opts.timeoutMs
   }
 }
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 /** True for the `ApiError` raised by the request bound; a caller's own cancellation is an `AbortError`, never this. */
 export function isTimeoutError(e: unknown): e is ApiError {
@@ -120,7 +143,7 @@ async function boundedRequest<T>(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-  handle: (res: Response, guard: Guard) => Promise<T>,
+  handle: (res: Response, guard: Guard, callerSignal: AbortSignal | null) => Promise<T>,
 ): Promise<T> {
   const callerSignal = init.signal ?? null
   if (callerSignal?.aborted) throw abortReasonOf(callerSignal)
@@ -131,7 +154,15 @@ async function boundedRequest<T>(
 
   const bound = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new ApiError(`${method} ${path} -> timeout after ${timeoutMs}ms`, { status: 0, code: API_TIMEOUT_CODE }))
+      const unsafe = !SAFE_METHODS.has(method.toUpperCase())
+      reject(
+        new ApiError(
+          unsafe
+            ? `${method} ${path} -> timeout after ${timeoutMs}ms: no answer, the result is unknown (the request may have been applied)`
+            : `${method} ${path} -> timeout after ${timeoutMs}ms`,
+          { status: 0, code: API_TIMEOUT_CODE, outcomeUnknown: unsafe, timeoutMs },
+        ),
+      )
       controller.abort()
     }, timeoutMs)
     if (callerSignal) {
@@ -149,20 +180,22 @@ async function boundedRequest<T>(
 
   try {
     const res = await guard(fetch(url, { credentials: 'include', ...init, signal: controller.signal }))
-    return await handle(res, guard)
+    return await handle(res, guard, callerSignal)
   } finally {
     if (timer !== undefined) clearTimeout(timer)
     if (callerSignal && onCallerAbort) callerSignal.removeEventListener('abort', onCallerAbort)
   }
 }
 
-async function failFromResponse(res: Response, path: string, guard: Guard): Promise<never> {
+async function failFromResponse(res: Response, path: string, guard: Guard, callerSignal: AbortSignal | null): Promise<never> {
   let bodyText: string | undefined
   try {
     bodyText = await guard(res.text())
   } catch (e) {
-    // A bound or a cancel while the body is read is the failure itself, not "no body".
-    if (e instanceof ApiError || (e as { name?: string } | null)?.name === 'AbortError') throw e
+    // A bound or a cancel while the body is read is the failure itself, not "no body". The caller's cancel wins
+    // with ITS reason, whatever that is; any other read error (a dropped connection) leaves the answer without a body.
+    if (callerSignal?.aborted) throw abortReasonOf(callerSignal)
+    if (isTimeoutError(e)) throw e
     bodyText = undefined
   }
   throw new ApiError(`HTTP ${res.status} ${res.statusText} for ${path}`, {
@@ -179,7 +212,15 @@ function splitInit(init?: HttpRequestInit): { fetchInit: RequestInit; timeoutMs:
   return { fetchInit, timeoutMs: bound }
 }
 
-export async function httpJson<T>(cfg: HttpConfig, path: string, init?: HttpRequestInit): Promise<T> {
+/** A JSON answer together with the correlation id the server put in its header (`null` when it sent none). */
+export type HttpJsonResult<T> = { value: T; requestId: string | null }
+
+/**
+ * Like `httpJson`, but also hands back the id of the ANSWER, so a caller that rejects a 2xx body (a response
+ * contract check) can still name the request in the error. A 2xx body that is not JSON is an `ApiError`
+ * (`API_INVALID_JSON_CODE`) carrying the id, as the admin client does.
+ */
+export async function httpJsonMeta<T>(cfg: HttpConfig, path: string, init?: HttpRequestInit): Promise<HttpJsonResult<T>> {
   const url = joinUrl(cfg.apiBase, path)
   const { fetchInit, timeoutMs } = splitInit(init)
 
@@ -191,11 +232,26 @@ export async function httpJson<T>(cfg: HttpConfig, path: string, init?: HttpRequ
   // credentials: 'include' (set in boundedRequest) sends cookies (e.g. geo_sim_sid) with every request.
   // This enables anonymous-visitor cookie-auth when no accessToken is provided.
   const method = String(fetchInit.method ?? 'GET')
-  return boundedRequest(method, path, url, { ...fetchInit, headers }, timeoutMs, async (res, guard) => {
-    if (!res.ok) return failFromResponse(res, path, guard)
-    if (res.status === 204) return undefined as T
-    return (await guard(res.json())) as T
+  return boundedRequest(method, path, url, { ...fetchInit, headers }, timeoutMs, async (res, guard, callerSignal) => {
+    if (!res.ok) return failFromResponse(res, path, guard, callerSignal)
+    const requestId = nonEmptyString(res.headers?.get('X-Request-ID'))
+    if (res.status === 204) return { value: undefined as T, requestId }
+    const text = await guard(res.text())
+    try {
+      return { value: JSON.parse(text) as T, requestId }
+    } catch {
+      throw new ApiError(`${method} ${path} -> HTTP ${res.status} answer is not valid JSON`, {
+        status: res.status,
+        bodyText: text.slice(0, 500),
+        code: API_INVALID_JSON_CODE,
+        requestId,
+      })
+    }
   })
+}
+
+export async function httpJson<T>(cfg: HttpConfig, path: string, init?: HttpRequestInit): Promise<T> {
+  return (await httpJsonMeta<T>(cfg, path, init)).value
 }
 
 export async function httpText(cfg: HttpConfig, path: string, init?: HttpRequestInit): Promise<string> {
@@ -208,8 +264,8 @@ export async function httpText(cfg: HttpConfig, path: string, init?: HttpRequest
   applyAuthHeaders(headers, cfg.accessToken)
 
   const method = String(fetchInit.method ?? 'GET')
-  return boundedRequest(method, path, url, { ...fetchInit, headers }, timeoutMs, async (res, guard) => {
-    if (!res.ok) return failFromResponse(res, path, guard)
+  return boundedRequest(method, path, url, { ...fetchInit, headers }, timeoutMs, async (res, guard, callerSignal) => {
+    if (!res.ok) return failFromResponse(res, path, guard, callerSignal)
     return await guard(res.text())
   })
 }

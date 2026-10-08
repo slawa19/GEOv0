@@ -1,4 +1,4 @@
-import { httpJson, httpUrl, LONG_REQUEST_TIMEOUT_MS, type HttpConfig, type HttpRequestInit } from './http'
+import { ApiError, httpJson, httpJsonMeta, httpUrl, LONG_REQUEST_TIMEOUT_MS, type HttpConfig, type HttpRequestInit } from './http'
 import {
   decodeBottlenecksResponse,
   decodeClearingOnceResponse,
@@ -54,8 +54,14 @@ async function simulatorContractJson<T>(
   decoder: (value: unknown) => T,
   init?: HttpRequestInit,
 ): Promise<T> {
-  const value = await httpJson<unknown>(cfg, path, init)
-  return decoder(value)
+  const { value, requestId } = await httpJsonMeta<unknown>(cfg, path, init)
+  try {
+    return decoder(value)
+  } catch (e) {
+    // A 2xx answer that breaks the response contract still names the request that produced it.
+    if (e instanceof ApiError && !e.requestId) e.requestId = requestId
+    throw e
+  }
 }
 
 export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {

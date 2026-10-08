@@ -1,6 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
+import { extractErrorMessage } from '../utils/errorMessage'
 import type { GraphSnapshot } from '../types'
 
 type SceneId = 'A' | 'B' | 'C'
@@ -81,8 +82,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let hasLoadedOnce = false
 
   function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message
-    return String(error)
+    return extractErrorMessage(error)
   }
 
   function parseSceneContext(sourcePath: string | null | undefined): { kind: 'scenario' | 'run' | 'other'; id: string } {

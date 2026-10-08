@@ -17,14 +17,22 @@ function requestIdOf(e: unknown): string | null {
 }
 
 /**
+ * `text` with the server's correlation id of `e` appended as `(ref: <id>)`, when `e` carries one. For texts the
+ * client composes itself (refusal texts) so that they can be found in the server log like any other error.
+ * Not repeated when the text already shows the id.
+ */
+export function withRequestRef(text: string, e: unknown): string {
+  const requestId = requestIdOf(e)
+  if (!requestId || text.includes(requestId)) return text
+  return text ? `${text} (ref: ${requestId})` : `(ref: ${requestId})`
+}
+
+/**
  * Extracts a human-readable error message from an unknown caught value.
  *
  * When the error carries the server's correlation id, the text ends with `(ref: <id>)`, so a message seen in the
  * UI can be found in the server log (AGENTS.md section 12).
  */
 export function extractErrorMessage(e: unknown): string {
-  const message = baseMessage(e)
-  const requestId = requestIdOf(e)
-  if (!requestId || message.includes(requestId)) return message
-  return message ? `${message} (ref: ${requestId})` : `(ref: ${requestId})`
+  return withRequestRef(baseMessage(e), e)
 }
