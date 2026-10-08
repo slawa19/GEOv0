@@ -464,7 +464,7 @@ async def load_graph(
     eq_models = (await db.execute(select(EquivalentModel).order_by(EquivalentModel.code.asc()))).scalars().all()
     equivalents = [StoredEquivalent.model_validate(e) for e in eq_models]
 
-    net_code = str(net_equivalent or "").strip().upper()
+    net_code = net_equivalent  # already the canonical code: the route reads it through `canonical_code`
     if net_code and participants:
         net_model = next((e for e in eq_models if e.code == net_code), None)
         if net_model is not None:

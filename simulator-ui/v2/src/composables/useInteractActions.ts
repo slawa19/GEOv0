@@ -1,6 +1,7 @@
 import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
+import { actionOutcomeUnknownText } from '../utils/paymentRefusalText'
 import {
   actionClearingReal,
   actionPaymentReal,
@@ -33,10 +34,18 @@ export type InteractActionError = {
   bodyText?: string
   /** Convenience flag for feature-flagged endpoints (SIMULATOR_ACTIONS_ENABLE=0). */
   actionsDisabled?: boolean
+  /**
+   * The server's correlation id (`X-Request-ID`): the simulator action errors have a flat body without
+   * `request_id`, so the header is the only source. Read by `extractErrorMessage` as `(ref: ...)`.
+   */
+  requestId?: string | null
 }
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
   if (!e || typeof e !== 'object') return false
+  // An `ApiError` also has `status`/`code`/`message` (since the transport bound, `code` is 'TIMEOUT' or
+  // 'INVALID_JSON'), but it is the raw failure, not the mapped action error: it must go through the mapper.
+  if (e instanceof ApiError) return false
   if (!('status' in e) || !('code' in e) || !('message' in e)) return false
   const v = e as Record<string, unknown>
   return typeof v.status === 'number' && typeof v.code === 'string' && typeof v.message === 'string'
@@ -84,8 +93,11 @@ function mapToInteractActionError(e: unknown): InteractActionError {
   if (isInteractActionError(e)) return e
 
   if (e instanceof ApiError) {
-    const parsed = parseActionErrorJson(e.bodyText)
-    const code = parsed?.code ?? `HTTP_${e.status}`
+    // Only the body of an ERROR answer is an error envelope. The `bodyText` of a 2xx failure (an invalid-JSON
+    // excerpt, a contract diagnostic) is not one, and a transport code (`ApiError.code`: TIMEOUT, INVALID_JSON)
+    // outranks anything parsed from a body: a request with no usable answer has no HTTP status to name it by.
+    const parsed = e.status >= 400 ? parseActionErrorJson(e.bodyText) : null
+    const code = e.code ?? parsed?.code ?? `HTTP_${e.status}`
     const message = parsed?.message ?? e.message
     const details = parsed?.details ?? null
     return {
@@ -95,6 +107,7 @@ function mapToInteractActionError(e: unknown): InteractActionError {
       details,
       bodyText: e.bodyText,
       actionsDisabled: e.status === 403 && code === 'ACTIONS_DISABLED',
+      requestId: e.requestId,
     }
   }
 
@@ -189,6 +202,13 @@ export function useInteractActions(opts: {
     } catch (e) {
       const mapped = mapToInteractActionError(e)
       if (mapped.actionsDisabled) actionsDisabled.value = true
+
+      // A request with a state-changing method that got no answer in time is NOT a refusal: it may have been
+      // carried out (`outcomeUnknown` is never set for a read). Say so, in the client's own words, instead of the
+      // technical timeout line that reads like a failed request.
+      if (e instanceof ApiError && e.outcomeUnknown) {
+        mapped.message = actionOutcomeUnknownText(e.timeoutMs)
+      }
 
       // If the run no longer exists, stop issuing run-scoped calls.
       // This can happen if a previously stored runId becomes stale (backend restart, TTL, cleanup).

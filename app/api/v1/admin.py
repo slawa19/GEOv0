@@ -60,7 +60,6 @@ from app.utils.exceptions import (
     BadRequestException,
     NotFoundException,
 )
-from app.utils.validation import validate_equivalent_code
 
 from app.schemas.metrics import AdminParticipantMetricsResponse
 
@@ -336,7 +335,11 @@ async def admin_participants_stats(
     )
 
 
-@router.get("/liquidity/summary", response_model=AdminLiquiditySummaryResponse)
+@router.get(
+    "/liquidity/summary",
+    response_model=AdminLiquiditySummaryResponse,
+    responses={400: {"model": ErrorEnvelope, "description": "`equivalent` is not an equivalent code after normalisation"}},
+)
 async def admin_liquidity_summary(
     equivalent: str | None = Query(None, description="Equivalent code (optional; omitted: counters only, money null)"),
     db: AsyncSession = Depends(deps.get_db),
@@ -348,7 +351,7 @@ async def admin_liquidity_summary(
     equivalent still shows its own sums.
     """
 
-    eq_code = str(equivalent or "").strip().upper() or None
+    eq_code = equivalents_core.canonical_code(equivalent) if equivalent is not None else None
     now = _utc_now()
 
     used_expr = func.coalesce(Debt.amount, 0)
@@ -537,7 +540,10 @@ async def admin_list_equivalents(
 
 #: 032 A-11, 033 A item 5: PATCH, DELETE, usage and the integrity-hold clear normalise the path code
 #: (`equivalents_core.canonical_code`); one that cannot exist after that is a 400, declared on both halves of the
-#: contract.
+#: contract.  035 B1 (F-035-10): the `equivalent` QUERY of `liquidity/summary`, `graph/snapshot`, `graph/ego` and
+#: `participants/{pid}/metrics` reads through the same function, so a code means the same thing wherever it is typed.
+#: `/admin/trustlines?equivalent=` is the deliberate exception: its filter is exact (032 S4, pinned by
+#: `test_trustline_filters_are_exact_and_compose`).
 _CODE_CANNOT_EXIST = {400: {"model": ErrorEnvelope, "description": "Not an equivalent code after normalisation"}}
 
 
@@ -793,10 +799,9 @@ async def admin_graph_snapshot(
     Guardrail: TrustLine direction in output is from→to = creditor→debtor.
     """
 
-    if equivalent is not None:
-        validate_equivalent_code(equivalent)
+    net_equivalent = equivalents_core.canonical_code(equivalent) if equivalent is not None else None
 
-    return AdminGraphSnapshotResponse(**await load_graph(db, net_equivalent=equivalent, include=include))
+    return AdminGraphSnapshotResponse(**await load_graph(db, net_equivalent=net_equivalent, include=include))
 
 
 @router.get(
@@ -831,8 +836,7 @@ async def admin_graph_ego(
     if not root_pid:
         raise BadRequestException("pid is required")
 
-    if equivalent is not None:
-        validate_equivalent_code(equivalent)
+    equivalent = equivalents_core.canonical_code(equivalent) if equivalent is not None else None
 
     root = (await db.execute(select(Participant).where(Participant.pid == root_pid))).scalar_one_or_none()
     if not root:
