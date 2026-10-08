@@ -103,6 +103,7 @@ async def test_the_tick_removes_a_closed_line_only_after_a_confirmed_commit(clie
         assert sse.events == [], "an observation was published before the transaction's outcome"
         if outcome == "commit":
             await session.commit()
+            await effects.build_post_commit_patches(factory)  # 034 F-034-2: the owner reads the patches after its commit
             assert effects.apply_after_commit()
             await asyncio.gather(*effects.closed_publications)
         else:
@@ -169,6 +170,8 @@ async def test_a_late_publication_does_not_erase_a_line_recreated_after_the_clos
         result = await _tick_payment(session, run, sse, code, p)
         assert result.committed == 1, result
         await session.commit()
+    # 034 F-034-2: the patches (and with them the closed pair) are read after the commit, BEFORE the re-create below.
+    await result.deferred_effects.build_post_commit_patches(factory)
     assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
 
     key = SigningKey(base64.b64decode(p["A"]["priv"]))
@@ -208,6 +211,8 @@ async def test_a_line_recreated_after_the_liveness_read_is_not_erased(client, db
         result = await _tick_payment(session, run, sse, code, p)
         assert result.committed == 1, result
         await session.commit()
+    # 034 F-034-2: the patches (and with them the closed pair) are read after the commit, BEFORE the re-create below.
+    await result.deferred_effects.build_post_commit_patches(factory)
     assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed", "the book did not complete the close"
 
     read_live = sse_broadcast._live_pairs

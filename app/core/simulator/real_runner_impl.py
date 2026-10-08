@@ -689,8 +689,19 @@ class RealRunnerImpl:
         equivalent: str,
         amount: str,
         seq: int,
+        epoch: int = 0,
     ) -> str:
+        """The idempotency key (and `tx_id`) of one planned payment of one tick of one LAUNCH of a run.
+
+        034 `F-034-1`: `epoch` is `RunRecord._launch_epoch`. A restart keeps `run_id` and starts the tick numbers
+        again, so without it the restarted run's first ticks repeated the keys of the first launch and the payment
+        service answered them with the stored payments - reported as paid, nothing moved. The first launch
+        (epoch 0) keeps the key it always had, byte for byte; within one launch a repeated tick still repeats its
+        keys, which is what makes a replayed money phase idempotent.
+        """
         material = f"{run_id}|{tick_ms}|{sender_pid}|{receiver_pid}|{equivalent}|{amount}|{seq}"
+        if int(epoch) > 0:
+            material += f"|epoch={int(epoch)}"
         return "sim:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
     async def _load_real_participants(

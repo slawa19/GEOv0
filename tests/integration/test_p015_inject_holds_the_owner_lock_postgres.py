@@ -320,12 +320,28 @@ async def test_the_observer_sees_a_debt_written_without_the_line_locks(observed_
 
 
 @pytest.mark.asyncio
-async def test_a_real_tick_reads_its_payments_snapshot_under_the_owner_lock(
+async def test_a_real_tick_plans_before_its_money_transaction_and_writes_debts_under_the_line_locks(
     observed_factory, monkeypatch
 ) -> None:
-    """The payments phase of a real tick reads its debt snapshot inside a transaction that holds every run
-    equivalent's lines (015 step 3, through the orchestrator's own PostgreSQL branch). The debts are seeded
-    as fixtures (a `TEST_FIXTURE` operation), the scenario has no events, and the tick must leave them as they were."""
+    """A real tick, through the orchestrator's own PostgreSQL branch, with payments of its own in both equivalents:
+
+    1. its planning reads are finished, and their session has given its connection back, BEFORE the money
+       transaction takes a connection and the line locks;
+    2. its payments really change the debts, by exactly what was planned;
+    3. every debt it writes is written under the line locks of the debt's pair (015 step 3);
+    4. all of that is OBSERVED inside the wrappers and ASSERTED after the tick has returned.
+
+    CHANGED 2026-10-08 (034 `F-034-2`, §15 review of `62cce627`; was
+    `test_a_real_tick_reads_its_payments_snapshot_under_the_owner_lock`). The test used to assert that the planning
+    debt snapshot is read inside a transaction holding the lines. That was never the 015 invariant: step 3 is about
+    WRITES leaving the journal's order when a nested commit released the owner lock (the module docstring, "WHAT
+    WAS WRONG"); the snapshot is advisory - the planner may run without it, and the payment service takes the pair's
+    lines, reads the debts behind them and checks capacity itself (`PaymentService._bind_payment`, `._segment`).
+    Reading it under the locks made the tick hold `FOR UPDATE` while it waited for a second pooled connection. So
+    claim 1 replaces the old one, and claims 2-3 are new here: the old tick planned nothing (`intensity_percent` 0)
+    and could not show anything about a tick's own writes. The control "a write without the lock is observed as not
+    held" is the test above, unchanged.
+    """
     import app.core.simulator.storage as simulator_storage
     import app.db.session as app_db_session
 
@@ -342,14 +358,20 @@ async def test_a_real_tick_reads_its_payments_snapshot_under_the_owner_lock(
         await session.commit()
     _observations.clear()  # the fixture's own flushes are not under test
 
+    # The debtor pays the creditor on the creditor's line in each equivalent; the amounts are bounded far below what
+    # the lines (100.00) have left, so every planned payment is carried.
     scenario: dict[str, Any] = {
         "equivalents": [eq.code for eq in world.equivalents],
-        "participants": [{"id": world.creditor.pid}, {"id": world.debtor.pid}],
-        "trustlines": [],
-        "behaviorProfiles": [],
+        "participants": [{"id": world.creditor.pid, "behaviorProfileId": "payer"},
+                         {"id": world.debtor.pid, "behaviorProfileId": "payer"}],
+        "trustlines": [{"from": world.creditor.pid, "to": world.debtor.pid, "equivalent": eq.code,
+                        "limit": "100.00", "status": "active"} for eq in world.equivalents],
+        "behaviorProfiles": [{"id": "payer", "props": {
+            "amount_model": {eq.code: {"min": "1.00", "max": "4.00"} for eq in world.equivalents}}}],
         "events": [],
     }
     run = _run(world, "p015-real-tick")
+    run.intensity_percent = 100  # this tick plans payments of its own
     artifacts = _Artifacts()
     runner = _runner(run, scenario, artifacts)
 
@@ -360,31 +382,66 @@ async def test_a_real_tick_reads_its_payments_snapshot_under_the_owner_lock(
         monkeypatch.setattr(simulator_storage, name, _noop)
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", observed_factory)
 
-    snapshot_locks: list[_Observation] = []
+    # Observed inside the wrappers, asserted below: an assertion raised in here would be swallowed by the tick's own
+    # handling of a failed planning read and surface as something else.
+    pool = observed_factory.kw["bind"].sync_engine.pool
+    order: list[dict[str, Any]] = []
+    plans: list[list[Any]] = []
     original_snapshot = runner._load_debt_snapshot_by_pid
+    original_lock = PaymentService.lock_staged_lines
+    original_plan = runner._plan_real_payments
 
     async def _observed_snapshot(session, participants, equivalents):
-        for eq in world.equivalents:
-            pid, held, error = await session.run_sync(lambda s, _id=eq.id: _holds(s, _id))
-            snapshot_locks.append(_Observation("debt snapshot", eq.id, pid, held, error))
+        order.append({"event": "snapshot", "session": session})
         return await original_snapshot(session, participants, equivalents)
 
+    async def _observed_lock(service, *args, **kwargs):
+        order.append({
+            "event": "lock",
+            "planning_open": [o["session"].in_transaction() for o in order if o["event"] == "snapshot"],
+            "connections_out": pool.checkedout(),
+            "money_begun": service.session.in_transaction(),
+            "planning_is_money": any(o["session"] is service.session for o in order if o["event"] == "snapshot"),
+        })
+        return await original_lock(service, *args, **kwargs)
+
+    def _recorded_plan(*args, **kwargs):
+        planned = original_plan(*args, **kwargs)
+        plans.append(list(planned))
+        return planned
+
     monkeypatch.setattr(runner, "_load_debt_snapshot_by_pid", _observed_snapshot)
+    monkeypatch.setattr(PaymentService, "lock_staged_lines", _observed_lock)
+    monkeypatch.setattr(runner, "_plan_real_payments", _recorded_plan)
 
     await runner.tick_real_mode(run.run_id)
-
     stored = await _stored(observed_factory, world)
-    assert stored == {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}, (
-        f"the tick must leave the seeded debts as they were, got {stored}; artifacts: {artifacts.events}"
-    )
-    assert not _observations, f"a tick with no events and no payments wrote a debt: {_observations}"
 
-    assert {o.equivalent_id for o in snapshot_locks} == {eq.id for eq in world.equivalents}, (
-        "non-vacuity: the payments phase never read its debt snapshot"
+    # 1. Planning first, on its own session, released before the money transaction takes anything.
+    assert run._real_money_replays_total == 0 and run.last_error is None, (run._real_money_replays_total, run.last_error)
+    assert [o["event"] for o in order] == ["snapshot", "lock"], (
+        f"the planning snapshot and the line locks came in the order {[o['event'] for o in order]}: the snapshot "
+        "must be read before the money transaction takes its line locks (034 F-034-2)"
     )
-    assert not [o for o in snapshot_locks if o.error], snapshot_locks
-    unlocked = [o for o in snapshot_locks if not o.held]
-    assert not unlocked, (
-        "the payments phase read its debt snapshot without the owner lock it plans against: "
-        f"{unlocked}"
+    lock = order[1]
+    assert (lock["planning_open"], lock["connections_out"], lock["money_begun"], lock["planning_is_money"]) == (
+        [False], 0, False, False), (
+        f"when the money transaction took its line locks: {dict(lock)}; expected the planning session ended, no "
+        "pooled connection held by the tick, the money transaction not begun, and planning on a session of its own"
     )
+
+    # 2. The tick's own payments moved the debts, in both equivalents, by what it planned.
+    assert len(plans) == 1 and plans[0], plans
+    code_to_id = {eq.code: eq.id for eq in world.equivalents}
+    expected = {eq.id: amount for eq, amount in zip(world.equivalents, _AMOUNTS)}
+    for action in plans[0]:
+        assert (action.sender_pid, action.receiver_pid) == (world.debtor.pid, world.creditor.pid), action
+        expected[code_to_id[action.equivalent]] += Decimal(action.amount)
+    assert all(expected[eq.id] > amount for eq, amount in zip(world.equivalents, _AMOUNTS)), (
+        f"non-vacuity: the tick planned no payment in one of the equivalents: {plans[0]}"
+    )
+    assert stored == expected, f"the tick's payments left {stored}, planned {expected}; artifacts: {artifacts.events}"
+
+    # 3. Every one of those writes held the line locks of its pair.
+    _assert_every_debt_write_was_locked(world)
+    assert len(_observations) >= len(plans[0]), (len(_observations), plans[0])

@@ -381,7 +381,8 @@ def _competitor_after_snapshot(
                     queued = await queue_behind_the_victim(
                         session, other,
                         hold=text(f"LOCK TABLE {_PREFIX_BARRIER} IN ACCESS EXCLUSIVE MODE"),
-                        # the lines, as below: the replay waits for the competitor's commit before it re-plans
+                        # the lines, as below: the replay's MONEY transaction waits on them for the competitor's
+                        # commit (its plan, read before the line locks since 034 `F-034-2`, may predate that commit)
                         wait_on_victim=the_lines,
                     )
                 else:
@@ -476,6 +477,50 @@ def _record_staged_conflicts(monkeypatch) -> list[str]:
     return conflicts
 
 
+def _record_written_here(monkeypatch) -> dict[str, bool]:
+    """tx_id -> whether the LAST staged call for it wrote its row itself (`written_here`), as opposed to being
+    answered from a stored row. A replay may plan the very payment a discarded attempt staged, under the same
+    `tx_id`; a row of that id is then the replay's own only if the replay wrote it."""
+
+    written: dict[str, bool] = {}
+    original = PaymentService.create_payment_internal_staged
+
+    async def _recording(self, *args, **kwargs):
+        staged = await original(self, *args, **kwargs)
+        written[str(staged.result.tx_id)] = bool(staged.written_here)
+        return staged
+
+    monkeypatch.setattr(PaymentService, "create_payment_internal_staged", _recording)
+    return written
+
+
+def _count_planning_reads(monkeypatch, runner: RealRunnerImpl) -> list[int]:
+    """One entry per read of the planning debt snapshot. Install BEFORE `_competitor_after_snapshot`."""
+
+    reads: list[int] = []
+    original = runner._load_debt_snapshot_by_pid
+
+    async def _counting(session, participants, equivalents):
+        reads.append(1)
+        return await original(session, participants, equivalents)
+
+    monkeypatch.setattr(runner, "_load_debt_snapshot_by_pid", _counting)
+    return reads
+
+
+def _carried_by_the_core(plan: list[Any], left: Decimal) -> list[Decimal]:
+    """Which payments of `plan`, in order, fit the capacity `left` on the stand's one line - what the payment
+    service, which checks capacity itself behind the pair's line locks, must carry and what it must refuse."""
+
+    carried: list[Decimal] = []
+    for action in plan:
+        amount = Decimal(action.amount)
+        if amount <= left:
+            carried.append(amount)
+            left -= amount
+    return carried
+
+
 def _record_conflict_sqlstates(monkeypatch) -> list[str | None]:
     """The SQLSTATE of the DATABASE error behind every conflict the tick's payments raised.
 
@@ -560,6 +605,23 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
 
     This is the long-standing half of the defect - it has behaved this way since well before
     T1525, on the backend the application actually runs concurrency on.
+
+    CHANGED 2026-10-08 (034 S1a, decision of the §15 fix-delta review, `REVERT-WAIT-AND-REVISE-P1`). This test
+    used to assert that the REPLAYED plan was sized against a snapshot that already includes the competitor
+    (`second <= _REMAINING`), and therefore that the replay's payment is always carried. That held while the
+    planning snapshot was read under the money transaction's line locks: the replay queued behind the competitor
+    and read after it. Since 034 `F-034-2` the planning inputs are read BEFORE the line locks, on a session of
+    their own, so the replay may read them before the competitor's commit has finished. That freshness is a
+    property of liveness, not of the correctness of a debt - the P1 decision itself draws that line
+    (`specs/015-financial-core-verification/spec.md`, P1) - and the money decision is the payment service's, behind
+    the pair's line locks: a stale plan moves no debt, it is refused honestly.
+
+    WHAT IS KEPT: the conflict is real and the phase is replayed once; the plan IS recomputed in the replay (the
+    planner runs again on inputs read again - only the promise that those inputs include a competitor still
+    committing is gone); nothing of the discarded attempt survives; the competitor's debt stands; one row and one
+    observation per payment. WHAT REPLACED THE FRESHNESS CLAIM: both honest outcomes of the replay are accepted
+    and checked by one rule, the report equals the rows - a replanned amount that fits what the competitor left is
+    carried, one that does not is refused by the core, and in either case nothing beyond that capacity is carried.
     """
     world = await _seed(factory)
     try:
@@ -568,6 +630,8 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         runner = _runner(run, _scenario(world), sse)
         _install(monkeypatch, factory)
         plans = _record_plans(monkeypatch, runner)
+        planning_reads = _count_planning_reads(monkeypatch, runner)
+        written_here = _record_written_here(monkeypatch)
         sqlstates = _record_conflict_sqlstates(monkeypatch)
         commits = _competitor_after_snapshot(
             monkeypatch, runner, factory, world, amount=_COMPETITOR, only_first=True
@@ -593,37 +657,51 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert sqlstates == ["40P01"], sqlstates
         _assert_the_tick_was_each_victim(1)
 
-        # ── The plan was recomputed against a snapshot that includes the competitor ───
+        # ── The plan was recomputed in the replay: the planner ran again, on inputs read again ───
         assert len(plans) == 2, f"the money phase was not replanned: {plans}"
+        assert len(planning_reads) == 2, f"the replay did not read its planning inputs again: {planning_reads}"
+        assert len(plans[1]) == 1, plans[1]
         first = Decimal(plans[0][0].amount)
         second = Decimal(plans[1][0].amount)
         assert first > _REMAINING, (
             f"stand is vacuous: the first plan ({first}) already fitted the capacity the "
             f"competitor left ({_REMAINING})"
         )
-        assert second <= _REMAINING and second < first
+        # Whether those inputs already include the competitor is a race this test does not decide (see the
+        # docstring): `second` is either sized to what the competitor left, or still the stale amount.
+        # What the core must do with it is decided by the capacity alone.
+        carried = _carried_by_the_core(plans[1], _REMAINING)
+        assert carried == ([second] if second <= _REMAINING else []), (second, carried)
 
         # ── The money, and the competitor's change, read on an independent session ────
+        updated = [Decimal(e["amount"]) for e in sse.events if e.get("type") == "tx.updated"]
+        assert updated == carried, (
+            f"replanned {second} with {_REMAINING} left after the competitor: the core must carry {carried}; "
+            f"published as carried: {updated}"
+        )
+        assert sum(updated, Decimal("0")) <= _REMAINING, updated  # nothing beyond what the competitor left
         debts = await _debts(factory, world)
         assert debts == {
-            (world.sender.pid, world.receiver.pid): _OPENING + _COMPETITOR + second
+            (world.sender.pid, world.receiver.pid): _OPENING + _COMPETITOR + sum(carried, Decimal("0"))
         }, (
-            f"expected the opening {_OPENING} plus the competitor's {_COMPETITOR} plus the "
-            f"REPLANNED {second}; got {debts}"
+            f"expected the opening {_OPENING} plus the competitor's {_COMPETITOR} plus what the replay "
+            f"carried {carried} (replanned {second}); got {debts}"
         )
 
         transactions = await _transactions(factory, world)
-        assert list(transactions.values()) == ["COMMITTED"], transactions
+        assert list(transactions.values()) == ["COMMITTED" if carried else "ABORTED"], transactions
         assert len(transactions) == 1, (
             f"the discarded attempt left a transaction behind: {transactions}"
         )
+        # The one stored row is the replay's own: written by it, not a row of the discarded attempt answered back.
+        assert [written_here.get(tx_id) for tx_id in transactions] == [True], (transactions, written_here)
 
-        # ── Published once, counted once ──────────────────────────────────────────────
-        assert sse.published("tx.updated") == 1
-        assert sse.published("tx.failed") == 0
-        assert run.committed_total == 1
+        # ── Published once, counted once: the report equals the rows ───────────────────
+        assert sse.published("tx.updated") == len(carried)
+        assert sse.published("tx.failed") == 1 - len(carried)
+        assert run.committed_total == len(carried)
         assert run.attempts_total == 1
-        assert run.rejected_total == 0
+        assert run.rejected_total == 1 - len(carried)
 
         # ── A transient conflict is not an error ──────────────────────────────────────
         assert run.errors_total == 0
@@ -631,8 +709,9 @@ async def test_a_real_serialization_failure_replays_the_money_phase_and_commits_
         assert run.state == "running"
         assert run._real_money_conflicts_total == 1
         assert run._real_money_replays_total == 1
-        # The replay SUCCEEDED: the budget was not exhausted and the tick made progress. These two
-        # and `rejected_total` above were asserted only by the SQLite stand until 017 stage 3.
+        # The replay SUCCEEDED: the budget was not exhausted and the tick's money phase committed - with the
+        # payment, or with the core's refusal of it recorded. These two and `rejected_total` above were asserted
+        # only by the SQLite stand until 017 stage 3.
         assert run._real_money_replay_exhausted_total == 0
         assert run._real_money_committed_ticks_total == 1
         assert run._real_consec_money_no_progress_ticks == 0
@@ -654,6 +733,19 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
     031 `T3191` finding 5: before, the conflict fired at the attempt's FIRST payment flow (staging is serialised,
     so nothing had been staged yet) and the non-vacuity check counted planned payments, not written ones. The
     conflict now fires after one COMPLETED flow, and the prefix is read in the attempt's own transaction.
+
+    CHANGED 2026-10-08 (034 S1a, decision of the §15 fix-delta review, `REVERT-WAIT-AND-REVISE-P1`; the reasons
+    are in the docstring of the test above). The test used to take for granted that every REPLANNED payment is
+    carried, which held only while the replay planned after the competitor's commit. The replay's planning inputs
+    are now read before the line locks and may predate that commit; the payment service then refuses what does
+    not fit. So what the replay must leave is no longer "all of the replanned payments" but exactly those of them
+    that fit what the competitor left, in order - carried or refused, one row and one observation each.
+
+    The claim this test owns is unchanged and is checked in both outcomes: the staged prefix of the discarded
+    attempt did not survive. A stale replay plans the SAME payments as the discarded attempt, under the same
+    `tx_id`s, so "none of the prefix's ids is stored" can no longer say it; instead every stored row must have
+    been WRITTEN by the replay (`written_here`) - a surviving prefix row would be answered back, not written - and
+    the debt must be the competitor's plus what the replay carried, with nothing of the prefix on top.
     """
     world = await _seed(factory)
     try:
@@ -665,6 +757,8 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
             await s.execute(text(f"CREATE TABLE IF NOT EXISTS {_PREFIX_BARRIER} (id int)"))
             await s.commit()
         plans = _record_plans(monkeypatch, runner)
+        planning_reads = _count_planning_reads(monkeypatch, runner)
+        written_here = _record_written_here(monkeypatch)
         _competitor_after_snapshot(
             monkeypatch, runner, factory, world, amount=_COMPETITOR, only_first=True, after_flows=1
         )
@@ -672,6 +766,9 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
         await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
 
         assert len(plans) == 2, plans
+        assert len(planning_reads) == 2, f"the replay did not read its planning inputs again: {planning_reads}"
+        assert run._real_money_replays_total == 1 and run._real_money_conflicts_total == 1, (
+            run._real_money_replays_total, run._real_money_conflicts_total)
         _assert_the_tick_was_each_victim(1)
         # ── Non-vacuity, from WRITES: one flow completed and its rows were in the attempt's transaction ──
         assert len(_PREFIXES) == 1, f"stand is vacuous: the conflict was not provoked after a staged prefix: {_PREFIXES}"
@@ -688,23 +785,41 @@ async def test_the_staged_prefix_of_a_conflicted_attempt_is_rolled_back(
         )
 
         # ── The prefix's rows did not persist: read on an independent session ──
-        replanned_total = sum(Decimal(a.amount) for a in plans[1])
+        # What the replay may carry is decided by the capacity the competitor left, not by which snapshot it
+        # planned from: the replanned payments that fit, in order; the rest the core refuses.
+        carried = _carried_by_the_core(plans[1], _REMAINING)
+        refused = len(plans[1]) - len(carried)
+        updated = [Decimal(e["amount"]) for e in sse.events if e.get("type") == "tx.updated"]
+        assert updated == carried, (
+            f"replanned {[a.amount for a in plans[1]]} with {_REMAINING} left after the competitor: the core must "
+            f"carry {carried}; published as carried: {updated}"
+        )
+        assert sum(updated, Decimal("0")) <= _REMAINING, updated  # nothing beyond what the competitor left
         debts = await _debts(factory, world)
         assert debts == {
-            (world.sender.pid, world.receiver.pid): _OPENING + _COMPETITOR + replanned_total
+            (world.sender.pid, world.receiver.pid): _OPENING + _COMPETITOR + sum(carried, Decimal("0"))
         }, f"the discarded attempt's prefix survived: {debts}"
 
         transactions = await _transactions(factory, world)
-        assert not set(prefix.tx_ids) & set(transactions), (
-            f"the discarded attempt's staged transaction {prefix.tx_ids} persisted: {transactions}"
-        )
         assert len(transactions) == len(plans[1]), (
             f"expected one transaction per REPLANNED payment and nothing from the discarded "
             f"attempt; got {transactions}"
         )
-        assert set(transactions.values()) == {"COMMITTED"}, transactions
-        assert sse.published("tx.updated") == len(plans[1])
-        assert run.committed_total == len(plans[1])
+        # Every stored row was written by the replay itself. A row of the discarded prefix that had persisted would
+        # be answered back to the replay (`written_here` False) or stand beside its rows (the count above).
+        assert {tx_id: written_here.get(tx_id) for tx_id in transactions} == dict.fromkeys(transactions, True), (
+            f"a stored transaction was not written by the replay - the discarded attempt's staged prefix "
+            f"{prefix.tx_ids} persisted: {transactions}, written by the last call: {written_here}"
+        )
+        if [a.amount for a in plans[1]] != [a.amount for a in plans[0]]:
+            # A plan that differs from the discarded one has ids of its own: none of the prefix's may be stored.
+            assert not set(prefix.tx_ids) & set(transactions), (
+                f"the discarded attempt's staged transaction {prefix.tx_ids} persisted: {transactions}"
+            )
+        assert sorted(transactions.values()) == ["ABORTED"] * refused + ["COMMITTED"] * len(carried), transactions
+        assert sse.published("tx.updated") == len(carried)
+        assert sse.published("tx.failed") == refused
+        assert (run.committed_total, run.rejected_total, run.errors_total) == (len(carried), refused, 0)
     finally:
         _forget_the_route_cache(world)
 

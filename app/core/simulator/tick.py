@@ -112,6 +112,12 @@ class TickPaymentsPhase:
             return False
         return self.deferred_effects.discard()
 
+    async def build_post_commit_patches(self, open_session: Callable[[], Any]) -> None:
+        """034 `F-034-2`: the visual patches of the committed payments, read after the commit on `open_session()`.
+        Awaited by the owner of the money phase before `apply_deferred_effects` publishes. Never raises."""
+        if self.deferred_effects is not None:
+            await self.deferred_effects.build_post_commit_patches(open_session)
+
     def apply_deferred_effects(self) -> bool:
         if self.deferred_effects is None:
             return False
@@ -485,16 +491,23 @@ class RealTick:
             await rr._apply_due_scenario_events(setup_session, run_id=run_id, run=run, scenario=scenario)
 
         async def _money_attempt(session):
-            """The inside of the boundary: owner locks, snapshot, planning, staged payments.
+            """One attempt: the planning inputs, then the boundary - owner locks, planning, staged payments.
 
             Everything in here is RECREATED per attempt, notably the plan: the planner sizes amounts against
             already-used debt, and a competitor's commit is exactly what invalidates that picture.
+
+            THE PLANNING INPUTS COME FIRST, ON A SESSION OF THEIR OWN THAT IS CLOSED BEFORE `session` TAKES A
+            CONNECTION (034 `F-034-2`, §15 review of `62cce627`): the tick holds one pooled connection at a time
+            and never waits for another while it holds `FOR UPDATE` on the lines. See `load_planning_inputs`.
             """
+            planning_inputs = await self.load_planning_inputs(
+                run=run, participants=participants, equivalents=equivalents
+            )
             owner_service = PaymentService(session)
             # 027 stage 2: the phase's COMPLETE line set - every non-closed line among the run's participants (its
             # routes are confined to them) in its equivalents, `FOR UPDATE` in `trust_lines.id` order - is this
-            # transaction's first statement, before the debt snapshot and the first payment. A deadlock (40P01)
-            # with a later, out-of-order line lock restarts the phase at this outer owner (`money_replay.py`).
+            # transaction's first statement, before the first payment. A deadlock (40P01) with a later,
+            # out-of-order line lock restarts the phase at this outer owner (`money_replay.py`).
             await owner_service.lock_staged_lines(equivalents, {participant_id for participant_id, _pid in participants})
 
             return await self.run_payments_phase(
@@ -504,6 +517,7 @@ class RealTick:
                 scenario=scenario,
                 participants=participants,
                 equivalents=equivalents,
+                planning_inputs=planning_inputs,
             )
 
         return await run_money_phase_with_bounded_replay(
@@ -516,6 +530,84 @@ class RealTick:
             run_money_attempt=_money_attempt,
         )
 
+    async def load_planning_inputs(
+        self,
+        *,
+        run: RunRecord,
+        participants: list[tuple[Any, str]],
+        equivalents: list[str],
+    ) -> tuple[dict[tuple[str, str, str], Decimal], dict[str, int]]:
+        """What the planner sizes amounts with - the debts and each equivalent's step - read on a session of its own.
+
+        034 `F-034-2`. Both reads used to run on the money session, inside the money transaction, behind
+        `except Exception`: a PostgreSQL error in one of them aborted that transaction and was swallowed, and the
+        payments after it failed on the aborted transaction. They now run on their own session, so their failure
+        can only cost the plan its inputs: the failed read's transaction is ended here, by its owner, and the
+        planner falls back - without the debts to the static limits, without the steps to cents (the payment door
+        refuses what is finer than an equivalent's step). Never raises.
+
+        BEFORE THE LINE LOCKS, NOT UNDER THEM (§15 review of `62cce627`, 2026-10-08). `_money_attempt` calls this
+        before the money session takes a connection, once per attempt. The first version of the fix read here while
+        the money transaction already held `FOR UPDATE` on the lines; with a small pool the tick then waited for a
+        second connection under those locks (measured by the review: 9.39 s held against 3.38 s before the fix).
+        What this gives up is freshness, not money: a competitor may commit between this read and the locks, and
+        the plan may then ask for more than is left. The plan is advisory - the payment service takes the pair's
+        lines, reads the debts behind them and checks capacity itself (`PaymentService._bind_payment`,
+        `._segment`), and answers such a payment with an honest refusal; planning with no snapshot at all was
+        always allowed for the same reason.
+
+        ONE WAIT FOR THE POOL: the connection is taken first, explicitly. If the pool has none, neither read is
+        tried and the planner gets its fallbacks after one pool timeout, not two.
+        """
+
+        rr = self._runner
+        debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
+        precision_by_eq: dict[str, int] = {}
+
+        async def _end_failed_read(session: Any, what: str) -> None:
+            if rr._should_warn_this_tick(run, key=what):
+                rr._logger.warning(
+                    "simulator.real.%s run_id=%s tick=%s",
+                    what,
+                    str(run.run_id),
+                    int(run.tick_index or 0),
+                    exc_info=True,
+                )
+            await session.rollback()
+
+        try:
+            async with db_session.AsyncSessionLocal() as planning_session:
+                await planning_session.connection()
+                # Phase 1.4: capacity-aware payment amounts, from the debts as they are AFTER the due events.
+                try:
+                    debt_snapshot = await rr._load_debt_snapshot_by_pid(planning_session, participants, equivalents)
+                except Exception:
+                    await _end_failed_read(planning_session, "planning_debt_snapshot_failed")
+                # 028 `F-028-32`: amounts in each equivalent's step.
+                try:
+                    precision_by_eq = {
+                        str(code): int(p)
+                        for code, p in (
+                            await planning_session.execute(
+                                select(Equivalent.code, Equivalent.precision).where(
+                                    Equivalent.code.in_(list(equivalents))
+                                )
+                            )
+                        ).all()
+                    }
+                except Exception:
+                    await _end_failed_read(planning_session, "planning_precision_failed")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            rr._logger.warning(
+                "simulator.real.planning_session_failed run_id=%s tick=%s",
+                str(run.run_id),
+                int(run.tick_index or 0),
+                exc_info=True,
+            )
+        return debt_snapshot, precision_by_eq
+
     async def run_payments_phase(
         self,
         *,
@@ -525,24 +617,17 @@ class RealTick:
         scenario: dict[str, Any],
         participants: list[tuple[Any, str]],
         equivalents: list[str],
+        planning_inputs: tuple[dict[tuple[str, str, str], Decimal], dict[str, int]] | None = None,
     ) -> tuple[TickPaymentsPhase, bool]:
         rr = self._runner
-        # Phase 1.4: capacity-aware payment amounts. The debt snapshot is loaded *after* events (which may mutate
-        # the DB). Best-effort: if the query fails, planning falls back to static limits.
-        debt_snapshot: dict[tuple[str, str, str], Decimal] = {}
-        try:
-            debt_snapshot = await rr._load_debt_snapshot_by_pid(session, participants, equivalents)
-        except Exception:
-            rr._logger.debug("capacity_aware: debt snapshot load failed, falling back to static limits")
-
-        # 028 `F-028-32`: amounts in each equivalent's step (the payment door refuses finer ones). Best-effort like the
-        # snapshot: without it the planner picks cents, and the door refuses what is finer than an equivalent's step.
-        precision_by_eq: dict[str, int] = {}
-        try:
-            precision_by_eq = {str(code): int(p) for code, p in (await session.execute(
-                select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(list(equivalents))))).all()}
-        except Exception:
-            rr._logger.debug("planner: equivalent precision load failed, falling back to cents")
+        # The tick reads the planning inputs BEFORE `session` holds anything and hands them in (`_money_attempt`).
+        # Only a caller that drives this phase directly, with no money transaction of the tick around it (the unit
+        # stands), gives none and has them read here.
+        if planning_inputs is None:
+            planning_inputs = await self.load_planning_inputs(
+                run=run, participants=participants, equivalents=equivalents
+            )
+        debt_snapshot, precision_by_eq = planning_inputs
         planned = rr._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot, precision_by_eq=precision_by_eq)
         with rr._lock:
             run.ops_sec = float(len(planned))
