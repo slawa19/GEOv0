@@ -111,7 +111,7 @@ export async function loadStrictRunRecoverySnapshot(input: {
  * A timeout is THROWN instead (034 S5a, review round 1, item 4); every other failure falls back, and a 404 first
  * resets the stale run - the contract the inline code had before it was extracted.
  */
-async function loadActiveRunSnapshot(input: {
+export async function loadActiveRunSnapshot(input: {
   apiBase: string
   accessToken: string
   runId: string

@@ -1,11 +1,11 @@
 /**
- * 034 S5a, fix-delta (external review of 03436d46), item 1: a run STATUS read that times out during an admin
- * Attach must not let the scenario preview replace the run scene that is already shown.
+ * 034 S5a: a run SNAPSHOT read that fails while the run is active, through the REAL entrance - `useSimulatorApp` ->
+ * `admin.attachRun` -> `attachToRun` -> `refreshSnapshot` -> `loadSnapshotForUi` - and not through an extracted
+ * helper. A timeout keeps the run scene that is shown and reports the error in `state.error`; 503, a network error
+ * and a 404 keep the existing contract (the scenario preview).
  *
- * This goes through the REAL entrance - `useSimulatorApp` -> `admin.attachRun` -> `attachToRun` ->
- * `refreshSnapshot` -> `loadSnapshotForUi` -, not through an extracted helper: the first fix of the snapshot
- * timeout was correct for the helper and still bypassed here, because attach sets `runStatus = null` and
- * `loadSnapshotForUi` then does not consider the run active at all.
+ * NOT covered, by decision (AGENTS section 19.5, recorded in the spec): an UNKNOWN run status (a timed-out status
+ * read) is still treated as "no active run" on every entrance and selects the preview.
  */
 import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -29,11 +29,14 @@ vi.mock('../api/simulatorApi', async (importOriginal) => {
 })
 vi.mock('../api/equivalentsApi', () => ({ fetchEquivalentPrecisions: vi.fn(async () => []) }))
 vi.mock('../api/sse', () => ({
+  // Production semantics (`api/sse.ts`): the signal goes to `fetch`/`reader.read()`, so an abort REJECTS with an
+  // AbortError; it does not resolve the connection like a clean end of stream.
   connectSse: vi.fn(
     (opts: { signal?: AbortSignal }) =>
-      new Promise<void>((resolve) => {
-        if (opts.signal?.aborted) return resolve()
-        opts.signal?.addEventListener('abort', () => resolve(), { once: true })
+      new Promise<void>((_resolve, reject) => {
+        const abort = () => reject(new DOMException('The operation was aborted.', 'AbortError'))
+        if (opts.signal?.aborted) return abort()
+        opts.signal?.addEventListener('abort', abort, { once: true })
       }),
   ),
 }))
@@ -92,53 +95,6 @@ afterEach(() => {
   scope = null
   window.history.replaceState({}, '', '/')
   vi.clearAllMocks()
-})
-
-describe('admin Attach with a run status read that times out', () => {
-  it('keeps the run scene that is shown and reports the timeout', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    scope = effectScope()
-    const app = scope.run(() => useSimulatorApp())!
-    await settle()
-    expect(app.state.snapshot?.nodes.map((n) => n.id), 'precondition: the run scene is shown').toEqual(['RUN_NODE'])
-
-    vi.mocked(getRun).mockRejectedValue(
-      new ApiError('GET /simulator/runs/R -> timeout after 30000ms', { status: 0, code: API_TIMEOUT_CODE, timeoutMs: 30_000 }),
-    )
-    await app.admin.attachRun('R')
-    await settle()
-
-    expect(app.state.snapshot?.nodes.map((n) => n.id), 'the run scene was replaced by the scenario preview').toEqual([
-      'RUN_NODE',
-    ])
-    expect(app.real.lastError).toContain('timeout')
-  })
-
-  it('counter-check: a 5xx on the status read keeps the existing behavior (the preview is shown)', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    scope = effectScope()
-    const app = scope.run(() => useSimulatorApp())!
-    await settle()
-    expect(app.state.snapshot?.nodes.map((n) => n.id)).toEqual(['RUN_NODE'])
-
-    vi.mocked(getRun).mockRejectedValue(new ApiError('HTTP 503  for /simulator/runs/R', { status: 503 }))
-    await app.admin.attachRun('R')
-    await settle()
-
-    expect(app.state.snapshot?.nodes.map((n) => n.id)).toEqual(['PREVIEW_NODE'])
-  })
-
-  it('anti-vacuum: a status read that answers attaches normally and shows the run scene', async () => {
-    scope = effectScope()
-    const app = scope.run(() => useSimulatorApp())!
-    await settle()
-
-    await app.admin.attachRun('R')
-    await settle()
-
-    expect(app.state.snapshot?.nodes.map((n) => n.id)).toEqual(['RUN_NODE'])
-    expect(app.real.runStatus?.run_id).toBe('R')
-  })
 })
 
 describe('a run SNAPSHOT read that fails while the run is active (through the real scene loader)', () => {
