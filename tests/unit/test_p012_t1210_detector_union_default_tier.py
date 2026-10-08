@@ -42,6 +42,7 @@ from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
 from tests.conftest import MODE_B
+from tests.p023_support import planned_cycles
 
 _EQ = "DUX"
 
@@ -110,27 +111,27 @@ async def _seed_graph(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", [4, 5, 6])
-async def test_a_triangle_does_not_hide_a_disjoint_quadrangle(db_session, max_depth) -> None:
-    """One triangle plus one disjoint 4-ring: the answer holds BOTH, at depths 4 through 6.
+async def test_a_triangle_does_not_hide_a_disjoint_quadrangle(db_session) -> None:
+    """One triangle plus one disjoint 4-ring: the answer holds BOTH.
 
-    Measured before this fix at depth 4: one cycle, lengths [3] - the quadrangle query never
+    Measured before the 012 fix at depth 4: one cycle, lengths [3] - the quadrangle query never
     ran because the triangle query was non-empty, and the early return declared that answer
-    complete.  Whichever detector answers, the caller asked for cycles up to `max_depth`
-    edges, and both cycles are within it.
+    complete.
+
+    MOVED 2026-10-09 (035 A2a, decision D3): the union of the detectors is their mechanics and leaves with them;
+    the property - two independent eligible cycles are both offered - is asked of the planner
+    (`planned_cycles`), which has no depth, so the three depths this ran at are one run. The assertion
+    `lengths == [3, 4]` is unchanged.
     """
 
     await _seed_graph(db_session, [["t1", "t2", "t3"], ["q1", "q2", "q3", "q4"]])
 
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(_EQ, max_depth=max_depth)
+    cycles = await planned_cycles(db_session, _EQ)
     lengths = sorted(len(c) for c in cycles)
 
     assert lengths == [3, 4], (
-        f"at max_depth={max_depth} the graph holds one triangle and one disjoint quadrangle, "
-        f"and the answer must hold both; got lengths={lengths!r}. [3] means the quadrangle "
-        f"query is gated on the triangles coming back empty again - a triangle anywhere in "
-        f"the graph silences every 4-cycle."
+        f"the graph holds one triangle and one disjoint quadrangle, and the answer must hold both; "
+        f"got lengths={lengths!r}"
     )
 
 

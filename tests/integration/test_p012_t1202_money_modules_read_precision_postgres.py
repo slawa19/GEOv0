@@ -65,7 +65,6 @@ inherited from a fixture, and the parametrised cases would be meaningless otherw
 
 from __future__ import annotations
 
-import inspect
 import uuid
 from decimal import Decimal
 
@@ -75,7 +74,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.balance.service import BalanceService
-from app.core.clearing.service import ClearingService
+from app.core.clearing.runner import planned_cycles_for_diagnostics
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -84,27 +83,10 @@ from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
 
 
-def _api_default_max_depth() -> int:
-    """The depth `GET /api/v1/clearing/cycles` uses when the caller names none.
-
-    THIS MODULE ORIGINALLY ASKED AT `max_depth=3`, AND THAT WAS THE HOLE (found by external
-    review, 2026-08-24).  Three is the ONE depth at which the SQL fast path and the Python DFS
-    have equal reach - the SQL detectors join three and four `debts` rows and can express
-    nothing longer - so it is the one depth at which `find_cycles` returning the SQL answer
-    early cannot be wrong.  Asking there made "the two detectors agree" true by choice of
-    population: at the route's real default of six, a graph with any triangle in it reported
-    NO longer cycle at all.  Read from the route rather than repeated, so the guard cannot
-    drift away from what users get; the reach itself is covered by
-    `test_p012_money_form_and_detector_reach_postgres.py`.
-    """
-
-    # 035 A1 (2026-10-08, owner decision П1-(а)): the route answers with the flow plan and has no `max_depth`; the
-    # detectors this module covers keep their own default, the same value, read from `find_cycles`.
-    marker = inspect.signature(ClearingService.find_cycles).parameters["max_depth"].default
-    return int(getattr(marker, "default", marker))
-
-
-API_DEFAULT_MAX_DEPTH = _api_default_max_depth()
+# 035 A2a (2026-10-09): `API_DEFAULT_MAX_DEPTH` and the helper that read it from `find_cycles` are gone from this
+# module - Part A asks the diagnostic's producer, which has no depth (see `_diagnostic_cycles`). The history of why
+# the depth mattered (the first edition asked at `max_depth=3`, the one depth where the two detectors had equal
+# reach) is in `git log -S "_api_default_max_depth" -- <this file>`.
 
 
 # `LEAST(...) > 0.01` is the predicate under test, so the amounts below are chosen against the
@@ -207,6 +189,22 @@ def _cycle_debt_id_sets(cycles) -> list[frozenset[str]]:
     return [frozenset(str(edge["debt_id"]) for edge in cycle) for cycle in cycles]
 
 
+async def _diagnostic_cycles(session: AsyncSession, code: str) -> list[list[dict]]:
+    """What `GET /api/v1/clearing/cycles` answers with since 035 A1: the product's own producer
+    (`runner.planned_cycles_for_diagnostics` - the flow plan on the planner's snapshot). 035 A2a (decision D3,
+    2026-10-08) moved Part A of this module here from the retired SQL detectors and their threshold: what
+    survives is that a small positive debt, down to the smallest storable one and to one finer than the
+    equivalent's quantum, is VISIBLE to the diagnostic. (Whether execution would accept such an amount is another
+    stage's rule and is not asked here.)
+
+    The stand is committed first (in mode A that releases a savepoint inside the test's rolled-back transaction):
+    the producer ends its read transaction before it plans, which would discard a stand that was only flushed.
+    """
+
+    await session.commit()
+    return await planned_cycles_for_diagnostics(session, code)
+
+
 # --------------------------------------------------------------------------------------------
 # PART A - the clearing threshold
 # --------------------------------------------------------------------------------------------
@@ -245,31 +243,30 @@ async def test_a_triangle_at_the_smallest_expressible_amount_is_detected(
         "If this fails the test is measuring storage, not the detector."
     )
 
-    service = ClearingService(db_session)
-    found = _cycle_debt_id_sets(await service.find_triangles_sql(eq.id))
+    # 035 A2a (D3): asked of the diagnostic's producer, not of `find_triangles_sql`; the assertion is unchanged.
+    found = _cycle_debt_id_sets(await _diagnostic_cycles(db_session, "UAH"))
 
     assert expected in found, (
         f"a triangle whose every leg is {leg} - the smallest amount a precision-{precision} "
         f"equivalent can express, accepted by the door and stored exactly - is invisible to "
-        f"find_triangles_sql. Found {len(found)} cycle(s): {found}. "
-        "The strict `LEAST(...) > 0.01` threshold is the only stage that can drop it."
+        f"the clearing diagnostic. Found {len(found)} cycle(s): {found}."
     )
 
 
 async def test_a_quadrangle_at_the_smallest_expressible_amount_is_detected(
     db_session: AsyncSession,
 ) -> None:
-    """The same hole, one edge wider: `find_quadrangles_sql` carries the identical predicate."""
+    """The same question one edge wider (it was `find_quadrangles_sql`'s own copy of the threshold)."""
 
     eq = await _equivalent(db_session, "UAH", 2)
     debt_ids = await _ring(db_session, eq, ["a", "b", "c", "d"], _quantum(2))
     expected = frozenset(str(d) for d in debt_ids)
 
-    service = ClearingService(db_session)
-    found = _cycle_debt_id_sets(await service.find_quadrangles_sql(eq.id))
+    # 035 A2a (D3): asked of the diagnostic's producer; the assertion is unchanged.
+    found = _cycle_debt_id_sets(await _diagnostic_cycles(db_session, "UAH"))
 
     assert expected in found, (
-        f"a four-node cycle at one quantum is invisible to find_quadrangles_sql. Found: {found}"
+        f"a four-node cycle at one quantum is invisible to the clearing diagnostic. Found: {found}"
     )
 
 
@@ -291,15 +288,13 @@ async def test_a_graph_with_an_ordinary_and_a_boundary_cycle_reports_both(
         str(d) for d in await _ring(db_session, eq, ["b1", "b2", "b3"], _quantum(2))
     )
 
-    service = ClearingService(db_session)
-    found = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH))
+    # 035 A2a (D3): asked of the diagnostic's producer; both assertions are unchanged.
+    found = _cycle_debt_id_sets(await _diagnostic_cycles(db_session, "UAH"))
 
     assert ordinary in found, "control: the ordinary cycle must be reported"
     assert boundary in found, (
         "the boundary cycle is missing while the ordinary one is reported: "
-        f"{len(found)} cycle(s) for two that exist. This is the reported-one-of-two effect - "
-        "the SQL detector drops the boundary cycle, `find_cycles` returns early because the "
-        "SQL result is non-empty, and the DFS that would have found it never runs."
+        f"{len(found)} cycle(s) for two that exist - the reported-one-of-two effect."
     )
 
 
@@ -340,18 +335,15 @@ async def test_the_detector_does_not_privately_decide_that_sub_quantum_debt_is_n
         f"precondition: storage must hold {sub_quantum} exactly, got {stored!r}"
     )
 
-    service = ClearingService(db_session)
-    via_sql = _cycle_debt_id_sets(await service.find_triangles_sql(eq.id))
-    via_find_cycles = _cycle_debt_id_sets(await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH))
+    # 035 A2a (D3). The two detectors this test set against each other are retired; the claim that survives is the
+    # one in the last paragraph above, asked of the diagnostic's producer: a stored sub-quantum debt is VISIBLE.
+    # (Since 030 S2 execution refuses an occurrence amount that is not a whole step; that is execution's rule and
+    # the diagnostic shows the debt regardless.)
+    found = _cycle_debt_id_sets(await _diagnostic_cycles(db_session, "UAH"))
 
-    assert expected in via_find_cycles, (
-        "control: the DFS fallback finds this cycle today, which is the whole point - the "
-        "threshold was never protecting the system from sub-quantum cycles"
-    )
-    assert expected in via_sql, (
-        f"the SQL detector drops a cycle the fallback finds and clears: find_triangles_sql -> "
-        f"{via_sql}. Whatever the right answer about sub-quantum money is, it cannot be "
-        "decided here, by one of two detectors, while the other one clears it."
+    assert expected in found, (
+        f"a stored sub-quantum cycle is invisible to the clearing diagnostic: {found}. Whatever the right "
+        "answer about sub-quantum money is, it cannot be decided by the stage that shows what is there."
     )
 
 
