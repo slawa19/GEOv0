@@ -220,7 +220,8 @@ Real Mode: тюнинг дисковой нагрузки (артефакты) �
   - `<=0` отключает `sync_artifacts` (уменьшает IO, но список артефактов может обновляться реже/только при finalize).
 
 Где искать артефакты прогона локально:
-- `.local-run/simulator/runs/<run_id>/artifacts/` (включая `events.ndjson`)
+- `.local-run/simulator/runs/<run_id>/artifacts/` (включая `events.ndjson`) — путь по умолчанию; с заданным
+  `SIMULATOR_STATE_DIR` — `<SIMULATOR_STATE_DIR>/runs/<run_id>/artifacts/` (см. `run-storage.md`, раздел 4.2)
 
 ---
 

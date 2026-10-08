@@ -585,7 +585,7 @@ export type ArtifactIndex = {
   api_version: string
   run_id: string
 
-  // Каталог артефактов относительно корня состояния симулятора (`.local-run/simulator/`),
+  // Каталог артефактов относительно корня состояния симулятора (по умолчанию `.local-run/simulator/`; задаётся `SIMULATOR_STATE_DIR`),
   // в POSIX-форме; абсолютный путь сервера наружу не отдаётся (программа 024, SIM-11).
   artifact_path?: string
 

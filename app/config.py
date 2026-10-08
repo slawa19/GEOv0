@@ -1,5 +1,6 @@
 import re
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, ClassVar, FrozenSet
 from urllib.parse import urlsplit
 
@@ -247,6 +248,14 @@ class Settings(BaseSettings):
     SIMULATOR_RUN_PERSIST_EVERY_MS: int = 5000
     SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS: int = 1000
     SIMULATOR_ARTIFACTS_TTL_HOURS: int = 0
+    # 034 S1c: where the simulator keeps its runtime state - `runs/<run_id>/artifacts` and uploaded `scenarios/`.
+    # Empty (the default): the checkout's `.local-run/simulator`, as before. A relative path is taken from the
+    # repository root, never from the working directory. The directory MUST BE THE SIMULATOR'S OWN: whatever
+    # cleans it - the runtime at start when `SIMULATOR_ARTIFACTS_TTL_HOURS` > 0, `scripts/cleanup_simulator_runs.py`
+    # - treats every directory under its `runs/` as a run and removes it. Sessions that share a checkout but must
+    # not share this state set it; the test tier does (`tests/conftest.py`). One rule turns the value into a
+    # path: `simulator_state_dir()` at the end of this module.
+    SIMULATOR_STATE_DIR: str = ""
     SIMULATOR_ARTIFACT_SHA_MAX_BYTES: int = 524288
     SIMULATOR_EVENT_BUFFER_SIZE: int = 2000
     SIMULATOR_EVENT_BUFFER_TTL_SEC: int = 600
@@ -536,3 +545,25 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def simulator_state_dir() -> Path:
+    """The simulator's runtime state directory: THE ONE RULE that turns `SIMULATOR_STATE_DIR` into a path.
+
+    Empty: `.local-run/simulator` of the repository this file belongs to, as before the setting existed. Relative:
+    taken from that repository root, never from the working directory. Absolute: as given.
+
+    WHY IT LIVES HERE (034 S1c, review of `a08f85a4`). The runtime asks through
+    `app.core.simulator.runtime_utils.local_state_dir()`, which delegates to this. The scripts that only need the
+    path - `scripts/cleanup_simulator_runs.py`, `scripts/check_latest_simulator_artifacts.py` - must NOT import
+    anything from `app.core.simulator`: that package's `__init__` builds the runtime singleton, whose constructor
+    applies the start-up cleanup of run directories. A script that imported the rule from there deleted old runs
+    before it had read its own arguments. This module imports nothing of the application.
+    """
+
+    configured = str(settings.SIMULATOR_STATE_DIR or "").strip()
+    repository_root = Path(__file__).resolve().parents[1]  # app/config.py -> the repository root
+    if not configured:
+        return repository_root / ".local-run" / "simulator"
+    path = Path(configured)
+    return path if path.is_absolute() else repository_root / path

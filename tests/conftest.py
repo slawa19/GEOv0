@@ -17,6 +17,15 @@ from sqlalchemy.pool import NullPool
 os.environ["ENV"] = "test"
 os.environ["ENVIRONMENT"] = "test"
 
+# 034 S1c (AGENTS.md §7, §12): the simulator's runtime state of a test process - run artifacts, uploaded scenarios -
+# lives under the task's artifact root, never in the checkout's `.local-run/simulator`, which is the developer's.
+# The tier used to write its runs there (a full tier left dozens of run directories). Set before `app.config` is
+# imported, and always: a developer's own `SIMULATOR_STATE_DIR` is not a place for test runs.
+# A relative root is taken from the repository root by `local_state_dir()`, not from the working directory.
+os.environ["SIMULATOR_STATE_DIR"] = str(
+    Path(os.environ.get("GEO_TEST_ARTIFACT_ROOT") or ".local-run/test-runs/direct-pytest/artifacts") / "simulator"
+)
+
 from scripts.validate_test_database_url import assert_safe_test_database_url  # noqa: E402
 from tests.migrated_schema import (  # noqa: E402
     MigratedSchemaError,

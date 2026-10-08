@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,7 +10,23 @@ from typing import Any, Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUNS_DIR = REPO_ROOT / ".local-run" / "simulator" / "runs"
+# Ensure `import app...` works regardless of current working directory.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app.config import simulator_state_dir  # noqa: E402
+
+
+def _runs_dir() -> Path:
+    """034 S1c: the runs of the simulator state the application uses - `SIMULATOR_STATE_DIR`, by default the
+    checkout's `.local-run/simulator` - not a path of this script's own. The cost: the script needs the
+    application's settings to load (`ENV`, `DATABASE_URL`), as the run it inspects did.
+
+    The rule is `app.config.simulator_state_dir()`, asked there and NOT through `app.core.simulator`: importing
+    that package starts the simulator runtime, whose constructor applies the start-up cleanup of run directories.
+    A script that only reads must not do that (it did, on `a08f85a4`)."""
+
+    return simulator_state_dir() / "runs"
 
 
 @dataclass(frozen=True)
@@ -38,11 +55,12 @@ def _iter_ndjson(path: Path) -> Iterable[dict[str, Any]]:
 
 
 def _latest_run_dir() -> Path:
-    if not RUNS_DIR.exists():
-        raise SystemExit(f"Runs dir not found: {RUNS_DIR}")
-    run_dirs = [p for p in RUNS_DIR.iterdir() if p.is_dir() and p.name.startswith("run_")]
+    runs_dir = _runs_dir()
+    if not runs_dir.exists():
+        raise SystemExit(f"Runs dir not found: {runs_dir}")
+    run_dirs = [p for p in runs_dir.iterdir() if p.is_dir() and p.name.startswith("run_")]
     if not run_dirs:
-        raise SystemExit(f"No run_* dirs found in {RUNS_DIR}")
+        raise SystemExit(f"No run_* dirs found in {runs_dir}")
 
     # Prefer mtime; name also embeds timestamp but mtime is the simplest signal.
     run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)

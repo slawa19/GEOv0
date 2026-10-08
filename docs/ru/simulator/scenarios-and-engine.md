@@ -122,7 +122,7 @@
 Control plane поддерживает upload:
 - `POST /api/v1/simulator/scenarios` (body: `{ "scenario": { ...scenario.json... } }`)
 
-Загруженные сценарии сохраняются локально в `.local-run/simulator/scenarios/<scenario_id>/scenario.json` и подхватываются runtime.
+Загруженные сценарии сохраняются локально в `.local-run/simulator/scenarios/<scenario_id>/scenario.json` (путь по умолчанию; корень состояния задаётся `SIMULATOR_STATE_DIR`, см. `backend/run-storage.md`, раздел 4.2) и подхватываются runtime.
 
 ---
 
@@ -288,7 +288,7 @@ flowchart LR
 
 Загрузка сценариев:
 - fixtures: [../../../fixtures/simulator/*/scenario.json](../../../fixtures/simulator/)
-- uploaded: `.local-run/simulator/scenarios/<scenario_id>/scenario.json`
+- uploaded: `.local-run/simulator/scenarios/<scenario_id>/scenario.json` (по умолчанию)
 
 Валидация:
 - При upload через API выполняется JSON Schema validation (см. `validate_scenario_or_400`).
@@ -482,7 +482,7 @@ sequenceDiagram
 
 **3) В artifacts (`events.ndjson` + status/summary)**
 - Все SSE‑события пишутся в `events.ndjson` (best‑effort).
-- Локальный путь (dev): `.local-run/simulator/runs/<run_id>/artifacts/events.ndjson`.
+- Локальный путь (dev, по умолчанию): `.local-run/simulator/runs/<run_id>/artifacts/events.ndjson`.
 - Там же лежат `status.json`, `last_tick.json`, а при finalize — `summary.json` и `bundle.zip`.
 
 См. где хранится и как устроено: [backend/run-storage.md](backend/run-storage.md).
