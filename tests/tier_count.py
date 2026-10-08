@@ -114,6 +114,9 @@ make the session green again:
   on the live emitter). Measured with `python -m pytest --collect-only -q -m "not slow"`; the guard refused first
   ("selected 3253 case(s), expected exactly 3252 ... MORE than recorded", exit 4).
 * 2026-10-09, 034 slice S3 merged after 035 A6 and 034 S4 (`origin/main` `bfae3cda`, 3264): 3264 -> 3265 (+1, the S3 changes above; the numbers in the S3 line are those of the branch on `1faf261b`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 034 slice S2 (F-034-11), on `origin/main` `0d153390`: 3265 -> 3267 (+2). One new module,
+  `tests/integration/test_p034_s2_payment_targets_route_answers_as_before.py` (the route byte for byte, and the refusals
+  around it). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3267/3282 tests collected`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -156,7 +159,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3265
+EXPECTED_SELECTED_ITEMS = 3267
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
