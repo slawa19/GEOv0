@@ -41,9 +41,9 @@ function ok<T>(data: T) {
 
 const HEALTH_OK = { status: 'ok' }
 const HEALTH_DB_OK = { status: 'ok', dialect: 'postgresql' }
-/** HTTP 200 и `is_up_to_date=true` (`app/api/v1/admin.py:1390`). */
+/** HTTP 200 и `is_up_to_date=true` (`migrations_status` в `app/api/v1/admin.py`). */
 const MIGRATIONS_UP_TO_DATE = { current_revision: 'a1b2c3', head_revision: 'a1b2c3', is_up_to_date: true }
-/** Тот же HTTP 200, но подтверждённо плохая схема (`app/api/v1/admin.py:1390`, путь отказа `:1393`). */
+/** Тот же HTTP 200, но подтверждённо плохая схема (`migrations_status` в `app/api/v1/admin.py`, его путь отказа). */
 const MIGRATIONS_BEHIND = { current_revision: 'a1b2c3', head_revision: 'z9y8x7', is_up_to_date: false }
 
 function neverResolves<T>(): Promise<T> {
@@ -73,7 +73,7 @@ function screenWouldReportHealthy(store: HealthStore): boolean {
  * Что стор на самом деле подтвердил: получены все три ответа и миграции на head.
  * Это не «мнение теста» — ровно эти три поля стор и наполняет (`health.ts:45-47`),
  * а `is_up_to_date` — единственное поле ответа, которое утверждает исправность
- * (`app/api/v1/admin.py:1390`).
+ * (`migrations_status` в `app/api/v1/admin.py`).
  */
 function confirmedHealthy(store: HealthStore): boolean {
   if (store.health === null || store.healthDb === null || store.migrations === null) return false
@@ -167,7 +167,7 @@ describe('RT-013-3 — стор здоровья не отличает «не з
 
   /**
    * СОСТОЯНИЕ: все три запроса вернули HTTP 200, а `/admin/migrations` в этом 200 сообщает
-   *   `is_up_to_date=false` — подтверждённо плохая схема (`app/api/v1/admin.py:1390`, тот же
+   *   `is_up_to_date=false` — подтверждённо плохая схема (`migrations_status` в `app/api/v1/admin.py`, тот же
    *   ответ на пути отказа `:1393`). `admin-ui/src/stores/health.ts:47` кладёт ответ в
    *   `migrations`, и ни один потребитель сигнала здоровья его не читает.
    * ЧЕСТНЫЙ СТОР: сигнал «всё чисто» не выдаётся — состояние подтверждено плохим.
