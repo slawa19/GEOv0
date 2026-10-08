@@ -19,7 +19,7 @@ Front-door и обязательный контракт для ИИ-агенто
 | Структура и статусы документации | `docs/ru/documentation-rules.md` |
 | Запуск и onboarding | `README.md` |
 
-Программы 002–006 специфицированы, но **не авторизованы к реализации** (см. specs/README.md, раздел «Статус авторизации»). Не начинайте неавторизованную программу по собственной инициативе. Не начинайте работу по документу из `plans/` — это приватный untracked каталог, не source of truth.
+Не начинайте неавторизованную программу по собственной инициативе: авторизация и её границы — в [`specs/README.md`](specs/README.md), раздел «Статус авторизации». Не начинайте работу по документу из `plans/` — это приватный untracked каталог, не source of truth.
 
 ---
 
@@ -167,7 +167,7 @@ Canonical local entrypoint — `scripts/verify_local.ps1`. Он же испол�
 | `simulator-super-smoke`, `admin-e2e`, `simulator-visual-e2e` | только schedule / workflow_dispatch | — |
 | `container-smoke` | только schedule / workflow_dispatch | — |
 
-Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` сервиса Postgres не имеет (причина — `specs/BACKLOG.md`) и после снятия SQLite-тира без него не проходит. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует; с 2026-10-07 (032 S4) smoke админки идёт против засеянного бэкенда и утверждает участника сида, mock-режима у админки нет. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
+Следствия: на обычном PR **не** проверяются полные Admin E2E, Simulator visual E2E и container-паритет. **Postgres-конкурентность проверяется с 2026-09-21** (017, `T1701`): расписанный job `postgres` упразднён, обе его pytest-сессии — матрица конкурентности и маркерный тир — переехали в обязательный `required-backend`, и это был смысл среза. **С 2026-09-23** (стадия 2c) три сессии job'а — матрица, маркерный тир и дефолтный тир на SQLite — стали одной сессией всего тира на PostgreSQL; три теста матрицы собираются тиром сами и поимённо держатся `tooling-tests/portable/test_p017_required_gate_runs_on_postgres.py`. `simulator-super-smoke` с 2026-10-04 (028 E9, `43b6f16a`) идёт на ubuntu с сервисом `postgres:16` (`.github/workflows/quality.yml`, `services: postgres` у job'а), как `required-backend`; до этого job шёл на `windows-latest` без сервиса и падал pytest exit `4`. Playwright smoke обоих UI при этом проверяется — `ui-smoke` вызывает `test:e2e:smoke` и блокирует; с 2026-10-07 (032 S4) smoke админки идёт против засеянного бэкенда и утверждает участника сида, mock-режима у админки нет. Не сокращайте это до «E2E на PR нет»: smoke — тоже Playwright. Mypy в репозитории не настроен и не запускается. Пиннутый Ruff для `app migrations` обязан быть зелёным; Black остаётся известным repository-wide долгом, поэтому:
 
 - не заявляйте «CI green» или «все gates green» — называйте конкретный job, SHA и exit code;
 - не превращайте текущие Black findings в блокер несвязанной задачи (см. храповик, §6);
@@ -327,7 +327,7 @@ $taskSlug = "agent_payments_review"
 - Проверяйте наблюдаемое поведение: пользовательский success/failure path, state transition, DB effect, API/event payload, DOM/a11y или visual contract.
 - Не добавляйте placeholder tests, `pass`, тесты без наблюдаемой проверки или no-op fixtures.
 - Не используйте реальный `sleep`, если можно управлять clock/event/barrier.
-- Backend test, зависящий от Postgres, внешнего сервиса, времени или долгого сценария, обязан иметь marker (`postgres`, `slow`) и documented prerequisites. Playwright E2E запускается отдельными package scripts/jobs. Маркер — часть контракта запуска: тест без маркера попадёт в дефолтный tier, тест с маркером не попадёт в него никогда.
+- Backend test, зависящий от Postgres, внешнего сервиса, времени или долгого сценария, обязан иметь marker `slow` и documented prerequisites (маркера `postgres` нет с 2026-09-23: весь backend-тир идёт на PostgreSQL, §5). Playwright E2E запускается отдельными package scripts/jobs. Маркер — часть контракта запуска: тест без маркера попадёт в дефолтный tier, тест с маркером не попадёт в него никогда.
 - Не называйте DB/API test unit-тестом. Различайте pure unit, component/service integration, DB integration, Postgres concurrency и E2E.
 - Тесты точного текста source/CSS/import wiring допустимы только как явно именованные policy/architecture guards. По возможности переносите policy в ESLint/static checker, а продуктовый контракт проверяйте через mount/emits/DOM/Playwright.
 - **Гард проверяет форму, а не истину.** Он не судит о правдивости прозы и корректности UX; его сообщение обязано называть границы проверки, что сделать вместо этого и команду, решающую, какой из вариантов верен. Гард, притворяющийся обратным, и есть ложное зелёное.
@@ -700,7 +700,7 @@ gate-evidence — это надо написать прямо, иначе зел
 - Менять OpenAPI, migrations, wire aliases, SSE shapes, fixture schema или денежную семантику попутно.
 - Запускать destructive DB reset по непроверенному URL.
 - Править `v1`/archive/`_audit*` или generated copies без явного scope.
-- Начинать реализацию неавторизованной программы 002–006.
+- Начинать реализацию неавторизованной программы (`specs/README.md`, «Статус авторизации»).
 - Закрывать волну с непройденным обязательным внешним ревью (§15) без датированного принятия риска владельцем.
 - Создавать спеку без `Verification plan`, содержащего репродьюсер, который падает на текущем коде.
 - Коммитить runtime artifacts, секреты, токены и абсолютные локальные пути.

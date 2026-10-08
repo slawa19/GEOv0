@@ -108,10 +108,12 @@ Clearing impact) осознанно вне MVP. HHI/top-shares реализов�
 > Модель — `app/db/models/audit_log.py:28-44`: индексированный `tx_id`, `operation_type`,
 > `equivalent_code`, checksum состояния до/после, `affected_participants`, `invariants_checked`,
 > `verification_passed`, `error_details`, индексированный `timestamp`. Пишут его
-> `app/core/payments/engine.py:1134`, `app/core/clearing/service.py:1042`,
-> `app/core/trustlines/service.py:122,226,319`, `app/core/simulator/real_tick_orchestrator.py:447`,
-> `app/api/v1/integrity.py:266`. Читающий эндпоинт тоже есть — `GET /integrity/audit-log`
-> (`app/api/v1/integrity.py:470`), он доступен админу через `deps.require_participant_or_admin`,
+> `app/core/payments/service.py:2063`, `app/core/clearing/service.py:2069`,
+> `app/core/trustlines/service.py:319`, `app/core/ledger/book.py:690`,
+> `app/api/v1/integrity.py:379` (якоря писателей обновлены 2026-10-08 по `git grep IntegrityAuditLog app`:
+> на 2026-08-11 здесь стояли `payments/engine.py:1134` и `simulator/real_tick_orchestrator.py:447` — обоих файлов больше нет,
+> платёж — одна транзакция в `payments/service.py`, программа 019). Читающий эндпоинт тоже есть — `GET /integrity/audit-log`
+> (`app/api/v1/integrity.py:410`), он доступен админу через `deps.require_participant_or_admin`,
 > но принимает **только** `page`/`per_page` — ни одного фильтра, и `admin-ui` его не вызывает
 > (0 вхождений `integrity/audit-log` в `admin-ui/src`).
 > Для сравнения, `GET /admin/audit-log` (`app/api/v1/admin.py:899`) на эту роль не годится: он

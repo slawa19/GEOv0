@@ -2,7 +2,7 @@
 
 > Примечание: этот документ — **аналитический/концептуальный отчёт**.
 >
-> **Каноническое описание фактического стека текущей реализации** находится в [`docs/ru/03-architecture.md`](docs/ru/03-architecture.md:1) (раздел «Технологический стек») и в манифестах зависимостей: `requirements.txt`, `requirements-dev.txt`, `admin-ui/package.json`.
+> **Каноническое описание фактического стека текущей реализации** находится в [`docs/ru/03-architecture.md`](../../03-architecture.md) (раздел «Технологический стек») и в манифестах зависимостей: `requirements.txt`, `requirements-dev.txt`, `admin-ui/package.json`.
 
 **Дата анализа:** 29 ноября 2025  
 **Версия:** 1.0
@@ -682,12 +682,12 @@ async def websocket_endpoint(websocket: WebSocket, participant_id: str):
 2. **Стек технологий**
     - В одном документе упоминается TypeScript + NestJS
     - В другом — Python + FastAPI
-    - **Статус:** выбор финализирован в коде (Python/FastAPI) и в каноне: [`docs/ru/03-architecture.md`](docs/ru/03-architecture.md:1)
+    - **Статус:** выбор финализирован в коде (Python/FastAPI) и в каноне: [`docs/ru/03-architecture.md`](../../03-architecture.md)
 
 3. **Web-админка**
    - В ряде концептов фигурирует server-rendered админка (Jinja2 + HTMX/Alpine.js)
    - В реализации админка — отдельный SPA-проект `admin-ui/` (Vue 3 + TypeScript + Vite + Element Plus + Pinia)
-   - **Статус:** server-rendered вариант считать устаревшим для текущего репозитория; см. канон: [`docs/ru/03-architecture.md`](docs/ru/03-architecture.md:1)
+   - **Статус:** server-rendered вариант считать устаревшим для текущего репозитория; см. канон: [`docs/ru/03-architecture.md`](../../03-architecture.md)
 
 3. **Роль координатора**
    - В протоколе — «любой узел может быть координатором»

@@ -36,6 +36,6 @@ v2 переписала политику **исключительно на `UAH`
 
 ## Структура
 
-Ростер и линии v2 живут в описании сообщества: [seeds/communities/greenfield-village-100/community.json](../../../seeds/communities/greenfield-village-100/community.json) — 100 участников и 523 линии против 439 у базовой версии. Разбивка по эквивалентам и сами эти числа закреплены константами в `tests/unit/test_p017_t1712_community_descriptions.py`, который краснеет и при расхождении, и при незаписанном изменении.
+Ростер и линии v2 живут в описании сообщества: [seeds/communities/greenfield-village-100/community.json](../../../seeds/communities/greenfield-village-100/community.json) — 100 участников и 523 линии против 439 у базовой версии. Разбивка по эквивалентам и сами эти числа закреплены константами в `tooling-tests/portable/test_p017_t1712_community_descriptions.py`, который краснеет и при расхождении, и при незаписанном изменении.
 
 Реализация, из которой описание было извлечено (генератор `admin-fixtures/tools/generate_seed_greenfield_village_100_v2.py`), удалена вместе с `admin-fixtures/` 2026-10-07 (032 S4); теперь `seeds/communities/greenfield-village-100/community.json` и `recipe.json` — единственный источник. См. [README](README.md#исторический-путь-пакет-фикстур-admin-ui).
