@@ -143,6 +143,10 @@ def pytest_collection_finish(session) -> None:
     """
 
     config = session.config
+    # pytest 7.4 runs this hook even when a module failed to import and aborts only afterwards (exit 2). A broken
+    # module has no cases, so the count would blame a "lost" test for an import error; that is pytest's to report.
+    if session.testsfailed or session.shouldstop or session.shouldfail:
+        return
     if not _tier_count.is_canonical_profile(
         markexpr=getattr(config.option, "markexpr", ""),
         args=list(config.args),

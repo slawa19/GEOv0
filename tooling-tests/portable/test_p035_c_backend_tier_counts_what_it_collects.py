@@ -66,8 +66,10 @@ _WIDE = ()
 _SUMMARY = re.compile(r"(?P<selected>\d+)(?:/(?P<total>\d+))? tests? collected(?: \((?P<deselected>\d+) deselected\))?")
 
 
-def _collect(*args: str) -> subprocess.CompletedProcess[str]:
+def _collect(*args: str, extra_pythonpath: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
+    if extra_pythonpath is not None:
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(extra_pythonpath), env.get("PYTHONPATH")]))
     env["ENV"] = "test"
     env["TEST_DATABASE_URL"] = _NO_SERVER_URL
     env["GEO_TEST_ALLOW_DB_RESET"] = "1"
@@ -152,6 +154,53 @@ def test_a_module_dropped_from_the_run_ends_the_canonical_backend_run(baseline: 
     assert f"selected {after} case(s), expected exactly {before}" in result.stdout + result.stderr
 
 
+_COLLECTION_ERROR_PLUGIN = """
+import pytest
+
+
+class _CollectionError(pytest.File):
+    def collect(self):
+        raise ImportError("p035 simulated import error")
+
+
+def pytest_collect_file(file_path, parent):
+    if file_path.name == "{module_name}":
+        return _CollectionError.from_parent(parent, path=file_path)
+"""
+
+
+def test_a_collection_error_stays_pytests_exit_2_and_is_not_reread_as_a_lost_test(
+    baseline: subprocess.CompletedProcess[str], tmp_path: Path
+) -> None:
+    """Reproducer (red on 7edf4cb8, review P2): pytest 7.4 calls `pytest_collection_finish` in a `finally`, BEFORE it
+    aborts on a collection error, so a module that fails to import reaches the count with its cases missing.
+
+    The module's real cases are dropped with `--deselect` and a plugin makes the same file fail to collect, which is
+    the shape of an import error in an existing module (done by hand once on `75dafc82`: exit 4, "a test was lost").
+    Expected: pytest's own exit 2 and the collection error's text, and no claim that a test was lost.
+    """
+
+    nodeid, module = _a_unit_module(baseline)
+    (tmp_path / "p035_collection_error_plugin.py").write_text(
+        _COLLECTION_ERROR_PLUGIN.replace("{module_name}", Path(module).name), encoding="utf-8"
+    )
+    result = _collect(
+        *_CANONICAL,
+        "--deselect",
+        module,
+        "-p",
+        "p035_collection_error_plugin",
+        extra_pythonpath=tmp_path,
+    )
+    output = result.stdout + result.stderr
+    assert "p035 simulated import error" in output, f"the collection error did not happen:\n{output[-1200:]}"
+    assert result.returncode == 2, (
+        f"a collection error ended the canonical backend run with exit {result.returncode}, not pytest's 2: "
+        f"{[line for line in output.splitlines() if 'refused' in line][:1]}"
+    )
+    assert "backend tier refused" not in output, "the count judged a collection that pytest was about to abort"
+
+
 def test_the_unmodified_canonical_profile_is_not_refused(baseline: subprocess.CompletedProcess[str]) -> None:
     """Counter-check: the rule does not refuse the tier as it is (the `baseline` fixture asserts exit 0)."""
 
@@ -217,7 +266,8 @@ def test_only_the_whole_tier_under_the_canonical_marker_expression_is_counted() 
 
     assert counted("not slow")  # no argument: `testpaths = tests`
     assert counted("not slow", "tests")
-    assert counted(" not slow ", "tests", "tests/")
+    assert counted(" not  slow ", "tests", "tests/")  # whitespace is collapsed
+    assert not counted("(not slow)", "tests")  # a differently spelled equivalent is NOT recognised (documented limit)
     assert not counted("", "tests")  # -IncludeExpensive
     assert not counted(None)
     assert not counted("not slow and not x", "tests")

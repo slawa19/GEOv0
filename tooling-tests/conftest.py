@@ -106,8 +106,11 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-08, 035 slice C1 (F-035-14): portable 197 -> 200. Three cases added to the same module, now that the count
 #: exists (`tests/tier_count.py`): the comparison refuses growth and loss alike, the profile decision in both
 #: outcomes, and each named skip is still declared where the count module says. The two reproducer cases went green.
+#:
+#: 2026-10-08, 035 slice C1 review fix-delta: portable 200 -> 201. One case added to the same module: a collection error on the
+#: canonical profile stays pytest's exit 2 (reproducer red on 7edf4cb8, exit 4 "a test was lost").
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 200,
+    "portable": 201,
     "powershell": 235,
 }
 
