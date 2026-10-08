@@ -105,3 +105,28 @@ async def test_a_neighbours_debt_outside_the_pairs_is_not_a_violation(db_session
     # Anti-vacuum: the same state IS a violation once the scope is dropped, so `pairs` is what made the difference.
     with pytest.raises(IntegrityViolationException):
         await checker.verify_clearing_neutrality([p.id for p in ring], eq.id, before, None)
+
+
+@pytest.mark.asyncio
+async def test_the_set_read_is_the_per_participant_read_for_every_participant(db_session):
+    """`net_positions` against `_calculate_net_position`, which is unchanged and still what the clearing reads
+    BEFORE its writes: the same number and the same spelling (the violation report prints both), with the scope and
+    without it, for a participant with rows on one side only, for one with none, and for a repeated id."""
+
+    eq, ring, outsider, _debts, pairs, before = await _cycle(db_session)
+    async with debt_fixture_setup(db_session, label="p035-a4-set"):
+        db_session.add(Debt(debtor_id=ring[0].id, creditor_id=outsider.id, equivalent_id=eq.id, amount=Decimal("5")))
+    await db_session.flush()
+    stranger = uuid.uuid4()
+    checker = InvariantChecker(db_session)
+    asked = [p.id for p in ring] + [outsider.id, stranger, ring[0].id]
+
+    for scope in (pairs, None, set()):
+        one_by_one = {pid: await checker._calculate_net_position(pid, eq.id, scope) for pid in asked}
+        as_a_set = await checker.net_positions(asked, eq.id, scope)
+        assert as_a_set == one_by_one, scope
+        assert {pid: str(v) for pid, v in as_a_set.items()} == {pid: str(v) for pid, v in one_by_one.items()}, scope
+        assert list(as_a_set) == list(dict.fromkeys(asked))
+    assert await checker.net_positions(asked, eq.id, pairs) == {**before, outsider.id: Decimal("0"), stranger: Decimal("0")}
+    assert (await checker.net_positions(asked, eq.id, None))[outsider.id] == Decimal("5")
+    assert await checker.net_positions([], eq.id, pairs) == {}
