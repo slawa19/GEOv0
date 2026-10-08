@@ -220,6 +220,21 @@ describe('unknown run status with NO scene of that run on screen (CONTRACT: the 
     expect(app.real.runStatus?.run_id).toBe('R')
   })
 
+  it('anti-vacuum: once the preview has replaced the run scene, an unknown status does not bring the run scene back', async () => {
+    const app = boot()
+    await settle()
+    vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => ({ ...RUN_STATUS(runId), state: 'stopped' })) as never)
+    await app.admin.attachRun('R')
+    await settle()
+    expect(ids(app), 'precondition: the preview replaced the scene of the stopped run').toEqual(['PREVIEW_NODE'])
+
+    app.real.runStatus = null
+    await app.realActions.refreshSnapshot()
+    await settle()
+
+    expect(ids(app)).toEqual(['PREVIEW_NODE'])
+  })
+
   it('anti-vacuum: a known TERMINAL status still selects the preview (the run is over)', async () => {
     const app = boot()
     await settle()

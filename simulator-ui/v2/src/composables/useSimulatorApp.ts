@@ -1498,19 +1498,30 @@ export function useSimulatorApp(opts?: {
   // Dblclick is always reserved for opening NodeCard (even during picking).
   // Single click is the flow input in picking phases.
 
+  /** The run whose snapshot is the scene on screen now (null: a preview, fixtures or nothing). */
+  let shownRunSceneId: string | null = null
+
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
-    if (!isRealMode.value) return loadSnapshotFixtures(eq)
+    if (!isRealMode.value) {
+      shownRunSceneId = null
+      return loadSnapshotFixtures(eq)
+    }
 
     const runId = real.runId
     const scenarioId = real.selectedScenarioId
 
     const runState = toLower(real.runStatus?.state)
+    // An UNKNOWN status (null: not read yet, or its read failed - a timeout included) is not "no active run" for a
+    // run whose scene is on screen: that scene is not demoted to the preview, the run snapshot is read instead
+    // (034 S5b). A known terminal status (stopped/error) still ends the run scene.
+    const statusUnknownForShownRun = !!runId && !real.runStatus && shownRunSceneId === runId
     const isActiveRun =
       !!runId &&
-      // Treat as active only when we have a known status.
+      // Otherwise treat as active only when we have a known status.
       // This avoids getting stuck on an unreachable/stale runId (scenario switching should still show previews).
-      !!real.runStatus &&
-      (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')
+      ((!!real.runStatus &&
+        (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')) ||
+        statusUnknownForShownRun)
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
@@ -1521,8 +1532,12 @@ export function useSimulatorApp(opts?: {
         equivalent: eq,
         onStaleRun: () => resetStaleRunThroughOwner({ clearError: true }),
       })
-      if (fromRun) return fromRun
+      if (fromRun) {
+        shownRunSceneId = runId
+        return fromRun
+      }
     }
+    shownRunSceneId = null
 
     // Real mode: no run, but have scenario selected - show preview
     // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
@@ -1564,12 +1579,16 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isEqAllowed: (v) => EQUIVALENT_CODE_RE.test(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
-    loadRecoverySnapshot: ({ runId, equivalent }) => loadStrictRunRecoverySnapshot({
-      apiBase: real.apiBase,
-      accessToken: real.accessToken,
-      runId,
-      equivalent,
-    }),
+    loadRecoverySnapshot: async ({ runId, equivalent }) => {
+      const loaded = await loadStrictRunRecoverySnapshot({
+        apiBase: real.apiBase,
+        accessToken: real.accessToken,
+        runId,
+        equivalent,
+      })
+      shownRunSceneId = runId
+      return loaded
+    },
     onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
     clearScheduledTimeouts,
     resetCamera,

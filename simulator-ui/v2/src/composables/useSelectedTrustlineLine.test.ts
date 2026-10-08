@@ -160,7 +160,7 @@ describe('useSelectedTrustlineLine: the same answers, reactive', () => {
     const acts = computed(() => canActOnTrustlineFigures(line.edgeDetailFiguresSource.value))
 
     // silent source: snapshot numbers, no basis to act
-    expect(line.selectedLink.value).toBe(SNAP_AB)
+    expect(line.selectedLink.value).toEqual(SNAP_AB) // a reactive proxy of the same link
     expect(line.figuresSource.value).toEqual({ kind: 'never-asked' })
     expect(acts.value).toBe(false)
 
