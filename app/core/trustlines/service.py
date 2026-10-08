@@ -6,6 +6,7 @@ from typing import Iterable, List
 from sqlalchemy import event, select, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from app.core.money_boundary import MoneyBoundary
 from app.utils.exceptions import (
     BadRequestException,
@@ -884,10 +885,28 @@ class TrustLineService:
         offset: int | None = None,
     ) -> List[TrustLine]:
         # direction: 'outgoing' (I trust someone) | 'incoming' (someone trusts me) | 'all'
-        if status is None:
-            query = select(TrustLine).where(TrustLine.status == 'active')
-        else:
-            query = select(TrustLine).where(TrustLine.status == status)
+        #
+        # ONE STATEMENT FOR THE PAGE (035 A3, `F-035-2`): each line with its equivalent, both participants and the
+        # debt it supports. `_hydrate_trustline` reads those four per line - 201 statements on 50 lines, measured.
+        # Every join is at most one row a line: the three parents are foreign keys, and a pair has one debt per
+        # equivalent (`uq_debts_debtor_creditor_equivalent`), so the page, its order and its offset are the lines'.
+        from_participant, to_participant = aliased(Participant), aliased(Participant)
+        query = (
+            select(TrustLine, Equivalent, from_participant, to_participant, Debt.amount)
+            .join(Equivalent, Equivalent.id == TrustLine.equivalent_id)
+            .join(from_participant, from_participant.id == TrustLine.from_participant_id)
+            .join(to_participant, to_participant.id == TrustLine.to_participant_id)
+            # used = debt where debtor is 'to' and creditor is 'from' - the rule of `_get_used_amount`
+            .outerjoin(
+                Debt,
+                and_(
+                    Debt.debtor_id == TrustLine.to_participant_id,
+                    Debt.creditor_id == TrustLine.from_participant_id,
+                    Debt.equivalent_id == TrustLine.equivalent_id,
+                ),
+            )
+            .where(TrustLine.status == ('active' if status is None else status))
+        )
 
         if direction == "outgoing":
             query = query.where(TrustLine.from_participant_id == participant_id)
@@ -920,12 +939,10 @@ class TrustLineService:
         if limit is not None:
             query = query.limit(limit)
         
-        result = await self.session.execute(query)
-        trustlines = result.scalars().all()
-        
         hydrated = []
-        for tl in trustlines:
-            hydrated.append(await self._hydrate_trustline(tl))
+        for tl, line_equivalent, line_from, line_to, debt in (await self.session.execute(query)).all():
+            tl.equivalent, tl.from_participant, tl.to_participant = line_equivalent, line_from, line_to
+            hydrated.append(self._attach_read_fields(tl, self._used_of(tl, debt), in_step=True))
         return hydrated
 
     async def get_one(self, trustline_id: UUID) -> TrustLine:
@@ -956,8 +973,12 @@ class TrustLineService:
             result = await self.session.execute(stmt)
             trustline.to_participant = result.scalar_one()
 
-        used = await self._get_used_amount(trustline)
-        
+        return self._attach_read_fields(trustline, await self._get_used_amount(trustline), in_step=in_step)
+
+    @staticmethod
+    def _attach_read_fields(trustline: TrustLine, used: Decimal, *, in_step: bool) -> TrustLine:
+        """The fields the schema reads off a line whose equivalent and participants are loaded."""
+
         # Attach dynamic properties for Pydantic schema
         # Pydantic model expects: equivalent_code, used, available
         # We can attach them to the object, or return a dict, or let Pydantic extract from methods if we used getter.
@@ -976,6 +997,15 @@ class TrustLineService:
         trustline.available = trustline.limit - used
         
         return trustline
+
+    @staticmethod
+    def _used_of(trustline: TrustLine, debt: Decimal | None) -> Decimal:
+        """`used` of a line from the debt of its pair, read with it (`None`: no debt row). One rule with
+        `_get_used_amount`: a closed line's `used` is zero whatever its pair owes now."""
+
+        if str(getattr(trustline, "status", "")) == "closed" or debt is None:
+            return Decimal("0")
+        return debt
 
     async def _get_used_amount(self, trustline: TrustLine) -> Decimal:
         # A CLOSED line is history: the debt on this pair belongs to whatever incarnation is
