@@ -490,8 +490,6 @@ class RealTick:
             # it needs and commits them away, and the phase returns with no transaction open.
             await rr._apply_due_scenario_events(setup_session, run_id=run_id, run=run, scenario=scenario)
 
-        attempts_made: list[int] = []  # of THIS tick's money phase; a second one is a replay after a conflict
-
         async def _money_attempt(session):
             """One attempt: the planning inputs, then the boundary - owner locks, planning, staged payments.
 
@@ -502,11 +500,6 @@ class RealTick:
             CONNECTION (034 `F-034-2`, §15 review of `62cce627`): the tick holds one pooled connection at a time
             and never waits for another while it holds `FOR UPDATE` on the lines. See `load_planning_inputs`.
             """
-            attempts_made.append(1)
-            if len(attempts_made) > 1:
-                await self._wait_for_the_line_holders(
-                    run_id=run_id, run=run, participants=participants, equivalents=equivalents
-                )
             planning_inputs = await self.load_planning_inputs(
                 run=run, participants=participants, equivalents=equivalents
             )
@@ -536,47 +529,6 @@ class RealTick:
             open_session=db_session.AsyncSessionLocal,
             run_money_attempt=_money_attempt,
         )
-
-    async def _wait_for_the_line_holders(
-        self,
-        *,
-        run_id: str,
-        run: RunRecord,
-        participants: list[tuple[Any, str]],
-        equivalents: list[str],
-    ) -> None:
-        """Before a REPLAYED attempt plans: wait until whoever holds the run's lines has finished.
-
-        034 S1a, with the planning inputs read before the line locks. A replay exists because a competitor won a
-        conflict over these lines, and it is the competitor's commit that the replay must re-plan against
-        (programme 015 / P1: "the plan was recomputed against a snapshot that includes the competitor",
-        `tests/integration/test_p015_p1_money_replay_postgres.py`). While planning was read under the money
-        transaction's locks that came for free: the replay queued behind the competitor on the lines and read after
-        it. Read before the locks, the replay would plan from the debts as they were BEFORE the competitor
-        committed, and the payment service would refuse the stale amount - a replay spent on a refusal.
-
-        So a replay first takes the same line locks on a throwaway session - which queues it behind the competitor -
-        and gives them back at once: the session is closed, its transaction rolled back, before anything is read.
-        One pooled connection at a time, as everywhere in the attempt; nothing here is the money transaction. The
-        first attempt does not do this: it has no known competitor. Best effort - a failure is logged and the
-        replay plans from what it can read; the money attempt takes its own locks and decides.
-        """
-
-        rr = self._runner
-        try:
-            async with db_session.AsyncSessionLocal() as waiting_session:
-                await PaymentService(waiting_session).lock_staged_lines(
-                    equivalents, {participant_id for participant_id, _pid in participants}
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            rr._logger.warning(
-                "simulator.real.replay_wait_for_line_holders_failed run_id=%s tick=%s",
-                str(run_id),
-                int(run.tick_index or 0),
-                exc_info=True,
-            )
 
     async def load_planning_inputs(
         self,
