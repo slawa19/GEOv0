@@ -1,4 +1,4 @@
-import { httpJson, httpUrl, type HttpConfig } from './http'
+import { ApiError, httpJson, httpJsonMeta, httpUrl, LONG_REQUEST_TIMEOUT_MS, type HttpConfig, type HttpRequestInit } from './http'
 import {
   decodeBottlenecksResponse,
   decodeClearingOnceResponse,
@@ -52,10 +52,16 @@ async function simulatorContractJson<T>(
   cfg: HttpConfig,
   path: string,
   decoder: (value: unknown) => T,
-  init?: RequestInit,
+  init?: HttpRequestInit,
 ): Promise<T> {
-  const value = await httpJson<unknown>(cfg, path, init)
-  return decoder(value)
+  const { value, requestId } = await httpJsonMeta<unknown>(cfg, path, init)
+  try {
+    return decoder(value)
+  } catch (e) {
+    // A 2xx answer that breaks the response contract still names the request that produced it.
+    if (e instanceof ApiError && !e.requestId) e.requestId = requestId
+    throw e
+  }
 }
 
 export function listScenarios(cfg: HttpConfig): Promise<ScenariosListResponse> {
@@ -211,6 +217,7 @@ export function actionTxOnce(cfg: HttpConfig, runId: string, req: TxOnceRequest)
     {
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -227,6 +234,7 @@ export function actionClearingOnce(
     {
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -239,7 +247,7 @@ export function actionTrustlineCreate(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionTrustlineCreateRequest,
-  init?: RequestInit,
+  init?: HttpRequestInit,
 ): Promise<SimulatorActionTrustlineCreateResponse> {
   return simulatorContractJson(
     cfg,
@@ -249,6 +257,7 @@ export function actionTrustlineCreate(
       ...(init ?? {}),
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -257,7 +266,7 @@ export function actionTrustlineUpdate(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionTrustlineUpdateRequest,
-  init?: RequestInit,
+  init?: HttpRequestInit,
 ): Promise<SimulatorActionTrustlineUpdateResponse> {
   return simulatorContractJson(
     cfg,
@@ -267,6 +276,7 @@ export function actionTrustlineUpdate(
       ...(init ?? {}),
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -275,7 +285,7 @@ export function actionTrustlineClose(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionTrustlineCloseRequest,
-  init?: RequestInit,
+  init?: HttpRequestInit,
 ): Promise<SimulatorActionTrustlineCloseResponse> {
   return simulatorContractJson(
     cfg,
@@ -285,6 +295,7 @@ export function actionTrustlineClose(
       ...(init ?? {}),
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -293,7 +304,7 @@ export function actionPaymentReal(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionPaymentRealRequest,
-  init?: RequestInit,
+  init?: HttpRequestInit,
 ): Promise<SimulatorActionPaymentRealResponse> {
   return simulatorContractJson(
     cfg,
@@ -303,6 +314,7 @@ export function actionPaymentReal(
       ...(init ?? {}),
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -311,7 +323,7 @@ export function actionClearingReal(
   cfg: HttpConfig,
   runId: string,
   req: SimulatorActionClearingRealRequest,
-  init?: RequestInit,
+  init?: HttpRequestInit,
 ): Promise<SimulatorActionClearingRealResponse> {
   return simulatorContractJson(
     cfg,
@@ -321,6 +333,7 @@ export function actionClearingReal(
       ...(init ?? {}),
       method: 'POST',
       body: JSON.stringify(req),
+      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
     },
   )
 }
@@ -347,6 +360,7 @@ export function getTrustlinesList(
     cfg,
     `/simulator/runs/${encodeURIComponent(runId)}/actions/trustlines-list?${q}`,
     decodeSimulatorActionTrustlinesListResponse,
+    { timeoutMs: LONG_REQUEST_TIMEOUT_MS },
   )
 }
 
@@ -370,6 +384,7 @@ export function getPaymentTargets(
     cfg,
     `/simulator/runs/${encodeURIComponent(runId)}/payment-targets?${q}`,
     decodeSimulatorPaymentTargetsResponse,
+    { timeoutMs: LONG_REQUEST_TIMEOUT_MS },
   )
 }
 
