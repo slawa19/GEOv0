@@ -14,8 +14,9 @@ What it checks, statically (AST - a comment or a docstring does not count):
 * under `app/`, only `app/core/clearing/service.py` calls the shared executor `execute_clearing_with_amount`, only
   `service.py` and `runner.py` call `execute_occurrence`, and nothing calls `auto_clear` or the compatibility
   wrapper `execute_clearing` - both gone from `ClearingService` (R4: safe delete; the wrapper: 024 `T2417`);
-* `find_cycles` (the diagnostic) is called only by the two diagnostic routes (`clearing.py::list_cycles`,
-  `admin.py`) - not by any simulator module.
+* `find_cycles` (the retired detectors) is called by nothing under `app/` outside `service.py` itself: since 035 A1
+  (owner decision П1-(а), 2026-10-08) `GET /clearing/cycles` answers with the flow plan through the runner, and
+  the admin copy of the route left in 032 S5. Its remaining callers are the seed tool and tests, until they move.
 
 Anti-vacuum: the walker sees each form it looks for in a synthetic snippet.
 
@@ -103,8 +104,6 @@ def test_only_the_service_and_the_runner_reach_the_executors_and_auto_clear_is_g
             allowed = {"execute_clearing_with_amount", "execute_occurrence", "find_cycles"}
         elif relative == "app/core/clearing/runner.py":
             allowed = {"execute_occurrence"}
-        elif relative in ("app/api/v1/clearing.py", "app/api/v1/admin.py"):
-            allowed = {"find_cycles"}
         if bad := sorted((called & _EXECUTORS) - allowed):
             offenders[relative] = bad
     gone = ("auto_clear", "execute_clearing")
