@@ -4168,7 +4168,7 @@ components:
         # The four viz fields are filled only when `equivalent` is supplied AND names an existing
         # equivalent AND the participant set is non-empty; otherwise all four stay null. The keys
         # are always present either way. `?equivalent=NOSUCH` is a 200 with four nulls, because
-        # validate_equivalent_code checks the format only.
+        # the code is checked for its format only (`canonical_code`).
         net_balance_atoms:
           # Integer atoms via str(int): no decimal point, negative for a net debtor. NOT a money
           # amount - the major-unit value is this divided by 10 ** precision.
@@ -7604,10 +7604,12 @@ components:
         - total_available
       properties:
         equivalent:
-          # The `equivalent` query parameter, trimmed and upper-cased, or null when it was omitted
-          # or blank. Echoed with no lookup: an unknown code is a 200 with this field set and every
-          # aggregate at zero, not a 404. Deliberately NOT $ref EquivalentCode - nothing validates the
-          # pattern on this route. An inactive equivalent is summed like an active one.
+          # The `equivalent` query parameter, trimmed and upper-cased (`canonical_code`), or null when it
+          # was omitted. A blank value or one that cannot be a code is a 400 (035 B1), not null. Echoed with
+          # no lookup: a well-formed but unknown code is a 200 with this field set and every aggregate at
+          # zero, not a 404. Deliberately NOT $ref EquivalentCode - the response never carries a code that
+          # failed the format, but the schema does not repeat the pattern. An inactive equivalent is summed
+          # like an active one.
           type: string
           nullable: true
         updated_at:
@@ -7687,9 +7689,9 @@ components:
           # The path parameter, trimmed. A blank or unknown pid is a 404, so this is never empty.
           type: string
         equivalent:
-          # Trimmed and upper-cased, null when omitted. Unlike the liquidity summary this route
-          # DOES validate it: validate_equivalent_code enforces the format (400) and an unknown code is
-          # a 404, so a non-null value here always names a real equivalent.
+          # Trimmed and upper-cased, null when omitted. The format is enforced (`canonical_code`, 400,
+          # as on the liquidity summary since 035 B1) and, unlike the liquidity summary, an unknown code
+          # is a 404, so a non-null value here always names a real equivalent.
           type: string
           nullable: true
         balance_rows:
