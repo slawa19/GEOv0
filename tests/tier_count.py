@@ -1,0 +1,172 @@
+"""The backend tier counts what it collects (035 F-035-14, slice C1).
+
+WHY. The tooling tier refuses a count that differs from `EXPECTED_CASES` (`tooling-tests/conftest.py`). The backend
+tier had no such count: a deleted module, a `--ignore` or a `--deselect` on the canonical run ended green. Measured
+2026-10-08 on `75dafc82`, direct pytest: one `--deselect` of one case, 3149 selected / 16 deselected, exit 0, and
+nothing in the session noticed. This module is the whole mechanism: one constant, one comparison, one profile test;
+`tests/conftest.py` calls it from `pytest_collection_finish`.
+
+THE RULE. On the CANONICAL PROFILE the number of selected cases must equal `EXPECTED_SELECTED_ITEMS`, in EITHER
+direction (a lost case and an unrecorded new case fail alike, AGENTS.md section 6). A mismatch ends the session with
+exit 4 (`pytest.ExitCode.USAGE_ERROR`) at the end of collection, before any test body runs, so it also holds under
+`--collect-only`.
+
+WHAT THE CANONICAL PROFILE IS, decided from the session's own options and never from an environment variable that
+can be forgotten:
+
+* the marker expression is `not slow` - what `scripts/verify_local.ps1 -BackendOnly` passes by default - compared after
+  runs of whitespace are collapsed (`not  slow` is the same expression); a differently spelled equivalent such as
+  `(not slow)` is NOT recognised and silently turns the guard off for that run (see "What this does not see");
+* the positional arguments, if any, name the whole `tests` directory and nothing narrower (no argument at all means
+  `testpaths = tests`; `-BackendSelector tests` is the whole tier and IS counted). Any narrower path or a `path::node`,
+  also after `--`, is a selector: a deliberate narrowing that is NOT counted (`-- tests` is still the whole tier).
+
+Everything else that reduces or reorders the selection is NOT an exemption, so the rule is not vacuous:
+`--deselect`, `--ignore`, `--ignore-glob`, `-k`, `--lf`, `--sw`. Run them with a path selector, or accept the refusal.
+
+NOT COUNTED BY THIS RULE: a run with a selector narrower than `tests` (`-BackendSelector <path>`), and a run with no marker expression
+(`-IncludeExpensive`, the wider profile: nothing is excluded, the 15 `slow` cases come back). The wide profile has no
+constant of its own because the rule asks for one number; it is the canonical number plus the `slow` cases.
+
+WHAT MOVES THE NUMBER BESIDES A TEST FILE (found by review, 2026-10-08; the first version of this file said "nothing").
+The count is the CARDINALITY OF THE SET OF SELECTED ITEMS, and two parametrize lists are built at import from the
+working tree. Found by reading every `parametrize` / `fixture(params=)` argument of `tests/**` back to its definition
+(a scan of 2026-10-08; scans in `tests/` that only ASSERT inside a test body do not move the count):
+
+* `tests/unit/test_p012_t1211_money_path_never_types_a_float.py` - `_float_sites()` walks `MONEY_MODULES`
+  (`app/core/money_boundary.py`, `app/core/clearing`, `app/core/trustlines`, `app/core/balance`, `app/utils/money.py`,
+  `app/utils/validation.py` and the other entries of that list; directories by `rglob("*.py")`) and parametrizes one case
+  per `float` site found there: `TYPED` 18, `CONSTRUCTED` 6, `DECLARED` 3 on 2026-10-08. A PRODUCT edit that adds or removes
+  a float typing, float construction or float-annotated attribute in those modules, or a new `.py` file in those
+  directories (even an untracked one), changes the count without touching a backend test.
+* `tests/unit/test_p012_t1211_money_rendering_conformance.py` - `_CASES` is `api/money-rendering-conformance.json`
+  (`TABLE_PATH`): 44 cases of `test_to_money_str_conforms_to_the_shared_table`. Editing the JSON table changes the count.
+
+So this is a guard of the set's cardinality, not of the list of tests; a change of one of these sources is a legitimate
+reason to move the constant, and the refusal message says so. The scan searched for names defined from file reads, globs,
+JSON, environment and platform, and for names imported from `app` / `scripts`; the other parametrize lists are literals or
+constructed values (exception instances, datetimes). A scan is not a proof: a new parametrize list built from the tree is
+invisible until it moves the count.
+
+PLATFORM. `skipped` cases are COLLECTED cases, so the number is the same on every platform as long as collection does
+not depend on the platform. NOT REFUTED by reading (grep over `tests/`): no `collect_ignore`, no
+`pytest_ignore_collect`, no `allow_module_level` skip, no `importorskip` that removes a module, no platform branch in a
+parametrize list; the only platform conditions are the three `skipif` listed below, which skip a collected case, and the
+two sources above walk sorted `rglob` paths and read a committed JSON file. It is a reading and NOT measured on ubuntu:
+the first `required-backend` run after this change is the measurement (AGENTS.md section 16, item 6).
+
+CHANGING THE NUMBER. The set of selected items changed: a test was added, moved or deleted, or one of the sources above
+moved. Change `EXPECTED_SELECTED_ITEMS` in the same commit with a dated line below saying which. That is the only way to
+make the session green again:
+
+* 2026-10-08, 035 slice C1 (F-035-14): first value, 3150 (3165 with the 15 `slow` cases). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` on `75dafc82`; on Windows the full run was
+  `3144 passed, 2 skipped, 3 xfailed, 16 deselected` with one case deselected, which is 3149 + 1.
+* 2026-10-08, 035 slice C1, merge of `origin/main` `0f248b9c`: 3150 -> 3219 (+69; 3234 with the 15 `slow` cases). The merge
+  brought backend tests of 035 A1 (PR #166: `test_p035_a1_cycles_do_not_hold_the_event_loop.py`, `test_p035_b1_equivalent_query_code.py`,
+  `tests/p035_support.py`) and 034 S1a (PR #167: three `test_p034_s1_*` modules, `test_p034_s1_launch_epoch_and_post_commit_publication.py`)
+  plus additions to existing modules. The guard itself refused the first merged collection ("MORE than recorded", exit 4)
+  - the case it is for. Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-08, 034 slice S1b: 3219 -> 3233 (+14; 3248 with the 15 `slow` cases). Four new modules of the slice:
+  `tests/unit/test_p034_s1b_artifact_event_drops.py` (4), `tests/unit/test_p034_s1b_interact_silent_failures_are_logged.py` (2),
+  `tests/unit/test_p034_s1b_heartbeat_failure_is_not_silent.py` (4) and
+  `tests/integration/test_p034_s1b_payment_edge_patch_names_the_line_postgres.py` (4). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `origin/main` `4a1768d5`; the guard refused
+  the collection first ("selected 3233 case(s), expected exactly 3219 ... MORE than recorded", exit 4).
+
+SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
+
+* Windows (`os.name == "nt"`): 2 - `tests/unit/test_deployment_config.py::test_entrypoint_preserves_custom_command_after_migrations`
+  (no POSIX shell) and `tests/unit/test_settings_guardrails.py` case under `skipif(os.name == "nt")` at line 260
+  (Windows environment keys are case-insensitive). Measured 2026-10-08: `SKIPPED [1] ...test_deployment_config.py:131`,
+  `SKIPPED [1] ...test_settings_guardrails.py:260`.
+* Linux (`os.name == "posix"`): 1 - the case under `skipif(os.name != "nt")` in
+  `tests/unit/test_p024_scenario_id_is_a_safe_path_segment.py` at line 188 (Windows device names). INFERRED from the
+  conditions, not measured on Linux; the CI log of `required-backend` is the measurement.
+* Two conditional skips that did not fire on the measured full run:
+  `tests/contract/test_p011_responses_conform_to_the_canon.py:521-523` skips the AGGREGATE only when the session was vacuous
+  (`_vacuity_skip_reason`); `:1506-1507` skips `test_the_aggregate_run_alone_no_longer_reports_success_over_zero_bodies`
+  when `GEO_CONFORMANCE_NO_SUBPROCESS` is set (an escape hatch for that one case, not for the aggregate).
+  Expected strict `xfail` cases: 3 on the Windows run (`xfailed`), not named here.
+
+`tooling-tests/portable/test_p035_c_backend_tier_counts_what_it_collects.py` holds that each named skip is still
+declared where this list says it is.
+
+A COLLECTION ERROR IS NOT THIS GUARD'S TO JUDGE. pytest 7.4 calls `pytest_collection_finish` even when a module failed to
+import, and aborts only afterwards (exit 2). A broken module has no cases, so the count would read "fewer" and blame a
+loss for what is an import error (reproduced 2026-10-08 on `7edf4cb8`: exit 4 instead of 2). The hook therefore returns
+without judging when the session recorded a collection error or a stop request (`session.testsfailed`, `shouldstop`,
+`shouldfail`); pytest's own failure handling and error text stand (exit 2 in the ordinary invocation; exit 1 under
+`--continue-on-collection-errors`). Reproducer and counter-check:
+`tooling-tests/portable/test_p035_c_backend_tier_counts_what_it_collects.py`.
+
+WHAT THIS DOES NOT SEE. A marker expression with the same meaning but another spelling (`(not slow)`, `not (slow)`): it is
+not recognised, the run is not counted, and nothing says so. WHICH tests are present: a case replaced by another under the same number passes. Whether the
+number was RIGHT when recorded: it is a measurement of the tier at the commit that changed it. A reconfiguration of the
+runner itself (`-o addopts=...`, `-p no:...`, `PYTEST_ADDOPTS` that ends pytest before the end of collection): the
+runner is not defended against reconfiguring itself (the same limit as `tooling-tests/conftest.py`). A collection that
+ERRORS (import failure) is left to pytest and its own exit code and error text.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from pathlib import Path
+
+#: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
+#: Moves only by the dated lines in the module docstring.
+EXPECTED_SELECTED_ITEMS = 3233
+
+#: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
+CANONICAL_MARKEXPR = "not slow"
+
+#: The directory whose collection is the whole tier (`pytest.ini` `testpaths`).
+TIER_DIRECTORY = "tests"
+
+
+def is_canonical_profile(
+    *,
+    markexpr: str | None,
+    args: Sequence[str],
+    invocation_dir: Path,
+    root: Path,
+) -> bool:
+    """True when the session collects the whole tier under the canonical marker expression.
+
+    `args` are the session's positional arguments after pytest has substituted `testpaths` for an empty list.
+    A `path::node` argument is a selector; so is every path other than the tier directory itself.
+    """
+
+    if " ".join(str(markexpr or "").split()) != CANONICAL_MARKEXPR:
+        return False
+    if not args:
+        return True
+    tier = (root / TIER_DIRECTORY).resolve()
+    for argument in args:
+        if "::" in argument:
+            return False
+        if (invocation_dir / argument).resolve() != tier:
+            return False
+    return True
+
+
+def count_problem(*, selected: int, expected: int = EXPECTED_SELECTED_ITEMS) -> str | None:
+    """None when the count matches; otherwise the refusal text, for either direction.
+
+    The text states the numbers as fact and lists the possible causes without choosing one: the count cannot tell a
+    lost test from a changed parametrize source.
+    """
+
+    if selected == expected:
+        return None
+    direction = "FEWER than recorded" if selected < expected else "MORE than recorded"
+    return (
+        f"the canonical backend profile (whole tier, -m 'not slow', no path selector) selected {selected} case(s), "
+        f"expected exactly {expected} (EXPECTED_SELECTED_ITEMS in tests/tier_count.py): {direction}. The count does "
+        "not say why. Possible causes: a test module or case added, deleted or renamed; a --deselect, --ignore, -k or "
+        "--lf on this run; a marker change; a change of a source that builds parametrize lists from the working tree "
+        "(the float scan over the money modules, api/money-rendering-conformance.json - the full list is in the "
+        "docstring of tests/tier_count.py). If the change is intended, set the constant in the same commit and add a "
+        "dated line to that docstring saying which. To run a subset on purpose, give a path selector "
+        "(scripts/verify_local.ps1 -BackendSelector <paths>) or run without -m (-IncludeExpensive); neither is counted."
+    )
