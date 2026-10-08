@@ -242,33 +242,43 @@ async def _publish_committed(
     open_session: Callable[[], Any],
     logger: logging.Logger,
     run_id: str,
+    read_patches: bool = True,
 ) -> None:
     """The money commit is CONFIRMED: read the payments' visual patches, then publish the observations once.
 
     034 `F-034-2`. The patches are read here, AFTER the commit, on a session of their own
     (`TickPaymentsPhase.build_post_commit_patches`), never in the money transaction: a failed patch query there
     aborted the transaction, its `COMMIT` was answered with a rollback, and the payments were still published.
-    Reading them is not allowed to cost the publication either. It is run to its end through a caller
-    cancellation, a failure of it is logged and leaves the events without patches, and the observations are
-    published in every case - the money is durable. A cancellation that arrived meanwhile is raised afterwards.
+
+    THE READ IS OPTIONAL AND IS WAITED FOR CANCELLABLY (§15 review of `62cce627`, 2026-10-08). Only the money's own
+    commit and rollback are drained through a cancellation; a visual read is not money. If the caller is cancelled
+    while it runs - a run being stopped while the pool or the server does not answer - the read is cancelled with
+    it, its session is closed by its owner on the way out, the observations are published WITHOUT patches, and the
+    cancellation is then raised, not swallowed. A failure of the read is logged and costs the patches likewise.
+    The observations are published in every case: the money is durable. `read_patches=False` is the caller that
+    is already being cancelled when the commit's outcome arrives: it publishes at once.
     """
 
     if phase is None:
         return
-    failure: BaseException | None = None
-    build = getattr(phase, "build_post_commit_patches", None)
+    cancelled: asyncio.CancelledError | None = None
+    build = getattr(phase, "build_post_commit_patches", None) if read_patches else None
     if build is not None:
-        _built, failure = await _drain_call(lambda: build(open_session))
-        if failure is not None and not isinstance(failure, asyncio.CancelledError):
+        try:
+            await build(open_session)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+            logger.warning("simulator.real.payment_patches_cancelled run_id=%s", str(run_id))
+        except Exception as exc:
             logger.warning(
                 "simulator.real.payment_patches_failed run_id=%s error_type=%s",
                 str(run_id),
-                type(failure).__name__,
-                exc_info=(type(failure), failure, failure.__traceback__),
+                type(exc).__name__,
+                exc_info=True,
             )
     phase.apply_deferred_effects()
-    if isinstance(failure, asyncio.CancelledError):
-        raise failure
+    if cancelled is not None:
+        raise cancelled
 
 
 async def _commit_money(
@@ -278,6 +288,7 @@ async def _commit_money(
     logger: logging.Logger,
     open_session: Callable[[], Any],
     run_id: str,
+    on_committed: Callable[[], None],
 ) -> _CommitResolution:
     """Commit the money and report WHICH outcome the commit actually reached.
 
@@ -286,6 +297,11 @@ async def _commit_money(
     `apply_rollback_observations`: whether a non-committed attempt's observations are published or
     destroyed is the replay's decision, and resolving the buffer here would take it away - a
     superseded attempt would publish `tx.failed` for payments the replay is about to re-plan.
+
+    `on_committed` settles the run's counters of a committed money phase. It is called the moment the commit is
+    confirmed - inside the commit's own resolution, before any optional wait - so a cancellation during the patch
+    read, or one that arrived while the commit ran, cannot leave a published payment uncounted (§15 review of
+    `62cce627`, finding B).
     """
 
     state: Literal["committed", "rolled_back", "unknown"] = "unknown"
@@ -293,6 +309,7 @@ async def _commit_money(
     def _on_commit() -> None:
         nonlocal state
         state = "committed"
+        on_committed()
 
     def _on_rollback() -> None:
         nonlocal state
@@ -314,8 +331,11 @@ async def _commit_money(
         )
     except asyncio.CancelledError:
         if state == "committed":
-            # The commit landed while the caller was being cancelled: its payments are published all the same.
-            await _publish_committed(phase, open_session=open_session, logger=logger, run_id=run_id)
+            # The commit landed while the caller was being cancelled: its payments are published all the same, at
+            # once and without patches - the caller is leaving, and a visual read is not worth making it wait.
+            await _publish_committed(
+                phase, open_session=open_session, logger=logger, run_id=run_id, read_patches=False
+            )
         raise
     except BaseException as exc:  # noqa: BLE001 - classified by the caller, never swallowed
         error = exc
@@ -619,14 +639,9 @@ async def run_money_phase_with_bounded_replay(
                     conflicts=conflicts,
                 )
 
-            commit_attempted = True
-            resolution = await _commit_money(
-                session=session, phase=phase, logger=logger, open_session=open_session, run_id=run_id
-            )
-            state = resolution.state
-            error = resolution.error
-
-            if state == "committed":
+            def _count_committed(phase: Any = phase, attempt: int = attempt) -> None:
+                """The run's counters of a committed money phase. Once per phase: each of its two callers is the
+                single place its branch learns that the money is durable."""
                 with lock:
                     run._real_money_committed_ticks_total += 1
                     run._real_money_committed_payments_total += int(
@@ -634,6 +649,21 @@ async def run_money_phase_with_bounded_replay(
                     )
                     run._real_money_attempts_total += attempt
                     run._real_consec_money_no_progress_ticks = 0
+
+            commit_attempted = True
+            resolution = await _commit_money(
+                session=session,
+                phase=phase,
+                logger=logger,
+                open_session=open_session,
+                run_id=run_id,
+                on_committed=_count_committed,
+            )
+            state = resolution.state
+            error = resolution.error
+
+            if state == "committed":
+                # Counted already, at the commit's confirmation (`_commit_money`, `on_committed`).
                 return MoneyPhaseOutcome(
                     stack=stack,
                     session=session,
@@ -653,17 +683,9 @@ async def run_money_phase_with_bounded_replay(
                 if landed is True:
                     # The money IS durable. Publish exactly once and let the error out: the tick is
                     # recorded as failed and its tail is skipped, but nothing may replay it.
-                    try:
-                        await _publish_committed(phase, open_session=open_session, logger=logger, run_id=run_id)
-                    finally:
-                        # Also when the caller is cancelled while the patches are read: the money did land.
-                        with lock:
-                            run._real_money_committed_ticks_total += 1
-                            run._real_money_committed_payments_total += int(
-                                getattr(phase, "committed", 0) or 0
-                            )
-                            run._real_money_attempts_total += attempt
-                            run._real_consec_money_no_progress_ticks = 0
+                    # Counted first: the patch read inside the publication is an optional, cancellable wait.
+                    _count_committed()
+                    await _publish_committed(phase, open_session=open_session, logger=logger, run_id=run_id)
                     logger.warning(
                         "simulator.real.money_commit_landed_after_unknown run_id=%s tick=%s",
                         str(run_id),

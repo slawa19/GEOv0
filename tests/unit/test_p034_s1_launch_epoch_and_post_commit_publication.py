@@ -3,8 +3,9 @@
 1. THE KEY. The first launch of a run (epoch 0) keeps the idempotency key it always had, byte for byte - the stored
    payments of every run that was never restarted stay answerable - and each restart gives the same planned payment
    another key. The old formula is spelled out below on purpose: it is the contract being kept.
-2. THE PUBLICATION. Once the money commit is confirmed, its payments are published whatever happens to the reading of
-   their visual patches: a failure of it, or a cancellation of the caller while it runs.
+2. THE PUBLICATION. Once the money commit is confirmed, it is counted and its payments are published whatever happens
+   to the reading of their visual patches: a failure of it, or a cancellation of the caller while it runs - which
+   cancels the reading (it is optional), never the publication or the counters.
 
 The restart itself, the stored rows and the SQL are the subject of the PostgreSQL stands
 `tests/integration/test_p034_s1_*`.
@@ -79,22 +80,71 @@ async def test_each_restart_starts_a_new_launch_epoch(monkeypatch) -> None:
 
 
 class _Phase:
-    """A committed phase whose patch reading is under the test's control."""
+    """A committed phase of one payment whose patch reading is under the test's control."""
+
+    committed = 1
+    staged_tx_ids = frozenset({"tx-1"})
 
     def __init__(self, *, fail: bool = False) -> None:
         self.started, self.release = asyncio.Event(), asyncio.Event()
-        self.fail, self.built, self.published = fail, False, 0
+        self.fail, self.built, self.read_cancelled, self.published = fail, False, False, 0
 
     async def build_post_commit_patches(self, _open_session) -> None:
         self.started.set()
         if self.fail:
             raise RuntimeError("p034: the patches could not be read")
-        await self.release.wait()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.read_cancelled = True
+            raise
         self.built = True
 
     def apply_deferred_effects(self) -> bool:
         self.published += 1
         return True
+
+    def _already_resolved(self) -> bool:
+        assert self.published, "a committed phase was resolved as something else before it was published"
+        return False
+
+    apply_rollback_observations = apply_unknown_transaction_observations = discard_observations = _already_resolved
+
+
+class _Session:
+    """A money session whose COMMIT succeeds."""
+
+    async def __aenter__(self) -> "_Session":
+        return self
+
+    async def __aexit__(self, *_exc) -> None:
+        return None
+
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None
+
+
+def _money_phase(phase: _Phase) -> tuple[RunRecord, "asyncio.Task"]:
+    """The real owner of the money phase (`run_money_phase_with_bounded_replay`) over a session that commits."""
+
+    run = RunRecord(run_id="run-1", scenario_id="s", mode="real", state="running")
+    run._real_consec_money_no_progress_ticks = 2  # a confirmed commit is progress: it must clear this
+
+    async def attempt(_session):
+        return phase, False
+
+    task = asyncio.create_task(money_replay.run_money_phase_with_bounded_replay(
+        run_id=run.run_id, run=run, lock=threading.RLock(), logger=logging.getLogger("tests.p034.publish"),
+        max_attempts=1, open_session=_Session, run_money_attempt=attempt))
+    return run, task
+
+
+def _money_counters(run: RunRecord) -> tuple[int, int, int, int]:
+    return (run._real_money_committed_ticks_total, run._real_money_committed_payments_total,
+            run._real_money_attempts_total, run._real_consec_money_no_progress_ticks)
 
 
 @pytest.mark.asyncio
@@ -109,19 +159,57 @@ async def test_a_failed_patch_reading_is_logged_and_the_payments_are_still_publi
     ]
 
 
+async def _cancel_while_the_patches_are_read(phase: _Phase, task: "asyncio.Task") -> bool:
+    """Cancel `task` once it is reading the patches; say whether it ended WITHOUT the reading being released."""
+
+    await phase.started.wait()
+    task.cancel()  # the tick is being stopped; the commit is already confirmed
+    done, _pending = await asyncio.wait({task}, timeout=5.0)
+    ended = task in done
+    phase.release.set()  # only so that a tree which still drains the reading does not hang this test
+    await asyncio.gather(task, return_exceptions=True)
+    return ended
+
+
 @pytest.mark.asyncio
-async def test_a_caller_cancelled_while_the_patches_are_read_still_publishes(caplog) -> None:
+async def test_a_caller_cancelled_while_the_patches_are_read_publishes_without_them() -> None:
+    """REWRITTEN 2026-10-08 (§15 review of `62cce627`, finding C; was `..._still_publishes`, which held that the
+    reading runs to its end through the cancellation). That contract is gone: only the money's commit and rollback
+    are drained; an optional visual read is waited for CANCELLABLY, so a run can be stopped while it is stuck."""
+
     phase = _Phase()
     task = asyncio.create_task(
         money_replay._publish_committed(
             phase, open_session=lambda: None, logger=logging.getLogger("tests.p034.publish"), run_id="run-1"
         )
     )
-    await phase.started.wait()
-    task.cancel()  # the tick is being stopped; the commit is already confirmed
+    ended = await _cancel_while_the_patches_are_read(phase, task)
+    assert (ended, task.cancelled(), phase.read_cancelled, phase.built, phase.published) == (True, True, True, False, 1), (
+        f"ended without the reading being released: {ended}; the cancellation left: {task.cancelled()}; the reading "
+        f"was cancelled: {phase.read_cancelled}, completed: {phase.built}; published: {phase.published}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_commit_is_counted_before_the_patches_are_waited_for() -> None:
+    """Finding B: a cancellation during the patch reading left the payment committed and published while the
+    counters of the committed money phase stayed at zero and "no money progress" was not cleared."""
+
+    phase = _Phase()
+    run, task = _money_phase(phase)
+    await _cancel_while_the_patches_are_read(phase, task)
+    assert task.cancelled() and phase.published == 1, (task, phase.published)
+    assert _money_counters(run) == (1, 1, 1, 0), (
+        f"committed money ticks, committed money payments, money attempts, ticks without money progress = "
+        f"{_money_counters(run)} after a commit that was confirmed and published; expected (1, 1, 1, 0)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_commit_is_counted_once_on_the_ordinary_path() -> None:
+    phase = _Phase()
     phase.release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    # The reading ran to its end (its session was not abandoned mid-statement), the payments were published once,
-    # and only then did the cancellation leave.
-    assert (phase.built, phase.published) == (True, 1)
+    run, task = _money_phase(phase)
+    outcome = await task
+    await outcome.stack.aclose()
+    assert (phase.built, phase.published, _money_counters(run)) == (True, 1, (1, 1, 1, 0))

@@ -120,6 +120,13 @@ class _Witness:
         self.fail_when = None  # (origin, sql) -> bool; the first match is replaced by `SELECT 1/0`
         self.failed: list[_Statement] = []
         self.server_errors: list[str] = []
+        # Pool checkouts against the life of the money transaction: ("checkout", origin), ("lines-locked", None)
+        # when its `FOR UPDATE` on the lines has run, ("money-ended", None) at its commit or rollback.
+        self.timeline: list[tuple[str, str | None]] = []
+        self._locking_conn: int | None = None
+
+    def _checkout(self, _dbapi_connection, _record, _proxy) -> None:
+        self.timeline.append(("checkout", _ORIGIN.get()))
 
     def _span(self, conn) -> _Span:
         span = self._open.get(id(conn))
@@ -140,6 +147,9 @@ class _Witness:
 
     def _after(self, conn, cursor, statement, parameters, context, executemany) -> None:
         self._span(conn).statements.append(_Statement(_ORIGIN.get(), statement))
+        if _ORIGIN.get() == _LOCKS and "FOR UPDATE" in statement.upper() and self._locking_conn is None:
+            self._locking_conn = id(conn)
+            self.timeline.append(("lines-locked", None))
 
     def _error(self, context) -> None:
         self.server_errors.append(str(getattr(context.original_exception, "sqlstate", None)))
@@ -152,6 +162,9 @@ class _Witness:
             span = self._open.pop(id(conn), None)
             if span is not None:
                 span.ended_by = how
+            if self._locking_conn == id(conn):
+                self._locking_conn = None
+                self.timeline.append(("money-ended", None))
         return ended
 
     @contextmanager
@@ -161,9 +174,11 @@ class _Witness:
                      ("commit", self._end("commit"), {}), ("rollback", self._end("rollback"), {})]
         for name, fn, kw in listeners:
             event.listen(engine, name, fn, **kw)
+        event.listen(engine.pool, "checkout", self._checkout)
         try:
             yield self
         finally:
+            event.remove(engine.pool, "checkout", self._checkout)
             for name, fn, _kw in listeners:
                 event.remove(engine, name, fn)
 
@@ -422,3 +437,90 @@ async def test_a_failed_planning_read_costs_the_plan_its_inputs_and_never_the_mo
     assert reported == len(stored) == run.committed_total and debts[pair] - _OPENING == amount * reported, (
         reported, transactions, debts, run.last_error)
     assert reported + sse.published("tx.failed") == 1, sse.events
+
+
+# ── §15 review of `62cce627` (2026-10-08): one connection at a time, and a patch read that can be stopped ────────
+
+
+@pytest.mark.asyncio
+async def test_the_tick_takes_no_connection_of_its_own_while_it_holds_the_line_locks(factory, monkeypatch) -> None:  # noqa: F811
+    """Finding A. On `62cce627` the planning reads ran on a second session AFTER the money transaction had taken
+    `FOR UPDATE` on the lines: with a small pool the tick waited for a connection while holding the locks. The
+    planning inputs are read, and their session is closed, BEFORE the money transaction takes anything; from the
+    line locks to the end of the money transaction the only connections taken are the payment service's own."""
+
+    world, run, sse, amount, called, witness, debts, transactions = await _one_tick(factory, monkeypatch)
+    events = [name for name, _origin in witness.timeline]
+
+    # Controls: the payment was made, the line locks and the end of the money transaction were both seen, and the
+    # planning inputs WERE read - on a connection taken before the locks.
+    assert list(transactions.values()) == ["COMMITTED"] and called[_PLANNING + "debt_snapshot"] == 1, (transactions, dict(called))
+    assert events.count("lines-locked") == 1 and events.count("money-ended") == 1, witness.timeline
+    locked, ended = events.index("lines-locked"), events.index("money-ended")
+    assert locked < ended and "checkout" in events[:locked], witness.timeline
+
+    foreign = [origin for name, origin in witness.timeline[locked:ended]
+               if name == "checkout" and not (origin or "").startswith(_MONEY)]
+    assert foreign == [], (
+        f"between its `FOR UPDATE` on the lines and the end of its money transaction the tick took {len(foreign)} "
+        f"pooled connection(s) outside the payment service, for: {foreign}; timeline: {witness.timeline}. Expected: 0"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_a_blocked_patch_read_ends_at_once_and_costs_only_the_patches(factory, monkeypatch) -> None:  # noqa: F811
+    """Findings B and C. The money commit is confirmed and the reading of the visual patches never returns (a pool
+    that has no connection, a server that does not answer). Stopping the run cancels the tick: it must end at once,
+    its payment must be published - without patches - and the counters of the committed money phase must stand.
+    On `62cce627` the reading was drained through the cancellation, so the tick could not be stopped, and the
+    counters were skipped by the cancellation."""
+
+    world = await _seed(factory)
+    pair = (world.sender.pid, world.receiver.pid)
+    reading, release = asyncio.Event(), asyncio.Event()
+
+    async def _never_returns(*_args, **_kwargs):
+        reading.set()
+        await release.wait()
+        raise AssertionError("the blocked patch read was resumed instead of being cancelled")
+
+    try:
+        sse = _Sse()
+        run = _run_record(world, f"p034-s1-{uuid.uuid4().hex[:8]}")
+        runner = _runner(run, _scenario(world), sse)
+        _install(monkeypatch, factory)
+        plans = _record_plans(monkeypatch, runner)
+        monkeypatch.setattr(VizPatchHelper, "create", classmethod(lambda _cls, *a, **kw: _never_returns(*a, **kw)))
+
+        tick = asyncio.create_task(runner.tick_real_mode(run.run_id))
+        try:
+            await asyncio.wait_for(reading.wait(), timeout=60.0)
+            # Control: the patches are being read AFTER the commit - the payment is already stored.
+            assert list((await _transactions(factory, world)).values()) == ["COMMITTED"]
+            assert sse.published("tx.updated") == 0, "the payment was published before its patches were read"
+
+            tick.cancel()  # what `RunLifecycle.stop` does to the heartbeat that runs the tick
+            done, _pending = await asyncio.wait({tick}, timeout=10.0)
+            stopped = tick in done
+        finally:
+            release.set()
+            await asyncio.gather(tick, return_exceptions=True)
+        debts = await _debts(factory, world)
+    finally:
+        _forget_the_route_cache(world)
+
+    amount = Decimal(plans[0][0].amount)
+    assert stopped and tick.cancelled(), (
+        f"the cancelled tick did not end while its patch read was blocked (ended: {stopped}, "
+        f"cancelled: {tick.cancelled()}): an optional visual read must not hold a stop"
+    )
+    updated = [e for e in sse.events if e.get("type") == "tx.updated"]
+    assert [(Decimal(e["amount"]), "edge_patch" in e, "node_patch" in e) for e in updated] == [(amount, False, False)], updated
+    assert debts == {pair: _OPENING + amount}, debts
+    counters = (run.committed_total, run._real_money_committed_ticks_total, run._real_money_committed_payments_total,
+                run._real_money_attempts_total, run._real_consec_money_no_progress_ticks)
+    assert counters == (1, 1, 1, 1, 0), (
+        f"after a stop during the patch read: committed_total, committed money ticks, committed money payments, "
+        f"money attempts, ticks without money progress = {counters}; expected (1, 1, 1, 1, 0)"
+    )
+    assert factory.kw["bind"].sync_engine.pool.checkedout() == 0, "the patch session kept its connection"
