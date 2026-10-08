@@ -199,24 +199,35 @@ def test_a_run_that_can_still_write_or_be_resumed_is_never_removed(tmp_path, sta
 # ── 3: other processes, and the test tier itself ────────────────────────────────────────────────────────────────
 
 
-def test_a_directory_written_recently_by_another_process_is_never_removed(tmp_path) -> None:
-    """This process knows none of these runs (an empty registry). One was written half the grace ago; the others
-    are just past it. A limit of 1 removes the least recently written of the old ones and leaves the recent one,
-    although it puts the count over the limit; a TTL shorter than the grace does not touch it either."""
+def test_a_directory_written_recently_by_another_process_is_never_removed(tmp_path, monkeypatch) -> None:
+    """This process knows none of these runs (an empty registry) - they are another process's, as far as it can
+    tell. TWO of them were written within the grace; a limit of 1 would have to remove the less recent of the two,
+    and does not: both stay, over the limit, and only the old ones go. (With one recent directory the limit would
+    keep it anyway, as the newest - the first version of this test was written that way and could not tell the
+    grace from its absence; a mutation survived it.)"""
 
     grace_h = RECENT_WRITE_GRACE_SEC / _HOUR
-    _run_dir(tmp_path, "written-recently", hours=grace_h / 2)
+    _run_dir(tmp_path, "written-a-moment-ago", hours=grace_h / 6)
+    _run_dir(tmp_path, "written-within-the-grace", hours=grace_h / 2)
     _run_dir(tmp_path, "old-a", hours=grace_h * 3)
     _run_dir(tmp_path, "old-b", hours=grace_h * 2)
 
     _manager(tmp_path).cleanup_old_runs(ttl_hours=0, max_runs=1)
-    assert _run_dirs(tmp_path) == ["written-recently"], _run_dirs(tmp_path)  # both old ones went; it is the one left
 
-    _run_dir(tmp_path, "old-c", hours=grace_h * 2)
-    monkey_ttl_hours = 1  # the smallest TTL there is; `grace_h / 2` h ago is "expired" by it only if the grace is ignored
-    assert grace_h / 2 * _HOUR < RECENT_WRITE_GRACE_SEC and RECENT_WRITE_GRACE_SEC <= monkey_ttl_hours * _HOUR
-    _manager(tmp_path).cleanup_old_runs(ttl_hours=monkey_ttl_hours, max_runs=0)
-    assert _run_dirs(tmp_path) == ["written-recently"], _run_dirs(tmp_path)
+    assert _run_dirs(tmp_path) == ["written-a-moment-ago", "written-within-the-grace"], (
+        f"two directories written within the grace ({RECENT_WRITE_GRACE_SEC} s) and a limit of 1: "
+        f"{_run_dirs(tmp_path)} left. Expected both of them and neither of the old ones"
+    )
+
+    # The TTL is counted in whole hours and the grace is one hour, so a TTL alone can never reach inside the grace.
+    # The rule is still the TTL's too, and is shown with a longer grace: written 2 h ago, TTL 1 h, grace 3 h.
+    _run_dir(tmp_path, "two-hours-old", hours=2)
+    monkeypatch.setattr(artifacts_module, "RECENT_WRITE_GRACE_SEC", 3 * _HOUR)
+    _manager(tmp_path).cleanup_old_runs(ttl_hours=1, max_runs=0)
+    assert "two-hours-old" in _run_dirs(tmp_path), _run_dirs(tmp_path)
+    monkeypatch.setattr(artifacts_module, "RECENT_WRITE_GRACE_SEC", RECENT_WRITE_GRACE_SEC)
+    _manager(tmp_path).cleanup_old_runs(ttl_hours=1, max_runs=0)
+    assert "two-hours-old" not in _run_dirs(tmp_path), _run_dirs(tmp_path)  # control: past the grace it does expire
 
 
 def test_the_test_tier_keeps_the_simulator_state_out_of_the_checkouts_directory() -> None:
