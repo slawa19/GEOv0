@@ -52,7 +52,7 @@ def test_stress_multipliers_by_scope() -> None:
         },
     ]
 
-    mult_all, by_group, by_profile = runner._compute_stress_multipliers(events=events, sim_time_ms=1600)
+    mult_all, by_group, by_profile = runner._real_payment_planner.compute_stress_multipliers(events=events, sim_time_ms=1600)
 
     assert mult_all == 2.0
     assert by_group["retail"] == 0.5
@@ -70,7 +70,7 @@ def test_stress_outside_window_is_ignored() -> None:
         }
     ]
 
-    mult_all, by_group, by_profile = runner._compute_stress_multipliers(events=events, sim_time_ms=2000)
+    mult_all, by_group, by_profile = runner._real_payment_planner.compute_stress_multipliers(events=events, sim_time_ms=2000)
 
     assert mult_all == 1.0
     assert by_group == {}
