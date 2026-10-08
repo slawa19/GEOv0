@@ -39,7 +39,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.conftest import TEST_DATABASE_URL, _committed_database_context
 from tests.debt_setup import debt_fixture_setup
-from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
 from tests.migrated_schema import (
     REPO_ROOT,
     MigratedSchemaError,
@@ -303,7 +303,7 @@ def _occurrence_of(cycle, equivalent_id):
 async def test_mode_b_session_is_accepted_by_clearing(committed_session):
     code, eq_id = await _seed_triangle(committed_session)
     service = ClearingService(committed_session)
-    cycles = await service.find_cycles(code, max_depth=3)
+    cycles = await planned_cycles(committed_session, code)  # 035 A2a: the planner, not the retired detectors
     assert cycles, "the seeded triangle was not detected; the clearing half below would be vacuous"
     cleared = await service.execute_occurrence(_occurrence_of(cycles[0], eq_id))
     assert cleared == Decimal("10")

@@ -18,7 +18,12 @@ from app.db.models.trustline import TrustLine
 from app.utils.exceptions import GeoException
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
+
+# 035 A2a (2026-10-08): the tests below that ask "which cycle is offered" or only need the stand's cycle to execute
+# read the PLANNER (`planned_cycles`: the decomposition of the flow plan on the session's snapshot) where they read
+# the retired detectors (`ClearingService.find_cycles`). Their assertions are unchanged. The one test of the
+# detectors themselves (`test_sql_and_dfs_produce_same_cycles`) still calls them and leaves with them (A2b).
 from tests.conftest import MODE_B, sessionmaker_of
 
 
@@ -156,7 +161,7 @@ async def test_all_cycles_blocked_by_policy_returns_empty(db_session):
     await db_session.commit()
 
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=4)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles == []
 
 
@@ -203,7 +208,7 @@ async def test_partially_blocked_returns_allowed_cycle(db_session):
     await db_session.commit()
 
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles, "Expected at least one allowed triangle"
 
     # Should NOT return the blocked A->B->C->A.
@@ -260,7 +265,7 @@ async def test_cycles_scoped_to_equivalent(db_session):
     await db_session.commit()
 
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq1.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq1.code)
     assert cycles
 
     pids = {a.pid, b.pid, c.pid}
@@ -288,7 +293,7 @@ async def test_no_trustline_means_no_consent(db_session):
     await db_session.commit()
 
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles == []
 
 
@@ -491,7 +496,7 @@ async def test_execute_clearing_unexpected_failure_rolls_back_and_surfaces_sanit
     await db_session.commit()
 
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles
     eq_code = eq.code
     eq_id = eq.id
@@ -554,7 +559,7 @@ async def test_execute_clearing_policy_lookup_failure_rolls_back_without_effects
 ):
     eq, _ = await _setup_committed_triangle(db_session, code_prefix="F")
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles
     eq_code = eq.code
     eq_id = eq.id
@@ -669,7 +674,7 @@ async def test_execute_clearing_commit_failure_rolls_back_without_visible_effect
 ):
     eq, _ = await _setup_committed_triangle(db_session, code_prefix="C")
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles
     eq_id = eq.id
     occurrence = _occurrence_of(cycles[0], eq_id)
@@ -725,7 +730,7 @@ async def test_execute_clearing_rollback_failure_keeps_original_error_sanitized(
 ):
     eq, _ = await _setup_committed_triangle(db_session, code_prefix="R")
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles
     occurrence = _occurrence_of(cycles[0], eq.id)
     original_rollback = db_session.rollback

@@ -274,6 +274,101 @@ async def fresh_read(session, fn, *args):
             await fresh.rollback()
 
 
+async def planned_cycles(session, equivalent_code: str, *, allowed_participant_pids=None) -> list[list[dict]]:
+    """The cycles a clearing pass would plan on this session's snapshot, each a list of
+    `{debt_id, debtor, creditor, amount}` in cycle order - the shape the retired `ClearingService.find_cycles` gave
+    (035 A2), so a test that only needs "the clearable cycle of this stand" reads it the way it always did.
+
+    What it is and what the detectors were not: the decomposition of the flow plan (`flow_planner.plan_for_equivalent`,
+    in this process - a test graph is small), the same eligibility rule execution applies, no depth and no cap. It is
+    not an enumeration of every cycle: two cycles sharing an edge may come back as one cycle, or as two with other
+    amounts. `debtor`/`creditor` are pids; `amount` is the debt's amount on the snapshot at the equivalent's
+    precision, as before. `allowed_participant_pids` is the planner's own perimeter (`None`: none).
+    """
+
+    from sqlalchemy import select
+
+    from app.core.clearing.flow_planner import money_of, plan_for_equivalent
+    from app.db.models.equivalent import Equivalent
+    from app.db.models.participant import Participant
+    from app.utils.money import to_money_str
+
+    plan = await plan_for_equivalent(session, equivalent_code, allowed_participant_pids=allowed_participant_pids)
+    precision = (
+        await session.execute(select(Equivalent.precision).where(Equivalent.code == equivalent_code))
+    ).scalar_one()
+    vertices = {v for cycle in plan.cycles for e in cycle.edges for v in (e.debtor_id, e.creditor_id)}
+    pid_of: dict = {}
+    if vertices:
+        rows = await session.execute(select(Participant.id, Participant.pid).where(Participant.id.in_(vertices)))
+        pid_of = {row.id: row.pid for row in rows}
+    return [
+        [
+            {
+                "debt_id": str(e.debt_id),
+                "debtor": pid_of[e.debtor_id],
+                "creditor": pid_of[e.creditor_id],
+                "amount": to_money_str(money_of(e.atoms), int(precision)),
+            }
+            for e in cycle.edges
+        ]
+        for cycle in plan.cycles
+    ]
+
+
+async def assert_named_cycles_are_in_the_snapshot(session, equivalent_code: str, cycles, *, precision: int = 2) -> None:
+    """CONTROL of a stand: each named cycle really is a clearable alternative on the planner's snapshot - read from
+    the OBSERVED snapshot edges, without asking the optimizer to choose it (035 A2a, decision D2, 2026-10-08).
+
+    It replaces `found == {cycle, cycle}` over the retired detectors, which listed every alternative; the plan's
+    decomposition does not (it holds the optimum only), so the control is built on the snapshot instead and made
+    to say as much as the old one did about each cycle. `cycles` are sequences of `tests.p020_support.Edge` in
+    cycle order. For each of them:
+
+    1. at least three distinct debt ids, every one an edge of this equivalent's snapshot
+       (`flow_planner.load_snapshot`: positive debt, live consenting line, active participants);
+    2. the observed debtor and creditor of each edge are the fixture's;
+    3. the observed debtors are distinct and each creditor is the next edge's debtor, the last closing on the first;
+    4. the observed amounts are the stand's declared ones, and the smallest is positive and a whole number of the
+       equivalent's steps.
+
+    What it does not establish: that the named cycles are the only cycles of the stand, and that execution would
+    admit them at this moment (a stopped or held equivalent, a concurrent writer).
+    """
+
+    from decimal import Decimal
+
+    from app.core.clearing.flow_planner import atoms_of, load_snapshot
+    from tests.p020_support import participant_uuid
+
+    observed = {edge.debt_id: edge for edge in await load_snapshot(session, equivalent_code)}
+    step_atoms = 10 ** (8 - int(precision))
+    for cycle in cycles:
+        cycle = list(cycle)
+        ids = [edge.debt_id for edge in cycle]
+        assert len(set(ids)) == len(ids) >= 3, f"control: a cycle needs three or more distinct debts, got {ids}"
+        missing = [str(i) for i in ids if i not in observed]
+        assert not missing, f"control: debts {missing} are not edges of the snapshot of {equivalent_code}"
+        seen = [observed[i] for i in ids]
+        for named, edge in zip(cycle, seen):
+            assert (edge.debtor_id, edge.creditor_id) == (
+                participant_uuid(named.debtor), participant_uuid(named.creditor)
+            ), f"control: debt {named.debt_id} is {edge.debtor_id} -> {edge.creditor_id}, not {named.debtor} -> {named.creditor}"
+        debtors = [edge.debtor_id for edge in seen]
+        assert len(set(debtors)) == len(debtors), f"control: a debtor repeats in {[e.debtor for e in cycle]}"
+        for edge, following in zip(seen, seen[1:] + seen[:1]):
+            assert edge.creditor_id == following.debtor_id, (
+                f"control: the cycle is not closed - debt {edge.debt_id} ends at {edge.creditor_id}, "
+                f"debt {following.debt_id} starts at {following.debtor_id}"
+            )
+        amounts = [edge.atoms for edge in seen]
+        declared = [atoms_of(Decimal(named.amount)) for named in cycle]
+        assert amounts == declared, f"control: the snapshot holds {amounts} atoms, the stand declares {declared}"
+        assert min(amounts) > 0 and min(amounts) % step_atoms == 0, (
+            f"control: the smallest debt of the cycle ({min(amounts)} atoms) is not a positive multiple of the step"
+        )
+
+
 def slow_plan(delay_seconds: float, edges):
     """Planner-process entry for the cold-spawn acceptance (spec (d), P2-2): sleep, then the real planner.
 

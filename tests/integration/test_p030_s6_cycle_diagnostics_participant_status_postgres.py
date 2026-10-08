@@ -13,12 +13,12 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import update
 
-from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import planned_cycles
 
 
 async def _add_ring(db_session, eq, people, amount: str) -> None:
@@ -57,22 +57,24 @@ async def _set_status(db_session, participant, status: str) -> None:
     await db_session.commit()
 
 
-# (ring size, max_depth that reaches only the detector under test, detector)
-_DETECTORS = [(3, 3, "sql triangles"), (4, 4, "sql quadrangles"), (5, 5, "dfs")]
+# 035 A2a (2026-10-08): the offer is read from the PLANNER (`planned_cycles`), which is what `GET /clearing/cycles`
+# answers with since 035 A1. Until then three detectors answered and each ring size reached another one (SQL
+# triangles, SQL quadrangles, the DFS - the old ids of these cells); there is one reader now, and the three sizes
+# stay as three stands. The assertions are unchanged.
+_RING_SIZES = [3, 4, 5]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["suspended", "left", "deleted"])
-@pytest.mark.parametrize("size,depth,detector", _DETECTORS, ids=[d[2] for d in _DETECTORS])
-async def test_a_cycle_through_a_participant_that_is_not_active_is_not_offered(db_session, size, depth, detector, status):
+@pytest.mark.parametrize("size", _RING_SIZES, ids=[f"ring of {size}" for size in _RING_SIZES])
+async def test_a_cycle_through_a_participant_that_is_not_active_is_not_offered(db_session, size, status):
     eq, people = await _ring(db_session, size, tag="DG")
-    service = ClearingService(db_session)
-    # Anti-vacuum: the detector under test finds this very ring while everyone is active.
-    offered = await service.find_cycles(eq.code, max_depth=depth)
-    assert [len(c) for c in offered] == [size], (detector, offered)
+    # Anti-vacuum: this very ring is offered while everyone is active.
+    offered = await planned_cycles(db_session, eq.code)
+    assert [len(c) for c in offered] == [size], (size, offered)
 
     await _set_status(db_session, people[1], status)  # an intermediate, not the first vertex
-    assert await service.find_cycles(eq.code, max_depth=depth) == [], (detector, status)
+    assert await planned_cycles(db_session, eq.code) == [], (size, status)
 
 
 @pytest.mark.asyncio
@@ -84,9 +86,8 @@ async def test_a_frozen_participant_removes_only_its_own_cycles(db_session):
     db_session.add_all(other)
     await db_session.flush()
     await _add_ring(db_session, eq, other, "7")
-    service = ClearingService(db_session)
-    assert len(await service.find_cycles(eq.code, max_depth=3)) == 2
+    assert len(await planned_cycles(db_session, eq.code)) == 2
 
     await _set_status(db_session, ring[0], "suspended")
-    left = await service.find_cycles(eq.code, max_depth=3)
+    left = await planned_cycles(db_session, eq.code)
     assert [{e["debtor"] for e in c} for c in left] == [{p.pid for p in other}], left

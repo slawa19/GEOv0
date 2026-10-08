@@ -11,10 +11,20 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
+from tests.p023_support import planned_cycles
+
+
+# 035 A2a (2026-10-09, decision D3). This module was the SQL detectors' own. Three of its four tests state something
+# that outlives them - a triangle is offered, a quadrangle is offered, a triangle blocked by policy is not offered
+# while the eligible quadrangle beside it is - and now ask the PLANNER (`planned_cycles`), with their assertions on
+# the offered edges unchanged. They were `test_find_cycles_uses_sql_triangles`, `test_find_cycles_uses_sql_
+# quadrangles` and `test_find_cycles_filters_auto_clearing_policy_and_falls_back_to_quadrangles`. The fourth
+# (`test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d`) is a property of the SQL query alone; it still
+# calls it and leaves with it (A2b).
 
 
 @pytest.mark.asyncio
-async def test_find_cycles_uses_sql_triangles(db_session):
+async def test_a_triangle_is_offered(db_session):
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(code=("T" + nonce[:15]).upper(), symbol="T", description=None, precision=2, metadata_={}, is_active=True)
     a = Participant(pid="A" + nonce, display_name="A", public_key="pkA-" + nonce, type="person", status="active", profile={})
@@ -43,8 +53,7 @@ async def test_find_cycles_uses_sql_triangles(db_session):
         )
     await db_session.commit()
 
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles, "Expected at least one triangle cycle"
 
     cycle = cycles[0]
@@ -53,7 +62,7 @@ async def test_find_cycles_uses_sql_triangles(db_session):
 
 
 @pytest.mark.asyncio
-async def test_find_cycles_uses_sql_quadrangles(db_session):
+async def test_a_quadrangle_is_offered(db_session):
     nonce = uuid.uuid4().hex[:10]
     eq = Equivalent(code=("Q" + nonce[:15]).upper(), symbol="Q", description=None, precision=2, metadata_={}, is_active=True)
     a = Participant(pid="A" + nonce, display_name="A", public_key="pkA-" + nonce, type="person", status="active", profile={})
@@ -84,8 +93,7 @@ async def test_find_cycles_uses_sql_quadrangles(db_session):
         )
     await db_session.commit()
 
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq.code, max_depth=4)
+    cycles = await planned_cycles(db_session, eq.code)
     assert cycles, "Expected at least one quadrangle cycle"
 
     cycle = cycles[0]
@@ -95,12 +103,15 @@ async def test_find_cycles_uses_sql_quadrangles(db_session):
 
 
 @pytest.mark.asyncio
-async def test_find_cycles_filters_auto_clearing_policy_and_falls_back_to_quadrangles(
+async def test_a_triangle_blocked_by_policy_is_not_offered_and_the_eligible_quadrangle_is(
     db_session,
 ):
-    """Regression: if triangles exist but are rejected by auto-clearing policy,
-    find_cycles(max_depth>=4) must still try quadrangles instead of returning a
-    non-executable candidate that would stop the clearing loop early.
+    """A triangle and a quadrangle share the edge A->B; one controlling line of the triangle refuses
+    auto-clearing. The triangle must not be offered and the quadrangle must be, with exactly its own edges.
+
+    (History: the regression was the detectors' fallback - a triangle rejected by policy must not stop
+    `find_cycles(max_depth>=4)` from trying quadrangles. The fallback is gone; what it protected is asked of the
+    planner.)
     """
 
     nonce = uuid.uuid4().hex[:10]
@@ -157,23 +168,20 @@ async def test_find_cycles_filters_auto_clearing_policy_and_falls_back_to_quadra
     assert (blocking_tl.policy or {}).get("auto_clearing") is False
     assert blocking_tl.status == "active"
 
-    service = ClearingService(db_session)
+    cycles = await planned_cycles(db_session, eq.code)
+    offered = [{(edge["debtor"], edge["creditor"]) for edge in cycle} for cycle in cycles]
 
-    # With SQL pre-filtering (JOIN trust_lines + policy predicate), non-consenting triangles
-    # are excluded already at SQL stage.
-    triangles = await service.find_triangles_sql(eq.id)
-    assert triangles == []
+    # The triangle is filtered out by policy (this was `find_triangles_sql == []` and `find_cycles(depth 3) == []`,
+    # both of which could only ever hold the triangle).
+    assert {(a.pid, b.pid), (b.pid, c.pid), (c.pid, a.pid)} not in offered, "Triangle should be filtered out by policy"
+    assert all(len(cycle) != 3 for cycle in cycles), offered
 
-    cycles_depth3 = await service.find_cycles(eq.code, max_depth=3)
-    assert cycles_depth3 == [], "Triangle should be filtered out by policy"
-
-    cycles_depth4 = await service.find_cycles(eq.code, max_depth=4)
-    assert cycles_depth4, "Expected quadrangle cycle fallback"
-
-    cycle = cycles_depth4[0]
+    assert cycles, "Expected the quadrangle to be offered"
+    cycle = cycles[0]
     assert len(cycle) == 4
     pairs = {(edge["debtor"], edge["creditor"]) for edge in cycle}
     assert pairs == {(a.pid, b.pid), (b.pid, d.pid), (d.pid, e.pid), (e.pid, a.pid)}
+    assert len(cycles) == 1, offered
 
 
 @pytest.mark.asyncio

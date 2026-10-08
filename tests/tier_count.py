@@ -98,6 +98,12 @@ make the session green again:
   `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py` became three (the failure on the first, the
   second and the third audit row). Measured with `python -m pytest --collect-only -q -m "not slow"`.
 * 2026-10-08, 035 slice A5 merged after 035 A3, A4 and 034 S1c (`origin/main` at the merge of PR #175, 3249): 3249 -> 3252 (+3, the three A5 cases above; the numbers in the A5 lines are those of the branch on `dd019a31`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 slice A2a, on `origin/main` `1faf261b`: 3252 -> 3262 (+10). New: 11 cases in
+  `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` and 5 in
+  `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the seed's two modes). Fewer: tests moved from the retired
+  detectors to the planner lost the depth parametrization that had no meaning there - `test_p020_selection_retention_
+  postgres.py` -4 (6 -> 3 and 2 -> 1), `test_p012_t1210_detector_union_default_tier.py` -2 (3 -> 1). The number is the
+  guard's own refusal ("selected 3262 case(s), expected exactly 3252", `python -m pytest --collect-only -q -m "not slow"`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -140,7 +146,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3252
+EXPECTED_SELECTED_ITEMS = 3262
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

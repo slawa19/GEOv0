@@ -43,7 +43,7 @@ from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
 from tests.conftest import MODE_B
-from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
 
 _EQ = "RPX"
 
@@ -250,19 +250,28 @@ async def test_the_owning_run_still_clears_its_own_cycle(client, db_session, run
 
 @pytest.mark.asyncio
 async def test_detection_layer_does_not_return_a_foreign_cycle(db_session):
+    # 035 A2a (2026-10-08): "detection" is the PLANNER's snapshot and plan now (`planned_cycles`, the perimeter being
+    # `flow_planner.load_snapshot`'s own `allowed_participant_pids`) - the retired detectors are no longer what a
+    # pass or the diagnostic reads. The two assertions are unchanged; the third is the half that
+    # `test_the_sql_producer_itself_is_scoped` carried for the SQL producer: the OWNING run still gets its cycle,
+    # so "empty for a stranger" is not "empty for everyone".
     eq, _people = await _seed_two_runs(db_session)
-    service = ClearingService(db_session)
 
-    unscoped = await service.find_cycles(_EQ, max_depth=6)
+    unscoped = await planned_cycles(db_session, _EQ)
     assert len(unscoped) == 1, (
         "the stand must contain exactly one detectable cycle, otherwise this test is not "
         f"measuring the perimeter: {unscoped}"
     )
 
-    scoped = await service.find_cycles(
-        _EQ, max_depth=6, allowed_participant_pids={"a1", "a2", "a3"}
-    )
+    scoped = await planned_cycles(db_session, _EQ, allowed_participant_pids={"a1", "a2", "a3"})
     assert scoped == [], f"detection returned another run's cycle: {scoped}"
+
+    own = await planned_cycles(db_session, _EQ, allowed_participant_pids={"b1", "b2", "b3"})
+    assert [{e["debtor"] for e in cycle} for cycle in own] == [{"b1", "b2", "b3"}], (
+        f"the perimeter must admit the owning run, not reject everything: {own}"
+    )
+    # Two of the three vertices inside is still outside: the rule is per edge endpoint, not a vertex count.
+    assert await planned_cycles(db_session, _EQ, allowed_participant_pids={"b1", "b2", "a1"}) == []
 
 
 @pytest.mark.asyncio
@@ -273,9 +282,9 @@ async def test_detection_treats_an_empty_perimeter_as_nobody(db_session):
     """
 
     await _seed_two_runs(db_session)
-    service = ClearingService(db_session)
 
-    assert await service.find_cycles(_EQ, max_depth=6, allowed_participant_pids=set()) == []
+    assert len(await planned_cycles(db_session, _EQ)) == 1  # control: without a perimeter the cycle is there
+    assert await planned_cycles(db_session, _EQ, allowed_participant_pids=set()) == []
 
 
 @MODE_B
@@ -288,7 +297,7 @@ async def test_execution_layer_refuses_a_cycle_outside_the_perimeter(db_session)
     eq_id = eq.id
     service = ClearingService(db_session)
 
-    cycle = (await service.find_cycles(_EQ, max_depth=6))[0]
+    cycle = (await planned_cycles(db_session, _EQ))[0]  # 035 A2a: the planner, not the retired detectors
 
     with pytest.raises(GeoException) as refused:
         await service.execute_occurrence(
@@ -366,7 +375,7 @@ async def test_a_committed_replay_is_not_returned_to_a_foreign_scope(db_session)
     eq, _people = await _seed_two_runs(db_session)
     eq_id = eq.id
     service = ClearingService(db_session)
-    cycle = (await service.find_cycles(_EQ, max_depth=6))[0]
+    cycle = (await planned_cycles(db_session, _EQ))[0]  # 035 A2a: the planner, not the retired detectors
 
     # Clear it legitimately first, so a committed CLEARING transaction exists for this cycle.
     cleared = await service.execute_occurrence(
