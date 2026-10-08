@@ -777,6 +777,7 @@ paths:
           required: false
           schema:
             type: string
+          description: Equivalent code, read like the path code of /admin/equivalents/{code} - any case, trimmed, normalised to upper case (`EquivalentCodePath`); a value that cannot be a code is a 400. No `pattern` here on purpose - the 400 is the application's, not a 422 of the framework.
       responses:
         '200':
           description: Liquidity summary
@@ -784,6 +785,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminLiquiditySummaryResponse'
+        '400':
+          # `equivalent` is not an equivalent code after normalisation (035 B1; `canonical_code`).
+          $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -807,6 +811,7 @@ paths:
           required: false
           schema:
             type: string
+          description: Equivalent code, read like the path code of /admin/equivalents/{code} - any case, trimmed, normalised to upper case (`EquivalentCodePath`); a value that cannot be a code is a 400. No `pattern` here on purpose - the 400 is the application's, not a 422 of the framework.
         - in: query
           name: include
           required: false
@@ -857,6 +862,7 @@ paths:
           required: false
           schema:
             type: string
+          description: Equivalent code, read like the path code of /admin/equivalents/{code} - any case, trimmed, normalised to upper case (`EquivalentCodePath`); a value that cannot be a code is a 400. No `pattern` here on purpose - the 400 is the application's, not a 422 of the framework.
         - in: query
           name: status
           required: false
@@ -1929,6 +1935,7 @@ paths:
           required: false
           schema:
             type: string
+          description: Equivalent code, read like the path code of /admin/equivalents/{code} - any case, trimmed, normalised to upper case (`EquivalentCodePath`); a value that cannot be a code is a 400. No `pattern` here on purpose - the 400 is the application's, not a 422 of the framework.
       responses:
         '200':
           description: Metrics
@@ -4044,8 +4051,9 @@ components:
       description: Equivalent code (1-16 chars; A-Z, 0-9, underscore)
     EquivalentCodePath:
       # 033 A: the INPUT form of the code in the path of the four `/admin/equivalents/{code}...` routes (PATCH,
-      # DELETE, usage, integrity-hold clear): any case, normalised to upper case (`canonical_code`) before the
-      # lookup. The STORED code stays `EquivalentCode`; a value that does not fit this pattern after trimming is a 400.
+      # DELETE, usage, integrity-hold clear) and, since 035 B1, in the `equivalent` query of `/admin/liquidity/summary`,
+      # `/admin/graph/snapshot`, `/admin/graph/ego` and `/admin/participants/{pid}/metrics`: any case, normalised to
+      # upper case (`canonical_code`) before the lookup. The STORED code stays `EquivalentCode`; a value that does not fit this pattern after trimming is a 400.
       type: string
       pattern: '^[A-Za-z0-9_]{1,16}$'
       description: Equivalent code in a path (1-16 chars; A-Z, a-z, 0-9, underscore); normalised to upper case
