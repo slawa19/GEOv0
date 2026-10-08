@@ -5,7 +5,6 @@
   - set_active_run_id(run_id, owner_id)
   - clear_active_run_id(owner_id, run_id)
   - get_all_active_runs()
-  - count_active_runs()
   - list_runs(state=..., owner_id=...)
   - RunRecord поля owner_id, owner_kind, created_by
 
@@ -35,7 +34,7 @@ class _MinimalRuntime:
 
     Имеет только атрибуты, которые используются в методах
     get_active_run_id / set_active_run_id / clear_active_run_id /
-    get_all_active_runs / count_active_runs / list_runs.
+    get_all_active_runs / list_runs.
     """
 
     def __init__(self) -> None:
@@ -48,7 +47,6 @@ class _MinimalRuntime:
     set_active_run_id = _SimulatorRuntimeBase.set_active_run_id
     clear_active_run_id = _SimulatorRuntimeBase.clear_active_run_id
     get_all_active_runs = _SimulatorRuntimeBase.get_all_active_runs
-    count_active_runs = _SimulatorRuntimeBase.count_active_runs
     list_runs = _SimulatorRuntimeBase.list_runs
 
 
@@ -163,22 +161,6 @@ def test_get_all_active_runs() -> None:
     assert rt.get_active_run_id("userC") is None, (
         "get_all_active_runs должен возвращать копию, а не ссылку"
     )
-
-
-def test_count_active_runs() -> None:
-    """count_active_runs возвращает корректное количество активных runs."""
-    rt = _MinimalRuntime()
-
-    assert rt.count_active_runs() == 0
-
-    rt.set_active_run_id("run1", owner_id="userA")
-    assert rt.count_active_runs() == 1
-
-    rt.set_active_run_id("run2", owner_id="userB")
-    assert rt.count_active_runs() == 2
-
-    rt.clear_active_run_id(owner_id="userA", run_id="run1")
-    assert rt.count_active_runs() == 1
 
 
 # ─── Тесты: list_runs ────────────────────────────────────────────────────────

@@ -21,7 +21,6 @@ from app.core.simulator.inject_executor import (
     inject_event_equivalent_codes,
     inject_event_freeze_participant_pids,
     inject_event_participant_pids,
-    invalidate_caches_after_inject as _inject_invalidate_caches_after_inject,
 )
 from app.core.simulator.models import RunRecord, TrustDriftResult
 from app.core.simulator.real_debt_snapshot_loader import RealDebtSnapshotLoader
@@ -185,17 +184,6 @@ class RealRunnerImpl:
             return max(0, int(t))
         # MVP: token-based times are future.
         return None
-
-    def _compute_stress_multipliers(
-        self,
-        *,
-        events: Any,
-        sim_time_ms: int,
-    ) -> tuple[float, dict[str, float], dict[str, float]]:
-        return self._real_payment_planner.compute_stress_multipliers(
-            events=events,
-            sim_time_ms=sim_time_ms,
-        )
 
     async def _apply_due_scenario_events(
         self, session, *, run_id: str, run: RunRecord, scenario: dict[str, Any]
@@ -553,28 +541,6 @@ class RealRunnerImpl:
                 exc_info=True,
             )
         await self._end_open_transaction(session)
-
-    def _invalidate_caches_after_inject(
-        self,
-        *,
-        run: RunRecord,
-        scenario: dict[str, Any],
-        affected_equivalents: set[str],
-        new_participants: list[tuple[uuid.UUID, str]],
-        new_participants_scenario: list[dict[str, Any]],
-        new_trustlines_scenario: list[dict[str, Any]],
-        frozen_pids: list[str],
-    ) -> None:
-        _inject_invalidate_caches_after_inject(
-            logger=self._logger,
-            run=run,
-            scenario=scenario,
-            affected_equivalents=affected_equivalents,
-            new_participants=new_participants,
-            new_participants_scenario=new_participants_scenario,
-            new_trustlines_scenario=new_trustlines_scenario,
-            frozen_pids=frozen_pids,
-        )
 
     async def _build_edge_patch_for_equivalent(
         self,

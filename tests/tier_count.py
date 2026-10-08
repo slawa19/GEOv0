@@ -107,17 +107,24 @@ make the session green again:
   `python -m pytest --collect-only -q -m "not slow"`; the guard refused the collection first ("selected 3262 case(s),
   expected exactly 3252 ... MORE than recorded", exit 4).
 * 2026-10-09, 034 slice S4 merged after 035 A6 (`origin/main` at the merge of PR #181, 3254): 3254 -> 3264 (+10, the S4 module above; the numbers in the S4 line are those of the branch on `213c84e3`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
-* 2026-10-09, 035 slice A2a, on `origin/main` `bfae3cda`: 3264 -> 3274 (+10). New: 11 cases in
+* 2026-10-08, 034 slice S3 (F-034-7, -12, -14), on `origin/main` `1faf261b` (without S4): 3252 -> 3253 (+1; 3268 with the
+  15 `slow` cases). +2 `tests/integration/test_p034_s3_a_healthy_clearing_tick_logs_no_warning_postgres.py`, +2
+  `tests/integration/test_p034_s3_total_debt_is_the_runs_own_postgres.py`, -1 `test_count_active_runs` (the method is
+  removed), -2 in `tests/unit/test_topology_changed_no_empty_payload.py` (five cases of a removed function became three
+  on the live emitter). Measured with `python -m pytest --collect-only -q -m "not slow"`; the guard refused first
+  ("selected 3253 case(s), expected exactly 3252 ... MORE than recorded", exit 4).
+* 2026-10-09, 034 slice S3 merged after 035 A6 and 034 S4 (`origin/main` `bfae3cda`, 3264): 3264 -> 3265 (+1, the S3 changes above; the numbers in the S3 line are those of the branch on `1faf261b`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 slice A2a, on `origin/main` `3ce2c6e6`: 3265 -> 3275 (+10). New: 11 cases in
   `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` and 5 in
   `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the seed's two modes). Fewer: tests moved from the retired
   detectors to the planner lost the depth parametrization that had no meaning there - `test_p020_selection_retention_
-  postgres.py` -4 (6 -> 3 and 2 -> 1), `test_p012_t1210_detector_union_default_tier.py` -2 (3 -> 1). Measured with
-  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `bfae3cda` (on `1faf261b` the same ten
-  read 3252 -> 3262, by the guard's own refusal).
-* 2026-10-09, 035 slice A2a, review of `4b833af5`: 3274 -> 3280 (+6). Four cases of the final acceptance in
+  postgres.py` -4 (6 -> 3 and 2 -> 1), `test_p012_t1210_detector_union_default_tier.py` -2 (3 -> 1).
+* 2026-10-09, 035 slice A2a, review of `4b833af5`: 3275 -> 3281 (+6). Four cases of the final acceptance in
   `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the surviving cycle at its declared amount) and two in
   `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` (the same on the real view; the control's
-  step read from the equivalent). The number is the guard's own refusal ("selected 3280 case(s), expected exactly 3274").
+  step read from the equivalent). Both A2a numbers are restated from `3ce2c6e6`; the total, 3281, is measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with it (on `bfae3cda` the same sixteen read
+  3264 -> 3280).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -160,7 +167,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3280
+EXPECTED_SELECTED_ITEMS = 3281
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

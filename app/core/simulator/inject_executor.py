@@ -192,37 +192,6 @@ def inject_event_participant_pids(*, event: Mapping[str, Any] | None) -> set[str
     return pids
 
 
-def invalidate_caches_after_inject(
-    *,
-    logger: logging.Logger,
-    run: RunRecord,
-    scenario: dict[str, Any],
-    affected_equivalents: set[str],
-    new_participants: list[tuple[uuid.UUID, str]],
-    new_participants_scenario: list[dict[str, Any]],
-    new_trustlines_scenario: list[dict[str, Any]],
-    frozen_pids: list[str],
-) -> None:
-    """Invalidate in-memory caches after a successful inject commit.
-
-    Uses Variant A (mutate shared dicts in-place) so that the running tick
-    picks up the topology changes immediately.
-
-    Best-effort: failures here are logged but do not crash the tick.
-    """
-
-    _invalidate_caches_after_inject(
-        logger=logger,
-        run=run,
-        scenario=scenario,
-        affected_equivalents=affected_equivalents,
-        new_participants=new_participants,
-        new_participants_scenario=new_participants_scenario,
-        new_trustlines_scenario=new_trustlines_scenario,
-        frozen_pids=frozen_pids,
-    )
-
-
 def broadcast_topology_changed(
     *,
     sse: SseBroadcast,
@@ -1073,7 +1042,8 @@ class InjectExecutor:
         new_trustlines_scenario: list[dict[str, Any]],
         frozen_pids: list[str],
     ) -> None:
-        invalidate_caches_after_inject(
+        # Mutates the run's shared dicts in place, so the running tick sees the new topology at once; best-effort.
+        _invalidate_caches_after_inject(
             logger=self._logger,
             run=run,
             scenario=scenario,

@@ -129,8 +129,10 @@ router = APIRouter(prefix="/simulator")
 # either: the flag is a literal at the call, and the placeholder is this constant.
 _UNSIGNED = "__internal__"
 
-# Uvicorn typically configures this logger at INFO level.
-logger = logging.getLogger("uvicorn.error")
+# The application's logger (034 S3, F-034-7), like every other module: level from `LOG_LEVEL`, the one format of
+# `app/main.py`. Until then this was `uvicorn.error`, whose lines the server prints through its own handler - without
+# time and logger name, and at the server's level.
+logger = logging.getLogger(__name__)
 
 
 @router.post("/session/ensure", summary="Ensure anonymous session")
