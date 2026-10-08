@@ -94,13 +94,17 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/?mode=real')
   vi.mocked(listScenarios).mockResolvedValue({
     api_version: 'simulator-api/1',
-    items: [{ scenario_id: 'sc1', label: 'Scenario 1' }],
+    items: [
+      { scenario_id: 'sc1', label: 'Scenario 1' },
+      { scenario_id: 'sc2', label: 'Scenario 2' },
+    ],
   } as never)
   vi.mocked(getActiveRun).mockResolvedValue({ run_id: 'R' } as never)
   vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => RUN_STATUS(runId)) as never)
   vi.mocked(getSnapshot).mockImplementation((async (_cfg: unknown, runId: string, eq: string) =>
     snap(eq === 'UAH' ? `${runId}_NODE` : `${runId}_NODE_${eq}`, eq)) as never)
-  vi.mocked(getScenarioPreview).mockResolvedValue(snap('PREVIEW_NODE'))
+  vi.mocked(getScenarioPreview).mockImplementation((async (_cfg: unknown, scenarioId: string) =>
+    snap(scenarioId === 'sc1' ? 'PREVIEW_NODE' : `PREVIEW_${scenarioId}`)) as never)
   vi.mocked(createRun).mockResolvedValue({ run_id: 'R2' } as never)
 })
 
@@ -172,6 +176,58 @@ describe('unknown run status while the run scene is on screen (reproducers: red 
   })
 })
 
+describe('what the unknown-status rule must NOT override (review of 7360403e, both red before)', () => {
+  it('an explicit choice of ANOTHER scenario still leads to its preview', async () => {
+    const app = boot()
+    await settle()
+    vi.mocked(getRun).mockRejectedValue(STATUS_TIMEOUT())
+    await app.admin.attachRun('R')
+    await settle()
+    expect(app.real.runStatus, 'precondition: the status is unknown').toBeNull()
+    expect(ids(app), 'precondition: the run scene stays').toEqual(['R_NODE'])
+
+    app.realActions.setSelectedScenarioId('sc2')
+    await settle()
+
+    expect(ids(app), 'the unknown status of the shown run overrode the explicit scenario choice').toEqual(['PREVIEW_sc2'])
+  })
+
+  it('a LATE snapshot of another run, which the scene owner rejects, does not take over the shown-run record', async () => {
+    const app = boot()
+    await settle()
+    expect(ids(app)).toEqual(['R_NODE'])
+
+    // 1. an equivalent switch starts a load of run R that is slow
+    let releaseLateR: (s: SimulatorGraphSnapshot) => void = () => undefined
+    const lateR = new Promise<SimulatorGraphSnapshot>((resolve) => {
+      releaseLateR = resolve
+    })
+    vi.mocked(getSnapshot).mockImplementation(((_cfg: unknown, runId: string, eq: string) =>
+      runId === 'R' && eq === 'EUR' ? lateR : Promise.resolve(snap(`${runId}_NODE_${eq}`, eq))) as never)
+    app.eq.value = 'EUR'
+    await settle()
+
+    // 2. meanwhile the operator attaches run B, whose scene is accepted
+    await app.admin.attachRun('B')
+    await settle()
+    expect(ids(app), 'precondition: the scene of B is on screen').toEqual(['B_NODE_EUR'])
+
+    // 3. the slow load of R answers; the scene owner rejects it (a newer load won)
+    releaseLateR(snap('R_NODE_EUR', 'EUR'))
+    await settle()
+    expect(ids(app), 'precondition: the late snapshot of R was rejected').toEqual(['B_NODE_EUR'])
+
+    // 4. a re-attach of B whose status read fails: the scene on screen is B's, and stays B's
+    vi.mocked(getRun).mockRejectedValue(STATUS_TIMEOUT())
+    await app.admin.attachRun('B')
+    await settle()
+
+    expect(ids(app), 'the late load of R made the scene of B look like "no run scene" and it fell to the preview').toEqual([
+      'B_NODE_EUR',
+    ])
+  })
+})
+
 describe('unknown run status with NO scene of that run on screen (CONTRACT: the preview stays, and the error must be visible)', () => {
   it('Boot with a saved run id whose status times out: nothing is on screen, the preview is shown and the error too', async () => {
     window.localStorage.setItem('geo.sim.v2.runId', 'R')
@@ -210,13 +266,17 @@ describe('unknown run status with NO scene of that run on screen (CONTRACT: the 
     expect(app.real.lastError).toContain('timeout')
   })
 
-  it('anti-vacuum: with a KNOWN status everything behaves normally (Attach shows the run scene)', async () => {
+  it('anti-vacuum: with a KNOWN status everything behaves normally (Attach RE-READS the run scene)', async () => {
     const app = boot()
     await settle()
+    expect(ids(app)).toEqual(['R_NODE'])
+    // the run moved on: the next read answers with a different scene, so an Attach that did nothing is visible
+    vi.mocked(getSnapshot).mockImplementation((async (_cfg: unknown, runId: string, eq: string) => snap(`${runId}_NODE_v2`, eq)) as never)
+
     await app.admin.attachRun('R')
     await settle()
 
-    expect(ids(app)).toEqual(['R_NODE'])
+    expect(ids(app), 'the Attach did not re-read the run snapshot').toEqual(['R_NODE_v2'])
     expect(app.real.runStatus?.run_id).toBe('R')
   })
 

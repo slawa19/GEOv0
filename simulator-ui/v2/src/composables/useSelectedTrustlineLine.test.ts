@@ -141,7 +141,7 @@ describe('useSelectedTrustlineLine: the same answers, reactive', () => {
       list: null as TrustlineInfo[] | null,
       fetch: { kind: 'never-asked' } as TrustlinesFetchState,
       answered: null as TrustlineInfo | null,
-      links: [SNAP_AB] as GraphLink[],
+      links: [SNAP_AB, SNAP_CD] as GraphLink[],
       wmState: 'live',
       wmLink: null as GraphLink | null,
       wmSource: null as TrustlineFiguresSource | null,
@@ -151,7 +151,8 @@ describe('useSelectedTrustlineLine: the same answers, reactive', () => {
       toPid: () => s.to,
       trustlines: () => s.list,
       fetchState: () => s.fetch,
-      findAnsweredTrustline: () => s.answered,
+      // pair-sensitive, like the cache: only the row of THIS pair is an answer for it
+      findAnsweredTrustline: (from, to) => (s.answered && s.answered.from_pid === from && s.answered.to_pid === to ? s.answered : null),
       snapshotLinks: () => s.links,
       windowState: () => s.wmState,
       frozenLink: () => s.wmLink,
@@ -178,10 +179,21 @@ describe('useSelectedTrustlineLine: the same answers, reactive', () => {
     s.wmSource = line.figuresSource.value
     s.from = 'c'
     s.to = 'd'
+    // the cache still holds the answer for a -> b: for the NEWLY selected pair c -> d it is an answer "no line"
+    expect(line.figuresSource.value, 'the row of another pair was taken for the new pair').toEqual({ kind: 'no-row' })
+    expect(line.selectedLink.value).toEqual(SNAP_CD)
+    expect(line.edgeDetailFiguresSource.value).toEqual({ kind: 'frozen' })
+    expect(acts.value).toBe(true)
+
+    // the cache then forgets the answer and asks again: the new pair is loading, the frozen copy is unchanged
     s.answered = null
     s.fetch = { kind: 'loading' }
     expect(line.figuresSource.value).toEqual({ kind: 'loading' })
     expect(line.edgeDetailFiguresSource.value).toEqual({ kind: 'frozen' })
-    expect(acts.value).toBe(true)
+
+    // the window is released: the live basis of the new pair is what the window shows
+    s.wmState = 'live'
+    expect(line.edgeDetailFiguresSource.value).toEqual({ kind: 'loading' })
+    expect(acts.value).toBe(false)
   })
 })
