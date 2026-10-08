@@ -15,7 +15,7 @@ from app.core.payments.service import (
     PaymentService,
     PaymentTransactionUnusable,
 )
-from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
 from app.core.simulator.rejection_codes import map_rejection_code
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter, schedule_closed_trustlines_publication
 from app.core.simulator.viz_patch_helper import VizPatchHelper
@@ -878,6 +878,8 @@ class RealPaymentsExecutor:
 
         async def _one(session, item: _PaymentObservation) -> _PaymentPatches:
             eq = str(item.equivalent)
+            # The observation's edges are the route's HOPS, payer -> payee. The nodes of the patch are their ends;
+            # the lines of the patch are `line_pairs_of_payment_hops` of them (034 S1b), not the hops themselves.
             edges_pairs = [(str(e["from"]), str(e["to"])) for e in item.edges]
 
             helper: VizPatchHelper | None
@@ -929,7 +931,7 @@ class RealPaymentsExecutor:
             edge_patch = await self._edge_patch_builder.build_edge_patch_for_pairs(
                 session=session,
                 helper=helper,
-                edges_pairs=edges_pairs,
+                edges_pairs=line_pairs_of_payment_hops(edges_pairs),
                 pid_to_participant=pid_to_participant,
                 closed=closed,
             ) or None

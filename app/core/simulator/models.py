@@ -195,6 +195,10 @@ class RunRecord:
     # Artifacts writer (events.ndjson). Best-effort and async-safe.
     _artifact_events_queue: "asyncio.Queue[Optional[str]]" | None = None
     _artifact_events_task: Optional[asyncio.Task[None]] = None
+    # 034 `F-034-8`: events of this run the writer could not record (queue full, failed append, not serialisable;
+    # nothing else is counted - see `ArtifactsManager._count_dropped_events`). In-memory; the
+    # process-wide count is the `/metrics` counter `geo_simulator_artifact_events_dropped_total`.
+    _artifact_events_dropped: int = 0
 
     # Real-mode artifact IO throttling (in-memory only).
     _artifact_last_tick_written_at_ms: int = 0
