@@ -16,7 +16,12 @@ What it checks, statically (AST - a comment or a docstring does not count):
   wrapper `execute_clearing` - both gone from `ClearingService` (R4: safe delete; the wrapper: 024 `T2417`);
 * `find_cycles` (the retired detectors) is called by nothing under `app/` outside `service.py` itself: since 035 A1
   (owner decision П1-(а), 2026-10-08) `GET /clearing/cycles` answers with the flow plan through the runner, and
-  the admin copy of the route left in 032 S5. Its remaining callers are the seed tool and tests, until they move.
+  the admin copy of the route left in 032 S5. Its remaining callers are the seed tool and tests, until they move;
+* the diagnostic route names `planned_cycles_for_diagnostics`, and the diagnostic path of the runner
+  (`planned_cycles_for_diagnostics`, `_diagnostic_plan`) calls neither the passes' planner pool
+  (`_default_planner_executor`) nor the passes' planning step (`_plan_off_the_loop`): a diagnostic plan must never
+  stand in the queue in front of a pass's plan (035 A1, review of `b2a9caea`). The behaviour itself is held by
+  `tests/integration/test_p035_a1_cycles_do_not_hold_the_event_loop.py`; this is only the form.
 
 Anti-vacuum: the walker sees each form it looks for in a synthetic snippet.
 
@@ -114,7 +119,22 @@ def test_only_the_service_and_the_runner_reach_the_executors_and_auto_clear_is_g
     )
 
 
+def test_diagnostics_do_not_use_the_passes_planner_pool() -> None:
+    route = _function(_parse(REPO_ROOT / "app/api/v1/clearing.py"), "list_cycles")
+    runner = _parse(APP / "core/clearing/runner.py")
+    shared = {"_default_planner_executor", "_plan_off_the_loop"}
+    used = {name: sorted(_called(_function(runner, name)) & shared)
+            for name in ("planned_cycles_for_diagnostics", "_diagnostic_plan")}
+    require_target(
+        "planned_cycles_for_diagnostics" in _called(route) and not any(used.values()),
+        f"GET /clearing/cycles calls {sorted(_called(route))}; the diagnostic path uses the passes' planner: {used}. "
+        "This guard reads the form only (direct calls by name); whether a pass is really not delayed is decided by "
+        "tests/integration/test_p035_a1_cycles_do_not_hold_the_event_loop.py",
+    )
+
+
 def test_the_walker_sees_the_forms_it_looks_for() -> None:
+    assert _called(ast.parse("_plan_off_the_loop(edges, None, state)")) == {"_plan_off_the_loop"}
     assert _called(ast.parse("service.execute_clearing_with_amount(c)")) == {"execute_clearing_with_amount"}
     assert "find_cycles" in _called(ast.parse("async def f(s):\n    await s.find_cycles('X')"))
     assert _called(ast.parse("run_clearing_pass(f, 'X')")) == {"run_clearing_pass"}

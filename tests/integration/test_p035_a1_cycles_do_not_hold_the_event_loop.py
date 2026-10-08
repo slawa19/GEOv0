@@ -32,14 +32,19 @@ from concurrent.futures.process import BrokenProcessPool
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import update
 
+from app.config import settings
 from app.core.clearing import flow_planner, runner
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
+from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_scenarios import register_and_login
+from tests.p023_support import remaining_debts
+from tests.p035_support import slow_rotated_plan
 
 _LAYERS = 12
 _WIDTH = 3
@@ -164,7 +169,8 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
     await _ring(db_session, eq, n, "T", 3, "7")
     user = await register_and_login(client, "P035A1Plan")
 
-    plan = await flow_planner.plan_for_equivalent(db_session, eq.code)
+    code = eq.code  # the route releases its read transaction, which expires `eq`
+    plan = await flow_planner.plan_for_equivalent(db_session, code)
     planned = {frozenset(str(edge.debt_id) for edge in cycle.edges) for cycle in plan.cycles}
     assert sorted(len(c) for c in planned) == [3, 7], planned
 
@@ -176,7 +182,7 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
         return submit(self, fn, *args, **kwargs)
 
     monkeypatch.setattr(ProcessPoolExecutor, "submit", _recording_submit)
-    response = await client.get(f"/api/v1/clearing/cycles?equivalent={eq.code}", headers=user["headers"])
+    response = await client.get(f"/api/v1/clearing/cycles?equivalent={code}", headers=user["headers"])
     assert response.status_code == 200, response.text
     offered = _debt_id_sets(response.json()["cycles"])
     assert offered == planned, (
@@ -186,6 +192,315 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
     assert flow_planner.plan_clearing in submitted, (
         f"the plan was not handed to a planner process: process-pool submissions={submitted}"
     )
+    # Every field of an edge, not only its id: the pids of the debt's two ends and the DEBT's amount on the snapshot
+    # at the equivalent's precision (10.00 on the ring, 7.00 on the triangle) - not the amount the cycle would clear.
+    stored = {debt: (debtor, creditor, f"{amount:.2f}")
+              for debt, debtor, creditor, amount in await remaining_debts(db_session, code)}
+    answered = {edge["debt_id"]: (edge["debtor"], edge["creditor"], edge["amount"])
+                for cycle in response.json()["cycles"] for edge in cycle}
+    assert answered == stored and sorted({a for _, _, a in stored.values()}) == ["10.00", "7.00"], (answered, stored)
+
+
+# ------------------------------------------------------------------------- a plan that is slow FOR THE PLANNER
+
+_PLAN_SECONDS = 0.6
+
+
+class _Handed(list):
+    def __init__(self) -> None:
+        super().__init__()
+        self.futures: list[Future] = []
+
+
+def _slow_the_planner(monkeypatch, delay_of):
+    """Every `plan_clearing` handed to ANY process pool runs `slow_rotated_plan` in the worker instead: it sleeps
+    `delay_of(pool)` seconds there and returns the real plan with every cycle rotated by one edge. Returns the list
+    of pools that were handed a plan, in order; its `futures` are the worker futures, in the same order."""
+
+    handed = _Handed()
+    submit = ProcessPoolExecutor.submit
+
+    def _slow_submit(self, fn, /, *args, **kwargs):
+        if fn is not flow_planner.plan_clearing:
+            return submit(self, fn, *args, **kwargs)
+        handed.append(self)
+        handed.futures.append(submit(self, slow_rotated_plan, delay_of(self), *args, **kwargs))
+        return handed.futures[-1]
+
+    monkeypatch.setattr(ProcessPoolExecutor, "submit", _slow_submit)
+    return handed
+
+
+async def _until(condition, *, seconds: float = 10.0) -> None:
+    """Yield to the loop until `condition()` holds - an event of this loop, not a sleep that guesses a duration."""
+
+    async def _spin():
+        while not condition():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(_spin(), timeout=seconds)
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_is_slow_for_the_planner_does_not_hold_the_loop_and_the_answer_is_the_workers(
+    client, db_session, monkeypatch
+):
+    """The dense graph above is heavy for the retired DFS and trivial for the planner (0.001 s), so the test above
+    cannot tell a plan computed in the worker from one computed on the loop. Here the plan takes `_PLAN_SECONDS` in
+    the worker, and the two effects are asserted, not the form:
+
+    (a) while the plan runs, the loop is not held (same probe, same threshold);
+    (b) the answer is what CAME BACK from the worker - its cycles are rotated, which no recomputation produces.
+    """
+
+    eq, _triangle = await _dense_graph_with_one_short_cycle(db_session)
+    code = eq.code
+    user = await register_and_login(client, "P035A1Slow")
+    plan = await flow_planner.plan_for_equivalent(db_session, code)
+    planned = {frozenset(str(edge.debt_id) for edge in cycle.edges) for cycle in plan.cycles}
+    _slow_the_planner(monkeypatch, lambda _pool: _PLAN_SECONDS)
+
+    started = time.perf_counter()
+    response, delay = await _get_while_measuring_the_loop(
+        client, f"/api/v1/clearing/cycles?equivalent={code}", user["headers"])
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 200, response.text
+    cycles = response.json()["cycles"]
+    assert _debt_id_sets(cycles) == planned and len(cycles) > 1
+    # Anti-vacuum: the plan really was in flight under the probe for longer than the threshold.
+    assert elapsed >= _PLAN_SECONDS > _LOOP_DELAY_THRESHOLD_SECONDS, elapsed
+    canonical = [cycle for cycle in cycles if cycle[0]["debt_id"] == min(edge["debt_id"] for edge in cycle)]
+    assert canonical == [], (
+        f"{len(canonical)} of {len(cycles)} cycles are in the planner's canonical rotation: the answer was "
+        f"recomputed, it is not the plan that came back from the worker"
+    )
+    assert delay < _LOOP_DELAY_THRESHOLD_SECONDS, (
+        f"GET /clearing/cycles held the event loop while the plan ran: actual={delay:.3f} s, "
+        f"threshold={_LOOP_DELAY_THRESHOLD_SECONDS} s"
+    )
+
+
+# ------------------------------------------------------------------ diagnostics and a clearing pass, side by side
+
+#: The hard timeout of the simulator tick's clearing at its floor (`app/core/simulator/tick.py`,
+#: `clearing_hard_timeout_sec`: `max(2 s, 4 x budget)`).
+_TICK_HARD_TIMEOUT_SECONDS = 2.0
+_QUEUED_DIAGNOSTICS = 8
+_QUEUED_PLAN_SECONDS = 0.3
+
+
+async def _diagnose(factory, code: str):
+    async with factory() as session:
+        return await runner.planned_cycles_for_diagnostics(session, code)
+
+
+async def _three_triangles(db_session, tag: str) -> list[str]:
+    codes = []
+    for k in range(3):
+        eq, n = await _equivalent(db_session, f"{tag}{k}")
+        await _ring(db_session, eq, n, "Q", 3, "7")
+        codes.append(eq.code)
+    return codes
+
+
+async def _timed_pass(factory, code: str):
+    started = time.perf_counter()
+    try:
+        result = await asyncio.wait_for(runner.run_clearing_pass(factory, code), timeout=_TICK_HARD_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        pytest.fail(
+            f"HARD TIMEOUT - the clearing pass was cancelled: actual>{_TICK_HARD_TIMEOUT_SECONDS} s, "
+            f"threshold={_TICK_HARD_TIMEOUT_SECONDS} s"
+        )
+    return result, time.perf_counter() - started
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_queued_diagnostics_do_not_delay_a_clearing_pass(db_session, monkeypatch):
+    """Eight diagnostic requests at once, each plan 0.3 s in the worker, then a clearing pass in the tick's form
+    (hard timeout 2.0 s). The pass must commit its cycle as it does with no diagnostics around: a diagnostic plan
+    never stands in front of a pass's plan, and the diagnostics do not queue up either - one is computed, the others
+    are refused at once."""
+
+    control_code, busy_code, diagnosed_code = await _three_triangles(db_session, "QD")
+    factory = sessionmaker_of(db_session)
+    # Warm planner processes: this is about the queue, not the first spawn.
+    await asyncio.wrap_future(runner._default_planner_executor().submit(flow_planner.plan_clearing, []))
+    assert len(await _diagnose(factory, diagnosed_code)) == 1
+    handed = _slow_the_planner(monkeypatch, lambda _pool: _QUEUED_PLAN_SECONDS)
+
+    control, control_seconds = await _timed_pass(factory, control_code)
+    assert len(control.committed) == 1
+    del handed[:]
+
+    diagnostics = [asyncio.create_task(_diagnose(factory, diagnosed_code)) for _ in range(_QUEUED_DIAGNOSTICS)]
+    await _until(lambda: len(handed) + sum(task.done() for task in diagnostics) >= _QUEUED_DIAGNOSTICS)
+    result, seconds = await _timed_pass(factory, busy_code)
+    outcomes = await asyncio.gather(*diagnostics, return_exceptions=True)
+
+    assert len(result.committed) == 1
+    assert seconds < control_seconds + 1.0, (
+        f"the pass behind {_QUEUED_DIAGNOSTICS} diagnostics took actual={seconds:.3f} s, "
+        f"control={control_seconds:.3f} s, threshold=control+1.0 s"
+    )
+    answered = [o for o in outcomes if isinstance(o, list)]
+    refused = [o for o in outcomes if isinstance(o, runner.ClearingDiagnosticsUnavailable)]
+    assert (len(answered), len(refused)) == (1, _QUEUED_DIAGNOSTICS - 1), outcomes
+    assert {r.details["reason"] for r in refused} == {"diagnostics_busy"}, refused
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_second_diagnostic_request_is_refused_while_one_plan_is_in_flight(client, db_session, monkeypatch):
+    """One diagnostic plan a process. A request that arrives while it is computed is answered at once - 503 (E007,
+    `details.reason = diagnostics_busy`) with a request id, not queued and not an empty list; when the plan is done
+    the next request answers."""
+
+    code = (await _three_triangles(db_session, "QB"))[0]
+    factory = sessionmaker_of(db_session)
+    user = await register_and_login(client, "P035A1Busy")
+    url = f"/api/v1/clearing/cycles?equivalent={code}"
+    handed = _slow_the_planner(monkeypatch, lambda _pool: 0.5)
+
+    first = asyncio.create_task(_diagnose(factory, code))
+    await _until(lambda: handed)
+    started = time.perf_counter()
+    busy = await client.get(url, headers=user["headers"])
+    refused_in = time.perf_counter() - started
+    assert not first.done(), "stand: the first plan ended before the second request was answered"
+    assert busy.status_code == 503, busy.text
+    error = busy.json()["error"]
+    assert (error["code"], error["details"]["reason"]) == ("E007", "diagnostics_busy") and error["request_id"], error
+    assert error["details"]["retry_after_seconds"] > 0 and "cycles" not in busy.json()
+    assert refused_in < 0.5 and len(handed) == 1, (refused_in, handed)
+
+    assert len(await first) == 1
+    after = await client.get(url, headers=user["headers"])
+    assert after.status_code == 200 and len(after.json()["cycles"]) == 1, after.text
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_diagnostic_plan_past_its_time_is_refused_its_worker_replaced_and_a_pass_not_delayed(
+    client, db_session, monkeypatch
+):
+    """The diagnostic plan has one upper bound of time. Past it the request is answered 503 (E007,
+    `details.reason = diagnostics_timeout`), the worker that is still computing is terminated and a new one serves
+    the next request - an abandoned plan cannot hold the one slot. A clearing pass that runs WHILE the diagnostic
+    plan hangs takes what it takes with no diagnostics around."""
+
+    control_code, busy_code, diagnosed_code = await _three_triangles(db_session, "QT")
+    factory = sessionmaker_of(db_session)
+    user = await register_and_login(client, "P035A1Timeout")
+    url = f"/api/v1/clearing/cycles?equivalent={diagnosed_code}"
+    await asyncio.wrap_future(runner._default_planner_executor().submit(flow_planner.plan_clearing, []))
+    assert len(await _diagnose(factory, diagnosed_code)) == 1
+    pass_pool, hung_pool = runner._planner_executor, runner._diagnostic_executor
+    assert hung_pool is not None and hung_pool is not pass_pool
+    hung_workers = list(hung_pool._processes.values())
+    assert hung_workers and all(worker.is_alive() for worker in hung_workers)
+
+    control, control_seconds = await _timed_pass(factory, control_code)
+    assert len(control.committed) == 1
+
+    delays = {"diagnostics": 30.0}
+    handed = _slow_the_planner(
+        monkeypatch, lambda pool: 0.0 if pool is runner._planner_executor else delays["diagnostics"])
+    default_bound = runner.DIAGNOSTIC_PLAN_TIMEOUT_SECONDS
+    monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", 1.5)
+    started = time.perf_counter()
+    hung = asyncio.create_task(_diagnose(factory, diagnosed_code))
+    await _until(lambda: handed)
+    result, seconds = await _timed_pass(factory, busy_code)
+    assert not hung.done(), "stand: the diagnostic plan ended before the pass did"
+    assert len(result.committed) == 1
+    assert seconds < control_seconds + 1.0, (
+        f"the pass beside a hung diagnostic plan took actual={seconds:.3f} s, control={control_seconds:.3f} s, "
+        f"threshold=control+1.0 s"
+    )
+
+    with pytest.raises(runner.ClearingDiagnosticsUnavailable) as refused:
+        await hung
+    assert refused.value.details["reason"] == "diagnostics_timeout"
+    assert time.perf_counter() - started < 10.0, "the bound of 1.5 s did not end a 30 s plan"
+    assert runner._diagnostic_executor is not hung_pool and runner._planner_executor is pass_pool
+    for worker in hung_workers:
+        worker.join(15)
+    assert not any(worker.is_alive() for worker in hung_workers), "the worker of the abandoned plan is still running"
+
+    # The same refusal over HTTP (a new worker, the plan hangs again), then a plan that fits: 200 from a new worker.
+    timed_out = await client.get(url, headers=user["headers"])
+    assert timed_out.status_code == 503, timed_out.text
+    error = timed_out.json()["error"]
+    assert (error["code"], error["details"]["reason"]) == ("E007", "diagnostics_timeout") and error["request_id"]
+    delays["diagnostics"] = 0.0
+    monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", default_bound)  # the new worker starts cold
+    recovered = await client.get(url, headers=user["headers"])
+    assert recovered.status_code == 200 and len(recovered.json()["cycles"]) == 1, recovered.text
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_cancelled_diagnostic_request_leaves_no_plan_running_in_the_slot(db_session, monkeypatch):
+    """A client that goes away cancels the request, not the worker's computation. The worker of the abandoned plan
+    is terminated with it, so the next request is neither refused as busy nor queued behind a plan nobody awaits."""
+
+    code = (await _three_triangles(db_session, "QC"))[0]
+    factory = sessionmaker_of(db_session)
+    assert len(await _diagnose(factory, code)) == 1
+    abandoned_pool = runner._diagnostic_executor
+    abandoned_workers = list(abandoned_pool._processes.values())
+    delays = {"diagnostics": 30.0}
+    handed = _slow_the_planner(monkeypatch, lambda _pool: delays["diagnostics"])
+
+    request = asyncio.create_task(_diagnose(factory, code))
+    # RUNNING, not merely handed over: a plan cancelled while still queued is simply dropped and needs no termination.
+    await _until(lambda: handed.futures and handed.futures[0].running())
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    for worker in abandoned_workers:
+        worker.join(15)
+    assert not any(worker.is_alive() for worker in abandoned_workers)
+
+    delays["diagnostics"] = 0.0
+    started = time.perf_counter()
+    assert len(await _diagnose(factory, code)) == 1
+    assert time.perf_counter() - started < 10.0
+
+
+# ---------------------------------------------------------------- the plan is offered where the pass would refuse
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_stopped_equivalent_and_disabled_clearing_still_show_the_plan_the_pass_refuses(
+    client, db_session, monkeypatch
+):
+    """Recorded behaviour, not a promise that the pass would run: `/cycles` is the plan a pass WOULD COMPUTE on this
+    snapshot. The pass itself can refuse - the equivalent is stopped, or clearing is switched off - and `/cycles`
+    still shows the plan rather than hiding real cycles under an empty list."""
+
+    code = (await _three_triangles(db_session, "QS"))[0]
+    user = await register_and_login(client, "P035A1Stopped")
+    cycles_url, auto_url = f"/api/v1/clearing/cycles?equivalent={code}", f"/api/v1/clearing/auto?equivalent={code}"
+
+    monkeypatch.setattr(settings, "CLEARING_ENABLED", False)
+    shown = await client.get(cycles_url, headers=user["headers"])
+    refused = await client.post(auto_url, headers=user["headers"])
+    assert shown.status_code == 200 and len(shown.json()["cycles"]) == 1, shown.text
+    assert (refused.status_code, refused.json()["error"]["details"]["reason"]) == (409, "clearing_disabled"), refused.text
+    monkeypatch.setattr(settings, "CLEARING_ENABLED", True)
+
+    await db_session.execute(update(Equivalent).where(Equivalent.code == code).values(is_active=False))
+    await db_session.commit()
+    shown = await client.get(cycles_url, headers=user["headers"])
+    refused = await client.post(auto_url, headers=user["headers"])
+    assert shown.status_code == 200 and len(shown.json()["cycles"]) == 1, shown.text
+    assert (refused.status_code, refused.json()["error"]["code"]) == (409, "E008"), refused.text
+    assert refused.json()["error"]["details"]["reason"] == "equivalent_inactive", refused.text
 
 
 @pytest.mark.asyncio
@@ -241,8 +556,8 @@ class _FailsWith:
 async def test_a_planner_that_cannot_answer_is_an_error_with_a_request_id_not_an_empty_list(
     client, db_session, pool, discarded
 ):
-    """The semantics of `runner._plan_off_the_loop`: a broken pool is discarded and the failure is loud; there is no
-    fallback detector. The next request gets a new pool and answers."""
+    """The semantics of `runner._plan_off_the_loop`, on the diagnostic pool: a broken pool is discarded and the failure
+    is loud; there is no fallback detector. The next request gets a new pool and answers."""
 
     eq, n = await _equivalent(db_session, "CF")
     await _ring(db_session, eq, n, "F", 3, "7")
@@ -250,13 +565,13 @@ async def test_a_planner_that_cannot_answer_is_an_error_with_a_request_id_not_an
     user = await register_and_login(client, "P035A1Fail")
     url = f"/api/v1/clearing/cycles?equivalent={code}"
 
-    real = runner._planner_executor
-    runner._planner_executor = pool
+    real = runner._diagnostic_executor
+    runner._diagnostic_executor = pool
     try:
         failed = await client.get(url, headers=user["headers"])
-        left = runner._planner_executor
+        left = runner._diagnostic_executor
     finally:
-        runner._planner_executor = real
+        runner._diagnostic_executor = real
     assert failed.status_code == 500, failed.text
     error = failed.json()["error"]
     assert error["code"] == "E010" and error["request_id"], failed.text

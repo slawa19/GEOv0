@@ -11,6 +11,7 @@ from concurrent.futures.process import BrokenProcessPool
 from app.api import deps
 from app.core.clearing.flow_planner import PlanIntegrityError
 from app.core.clearing.runner import (
+    ClearingDiagnosticsUnavailable,
     ClearingPassCancelled,
     ClearingPassError,
     ClearingPassResult,
@@ -37,23 +38,41 @@ _EXECUTION_DEPTH_REMOVED = (
 )
 
 
-@router.get("/cycles", response_model=ClearingCyclesResponse)
+@router.get(
+    "/cycles",
+    response_model=ClearingCyclesResponse,
+    responses={
+        # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
+        500: {"model": ErrorEnvelope, "description": "The planner process could not answer (E010)"},
+        503: {
+            "model": ErrorEnvelope,
+            "description": "Diagnostics cannot answer now (E007): another diagnostic plan is being computed "
+            "(`details.reason = diagnostics_busy`) or this one ran past its time bound "
+            "(`details.reason = diagnostics_timeout`); retry after `details.retry_after_seconds`",
+        },
+    },
+)
 async def list_cycles(
     request: Request,
     equivalent: str = Query(..., description="Equivalent code"),
     db: AsyncSession = Depends(deps.get_db),
     _current_participant=Depends(deps.get_current_participant),
 ):
-    """The cycles a clearing pass would execute now: the flow plan on a fresh snapshot (035 A1, П1-(а)).
+    """The cycles of the plan a clearing pass would compute now, on a fresh snapshot (035 A1, П1-(а)).
 
-    The plan is computed in the planner process, never on the event loop. A planner that cannot answer is an error
-    with a `request_id`, not an empty list and not another detector.
+    The plan is computed in the diagnostic planner process, never on the event loop and never in front of a pass's
+    plan. Diagnostics that cannot answer say so with a `request_id` - busy or past the time bound is 503, a planner
+    that failed is 500 - never an empty list and never another detector. The pass itself may still refuse to run
+    (a stopped or held equivalent, clearing switched off): this route does not ask.
     """
 
     _refuse_execution_depth(request)
     validate_equivalent_code(equivalent)
     try:
         cycles = await planned_cycles_for_diagnostics(db, equivalent)
+    except ClearingDiagnosticsUnavailable as unavailable:
+        logger.warning("event=clearing.cycles.unavailable equivalent=%s reason=%s", equivalent, unavailable.reason)
+        raise
     except (BrokenProcessPool, PlanIntegrityError) as failed:
         # The bare E010 (500) with the request id; which of the two it was stays in the log.
         logger.error("event=clearing.cycles.planner_failed equivalent=%s error=%s", equivalent, type(failed).__name__)

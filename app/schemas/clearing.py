@@ -9,7 +9,10 @@ class ClearingCycleEdge(BaseModel):
     debt_id: str
     debtor: str
     creditor: str
-    amount: str
+    amount: str = Field(
+        description="The debt's amount on the snapshot, at the equivalent's precision - not the amount the cycle "
+        "would clear."
+    )
 
 
 class ClearingCyclesResponse(BaseModel):

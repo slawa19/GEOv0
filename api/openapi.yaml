@@ -2483,15 +2483,20 @@ paths:
   /clearing/cycles:
     get:
       tags: [Clearing]
-      summary: List the debt cycles a clearing pass would execute for an equivalent
+      summary: List the debt cycles of the plan a clearing pass would compute for an equivalent
       description: >-
-        Programme 035 (A1): the cycles of the flow plan on a fresh snapshot - what one pass of POST /clearing/auto
-        would execute now, in plan order - computed in the planner process. Read-only: nothing is executed or
-        written. It is the decomposition of that plan, not an enumeration of every cycle of the debt graph. Each
-        edge carries the debt's amount on the snapshot. `max_depth` is NOT accepted: the plan has no depth limit,
-        and the presence of the key in any form (bare, empty, repeated, valid or not) is answered 422 (E009,
-        `details.errors[].loc = [query, max_depth]`). A planner that cannot answer is 500 (E010) with a
-        `request_id`, never an empty list.
+        Programme 035 (A1): the cycles of the flow plan a pass of POST /clearing/auto would compute on this
+        snapshot, in plan order, computed in a planner process. Read-only: nothing is executed or written. The
+        pass itself may refuse to run - the equivalent is inactive or held, clearing is switched off (see POST
+        /clearing/auto) - and this operation still answers with the plan. It is the decomposition of that plan,
+        not an enumeration of every cycle of the debt graph. Each edge carries the debt's amount on the snapshot,
+        not the amount the cycle would clear. `max_depth` is NOT accepted: the plan has no depth limit, and the
+        presence of the key in any form (bare, empty, repeated, valid or not) is answered 422 (E009,
+        `details.errors[].loc = [query, max_depth]`). One diagnostic plan is computed at a time and it has an
+        upper bound of time: a request that meets a plan in flight, or whose own plan runs past the bound, is
+        answered 503 (E007, `details.reason` = `diagnostics_busy` | `diagnostics_timeout`,
+        `details.retry_after_seconds`) - it is not queued. A planner that fails is 500 (E010). Every error carries
+        a `request_id`; none of them is an empty list.
       parameters:
         - in: query
           name: equivalent
@@ -2513,6 +2518,21 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          description: The planner process could not answer (E010)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: >-
+            Diagnostics cannot answer now (E007): another diagnostic plan is being computed
+            (`details.reason = diagnostics_busy`) or this one ran past its time bound
+            (`details.reason = diagnostics_timeout`); retry after `details.retry_after_seconds`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /clearing/auto:
     post:
@@ -5307,6 +5327,9 @@ components:
           type: string
         amount:
           type: string
+          description: >-
+            The debt's amount on the snapshot, at the equivalent's precision - not the amount the cycle
+            would clear.
 
     ClearingCyclesResponse:
       type: object
