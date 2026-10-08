@@ -292,11 +292,6 @@ class _SimulatorRuntimeBase:
         with self._lock:
             return dict(self._active_run_id_by_owner)
 
-    def count_active_runs(self) -> int:
-        """Total number of active runs across all owners."""
-        with self._lock:
-            return len(self._active_run_id_by_owner)
-
     def list_runs(
         self,
         *,

@@ -17,8 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.simulator.models import RunRecord
-from app.core.simulator.sse_broadcast import SseBroadcast
-from app.core.simulator.trust_drift_engine import broadcast_trust_drift_changed
+from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.schemas.simulator import (
     SimulatorTopologyChangedEvent,
     TopologyChangedPayload,
@@ -61,111 +60,42 @@ class FakeSseBroadcast:
 
 
 # ---------------------------------------------------------------------------
-# Test: broadcast_trust_drift_changed skips empty edge_patch
+# Test: the trust-drift emission point skips an empty edge_patch
 # ---------------------------------------------------------------------------
 
-class TestBroadcastTrustDriftChangedSkipsEmpty:
-    """trust_drift_engine.broadcast_trust_drift_changed must NEVER emit
-    a topology.changed event when edge_patches_by_eq is empty or missing
-    for a given equivalent.
+def _emit_edge_patch(sse, edge_patch):
+    """The live emission point of a trust-drift `topology.changed` (growth and decay in the tick).
+
+    034 S3: until then this class called `trust_drift_engine.broadcast_trust_drift_changed`, a function nothing in
+    the application called; its by-equivalent cases (a missing key, an empty dict) had no counterpart on the live
+    path, which emits one equivalent at a time.
     """
+    return SseEventEmitter(sse=sse, utc_now=_utc_now, logger=logging.getLogger("test")).emit_topology_edge_patch(
+        run_id="run-1", run=_make_run(), equivalent="UAH", edge_patch=edge_patch, reason="trust_drift_decay")
 
-    def test_no_event_when_edge_patches_missing(self):
-        """No event emitted when edge_patches_by_eq is None."""
-        sse = FakeSseBroadcast()
-        run = _make_run()
-        broadcast_trust_drift_changed(
-            sse=sse,
-            utc_now=_utc_now,
-            logger=logging.getLogger("test"),
-            run_id="run-1",
-            run=run,
-            reason="trust_drift_decay",
-            equivalents=["UAH", "EUR"],
-            edge_patches_by_eq=None,
-        )
-        assert len(sse.events) == 0, (
-            "Must not emit topology.changed when edge_patches_by_eq is None"
-        )
 
-    def test_no_event_when_edge_patches_empty_dict(self):
-        """No event emitted when edge_patches_by_eq is an empty dict."""
-        sse = FakeSseBroadcast()
-        run = _make_run()
-        broadcast_trust_drift_changed(
-            sse=sse,
-            utc_now=_utc_now,
-            logger=logging.getLogger("test"),
-            run_id="run-1",
-            run=run,
-            reason="trust_drift_decay",
-            equivalents=["UAH"],
-            edge_patches_by_eq={},
-        )
-        assert len(sse.events) == 0
+class TestTrustDriftEdgePatchSkipsEmpty:
+    """`SseEventEmitter.emit_topology_edge_patch` must NEVER emit a topology.changed event without an edge patch."""
 
-    def test_no_event_when_edge_patches_empty_list_for_eq(self):
-        """No event when the specific equivalent has an empty patch list."""
+    @pytest.mark.parametrize("edge_patch", [None, []])
+    def test_no_event_without_an_edge_patch(self, edge_patch):
         sse = FakeSseBroadcast()
-        run = _make_run()
-        broadcast_trust_drift_changed(
-            sse=sse,
-            utc_now=_utc_now,
-            logger=logging.getLogger("test"),
-            run_id="run-1",
-            run=run,
-            reason="trust_drift_decay",
-            equivalents=["UAH"],
-            edge_patches_by_eq={"UAH": []},
-        )
-        assert len(sse.events) == 0
+        assert _emit_edge_patch(sse, edge_patch) is None
+        assert len(sse.events) == 0, "Must not emit topology.changed without an edge patch"
 
     def test_event_emitted_with_nonempty_edge_patch(self):
         """Event IS emitted when edge_patch is non-empty."""
         sse = FakeSseBroadcast()
-        run = _make_run()
         patch = [{"source": "A", "target": "B", "used": "10.00", "available": "90.00"}]
-        broadcast_trust_drift_changed(
-            sse=sse,
-            utc_now=_utc_now,
-            logger=logging.getLogger("test"),
-            run_id="run-1",
-            run=run,
-            reason="trust_drift_decay",
-            equivalents=["UAH"],
-            edge_patches_by_eq={"UAH": patch},
-        )
+        assert _emit_edge_patch(sse, patch) is not None
         assert len(sse.events) == 1
         _, evt = sse.events[0]
         assert evt["type"] == "topology.changed"
         assert evt["equivalent"] == "UAH"
         assert evt["reason"] == "trust_drift_decay"
-        # payload must have edge_patch
         payload = evt.get("payload", {})
         assert isinstance(payload.get("edge_patch"), list)
         assert len(payload["edge_patch"]) > 0
-
-    def test_mixed_equivalents_only_nonempty_emitted(self):
-        """Only equivalents with non-empty patches get events."""
-        sse = FakeSseBroadcast()
-        run = _make_run()
-        broadcast_trust_drift_changed(
-            sse=sse,
-            utc_now=_utc_now,
-            logger=logging.getLogger("test"),
-            run_id="run-1",
-            run=run,
-            reason="trust_drift_decay",
-            equivalents=["UAH", "EUR", "HOUR"],
-            edge_patches_by_eq={
-                "UAH": [{"source": "A", "target": "B"}],
-                "EUR": [],  # empty → skip
-                # HOUR missing → skip
-            },
-        )
-        assert len(sse.events) == 1
-        _, evt = sse.events[0]
-        assert evt["equivalent"] == "UAH"
 
 
 # ---------------------------------------------------------------------------
