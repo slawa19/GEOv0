@@ -13,7 +13,8 @@
  * default up to that value satisfies the test; the value itself is the implementer's choice.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, httpJson } from './http'
+import { ApiError, DEFAULT_REQUEST_TIMEOUT_MS, httpJson, httpText, isTimeoutError, LONG_REQUEST_TIMEOUT_MS } from './http'
+import { getRun, actionPaymentReal } from './simulatorApi'
 import { extractErrorMessage } from '../utils/errorMessage'
 
 const CFG = { apiBase: '/api/v1' }
@@ -225,5 +226,91 @@ describe('F-034-15: the correlation id reaches ApiError and the message', () => 
     expect(error).toBeInstanceOf(ApiError)
     expect(error.requestId ?? null).toBeNull()
     expect(extractErrorMessage(error)).not.toContain('(ref:')
+  })
+})
+
+describe('F-034-15: the bound is per call, covers httpText, and leaves no timer behind', () => {
+  const OK = () => new Response(JSON.stringify({ ok: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+
+  it('a per-call timeoutMs is honored: pending just before it, TIMEOUT ApiError at it', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const call = track(httpJson(CFG, '/x', { timeoutMs: 1_000 }))
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(call.outcome().settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+
+    const o = call.outcome()
+    expect(o.settled).toBe(true)
+    const error = 'error' in o ? o.error : undefined
+    expect(isTimeoutError(error)).toBe(true)
+    expect((error as ApiError).status).toBe(0)
+  })
+
+  it('httpText is bounded the same way', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const call = track(httpText(CFG, '/x'))
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_BOUND_MS)
+
+    const o = call.outcome()
+    expect(o.settled).toBe(true)
+    expect(isTimeoutError('error' in o ? o.error : undefined)).toBe(true)
+  })
+
+  it('the default bound is DEFAULT_REQUEST_TIMEOUT_MS: pending just before it', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const call = track(httpJson(CFG, '/x'))
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS - 1)
+    expect(call.outcome().settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(call.outcome().settled).toBe(true)
+  })
+
+  it('an Interact action gets the long bound, an ordinary read the default one', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const read = track(getRun(CFG, 'run-1'))
+    const action = track(actionPaymentReal(CFG, 'run-1', { from_pid: 'a', to_pid: 'b', amount: '1', equivalent: 'UAH' } as never))
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_REQUEST_TIMEOUT_MS)
+    expect(isTimeoutError('error' in read.outcome() ? (read.outcome() as { error: unknown }).error : undefined)).toBe(true)
+    expect(action.outcome().settled, 'the action was cut at the default bound').toBe(false)
+
+    await vi.advanceTimersByTimeAsync(LONG_REQUEST_TIMEOUT_MS - DEFAULT_REQUEST_TIMEOUT_MS)
+    expect(isTimeoutError('error' in action.outcome() ? (action.outcome() as { error: unknown }).error : undefined)).toBe(true)
+  })
+
+  it('no timer is left after success, an error answer, a timeout and a caller abort', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => OK()))
+    await httpJson(CFG, '/x')
+    expect(vi.getTimerCount(), 'success').toBe(0)
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
+    await expect(httpJson(CFG, '/x')).rejects.toBeInstanceOf(ApiError)
+    expect(vi.getTimerCount(), 'error answer').toBe(0)
+
+    vi.stubGlobal('fetch', hangingFetch())
+    const timedOut = track(httpJson(CFG, '/x'))
+    await vi.advanceTimersByTimeAsync(TIMEOUT_BOUND_MS)
+    expect(timedOut.outcome().settled).toBe(true)
+    expect(vi.getTimerCount(), 'timeout').toBe(0)
+
+    const external = new AbortController()
+    const cancelled = track(httpJson(CFG, '/x', { signal: external.signal }))
+    external.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(cancelled.outcome().settled).toBe(true)
+    expect(vi.getTimerCount(), 'caller abort').toBe(0)
+  })
+
+  it('the caller signal listener is released after the call', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => OK()))
+    const external = new AbortController()
+    const remove = vi.spyOn(external.signal, 'removeEventListener')
+
+    await httpJson(CFG, '/x', { signal: external.signal })
+
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
   })
 })

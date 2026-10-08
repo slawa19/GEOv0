@@ -85,7 +85,8 @@ function mapToInteractActionError(e: unknown): InteractActionError {
 
   if (e instanceof ApiError) {
     const parsed = parseActionErrorJson(e.bodyText)
-    const code = parsed?.code ?? `HTTP_${e.status}`
+    // A request that never got an answer (the bound, `ApiError.code`) has no HTTP status to name it by.
+    const code = parsed?.code ?? e.code ?? `HTTP_${e.status}`
     const message = parsed?.message ?? e.message
     const details = parsed?.details ?? null
     return {
