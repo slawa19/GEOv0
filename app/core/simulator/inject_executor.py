@@ -21,6 +21,7 @@ from app.core.simulator.models import InjectResult, RunRecord
 from app.core.simulator.real_scenario_seeder import (
     SimulatorPidTakenError,
     require_simulated_participant,
+    scenario_participant_status,
     simulated_public_key,
 )
 from app.core.simulator.net_balance_utils import to_money_str
@@ -553,9 +554,7 @@ class InjectExecutor:
                 p_type = str(p_data.get("type") or "person").strip()
                 if p_type not in {"person", "business", "hub"}:
                     p_type = "person"
-                status = str(p_data.get("status") or "active").strip().lower()
-                if status not in {"active", "suspended", "left", "deleted"}:
-                    status = "active"
+                status = scenario_participant_status(p_data.get("status"))  # the seeder's rule (034 S4, F-034-14)
                 public_key = simulated_public_key(pid)
 
                 # Inserted ACTIVE through the participant service (030 S3b, F-030-19): the lines below are created by
