@@ -95,6 +95,33 @@ describe('item 1: the request id survives the Interact path', () => {
   })
 })
 
+describe('fix-delta item 5: a 2xx body that is not JSON is never read as a business refusal', () => {
+  it('a diagnostic excerpt that happens to parse as an error envelope stays INVALID_JSON', async () => {
+    // A valid refusal envelope padded with spaces to the 500 characters the transport keeps as an excerpt,
+    // followed by garbage: the WHOLE body is not JSON, the excerpt alone is.
+    const body = `${'{"code":"NO_ROUTE","message":"no route"}'.padEnd(500, ' ')}<garbage`
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'X-Request-ID': 'req-trap' } })))
+
+    const call = rejection(actions().sendPayment('a', 'b', '1.00', 'UAH'))
+    await vi.advanceTimersByTimeAsync(0)
+    const error = await call
+
+    expect(error.code, 'the transport failure was turned into the refusal the excerpt spells').toBe('INVALID_JSON')
+    expect(paymentRefusalText(error, 'UAH', 'en')).not.toContain('No payment route')
+    expect(error.message, 'the message of the excerpt replaced the transport message').not.toBe('no route')
+    expect(error.message).toMatch(/not valid JSON/)
+    expect(error.requestId).toBe('req-trap')
+  })
+
+  it('anti-vacuum: a real 409 refusal envelope is still read from the body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => refusal409({})))
+    const call = rejection(actions().sendPayment('a', 'b', '1.00', 'UAH'))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect((await call).code).toBe('NO_ROUTE')
+  })
+})
+
 describe('item 3: a timeout of a mutating action is an unknown outcome, not a refusal', () => {
   const MUTATING: Array<[string, () => Promise<unknown>]> = [
     ['sendPayment', () => actions().sendPayment('a', 'b', '1.00', 'UAH')],
@@ -159,7 +186,7 @@ describe('item 3: a timeout of a mutating action is an unknown outcome, not a re
     expect(error.requestId).toBe('req-html')
   })
 
-  it('anti-vacuum: a READ timeout is not an unknown outcome (nothing was written), and keeps the technical message', async () => {
+  it('anti-vacuum: a READ timeout is not an unknown outcome (the client asked for no change; the lazy seeding some reads trigger server-side is not an action to repeat), and keeps the technical message', async () => {
     vi.stubGlobal('fetch', hangingFetch())
     const call = rejection(actions().fetchTrustlines('UAH'))
 

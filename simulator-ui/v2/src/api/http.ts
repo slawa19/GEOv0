@@ -60,7 +60,7 @@ export class ApiError extends Error {
   requestId: string | null
   /**
    * True when the request was SENT with a method that may change state and no answer came back in time: the server
-   * may or may not have applied it. Never true for a GET/HEAD (nothing to apply) and never for an answered request.
+   * may or may not have applied it. Never true for a GET/HEAD (the client asked for no change; a read may still make the server seed lazily, which is not an action to repeat) and never for an answered request.
    */
   outcomeUnknown: boolean
   /** The bound that expired, for a timeout; undefined otherwise. */
@@ -151,6 +151,8 @@ async function boundedRequest<T>(
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   let onCallerAbort: (() => void) | undefined
+  // The id of the answer whose headers have arrived; a timeout while the body is read still names that request.
+  let answeredRequestId: string | null = null
 
   const bound = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
@@ -160,7 +162,7 @@ async function boundedRequest<T>(
           unsafe
             ? `${method} ${path} -> timeout after ${timeoutMs}ms: no answer, the result is unknown (the request may have been applied)`
             : `${method} ${path} -> timeout after ${timeoutMs}ms`,
-          { status: 0, code: API_TIMEOUT_CODE, outcomeUnknown: unsafe, timeoutMs },
+          { status: 0, code: API_TIMEOUT_CODE, outcomeUnknown: unsafe, timeoutMs, requestId: answeredRequestId },
         ),
       )
       controller.abort()
@@ -180,6 +182,7 @@ async function boundedRequest<T>(
 
   try {
     const res = await guard(fetch(url, { credentials: 'include', ...init, signal: controller.signal }))
+    answeredRequestId = nonEmptyString(res.headers?.get('X-Request-ID'))
     return await handle(res, guard, callerSignal)
   } finally {
     if (timer !== undefined) clearTimeout(timer)

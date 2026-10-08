@@ -22,7 +22,7 @@ import type {
 } from '../api/simulatorTypes'
 import { connectSse, type SseParsedMessage } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
-import { ApiError, authHeaders } from '../api/http'
+import { ApiError, authHeaders, isTimeoutError } from '../api/http'
 import { fetchEquivalentPrecisions } from '../api/equivalentsApi'
 import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 
@@ -394,6 +394,13 @@ export function useSimulatorRealMode(opts: {
 
   type RunStatusRefreshOutcome = 'current' | 'stale' | 'transient' | 'superseded'
 
+  /**
+   * Did the last run STATUS read of the current run time out (and nothing has answered since)? Set by the call that
+   * saw the timeout even when a newer call superseded it - the stale SSE loop re-reads the status after its stream
+   * is aborted and does supersede an Attach's read. A status that did not answer is unknown, not "no active run".
+   */
+  let runStatusTimedOut = false
+
   async function refreshRunStatusForCurrentContext(): Promise<RunStatusRefreshOutcome> {
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     const runId = real.runId
@@ -403,11 +410,13 @@ export function useSimulatorRealMode(opts: {
     try {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
       if (!isCurrent()) return 'superseded'
+      runStatusTimedOut = false
       real.runStatus = st
       const le = st.last_error
       real.lastError = le && isUserFacingRunError(le.code) ? runErrorText(le) : ''
       return 'current'
     } catch (e: unknown) {
+      if (isTimeoutError(e) && real.runId === runId) runStatusTimedOut = true
       if (!isCurrent()) return 'superseded'
       if (e instanceof ApiError && e.status === 404) {
         resetStaleRun({ clearError: true })
@@ -1242,9 +1251,13 @@ export function useSimulatorRealMode(opts: {
       replayGapRecoveryRunId = null
       real.artifacts = []
 
+      runStatusTimedOut = false
       await refreshRunStatus()
-      await refreshSnapshot()
-      void runSseLoop()
+      // After a status timeout `runStatus` stays null and the scene loader would take the scenario preview for the
+      // run: keep the scene that is shown (the timeout is in `lastError`, which the SSE restart must not clear).
+      const statusUnknown = runStatusTimedOut && real.runStatus === null
+      if (!statusUnknown) await refreshSnapshot()
+      void runSseLoop({ preserveLastError: statusUnknown })
     } catch (e: unknown) {
       real.lastError = getErrorMessage(e)
     }

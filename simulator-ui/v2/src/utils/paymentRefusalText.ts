@@ -85,7 +85,7 @@ export function paymentRefusalText(error: unknown, equivalent: string, locale: U
   const reason = typeof details.reason === 'string' ? details.reason : ''
   const text = REASONS[reason] ?? REASONS[CODES[code] ?? '']
   if (text) return withRequestRef(text[locale](vars), error)
-  return CODE_GENERIC.has(code) ? GENERIC[locale] : extractErrorMessage(error)
+  return CODE_GENERIC.has(code) ? withRequestRef(GENERIC[locale], error) : extractErrorMessage(error)
 }
 
 /**

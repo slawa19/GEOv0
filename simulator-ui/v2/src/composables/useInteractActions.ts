@@ -93,9 +93,11 @@ function mapToInteractActionError(e: unknown): InteractActionError {
   if (isInteractActionError(e)) return e
 
   if (e instanceof ApiError) {
-    const parsed = parseActionErrorJson(e.bodyText)
-    // A request that never got an answer (the bound, `ApiError.code`) has no HTTP status to name it by.
-    const code = parsed?.code ?? e.code ?? `HTTP_${e.status}`
+    // Only the body of an ERROR answer is an error envelope. The `bodyText` of a 2xx failure (an invalid-JSON
+    // excerpt, a contract diagnostic) is not one, and a transport code (`ApiError.code`: TIMEOUT, INVALID_JSON)
+    // outranks anything parsed from a body: a request with no usable answer has no HTTP status to name it by.
+    const parsed = e.status >= 400 ? parseActionErrorJson(e.bodyText) : null
+    const code = e.code ?? parsed?.code ?? `HTTP_${e.status}`
     const message = parsed?.message ?? e.message
     const details = parsed?.details ?? null
     return {
@@ -192,7 +194,7 @@ export function useInteractActions(opts: {
     return id
   }
 
-  async function wrap<T>(fn: () => Promise<T>, o?: { mutating?: boolean }): Promise<T> {
+  async function wrap<T>(fn: () => Promise<T>): Promise<T> {
     try {
       // Do NOT clear `actionsDisabled` optimistically before awaiting.
       // If backend keeps rejecting with 403 ACTIONS_DISABLED, the UI should not flicker.
@@ -201,9 +203,10 @@ export function useInteractActions(opts: {
       const mapped = mapToInteractActionError(e)
       if (mapped.actionsDisabled) actionsDisabled.value = true
 
-      // A mutating action that got no answer in time is NOT a refusal: it may have been carried out. Say so, in
-      // the client's own words, instead of the technical timeout line that reads like a failed request.
-      if (o?.mutating && e instanceof ApiError && e.outcomeUnknown) {
+      // A request with a state-changing method that got no answer in time is NOT a refusal: it may have been
+      // carried out (`outcomeUnknown` is never set for a read). Say so, in the client's own words, instead of the
+      // technical timeout line that reads like a failed request.
+      if (e instanceof ApiError && e.outcomeUnknown) {
         mapped.message = actionOutcomeUnknownText(e.timeoutMs)
       }
 
@@ -218,7 +221,7 @@ export function useInteractActions(opts: {
   }
 
   async function wrapAction<T>(fn: () => Promise<T>): Promise<T> {
-    const res = await wrap(fn, { mutating: true })
+    const res = await wrap(fn)
     // Clear only after a successful *action* call (feature flag may have been re-enabled).
     actionsDisabled.value = false
     return res

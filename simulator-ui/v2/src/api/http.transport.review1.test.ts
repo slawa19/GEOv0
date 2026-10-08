@@ -174,6 +174,40 @@ describe('items 5, 6, 7: sources of the id, the success body, the caller reason'
   })
 })
 
+describe('fix-delta item 2: a timeout while the body is read keeps the id of the headers already received', () => {
+  function hangingBodyWithHeader(status: number, id: string | null): Response {
+    return new Response(new ReadableStream({ start() {} }), {
+      status,
+      headers: { 'Content-Type': 'application/json', ...(id ? { 'X-Request-ID': id } : {}) },
+    })
+  }
+
+  it.each([200, 500])('a %s answer whose body never ends: the timeout ApiError carries the header id', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => hangingBodyWithHeader(status, 'req-late')))
+    const call = track(httpJson(CFG, '/x'))
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_BOUND_MS)
+
+    const error = errorOf(call.outcome())
+    expect(isTimeoutError(error)).toBe(true)
+    expect((error as ApiError).requestId).toBe('req-late')
+    expect(extractErrorMessage(error)).toContain('(ref: req-late)')
+  })
+
+  it('anti-vacuum: no header, or a timeout BEFORE any header arrived, invents no id', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => hangingBodyWithHeader(200, null)))
+    const noHeader = track(httpJson(CFG, '/x'))
+    await vi.advanceTimersByTimeAsync(TIMEOUT_BOUND_MS)
+    expect((errorOf(noHeader.outcome()) as ApiError).requestId).toBeNull()
+
+    vi.stubGlobal('fetch', hangingFetch())
+    const noHeaders = track(httpJson(CFG, '/x'))
+    await vi.advanceTimersByTimeAsync(TIMEOUT_BOUND_MS)
+    expect(isTimeoutError(errorOf(noHeaders.outcome()))).toBe(true)
+    expect((errorOf(noHeaders.outcome()) as ApiError).requestId).toBeNull()
+  })
+})
+
 describe('item 3 (transport half): an unsafe-method timeout says the outcome is unknown', () => {
   it('a POST timeout carries outcomeUnknown and says so; a GET timeout does not', async () => {
     vi.stubGlobal('fetch', hangingFetch())
