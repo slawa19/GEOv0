@@ -3,7 +3,7 @@
 
 > Примечание: это **концептуальный документ** (исторический контекст по архитектурным вариантам и выборам стека).
 >
-> **Канонический стек текущей реализации в этом репозитории** зафиксирован в [`docs/ru/03-architecture.md`](docs/ru/03-architecture.md:1) (раздел «Технологический стек») и в манифестах зависимостей: `requirements.txt`, `requirements-dev.txt`, `admin-ui/package.json`.
+> **Канонический стек текущей реализации в этом репозитории** зафиксирован в [`docs/ru/03-architecture.md`](../03-architecture.md) (раздел «Технологический стек») и в манифестах зависимостей: `requirements.txt`, `requirements-dev.txt`, `admin-ui/package.json`.
 >
 > Упоминания ниже про TypeScript/NestJS/React и др. следует читать как **альтернативы, которые сейчас считаются устаревшими** для кода GEOv0.
 
@@ -557,7 +557,7 @@
 
 ⚠️ **УСТАРЕВШЕЕ для текущего репозитория (реализация GEOv0):** ниже в разделе 7 описаны варианты стека, которые рассматривались на этапе концепции (TypeScript/NestJS/React и др.).
 
-Актуальный стек реализации (см. канон: [`docs/ru/03-architecture.md`](docs/ru/03-architecture.md:1)):
+Актуальный стек реализации (см. канон: [`docs/ru/03-architecture.md`](../03-architecture.md)):
 
 - Backend: Python + FastAPI + SQLAlchemy + Alembic + PostgreSQL + Redis
 - Admin UI: Vue 3 + TypeScript + Vite + Element Plus + Pinia

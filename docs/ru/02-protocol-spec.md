@@ -72,7 +72,7 @@ GEO v0.1 — это протокол для:
 
 Используется для:
 - Генерации PID из публичного ключа
-- Вычисления `tx_id` (для hash-варианта, если он используется; см. [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:209))
+- Вычисления `tx_id` (для hash-варианта, если он используется; см. [Приложение E](02-protocol-spec.md#e-tx_id-normative))
 - Верификации целостности данных
 
 ### 2.3. Идентификатор участника (PID)
@@ -103,7 +103,7 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 
 **Подписываемое сообщение:** канонический JSON payload без поля `signatures`.
 
-Алгоритм канонизации JSON (normative) описан в Приложении A (см. [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:2073)).
+Алгоритм канонизации JSON (normative) описан в Приложении A (см. [Приложение A](02-protocol-spec.md#a-канонический-json-normative)).
 
 ---
 
@@ -239,7 +239,7 @@ PID: "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 }
 ```
 
-**Нормативные правила `tx_id`:** см. Приложение E (генерация, idempotency, конфликт payload) в [`docs/ru/02-protocol-spec.md`](docs/ru/02-protocol-spec.md:2073).
+**Нормативные правила `tx_id`:** см. Приложение E (генерация, idempotency, конфликт payload) в [Приложение E](02-protocol-spec.md#e-tx_id-normative).
 
 ### 3.5.1. Примечание о реализации (Hub v0.1 в этом репозитории)
 

@@ -9,7 +9,7 @@
 
 Source of truth:
 - Endpoints и схемы: `api/openapi.yaml` (Payments + Clearing)
-- Реализация payments: `app/api/v1/payments.py`, `app/core/payments/service.py`, `app/core/payments/engine.py`
+- Реализация payments: `app/api/v1/payments.py`, `app/core/payments/service.py` (платёж — одна транзакция; `engine.py` удалён программой 019)
 - Реализация clearing: `app/api/v1/clearing.py`, `app/core/clearing/service.py`
 - Протокол realtime: `docs/ru/simulator/backend/ws-protocol.md`
 - Типы событий симулятора: `docs/ru/simulator/backend/simulator-domain-model.md`

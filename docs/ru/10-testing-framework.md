@@ -12,7 +12,7 @@
 ```
 
 Команда запускает backend tier на PostgreSQL без `slow`, проверку одного
-Alembic head, а затем lint/unit/build для Admin UI и lint/typecheck/unit/build для
+Alembic head, тир инструментов (ниже), а затем lint/unit/build для Admin UI и lint/typecheck/unit/build для
 Simulator UI v2. Успешный локальный запуск не доказывает статус опубликованного CI.
 
 Каждый параллельный процесс получает уникальный `TaskSlug`. Его pytest
@@ -21,6 +21,39 @@ basetemp/cache и failure artifacts находятся в
 `127.0.0.1:5432` (раннер выводит URL сам, если `TEST_DATABASE_URL` не задан, и тир
 создаёт базу); общий task-less output запрещён. Нет PostgreSQL на машине —
 [`docs/ru/backend/postgres-local-portable.md`](backend/postgres-local-portable.md).
+
+## Тир инструментов `tooling-tests/`
+
+Тесты самих инструментов репозитория, которым не нужна база: форма CI-workflow,
+гарды документов и репозитория, описания и рецепты сидов без БД, PowerShell-лаунчеры
+(025, `T2502.2`, 2026-10-03). Backend-тир (`tests/`) без PostgreSQL не стартует,
+поэтому проверка YAML-файла в нём не могла бежать там, где базы нет. Discovery backend-тира
+не затронут: `pytest.ini` по-прежнему собирает только `tests`.
+
+Два раздела, по одному на раннер:
+
+- `tooling-tests/portable/` — обычный Python; блокирующий шаг job'а `static-diagnostics` (ubuntu);
+- `tooling-tests/powershell/` — проверки лаунчеров; блокирующий шаг job'а `required-ui` (windows).
+
+```powershell
+.\scripts\verify_local.ps1 -TaskSlug tooling_example -ToolingOnly                         # оба раздела
+.\scripts\verify_local.ps1 -TaskSlug tooling_example -ToolingOnly -ToolingPartition portable
+```
+
+`-ToolingPartition portable|powershell|all` (по умолчанию `all`) допустим только
+вместе с `-ToolingOnly`; `-ToolingOnly` не сочетается с `-BackendOnly`, `-UiOnly`,
+`-BackendSelector` и `-IncludeExpensive` — сочетание отказывает, а не молчит. Без
+переключателей полный `verify_local.ps1` берёт оба раздела; `-BackendOnly` и `-UiOnly` — ни одного.
+
+Сессия сама сверяет себя ([`tooling-tests/conftest.py`](../../tooling-tests/conftest.py)):
+число выбранных элементов раздела обязано равняться `EXPECTED_CASES` **в обе стороны**
+(новый элемент без записи в константу краснит так же, как потерянный); отказывают
+запуск без `--tooling-partition`, `--collect-only` и подобные, любой deselect
+(`-m`, `-k`, `--deselect`, `--lf`) и модуль вне `portable/` и `powershell/`; прогон
+краснеет при skip и xfail; раздел `powershell` требует на машине обе PowerShell
+(`pwsh` и Windows PowerShell 5.1). Переменные базы из окружения сессии удаляются.
+Отладочный прогон одного файла возможен с `--noconftest` и ничего из перечисленного не проверяет.
+Границы механизма — в docstring `conftest.py` («WHAT IT DOES NOT SEE»).
 
 ## Узкие backend-проверки
 
