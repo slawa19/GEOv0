@@ -114,6 +114,12 @@ make the session green again:
   on the live emitter). Measured with `python -m pytest --collect-only -q -m "not slow"`; the guard refused first
   ("selected 3253 case(s), expected exactly 3252 ... MORE than recorded", exit 4).
 * 2026-10-09, 034 slice S3 merged after 035 A6 and 034 S4 (`origin/main` `bfae3cda`, 3264): 3264 -> 3265 (+1, the S3 changes above; the numbers in the S3 line are those of the branch on `1faf261b`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 034 slice S4b (a non-finite initial limit of `add_participant`), on `origin/main` `bfae3cda`: 3264 -> 3274
+  (+10; 3289 with the 15 `slow` cases). One new module,
+  `tests/integration/test_p034_s4b_a_bad_initial_line_does_not_split_the_participant_postgres.py`: three control cases,
+  six cases of the reproducer, one of the sibling `create_trustline`. Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3274/3289 tests collected`); the guard refused it first (exit 4).
+* 2026-10-09, 034 slice S4b merged after 034 S3 (`origin/main` `3ce2c6e6`, 3265): 3265 -> 3275 (+10, the S4b module above; the numbers in the S4b line are those of the branch on `bfae3cda`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 035 slice A2a, on `origin/main` `3ce2c6e6`: 3265 -> 3275 (+10). New: 11 cases in
   `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` and 5 in
   `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the seed's two modes). Fewer: tests moved from the retired
@@ -125,6 +131,7 @@ make the session green again:
   step read from the equivalent). Both A2a numbers are restated from `3ce2c6e6`; the total, 3281, is measured with
   `python -m pytest --collect-only -q -m "not slow"` on the branch merged with it (on `bfae3cda` the same sixteen read
   3264 -> 3280).
+* 2026-10-09, 035 slice A2a merged after 034 S4b (`origin/main` at the merge of PR #186, 3275): 3275 -> 3291 (+16, the A2a cases above; the numbers in the A2a lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -167,7 +174,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3281
+EXPECTED_SELECTED_ITEMS = 3291
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
