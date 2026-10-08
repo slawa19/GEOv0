@@ -228,6 +228,65 @@ describe('what the unknown-status rule must NOT override (review of 7360403e, bo
   })
 })
 
+describe('the record of an accepted scene is not rewritten by a REJECTED read of the same key (review of dd3f65f6)', () => {
+  it('a late read of the same run and equivalent, finishing under another selected scenario, does not poison the record', async () => {
+    const app = boot()
+    await settle()
+    expect(ids(app), 'precondition: R is shown under sc1').toEqual(['R_NODE'])
+
+    // L1: the equivalent switch starts a slow read of R / EUR (requested under sc1)
+    let releaseL1: (s: SimulatorGraphSnapshot) => void = () => undefined
+    const l1 = new Promise<SimulatorGraphSnapshot>((resolve) => {
+      releaseL1 = resolve
+    })
+    let readsOfREur = 0
+    vi.mocked(getSnapshot).mockImplementation(((_cfg: unknown, runId: string, eq: string) => {
+      if (runId === 'R' && eq === 'EUR') {
+        readsOfREur += 1
+        if (readsOfREur === 1) return l1
+      }
+      return Promise.resolve(snap(`${runId}_NODE_${eq}`, eq))
+    }) as never)
+    app.eq.value = 'EUR'
+    await settle()
+    expect(readsOfREur, 'the deferred request L1 did not start').toBe(1)
+
+    // L2: a re-attach of R whose status read fails; its newer read of R / EUR is accepted (under sc1)
+    vi.mocked(getRun).mockRejectedValue(STATUS_TIMEOUT())
+    await app.admin.attachRun('R')
+    await settle()
+    expect(readsOfREur, 'the newer request L2 did not start').toBe(2)
+    expect(ids(app), 'precondition: L2 is the accepted scene').toEqual(['R_NODE_EUR'])
+    expect(app.real.runStatus, 'precondition: the status is unknown').toBeNull()
+
+    // the operator chooses sc2; its preview is slow (in flight)
+    let previewsOfSc2 = 0
+    vi.mocked(getScenarioPreview).mockImplementation((async (_cfg: unknown, scenarioId: string) => {
+      if (scenarioId === 'sc2') {
+        previewsOfSc2 += 1
+        if (previewsOfSc2 === 1) return new Promise<SimulatorGraphSnapshot>(() => undefined)
+      }
+      return snap(scenarioId === 'sc1' ? 'PREVIEW_NODE' : `PREVIEW_${scenarioId}`)
+    }) as never)
+    app.realActions.setSelectedScenarioId('sc2')
+    await settle()
+    expect(previewsOfSc2, 'the preview of sc2 did not start').toBe(1)
+
+    // L1 finishes NOW, with sc2 selected; the scene owner rejects it (L2 was newer)
+    releaseL1(snap('R_NODE_EUR', 'EUR'))
+    await settle()
+    expect(ids(app), 'precondition: L1 was rejected, L2 is still the scene').toEqual(['R_NODE_EUR'])
+
+    // the next scene change must go to the preview of sc2: the accepted scene was loaded under sc1
+    app.eq.value = 'UAH'
+    await settle()
+
+    expect(ids(app), 'the rejected L1 rewrote the scenario of the accepted scene and R was read instead of the preview').toEqual([
+      'PREVIEW_sc2',
+    ])
+  })
+})
+
 describe('unknown run status with NO scene of that run on screen (CONTRACT: the preview stays, and the error must be visible)', () => {
   it('Boot with a saved run id whose status times out: nothing is on screen, the preview is shown and the error too', async () => {
     window.localStorage.setItem('geo.sim.v2.runId', 'R')

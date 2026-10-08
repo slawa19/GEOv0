@@ -1504,8 +1504,10 @@ export function useSimulatorApp(opts?: {
    * a late load that the owner rejected is never "the scene on screen". A handful of entries (run x equivalent).
    */
   const runSceneLoads = new Map<string, { runId: string; scenarioId: string }>()
-  function recordRunSceneLoad(sourcePath: string, runId: string) {
-    runSceneLoads.set(sourcePath, { runId, scenarioId: real.selectedScenarioId })
+  function recordRunSceneLoad(sourcePath: string, runId: string, requestedUnderScenarioId: string) {
+    // The scenario the read was REQUESTED under, taken before the await: a read that finishes later (and that the
+    // owner rejects) must not rewrite the record of the scene that was accepted for the same key.
+    runSceneLoads.set(sourcePath, { runId, scenarioId: requestedUnderScenarioId })
   }
 
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
@@ -1541,7 +1543,7 @@ export function useSimulatorApp(opts?: {
         onStaleRun: () => resetStaleRunThroughOwner({ clearError: true }),
       })
       if (fromRun) {
-        recordRunSceneLoad(fromRun.sourcePath, runId)
+        recordRunSceneLoad(fromRun.sourcePath, runId, scenarioId)
         return fromRun
       }
     }
@@ -1587,13 +1589,14 @@ export function useSimulatorApp(opts?: {
     isEqAllowed: (v) => EQUIVALENT_CODE_RE.test(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
     loadRecoverySnapshot: async ({ runId, equivalent }) => {
+      const requestedUnderScenarioId = real.selectedScenarioId
       const loaded = await loadStrictRunRecoverySnapshot({
         apiBase: real.apiBase,
         accessToken: real.accessToken,
         runId,
         equivalent,
       })
-      recordRunSceneLoad(loaded.sourcePath, runId)
+      recordRunSceneLoad(loaded.sourcePath, runId, requestedUnderScenarioId)
       return loaded
     },
     onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
