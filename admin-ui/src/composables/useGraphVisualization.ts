@@ -54,6 +54,12 @@ export type GraphElementOption = {
 export type GraphRebuildOptions = {
   fit?: boolean
   preserveViewport?: boolean
+  /**
+   * A filter changed what is drawn, not the graph (035 B3, F-035-12): nodes the Core already placed keep their
+   * place - also nodes that left and come back - and the layout runs only when a node without a place appears.
+   * Without it every rebuild lays the whole graph out again.
+   */
+  keepPositions?: boolean
 }
 
 export function graphSelectionAnnouncement(selected: SelectedInfo | null, drawerOpen: boolean): string | null {
@@ -511,6 +517,10 @@ export function useGraphVisualization(options: {
     runLayoutWithFit(layoutFit)
   }
 
+  // Where the Core last put each node, by pid, for `keepPositions` rebuilds (a node that was filtered out keeps its
+  // place until a rebuild without `keepPositions` lays the graph out anew).
+  const placedNodes = new Map<string, { x: number; y: number }>()
+
   function rebuildGraph(opts?: GraphRebuildOptions) {
     const cy = getCy()
     if (!cy) return
@@ -518,10 +528,28 @@ export function useGraphVisualization(options: {
     const fit = opts?.fit ?? false
     const layoutFit = !opts?.preserveViewport
 
+    const keepPositions = Boolean(opts?.keepPositions)
+    if (keepPositions) {
+      cy.nodes().forEach((n) => {
+        placedNodes.set(n.id(), { ...n.position() })
+      })
+    } else {
+      placedNodes.clear()
+    }
+
     const { nodes, edges } = buildElements()
     cy.elements().remove()
     cy.add(nodes)
     cy.add(edges)
+
+    let hasUnplacedNode = false
+    if (keepPositions) {
+      cy.nodes().forEach((n) => {
+        const place = placedNodes.get(n.id())
+        if (place) n.position(place)
+        else hasUnplacedNode = true
+      })
+    }
 
     applyStyle()
     updateZoomStyles()
@@ -530,6 +558,7 @@ export function useGraphVisualization(options: {
     applySelectedHighlight(
       options.selected.value && options.selected.value.kind === 'node' ? options.selected.value.pid : '',
     )
+    if (keepPositions && !hasUnplacedNode && !fit) return
     runLayoutAndMaybeFit({ fitOnStop: fit, layoutFit })
   }
 
@@ -968,6 +997,7 @@ export function useGraphVisualization(options: {
     stopSelectedPulse()
     stopOwnedTimeouts()
     layoutRunId += 1
+    placedNodes.clear()
     const current = getCy()
     if (current) {
       current.destroy()
