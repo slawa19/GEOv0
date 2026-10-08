@@ -78,8 +78,9 @@ async def test_a_cycle_of_four_is_verified_in_two_statements(db_session):
 @pytest.mark.asyncio
 async def test_a_changed_position_of_a_cycle_participant_is_a_violation(db_session):
     eq, ring, _outsider, debts, pairs, before = await _cycle(db_session)
+    first, raised = debts[0], _AMOUNTS[0] + Decimal("1")  # p0 owes p1 one more: both positions move
     async with debt_fixture_setup(db_session, label="p035-a4-skew"):
-        debts[0].amount = _AMOUNTS[0] + Decimal("1")  # p0 owes p1 one more: both positions move
+        first.amount = raised
     await db_session.flush()
 
     with pytest.raises(IntegrityViolationException) as refused:
