@@ -43,6 +43,22 @@ def simulated_public_key(pid: str) -> str:
     return hashlib.sha256(pid.encode("utf-8")).hexdigest()
 
 
+def scenario_participant_status(raw: object) -> str:
+    """The participant status a scenario's `status` means. The one owner of the rule (034 S4, F-034-14).
+
+    Read by both paths that create a participant from a scenario - the seeder (`participants`) and the inject
+    executor (`add_participant`); until 034 S4 the executor had its own copy without the two aliases, so `frozen`
+    and `banned` were stored `active` there. `frozen` -> `suspended` and `banned` -> `deleted` are the scenario's
+    words for the stored statuses; anything else that is not a stored status is `active`."""
+
+    status = str(raw or "active").strip().lower()
+    if status == "frozen":
+        return "suspended"
+    if status == "banned":
+        return "deleted"
+    return status if status in {"active", "suspended", "left", "deleted"} else "active"
+
+
 class SimulatorPidTakenError(ConflictException):
     """A scenario names a pid that exists and was not created by the simulator."""
 
@@ -192,13 +208,7 @@ class RealScenarioSeeder:
                     continue
                 name = str(p.get("name") or pid)
                 p_type = str(p.get("type") or "person").strip() or "person"
-                status = str(p.get("status") or "active").strip().lower()
-                if status == "frozen":
-                    status = "suspended"
-                elif status == "banned":
-                    status = "deleted"
-                elif status not in {"active", "suspended", "left", "deleted"}:
-                    status = "active"
+                status = scenario_participant_status(p.get("status"))
                 # Inserted ACTIVE by the participant service (030 S3b, F-030-19); a scenario status other than
                 # active is set AFTER the lines, because the trust-line service refuses a line to a suspended end.
                 await ParticipantService(session).insert_participant(
