@@ -18,13 +18,13 @@ can be forgotten:
   runs of whitespace are collapsed (`not  slow` is the same expression); a differently spelled equivalent such as
   `(not slow)` is NOT recognised and silently turns the guard off for that run (see "What this does not see");
 * the positional arguments, if any, name the whole `tests` directory and nothing narrower (no argument at all means
-  `testpaths = tests`; `-BackendSelector tests` is the whole tier and IS counted). Any narrower path, a `path::node`
-  or `-- <paths>` is a selector: a deliberate narrowing that is NOT counted.
+  `testpaths = tests`; `-BackendSelector tests` is the whole tier and IS counted). Any narrower path or a `path::node`,
+  also after `--`, is a selector: a deliberate narrowing that is NOT counted (`-- tests` is still the whole tier).
 
 Everything else that reduces or reorders the selection is NOT an exemption, so the rule is not vacuous:
 `--deselect`, `--ignore`, `--ignore-glob`, `-k`, `--lf`, `--sw`. Run them with a path selector, or accept the refusal.
 
-NOT COUNTED BY THIS RULE: a run with a selector (`-BackendSelector`), and a run with no marker expression
+NOT COUNTED BY THIS RULE: a run with a selector narrower than `tests` (`-BackendSelector <path>`), and a run with no marker expression
 (`-IncludeExpensive`, the wider profile: nothing is excluded, the 15 `slow` cases come back). The wide profile has no
 constant of its own because the rule asks for one number; it is the canonical number plus the `slow` cases.
 
@@ -90,7 +90,8 @@ A COLLECTION ERROR IS NOT THIS GUARD'S TO JUDGE. pytest 7.4 calls `pytest_collec
 import, and aborts only afterwards (exit 2). A broken module has no cases, so the count would read "fewer" and blame a
 loss for what is an import error (reproduced 2026-10-08 on `7edf4cb8`: exit 4 instead of 2). The hook therefore returns
 without judging when the session recorded a collection error or a stop request (`session.testsfailed`, `shouldstop`,
-`shouldfail`); pytest's own exit 2 and error text stand. Reproducer and counter-check:
+`shouldfail`); pytest's own failure handling and error text stand (exit 2 in the ordinary invocation; exit 1 under
+`--continue-on-collection-errors`). Reproducer and counter-check:
 `tooling-tests/portable/test_p035_c_backend_tier_counts_what_it_collects.py`.
 
 WHAT THIS DOES NOT SEE. A marker expression with the same meaning but another spelling (`(not slow)`, `not (slow)`): it is
@@ -98,7 +99,7 @@ not recognised, the run is not counted, and nothing says so. WHICH tests are pre
 number was RIGHT when recorded: it is a measurement of the tier at the commit that changed it. A reconfiguration of the
 runner itself (`-o addopts=...`, `-p no:...`, `PYTEST_ADDOPTS` that ends pytest before the end of collection): the
 runner is not defended against reconfiguring itself (the same limit as `tooling-tests/conftest.py`). A collection that
-ERRORS (import failure) is left to pytest, which exits 2 with the error text.
+ERRORS (import failure) is left to pytest and its own exit code and error text.
 """
 
 from __future__ import annotations
