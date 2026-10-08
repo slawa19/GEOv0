@@ -73,6 +73,10 @@ make the session green again:
   `tests/integration/test_p034_s1b_payment_edge_patch_names_the_line_postgres.py` (4). Measured with
   `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `origin/main` `4a1768d5`; the guard refused
   the collection first ("selected 3233 case(s), expected exactly 3219 ... MORE than recorded", exit 4).
+* 2026-10-08, 034 slice S1c: 3233 -> 3247 (+14; 3262 with the 15 `slow` cases). One new module,
+  `tests/unit/test_p034_s1c_artifact_retention.py`: 10 test functions, one of them parametrized over five run states.
+  Measured with `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `claude/p034-s1b`; the guard
+  refused the collection first ("selected 3247 case(s), expected exactly 3233 ... MORE than recorded", exit 4).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -115,7 +119,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3233
+EXPECTED_SELECTED_ITEMS = 3247
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
