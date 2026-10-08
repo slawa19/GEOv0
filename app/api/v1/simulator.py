@@ -36,7 +36,7 @@ from app.core.clearing.runner import (
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
 from app.core.payments.service import PaymentService, public_refusal_details, public_refusal_message
-from app.core.simulator.edge_patch_builder import EdgePatchBuilder
+from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import (
     RealScenarioSeeder,
@@ -362,8 +362,13 @@ async def _compute_viz_patches_best_effort(
                 participant_ids=participant_ids,
             )
         except Exception:
-            # Quantiles are optional; continue with default keys.
-            pass
+            # Quantiles are optional; continue with default keys - and say so (034 `F-034-9`).
+            logger.warning(
+                "simulator.actions.viz_quantiles_failed run_id=%s eq=%s",
+                str(getattr(run, "run_id", "")),
+                eq_upper,
+                exc_info=True,
+            )
 
         # 3) Load Participant rows for touched pids.
         pids = sorted({pid for ab in edges_pairs for pid in ab if str(pid).strip()})
@@ -395,6 +400,14 @@ async def _compute_viz_patches_best_effort(
 
         return edge_patch, node_patch
     except Exception:
+        # Best-effort: the event goes out without patches. Logged, so that a missing patch can be found
+        # (034 `F-034-9`; until then this handler was silent).
+        logger.warning(
+            "simulator.actions.viz_patch_failed run_id=%s eq=%s",
+            str(getattr(run, "run_id", "")),
+            eq_upper,
+            exc_info=True,
+        )
         return None, None
 
 
@@ -1013,7 +1026,18 @@ def _mutate_runtime_trustline_topology_best_effort(
             with lock_ctx:
                 _apply()
     except Exception:
-        return
+        # Never raises - the action itself is committed. But the run's in-memory topology (`_scenario_raw`,
+        # `_edges_by_equivalent`) may now disagree with the database until the next snapshot, and until 034
+        # `F-034-9` nothing said so.
+        logger.warning(
+            "simulator.actions.runtime_topology_sync_failed run_id=%s op=%s eq=%s from_pid=%s to_pid=%s",
+            str(run_id),
+            str(op),
+            str(equivalent),
+            str(from_pid),
+            str(to_pid),
+            exc_info=True,
+        )
 
 
 class TxOnceRequestBody(BaseModel):
@@ -1736,7 +1760,8 @@ async def action_payment_real(
             session=db,
             run=run,
             equivalent_code=eq.code,
-            edges_pairs=edges_pairs,
+            # The LINES of the route's hops (payee -> payer and its reverse), not the hops themselves: 034 S1b.
+            edges_pairs=line_pairs_of_payment_hops(edges_pairs),
             closed=closed,
         )
 

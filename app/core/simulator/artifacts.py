@@ -301,13 +301,44 @@ class ArtifactsManager:
                 buf.append(nxt)
 
             text = "".join(buf)
+            lines = len(buf)
             buf.clear()
             try:
                 await asyncio.to_thread(_append_text, path, text)
             except Exception:
-                # Best-effort: drop on IO errors.
+                # Best-effort: the batch is dropped on an IO error - and counted (034 `F-034-8`).
                 self._logger.exception("simulator.artifacts.events_writer_append_failed run_id=%s", run_id)
+                self._count_dropped_events(run_id, reason="write_failed", count=lines)
                 continue
+
+    def _count_dropped_events(self, run_id: str, *, reason: str, count: int = 1) -> None:
+        """034 `F-034-8`: an event the writer could not record is COUNTED - on the run, on the `/metrics` counter
+        `geo_simulator_artifact_events_dropped_total{reason}` - and the loss is logged: at the run's first drop
+        and then once per thousand, with the run's total. Never raises; a drop stays a drop.
+
+        THREE REASONS ARE COUNTED, and nothing else: `queue_full` (the writer's queue had no room), `write_failed`
+        (a batch could not be appended; every line of it) and `encode_failed` (the event is not JSON-serialisable).
+        NOT COUNTED - so a zero here does not say "nothing is missing from `events.ndjson`": an event that arrives
+        when the run has no writer (before it starts, after the run is stopped - `enqueue_event_artifact` returns
+        on `q is None`), and events still queued when `stop_events_writer` cancels a writer that did not finish in
+        its 2 s."""
+
+        total = count
+        try:
+            with self._lock:
+                run = self._runs.get(run_id)
+                if run is not None:
+                    run._artifact_events_dropped += count
+                    total = int(run._artifact_events_dropped)
+            from app.utils import metrics
+
+            metrics.SIMULATOR_ARTIFACT_EVENTS_DROPPED_TOTAL.labels(reason=reason).inc(count)
+        except Exception:
+            self._logger.debug("simulator.artifacts.drop_count_failed run_id=%s", run_id, exc_info=True)
+        if total == count or total // 1000 != (total - count) // 1000:
+            self._logger.warning(
+                "simulator.artifacts.events_dropped run_id=%s reason=%s dropped_total=%d", run_id, reason, total
+            )
 
     def enqueue_event_artifact(self, run_id: str, payload: dict[str, Any]) -> None:
         run = self._get_run(run_id)
@@ -318,12 +349,13 @@ class ArtifactsManager:
             line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         except Exception:
             self._logger.exception("simulator.artifacts.events_json_encode_failed run_id=%s", run_id)
+            self._count_dropped_events(run_id, reason="encode_failed")
             return
         try:
             q.put_nowait(line)
         except asyncio.QueueFull:
-            # Best-effort drop.
-            return
+            # Best-effort drop: the event is not recorded in `events.ndjson`, and that is counted.
+            self._count_dropped_events(run_id, reason="queue_full")
 
     async def finalize_run_artifacts(self, *, run_id: str, status_payload: dict[str, Any]) -> None:
         run = self._get_run(run_id)

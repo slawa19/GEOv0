@@ -67,6 +67,12 @@ make the session green again:
   `tests/p035_support.py`) and 034 S1a (PR #167: three `test_p034_s1_*` modules, `test_p034_s1_launch_epoch_and_post_commit_publication.py`)
   plus additions to existing modules. The guard itself refused the first merged collection ("MORE than recorded", exit 4)
   - the case it is for. Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-08, 034 slice S1b: 3219 -> 3233 (+14; 3248 with the 15 `slow` cases). Four new modules of the slice:
+  `tests/unit/test_p034_s1b_artifact_event_drops.py` (4), `tests/unit/test_p034_s1b_interact_silent_failures_are_logged.py` (2),
+  `tests/unit/test_p034_s1b_heartbeat_failure_is_not_silent.py` (4) and
+  `tests/integration/test_p034_s1b_payment_edge_patch_names_the_line_postgres.py` (4). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `origin/main` `4a1768d5`; the guard refused
+  the collection first ("selected 3233 case(s), expected exactly 3219 ... MORE than recorded", exit 4).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -109,7 +115,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3219
+EXPECTED_SELECTED_ITEMS = 3233
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
