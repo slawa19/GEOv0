@@ -184,4 +184,3 @@ async def test_a_batch_the_writer_could_not_append_is_counted(tmp_path) -> None:
     await manager._events_writer_loop(run_id=run.run_id, path=artifacts / "events.ndjson", queue=queue)
 
     assert (_dropped("write_failed") - before, run._artifact_events_dropped) == (2, 2)
-
