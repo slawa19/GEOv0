@@ -50,7 +50,9 @@ BACKGROUND_JOB_EVENTS_TOTAL = Counter(
 
 
 # 034 `F-034-8`: simulator events the run's artifact writer (`events.ndjson`) could not record. A drop used to
-# leave no trace, so "nothing was lost" and "nobody counted" read the same. `reason`: `queue_full`, `write_failed`.
+# leave no trace, so "nothing was lost" and "nobody counted" read the same. `reason`: `queue_full`, `write_failed`,
+# `encode_failed` - and only these: events arriving while a run has no writer, and events left in the queue of a
+# writer cancelled at stop, are not counted (`ArtifactsManager._count_dropped_events`).
 SIMULATOR_ARTIFACT_EVENTS_DROPPED_TOTAL = Counter(
     "geo_simulator_artifact_events_dropped_total",
     "Simulator events not recorded in a run's events.ndjson artifact",

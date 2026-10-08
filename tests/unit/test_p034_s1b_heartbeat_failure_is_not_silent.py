@@ -19,6 +19,7 @@ import logging
 import pytest
 
 import app.core.simulator.runtime_impl as runtime_impl
+import app.core.simulator.storage as simulator_storage
 from app.core.simulator.runtime import runtime
 from tests.unit.test_p024_heartbeat_follows_every_entry_into_running import (  # noqa: F401 - `clock` is a fixture
     _heartbeats,
@@ -59,14 +60,60 @@ async def test_a_failed_heartbeat_iteration_does_not_leave_the_run_running_witho
         f"last_error {run.last_error!r}, errors logged with the exception: {logged}. Expected: still ticked, or "
         f"not `running` with `last_error` set and the failure logged"
     )
+    # What goes OUT names the type of the exception and nothing of its text (`last_error` is published, served and
+    # stored; an exception's text carries paths and SQL); the text is in the log, with the traceback.
+    assert run.last_error == {"code": "HEARTBEAT_FAILED", "message": "The heartbeat failed: RuntimeError",
+                              "at": run.last_error["at"]}, run.last_error
+    assert any("the status could not be published" in str(r.exc_info[1]) for r in caplog.records if r.exc_info)
+
+
+def _record_the_stored_states(monkeypatch) -> list[tuple[str, str]]:
+    """(run_id, state) of every row the runtime hands to `simulator_storage.upsert_run`, in order. The storage
+    writer is the boundary here (the stand has no database): what it is given is what the row would say."""
+
+    stored: list[tuple[str, str]] = []
+
+    async def recording(run) -> None:
+        stored.append((run.run_id, str(run.state)))
+
+    monkeypatch.setattr(simulator_storage, "upsert_run", recording)
+    return stored
 
 
 @pytest.mark.asyncio
-async def test_the_run_is_marked_failed_even_when_the_failure_path_itself_fails(clock, monkeypatch) -> None:  # noqa: F811
-    """`fail_run` - the path a failing tick uses, and the one the heartbeat takes - raises too (it publishes a
-    status of its own). The run still does not stay `running`: the state is set directly, with the reason."""
+async def test_a_run_failed_by_its_heartbeat_is_stored_as_failed_when_no_status_can_be_published(clock, monkeypatch) -> None:  # noqa: F811
+    """The whole publication is broken - `SseBroadcast.publish_event`, not only the loop's own call - so `fail_run`,
+    which the heartbeat takes, fails as well: it moves the state and then raises on its own status publication,
+    before it stores anything. The run must still be `error` in memory AND in what is stored - a row that keeps
+    saying `running` for a run nobody ticks is the defect this slice removes, one layer down."""
 
     run = await _started(clock)
+    stored = _record_the_stored_states(monkeypatch)
+    errors_before = run.errors_total
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("p034: nothing can be published")
+
+    with monkeypatch.context() as outage:
+        outage.setattr(runtime._sse, "publish_event", broken)
+        await clock.progress(run)
+
+    assert (run.state, _heartbeats(run.run_id)) == ("error", 0), (run.state, run.last_error)
+    assert run.last_error["code"] == "HEARTBEAT_FAILED" and "nothing can be published" not in run.last_error["message"], run.last_error
+    assert run.errors_total == errors_before + 1, (errors_before, run.errors_total)  # counted once, not per layer
+    assert stored and stored[-1] == (run.run_id, "error"), (
+        f"the heartbeat failed the run while no status could be published; rows handed to the storage for it, in "
+        f"order: {stored}. Expected the last one to say `error`"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_run_is_marked_failed_even_when_the_failure_path_cannot_start(clock, monkeypatch) -> None:  # noqa: F811
+    """`fail_run` raises before it has moved anything. The run still does not stay `running`: the state is set
+    directly, with the reason, and stored."""
+
+    run = await _started(clock)
+    stored = _record_the_stored_states(monkeypatch)
     _fail_the_status_publication(monkeypatch)
 
     async def _fail_run_fails(_run_id: str, *, code: str, message: str) -> None:
@@ -77,8 +124,9 @@ async def test_the_run_is_marked_failed_even_when_the_failure_path_itself_fails(
     await clock.progress(run)
 
     assert (run.state, _heartbeats(run.run_id)) == ("error", 0), (run.state, run.last_error)
-    assert run.last_error and run.last_error["code"] == "HEARTBEAT_FAILED" and run.errors_total == errors_before + 1, run.last_error
-    assert "the status could not be published" in run.last_error["message"], run.last_error
+    assert run.last_error["code"] == "HEARTBEAT_FAILED" and run.errors_total == errors_before + 1, run.last_error
+    assert run.last_error["message"] == "The heartbeat failed: RuntimeError", run.last_error
+    assert stored[-1] == (run.run_id, "error"), stored
 
 
 @pytest.mark.asyncio

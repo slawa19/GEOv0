@@ -561,12 +561,18 @@ sequenceDiagram
 - Что говорит:
   - это почти всегда про данные в `error.details` (там обычно есть `exc`, `geo_code`, `status_code`).
 
-**H) `run_status.state="error"` + `last_error.code=REAL_MODE_TOO_MANY_TIMEOUTS|REAL_MODE_TOO_MANY_ERRORS|REAL_MODE_TICK_FAILED_REPEATED`**
+**H) `run_status.state="error"` + `last_error.code=REAL_MODE_TOO_MANY_TIMEOUTS|REAL_MODE_TOO_MANY_ERRORS|REAL_MODE_TICK_FAILED_REPEATED|HEARTBEAT_FAILED`**
 - Что это: сработали guardrails и run принудительно остановлен как аварийный.
 - Что говорит:
   - `REAL_MODE_TOO_MANY_TIMEOUTS`: деградация стека/локи/ресурсная нехватка.
   - `REAL_MODE_TOO_MANY_ERRORS`: систематическая ошибка исполнения (например, постоянные `INTERNAL_ERROR`).
   - `REAL_MODE_TICK_FAILED_REPEATED`: тик падает исключением несколько раз подряд (часто баг или транзакционное “poisoning”).
+  - `HEARTBEAT_FAILED` (программа 034, F-034-10, 2026-10-08): исключение в самой итерации heartbeat — вне
+    обработки ошибок тика (публикация статуса, реестр ранов, сбой внутри обработчика упавшего тика). Действует
+    в обоих режимах (`real` и `fixtures`). Повтора нет: ран сразу `error`, тиков больше не будет; вернуть его в
+    работу — `resume`. `last_error.message` несёт **только тип исключения** (`The heartbeat failed: <Type>`);
+    текст исключения наружу не уходит, он в логе: строка `simulator.heartbeat.failed run_id=<id>` с трейсбеком.
+    До 034 такое исключение молча завершало задачу heartbeat, и ран оставался `running` без тиков.
 
 **I) `last_error.code=REAL_MODE_TICK_FAILED`, но run ещё `running`**
 - Что это: один тик упал исключением, но runner пытается продолжить (до порога “подряд”).

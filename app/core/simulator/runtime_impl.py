@@ -104,9 +104,8 @@ class _SimulatorRuntimeBase:
         self._run_persist_every_ms = settings.SIMULATOR_RUN_PERSIST_EVERY_MS
         self._run_persist_dirty_every_ms = settings.SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS
 
-        # Local artifact retention (0 disables either rule; 034 `F-034-8`).
+        # Local artifact retention (0 disables).
         self._artifacts_ttl_hours = settings.SIMULATOR_ARTIFACTS_TTL_HOURS
-        self._artifacts_max_runs = settings.SIMULATOR_ARTIFACTS_MAX_RUNS
 
         self._artifacts = ArtifactsManager(
             lock=self._lock,
@@ -146,9 +145,7 @@ class _SimulatorRuntimeBase:
 
         # Best-effort cleanup of old local artifacts (keeps dev dirs from growing forever).
         try:
-            self._artifacts.cleanup_old_runs(
-                ttl_hours=self._artifacts_ttl_hours, max_runs=self._artifacts_max_runs
-            )
+            self._artifacts.cleanup_old_runs(ttl_hours=self._artifacts_ttl_hours)
         except Exception:
             logger.exception("simulator.artifacts.cleanup_failed")
 
@@ -904,15 +901,21 @@ class _SimulatorRuntimeBase:
             type(error).__name__,
             exc_info=(type(error), error, error.__traceback__),
         )
-        message = f"The heartbeat failed: {type(error).__name__}: {error}"
+        # ONLY THE TYPE of the exception goes out: `last_error` is published in `run_status`, served by the API and
+        # stored in `simulator_runs`, and the text of an `OSError` or a database error carries local paths and SQL
+        # (AGENTS.md §12). The full text is in the log line above, found by the run id.
+        message = f"The heartbeat failed: {type(error).__name__}"
         try:
             await self._real_runner.fail_run(run_id, code="HEARTBEAT_FAILED", message=message)
+            return
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.error("simulator.heartbeat.fail_run_failed run_id=%s", str(run_id), exc_info=True)
-        # `fail_run` moves the state before anything in it can fail; this is for the case where it could not even
-        # start (the registry no longer has the run - then there is nothing left to mark).
+        # `fail_run` raised. It moves the state first and then publishes and stores; when it is the publication
+        # that failed (the usual way to get here: it is what failed the heartbeat too), the run is `error` in
+        # memory and NOTHING of that was stored - the `simulator_runs` row would keep saying `running`. So the
+        # state is made sure of here (for the case where `fail_run` could not even start) and the row is written.
         with self._lock:
             run = self._runs.get(run_id)
             if run is not None and run.state == "running":
@@ -921,6 +924,14 @@ class _SimulatorRuntimeBase:
                 run.current_phase = None
                 run.errors_total += 1
                 run.last_error = {"code": "HEARTBEAT_FAILED", "message": message, "at": _utc_now().isoformat()}
+        if run is None:
+            return  # the registry no longer has the run: there is nothing left to mark or to store
+        try:
+            await simulator_storage.upsert_run(run)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("simulator.heartbeat.fail_run_upsert_failed run_id=%s", str(run_id), exc_info=True)
 
     async def _heartbeat_loop(self, run_id: str) -> None:
         try:
