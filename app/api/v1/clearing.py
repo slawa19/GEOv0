@@ -6,15 +6,19 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from concurrent.futures.process import BrokenProcessPool
+
 from app.api import deps
+from app.core.clearing.flow_planner import PlanIntegrityError
 from app.core.clearing.runner import (
+    ClearingDiagnosticsUnavailable,
     ClearingPassCancelled,
     ClearingPassError,
     ClearingPassResult,
     atoms_text,
+    planned_cycles_for_diagnostics,
     run_awaited_clearing,
 )
-from app.core.clearing.service import ClearingService
 from app.schemas.clearing import ClearingAutoResponse, ClearingCyclesResponse
 from app.schemas.common import ErrorEnvelope
 from app.utils.error_codes import ERROR_MESSAGES, ErrorCode
@@ -25,24 +29,55 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#: Programme 023, decision 8 / R2: execution has no depth. The parameter stays on the diagnostic `GET /cycles`.
+#: Programme 023, decision 8 / R2: execution has no depth. 035 A1 (owner decision П1-(а), 2026-10-08): neither has the
+#: diagnostic `GET /cycles`, which answers with the cycles of the same flow plan.
 _EXECUTION_DEPTH_REMOVED = (
-    "max_depth is not accepted by POST /clearing/auto: clearing execution has no depth limit since programme 023 "
-    "(the flow plan clears cycles of any length); the parameter was removed, and remains on the diagnostic "
-    "GET /clearing/cycles"
+    "max_depth is not accepted: clearing has no depth limit since programme 023 (the flow plan clears cycles of any "
+    "length); the parameter was removed from POST /clearing/auto and from the diagnostic GET /clearing/cycles, "
+    "which answers with the cycles of that plan"
 )
 
 
-@router.get("/cycles", response_model=ClearingCyclesResponse)
+@router.get(
+    "/cycles",
+    response_model=ClearingCyclesResponse,
+    responses={
+        # Declared here as well as in api/openapi.yaml so the generated schema states the same contract.
+        500: {"model": ErrorEnvelope, "description": "The planner process could not answer (E010)"},
+        503: {
+            "model": ErrorEnvelope,
+            "description": "Diagnostics cannot answer now (E007): another diagnostic plan is being computed "
+            "(`details.reason = diagnostics_busy`) or this one ran past its time bound "
+            "(`details.reason = diagnostics_timeout`); retry after `details.retry_after_seconds`",
+        },
+    },
+)
 async def list_cycles(
+    request: Request,
     equivalent: str = Query(..., description="Equivalent code"),
-    max_depth: int = Query(6, ge=3, le=10),
     db: AsyncSession = Depends(deps.get_db),
     _current_participant=Depends(deps.get_current_participant),
 ):
+    """The cycles of the plan a clearing pass would compute now, on a fresh snapshot (035 A1, П1-(а)).
+
+    The plan is computed in the diagnostic planner process, never on the event loop and never in the passes' planner
+    queue. Diagnostics that cannot answer say so with a `request_id` - busy (one diagnostic request at a time in
+    this server process) or planning past its time bound is 503, a planner that failed is 500 - never an empty list
+    and never another detector. The pass itself may still refuse to run
+    (a stopped or held equivalent, clearing switched off): this route does not ask.
+    """
+
+    _refuse_execution_depth(request)
     validate_equivalent_code(equivalent)
-    service = ClearingService(db)
-    cycles = await service.find_cycles(equivalent, max_depth=max_depth)
+    try:
+        cycles = await planned_cycles_for_diagnostics(db, equivalent)
+    except ClearingDiagnosticsUnavailable as unavailable:
+        logger.warning("event=clearing.cycles.unavailable equivalent=%s reason=%s", equivalent, unavailable.reason)
+        raise
+    except (BrokenProcessPool, PlanIntegrityError) as failed:
+        # The bare E010 (500) with the request id; which of the two it was stays in the log.
+        logger.error("event=clearing.cycles.planner_failed equivalent=%s error=%s", equivalent, type(failed).__name__)
+        raise GeoException() from failed
     return {"cycles": cycles}
 
 
@@ -50,7 +85,7 @@ def _refuse_execution_depth(request: Request) -> None:
     """R2: the KEY's presence is refused, whatever its value - bare, empty, repeated, valid or not.
 
     FastAPI ignores an undeclared query parameter, so deleting `max_depth` from the signature alone would accept
-    and silently drop it - exactly the state decision 8 forbids.
+    and silently drop it - exactly the state decision 8 forbids. Both routes of this module refuse it (035 A1).
     """
 
     if "max_depth" in request.query_params:

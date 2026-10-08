@@ -127,7 +127,10 @@ def _route_default(endpoint, name: str) -> int:
     return int(getattr(marker, "default", marker))
 
 
-API_DEFAULT_MAX_DEPTH = _route_default(clearing_route.list_cycles, "max_depth")
+# 035 A1 (2026-10-08, owner decision П1-(а)): `GET /clearing/cycles` answers with the flow plan and has no `max_depth`,
+# so there is no route default to read. The detectors this module covers still have their own, with the same value
+# (6); it is read from `find_cycles`, still not repeated. The name is kept so no assertion below is touched.
+API_DEFAULT_MAX_DEPTH = _route_default(ClearingService.find_cycles, "max_depth")
 # MOVED 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3; decision 8): this module read the
 # default depth of `POST /clearing/auto` here and required it to equal the diagnostic's. Execution has no depth any
 # more - the route refuses the parameter - so there is no second default to agree with; the agreement assertion

@@ -59,16 +59,19 @@ from typing import AbstractSet, Awaitable, Callable, Optional
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.clearing.flow_planner import PlannedCycle, load_snapshot, plan_clearing
+from app.core.clearing.flow_planner import PlannedCycle, load_snapshot, money_of, plan_clearing
 from app.core.clearing.service import (
     ClearingOccurrence,
     ClearingService,
     RetryableClearingConflictException,
 )
 from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
 from app.db.models.simulator_storage import SimulatorRun
 from app.utils.distributed_lock import RenewableLease, renewable_lease
+from app.utils.error_codes import ErrorCode
 from app.utils.exceptions import ConflictException, GeoException
+from app.utils.money import to_money_str
 from app.utils.validation import validate_equivalent_code
 
 logger = logging.getLogger(__name__)
@@ -287,6 +290,143 @@ async def _plan_off_the_loop(edges, executor: Optional[Executor], state: _PassSt
         worker.cancel()
         state.planner_abandoned = not worker.done()
         raise
+
+
+# ---------------------------------------------------------------------------------------------- diagnostics
+
+#: The bound of the AWAITED PLANNING PHASE of one diagnostic request: the wait for the worker's answer, a cold
+#: worker's start included. Past it the request is refused and the worker terminated. It bounds that wait and nothing
+#: else: the snapshot read, the rollback, the creation of the pool and the synchronous hand-over run before it, so it
+#: is not the longest the slot can stay taken.
+#:
+#: A CHOSEN value, not a proven performance bound and not measured in production. The review of `b2a9caea`
+#: (2026-10-08) measured a plan of ~200 participants / 3000 debts at 0.4 s and of 400 / 8000 at 2.35 s, growing
+#: roughly quadratically; 5 s sits above both. It does NOT follow the passes' budgets: a plan of 5.1 s still fits a
+#: simulator tick's 8 s cap and is refused here. What protects the passes is not this number but the isolation - the
+#: diagnostic worker and its one slot are not the passes'.
+DIAGNOSTIC_PLAN_TIMEOUT_SECONDS = 5.0
+#: What a refused client is told to wait before asking again. A hint, not a promise that the slot is free by then.
+DIAGNOSTIC_RETRY_AFTER_SECONDS = 1
+
+_diagnostic_executor: Optional[ProcessPoolExecutor] = None
+_diagnostic_plan_in_flight = False
+
+
+class ClearingDiagnosticsUnavailable(GeoException):
+    """`GET /clearing/cycles` cannot answer NOW and says so (503, E007): another diagnostic plan is being computed
+    (`diagnostics_busy`), or this one ran past its bound (`diagnostics_timeout`). Never an empty list."""
+
+    def __init__(self, reason: str):
+        super().__init__(
+            "Clearing diagnostics are busy; retry later",
+            code=ErrorCode.E007,
+            details={"reason": reason, "retry_after_seconds": DIAGNOSTIC_RETRY_AFTER_SECONDS},
+            status_code=503,
+        )
+        self.reason = reason
+
+
+def _default_diagnostic_executor() -> ProcessPoolExecutor:
+    """The diagnostic planner process: its own one-worker `spawn` pool, created on first use. NOT the pool of the
+    passes - a diagnostic plan never stands in a queue in front of a clearing plan (035 A1, review of `b2a9caea`)."""
+
+    global _diagnostic_executor
+    if _diagnostic_executor is None:
+        _diagnostic_executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+    return _diagnostic_executor
+
+
+def _discard_diagnostic_executor(pool: Executor, *, terminate: bool) -> None:
+    """Forget `pool`; the next request gets a new one. `terminate`: its worker may still be computing a plan nobody
+    awaits - `Future.cancel()` cannot stop a running task, so the process is ended, or it would hold the one slot."""
+
+    global _diagnostic_executor
+    if _diagnostic_executor is pool:
+        _diagnostic_executor = None
+    if terminate:
+        for process in list((getattr(pool, "_processes", None) or {}).values()):
+            process.terminate()
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+async def _diagnostic_plan(edges, executor: Optional[Executor]):
+    """`plan_clearing(edges)` in the diagnostic worker; the wait for its answer is bounded by
+    `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` (the hand-over itself, `submit`, is synchronous and outside that bound)."""
+
+    pool = executor or _default_diagnostic_executor()
+    try:
+        worker = pool.submit(plan_clearing, edges)
+    except BrokenProcessPool:
+        _discard_diagnostic_executor(pool, terminate=False)
+        raise
+    try:
+        return await asyncio.wait_for(asyncio.wrap_future(worker), timeout=DIAGNOSTIC_PLAN_TIMEOUT_SECONDS)
+    except BrokenProcessPool:
+        _discard_diagnostic_executor(pool, terminate=False)
+        raise
+    except asyncio.TimeoutError:
+        _discard_diagnostic_executor(pool, terminate=True)
+        raise ClearingDiagnosticsUnavailable("diagnostics_timeout") from None
+    except asyncio.CancelledError:
+        # The caller went away. A plan still running would keep the slot's worker busy for a result nobody reads.
+        if not worker.done():
+            _discard_diagnostic_executor(pool, terminate=True)
+        raise
+
+
+async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, executor: Optional[Executor] = None):
+    """The cycles of the plan a clearing pass would compute now, in plan order, for `GET /clearing/cycles` (035 A1,
+    owner decision П1-(а)).
+
+    The first two steps of a pass and nothing of its execution: the snapshot is read on the caller's `session` (the
+    eligible edges, the equivalent's precision, the pids of their participants), the read transaction is released,
+    and the plan is computed in a planner PROCESS - never on the event loop. Read-only: no lease, no lock, no write.
+    It does not ask whether a pass would be allowed to run (a stopped or held equivalent, clearing switched off).
+
+    DIAGNOSTICS DO NOT STAND IN THE PASSES' PLANNER QUEUE AND DO NOT QUEUE THEMSELVES (review of `b2a9caea`): the
+    worker is the diagnostic one (`_default_diagnostic_executor`), not the passes'; in ONE SERVER PROCESS one
+    diagnostic request is in flight at a time (several server processes have a slot and a worker each) and a request
+    that meets it is refused at once (`ClearingDiagnosticsUnavailable`, `diagnostics_busy`); a plan whose awaited
+    planning phase runs past `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` is refused (`diagnostics_timeout`) and its worker
+    terminated, as is the worker of a request that was cancelled while its plan ran. The isolation is of the planner
+    queue: the diagnostic worker still shares the machine's CPU with everything else.
+
+    Each cycle is a list of `{debt_id, debtor, creditor, amount}`; `amount` is the debt's amount on the snapshot at
+    the equivalent's precision, not the cycle's `c`. A missing equivalent raises `GeoException`, as `load_snapshot`
+    does. A planner failure propagates unchanged (`BrokenProcessPool` after the broken pool is forgotten,
+    `PlanIntegrityError`): there is no fallback and no other detector.
+    """
+
+    global _diagnostic_plan_in_flight
+    if _diagnostic_plan_in_flight:
+        raise ClearingDiagnosticsUnavailable("diagnostics_busy")
+    _diagnostic_plan_in_flight = True  # set before the first await: one event loop, so check-and-set is atomic
+    try:
+        edges = await load_snapshot(session, equivalent_code)
+        precision = (
+            await session.execute(select(Equivalent.precision).where(Equivalent.code == equivalent_code))
+        ).scalar_one()
+        vertices = sorted({v for e in edges for v in (e.debtor_id, e.creditor_id)}, key=str)
+        pid_of: dict = {}
+        if vertices:
+            rows = await session.execute(select(Participant.id, Participant.pid).where(Participant.id.in_(vertices)))
+            pid_of = {row.id: row.pid for row in rows}
+        await session.rollback()
+        plan = await _diagnostic_plan(edges, executor)
+    finally:
+        _diagnostic_plan_in_flight = False
+    return [
+        [
+            {
+                "debt_id": str(e.debt_id),
+                "debtor": str(pid_of.get(e.debtor_id, e.debtor_id)),
+                "creditor": str(pid_of.get(e.creditor_id, e.creditor_id)),
+                "amount": to_money_str(money_of(e.atoms), int(precision)),
+            }
+            for e in cycle.edges
+        ]
+        for cycle in plan.cycles
+    ]
 
 
 def _stop_reason(lease: Optional[RenewableLease], deadline: Optional[float], deadline_clock: Callable[[], float]):

@@ -6,7 +6,7 @@ committed occurrences with their identity and edges, `complete` only on an empty
 `interrupted` with a reason otherwise. Outcomes walked here, each through a REAL path (Verification plan §6):
 
 * success - two disjoint triangles, `V_edge` 15 and `V_cyc` 5 differ, `complete`;
-* `max_depth` in ANY form - 422 before the runner starts, nothing cleared (R2); `/cycles` keeps it (control);
+* `max_depth` in ANY form - 422 before the runner starts, nothing cleared (R2); `/cycles` refuses it too since 035 A1;
 * the operator stop between occurrences - `200 interrupted`, `reason = error`, `error.code = "E008"`, the first
   occurrence reported, the second never started;
 * an unexpected error after progress - `200 interrupted` with a SANITISED error (no raw text);
@@ -163,13 +163,17 @@ async def test_max_depth_in_any_form_is_refused_before_the_runner(db_session, cl
 
 
 @pytest.mark.asyncio
-async def test_counter_check_the_diagnostic_cycles_keeps_max_depth(db_session, client, auth_headers) -> None:
+async def test_the_diagnostic_cycles_answers_without_max_depth_and_refuses_it(db_session, client, auth_headers) -> None:
+    """Was `test_counter_check_the_diagnostic_cycles_keeps_max_depth` until 035 A1 (owner decision П1-(а),
+    2026-10-08): `/cycles` kept the parameter then; it answers with the plan's cycles and refuses it now, as `/auto`."""
+
     await _seed(db_session)
-    response = await client.get(f"/api/v1/clearing/cycles?equivalent={CODE}&max_depth=3", headers=auth_headers)
+    response = await client.get(f"/api/v1/clearing/cycles?equivalent={CODE}", headers=auth_headers)
     assert response.status_code == 200, response.text
     assert len(response.json()["cycles"]) == 2
-    bad = await client.get(f"/api/v1/clearing/cycles?equivalent={CODE}&max_depth=99", headers=auth_headers)
-    assert bad.status_code == 422, bad.text
+    for query in ("max_depth=3", "max_depth=99"):
+        bad = await client.get(f"/api/v1/clearing/cycles?equivalent={CODE}&{query}", headers=auth_headers)
+        assert bad.status_code == 422 and bad.json()["error"]["code"] == "E009", bad.text
 
 
 # ------------------------------------------------------------------------------------ error after progress
