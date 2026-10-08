@@ -77,6 +77,9 @@ make the session green again:
   `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py`. Measured with
   `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `dd019a31` (on `4a1768d5` the same case
   read 3219 -> 3220, by the guard's own refusal).
+* 2026-10-08, 035 slice A5, review of `a181b6c1`: 3234 -> 3236 (+2). The one case of
+  `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py` became three (the failure on the first, the
+  second and the third audit row). Measured with `python -m pytest --collect-only -q -m "not slow"`.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -119,7 +122,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3234
+EXPECTED_SELECTED_ITEMS = 3236
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
