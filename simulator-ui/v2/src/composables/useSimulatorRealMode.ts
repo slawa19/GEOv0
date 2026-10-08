@@ -1167,8 +1167,8 @@ export function useSimulatorRealMode(opts: {
 
       await refreshRunStatus()
       await refreshSnapshot()
-      // SSE loop is long-lived; do not await it.
-      void runSseLoop()
+      // SSE loop is long-lived; do not await it. `lastError` was reset at the top of this start.
+      void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
       real.lastError = getErrorMessage(e)
     } finally {
@@ -1244,7 +1244,8 @@ export function useSimulatorRealMode(opts: {
 
       await refreshRunStatus()
       await refreshSnapshot()
-      void runSseLoop()
+      // `lastError` was reset at the top of this attach, so what it holds now came from the reads above.
+      void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
       real.lastError = getErrorMessage(e)
     }
@@ -1364,7 +1365,8 @@ export function useSimulatorRealMode(opts: {
               await refreshSnapshot()
               if (real.runId) {
                 // SSE loop is long-lived; do not await it during boot.
-                void runSseLoop()
+                // The error of the status/snapshot reads above is not stale: keep it on screen.
+                void runSseLoop({ preserveLastError: true })
               }
               return
             }

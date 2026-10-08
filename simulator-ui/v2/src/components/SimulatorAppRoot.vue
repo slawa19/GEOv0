@@ -23,12 +23,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
  import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
 
  import type { InteractPhase } from '../composables/useInteractMode'
-import {
-  canActOnTrustlineFigures,
-  freezeTrustlineFiguresSource,
-  resolveTrustlineFiguresSource,
-  type TrustlineFiguresSource,
-} from '../composables/interact/trustlinesSourceState'
+import { canActOnTrustlineFigures } from '../composables/interact/trustlinesSourceState'
+import { useSelectedTrustlineLine } from '../composables/useSelectedTrustlineLine'
 import { provideActivePanelState } from '../composables/useActivePanelState'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
@@ -631,80 +627,22 @@ const interactRunTerminal = computed(() => {
   return st === 'stopped' || st === 'error'
 })
 
-const interactSelectedLink = computed<GraphLink | null>(() => {
-  const from = interact.mode.state.fromPid
-  const to = interact.mode.state.toPid
-  if (!from || !to) return null
-
-  // NEW-3: prefer backend-fetched trustlines (Interact Mode cache) as the source of truth.
-  // This keeps EdgeDetailPopup and TrustlineManagementPanel consistent.
-  const tls = interact.mode.trustlines.value
-  if (Array.isArray(tls) && tls.length > 0) {
-    const tl = tls.find((t) => t.from_pid === from && t.to_pid === to) ?? null
-    if (tl) {
-      return {
-        source: from,
-        target: to,
-        trust_limit: tl.limit,
-        used: tl.used,
-        reverse_used: tl.reverse_used,
-        available: tl.available,
-        status: tl.status ?? undefined,
-        close_requested_at: tl.close_requested_at ?? null,
-      }
-    }
-  }
-
-  // Fallback: snapshot link (may be stale, but always available in fixtures/topology-only views).
-  const snap = state.snapshot
-  if (!snap) return null
-  for (const l of snap.links ?? []) {
-    if (l.source === from && l.target === to) return l
-  }
-  return null
+// F-034-16 (034 S5b): the selected line and the BASIS of its figures live in a composable, testable without a mount
+// (`useSelectedTrustlineLine.test.ts`); this is where the root hands it the pair, the cache and the window state.
+const selectedLine = useSelectedTrustlineLine({
+  fromPid: () => interact.mode.state.fromPid,
+  toPid: () => interact.mode.state.toPid,
+  trustlines: () => interact.mode.trustlines.value,
+  fetchState: () => interact.mode.trustlinesFetchState.value,
+  findAnsweredTrustline: (from, to) => interact.mode.findAnsweredTrustline(from, to),
+  snapshotLinks: () => state.snapshot?.links,
+  windowState: () => wmEdgeDetail.state.value,
+  frozenLink: () => wmEdgeDetail.frozenLink.value,
+  frozenFiguresSource: () => wmEdgeDetail.frozenFiguresSource.value,
 })
-
-/**
- * ЧЕМ ОБОСНОВАНЫ числа выбранной линии (`F-013-7`, третья копия; расширено 2026-09-10).
- *
- * `interactSelectedLink` выше предпочитает REST-результат только когда массив непустой, иначе
- * молча берёт снапшот. Для ПРОСМОТРА это допустимо и так и задумано; для МУТИРУЮЩЕГО контрола —
- * нет: решение «разрешить закрыть линию» принималось бы по чужим числам.
- *
- * ПОЧЕМУ РЕШЕНИЕ ЖИВЁТ ЗДЕСЬ, А СОСТОЯНИЕ ИСТОЧНИКА — В КЭШЕ. Жизненный цикл запроса
- * знает только `useInteractDataCache` — он и отдаёт `trustlinesFetchState` вместе с
- * `findAnsweredTrustline`, который смотрит в НЕСЛИТЫЙ ответ. А какая пара выбрана и какой
- * поверхности отвечать — знает только корень, рядом с тем самым фоллбэком, который он
- * страхует. Компоненты получают готовое основание ПРОПОМ именно потому, что сами вычислить
- * его не могут: им виден только слитый список, в котором строка из снапшота неотличима от
- * строки из ответа бэкенда.
- */
-const interactSelectedLinkFiguresSource = computed<TrustlineFiguresSource>(() => {
-  const from = interact.mode.state.fromPid
-  const to = interact.mode.state.toPid
-  return resolveTrustlineFiguresSource(
-    interact.mode.trustlinesFetchState.value,
-    interact.mode.findAnsweredTrustline(from, to) != null,
-  )
-})
-
-/**
- * То же для окна edge-detail, с одной поправкой: в режиме `keepAlive` попап показывает
- * ЗАМОРОЖЕННУЮ линию — снимок, снятый до того, как interact-состояние очистили (и ушло на ДРУГУЮ
- * пару), поэтому спрашивать про неё живое состояние источника бессмысленно: оно уже про другое.
- *
- * ЧТО ИЗМЕНИЛОСЬ 2026-09-10 (внешнее ревью 013, находка P3). Раньше здесь возвращалось `frozen`
- * по одному лишь ФАКТУ наличия замороженной линии. Тогда «Send Payment», нажатый при неспрошенном
- * или упавшем источнике, снимал предупреждение: жест пользователя превращал молчание бэкенда в
- * его ответ. Теперь замораживается ОСНОВАНИЕ ВМЕСТЕ С ЧИСЛАМИ, и `frozen` получается только из
- * того, что действительно БЫЛО ответом (`freezeTrustlineFiguresSource`).
- */
-const wmEdgeDetailFiguresSource = computed<TrustlineFiguresSource>(() => {
-  if (wmEdgeDetail.state.value === 'keepAlive' && wmEdgeDetail.frozenLink.value != null) {
-    return freezeTrustlineFiguresSource(wmEdgeDetail.frozenFiguresSource.value)
-  }
-  return interactSelectedLinkFiguresSource.value
-})
+const interactSelectedLink = selectedLine.selectedLink
+const interactSelectedLinkFiguresSource = selectedLine.figuresSource
+const wmEdgeDetailFiguresSource = selectedLine.edgeDetailFiguresSource
 
 function formatDemoActionError(e: unknown): string {
   const msg = extractErrorMessage(e)
