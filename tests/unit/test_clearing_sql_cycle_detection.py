@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from app.core.clearing.flow_planner import load_snapshot
 from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
@@ -168,11 +169,18 @@ async def test_a_triangle_blocked_by_policy_is_not_offered_and_the_eligible_quad
     assert (blocking_tl.policy or {}).get("auto_clearing") is False
     assert blocking_tl.status == "active"
 
+    # EXCLUDED BY POLICY, NOT OUTBID (review of `4b833af5`, P3). On this stand the plan would leave the triangle out
+    # even with the policy broken: the two cycles share A->B, every debt is 10, and four edges beat three. So "the
+    # triangle is not in the plan" alone does not show the policy at work. What does: the planner's SNAPSHOT - the
+    # eligible edges, before any optimisation - holds every debt of this stand except the one whose controlling
+    # line refuses auto-clearing (B->C). (This is what `find_triangles_sql == []` said for the retired detector.)
+    snapshot = {(edge.debtor_id, edge.creditor_id) for edge in await load_snapshot(db_session, eq.code)}
+    assert (b.id, c.id) not in snapshot, "the debt whose controlling line refuses auto-clearing is in the snapshot"
+    assert snapshot == {(a.id, b.id), (c.id, a.id), (b.id, d.id), (d.id, e.id), (e.id, a.id)}, snapshot
+
     cycles = await planned_cycles(db_session, eq.code)
     offered = [{(edge["debtor"], edge["creditor"]) for edge in cycle} for cycle in cycles]
 
-    # The triangle is filtered out by policy (this was `find_triangles_sql == []` and `find_cycles(depth 3) == []`,
-    # both of which could only ever hold the triangle).
     assert {(a.pid, b.pid), (b.pid, c.pid), (c.pid, a.pid)} not in offered, "Triangle should be filtered out by policy"
     assert all(len(cycle) != 3 for cycle in cycles), offered
 

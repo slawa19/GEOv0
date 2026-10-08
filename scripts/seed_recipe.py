@@ -1031,8 +1031,10 @@ async def _check_clearing_executed(session_factory) -> dict[str, Any]:
 
 
 async def _check_surviving_cycle(session_factory, run: _Run) -> dict[str, Any]:
-    """Every `assert_clearable` cycle of the recipe is STILL one of the cycles of the clearing plan now, at the end
-    (035 A2a, decision D1). Nothing is executed."""
+    """Every `assert_clearable` cycle of the recipe is STILL offered at its declared amount now, at the end: it is
+    one of the cycles of the clearing plan (035 A2a, decision D1) AND its smallest debt on the snapshot is the amount
+    the recipe declares - the same two questions the command itself was asked when it ran. Presence alone let a
+    surviving cycle through with its smallest debt moved (review of `4b833af5`). Nothing is executed."""
 
     asserted = [
         command
@@ -1046,18 +1048,27 @@ async def _check_surviving_cycle(session_factory, run: _Run) -> dict[str, Any]:
         }
 
     missing: list[str] = []
+    moved: list[str] = []
     found: list[str] = []
     for command in asserted:
         expected = run._expected_cycle_edges(command)
         async with session_factory() as session:
             _eligible, planned = await _clearing_view(session, command["equivalent"])
-        (found if _match_cycle(planned, expected) is not None else missing).append(command["id"])
+        match = _match_cycle(planned, expected)
+        if match is None:
+            missing.append(command["id"])
+        elif (smallest := min(Decimal(edge["amount"]) for edge in match)) != Decimal(command["amount"]):
+            moved.append(f"{command['id']} (declares {command['amount']}, its smallest debt is {smallest})")
+        else:
+            found.append(command["id"])
 
     return {
-        "passed": not missing,
+        "passed": not missing and not moved,
         "surviving": found,
         "missing": missing,
-        "detail": f"{len(found)} of {len(asserted)} asserted cycle(s) still clearable",
+        "amount_moved": moved,
+        "detail": f"{len(found)} of {len(asserted)} asserted cycle(s) still clearable at the declared amount"
+        + (f"; not at the declared amount: {'; '.join(moved)}" if moved else ""),
     }
 
 

@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,6 +164,14 @@ async def test_all_cycles_blocked_by_policy_returns_empty(db_session):
     cycles = await planned_cycles(db_session, eq.code)
     assert cycles == []
 
+    # Positive control (review of `4b833af5`): the same debts and lines, consenting, ARE offered - so the empty
+    # answer above is the policy's doing and not a stand in which nothing could ever be offered.
+    await db_session.execute(
+        update(TrustLine).where(TrustLine.equivalent_id == eq.id).values(policy={"auto_clearing": True})
+    )
+    await db_session.commit()
+    assert await planned_cycles(db_session, eq.code) != []
+
 
 @pytest.mark.asyncio
 async def test_partially_blocked_returns_allowed_cycle(db_session):
@@ -295,6 +303,13 @@ async def test_no_trustline_means_no_consent(db_session):
     service = ClearingService(db_session)
     cycles = await planned_cycles(db_session, eq.code)
     assert cycles == []
+
+    # Positive control (review of `4b833af5`): with the three controlling lines in place the triangle IS offered.
+    await _add_controlling_trustlines(
+        db_session, eq_id=eq.id, edges=[(a, b), (b, c), (c, a)], policy={"auto_clearing": True}
+    )
+    await db_session.commit()
+    assert [len(cycle) for cycle in await planned_cycles(db_session, eq.code)] == [3]
 
 
 @pytest.mark.asyncio

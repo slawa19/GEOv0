@@ -429,6 +429,50 @@ async def test_the_smallest_debt_of_the_cycle_must_be_the_declared_amount_in_bot
     assert executed == []
 
 
+@pytest.mark.parametrize(
+    "amounts, planned, passes",
+    [
+        (("880.00", "1015.00", "1240.00"), True, True),
+        # Review of `4b833af5` (P2): the cycle is still in the plan, but its smallest debt is no longer what the
+        # recipe declares. Presence alone accepted it.
+        (("879.00", "1015.00", "1240.00"), True, False),
+        (("881.00", "1015.00", "1240.00"), True, False),
+        (("880.00", "1015.00", "1240.00"), False, False),
+    ],
+    ids=["offered at the declared amount", "offered, one unit short", "offered, one unit over", "not offered"],
+)
+async def test_the_surviving_cycle_must_still_be_offered_at_its_declared_amount(monkeypatch, amounts, planned, passes):
+    """The final acceptance asks the same two things `assert_clearable` asked when the command ran: the named cycle
+    is one of the cycles of the plan AND its smallest debt on the snapshot is the declared amount."""
+
+    import types
+
+    import scripts.seed_recipe as seed
+
+    cycle = [
+        {"debtor": d, "creditor": c, "amount": amount, "debt_id": f"{d}{c}"}
+        for (d, c), amount in zip((("A", "B"), ("B", "C"), ("C", "A")), amounts)
+    ]
+
+    async def _view(session, equivalent):
+        return {(edge["debtor"], edge["creditor"]): edge for edge in cycle}, ([cycle] if planned else [])
+
+    monkeypatch.setattr(seed, "_clearing_view", _view)
+    run = _run_with_fake_sessions()
+    run.identities = {ref: types.SimpleNamespace(pid=ref.upper()) for ref in "abc"}
+    run.recipe = {"commands": [
+        {"op": "clearing", "id": "survivor", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "880.00",
+         "mode": "assert_clearable", "expect": "-"},
+        {"op": "clearing", "id": "executed", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "1.00",
+         "mode": "execute", "expect": "-"},  # an executed cycle is not asked to survive
+    ]}
+
+    verdict = await seed._check_surviving_cycle(_FakeSession, run)
+
+    assert verdict["passed"] is passes, verdict
+    assert (verdict["surviving"] == ["survivor"]) is passes, verdict
+
+
 # =================================================================================================
 # The activity check counts what the DESCRIPTION declares, not what the database happens to hold
 # =================================================================================================

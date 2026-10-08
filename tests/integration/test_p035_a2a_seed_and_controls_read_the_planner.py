@@ -66,6 +66,44 @@ async def test_the_seed_view_is_empty_where_nothing_is_eligible(db_session) -> N
     assert await seed._clearing_view(db_session, _EQ) == ({}, [])
 
 
+@pytest.mark.asyncio
+async def test_the_final_acceptance_refuses_a_surviving_cycle_whose_smallest_debt_moved(db_session) -> None:
+    """Review of `4b833af5` (P2), on the real view: the recipe's surviving triangle (880 / 1015 / 1240, declared 880)
+    is accepted; the same triangle still in the plan with its smallest debt at 879 is not."""
+
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from app.db.models.debt import Debt
+    from tests.debt_setup import debt_fixture_setup
+
+    survivor = ring(["p035fa", "p035fb", "p035fc"], ["880", "1015", "1240"], [debt_uuid(0x35F1, k) for k in range(3)])
+    await seed_graph(db_session, _EQ, survivor)
+
+    @asynccontextmanager
+    async def _this_session():
+        yield db_session
+
+    run = SimpleNamespace(
+        recipe={"commands": [{"op": "clearing", "id": "survivor", "equivalent": _EQ, "amount": "880.00",
+                              "mode": "assert_clearable", "cycle": ["a", "b", "c"]}]},
+        _expected_cycle_edges=lambda command: _pairs(survivor),
+    )
+
+    assert (await seed._check_surviving_cycle(_this_session, run))["passed"] is True
+
+    smallest = await db_session.get(Debt, survivor[0].debt_id)
+    lowered = Decimal("879")
+    async with debt_fixture_setup(db_session, label="p035-a2a-lowered"):
+        smallest.amount = lowered
+    await db_session.commit()
+
+    _eligible, planned = await seed._clearing_view(db_session, _EQ)
+    assert seed._match_cycle(planned, _pairs(survivor)) is not None, "stand: the triangle must still be in the plan"
+    verdict = await seed._check_surviving_cycle(_this_session, run)
+    assert verdict["passed"] is False and verdict["surviving"] == [], verdict
+
+
 # ------------------------------------------------------------------------------------------------ the control
 
 
@@ -83,6 +121,25 @@ async def test_the_control_accepts_the_cycles_the_stand_really_holds(db_session)
     await assert_named_cycles_are_in_the_snapshot(db_session, _EQ, [first, second])
     # A rotation is the same cycle.
     await assert_named_cycles_are_in_the_snapshot(db_session, _EQ, [first[1:] + first[:1]])
+
+
+@pytest.mark.asyncio
+async def test_the_control_reads_the_step_from_the_equivalent_it_is_reading(db_session) -> None:
+    """Review of `4b833af5` (P3): the step is the equivalent's own, not a default of 2 digits. A triangle of the
+    smallest storable debt under precision 8 IS a whole number of steps; debts of 0.01 under precision 0 are not."""
+
+    fine = ring(["p035pa", "p035pb", "p035pc"], ["0.00000001"] * 3, [debt_uuid(0x35D1, k) for k in range(3)])
+    await seed_graph(db_session, "PZP", fine, precision=8)
+    await assert_named_cycles_are_in_the_snapshot(db_session, "PZP", [fine])
+
+    coarse = ring(["p035qa", "p035qb", "p035qc"], ["0.01"] * 3, [debt_uuid(0x35D2, k) for k in range(3)])
+    await seed_graph(db_session, "PZQ", coarse, precision=0)
+    with pytest.raises(AssertionError, match="not a positive multiple of the step"):
+        await assert_named_cycles_are_in_the_snapshot(db_session, "PZQ", [coarse])
+    # The same debts under an equivalent whose step they fit are accepted: it is the step that refused them.
+    whole = ring(["p035ra", "p035rb", "p035rc"], ["0.01"] * 3, [debt_uuid(0x35D3, k) for k in range(3)])
+    await seed_graph(db_session, "PZR", whole, precision=2)
+    await assert_named_cycles_are_in_the_snapshot(db_session, "PZR", [whole])
 
 
 @pytest.mark.asyncio

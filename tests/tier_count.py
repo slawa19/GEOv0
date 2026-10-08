@@ -114,6 +114,10 @@ make the session green again:
   postgres.py` -4 (6 -> 3 and 2 -> 1), `test_p012_t1210_detector_union_default_tier.py` -2 (3 -> 1). Measured with
   `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `bfae3cda` (on `1faf261b` the same ten
   read 3252 -> 3262, by the guard's own refusal).
+* 2026-10-09, 035 slice A2a, review of `4b833af5`: 3274 -> 3280 (+6). Four cases of the final acceptance in
+  `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the surviving cycle at its declared amount) and two in
+  `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` (the same on the real view; the control's
+  step read from the equivalent). The number is the guard's own refusal ("selected 3280 case(s), expected exactly 3274").
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -156,7 +160,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3274
+EXPECTED_SELECTED_ITEMS = 3280
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

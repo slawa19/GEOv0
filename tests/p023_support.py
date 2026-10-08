@@ -316,7 +316,7 @@ async def planned_cycles(session, equivalent_code: str, *, allowed_participant_p
     ]
 
 
-async def assert_named_cycles_are_in_the_snapshot(session, equivalent_code: str, cycles, *, precision: int = 2) -> None:
+async def assert_named_cycles_are_in_the_snapshot(session, equivalent_code: str, cycles) -> None:
     """CONTROL of a stand: each named cycle really is a clearable alternative on the planner's snapshot - read from
     the OBSERVED snapshot edges, without asking the optimizer to choose it (035 A2a, decision D2, 2026-10-08).
 
@@ -338,10 +338,18 @@ async def assert_named_cycles_are_in_the_snapshot(session, equivalent_code: str,
 
     from decimal import Decimal
 
+    from sqlalchemy import select
+
     from app.core.clearing.flow_planner import atoms_of, load_snapshot
+    from app.db.models.equivalent import Equivalent
     from tests.p020_support import participant_uuid
 
     observed = {edge.debt_id: edge for edge in await load_snapshot(session, equivalent_code)}
+    # The step of THE EQUIVALENT WHOSE SNAPSHOT IS READ (review of `4b833af5`: an argument defaulting to 2 refused
+    # a correct one-atom triangle under precision 8 and passed debts of 0.01 under precision 0).
+    precision = (
+        await session.execute(select(Equivalent.precision).where(Equivalent.code == equivalent_code))
+    ).scalar_one()
     step_atoms = 10 ** (8 - int(precision))
     for cycle in cycles:
         cycle = list(cycle)
