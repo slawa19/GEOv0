@@ -1498,14 +1498,18 @@ export function useSimulatorApp(opts?: {
   // Dblclick is always reserved for opening NodeCard (even during picking).
   // Single click is the flow input in picking phases.
 
-  /** The run whose snapshot is the scene on screen now (null: a preview, fixtures or nothing). */
-  let shownRunSceneId: string | null = null
+  /**
+   * Which run (and under which selected scenario) each run-snapshot source path was loaded for. Written when the
+   * read FINISHES, read only through `state.sourcePath` - which the scene owner sets when it ACCEPTS a snapshot - so
+   * a late load that the owner rejected is never "the scene on screen". A handful of entries (run x equivalent).
+   */
+  const runSceneLoads = new Map<string, { runId: string; scenarioId: string }>()
+  function recordRunSceneLoad(sourcePath: string, runId: string) {
+    runSceneLoads.set(sourcePath, { runId, scenarioId: real.selectedScenarioId })
+  }
 
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
-    if (!isRealMode.value) {
-      shownRunSceneId = null
-      return loadSnapshotFixtures(eq)
-    }
+    if (!isRealMode.value) return loadSnapshotFixtures(eq)
 
     const runId = real.runId
     const scenarioId = real.selectedScenarioId
@@ -1513,8 +1517,12 @@ export function useSimulatorApp(opts?: {
     const runState = toLower(real.runStatus?.state)
     // An UNKNOWN status (null: not read yet, or its read failed - a timeout included) is not "no active run" for a
     // run whose scene is on screen: that scene is not demoted to the preview, the run snapshot is read instead
-    // (034 S5b). A known terminal status (stopped/error) still ends the run scene.
-    const statusUnknownForShownRun = !!runId && !real.runStatus && shownRunSceneId === runId
+    // (034 S5b). Only a REFRESH of that scene: choosing another scenario is an explicit request for its preview
+    // (the scenario watcher allows it while the status is unknown), and a known terminal status (stopped/error)
+    // still ends the run scene.
+    const shownRunScene = runSceneLoads.get(state.sourcePath)
+    const statusUnknownForShownRun =
+      !!runId && !real.runStatus && shownRunScene?.runId === runId && shownRunScene.scenarioId === scenarioId
     const isActiveRun =
       !!runId &&
       // Otherwise treat as active only when we have a known status.
@@ -1533,11 +1541,10 @@ export function useSimulatorApp(opts?: {
         onStaleRun: () => resetStaleRunThroughOwner({ clearError: true }),
       })
       if (fromRun) {
-        shownRunSceneId = runId
+        recordRunSceneLoad(fromRun.sourcePath, runId)
         return fromRun
       }
     }
-    shownRunSceneId = null
 
     // Real mode: no run, but have scenario selected - show preview
     // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
@@ -1586,7 +1593,7 @@ export function useSimulatorApp(opts?: {
         runId,
         equivalent,
       })
-      shownRunSceneId = runId
+      recordRunSceneLoad(loaded.sourcePath, runId)
       return loaded
     },
     onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
