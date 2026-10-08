@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import pytest
 
@@ -29,6 +30,17 @@ from tests.integration.test_p023_d_tick_driver_through_runner_postgres import ( 
 )
 
 TICK_LOGGER = "p023d.tick"  # the logger the stand gives its runner
+
+#: The seven lines that say "the clearing of this tick is going well". They are progress, never a warning.
+PROGRESS_LINES = (
+    "tick_clearing_enter",
+    "clearing_eq_enter",
+    "clearing_pass_done",
+    "clearing_patch_start",
+    "clearing_patch_done",
+    "clearing_eq_done",
+    "tick_clearing_done",
+)
 
 
 def _of_the_tick(caplog, level: int) -> list[str]:
@@ -77,7 +89,12 @@ async def test_a_clearing_tick_that_cleared_writes_no_warning(factory, caplog) -
     for name in ("tick_clearing_enter", "clearing_pass_done", "tick_clearing_done"):
         assert any(f"simulator.real.{name} " in m for m in progress), f"the progress line {name} is gone: {progress}"
 
-    warnings = _of_the_tick(caplog, logging.WARNING)
+    # Only the PROGRESS lines are judged. A tick that cleared may still be slow, and `clearing_patch_slow` or a slow
+    # commit is then a legitimate WARNING: rejecting every WARNING made this test fail on a loaded machine for
+    # behaviour that is correct (section-15 review of 034 S3, 2026-10-09).
+    warnings = [
+        m for m in _of_the_tick(caplog, logging.WARNING) if any(re.search(rf"\b{name}\b", m) for name in PROGRESS_LINES)
+    ]
     assert warnings == [], (
-        f"a clearing tick that cleared its cycle wrote {len(warnings)} line(s) at WARNING or above, expected 0: "
-        f"{warnings}")
+        f"a clearing tick that cleared its cycle wrote {len(warnings)} progress line(s) at WARNING or above, "
+        f"expected 0: {warnings}")
