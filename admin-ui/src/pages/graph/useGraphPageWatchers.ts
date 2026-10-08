@@ -67,7 +67,8 @@ export function useGraphPageWatchers(opts: {
   })
 
   const throttledRebuild = throttle(() => {
-    applyGraphView({ fit: false })
+    // A filter changes what is drawn, not the places of the nodes already drawn (035 B3).
+    applyGraphView({ fit: false, keepPositions: true })
   }, THROTTLE_GRAPH_REBUILD_MS)
 
   const throttledLayoutSpacing = throttle(() => {

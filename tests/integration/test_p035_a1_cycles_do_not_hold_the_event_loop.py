@@ -252,6 +252,19 @@ async def _until(condition, *, seconds: float = 10.0) -> None:
     await asyncio.wait_for(_spin(), timeout=seconds)
 
 
+async def _until_ended(workers) -> None:
+    """Wait, bounded, until every worker process has ended; `TimeoutError` if one is still running.
+
+    Polled, not sampled once after `join` (2026-10-08, `required-backend` on PR #170, ubuntu): the pool's own
+    management thread reaps a terminated worker too. When it wins the `waitpid`, this thread's `join` returns at
+    once and `is_alive()` still answers True until that thread gets the GIL back to record the exit code - a single
+    sample then calls a dead worker alive. The bound is shorter than `_HELD_PLAN_GIVES_UP_AFTER_SECONDS`, so a
+    worker that was NOT terminated still fails here.
+    """
+
+    await _until(lambda: not any(worker.is_alive() for worker in workers), seconds=60.0)
+
+
 @pytest.mark.asyncio
 async def test_a_plan_that_is_slow_for_the_planner_does_not_hold_the_loop_and_the_answer_is_the_workers(
     client, db_session, monkeypatch
@@ -505,9 +518,7 @@ async def test_a_diagnostic_plan_past_its_time_is_refused_and_its_worker_replace
         await hung
     assert refused.value.details["reason"] == "diagnostics_timeout"
     assert runner._diagnostic_executor is not hung_pool
-    for worker in hung_workers:
-        worker.join(60)
-    assert not any(worker.is_alive() for worker in hung_workers), "the worker of the abandoned plan is still running"
+    await _until_ended(hung_workers)
 
     # The same refusal over HTTP (a new worker, the plan hangs again), then the gate opens: 200 from a new worker.
     timed_out = await client.get(url, headers=user["headers"])
@@ -539,9 +550,8 @@ async def test_a_cancelled_diagnostic_request_leaves_no_plan_running_in_the_slot
     request.cancel()
     with pytest.raises(asyncio.CancelledError):
         await request
-    for worker in abandoned_workers:
-        worker.join(60)
-    assert abandoned_workers and not any(worker.is_alive() for worker in abandoned_workers)
+    assert abandoned_workers, "stand: the pool started no worker"
+    await _until_ended(abandoned_workers)
     assert runner._diagnostic_executor is not handed[0]
 
     gate.open()

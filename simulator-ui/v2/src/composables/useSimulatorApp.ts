@@ -1498,6 +1498,18 @@ export function useSimulatorApp(opts?: {
   // Dblclick is always reserved for opening NodeCard (even during picking).
   // Single click is the flow input in picking phases.
 
+  /**
+   * Which run (and under which selected scenario) each run-snapshot source path was loaded for. Written when the
+   * read FINISHES, read only through `state.sourcePath` - which the scene owner sets when it ACCEPTS a snapshot - so
+   * a late load that the owner rejected is never "the scene on screen". A handful of entries (run x equivalent).
+   */
+  const runSceneLoads = new Map<string, { runId: string; scenarioId: string }>()
+  function recordRunSceneLoad(sourcePath: string, runId: string, requestedUnderScenarioId: string) {
+    // The scenario the read was REQUESTED under, taken before the await: a read that finishes later (and that the
+    // owner rejects) must not rewrite the record of the scene that was accepted for the same key.
+    runSceneLoads.set(sourcePath, { runId, scenarioId: requestedUnderScenarioId })
+  }
+
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
     if (!isRealMode.value) return loadSnapshotFixtures(eq)
 
@@ -1505,12 +1517,21 @@ export function useSimulatorApp(opts?: {
     const scenarioId = real.selectedScenarioId
 
     const runState = toLower(real.runStatus?.state)
+    // An UNKNOWN status (null: not read yet, or its read failed - a timeout included) is not "no active run" for a
+    // run whose scene is on screen: that scene is not demoted to the preview, the run snapshot is read instead
+    // (034 S5b). Only a REFRESH of that scene: choosing another scenario is an explicit request for its preview
+    // (the scenario watcher allows it while the status is unknown), and a known terminal status (stopped/error)
+    // still ends the run scene.
+    const shownRunScene = runSceneLoads.get(state.sourcePath)
+    const statusUnknownForShownRun =
+      !!runId && !real.runStatus && shownRunScene?.runId === runId && shownRunScene.scenarioId === scenarioId
     const isActiveRun =
       !!runId &&
-      // Treat as active only when we have a known status.
+      // Otherwise treat as active only when we have a known status.
       // This avoids getting stuck on an unreachable/stale runId (scenario switching should still show previews).
-      !!real.runStatus &&
-      (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')
+      ((!!real.runStatus &&
+        (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')) ||
+        statusUnknownForShownRun)
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
@@ -1521,7 +1542,10 @@ export function useSimulatorApp(opts?: {
         equivalent: eq,
         onStaleRun: () => resetStaleRunThroughOwner({ clearError: true }),
       })
-      if (fromRun) return fromRun
+      if (fromRun) {
+        recordRunSceneLoad(fromRun.sourcePath, runId, scenarioId)
+        return fromRun
+      }
     }
 
     // Real mode: no run, but have scenario selected - show preview
@@ -1564,12 +1588,17 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isEqAllowed: (v) => EQUIVALENT_CODE_RE.test(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
-    loadRecoverySnapshot: ({ runId, equivalent }) => loadStrictRunRecoverySnapshot({
-      apiBase: real.apiBase,
-      accessToken: real.accessToken,
-      runId,
-      equivalent,
-    }),
+    loadRecoverySnapshot: async ({ runId, equivalent }) => {
+      const requestedUnderScenarioId = real.selectedScenarioId
+      const loaded = await loadStrictRunRecoverySnapshot({
+        apiBase: real.apiBase,
+        accessToken: real.accessToken,
+        runId,
+        equivalent,
+      })
+      recordRunSceneLoad(loaded.sourcePath, runId, requestedUnderScenarioId)
+      return loaded
+    },
     onIncrementalSnapshotLoaded: (snapshot) => syncLayoutFromSnapshot(snapshot),
     clearScheduledTimeouts,
     resetCamera,

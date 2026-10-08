@@ -96,8 +96,21 @@ _HERE = Path(__file__).resolve().parent
 #: `powershell/test_p033_launchers_write_vite_api_mode_only_for_the_simulator.py`: `Update-EnvLocal` of
 #: `run_full_stack.ps1` and `run_local.ps1` leaves no `VITE_API_MODE` in the Admin UI's `.env.local` (two launchers x
 #: two initial states x two hosts = 8) and keeps it in the Simulator UI's (two states x two hosts = 4).
+#:
+#: 2026-10-08, 035 slice C (F-035-14 reproducer): portable 192 -> 197. Five cases added,
+#: `portable/test_p035_c_backend_tier_counts_what_it_collects.py`: the backend tier refuses a canonical
+#: run (whole tier, `-m "not slow"`, no selector) whose selected count differs from a recorded constant
+#: - two RED cases until the count is implemented (a deselect; a dropped module) - and three
+#: counter-checks that the unmodified tier, a selector run and the wide profile are not refused.
+#:
+#: 2026-10-08, 035 slice C1 (F-035-14): portable 197 -> 200. Three cases added to the same module, now that the count
+#: exists (`tests/tier_count.py`): the comparison refuses growth and loss alike, the profile decision in both
+#: outcomes, and each named skip is still declared where the count module says. The two reproducer cases went green.
+#:
+#: 2026-10-08, 035 slice C1 review fix-delta: portable 200 -> 201. One case added to the same module: a collection error on the
+#: canonical profile stays pytest's exit 2 (reproducer red on 7edf4cb8, exit 4 "a test was lost").
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 192,
+    "portable": 201,
     "powershell": 235,
 }
 
