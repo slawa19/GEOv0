@@ -8,7 +8,7 @@ set, and the event still committed. The database then said `active`, the run's s
 written before the bad one stayed.
 
 Every other bad initial line - unparsable, unstorable, refused by the trust-line service - is skipped and the effect
-goes on. A non-finite limit is now one of them, under the storability rule's own name (`MONEY_FINITENESS`).
+goes on. A non-finite limit is now one of them, under the storability rule's own name (`money_finiteness`).
 
 Asserted: the stored `Participant.status` equals the status the run's scenario carries; the good line is there, the
 bad one is not; the note counts the skipped line by its reason. Entry: `runner._apply_due_scenario_events`, as S4.
@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from tests.integration.test_p030_s3b_simulator_through_the_services_postgres import _world
+from tests.integration.test_p030_s3b_simulator_through_the_services_postgres import _inject, _world
 from tests.unit.test_scenario_inject_topology import _make_run, _make_runner
 
 
@@ -77,4 +77,16 @@ async def test_a_non_finite_initial_limit_does_not_split_the_participant(db_sess
         f"scenario {got['in_scenario']} - the participant was committed half-added ({got['stats']})")
     assert (got["stored"], got["lines"]) == (expected, 1), (
         f"expected the participant {expected!r} with its one good line; got {got}")
-    assert got["stats"]["skipped_reasons"] == {"MONEY_FINITENESS": 1}, got["stats"]
+    assert got["stats"]["skipped_reasons"] == {"money_finiteness": 1}, got["stats"]
+
+
+@pytest.mark.asyncio
+async def test_a_non_finite_create_trustline_limit_is_skipped_under_its_reason(db_session) -> None:
+    """The sibling effect: nothing is written before its comparison, so nothing was split - but the general handler
+    hid why the line was skipped. It now answers like every other unstorable limit."""
+    eq, p = await _world(db_session)
+    note = await _inject(db_session, eq, p, {"op": "create_trustline", "from": p["A"].pid, "to": p["B"].pid,
+                                             "equivalent": eq.code, "limit": "NaN"})
+    lines = await db_session.scalar(select(func.count()).select_from(TrustLine).where(TrustLine.equivalent_id == eq.id))
+    assert lines == 0, note
+    assert note["stats"]["skipped_reasons"] == {"money_finiteness": 1}, note["stats"]

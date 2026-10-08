@@ -592,7 +592,11 @@ class InjectExecutor:
                             tl_limit_val = Decimal(str(raw_limit))
                         except Exception:
                             continue
-                        if tl_limit_val <= 0:
+                        # 034 S4b: a non-finite limit (`NaN` parses, and comparing it RAISES) is a bad line like its
+                        # neighbours - it goes to the storability door below, which names it (`money_finiteness`) and
+                        # skips the line. Raised here, it left the effect after the participant was inserted `active`
+                        # and before its declared status was set, and the event still committed.
+                        if tl_limit_val.is_finite() and tl_limit_val <= 0:
                             continue
                         # Storage-capacity door (012 / F-012-1).
                         if unstorable_limit(tl_limit_val):
@@ -724,7 +728,7 @@ class InjectExecutor:
                 except Exception:
                     skipped += 1
                     return False
-                if tl_limit_val <= 0:
+                if tl_limit_val.is_finite() and tl_limit_val <= 0:  # non-finite: the storability door below (034 S4b)
                     skipped += 1
                     return False
                 # Storage-capacity door (012 / F-012-1).
