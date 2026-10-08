@@ -62,6 +62,11 @@ make the session green again:
 * 2026-10-08, 035 slice C1 (F-035-14): first value, 3150 (3165 with the 15 `slow` cases). Measured with
   `python -m pytest --collect-only -q -m "not slow"` on `75dafc82`; on Windows the full run was
   `3144 passed, 2 skipped, 3 xfailed, 16 deselected` with one case deselected, which is 3149 + 1.
+* 2026-10-08, 035 slice C1, merge of `origin/main` `0f248b9c`: 3150 -> 3219 (+69; 3234 with the 15 `slow` cases). The merge
+  brought backend tests of 035 A1 (PR #166: `test_p035_a1_cycles_do_not_hold_the_event_loop.py`, `test_p035_b1_equivalent_query_code.py`,
+  `tests/p035_support.py`) and 034 S1a (PR #167: three `test_p034_s1_*` modules, `test_p034_s1_launch_epoch_and_post_commit_publication.py`)
+  plus additions to existing modules. The guard itself refused the first merged collection ("MORE than recorded", exit 4)
+  - the case it is for. Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -103,7 +108,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3150
+EXPECTED_SELECTED_ITEMS = 3219
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
