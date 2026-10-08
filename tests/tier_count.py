@@ -73,7 +73,11 @@ make the session green again:
   `tests/integration/test_p034_s1b_payment_edge_patch_names_the_line_postgres.py` (4). Measured with
   `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `origin/main` `4a1768d5`; the guard refused
   the collection first ("selected 3233 case(s), expected exactly 3219 ... MORE than recorded", exit 4).
-* 2026-10-08, 035 slice A4 (F-035-3), on `origin/main` `dd019a31`: 3233 -> 3237 (+4). Four new cases in
+* 2026-10-08, 035 slice A3 (F-035-2), on `origin/main` `dd019a31`: 3233 -> 3235 (+2). Two new cases in
+  `tests/integration/test_p035_a3_trustlines_page_is_not_a_query_per_line.py` (the statement count of a page and the
+  page against the single-line read). Measured with `python -m pytest --collect-only -q -m "not slow"` on the branch
+  merged with `dd019a31` (on `4a1768d5` the same two cases read 3219 -> 3221, by the guard's own refusal).
+* 2026-10-08, 035 slice A4 (F-035-3), merged after A3 (`origin/main` `9b19fc04`): 3235 -> 3239 (+4; on `dd019a31` alone it read 3233 -> 3237). Four new cases in
   `tests/integration/test_p035_a4_neutrality_reads_the_cycle_as_a_set.py` (the statement count, two counterexamples,
   the set read against the per-participant read). Measured with `python -m pytest --collect-only -q -m "not slow"` on
   the branch merged with `dd019a31` (on `4a1768d5` the same four cases read 3219 -> 3223, by the guard's own refusal).
@@ -119,7 +123,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3237
+EXPECTED_SELECTED_ITEMS = 3239
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
