@@ -429,8 +429,10 @@ class ArtifactsManager:
         (a batch could not be appended; every line of it) and `encode_failed` (the event is not JSON-serialisable).
         NOT COUNTED - so a zero here does not say "nothing is missing from `events.ndjson`": an event that arrives
         when the run has no writer (before it starts, after the run is stopped - `enqueue_event_artifact` returns
-        on `q is None`), and events still queued when `stop_events_writer` cancels a writer that did not finish in
-        its 2 s."""
+        on `q is None`); events still queued when `stop_events_writer` cancels a writer that did not finish in
+        its 2 s; and the BATCH that writer had already taken off the queue when it was cancelled - the loop
+        takes a batch before it awaits the append in a thread, and the stop's timeout can cancel an append that
+        has not started, or stop watching one that is running (it may still land, or not; nobody counts either)."""
 
         total = count
         try:
