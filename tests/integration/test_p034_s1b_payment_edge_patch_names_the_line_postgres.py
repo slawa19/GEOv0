@@ -85,6 +85,45 @@ async def test_the_tick_patches_the_line_the_payment_drew_on(factory, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_the_tick_patches_both_lines_of_the_pair_when_both_exist(factory, monkeypatch) -> None:  # noqa: F811
+    """The payer also trusts the payee (S -> R, limit 50.00, nothing owed on it). A hop S -> R may change either
+    line of the pair, so both are patched - the one drawn on first - each with its own figures; before the fix
+    only S -> R was patched, the line this payment did not move."""
+
+    world = await _seed(factory)
+    payer, payee = world.sender.pid, world.receiver.pid
+    async with factory() as s:
+        s.add(TrustLine(from_participant_id=world.sender.id, to_participant_id=world.receiver.id,
+                        equivalent_id=world.equivalent.id, limit=Decimal("50.00"), status="active"))
+        await s.commit()
+    PaymentRouter.invalidate_cache(world.equivalent.code)
+    try:
+        sse = _Sse()
+        run = _run_record(world, f"p034-s1b-{uuid.uuid4().hex[:8]}")
+        runner = _runner(run, _scenario(world), sse)
+        _install(monkeypatch, factory)
+        plans = _record_plans(monkeypatch, runner)
+        await asyncio.wait_for(runner.tick_real_mode(run.run_id), timeout=90.0)
+        debts = await _debts(factory, world)
+    finally:
+        _forget_the_route_cache(world)
+
+    used = _OPENING + Decimal(plans[0][0].amount)
+    assert debts == {(payer, payee): used} and run.last_error is None, (debts, run.last_error)
+    updated = [e for e in sse.events if e.get("type") == "tx.updated"]
+    patch = [(p["source"], p["target"], p["used"], p["available"]) for p in updated[0].get("edge_patch") or []]
+    assert patch == [(payee, payer, _money(used), _money(_LIMIT - used)), (payer, payee, "0.00", "50.00")], patch
+
+
+def test_the_lines_of_a_route_are_both_directions_of_each_hop_once() -> None:
+    from app.core.simulator.edge_patch_builder import line_pairs_of_payment_hops
+
+    assert line_pairs_of_payment_hops([("a", "b"), ("b", "c")]) == [("b", "a"), ("a", "b"), ("c", "b"), ("b", "c")]
+    assert line_pairs_of_payment_hops([("a", "b"), ("b", "a"), ("a", "b")]) == [("b", "a"), ("a", "b")]
+    assert line_pairs_of_payment_hops([]) == []
+
+
+@pytest.mark.asyncio
 async def test_the_interact_payment_patches_the_line_the_payment_drew_on(
     client, db_session, interact_actions_enabled, monkeypatch  # noqa: F811
 ) -> None:

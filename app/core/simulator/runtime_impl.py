@@ -104,8 +104,9 @@ class _SimulatorRuntimeBase:
         self._run_persist_every_ms = settings.SIMULATOR_RUN_PERSIST_EVERY_MS
         self._run_persist_dirty_every_ms = settings.SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS
 
-        # Local artifact retention (0 disables).
+        # Local artifact retention (0 disables either rule; 034 `F-034-8`).
         self._artifacts_ttl_hours = settings.SIMULATOR_ARTIFACTS_TTL_HOURS
+        self._artifacts_max_runs = settings.SIMULATOR_ARTIFACTS_MAX_RUNS
 
         self._artifacts = ArtifactsManager(
             lock=self._lock,
@@ -145,7 +146,9 @@ class _SimulatorRuntimeBase:
 
         # Best-effort cleanup of old local artifacts (keeps dev dirs from growing forever).
         try:
-            self._artifacts.cleanup_old_runs(ttl_hours=self._artifacts_ttl_hours)
+            self._artifacts.cleanup_old_runs(
+                ttl_hours=self._artifacts_ttl_hours, max_runs=self._artifacts_max_runs
+            )
         except Exception:
             logger.exception("simulator.artifacts.cleanup_failed")
 
@@ -884,6 +887,41 @@ class _SimulatorRuntimeBase:
             limits=snap.limits,
         )
 
+    async def _heartbeat_failed(self, run_id: str, error: Exception) -> None:
+        """An iteration of the heartbeat raised: the run is stopped as failed, visibly (034 `F-034-10`).
+
+        The loop used to catch `CancelledError` only. Any other exception - a status publication, the registry, a
+        failure inside the tick's own failure handling - ended the task and left the run `running` with nothing
+        ticking it, no `last_error` and no log line of the application. There is no retry here: what failed is
+        not known to be transient, and a run that is not ticked must not say `running`. The run goes to `error`
+        with `last_error`, through the same `fail_run` a failing tick uses; `resume` brings it back (024 T2416.2).
+        Never raises (a cancellation aside).
+        """
+
+        logger.error(
+            "simulator.heartbeat.failed run_id=%s error_type=%s",
+            str(run_id),
+            type(error).__name__,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        message = f"The heartbeat failed: {type(error).__name__}: {error}"
+        try:
+            await self._real_runner.fail_run(run_id, code="HEARTBEAT_FAILED", message=message)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("simulator.heartbeat.fail_run_failed run_id=%s", str(run_id), exc_info=True)
+        # `fail_run` moves the state before anything in it can fail; this is for the case where it could not even
+        # start (the registry no longer has the run - then there is nothing left to mark).
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is not None and run.state == "running":
+                run.state = "error"
+                run.stopped_at = _utc_now()
+                run.current_phase = None
+                run.errors_total += 1
+                run.last_error = {"code": "HEARTBEAT_FAILED", "message": message, "at": _utc_now().isoformat()}
+
     async def _heartbeat_loop(self, run_id: str) -> None:
         try:
             while True:
@@ -981,6 +1019,9 @@ class _SimulatorRuntimeBase:
                     run._persist_last_sig = sig
         except asyncio.CancelledError:
             return
+        except Exception as error:
+            # 034 `F-034-10`: the loop ends here either way; the run must not stay `running` behind it.
+            await self._heartbeat_failed(run_id, error)
 
 
 class SimulatorRuntime(_SimulatorRuntimeBase):

@@ -120,6 +120,21 @@ async def test_finalizing_a_run_prunes_the_expired_and_the_surplus_run_directori
     )
 
 
+def test_each_rule_is_off_at_zero_and_works_alone(tmp_path) -> None:
+    """The two rules are independent, and 0 switches a rule off - an operator's choice, no longer the default."""
+
+    manager = _manager(tmp_path, {})
+    for hours, name in ((30, "a-oldest"), (20, "b"), (10, "c-newest")):
+        _run_dir(tmp_path, name, age_s=hours * 3600)
+
+    manager.cleanup_old_runs(ttl_hours=0, max_runs=0)
+    assert _run_dirs(tmp_path) == {"a-oldest", "b", "c-newest"}  # both off: nothing is removed
+    manager.cleanup_old_runs(ttl_hours=25, max_runs=0)
+    assert _run_dirs(tmp_path) == {"b", "c-newest"}  # the TTL alone
+    manager.cleanup_old_runs(ttl_hours=0, max_runs=1)
+    assert _run_dirs(tmp_path) == {"c-newest"}  # the limit alone keeps the newest
+
+
 def _dropped(reason: str) -> float:
     return REGISTRY.get_sample_value(_DROPPED, {"reason": reason}) or 0.0
 
@@ -147,3 +162,26 @@ async def test_an_event_the_artifact_writer_could_not_take_is_counted(tmp_path, 
         f"3 events did not fit the artifact writer's queue; counted by {_DROPPED}{{reason=\"queue_full\"}}: "
         f"{counted:g}; warnings logged: {logged}. Expected 3 counted and the loss logged"
     )
+    assert run._artifact_events_dropped == 3 and len(logged) == 1, (run._artifact_events_dropped, logged)  # once, not per event
+
+
+@pytest.mark.asyncio
+async def test_a_batch_the_writer_could_not_append_is_counted(tmp_path) -> None:
+    """The other way an event is lost: the append itself fails (here `events.ndjson` is a directory). The real
+    writer loop takes the two queued events as one batch, fails to append it, and counts both."""
+
+    runs: dict[str, RunRecord] = {}
+    manager = _manager(tmp_path, runs)
+    artifacts = _run_dir(tmp_path, "r-io", age_s=0)
+    run = _registered(runs, "r-io", "running", artifacts)
+    (artifacts / "events.ndjson").unlink()
+    (artifacts / "events.ndjson").mkdir()
+    before = _dropped("write_failed")
+
+    queue: asyncio.Queue = asyncio.Queue()
+    for item in ('{"seq":0}\n', '{"seq":1}\n', None):
+        queue.put_nowait(item)
+    await manager._events_writer_loop(run_id=run.run_id, path=artifacts / "events.ndjson", queue=queue)
+
+    assert (_dropped("write_failed") - before, run._artifact_events_dropped) == (2, 2)
+

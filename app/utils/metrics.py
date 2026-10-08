@@ -49,5 +49,14 @@ BACKGROUND_JOB_EVENTS_TOTAL = Counter(
 )
 
 
+# 034 `F-034-8`: simulator events the run's artifact writer (`events.ndjson`) could not record. A drop used to
+# leave no trace, so "nothing was lost" and "nobody counted" read the same. `reason`: `queue_full`, `write_failed`.
+SIMULATOR_ARTIFACT_EVENTS_DROPPED_TOTAL = Counter(
+    "geo_simulator_artifact_events_dropped_total",
+    "Simulator events not recorded in a run's events.ndjson artifact",
+    ["reason"],
+)
+
+
 def render_metrics() -> tuple[bytes, str]:
     return generate_latest(), CONTENT_TYPE_LATEST

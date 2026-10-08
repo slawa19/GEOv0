@@ -62,6 +62,26 @@ async def test_a_failed_heartbeat_iteration_does_not_leave_the_run_running_witho
 
 
 @pytest.mark.asyncio
+async def test_the_run_is_marked_failed_even_when_the_failure_path_itself_fails(clock, monkeypatch) -> None:  # noqa: F811
+    """`fail_run` - the path a failing tick uses, and the one the heartbeat takes - raises too (it publishes a
+    status of its own). The run still does not stay `running`: the state is set directly, with the reason."""
+
+    run = await _started(clock)
+    _fail_the_status_publication(monkeypatch)
+
+    async def _fail_run_fails(_run_id: str, *, code: str, message: str) -> None:
+        raise RuntimeError("p034: the failure path failed")
+
+    monkeypatch.setattr(runtime._real_runner, "fail_run", _fail_run_fails)
+    errors_before = run.errors_total
+    await clock.progress(run)
+
+    assert (run.state, _heartbeats(run.run_id)) == ("error", 0), (run.state, run.last_error)
+    assert run.last_error and run.last_error["code"] == "HEARTBEAT_FAILED" and run.errors_total == errors_before + 1, run.last_error
+    assert "the status could not be published" in run.last_error["message"], run.last_error
+
+
+@pytest.mark.asyncio
 async def test_a_run_stopped_by_a_heartbeat_failure_can_be_resumed_and_ticks_again(clock, monkeypatch) -> None:  # noqa: F811
     """The way back, once the cause is gone: `resume` re-enters `running` with one live heartbeat (024 T2416.2)."""
 

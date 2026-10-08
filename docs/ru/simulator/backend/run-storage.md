@@ -221,10 +221,24 @@ WHERE created_at < NOW() - INTERVAL '30 days';
 - В БД в `simulator_run_artifacts.storage_url` кладём URL вида:
   - `/api/v1/simulator/runs/<run_id>/artifacts/<name>`
 
-Файловую очистку делаем отдельной job:
-- находит runs старше retention
-- удаляет папку `.local-run/simulator/runs/<run_id>`
-- (опционально) удаляет записи `simulator_runs` (если ещё не удалены)
+**Фактическая очистка (программа 034, F-034-8, 2026-10-08).** Отдельной job нет; правило применяет
+`ArtifactsManager.cleanup_old_runs` (`app/core/simulator/artifacts.py`) — при старте рантайма и сразу после
+`finalize_run_artifacts` (остановка рана):
+
+- `SIMULATOR_ARTIFACTS_TTL_HOURS` (по умолчанию 72): каталог рана, не менявшийся дольше, удаляется;
+- `SIMULATOR_ARTIFACTS_MAX_RUNS` (по умолчанию 50): если каталогов больше, удаляются самые старые;
+- `0` выключает соответствующее правило (до 034 TTL по умолчанию был 0, а лимита не было вовсе);
+- каталог **активного** рана (`running`, `paused`, `stopping`) не удаляется и в лимит не входит; только что
+  записанный ран не удаляется и считается самым новым;
+- трогаются только каталоги непосредственно под `runs/`; хранилище сценариев рядом — нет;
+- записи `simulator_runs` и индекс артефактов в БД очистка не трогает: у рана, чей каталог удалён, список
+  артефактов пуст.
+
+**Потерянные события артефакта.** Событие, не поместившееся в очередь писателя `events.ndjson` (10 000) или
+не записанное из-за ошибки ввода-вывода, не восстанавливается, но считается: счётчик `/metrics`
+`geo_simulator_artifact_events_dropped_total{reason="queue_full"|"write_failed"}` и предупреждение в логе
+`simulator.artifacts.events_dropped` (первая потеря рана и далее раз в тысячу). Размер одного `events.ndjson`
+живого рана по-прежнему не ограничен.
 
 ## 5) TODO (для закрытия документа)
 - Replay buffer для `Last-Event-ID` уже реализован как in-memory ring-buffer (best-effort).

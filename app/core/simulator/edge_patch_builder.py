@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import and_, func, or_, select
 
@@ -20,7 +20,26 @@ from app.core.simulator.models import RunRecord
 # that `viz_patch_helper` -- which this module imports -- can call it without a cycle.  The
 # name stays importable from here because that is where T1201 published it; the rule and its
 # reasoning live in the docstring at the new home and are not to be re-litigated in a copy.
-__all__ = ["EdgePatchBuilder", "to_money_str"]
+__all__ = ["EdgePatchBuilder", "line_pairs_of_payment_hops", "to_money_str"]
+
+
+def line_pairs_of_payment_hops(hops: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The trust-line pairs (creditor PID, debtor PID) a payment's hops may have changed, for the edge patch.
+
+    034 S1b. A hop goes payer -> payee; the line it draws on goes the other way, payee (creditor) -> payer
+    (debtor), which is the direction of every edge the client holds and of `build_edge_patch_for_pairs`. A hop can
+    also pay down what the payee owes the payer, which is the line payer -> payee. So each hop names BOTH lines of
+    its pair - the one it draws on first - and the builder patches those that exist. The payment paths used to
+    hand the hops themselves over as lines: the patch then described payer -> payee only, a line that often does
+    not exist, and the line whose `used` had grown was never patched.
+    """
+
+    pairs: list[tuple[str, str]] = []
+    for payer, payee in hops:
+        for pair in ((payee, payer), (payer, payee)):
+            if pair[0] and pair[1] and pair not in pairs:
+                pairs.append(pair)
+    return pairs
 
 
 class EdgePatchBuilder:
@@ -266,8 +285,12 @@ class EdgePatchBuilder:
             if not src_part or not dst_part:
                 continue
 
+            if (src_part.id, dst_part.id) not in tl_by_pair:
+                # No trust line of this pair in this direction, live or closed: there is no edge to patch. Until
+                # 034 S1b this emitted a patch of an invented line - limit 0, `used` and `available` 0.00.
+                continue
             used_amt = debt_by_pair.get((src_part.id, dst_part.id), Decimal("0"))
-            limit_amt, tl_status, requested = tl_by_pair.get((src_part.id, dst_part.id), (Decimal("0"), None, None))
+            limit_amt, tl_status, requested = tl_by_pair[(src_part.id, dst_part.id)]
             if tl_status == "closed":
                 if closed is not None:
                     closed.add((src_pid, dst_pid))

@@ -7,7 +7,7 @@ import shutil
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from sqlalchemy import delete
 
@@ -87,38 +87,70 @@ class ArtifactsManager:
             self._logger.exception("simulator.artifacts.init_failed run_id=%s", getattr(run, "run_id", ""))
             run.artifacts_dir = None
 
-    def cleanup_old_runs(self, *, ttl_hours: int) -> None:
-        """Best-effort cleanup for `.local-run/simulator/runs/*`.
+    def cleanup_old_runs(self, *, ttl_hours: int, max_runs: int = 0, keep: Iterable[str] = ()) -> None:
+        """Best-effort retention of `.local-run/simulator/runs/*`: a TTL and a limit of run directories.
 
-        Only touches local filesystem artifacts; never affects DB state.
+        034 `F-034-8` (AGENTS.md §12). A run directory last modified more than `ttl_hours` ago is removed; then, if
+        more than `max_runs` run directories are left, the oldest are removed until `max_runs` are. Either rule is
+        off at 0. Called when the runtime starts and right after a run's artifacts are finalized.
+
+        NEVER REMOVED: the directory of an ACTIVE run (`running`, `paused`, `stopping` in this process's registry),
+        which is not counted against the limit either, and the runs named in `keep` (the one just written), which
+        are counted as the newest. Only directories directly under `runs/` that resolve inside it are looked at - a
+        file there, or anything beside `runs/` (the scenarios store), is not a run. Only touches local filesystem
+        artifacts; never affects DB state.
         """
 
-        ttl_hours = int(ttl_hours or 0)
-        if ttl_hours <= 0:
+        ttl_hours, max_runs = int(ttl_hours or 0), int(max_runs or 0)
+        if ttl_hours <= 0 and max_runs <= 0:
             return
 
         base = (self._local_state_dir() / "runs").resolve()
         if not base.exists() or not base.is_dir():
             return
 
+        with self._lock:
+            active = {
+                str(run_id) for run_id, run in self._runs.items()
+                if str(getattr(run, "state", "")) in ("running", "paused", "stopping")
+            }
+        kept = {str(run_id) for run_id in keep}
+        newest = float("inf")
+
+        def _remove(path: Path) -> bool:
+            try:
+                shutil.rmtree(path, ignore_errors=False)
+                return True
+            except FileNotFoundError:
+                return True
+            except Exception:
+                self._logger.exception("simulator.artifacts.cleanup_failed path=%s", str(path))
+                return False
+
         cutoff = time.time() - (ttl_hours * 3600)
-
+        left: list[tuple[float, Path]] = []
         for p in sorted(base.iterdir()):
-            if not p.is_dir():
+            if not p.is_dir() or p.name in active:
                 continue
-
             try:
                 rp = p.resolve()
                 if not rp.is_relative_to(base):
                     continue
-                mtime = float(rp.stat().st_mtime)
-                if mtime >= cutoff:
-                    continue
-                shutil.rmtree(rp, ignore_errors=False)
+                mtime = newest if p.name in kept else float(rp.stat().st_mtime)
             except FileNotFoundError:
                 continue
             except Exception:
                 self._logger.exception("simulator.artifacts.cleanup_failed path=%s", str(p))
+                continue
+            if ttl_hours > 0 and mtime < cutoff and _remove(rp):
+                continue
+            left.append((mtime, rp))
+
+        if max_runs > 0 and len(left) > max_runs:
+            left.sort(key=lambda entry: (entry[0], entry[1].name))
+            for mtime, rp in left[: len(left) - max_runs]:
+                if mtime != newest:
+                    _remove(rp)
 
     async def list_artifacts(self, *, run_id: str) -> ArtifactIndex:
         run = self._get_run(run_id)
@@ -301,13 +333,37 @@ class ArtifactsManager:
                 buf.append(nxt)
 
             text = "".join(buf)
+            lines = len(buf)
             buf.clear()
             try:
                 await asyncio.to_thread(_append_text, path, text)
             except Exception:
-                # Best-effort: drop on IO errors.
+                # Best-effort: the batch is dropped on an IO error - and counted (034 `F-034-8`).
                 self._logger.exception("simulator.artifacts.events_writer_append_failed run_id=%s", run_id)
+                self._count_dropped_events(run_id, reason="write_failed", count=lines)
                 continue
+
+    def _count_dropped_events(self, run_id: str, *, reason: str, count: int = 1) -> None:
+        """034 `F-034-8`: events the writer could not record are COUNTED - on the run, on the `/metrics` counter
+        `geo_simulator_artifact_events_dropped_total{reason}` - and the loss is logged: at the run's first drop
+        and then once per thousand, with the run's total. Never raises; a drop stays a drop."""
+
+        total = count
+        try:
+            with self._lock:
+                run = self._runs.get(run_id)
+                if run is not None:
+                    run._artifact_events_dropped += count
+                    total = int(run._artifact_events_dropped)
+            from app.utils import metrics
+
+            metrics.SIMULATOR_ARTIFACT_EVENTS_DROPPED_TOTAL.labels(reason=reason).inc(count)
+        except Exception:
+            self._logger.debug("simulator.artifacts.drop_count_failed run_id=%s", run_id, exc_info=True)
+        if total == count or total // 1000 != (total - count) // 1000:
+            self._logger.warning(
+                "simulator.artifacts.events_dropped run_id=%s reason=%s dropped_total=%d", run_id, reason, total
+            )
 
     def enqueue_event_artifact(self, run_id: str, payload: dict[str, Any]) -> None:
         run = self._get_run(run_id)
@@ -322,8 +378,8 @@ class ArtifactsManager:
         try:
             q.put_nowait(line)
         except asyncio.QueueFull:
-            # Best-effort drop.
-            return
+            # Best-effort drop: the event is not recorded in `events.ndjson`, and that is counted.
+            self._count_dropped_events(run_id, reason="queue_full")
 
     async def finalize_run_artifacts(self, *, run_id: str, status_payload: dict[str, Any]) -> None:
         run = self._get_run(run_id)
@@ -366,7 +422,18 @@ class ArtifactsManager:
             await simulator_storage.sync_artifacts(run)
         except Exception:
             self._logger.exception("simulator.artifacts.sync_failed run_id=%s", run_id)
-            return
+
+        # 034 `F-034-8` (AGENTS.md §12): the retention is applied right after the write, not only at start. A
+        # failure of it never costs the artifacts just written.
+        try:
+            await asyncio.to_thread(
+                self.cleanup_old_runs,
+                ttl_hours=settings.SIMULATOR_ARTIFACTS_TTL_HOURS,
+                max_runs=settings.SIMULATOR_ARTIFACTS_MAX_RUNS,
+                keep=(run_id,),
+            )
+        except Exception:
+            self._logger.exception("simulator.artifacts.cleanup_failed run_id=%s", run_id)
 
     def write_real_tick_artifact(self, run: RunRecord, payload: dict[str, Any]) -> None:
         base = run.artifacts_dir
