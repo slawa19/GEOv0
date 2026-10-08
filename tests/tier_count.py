@@ -78,6 +78,9 @@ make the session green again:
   cases (the branch said 3247 then, never `main`); the mechanism and its tests were withdrawn after the section-15 review,
   so that number is gone with them. Measured with `python -m pytest --collect-only -q -m "not slow"` on the branch merged
   with `origin/main` `dd019a31`.
+* 2026-10-08, 034 slice S1c, fix-delta of the review of `a08f85a4`: 3239 -> 3243 (+4; 3258 with the 15 `slow` cases). One
+  new module, `tests/unit/test_p034_s1c_scripts_do_not_start_the_simulator_runtime.py`: one test parametrized over three
+  script invocations, and one more. Measured with `python -m pytest --collect-only -q -m "not slow"`.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -120,7 +123,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3239
+EXPECTED_SELECTED_ITEMS = 3243
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

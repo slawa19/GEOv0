@@ -14,16 +14,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.core.simulator.runtime_utils import local_state_dir  # noqa: E402
-
+from app.config import simulator_state_dir  # noqa: E402
 
 
 def _runs_dir() -> Path:
-    """034 S1c: the runs of the simulator state the application uses (`SIMULATOR_STATE_DIR`, else the checkout's
-    `.local-run/simulator`), through the application's own resolver - not a path of this script's own. The cost:
-    the script now needs the application's settings to load (`ENV`, `DATABASE_URL`), as the run it inspects did."""
+    """034 S1c: the runs of the simulator state the application uses - `SIMULATOR_STATE_DIR`, by default the
+    checkout's `.local-run/simulator` - not a path of this script's own. The cost: the script needs the
+    application's settings to load (`ENV`, `DATABASE_URL`), as the run it inspects did.
 
-    return local_state_dir() / "runs"
+    The rule is `app.config.simulator_state_dir()`, asked there and NOT through `app.core.simulator`: importing
+    that package starts the simulator runtime, whose constructor applies the start-up cleanup of run directories.
+    A script that only reads must not do that (it did, on `a08f85a4`)."""
+
+    return simulator_state_dir() / "runs"
 
 
 @dataclass(frozen=True)

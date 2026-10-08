@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from app.config import settings
+from app.config import simulator_state_dir
 from app.schemas.simulator import SIMULATOR_API_VERSION, RunStatus
 from app.core.simulator.models import RunRecord
 from app.core.simulator.scenario_equivalent import (
@@ -25,19 +25,14 @@ def repo_root() -> Path:
 
 def local_state_dir() -> Path:
     """The simulator's runtime state directory: `SIMULATOR_STATE_DIR`, else the checkout's `.local-run/simulator`
-    (ignored by .gitignore). A relative setting is taken from the repository root, never from the process's
-    working directory. 034 S1c: the override exists so that a session sharing the checkout - the test tier above
-    all - does not write into, or clean, the developer's directory (AGENTS.md §7, §12).
+    (ignored by .gitignore). 034 S1c: the override exists so that a session sharing the checkout - the test tier
+    above all - does not write into the developer's directory (AGENTS.md §7, §12).
 
-    THE ONE RESOLVER: the runtime, `scripts/cleanup_simulator_runs.py` and
-    `scripts/check_latest_simulator_artifacts.py` all ask this function, so a script cannot work on a directory the
-    application is not using. The directory must be the simulator's own (see `Settings.SIMULATOR_STATE_DIR`)."""
+    The rule itself is `app.config.simulator_state_dir()`, and this only delegates to it: the scripts that need
+    the path ask `app.config` directly, because importing this package starts the runtime (see there). The
+    directory must be the simulator's own (see `Settings.SIMULATOR_STATE_DIR`)."""
 
-    configured = str(settings.SIMULATOR_STATE_DIR or "").strip()
-    if not configured:
-        return repo_root() / ".local-run" / "simulator"
-    path = Path(configured)
-    return path if path.is_absolute() else repo_root() / path
+    return simulator_state_dir()
 
 
 FIXTURES_DIR = repo_root() / "fixtures" / "simulator"

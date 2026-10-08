@@ -12,7 +12,9 @@ WHAT IS HELD HERE.
 2. ANTI-VACUUM: the rule is a setting and not a test-only switch - empty, the path is the old one; relative, it is
    taken from the repository root whatever the working directory; absolute, it is taken as given.
 3. THE SCRIPTS (red on `dd019a31`): `cleanup_simulator_runs.py` and `check_latest_simulator_artifacts.py` work on
-   the configured directory, through the application's resolver.
+   the configured directory, by the one rule in `app.config` (`simulator_state_dir()`; the runtime's
+   `local_state_dir()` delegates to it). That they do so WITHOUT starting the runtime is held in a fresh process
+   by `test_p034_s1c_scripts_do_not_start_the_simulator_runtime.py` - it cannot be seen from inside this one.
 
 SAFETY OF THIS MODULE ITSELF. The cleanup script deletes directories. Every call of it here is a dry run, except one
 that runs only after an assertion has shown that the directory it resolved lies inside the test's temporary
@@ -99,6 +101,10 @@ def test_a_relative_setting_is_taken_from_the_repository_root_and_an_absolute_on
     assert local_state_dir() == repo_root() / ".local-run" / "somewhere" / "simulator"
     monkeypatch.setattr(settings, "SIMULATOR_STATE_DIR", str(tmp_path / "state"))
     assert local_state_dir() == tmp_path / "state"
+    # One rule, two askers: the runtime's function is the one in `app.config`, not a copy of it.
+    from app.config import simulator_state_dir
+
+    assert local_state_dir() == simulator_state_dir()
 
 
 # ── 3: the scripts ──────────────────────────────────────────────────────────────────────────────────────────────

@@ -29,8 +29,7 @@ from app.db.models.simulator_storage import (  # noqa: E402
     SimulatorRunBottleneck,
     SimulatorRunMetric,
 )
-from app.config import settings  # noqa: E402
-from app.core.simulator.runtime_utils import local_state_dir  # noqa: E402
+from app.config import settings, simulator_state_dir  # noqa: E402
 from app.db.session import AsyncSessionLocal  # noqa: E402
 
 
@@ -39,12 +38,16 @@ def _utc_now() -> datetime:
 
 
 def _local_simulator_runs_dir() -> Path:
-    """The run directories of the simulator state THE APPLICATION USES (`SIMULATOR_STATE_DIR`, else the checkout's
-    `.local-run/simulator`), through the application's own resolver. 034 S1c: this used to be a path of its own,
-    hard-coded to the checkout, so with the setting in use the script cleaned a directory the application was
-    not writing to - and left alone the one it was."""
+    """The run directories of the simulator state THE APPLICATION USES: `SIMULATOR_STATE_DIR`, by default the
+    checkout's `.local-run/simulator`. 034 S1c: this used to be a path of its own, hard-coded to the checkout, so
+    with the setting in use the script cleaned a directory the application was not writing to - and left alone
+    the one it was.
 
-    return local_state_dir() / "runs"
+    The rule is `app.config.simulator_state_dir()`, asked there and NOT through `app.core.simulator`: importing
+    that package starts the simulator runtime, whose constructor applies the start-up cleanup - this script would
+    delete run directories before reading `--dry-run` (it did, on `a08f85a4`)."""
+
+    return simulator_state_dir() / "runs"
 
 
 T = TypeVar("T")
@@ -184,7 +187,8 @@ async def main() -> int:
         "--artifacts",
         action="store_true",
         default=True,
-        help="Cleanup local artifacts under .local-run (default: enabled)",
+        help="Cleanup local artifacts under the simulator state directory - SIMULATOR_STATE_DIR, by default "
+             ".local-run/simulator (default: enabled)",
     )
     parser.add_argument(
         "--no-artifacts",

@@ -237,9 +237,14 @@ WHERE created_at < NOW() - INTERVAL '30 days';
 
 - пустое значение (по умолчанию) — `.local-run/simulator` чекаута, как было всегда;
 - относительный путь берётся от корня репозитория, а не от рабочего каталога процесса;
-- путь один на всех: рантайм, `scripts/cleanup_simulator_runs.py` и `scripts/check_latest_simulator_artifacts.py`
-  спрашивают один резолвер (`app/core/simulator/runtime_utils.py`, `local_state_dir()`), поэтому скрипт не
-  может работать по каталогу, которым приложение не пользуется.
+- правило одно — `simulator_state_dir()` в `app/config.py`: рантайм спрашивает его через
+  `app/core/simulator/runtime_utils.py` (`local_state_dir()`), а `scripts/cleanup_simulator_runs.py` и
+  `scripts/check_latest_simulator_artifacts.py` — напрямую из `app.config`, поэтому скрипт не может работать
+  по каталогу, которым приложение не пользуется;
+- скриптам **нельзя** импортировать что-либо из `app.core.simulator`: импорт этого пакета строит рантайм
+  симулятора, а его конструктор применяет стартовую чистку. На `a08f85a4` скрипты так и делали, и при
+  `SIMULATOR_ARTIFACTS_TTL_HOURS > 0` запуск `--dry-run` или `--help` удалял старые каталоги до разбора
+  аргументов (держит `tests/unit/test_p034_s1c_scripts_do_not_start_the_simulator_runtime.py`, свежий процесс).
 
 **Каталог обязан быть выделенным под симулятор.** Всё, что его чистит, считает своим каждый каталог под
 `runs/`: чистка при старте рантайма (при `SIMULATOR_ARTIFACTS_TTL_HOURS > 0`) и ручной скрипт удаляют такие
