@@ -33,7 +33,7 @@ from tests.integration.test_p020_selection_amount_first_unique_cycles_postgres i
     _remaining,
 )
 from tests.p020_support import Edge, debt_uuid, identity, identity_of, ring, seed_graph
-from tests.p023_support import auto_clear_http, fresh_read, require_target
+from tests.p023_support import auto_clear_http, fresh_read, planned_cycles, require_target
 
 _DEPTHS = [3, 4, 6, 7, 10]
 
@@ -87,10 +87,13 @@ def _admission_edges(kind: str):
     return edges, excluded, identity_of(eligible_ids)
 
 
+# 035 A2a (2026-10-08): the offer is read from the PLANNER (`planned_cycles`), not from the retired detectors. The
+# property that survives is the admission: an excluded cycle is never offered and never stands in the way of an
+# eligible one. The detectors' limit of 100 and their depth are gone with them, so the two depths this test ran at
+# are one run; the assertions are unchanged.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", [4, 6])
 @pytest.mark.parametrize("kind", ["consent", "closed", "perimeter"])
-async def test_retention_excluded_cycles_do_not_consume_the_limit(db_session, kind, max_depth) -> None:
+async def test_retention_excluded_cycles_do_not_consume_the_limit(db_session, kind) -> None:
     edges, excluded, eligible = _admission_edges(kind)
     await seed_graph(db_session, "PZX", edges)
 
@@ -102,13 +105,11 @@ async def test_retention_excluded_cycles_do_not_consume_the_limit(db_session, ki
             f"p020x{i:03d}{v}" for i in range(_EXCLUDED) for v in "ab"
         }
 
-    cycles = await ClearingService(db_session).find_cycles(
-        "PZX", max_depth=max_depth, allowed_participant_pids=perimeter
-    )
+    cycles = await planned_cycles(db_session, "PZX", allowed_participant_pids=perimeter)
     got = [identity(c) for c in cycles]
 
-    assert eligible in got, f"{kind}, depth {max_depth}: the eligible triangle is missing; got {len(got)}"
-    assert not (set(got) & excluded), f"{kind}, depth {max_depth}: an excluded triangle was returned"
+    assert eligible in got, f"{kind}: the eligible triangle is missing; got {len(got)}"
+    assert not (set(got) & excluded), f"{kind}: an excluded triangle was returned"
 
 
 @pytest.mark.asyncio
@@ -175,14 +176,15 @@ async def test_retention_ladder_occurrences_and_remainder_are_exact(db_session, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("max_depth", [4, 6])
-async def test_retention_overflow_global_result_is_not_empty(db_session, max_depth) -> None:
+async def test_retention_overflow_global_result_is_not_empty(db_session) -> None:
+    """035 A2a: read from the planner (one run - the detectors' two depths are gone with them)."""
+
     edges, ids_by_triangle = _overflow_edges()
     await seed_graph(db_session, "PZO", edges)
     seeded = (await db_session.execute(select(func.count()).select_from(Debt))).scalar_one()
     assert seeded == 3 * _TRIANGLES
 
-    got = [identity(c) for c in await ClearingService(db_session).find_cycles("PZO", max_depth=max_depth)]
+    got = [identity(c) for c in await planned_cycles(db_session, "PZO")]
 
-    assert got, f"depth {max_depth}: 101 eligible triangles and an empty global answer"
+    assert got, "101 eligible triangles and an empty global answer"
     assert set(got) <= {identity_of(ids) for ids in ids_by_triangle.values()}, "a returned cycle is not seeded"

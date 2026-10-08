@@ -40,7 +40,7 @@ from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
 
 
 @pytest_asyncio.fixture
@@ -135,10 +135,15 @@ async def test_interlock_path_still_clears_for_the_owning_run(
 
     async with sessionmaker() as session:
         service = ClearingService(session)
-        cycles = await service.find_cycles(
-            eq_code, max_depth=6, allowed_participant_pids=own_scope
-        )
+        # 035 A2a (2026-10-08): the cycle comes from the PLANNER under the run's perimeter, not from the retired
+        # detectors. The first assertion is unchanged; the second is the half `test_the_expanding_bind_works_on_
+        # postgresql` carried for the SQL producer on this engine: a foreign perimeter sees nothing here.
+        cycles = await planned_cycles(session, eq_code, allowed_participant_pids=own_scope)
         assert len(cycles) == 1, f"the owning run must still see its cycle: {cycles}"
+        foreign_scope = {ids["pid:a1"], ids["pid:a2"], ids["pid:a3"]}  # type: ignore[index]
+        assert await planned_cycles(session, eq_code, allowed_participant_pids=foreign_scope) == [], (
+            "the planner returned another run's cycle"
+        )
 
         cleared = await service.execute_occurrence(
             _occurrence_of(cycles[0], eq_id), allowed_participant_pids=own_scope

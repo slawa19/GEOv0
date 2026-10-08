@@ -120,11 +120,23 @@ make the session green again:
   six cases of the reproducer, one of the sibling `create_trustline`. Measured with
   `python -m pytest --collect-only -q -m "not slow"` (`3274/3289 tests collected`); the guard refused it first (exit 4).
 * 2026-10-09, 034 slice S4b merged after 034 S3 (`origin/main` `3ce2c6e6`, 3265): 3265 -> 3275 (+10, the S4b module above; the numbers in the S4b line are those of the branch on `bfae3cda`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
-* 2026-10-09, 035 money storability past the decimal context (review of 034 S4b), on `origin/main` `906cae90`:
-  3275 -> 3339 (+64). One new module, `tests/integration/test_p035_money_storability_does_not_depend_on_the_decimal_
+* 2026-10-09, 035 slice A2a, on `origin/main` `3ce2c6e6`: 3265 -> 3275 (+10). New: 11 cases in
+  `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` and 5 in
+  `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the seed's two modes). Fewer: tests moved from the retired
+  detectors to the planner lost the depth parametrization that had no meaning there - `test_p020_selection_retention_
+  postgres.py` -4 (6 -> 3 and 2 -> 1), `test_p012_t1210_detector_union_default_tier.py` -2 (3 -> 1).
+* 2026-10-09, 035 slice A2a, review of `4b833af5`: 3275 -> 3281 (+6). Four cases of the final acceptance in
+  `tests/unit/test_p017_t1711_seed_recipe_refuses.py` (the surviving cycle at its declared amount) and two in
+  `tests/integration/test_p035_a2a_seed_and_controls_read_the_planner.py` (the same on the real view; the control's
+  step read from the equivalent). Both A2a numbers are restated from `3ce2c6e6`; the total, 3281, is measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with it (on `bfae3cda` the same sixteen read
+  3264 -> 3280).
+* 2026-10-09, 035 slice A2a merged after 034 S4b (`origin/main` at the merge of PR #186, 3275): 3275 -> 3291 (+16, the A2a cases above; the numbers in the A2a lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 money storability past the decimal context (review of 034 S4b), on `origin/main` `a0d25e7c`:
+  3291 -> 3355 (+64). One new module, `tests/integration/test_p035_money_storability_does_not_depend_on_the_decimal_
   context.py`: the rule itself (boundary table, values past the context, a narrow context), the simulator's three
-  entries and ten cases of the two HTTP money doors. The number is the guard's own refusal ("selected 3339 case(s),
-  expected exactly 3275", `python -m pytest --collect-only -q -m "not slow"`).
+  entries and ten cases of the two HTTP money doors. Measured with `python -m pytest --collect-only -q -m "not slow"`
+  on the branch merged with `a0d25e7c` (on `906cae90` the same 64 read 3275 -> 3339, by the guard's own refusal).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -167,7 +179,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3339
+EXPECTED_SELECTED_ITEMS = 3355
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

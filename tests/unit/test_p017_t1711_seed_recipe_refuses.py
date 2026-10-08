@@ -309,13 +309,20 @@ async def test_a_retried_clearing_replays_the_occurrence_its_first_attempt_built
     detections, executed = [], []
     detected = [{**edge, "debt_id": str(uuid.uuid4())} for edge in _cycle(("B", "C"), ("C", "A"), ("A", "B"))]
 
+    # 035 A2a: the seed reads the planner's snapshot (`seed._clearing_view`), not the retired detectors; an `execute`
+    # command takes its cycle from the snapshot's edges. The double keeps the stand's point - the cycle is there
+    # once only - and every assertion below is unchanged.
+    async def _view(session, equivalent):
+        detections.append(equivalent)
+        if len(detections) != 1:
+            return {}, []
+        return {(edge["debtor"], edge["creditor"]): edge for edge in detected}, [detected]
+
+    monkeypatch.setattr(seed, "_clearing_view", _view)
+
     class _Service:
         def __init__(self, session):
             pass
-
-        async def find_cycles(self, equivalent, max_depth):
-            detections.append(equivalent)
-            return [detected] if len(detections) == 1 else []
 
         async def execute_occurrence(self, occurrence):
             executed.append(occurrence)
@@ -331,6 +338,139 @@ async def test_a_retried_clearing_replays_the_occurrence_its_first_attempt_built
     assert (len(detections), len(executed), run.report.retries) == (1, 2, 1)
     assert executed[0] == executed[1] and executed[0].amount_atoms == 10**8
     assert [str(debt_id) for debt_id in executed[0].debt_ids] == [detected[k]["debt_id"] for k in (2, 0, 1)]
+
+
+async def _clearing_with_a_cycle_that_is_whole_but_not_planned(monkeypatch, mode: str, *, planned=()):
+    """One `clearing` command of `mode` over a view where the named cycle a -> b -> c is whole in the snapshot and
+    the plan holds `planned` (nothing by default - the planner routed its volume elsewhere). Returns the run and
+    what was executed."""
+
+    import types
+    import uuid
+
+    import scripts.seed_recipe as seed
+
+    executed = []
+    named = [{**edge, "debt_id": str(uuid.uuid4())} for edge in _cycle(("A", "B"), ("B", "C"), ("C", "A"))]
+
+    async def _view(session, equivalent):
+        return {(edge["debtor"], edge["creditor"]): edge for edge in named}, [list(cycle) for cycle in planned]
+
+    class _Service:
+        def __init__(self, session):
+            pass
+
+        async def execute_occurrence(self, occurrence):
+            executed.append(occurrence)
+            return occurrence.amount
+
+    monkeypatch.setattr(seed, "_clearing_view", _view)
+    monkeypatch.setattr(seed, "ClearingService", _Service)
+    run = _run_with_fake_sessions()
+    run.identities = {ref: types.SimpleNamespace(pid=ref.upper()) for ref in "abc"}
+    run.equivalent_ids = {"UAH": uuid.uuid4()}
+    command = {"id": "c", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "1.00", "mode": mode, "expect": "-"}
+    return run, command, executed, named
+
+
+async def test_assert_clearable_needs_the_cycle_in_the_plan_not_only_in_the_snapshot(monkeypatch):
+    """035 A2a, decision D1: `assert_clearable` promises the cycle is OFFERED - one of the cycles of the plan. A
+    cycle whose every edge is eligible but which the plan does not hold (its volume went round another cycle) is
+    refused, and nothing is executed. The counter-check: the same cycle in the plan is accepted."""
+
+    run, command, executed, named = await _clearing_with_a_cycle_that_is_whole_but_not_planned(
+        monkeypatch, "assert_clearable")
+    with pytest.raises(SeedRefusal, match="not one of the 0 cycle"):
+        await run._clearing(command)
+    assert executed == []
+
+    rotated = named[1:] + named[:1]
+    run, command, executed, _ = await _clearing_with_a_cycle_that_is_whole_but_not_planned(
+        monkeypatch, "assert_clearable", planned=[rotated])
+    # `_view` of this second stand renders its own debt ids; only the directed edges are compared.
+    await run._clearing(command)
+    assert executed == []
+
+
+async def test_execute_takes_its_named_cycle_from_the_snapshot_whatever_the_plan_holds(monkeypatch):
+    """The other half of D1: an `execute` command names its own occurrence. Its cycle has to be whole in the
+    snapshot, in the recipe's order; that a pass would have chosen another cycle does not refuse it."""
+
+    run, command, executed, named = await _clearing_with_a_cycle_that_is_whole_but_not_planned(monkeypatch, "execute")
+    await run._clearing(command)
+    assert len(executed) == 1 and executed[0].amount_atoms == 10**8
+    assert [str(debt_id) for debt_id in executed[0].debt_ids] == [edge["debt_id"] for edge in named]
+
+
+async def test_execute_refuses_a_cycle_with_an_edge_missing_from_the_snapshot(monkeypatch):
+    import scripts.seed_recipe as seed
+
+    run, command, executed, named = await _clearing_with_a_cycle_that_is_whole_but_not_planned(monkeypatch, "execute")
+
+    async def _view_without_one_edge(session, equivalent):
+        return {(edge["debtor"], edge["creditor"]): edge for edge in named[:-1]}, []
+
+    monkeypatch.setattr(seed, "_clearing_view", _view_without_one_edge)
+    with pytest.raises(SeedRefusal, match="not whole in the planner's snapshot"):
+        await run._clearing(command)
+    assert executed == []
+
+
+@pytest.mark.parametrize("mode", ["execute", "assert_clearable"])
+async def test_the_smallest_debt_of_the_cycle_must_be_the_declared_amount_in_both_modes(monkeypatch, mode):
+    """The recipe's own assertion, kept by D1 for both modes: the smallest DEBT of the named cycle is the declared
+    amount. It is the debt on the snapshot that is compared, not the amount the plan gives the cycle."""
+
+    run, command, executed, named = await _clearing_with_a_cycle_that_is_whole_but_not_planned(
+        monkeypatch, mode, planned=[_cycle(("A", "B"), ("B", "C"), ("C", "A"))])
+    command["amount"] = "0.50"
+    with pytest.raises(SeedRefusal, match="its smallest edge is 1.00"):
+        await run._clearing(command)
+    assert executed == []
+
+
+@pytest.mark.parametrize(
+    "amounts, planned, passes",
+    [
+        (("880.00", "1015.00", "1240.00"), True, True),
+        # Review of `4b833af5` (P2): the cycle is still in the plan, but its smallest debt is no longer what the
+        # recipe declares. Presence alone accepted it.
+        (("879.00", "1015.00", "1240.00"), True, False),
+        (("881.00", "1015.00", "1240.00"), True, False),
+        (("880.00", "1015.00", "1240.00"), False, False),
+    ],
+    ids=["offered at the declared amount", "offered, one unit short", "offered, one unit over", "not offered"],
+)
+async def test_the_surviving_cycle_must_still_be_offered_at_its_declared_amount(monkeypatch, amounts, planned, passes):
+    """The final acceptance asks the same two things `assert_clearable` asked when the command ran: the named cycle
+    is one of the cycles of the plan AND its smallest debt on the snapshot is the declared amount."""
+
+    import types
+
+    import scripts.seed_recipe as seed
+
+    cycle = [
+        {"debtor": d, "creditor": c, "amount": amount, "debt_id": f"{d}{c}"}
+        for (d, c), amount in zip((("A", "B"), ("B", "C"), ("C", "A")), amounts)
+    ]
+
+    async def _view(session, equivalent):
+        return {(edge["debtor"], edge["creditor"]): edge for edge in cycle}, ([cycle] if planned else [])
+
+    monkeypatch.setattr(seed, "_clearing_view", _view)
+    run = _run_with_fake_sessions()
+    run.identities = {ref: types.SimpleNamespace(pid=ref.upper()) for ref in "abc"}
+    run.recipe = {"commands": [
+        {"op": "clearing", "id": "survivor", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "880.00",
+         "mode": "assert_clearable", "expect": "-"},
+        {"op": "clearing", "id": "executed", "equivalent": "UAH", "cycle": ["a", "b", "c"], "amount": "1.00",
+         "mode": "execute", "expect": "-"},  # an executed cycle is not asked to survive
+    ]}
+
+    verdict = await seed._check_surviving_cycle(_FakeSession, run)
+
+    assert verdict["passed"] is passes, verdict
+    assert (verdict["surviving"] == ["survivor"]) is passes, verdict
 
 
 # =================================================================================================

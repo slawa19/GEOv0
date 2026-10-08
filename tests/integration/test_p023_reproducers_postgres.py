@@ -58,11 +58,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from app.core.clearing.service import ClearingService
 from app.db.models.transaction import Transaction
 from tests.conftest import MODE_B
-from tests.p020_support import debt_uuid, identity, identity_of, ring, seed_graph
+from tests.p020_support import debt_uuid, ring, seed_graph
 from tests.p023_support import (
+    assert_named_cycles_are_in_the_snapshot,
     auto_clear_http,
     fresh_read,
     oracle_max_volume,
@@ -125,11 +125,11 @@ async def test_r023_1_depth_six_loses_volume_the_flow_finds(db_session, client, 
     edges, ring7, tri = _r1_edges()
     await seed_graph(db_session, "PQA", edges)
     oracle = _oracle_units(edges)
-    # Controls: the oracle's optimum is the ring carrying both units of the shared edge; both cycles are
-    # eligible and visible to the diagnostic detector when it may look seven edges deep.
+    # Controls: the oracle's optimum is the ring carrying both units of the shared edge; both cycles are real
+    # clearable alternatives on the snapshot (035 A2a, D2: read from the observed edges - the plan holds only the
+    # optimum, so it cannot list them; until then the retired detector did, at depth 7).
     assert oracle == 14, oracle
-    found = {identity(c) for c in await ClearingService(db_session).find_cycles("PQA", max_depth=7)}
-    assert found == {identity_of(e.debt_id for e in ring7), identity_of(e.debt_id for e in tri)}, found
+    await assert_named_cycles_are_in_the_snapshot(db_session, "PQA", [ring7, tri])
 
     cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQA")
     assert cleared >= 1, "control: the run executed something"
@@ -156,10 +156,9 @@ def _r2_edges():
 async def test_r023_2_shared_edge_six_versus_eight(db_session, client, auth_headers) -> None:
     edges, tri, five = _r2_edges()
     await seed_graph(db_session, "PQB", edges)
-    # Controls: the optimum is 8 and both cycles are eligible at depth 6.
+    # Controls: the optimum is 8 and both cycles are real clearable alternatives on the snapshot (035 A2a, D2).
     assert _oracle_units(edges) == 8
-    found = {identity(c) for c in await ClearingService(db_session).find_cycles("PQB", max_depth=6)}
-    assert found == {identity_of(e.debt_id for e in tri), identity_of(e.debt_id for e in five)}, found
+    await assert_named_cycles_are_in_the_snapshot(db_session, "PQB", [tri, five])
 
     cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQB")
     assert cleared >= 1, "control: the run executed something"
@@ -186,9 +185,8 @@ def _ring_edges(tag: str, group: int, length: int):
 async def test_r023_3_seven_ring_is_missed_at_depth_six(db_session, client, auth_headers) -> None:
     target_ring = _ring_edges("r3s", 0x2331, 7)
     await seed_graph(db_session, "PQD", target_ring)
-    # Control: the ring is eligible - the diagnostic detector returns it when allowed seven edges.
-    found = [identity(c) for c in await ClearingService(db_session).find_cycles("PQD", max_depth=7)]
-    assert found == [identity_of(e.debt_id for e in target_ring)], found
+    # Control: the ring is a real clearable cycle on the snapshot (035 A2a, D2; the retired detector showed it at 7).
+    await assert_named_cycles_are_in_the_snapshot(db_session, "PQD", [target_ring])
 
     cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQD")
     require_target(v_edge == Decimal(7), f"/auto: V_edge {v_edge} ({cleared} occurrences), target 7")
@@ -199,9 +197,8 @@ async def test_r023_3_seven_ring_is_missed_at_depth_six(db_session, client, auth
 async def test_r023_3_eleven_ring_is_missed_at_every_supported_depth(db_session, client, auth_headers) -> None:
     edges = _ring_edges("r3e", 0x2332, 11)
     await seed_graph(db_session, "PQE", edges)
-    # Control: the ring is eligible - the diagnostic detector returns it when allowed eleven edges.
-    found = [identity(c) for c in await ClearingService(db_session).find_cycles("PQE", max_depth=11)]
-    assert found == [identity_of(e.debt_id for e in edges)], found
+    # Control: the ring is a real clearable cycle on the snapshot (035 A2a, D2; the retired detector showed it at 11).
+    await assert_named_cycles_are_in_the_snapshot(db_session, "PQE", [edges])
 
     cleared, v_edge = await _run_auto_clear(client, auth_headers, db_session, "PQE")
     require_target(v_edge == Decimal(11), f"/auto: V_edge {v_edge} ({cleared} occurrences), target 11")

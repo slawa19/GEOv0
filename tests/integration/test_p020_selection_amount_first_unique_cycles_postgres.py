@@ -42,20 +42,23 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.participant import Participant
 from app.db.models.transaction import Transaction
 from tests.conftest import MODE_B
 from tests.p020_support import (
     debt_uuid,
-    identity,
-    identity_of,
     require_target,
     ring,
     seed_graph,
 )
-from tests.p023_support import auto_clear_http, fresh_read, oracle_max_volume, positive_debt_total
+from tests.p023_support import (
+    assert_named_cycles_are_in_the_snapshot,
+    auto_clear_http,
+    fresh_read,
+    oracle_max_volume,
+    positive_debt_total,
+)
 
 # ------------------------------------------------------------------------------------------------ overflow
 
@@ -147,11 +150,11 @@ async def test_amount_first_executes_the_long_cycle_over_a_shared_edge(db_sessio
 
     edges, tri, long_cycle = _ladder_edges(long_len)
     await seed_graph(db_session, _LADDER_EQ, edges)
-    service = ClearingService(db_session)
 
-    # Controls: both cycles are eligible and visible to the diagnostic; the oracle's optimum is the long cycle.
-    found = {identity(c) for c in await service.find_cycles(_LADDER_EQ, max_depth=6)}
-    assert found == {identity_of(e.debt_id for e in tri), identity_of(e.debt_id for e in long_cycle)}, found
+    # Controls: both cycles are real clearable alternatives on the snapshot (035 A2a, D2: read from the observed
+    # edges - the plan holds only the optimum, so it cannot list them; until then the retired detector did, at
+    # depth 6); the oracle's optimum is the long cycle.
+    await assert_named_cycles_are_in_the_snapshot(db_session, _LADDER_EQ, [tri, long_cycle])
     oracle = oracle_max_volume([(e.debt_id, e.debtor, e.creditor, int(Decimal(e.amount))) for e in edges])[0]
     assert oracle == 100 * long_len, oracle
 
