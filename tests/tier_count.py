@@ -67,6 +67,10 @@ make the session green again:
   `tests/p035_support.py`) and 034 S1a (PR #167: three `test_p034_s1_*` modules, `test_p034_s1_launch_epoch_and_post_commit_publication.py`)
   plus additions to existing modules. The guard itself refused the first merged collection ("MORE than recorded", exit 4)
   - the case it is for. Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-08, 035 slice A3 (F-035-2), on `origin/main` `4a1768d5`: 3219 -> 3221 (+2). Two new cases in
+  `tests/integration/test_p035_a3_trustlines_page_is_not_a_query_per_line.py` (the statement count of a page and the
+  page against the single-line read). The number is the guard's own refusal on the merged tree ("selected 3221 ... MORE
+  than recorded", exit 4, `scripts/verify_local.ps1 -BackendOnly`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -109,7 +113,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3219
+EXPECTED_SELECTED_ITEMS = 3221
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
