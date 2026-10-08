@@ -14,7 +14,12 @@ THE GRAPH AND THE THRESHOLD WERE FIXED BEFORE THE FIRST MEASUREMENT (spec 035, V
 * `_LOOP_DELAY_THRESHOLD_SECONDS = 0.25`: a request that only awaits the database yields within milliseconds; a
   quarter of a second is two orders above that and still what a neighbouring request would feel as a stall.
 
-What this does not see: a loop held for less than the threshold, and any other route.
+MEASURED ON `75dafc82` (the detectors, `max_depth=10`): the loop was held 1.460 s. With the fix the request carries
+no `max_depth` (the parameter left the contract, П1-(а)) and the control of the instrument is a request on a small
+equivalent instead of a shallow depth; the graph, the threshold and the assertion are the ones fixed above.
+
+What this does not see: a loop held for less than the threshold, any other route, and how long the planner process
+itself works (it shares one worker with clearing passes).
 """
 
 from __future__ import annotations
@@ -22,12 +27,13 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from decimal import Decimal
 
 import pytest
 
-from app.core.clearing import flow_planner
+from app.core.clearing import flow_planner, runner
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -37,7 +43,6 @@ from tests.integration.test_scenarios import register_and_login
 
 _LAYERS = 12
 _WIDTH = 3
-_MAX_DEPTH = 10
 _LOOP_DELAY_THRESHOLD_SECONDS = 0.25
 
 
@@ -117,25 +122,30 @@ def _debt_id_sets(cycles) -> set[frozenset[str]]:
     return {frozenset(edge["debt_id"] for edge in cycle) for cycle in cycles}
 
 
-@pytest.mark.slow  # measures wall time and, while red, runs the multi-second search (AGENTS §11)
 @pytest.mark.asyncio
 async def test_the_deepest_cycle_search_does_not_hold_the_event_loop(client, db_session):
     eq, triangle = await _dense_graph_with_one_short_cycle(db_session)
+    small, n = await _equivalent(db_session, "CS")
+    await _ring(db_session, small, n, "S", 3, "7")
+    dense_code, small_code = eq.code, small.code  # the route releases its read transaction, which expires `eq`
     user = await register_and_login(client, "P035A1Loop")
-    url = f"/api/v1/clearing/cycles?equivalent={eq.code}"
 
-    # Anti-vacuum for the instrument: on the same graph a search that does not reach the deep walk stays under the
-    # threshold, so the seeding, the database and the probe itself are not what the assertion below measures.
-    shallow, shallow_delay = await _get_while_measuring_the_loop(client, f"{url}&max_depth=3", user["headers"])
-    assert shallow.status_code == 200, shallow.text
-    assert shallow_delay < _LOOP_DELAY_THRESHOLD_SECONDS, f"the control request held the loop {shallow_delay:.3f} s"
+    # Anti-vacuum for the instrument: a request on a three-debt equivalent stays under the threshold, so the
+    # database, the planner process and the probe itself are not what the assertion below measures.
+    control, control_delay = await _get_while_measuring_the_loop(
+        client, f"/api/v1/clearing/cycles?equivalent={small_code}", user["headers"])
+    assert control.status_code == 200 and len(control.json()["cycles"]) == 1, control.text
+    assert control_delay < _LOOP_DELAY_THRESHOLD_SECONDS, f"the control request held the loop {control_delay:.3f} s"
 
-    response, delay = await _get_while_measuring_the_loop(client, f"{url}&max_depth={_MAX_DEPTH}", user["headers"])
+    response, delay = await _get_while_measuring_the_loop(
+        client, f"/api/v1/clearing/cycles?equivalent={dense_code}", user["headers"])
     assert response.status_code == 200, response.text
     offered = _debt_id_sets(response.json()["cycles"])
     assert frozenset(triangle) in offered, "the admissible cycle is not offered: an empty answer is not a fix"
+    # The dense component is what made the search deep; it is planned too - every one of its debts is on a cycle.
+    assert len({debt for cycle in offered for debt in cycle}) == _LAYERS * _WIDTH * _WIDTH + 3, offered
     assert delay < _LOOP_DELAY_THRESHOLD_SECONDS, (
-        f"GET /clearing/cycles?max_depth={_MAX_DEPTH} held the event loop: actual={delay:.3f} s, "
+        f"GET /clearing/cycles held the event loop: actual={delay:.3f} s, "
         f"threshold={_LOOP_DELAY_THRESHOLD_SECONDS} s"
     )
 
@@ -176,3 +186,82 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
     assert flow_planner.plan_clearing in submitted, (
         f"the plan was not handed to a planner process: process-pool submissions={submitted}"
     )
+
+
+@pytest.mark.asyncio
+async def test_an_equivalent_without_cycles_answers_an_empty_list_and_max_depth_is_refused(client, db_session):
+    """No debts at all, and debts that close no cycle: 200 with `cycles: []`, not an error. `max_depth` in any form is
+    422 (E009) as on `POST /clearing/auto` - an old client is told, not silently answered with something else."""
+
+    empty, _ = await _equivalent(db_session, "CE")
+    chain, n = await _equivalent(db_session, "CH")
+    people = _people("H", n, 3)
+    db_session.add_all(people)
+    await db_session.flush()
+    await _add_debts(db_session, chain, [(people[0], people[1]), (people[1], people[2])], "5")
+    empty_code, chain_code = empty.code, chain.code
+    user = await register_and_login(client, "P035A1Empty")
+
+    for code in (empty_code, chain_code):
+        response = await client.get(f"/api/v1/clearing/cycles?equivalent={code}", headers=user["headers"])
+        assert (response.status_code, response.json()) == (200, {"cycles": []}), (code, response.text)
+
+    for query in ("max_depth=3", "max_depth=", "max_depth", "max_depth=99", "max_depth=3&max_depth=4"):
+        refused = await client.get(f"/api/v1/clearing/cycles?equivalent={chain_code}&{query}", headers=user["headers"])
+        error = refused.json().get("error") or {}
+        assert (refused.status_code, error.get("code")) == (422, "E009"), (query, refused.text)
+        assert any("max_depth" in str(e.get("loc")) for e in error["details"]["errors"]), (query, refused.text)
+
+
+class _DeadAtSubmission:
+    def submit(self, fn, /, *args, **kwargs):
+        raise BrokenProcessPool("p035-a1: the planner process is gone")
+
+
+class _FailsWith:
+    def __init__(self, failure: BaseException) -> None:
+        self._failure = failure
+
+    def submit(self, fn, /, *args, **kwargs):
+        done: Future = Future()
+        done.set_exception(self._failure)
+        return done
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pool,discarded",
+    [
+        (_DeadAtSubmission(), True),
+        (_FailsWith(BrokenProcessPool("p035-a1: the planner process died while planning")), True),
+        (_FailsWith(flow_planner.PlanIntegrityError("p035-a1: the plan failed its own check")), False),
+    ],
+    ids=["pool broken at submission", "worker died while planning", "plan integrity error"],
+)
+async def test_a_planner_that_cannot_answer_is_an_error_with_a_request_id_not_an_empty_list(
+    client, db_session, pool, discarded
+):
+    """The semantics of `runner._plan_off_the_loop`: a broken pool is discarded and the failure is loud; there is no
+    fallback detector. The next request gets a new pool and answers."""
+
+    eq, n = await _equivalent(db_session, "CF")
+    await _ring(db_session, eq, n, "F", 3, "7")
+    code = eq.code
+    user = await register_and_login(client, "P035A1Fail")
+    url = f"/api/v1/clearing/cycles?equivalent={code}"
+
+    real = runner._planner_executor
+    runner._planner_executor = pool
+    try:
+        failed = await client.get(url, headers=user["headers"])
+        left = runner._planner_executor
+    finally:
+        runner._planner_executor = real
+    assert failed.status_code == 500, failed.text
+    error = failed.json()["error"]
+    assert error["code"] == "E010" and error["request_id"], failed.text
+    assert "cycles" not in failed.json()
+    assert (left is None) is discarded, f"the pool after the failure: {left!r}"
+
+    recovered = await client.get(url, headers=user["headers"])
+    assert recovered.status_code == 200 and len(recovered.json()["cycles"]) == 1, recovered.text

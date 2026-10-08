@@ -59,16 +59,18 @@ from typing import AbstractSet, Awaitable, Callable, Optional
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.clearing.flow_planner import PlannedCycle, load_snapshot, plan_clearing
+from app.core.clearing.flow_planner import PlannedCycle, load_snapshot, money_of, plan_clearing
 from app.core.clearing.service import (
     ClearingOccurrence,
     ClearingService,
     RetryableClearingConflictException,
 )
 from app.db.models.equivalent import Equivalent
+from app.db.models.participant import Participant
 from app.db.models.simulator_storage import SimulatorRun
 from app.utils.distributed_lock import RenewableLease, renewable_lease
 from app.utils.exceptions import ConflictException, GeoException
+from app.utils.money import to_money_str
 from app.utils.validation import validate_equivalent_code
 
 logger = logging.getLogger(__name__)
@@ -287,6 +289,46 @@ async def _plan_off_the_loop(edges, executor: Optional[Executor], state: _PassSt
         worker.cancel()
         state.planner_abandoned = not worker.done()
         raise
+
+
+async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, executor: Optional[Executor] = None):
+    """The cycles a clearing pass would execute now, in plan order, for `GET /clearing/cycles` (035 A1, decision П1-(а)).
+
+    The same two steps as a pass, and nothing of its execution: the snapshot is read on the caller's `session` (the
+    eligible edges, the equivalent's precision, the pids of their participants) and the read transaction is released
+    BEFORE the plan is handed to the planner process (`_plan_off_the_loop`) - never computed on the event loop.
+    Read-only: it takes no lease and no lock, writes nothing and starts nothing.
+
+    Each cycle is a list of `{debt_id, debtor, creditor, amount}`; `amount` is the debt's amount on the snapshot at
+    the equivalent's precision, not the cycle's `c`. A missing equivalent raises `GeoException`, as `load_snapshot`
+    does. A planner failure propagates unchanged (`BrokenProcessPool` after the broken pool is discarded,
+    `PlanIntegrityError`): there is no fallback and no other detector. The pool is the one a pass uses, with one
+    worker: a diagnostic plan in flight delays the next plan, it does not hold the loop.
+    """
+
+    edges = await load_snapshot(session, equivalent_code)
+    precision = (
+        await session.execute(select(Equivalent.precision).where(Equivalent.code == equivalent_code))
+    ).scalar_one()
+    vertices = sorted({v for e in edges for v in (e.debtor_id, e.creditor_id)}, key=str)
+    pid_of: dict = {}
+    if vertices:
+        rows = await session.execute(select(Participant.id, Participant.pid).where(Participant.id.in_(vertices)))
+        pid_of = {row.id: row.pid for row in rows}
+    await session.rollback()
+    plan = await _plan_off_the_loop(edges, executor, _PassState(equivalent=equivalent_code, distributed_exclusive=False))
+    return [
+        [
+            {
+                "debt_id": str(e.debt_id),
+                "debtor": str(pid_of.get(e.debtor_id, e.debtor_id)),
+                "creditor": str(pid_of.get(e.creditor_id, e.creditor_id)),
+                "amount": to_money_str(money_of(e.atoms), int(precision)),
+            }
+            for e in cycle.edges
+        ]
+        for cycle in plan.cycles
+    ]
 
 
 def _stop_reason(lease: Optional[RenewableLease], deadline: Optional[float], deadline_clock: Callable[[], float]):

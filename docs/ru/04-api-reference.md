@@ -726,9 +726,13 @@ Authorization: Bearer {token}
 ### 7.1. Список циклов долгов (по эквиваленту)
 
 ```http
-GET /clearing/cycles?equivalent=UAH&max_depth=6
+GET /clearing/cycles?equivalent=UAH
 Authorization: Bearer {access_token}
 ```
+
+Ответ — циклы плана потока на свежем снимке: то, что сейчас исполнил бы один проход `POST /clearing/auto`
+(декомпозиция плана, а не перечень всех циклов графа). `max_depth` **не принимается** — `422` (E009), как у
+`POST /clearing/auto` (программа 035, 2026-10-08).
 
 **Response:**
 ```json
@@ -752,7 +756,7 @@ Authorization: Bearer {access_token}
 
 Один ожидаемый проход общего раннера клиринга (программа 023): план потока на свежем снимке, исполнение
 цикл за циклом. `max_depth` **не принимается**: присутствие ключа в любой форме — `422` (E009) до начала
-прохода; параметр остаётся у диагностики `GET /clearing/cycles`. Нормативная схема — `api/openapi.yaml`.
+прохода; диагностика `GET /clearing/cycles` отклоняет его так же. Нормативная схема — `api/openapi.yaml`.
 
 **Response (пример, полный проход):**
 ```json
