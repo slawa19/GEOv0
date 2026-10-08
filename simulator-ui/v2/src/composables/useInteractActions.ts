@@ -43,6 +43,9 @@ export type InteractActionError = {
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
   if (!e || typeof e !== 'object') return false
+  // An `ApiError` also has `status`/`code`/`message` (since the transport bound, `code` is 'TIMEOUT' or
+  // 'INVALID_JSON'), but it is the raw failure, not the mapped action error: it must go through the mapper.
+  if (e instanceof ApiError) return false
   if (!('status' in e) || !('code' in e) || !('message' in e)) return false
   const v = e as Record<string, unknown>
   return typeof v.status === 'number' && typeof v.code === 'string' && typeof v.message === 'string'

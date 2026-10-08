@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
-import { LONG_REQUEST_TIMEOUT_MS } from '../api/http'
+import { ApiError, LONG_REQUEST_TIMEOUT_MS } from '../api/http'
 import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { isInteractActionError, useInteractActions, type InteractActionError } from './useInteractActions'
 
@@ -142,6 +142,21 @@ describe('item 3: a timeout of a mutating action is an unknown outcome, not a re
     expect(error.message).toContain('результат неизвестен')
     expect(error.message).toContain('могло быть выполнено')
     expect(error.message).toContain('120')
+  })
+
+  it('the rejection is the mapped action error, never the raw ApiError (which has status/code/message too)', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const timedOut = rejection(actions().sendPayment('a', 'b', '1.00', 'UAH'))
+    await vi.advanceTimersByTimeAsync(LONG_REQUEST_TIMEOUT_MS)
+    expect(await timedOut).not.toBeInstanceOf(ApiError)
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>proxy</html>', { status: 200, headers: { 'X-Request-ID': 'req-html' } })))
+    const notJson = rejection(actions().sendPayment('a', 'b', '1.00', 'UAH'))
+    await vi.advanceTimersByTimeAsync(0)
+    const error = await notJson
+    expect(error).not.toBeInstanceOf(ApiError)
+    expect(error.code).toBe('INVALID_JSON')
+    expect(error.requestId).toBe('req-html')
   })
 
   it('anti-vacuum: a READ timeout is not an unknown outcome (nothing was written), and keeps the technical message', async () => {
