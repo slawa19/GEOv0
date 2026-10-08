@@ -104,8 +104,9 @@ class _SimulatorRuntimeBase:
         self._run_persist_every_ms = settings.SIMULATOR_RUN_PERSIST_EVERY_MS
         self._run_persist_dirty_every_ms = settings.SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS
 
-        # Local artifact retention (0 disables).
+        # Local artifact retention (0 disables either rule; both are off by default - 034 S1c).
         self._artifacts_ttl_hours = settings.SIMULATOR_ARTIFACTS_TTL_HOURS
+        self._artifacts_max_runs = settings.SIMULATOR_ARTIFACTS_MAX_RUNS
 
         self._artifacts = ArtifactsManager(
             lock=self._lock,
@@ -145,7 +146,9 @@ class _SimulatorRuntimeBase:
 
         # Best-effort cleanup of old local artifacts (keeps dev dirs from growing forever).
         try:
-            self._artifacts.cleanup_old_runs(ttl_hours=self._artifacts_ttl_hours)
+            self._artifacts.cleanup_old_runs(
+                ttl_hours=self._artifacts_ttl_hours, max_runs=self._artifacts_max_runs
+            )
         except Exception:
             logger.exception("simulator.artifacts.cleanup_failed")
 

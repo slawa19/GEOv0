@@ -136,6 +136,12 @@ configuration persistence.
 - pytest basetemp и cache;
 - `GEO_TEST_ARTIFACT_ROOT=.local-run/test-runs/<TaskSlug>/artifacts`.
 
+Состояние симулятора тестового процесса (артефакты ранов, загруженные сценарии) лежит под тем же корнем:
+`tests/conftest.py` задаёт `SIMULATOR_STATE_DIR=<GEO_TEST_ARTIFACT_ROOT>/simulator` до импорта `app.config`
+(034 S1c, 2026-10-08), у прямого pytest — `.local-run/test-runs/direct-pytest/artifacts/simulator`. Каталог
+разработчика `.local-run/simulator` тесты не пишут и не чистят. Правила хранения —
+[`simulator/backend/run-storage.md`](simulator/backend/run-storage.md), раздел 4.2.
+
 Тир тестов идёт только на PostgreSQL (017, стадия 2c, 2026-09-23). Свою базу задавайте
 явно и только после проверки URL включайте `GEO_TEST_ALLOW_DB_RESET=1`. Прямой pytest —
 debug path: у него умолчания нет, `TEST_DATABASE_URL` обязателен.

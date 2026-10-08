@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from app.config import settings
 from app.schemas.simulator import SIMULATOR_API_VERSION, RunStatus
 from app.core.simulator.models import RunRecord
 from app.core.simulator.scenario_equivalent import (
@@ -23,8 +24,16 @@ def repo_root() -> Path:
 
 
 def local_state_dir() -> Path:
-    # Ignored by .gitignore
-    return repo_root() / ".local-run" / "simulator"
+    """The simulator's runtime state directory: `SIMULATOR_STATE_DIR`, else the checkout's `.local-run/simulator`
+    (ignored by .gitignore). A relative setting is taken from the repository root, never from the process's
+    working directory. 034 S1c: the override exists so that a session sharing the checkout - the test tier above
+    all - does not write into, or clean, the developer's directory (AGENTS.md §7, §12)."""
+
+    configured = str(settings.SIMULATOR_STATE_DIR or "").strip()
+    if not configured:
+        return repo_root() / ".local-run" / "simulator"
+    path = Path(configured)
+    return path if path.is_absolute() else repo_root() / path
 
 
 FIXTURES_DIR = repo_root() / "fixtures" / "simulator"

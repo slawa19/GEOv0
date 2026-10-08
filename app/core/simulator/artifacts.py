@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import time
@@ -19,6 +20,33 @@ from app.core.simulator.models import RunRecord
 from app.db.models.simulator_storage import SimulatorRunArtifact
 from app.schemas.simulator import SIMULATOR_API_VERSION, ArtifactIndex, ArtifactItem
 from app.utils.exceptions import NotFoundException
+
+# ── The retention of run directories: its constants (034 S1c; AGENTS.md §12) ──────────────────────────────────────
+# The TTL and the limit are settings (`SIMULATOR_ARTIFACTS_TTL_HOURS`, `SIMULATOR_ARTIFACTS_MAX_RUNS`, both off at 0).
+#: A run directory written within this many seconds is never removed, by either rule, whoever wrote it.
+RECENT_WRITE_GRACE_SEC = 3600
+#: The states of a run in THIS process's registry whose directory the retention may remove. Every other state can
+#: still write, or be resumed into writing, without re-creating the directory.
+_PRUNABLE_STATES = frozenset({"stopped"})
+#: A run directory being deleted is first renamed to `<run_id>` + this.
+_DELETING_SUFFIX = ".deleting"
+
+
+def _last_write(run_dir: Path) -> float:
+    """The newest modification time in a run directory: the directory, `artifacts/` and the files in it."""
+
+    newest = float(run_dir.stat().st_mtime)
+    stack = [run_dir]
+    while stack:
+        with os.scandir(stack.pop()) as entries:
+            for entry in entries:
+                try:
+                    newest = max(newest, float(entry.stat(follow_symlinks=False).st_mtime))
+                    if entry.is_dir(follow_symlinks=False):
+                        stack.append(Path(entry.path))
+                except FileNotFoundError:
+                    continue
+    return newest
 
 
 class ArtifactsManager:
@@ -38,6 +66,8 @@ class ArtifactsManager:
         self._utc_now = utc_now
         self._db_enabled = db_enabled
         self._logger = logger
+        # Run directories the retention could not remove, by name: the traceback is logged once per name.
+        self._cleanup_failures: set[str] = set()
 
     def _get_run(self, run_id: str) -> RunRecord:
         with self._lock:
@@ -87,38 +117,117 @@ class ArtifactsManager:
             self._logger.exception("simulator.artifacts.init_failed run_id=%s", getattr(run, "run_id", ""))
             run.artifacts_dir = None
 
-    def cleanup_old_runs(self, *, ttl_hours: int) -> None:
-        """Best-effort cleanup for `.local-run/simulator/runs/*`.
+    def cleanup_old_runs(self, *, ttl_hours: int, max_runs: int = 0) -> None:
+        """Best-effort retention of `<state dir>/runs/*`: a TTL and a limit of run directories (034 S1c, `F-034-8`).
 
-        Only touches local filesystem artifacts; never affects DB state.
+        A run directory NOT WRITTEN for more than `ttl_hours` is removed; then, if more than `max_runs` run
+        directories are left, the least recently written are removed until `max_runs` are, or until nothing
+        removable is left. Either rule is off at 0. Called when the runtime starts and right after a run's
+        artifacts are finalized. Only touches local filesystem artifacts; never affects DB state.
+
+        THE AGE OF A RUN is the newest write anywhere in its directory (`_last_write`), not the directory's own
+        modification time: a run appends to `runs/<id>/artifacts/events.ndjson` for as long as it lives, and that
+        moves nothing on `runs/<id>` itself.
+
+        NEVER REMOVED, and each for its own reason:
+        * a run of THIS process that may still write or be written to again - every state but `stopped`
+          (`_PRUNABLE_STATES`): `resume` takes an `error` or `idle` run back to `running` without restarting its
+          writer (`run_lifecycle.py`, `resume`), so its directory must stay; a `stopped` run can only be brought
+          back by `restart`, which re-creates what it needs (`start_events_writer`);
+        * a directory written within `RECENT_WRITE_GRACE_SEC` by ANYONE: the state directory may be shared by
+          other processes whose runs this registry knows nothing about, and the file system is the one thing they
+          have in common. It counts against the limit and is not removed for it;
+        * anything that is not a directory directly under `runs/` resolving inside it - a file there, a link out
+          of it, the scenarios store beside it.
+
+        NOT SEEN (and so not protected): a run of ANOTHER process that has written nothing for longer than the
+        grace - a paused one, typically. There is no lock between processes here; the limit of this rule is that.
+
+        A directory is renamed aside (`<id>.deleting`) before it is deleted, so that one still open somewhere
+        (Windows refuses the rename) is left whole instead of half-deleted; a leftover `*.deleting` is removed by
+        the next call.
         """
 
-        ttl_hours = int(ttl_hours or 0)
-        if ttl_hours <= 0:
+        ttl_hours, max_runs = int(ttl_hours or 0), int(max_runs or 0)
+        if ttl_hours <= 0 and max_runs <= 0:
             return
 
         base = (self._local_state_dir() / "runs").resolve()
         if not base.exists() or not base.is_dir():
             return
 
-        cutoff = time.time() - (ttl_hours * 3600)
+        with self._lock:
+            may_still_write = {
+                str(run_id) for run_id, run in self._runs.items()
+                if str(getattr(run, "state", "")) not in _PRUNABLE_STATES
+            }
 
+        now = time.time()
+        expired_before = now - (ttl_hours * 3600)
+        recent_after = now - RECENT_WRITE_GRACE_SEC
+        left: list[tuple[float, Path]] = []
         for p in sorted(base.iterdir()):
-            if not p.is_dir():
-                continue
-
             try:
-                rp = p.resolve()
-                if not rp.is_relative_to(base):
+                if not p.is_dir() or not p.resolve().is_relative_to(base) or p.resolve() != base / p.name:
                     continue
-                mtime = float(rp.stat().st_mtime)
-                if mtime >= cutoff:
+                if p.name.endswith(_DELETING_SUFFIX):
+                    self._delete_aside(p)
                     continue
-                shutil.rmtree(rp, ignore_errors=False)
+                if p.name in may_still_write:
+                    continue
+                written = _last_write(p)
             except FileNotFoundError:
                 continue
             except Exception:
-                self._logger.exception("simulator.artifacts.cleanup_failed path=%s", str(p))
+                self._cleanup_failed(p.name)
+                continue
+            removable = written < recent_after
+            if ttl_hours > 0 and removable and written < expired_before and self._remove_run_dir(p):
+                continue
+            left.append((written if removable else float("inf"), p))
+
+        if max_runs > 0 and len(left) > max_runs:
+            left.sort(key=lambda entry: (entry[0], entry[1].name))
+            for written, p in left[: len(left) - max_runs]:
+                if written != float("inf"):
+                    self._remove_run_dir(p)
+
+    def _remove_run_dir(self, path: Path) -> bool:
+        """Remove one run directory whole or not at all: renamed aside first, then deleted."""
+
+        aside = path.with_name(path.name + _DELETING_SUFFIX)
+        try:
+            os.rename(path, aside)
+        except FileNotFoundError:
+            return True
+        except Exception:
+            # In use (a download, a writer of another process): nothing of it was touched.
+            self._cleanup_failed(path.name)
+            return False
+        self._delete_aside(aside)
+        return True
+
+    def _delete_aside(self, aside: Path) -> None:
+        try:
+            shutil.rmtree(aside, ignore_errors=False)
+        except FileNotFoundError:
+            return
+        except Exception:
+            self._cleanup_failed(aside.name)
+
+    def _cleanup_failed(self, name: str) -> None:
+        """Log a directory the retention could not remove: by its NAME (the run id), never its absolute path
+        (AGENTS.md §12), and with the traceback once per name - the retention runs after every finalize, and a
+        directory that stays busy would otherwise repeat it each time."""
+
+        first = name not in self._cleanup_failures
+        self._cleanup_failures.add(name)
+        self._logger.log(
+            logging.WARNING if first else logging.DEBUG,
+            "simulator.artifacts.cleanup_failed run_dir=%s",
+            name,
+            exc_info=first,
+        )
 
     async def list_artifacts(self, *, run_id: str) -> ArtifactIndex:
         run = self._get_run(run_id)
@@ -398,7 +507,17 @@ class ArtifactsManager:
             await simulator_storage.sync_artifacts(run)
         except Exception:
             self._logger.exception("simulator.artifacts.sync_failed run_id=%s", run_id)
-            return
+
+        # 034 S1c, `F-034-8` (AGENTS.md §12): the retention is applied right after the write, not only at start.
+        # In a thread (it walks and deletes directories), and a failure of it never costs what was just written.
+        try:
+            await asyncio.to_thread(
+                self.cleanup_old_runs,
+                ttl_hours=settings.SIMULATOR_ARTIFACTS_TTL_HOURS,
+                max_runs=settings.SIMULATOR_ARTIFACTS_MAX_RUNS,
+            )
+        except Exception:
+            self._logger.warning("simulator.artifacts.cleanup_failed run_id=%s", run_id, exc_info=True)
 
     def write_real_tick_artifact(self, run: RunRecord, payload: dict[str, Any]) -> None:
         base = run.artifacts_dir
