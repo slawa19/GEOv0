@@ -75,7 +75,7 @@ from app.api.v1.admin import admin_create_equivalent, freeze_participant  # noqa
 from app.config import Settings, settings  # noqa: E402
 from app.core.auth.canonical import canonical_json  # noqa: E402
 from app.core.auth.crypto import generate_keypair, get_pid_from_public_key  # noqa: E402
-from app.core.clearing.flow_planner import atoms_of  # noqa: E402
+from app.core.clearing.flow_planner import atoms_of, load_snapshot, money_of, plan_clearing  # noqa: E402
 from app.core.clearing.service import ClearingOccurrence, ClearingService  # noqa: E402
 from app.core.ledger.reconciliation import (  # noqa: E402
     FULL_RECOMPUTATION,
@@ -104,6 +104,7 @@ from app.schemas.participant import ParticipantCreateRequest, ParticipantProfile
 from app.schemas.payment import PaymentConstraints, PaymentCreateRequest  # noqa: E402
 from app.schemas.trustline import TrustLineCreateRequest  # noqa: E402
 from app.utils.exceptions import RetryablePaymentConflictException  # noqa: E402
+from app.utils.money import to_money_str  # noqa: E402
 
 
 class SeedRefusal(RuntimeError):
@@ -125,10 +126,47 @@ REACHABLE_PARTICIPANT_STATUSES = frozenset({"active", "frozen"})
 _MAX_ATTEMPTS = 4
 _RETRY_BACKOFF_SECONDS = (0.05, 0.20, 0.50)
 
-#: `max_depth` for cycle detection. Every cycle a recipe may name is at least a triangle
-#: (`seeds/communities/recipe_schema.py:MIN_CYCLE_LENGTH`); six is the API's own default
-#: (`app/api/v1/clearing.py:20`).
-_CYCLE_MAX_DEPTH = 6
+
+async def _clearing_view(session, equivalent_code: str) -> tuple[dict[tuple[str, str], dict], list[list[dict]]]:
+    """What the planner sees of one equivalent now, in the recipe's vocabulary (035 A2a; until then the seed asked
+    the retired detectors, `ClearingService.find_cycles`).
+
+    Two things, because a recipe makes two different promises about a cycle (decision D1, 2026-10-08):
+
+    * `eligible` - every edge of the planner's SNAPSHOT (`flow_planner.load_snapshot`: a positive debt whose
+      controlling line is live and consents, both participants active), keyed by `(debtor pid, creditor pid)`. An
+      `execute` command names its own occurrence; it needs its cycle to BE THERE, not to be what a pass would pick.
+    * `planned` - the cycles of the plan's decomposition (`flow_planner.plan_clearing`), which is what the
+      diagnostic `GET /clearing/cycles` answers with. `assert_clearable` and the final acceptance promise that the
+      cycle is OFFERED, so they look here.
+
+    Every edge is `{debt_id, debtor, creditor, amount}`; `amount` is the DEBT's amount on the snapshot at the
+    equivalent's precision. It is not the amount the plan gives the cycle, which may be smaller than the cycle's
+    smallest debt when cycles share an edge. Computed in this process: a seed is a script and its graphs are small.
+    """
+
+    edges = await load_snapshot(session, equivalent_code)
+    precision = (
+        await session.execute(select(Equivalent.precision).where(Equivalent.code == equivalent_code))
+    ).scalar_one()
+    vertices = {v for e in edges for v in (e.debtor_id, e.creditor_id)}
+    pid_of: dict = {}
+    if vertices:
+        rows = await session.execute(select(Participant.id, Participant.pid).where(Participant.id.in_(vertices)))
+        pid_of = {row.id: row.pid for row in rows}
+
+    def rendered(edge) -> dict:
+        return {
+            "debt_id": str(edge.debt_id),
+            "debtor": pid_of[edge.debtor_id],
+            "creditor": pid_of[edge.creditor_id],
+            "amount": to_money_str(money_of(edge.atoms), int(precision)),
+        }
+
+    eligible = {(pid_of[e.debtor_id], pid_of[e.creditor_id]): rendered(e) for e in edges}
+    planned = [[rendered(e) for e in cycle.edges] for cycle in plan_clearing(edges).cycles]
+    return eligible, planned
+
 
 #: The bottleneck the acceptance looks for: an edge with less than this share of its limit left.
 BOTTLENECK_RESIDUAL_SHARE = Decimal("0.10")
@@ -707,36 +745,51 @@ class _Run:
         # made once, here; the first attempt that matches the cycle keeps the descriptor and every retry replays
         # it, so a retry after a durable commit is answered by that commit rather than by a detection of a cycle
         # the commit consumed - and never by a second occurrence.
+        #
+        # 035 A2a (decision D1, 2026-10-08): WHICH QUESTION IS ASKED DEPENDS ON THE MODE. `execute` names its own
+        # occurrence, so its cycle has to be present in the planner's snapshot, edge by edge in the recipe's
+        # order - not to be the cycle a pass would choose. `assert_clearable` promises the cycle is OFFERED, so it
+        # has to be one of the cycles of the plan. Both keep the recipe's own check: the smallest DEBT of the cycle
+        # is the declared amount (the amount the plan gives a cycle is another number and is not compared).
         plan_id, occurrence = uuid.uuid4(), None
+        pids = [self.identities[ref].pid for ref in command["cycle"]]
+        ordered = list(zip(pids, pids[1:] + pids[:1]))
 
         async def body(session):
             nonlocal occurrence
             service = ClearingService(session)
             if occurrence is None:
-                cycles = await service.find_cycles(command["equivalent"], max_depth=_CYCLE_MAX_DEPTH)
-                match = _match_cycle(cycles, expected)
+                eligible, planned = await _clearing_view(session, command["equivalent"])
+                if command["mode"] == "assert_clearable":
+                    match = _match_cycle(planned, expected)
+                else:
+                    match = [eligible[pair] for pair in ordered] if all(pair in eligible for pair in ordered) else None
                 if match is None:
-                    return None, cycles
+                    return None, planned
                 smallest = min(Decimal(edge["amount"]) for edge in match)
                 if command["mode"] == "assert_clearable" or smallest != declared:
                     return ("detected", smallest)
                 debt_of = {(str(edge["debtor"]), str(edge["creditor"])): edge["debt_id"] for edge in match}
-                pids = [self.identities[ref].pid for ref in command["cycle"]]
                 occurrence = ClearingOccurrence(
                     plan_id=plan_id,
                     equivalent_id=self.equivalent_ids[command["equivalent"]],
                     ordinal=0,
-                    debt_ids=tuple(uuid.UUID(str(debt_of[edge])) for edge in zip(pids, pids[1:] + pids[:1])),
+                    debt_ids=tuple(uuid.UUID(str(debt_of[edge])) for edge in ordered),
                     amount_atoms=atoms_of(declared),
                 )
             return ("executed", await service.execute_occurrence(occurrence))
 
         outcome = await self._attempt(f"clearing {command['id']}", body)
         if outcome[0] is None:
+            where = (
+                f"is not one of the {len(outcome[1])} cycle(s) of the clearing plan"
+                if command["mode"] == "assert_clearable"
+                else "is not whole in the planner's snapshot (an edge is missing: no positive debt, or its line "
+                "does not consent or is not live, or a participant is not active)"
+            )
             raise SeedRefusal(
-                f"clearing {command['id']}: the cycle {command['cycle']} in "
-                f"{command['equivalent']} is not among the {len(outcome[1])} clearable cycle(s) "
-                f"detection found. What detection DID find: {self._render_cycles(outcome[1])}. "
+                f"clearing {command['id']} ({command['mode']}): the cycle {command['cycle']} in "
+                f"{command['equivalent']} {where}. What the plan DOES hold: {self._render_cycles(outcome[1])}. "
                 f"The recipe expected: {command['expect']}"
             )
         if outcome[0] == "detected":
@@ -778,12 +831,9 @@ class _Run:
         The recipe writes the cycle debtor -> creditor and closes it implicitly
         (`seeds/communities/recipe_schema.py`).
 
-        PIDs, NOT `participants.id`, and this is not a matter of taste. `find_cycles` renders both
-        of its detectors' output with `debtor`/`creditor` REPLACED by the participants' PIDs
-        (`app/core/clearing/service.py:1258-1270` for the SQL path and the same substitution for the
-        DFS), even though the underlying columns are `debts.debtor_id`. Matching on the primary key
-        made the one correctly detected cycle look absent - measured 2026-09-22 on the Riverside
-        recipe, where detection returned exactly the triangle the recipe names.
+        PIDs, NOT `participants.id`: `_clearing_view` renders `debtor`/`creditor` as the participants' PIDs, as
+        the diagnostic does, even though the underlying columns are `debts.debtor_id`. (History: matching on the
+        primary key made the one correctly detected cycle look absent - measured 2026-09-22 on the Riverside recipe.)
         """
 
         refs = command["cycle"]
@@ -796,10 +846,10 @@ class _Run:
 def _match_cycle(
     cycles: Sequence[Sequence[dict]], expected: frozenset[tuple[str, str]]
 ) -> list[dict] | None:
-    """The detected cycle whose edges are exactly `expected`, or None.
+    """The cycle of `cycles` whose edges are exactly `expected`, or None.
 
-    Compared as a SET of directed edges rather than as a sequence: detection is free to start a
-    cycle at any of its participants, and a rotation is the same cycle.
+    Compared as a SET of directed edges rather than as a sequence: a cycle may be written from any of its
+    participants, and a rotation is the same cycle.
     """
 
     for cycle in cycles:
@@ -981,7 +1031,10 @@ async def _check_clearing_executed(session_factory) -> dict[str, Any]:
 
 
 async def _check_surviving_cycle(session_factory, run: _Run) -> dict[str, Any]:
-    """Every `assert_clearable` cycle of the recipe is STILL detectable now, at the end."""
+    """Every `assert_clearable` cycle of the recipe is STILL offered at its declared amount now, at the end: it is
+    one of the cycles of the clearing plan (035 A2a, decision D1) AND its smallest debt on the snapshot is the amount
+    the recipe declares - the same two questions the command itself was asked when it ran. Presence alone let a
+    surviving cycle through with its smallest debt moved (review of `4b833af5`). Nothing is executed."""
 
     asserted = [
         command
@@ -995,20 +1048,27 @@ async def _check_surviving_cycle(session_factory, run: _Run) -> dict[str, Any]:
         }
 
     missing: list[str] = []
+    moved: list[str] = []
     found: list[str] = []
     for command in asserted:
         expected = run._expected_cycle_edges(command)
         async with session_factory() as session:
-            cycles = await ClearingService(session).find_cycles(
-                command["equivalent"], max_depth=_CYCLE_MAX_DEPTH
-            )
-        (found if _match_cycle(cycles, expected) is not None else missing).append(command["id"])
+            _eligible, planned = await _clearing_view(session, command["equivalent"])
+        match = _match_cycle(planned, expected)
+        if match is None:
+            missing.append(command["id"])
+        elif (smallest := min(Decimal(edge["amount"]) for edge in match)) != Decimal(command["amount"]):
+            moved.append(f"{command['id']} (declares {command['amount']}, its smallest debt is {smallest})")
+        else:
+            found.append(command["id"])
 
     return {
-        "passed": not missing,
+        "passed": not missing and not moved,
         "surviving": found,
         "missing": missing,
-        "detail": f"{len(found)} of {len(asserted)} asserted cycle(s) still clearable",
+        "amount_moved": moved,
+        "detail": f"{len(found)} of {len(asserted)} asserted cycle(s) still clearable at the declared amount"
+        + (f"; not at the declared amount: {'; '.join(moved)}" if moved else ""),
     }
 
 

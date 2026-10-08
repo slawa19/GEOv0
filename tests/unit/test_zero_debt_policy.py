@@ -13,7 +13,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
 from tests.conftest import MODE_B
 
 
@@ -57,7 +57,7 @@ async def test_clearing_deletes_zero_debts(db_session):
     pids = {a.pid, b.pid, c.pid}
 
     service = ClearingService(db_session)
-    cycles = await service.find_cycles(eq_code, max_depth=3)
+    cycles = await planned_cycles(db_session, eq_code)  # 035 A2a: the planner, not the retired detectors
     assert cycles
 
     # 025 `T2508.1`: the plan occurrence of the detected cycle (in detection's order), declared 10.

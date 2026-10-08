@@ -117,8 +117,8 @@ _MODES = ("assert_clearable", "execute")
 
 _DECIMAL_RE = re.compile(r"^(0|[1-9][0-9]*)(\.[0-9]+)?$")
 
-#: The shortest cycle the clearing service can detect is a triangle
-#: (`app/core/clearing/service.py:582`, `find_triangles_sql`).
+#: A recipe names at least a triangle. The number came from the retired detectors (their shortest cycle); since
+#: 035 A2a the seed reads the planner instead, and the rule stays as the recipe's own (not re-examined there).
 MIN_CYCLE_LENGTH = 3
 
 

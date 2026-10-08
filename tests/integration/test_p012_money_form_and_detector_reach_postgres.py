@@ -94,6 +94,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1 import clearing as clearing_route
 from app.core.balance.service import BalanceService
+from app.core.clearing.runner import planned_cycles_for_diagnostics
 from app.core.clearing.service import (
     _SQL_DETECTOR_MAX_CYCLE_LENGTH,
     ClearingService,
@@ -106,7 +107,7 @@ from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 
 from tests.debt_setup import debt_fixture_setup
-from tests.p023_support import TEST_PLAN_ID, occurrence_of
+from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
 
 # Only `test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays` commits (clearing refuses a
 # connection-bound session), so only it runs on a disposable clone of the migrated template and leaves
@@ -235,6 +236,21 @@ def _all_amounts(cycles) -> list[str]:
     return [str(edge["amount"]) for cycle in cycles for edge in cycle]
 
 
+async def _diagnostic_cycles(session: AsyncSession, code: str) -> list[list[dict]]:
+    """What `GET /api/v1/clearing/cycles` answers with since 035 A1: the PRODUCT's producer and renderer
+    (`runner.planned_cycles_for_diagnostics` - the flow plan on the snapshot, computed in the diagnostic planner
+    process, each edge carrying the debt's amount through `to_money_str`). 035 A2a (decision D3, 2026-10-08) moved
+    the money-form and "one component does not hide another" assertions of this module here from the retired
+    detectors: programme 012's clearing surface is this renderer now.
+
+    The stand is committed first (in mode A that releases a savepoint inside the test's rolled-back transaction):
+    the producer ends its read transaction before it plans, which would discard a stand that was only flushed.
+    """
+
+    await session.commit()
+    return await planned_cycles_for_diagnostics(session, code)
+
+
 # --------------------------------------------------------------------------------------------
 # PART 1 - the money form on the routes `F-012-11` did not reach
 # --------------------------------------------------------------------------------------------
@@ -317,26 +333,21 @@ async def test_get_debts_renders_plain_decimals_at_the_declared_precision(
         (4, Decimal("0.01"), "0.0100"),
     ],
 )
-@pytest.mark.parametrize(
-    "ring_size, method",
-    [(3, "find_triangles_sql"), (4, "find_quadrangles_sql")],
-)
-async def test_the_sql_detectors_render_money_plainly_and_at_the_declared_precision(
+@pytest.mark.parametrize("ring_size", [3, 4])
+async def test_the_clearing_diagnostic_renders_money_plainly_and_at_the_declared_precision(
     db_session: AsyncSession,
     ring_size: int,
-    method: str,
     precision: int,
     leg: Decimal,
     expected: str,
 ) -> None:
-    """The two raw-SQL producers, addressed directly.
+    """The clearing surface's renderer, on rings of three and of four.
 
-    DIRECTLY IS NOT PEDANTRY HERE.  Going through `find_cycles` at the API's default depth
-    does NOT exercise these: past the SQL detectors' reach both detectors run and the union is
-    de-duplicated by debt-id set, keeping the first occurrence, which is the DFS's rendition of
-    the cycle.  Measured - reverting either SQL renderer to `str()` leaves every `find_cycles`
-    test green.  So the SQL producers are asked here in their own right, and by name, which is
-    also the only way to exercise the `precision` lookup they do when a caller passes none.
+    MOVED 2026-10-08 (035 A2a, D3). This was `test_the_sql_detectors_render_money_plainly_and_at_the_declared_
+    precision`, which addressed the two raw-SQL producers by name (`find_triangles_sql`, `find_quadrangles_sql`)
+    because each had a renderer of its own. `GET /clearing/cycles` has one producer now and it is asked here; the
+    precondition and both assertions - no exponent, the exact string at the declared precision - are unchanged.
+    The two ring sizes stay as two stands (they were the two producers).
     """
 
     eq = await _equivalent(db_session, "UAH", precision)
@@ -344,41 +355,32 @@ async def test_the_sql_detectors_render_money_plainly_and_at_the_declared_precis
         db_session, eq, [f"n{i}" for i in range(ring_size)], leg
     )
 
-    cycles = await getattr(ClearingService(db_session), method)(eq.id)
+    cycles = await _diagnostic_cycles(db_session, "UAH")
     assert expected_cycle in _cycle_sets(cycles), (
-        f"precondition: {method} must find the {ring_size}-ring it is being asked about. "
+        f"precondition: the diagnostic must offer the {ring_size}-ring it is being asked about. "
         f"Found: {_cycle_sets(cycles)}"
     )
 
     amounts = _all_amounts(cycles)
     offenders = [a for a in amounts if _is_exponential(a)]
     assert not offenders, (
-        f"exponential money from {method}, which feeds GET /api/v1/clearing/cycles verbatim: "
-        f"{offenders}"
+        f"exponential money on GET /api/v1/clearing/cycles: {offenders}"
     )
     assert set(amounts) == {expected}, (
-        f"{method} must render {leg} under a precision-{precision} equivalent as {expected!r}: "
+        f"the diagnostic must render {leg} under a precision-{precision} equivalent as {expected!r}: "
         f"got {sorted(set(amounts))}"
     )
 
 
-@pytest.mark.parametrize(
-    "ring_size, max_depth, producer",
-    [
-        (3, 3, "find_triangles_sql, through the early return"),
-        (4, 4, "find_quadrangles_sql, through the early return"),
-        (5, API_DEFAULT_MAX_DEPTH, "the Python DFS"),
-    ],
-)
+@pytest.mark.parametrize("ring_size", [3, 4, 5])
 async def test_no_routed_answer_puts_an_exponent_on_the_wire(
-    db_session: AsyncSession, ring_size: int, max_depth: int, producer: str
+    db_session: AsyncSession, ring_size: int
 ) -> None:
-    """The same three producers as `find_cycles` actually routes to them.
+    """A ring of the smallest storable debt, three, four and five edges long, on the diagnostic's wire.
 
-    A 3-ring at depth 3 and a 4-ring at depth 4 are inside the SQL detectors' reach, so the
-    early return answers and the raw-SQL rendition is what reaches the caller; a 5-ring is
-    past that reach and only the DFS can build it.  Parametrising by (ring length, depth) is
-    therefore parametrising by producer without reaching into the service to force a path.
+    MOVED 2026-10-08 (035 A2a, D3): the three ring lengths were the three producers `find_cycles` routed to (the
+    two SQL detectors through the early return, and the DFS); the diagnostic has one producer now and the three
+    lengths stay as three stands. The precondition and both assertions are unchanged.
     """
 
     eq = await _equivalent(db_session, "UAH", 2)
@@ -386,16 +388,15 @@ async def test_no_routed_answer_puts_an_exponent_on_the_wire(
         db_session, eq, [f"n{i}" for i in range(ring_size)], _SMALLEST_STORABLE
     )
 
-    cycles = await ClearingService(db_session).find_cycles("UAH", max_depth=max_depth)
+    cycles = await _diagnostic_cycles(db_session, "UAH")
     assert expected in _cycle_sets(cycles), (
-        f"precondition: the {ring_size}-ring must be found at depth {max_depth}, so that "
-        f"{producer} is the producer under test. Found: {_cycle_sets(cycles)}"
+        f"precondition: the {ring_size}-ring must be offered. Found: {_cycle_sets(cycles)}"
     )
 
     amounts = _all_amounts(cycles)
     offenders = [a for a in amounts if _is_exponential(a)]
     assert not offenders, (
-        f"exponential money from {producer} on GET /api/v1/clearing/cycles: {offenders}. "
+        f"exponential money on GET /api/v1/clearing/cycles: {offenders}. "
         f"All amounts: {amounts}"
     )
     assert all(Decimal(a) == _SMALLEST_STORABLE for a in amounts), (
@@ -441,26 +442,26 @@ async def test_precision_widens_the_clearing_amount_but_never_narrows_the_value(
     """The counter-check for the renderer's own parameter, on the clearing surface.
 
     Two claims at once, and they pull in opposite directions.  A precision-4 equivalent must
-    show four digits for an ordinary `0.01` - proving the detectors read `precision` at all
+    show four digits for an ordinary `0.01` - proving the renderer reads `precision` at all
     and that this test reacts to it.  And a precision-1 equivalent holding a real, stored
     `0.05` must still report `0.05`, not `0.0` - proving `precision` sets a MINIMUM number of
     digits and never a licence to round a debt away (`RT-012-2`, applied to clearing).
+
+    MOVED 2026-10-08 (035 A2a, D3) from the retired detectors to the diagnostic's own producer; both exact
+    strings are unchanged. The diagnostic renders the DEBT on the snapshot, so execution's step rule (a 0.05 under
+    precision 1 is not a whole step) does not apply to what is shown.
     """
 
     eq = await _equivalent(db_session, "UAH", 4)
     await _ring(db_session, eq, ["w1", "w2", "w3"], Decimal("0.01"))
-    cycles = await ClearingService(db_session).find_cycles(
-        "UAH", max_depth=API_DEFAULT_MAX_DEPTH
-    )
+    cycles = await _diagnostic_cycles(db_session, "UAH")
     assert set(_all_amounts(cycles)) == {"0.0100"}, (
         f"a precision-4 equivalent must show four digits: {sorted(set(_all_amounts(cycles)))}"
     )
 
     hour = await _equivalent(db_session, "HOUR", 1)
     await _ring(db_session, hour, ["h1", "h2", "h3"], Decimal("0.05"))
-    cycles = await ClearingService(db_session).find_cycles(
-        "HOUR", max_depth=API_DEFAULT_MAX_DEPTH
-    )
+    cycles = await _diagnostic_cycles(db_session, "HOUR")
     amounts = set(_all_amounts(cycles))
     assert amounts == {"0.05"}, (
         f"a stored 0.05 under a precision-1 equivalent must not be rounded away by the "
@@ -507,6 +508,10 @@ async def test_at_the_api_default_depth_a_triangle_does_not_hide_a_long_cycle(
     reach.  They share no participant and no debt, so neither can be an artefact of the other.
     Before the fix `find_cycles` returned the SQL answer because it was non-empty and the
     5-cycle never appeared - at ANY depth, including this one.
+
+    MOVED 2026-10-08 (035 A2a, D3): the property - another component must not hide this eligible one - is asked
+    of the diagnostic's producer (the flow plan), which has no depth and no early return. Both assertions are
+    unchanged; the name keeps its history.
     """
 
     eq = await _equivalent(db_session, "UAH", 2)
@@ -515,18 +520,11 @@ async def test_at_the_api_default_depth_a_triangle_does_not_hide_a_long_cycle(
         db_session, eq, ["l1", "l2", "l3", "l4", "l5"], Decimal("50")
     )
 
-    found = _cycle_sets(
-        await ClearingService(db_session).find_cycles(
-            "UAH", max_depth=API_DEFAULT_MAX_DEPTH
-        )
-    )
+    found = _cycle_sets(await _diagnostic_cycles(db_session, "UAH"))
 
     assert triangle in found, "control: the short cycle must still be reported"
     assert long_cycle in found, (
-        f"at the route's own default depth ({API_DEFAULT_MAX_DEPTH}) a 5-node cycle is missing "
-        f"while a 3-node one is reported: {len(found)} cycle(s) for two that exist. The SQL "
-        "fast path reaches 4 edges at most, and `find_cycles` returned its answer early "
-        "because it was non-empty, so the DFS that would have found the long cycle never ran."
+        f"a 5-node cycle is missing while a 3-node one is reported: {len(found)} cycle(s) for two that exist"
     )
 
 
@@ -577,27 +575,25 @@ async def test_the_long_cycle_is_reported_whether_or_not_a_short_one_exists(
     cycle happened to make one detector non-empty.  So the same 5-node cycle is asked for
     twice - once alone, once with a disjoint triangle beside it - and it must be reported both
     times.  This is the assertion that fails for any fix that merely reorders the detectors.
+
+    MOVED 2026-10-08 (035 A2a, D3) to the diagnostic's producer; both assertions are unchanged.
     """
 
     eq = await _equivalent(db_session, "UAH", 2)
     long_cycle = await _ring(
         db_session, eq, ["l1", "l2", "l3", "l4", "l5"], Decimal("50")
     )
-    service = ClearingService(db_session)
+    eq_id = eq.id  # the producer ends its read transaction, which expires `eq`
 
-    alone = _cycle_sets(
-        await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH)
-    )
+    alone = _cycle_sets(await _diagnostic_cycles(db_session, "UAH"))
     assert long_cycle in alone, f"control: with nothing else present it is found: {alone}"
 
+    eq = await db_session.get(Equivalent, eq_id)
     await _ring(db_session, eq, ["t1", "t2", "t3"], Decimal("0.01"))
-    beside_a_triangle = _cycle_sets(
-        await service.find_cycles("UAH", max_depth=API_DEFAULT_MAX_DEPTH)
-    )
+    beside_a_triangle = _cycle_sets(await _diagnostic_cycles(db_session, "UAH"))
     assert long_cycle in beside_a_triangle, (
         "adding an unrelated triangle removed the 5-node cycle from the answer: "
-        f"{alone} -> {beside_a_triangle}. Which cycles exist cannot depend on which detector "
-        "was non-empty."
+        f"{alone} -> {beside_a_triangle}. Which cycles are offered cannot depend on an unrelated component."
     )
 
 
@@ -616,6 +612,10 @@ async def test_past_the_sql_reach_the_two_answers_are_merged_and_not_swapped(
 
     Twenty-five is chosen against both caps: comfortably past the DFS's, comfortably inside the
     SQL's, so the assertion is about the merge and not about either limit.
+
+    MOVED 2026-10-08 (035 A2a, D3): the caps and the merge above are the detectors' and leave with them; what
+    stays is that every one of 25 independent eligible cycles is offered, asked of the diagnostic's producer
+    (which has no cap). The assertion is unchanged; the name keeps its history.
     """
 
     eq = await _equivalent(db_session, "UAH", 2)
@@ -624,18 +624,11 @@ async def test_past_the_sql_reach_the_two_answers_are_merged_and_not_swapped(
         for k in range(25)
     ]
 
-    found = _cycle_sets(
-        await ClearingService(db_session).find_cycles(
-            "UAH", max_depth=API_DEFAULT_MAX_DEPTH
-        )
-    )
+    found = _cycle_sets(await _diagnostic_cycles(db_session, "UAH"))
 
     missing = [i for i, t in enumerate(triangles) if t not in found]
     assert not missing, (
-        f"{len(missing)} of {len(triangles)} triangles are missing at "
-        f"max_depth={API_DEFAULT_MAX_DEPTH}: indices {missing}. Past the SQL detectors' reach "
-        "both detectors must contribute; the DFS alone stops at fifty raw cycles and the SQL "
-        "answer is what carries the rest."
+        f"{len(missing)} of {len(triangles)} triangles are missing from the diagnostic: indices {missing}"
     )
 
 
@@ -727,8 +720,8 @@ async def test_the_persisted_clearing_payload_is_plain_decimal_and_still_replays
 
     async with TestingSessionLocal() as worker:
         service = ClearingService(worker)
-        cycles = await service.find_cycles(code, max_depth=API_DEFAULT_MAX_DEPTH)
-        assert cycles, "precondition: the triangle must be detected before it is cleared"
+        cycles = await planned_cycles(worker, code)  # 035 A2a: the planner, not the retired detectors
+        assert cycles, "precondition: the triangle must be offered before it is cleared"
         # 025 `T2508.1`: the plan occurrence of the ring, declared (one atom, the whole debt), not the detected list.
         applied = await service.execute_occurrence(
             occurrence_of(
