@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Set, Tuple, Iterable
+from typing import AbstractSet, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 from uuid import UUID
 
 from app.utils.observability import log_duration
@@ -24,6 +24,15 @@ from app.utils.validation import floor_to_step, money_step, validate_equivalent_
 from app.utils.exceptions import BadRequestException, TimeoutException
 
 logger = logging.getLogger(__name__)
+
+
+class PaymentTarget(NamedTuple):
+    """One answer of `PaymentRouter.payment_targets`: a participant that can be paid, and one shortest route to it."""
+
+    to_pid: str
+    hops: int
+    path: Tuple[str, ...]
+
 
 class PaymentRouter:
     _graph_cache: Dict[
@@ -359,6 +368,59 @@ class PaymentRouter:
         for u, v in zip(path[:-1], path[1:]):
             b = min(b, graph.get(u, {}).get(v, Decimal('0')))
         return b
+
+    def confine_to_participants(self, allowed: AbstractSet[str]) -> None:
+        """Narrow THIS INSTANCE's graph to one perimeter: only `allowed` participants remain, as endpoints and as
+        hops. The public name of what `PaymentService._confine_router_to_perimeter` does (035 A6, `T3511`; that
+        method now calls this one, and its note on why this is instance state only - the shared cache is not
+        reached - stays there).
+
+        `graph` is what decides the route; the two policy maps are narrowed to stay consistent with it. The blocked
+        participants are values of a DENY list and are copied unchanged. `edge_no_transit` is not narrowed here, as
+        it was not before this method had a public name (not examined in 035 A6; recorded, not changed).
+        """
+
+        self.graph = {
+            u: {v: cap for v, cap in adj.items() if v in allowed}
+            for u, adj in self.graph.items()
+            if u in allowed
+        }
+        self.edge_can_be_intermediate = {
+            u: {v: flag for v, flag in adj.items() if v in allowed}
+            for u, adj in self.edge_can_be_intermediate.items()
+            if u in allowed
+        }
+        self.edge_blocked_participants = {
+            u: {v: blocked for v, blocked in adj.items() if v in allowed}
+            for u, adj in self.edge_blocked_participants.items()
+            if u in allowed
+        }
+
+    def payment_targets(self, from_pid: str, *, max_hops: int, limit: Optional[int] = None) -> List[PaymentTarget]:
+        """Whom `from_pid` can pay on the graph of this instance: every other participant a route of at most
+        `max_hops` hops reaches, each edge with capacity above zero and the hop policy respected - the same search
+        a payment's routing runs (`_bfs_single_path`, amount zero), so the answer cannot disagree with routing.
+
+        Nearest first, then by pid; `limit` cuts the list after that order (`None`: no cut). A participant that is
+        not on the graph has no targets. The path of a target is one shortest route, not the only one, and its
+        capacity is not stated: ask `calculate_max_flow`. A hint like the graph itself - nothing is locked or read.
+
+        035 A6 (`T3511`): the public form of the loop the simulator's `payment-targets` route ran over the private
+        search (034 `F-034-11`).
+        """
+
+        if from_pid not in self.graph:
+            return []
+        targets: List[PaymentTarget] = []
+        for to_pid in self.graph:
+            if not to_pid or to_pid == from_pid:
+                continue
+            path = self._bfs_single_path(from_pid, to_pid, Decimal("0"), max_hops=int(max_hops))
+            if not path or len(path) < 2:
+                continue
+            targets.append(PaymentTarget(to_pid=to_pid, hops=len(path) - 1, path=tuple(path)))
+        targets.sort(key=lambda target: (target.hops, target.to_pid))
+        return targets if limit is None else targets[: int(limit)]
 
     def find_flow_routes(
         self,
