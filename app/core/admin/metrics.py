@@ -14,17 +14,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.equivalents import canonical_code
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
 from app.schemas.metrics import AdminParticipantBalanceRow, AdminParticipantMetricsResponse
 from app.utils.exceptions import NotFoundException
-from app.utils.validation import validate_equivalent_code
-
-
-def _norm_eq(code: str) -> str:
-    return str(code or "").strip().upper()
 
 
 async def compute_participant_metrics(
@@ -43,9 +39,7 @@ async def compute_participant_metrics(
     if participant is None:
         raise NotFoundException("Participant not found")
 
-    eq_code = _norm_eq(equivalent) if equivalent is not None else None
-    if eq_code is not None:
-        validate_equivalent_code(eq_code)
+    eq_code = canonical_code(equivalent) if equivalent is not None else None
 
     all_codes = [str(code) for code in (await db.execute(select(Equivalent.code))).scalars().all()]
 
