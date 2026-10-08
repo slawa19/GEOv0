@@ -55,6 +55,45 @@ async def _trust_limits(checker: InvariantChecker, equivalent_id) -> TrustLimits
     return TrustLimitsResult(passed=True, violations=0, over_limit_allowed=allowed)
 
 
+async def _evaluate_invariants(
+    checker: InvariantChecker, eq: Equivalent
+) -> tuple[str, dict[str, InvariantOutcome], list[str]]:
+    """The invariant checks of one equivalent, as `status` and `verify` both report them (035 A5, `F-035-4`: the two
+    routes carried a copy each): its status by these checks alone, the outcome per invariant, and the alerts in the
+    order the checks run. A trust-limit violation is `critical`, a debt-symmetry violation `warning`."""
+
+    status = "healthy"
+    alerts: list[str] = []
+    invariants: dict[str, InvariantOutcome] = {}
+
+    # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
+    # `check_zero_sum` (removed, 024 `T2411`) telescoped to zero for any `Debt` rows, so could not fail on
+    # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
+    # response keeps naming every protocol invariant, and `unverified` keeps the gap
+    # visible in the summary rather than implied by a missing key.
+    invariants["zero_sum"] = InvariantWithdrawn()
+
+    invariants["trust_limits"] = trust = await _trust_limits(checker, eq.id)
+    if not trust.passed:
+        status = "critical"
+        alerts.append(f"Trust limit violations in {eq.code}: {trust.violations}")
+
+    try:
+        await checker.check_debt_symmetry(equivalent_id=eq.id)
+        invariants["debt_symmetry"] = InvariantResult(passed=True, violations=0)
+    except IntegrityViolationException as exc:
+        violations = (exc.details or {}).get("violations") or []
+        invariants["debt_symmetry"] = InvariantResult(
+            passed=False,
+            violations=len(violations),
+            details=exc.details,
+        )
+        status = _worse(status, "warning")
+        alerts.append(f"Debt symmetry violations in {eq.code}: {len(violations)}")
+
+    return status, invariants, alerts
+
+
 def _unverified_names(invariants: dict[str, InvariantOutcome]) -> list[str]:
     """Names carrying no verdict, derived from the values rather than hard-coded.
 
@@ -211,41 +250,12 @@ async def get_integrity_status(
     alerts: list[str] = []
 
     for eq in equivalents:
-        status = "healthy"
-        invariants: dict[str, InvariantOutcome] = {}
-
         checkpoint = await _latest_checkpoint(db, equivalent_id=eq.id)
         checksum = checkpoint.checksum if checkpoint else ""
         last_verified = checkpoint.created_at if checkpoint else None
 
-        # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
-        # `check_zero_sum` (removed, 024 `T2411`) telescoped to zero for any `Debt` rows, so could not fail on
-        # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
-        # response keeps naming every protocol invariant, and `unverified` below keeps the gap
-        # visible in the summary rather than implied by a missing key.
-        invariants["zero_sum"] = InvariantWithdrawn()
-
-        invariants["trust_limits"] = trust = await _trust_limits(checker, eq.id)
-        if not trust.passed:
-            status = "critical"
-            overall_status = "critical"
-            alerts.append(f"Trust limit violations in {eq.code}: {trust.violations}")
-
-        try:
-            await checker.check_debt_symmetry(equivalent_id=eq.id)
-            invariants["debt_symmetry"] = InvariantResult(passed=True, violations=0)
-        except IntegrityViolationException as exc:
-            violations = (exc.details or {}).get("violations") or []
-            invariants["debt_symmetry"] = InvariantResult(
-                passed=False,
-                violations=len(violations),
-                details=exc.details,
-            )
-            if status == "healthy":
-                status = "warning"
-            if overall_status == "healthy":
-                overall_status = "warning"
-            alerts.append(f"Debt symmetry violations in {eq.code}: {len(violations)}")
+        status, invariants, invariant_alerts = await _evaluate_invariants(checker, eq)
+        alerts.extend(invariant_alerts)
 
         reconciliation_severity, reconciliation_alerts = _reconciliation_view(
             eq, latest_results.get(eq.id), run_problem=debt_reconciliation_run_problem(request.app, eq.id)
@@ -325,37 +335,9 @@ async def verify_integrity(
     checked_at = _now()
 
     for eq in equivalents:
-        status = "healthy"
-        invariants: dict[str, InvariantOutcome] = {}
-
-        # zero-sum: WITHDRAWN by T1402 of programme 014. Not called, no verdict published.
-        # `check_zero_sum` (removed, 024 `T2411`) telescoped to zero for any `Debt` rows, so could not fail on
-        # corruption; `passed=True, value="0"` was a measurement of nothing. The key stays so the
-        # response keeps naming every protocol invariant, and `unverified` below keeps the gap
-        # visible in the summary rather than implied by a missing key.
-        invariants["zero_sum"] = InvariantWithdrawn()
-
-        invariants["trust_limits"] = trust = await _trust_limits(checker, eq.id)
-        if not trust.passed:
-            status = "critical"
-            overall_status = "critical"
-            alerts.append(f"Trust limit violations in {eq.code}: {trust.violations}")
-
-        try:
-            await checker.check_debt_symmetry(equivalent_id=eq.id)
-            invariants["debt_symmetry"] = InvariantResult(passed=True, violations=0)
-        except IntegrityViolationException as exc:
-            violations = (exc.details or {}).get("violations") or []
-            invariants["debt_symmetry"] = InvariantResult(
-                passed=False,
-                violations=len(violations),
-                details=exc.details,
-            )
-            if status == "healthy":
-                status = "warning"
-            if overall_status == "healthy":
-                overall_status = "warning"
-            alerts.append(f"Debt symmetry violations in {eq.code}: {len(violations)}")
+        status, invariants, invariant_alerts = await _evaluate_invariants(checker, eq)
+        overall_status = _worse(overall_status, status)
+        alerts.extend(invariant_alerts)
 
         checkpoint = await _latest_checkpoint(db, equivalent_id=eq.id)
         equivalents_status[eq.code] = EquivalentIntegrityStatus(
@@ -373,29 +355,30 @@ async def verify_integrity(
         )
         checksum = computed.checksum
 
-        try:
-            passed = status == "healthy"
-            db.add(
-                IntegrityAuditLog(
-                    operation_type="INTEGRITY_VERIFY",
-                    tx_id=None,
-                    equivalent_code=eq.code,
-                    state_checksum_before=checksum,
-                    state_checksum_after=checksum,
-                    affected_participants={},
-                    invariants_checked={k: v.model_dump() for k, v in invariants.items()},
-                    verification_passed=passed,
-                    error_details=None
-                    if passed
-                    else {
-                        "status": status,
-                        "checked_at": checked_at.isoformat(),
-                        "invariants": {k: v.model_dump() for k, v in invariants.items()},
-                    },
-                )
+        # NOT best-effort (035 A5, `F-035-4`): this route's job is to check AND record. A row that cannot be built or
+        # added fails the request - the internal-error answer with its request id, and nothing committed, as a
+        # failure of the commit below always did - instead of a 200 that left no trace. It was `except Exception:
+        # pass` around exactly these lines.
+        passed = status == "healthy"
+        db.add(
+            IntegrityAuditLog(
+                operation_type="INTEGRITY_VERIFY",
+                tx_id=None,
+                equivalent_code=eq.code,
+                state_checksum_before=checksum,
+                state_checksum_after=checksum,
+                affected_participants={},
+                invariants_checked={k: v.model_dump() for k, v in invariants.items()},
+                verification_passed=passed,
+                error_details=None
+                if passed
+                else {
+                    "status": status,
+                    "checked_at": checked_at.isoformat(),
+                    "invariants": {k: v.model_dump() for k, v in invariants.items()},
+                },
             )
-        except Exception:
-            pass
+        )
 
     await db.commit()
 

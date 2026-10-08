@@ -90,6 +90,14 @@ make the session green again:
   new module, `tests/unit/test_p034_s1c_scripts_do_not_start_the_simulator_runtime.py`: one test parametrized over three
   script invocations, and one more. Measured with `python -m pytest --collect-only -q -m "not slow"`.
 * 2026-10-08, 034 slice S1c merged after 035 A3 and A4 (`origin/main` `9cbc92ff`, 3239): 3239 -> 3249 (+10, the two S1c modules above; the numbers 3239 and 3243 in the two S1c lines are those of the branch on `dd019a31`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-08, 035 slice A5 (F-035-4), on `origin/main` `dd019a31`: 3233 -> 3234 (+1). One new case in
+  `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py`. Measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `dd019a31` (on `4a1768d5` the same case
+  read 3219 -> 3220, by the guard's own refusal).
+* 2026-10-08, 035 slice A5, review of `a181b6c1`: 3234 -> 3236 (+2). The one case of
+  `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py` became three (the failure on the first, the
+  second and the third audit row). Measured with `python -m pytest --collect-only -q -m "not slow"`.
+* 2026-10-08, 035 slice A5 merged after 035 A3, A4 and 034 S1c (`origin/main` at the merge of PR #175, 3249): 3249 -> 3252 (+3, the three A5 cases above; the numbers in the A5 lines are those of the branch on `dd019a31`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -132,7 +140,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3249
+EXPECTED_SELECTED_ITEMS = 3252
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
