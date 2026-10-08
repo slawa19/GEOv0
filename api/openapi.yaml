@@ -2499,9 +2499,9 @@ paths:
         not an enumeration of every cycle of the debt graph. Each edge carries the debt's amount on the snapshot,
         not the amount the cycle would clear. `max_depth` is NOT accepted: the plan has no depth limit, and the
         presence of the key in any form (bare, empty, repeated, valid or not) is answered 422 (E009,
-        `details.errors[].loc = [query, max_depth]`). One diagnostic plan is computed at a time and it has an
-        upper bound of time: a request that meets a plan in flight, or whose own plan runs past the bound, is
-        answered 503 (E007, `details.reason` = `diagnostics_busy` | `diagnostics_timeout`,
+        `details.errors[].loc = [query, max_depth]`). One diagnostic plan is computed at a time in each server
+        process, and its planning phase has a time bound (a chosen value, not a performance guarantee): a request
+        that meets a plan in flight in its process, or whose own planning runs past the bound, is answered 503 (E007, `details.reason` = `diagnostics_busy` | `diagnostics_timeout`,
         `details.retry_after_seconds`) - it is not queued. A planner that fails is 500 (E010). Every error carries
         a `request_id`; none of them is an empty list.
       parameters:

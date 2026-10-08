@@ -44,7 +44,7 @@ from tests.conftest import MODE_B, sessionmaker_of
 from tests.debt_setup import debt_fixture_setup
 from tests.integration.test_scenarios import register_and_login
 from tests.p023_support import remaining_debts
-from tests.p035_support import slow_rotated_plan
+from tests.p035_support import held_rotated_plan, slow_rotated_plan
 
 _LAYERS = 12
 _WIDTH = 3
@@ -56,14 +56,17 @@ def _people(prefix: str, n: str, size: int) -> list[Participant]:
                         type="person", status="active", profile={}) for i in range(size)]
 
 
-async def _add_debts(db_session, eq, pairs, amount: str) -> list[Debt]:
-    """Debts `debtor -> creditor`, each with its consenting line (`creditor -> debtor`)."""
+async def _add_debts(db_session, eq, pairs, amount) -> list[Debt]:
+    """Debts `debtor -> creditor`, each with its consenting line (`creditor -> debtor`). `amount` is one amount for
+    every debt, or one per pair."""
 
+    amounts = [amount] * len(pairs) if isinstance(amount, str) else list(amount)
+    assert len(amounts) == len(pairs)
     db_session.add_all([TrustLine(from_participant_id=creditor.id, to_participant_id=debtor.id, equivalent_id=eq.id,
                                   limit=Decimal("100"), status="active", policy={"auto_clearing": True})
                         for debtor, creditor in pairs])
-    debts = [Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal(amount))
-             for debtor, creditor in pairs]
+    debts = [Debt(debtor_id=debtor.id, creditor_id=creditor.id, equivalent_id=eq.id, amount=Decimal(one))
+             for (debtor, creditor), one in zip(pairs, amounts)]
     async with debt_fixture_setup(db_session, label="p035-a1"):
         db_session.add_all(debts)
     await db_session.commit()
@@ -78,7 +81,7 @@ async def _equivalent(db_session, tag: str) -> tuple[Equivalent, str]:
     return eq, n
 
 
-async def _ring(db_session, eq, n: str, prefix: str, size: int, amount: str) -> list[Debt]:
+async def _ring(db_session, eq, n: str, prefix: str, size: int, amount) -> list[Debt]:
     people = _people(prefix, n, size)
     db_session.add_all(people)
     await db_session.flush()
@@ -162,11 +165,13 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
 
     A ring of 7 and a triangle: the plan holds both, the retired detectors stop at the default depth of 6. The
     boundary is observed as a `plan_clearing` submission to a process pool; a thread or an inline call does not count.
+    The triangle's debts DIFFER (7, 9, 11) and its cycle clears 7: an `amount` that were the cycle's amount would
+    read 7.00 on all three edges.
     """
 
     eq, n = await _equivalent(db_session, "CP")
     await _ring(db_session, eq, n, "R", 7, "10")
-    await _ring(db_session, eq, n, "T", 3, "7")
+    await _ring(db_session, eq, n, "T", 3, ["7", "9", "11"])
     user = await register_and_login(client, "P035A1Plan")
 
     code = eq.code  # the route releases its read transaction, which expires `eq`
@@ -193,12 +198,18 @@ async def test_the_offered_cycles_are_the_plan_computed_off_the_loop(client, db_
         f"the plan was not handed to a planner process: process-pool submissions={submitted}"
     )
     # Every field of an edge, not only its id: the pids of the debt's two ends and the DEBT's amount on the snapshot
-    # at the equivalent's precision (10.00 on the ring, 7.00 on the triangle) - not the amount the cycle would clear.
+    # at the equivalent's precision - not the amount the cycle would clear (7.00 on every edge of the triangle).
     stored = {debt: (debtor, creditor, f"{amount:.2f}")
               for debt, debtor, creditor, amount in await remaining_debts(db_session, code)}
     answered = {edge["debt_id"]: (edge["debtor"], edge["creditor"], edge["amount"])
                 for cycle in response.json()["cycles"] for edge in cycle}
-    assert answered == stored and sorted({a for _, _, a in stored.values()}) == ["10.00", "7.00"], (answered, stored)
+    assert sorted(a for _, _, a in stored.values()) == ["10.00"] * 7 + ["11.00", "7.00", "9.00"], stored
+    triangle = next(cycle for cycle in response.json()["cycles"] if len(cycle) == 3)
+    assert sorted(edge["amount"] for edge in triangle) == ["11.00", "7.00", "9.00"], (
+        f"the triangle's edges carry {[edge['amount'] for edge in triangle]}: each must be its own debt on the "
+        f"snapshot (7.00, 9.00, 11.00), not the amount the cycle would clear"
+    )
+    assert answered == stored, (answered, stored)
 
 
 # ------------------------------------------------------------------------- a plan that is slow FOR THE PLANNER
@@ -287,7 +298,51 @@ async def test_a_plan_that_is_slow_for_the_planner_does_not_hold_the_loop_and_th
 #: `clearing_hard_timeout_sec`: `max(2 s, 4 x budget)`).
 _TICK_HARD_TIMEOUT_SECONDS = 2.0
 _QUEUED_DIAGNOSTICS = 8
-_QUEUED_PLAN_SECONDS = 0.3
+
+
+class _Gate:
+    """The barrier of `held_rotated_plan`: closed until `open()`, and `started()` once a held plan runs in a worker."""
+
+    def __init__(self, directory) -> None:
+        self._started, self._release = directory / "plan.started", directory / "plan.release"
+
+    def started(self) -> bool:
+        return self._started.exists()
+
+    def open(self) -> None:
+        self._release.touch()
+
+    @property
+    def paths(self) -> tuple[str, str]:
+        return str(self._started), str(self._release)
+
+
+def _hold_diagnostic_plans(monkeypatch, tmp_path) -> tuple[_Gate, _Handed]:
+    """Every DIAGNOSTIC plan stays in flight in its worker until the gate is opened; a pass's plan is the unchanged
+    planner. On a tree where both share one worker the pass's plan then waits behind the held one - which is the
+    defect, not a flaw of the stand. Returns the gate and the pools handed a held plan, in order."""
+
+    gate, handed = _Gate(tmp_path), _Handed()
+    submit = ProcessPoolExecutor.submit
+
+    def _holding_submit(self, fn, /, *args, **kwargs):
+        if fn is not flow_planner.plan_clearing or not _is_diagnostic_call():
+            return submit(self, fn, *args, **kwargs)
+        handed.append(self)
+        handed.futures.append(submit(self, held_rotated_plan, *gate.paths, *args, **kwargs))
+        return handed.futures[-1]
+
+    monkeypatch.setattr(ProcessPoolExecutor, "submit", _holding_submit)
+    return gate, handed
+
+
+def _is_diagnostic_call() -> bool:
+    """Whether the current hand-over comes from the diagnostic path - by the caller's name on the stack, so the stand
+    does not depend on WHICH pool diagnostics use."""
+
+    import inspect
+
+    return any(frame.function == "planned_cycles_for_diagnostics" for frame in inspect.stack(context=0))
 
 
 async def _diagnose(factory, code: str):
@@ -318,64 +373,72 @@ async def _timed_pass(factory, code: str):
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_queued_diagnostics_do_not_delay_a_clearing_pass(db_session, monkeypatch):
-    """Eight diagnostic requests at once, each plan 0.3 s in the worker, then a clearing pass in the tick's form
-    (hard timeout 2.0 s). The pass must commit its cycle as it does with no diagnostics around: a diagnostic plan
-    never stands in front of a pass's plan, and the diagnostics do not queue up either - one is computed, the others
-    are refused at once."""
+async def test_queued_diagnostics_do_not_delay_a_clearing_pass(db_session, monkeypatch, tmp_path):
+    """Eight diagnostic requests at once while a diagnostic plan is HELD in its worker, then a clearing pass in the
+    tick's form (hard timeout 2.0 s). The pass must commit its cycle as it does with no diagnostics around: a
+    diagnostic plan never stands in front of a pass's plan, and the diagnostics do not queue up either - one is
+    being computed, the others are refused at once.
+
+    The overlap is a barrier, not a duration: the plan stays in flight until the test opens the gate, so the pass
+    runs beside it however slow this machine is. What IS measured is the subject: the pass inside the tick's hard
+    timeout, and not slower than the control pass by more than a second."""
 
     control_code, busy_code, diagnosed_code = await _three_triangles(db_session, "QD")
     factory = sessionmaker_of(db_session)
     # Warm planner processes: this is about the queue, not the first spawn.
     await asyncio.wrap_future(runner._default_planner_executor().submit(flow_planner.plan_clearing, []))
     assert len(await _diagnose(factory, diagnosed_code)) == 1
-    handed = _slow_the_planner(monkeypatch, lambda _pool: _QUEUED_PLAN_SECONDS)
-
     control, control_seconds = await _timed_pass(factory, control_code)
     assert len(control.committed) == 1
-    del handed[:]
 
+    gate, handed = _hold_diagnostic_plans(monkeypatch, tmp_path)
     diagnostics = [asyncio.create_task(_diagnose(factory, diagnosed_code)) for _ in range(_QUEUED_DIAGNOSTICS)]
     await _until(lambda: len(handed) + sum(task.done() for task in diagnostics) >= _QUEUED_DIAGNOSTICS)
+    await _until(gate.started, seconds=60.0)
     result, seconds = await _timed_pass(factory, busy_code)
+    in_flight = [task for task in diagnostics if not task.done()]
+    gate.open()
     outcomes = await asyncio.gather(*diagnostics, return_exceptions=True)
 
     assert len(result.committed) == 1
     assert seconds < control_seconds + 1.0, (
-        f"the pass behind {_QUEUED_DIAGNOSTICS} diagnostics took actual={seconds:.3f} s, "
+        f"the pass beside {_QUEUED_DIAGNOSTICS} diagnostics took actual={seconds:.3f} s, "
         f"control={control_seconds:.3f} s, threshold=control+1.0 s"
     )
     answered = [o for o in outcomes if isinstance(o, list)]
     refused = [o for o in outcomes if isinstance(o, runner.ClearingDiagnosticsUnavailable)]
+    assert (len(in_flight), len(handed)) == (1, 1), "one diagnostic plan was in flight while the pass ran"
     assert (len(answered), len(refused)) == (1, _QUEUED_DIAGNOSTICS - 1), outcomes
     assert {r.details["reason"] for r in refused} == {"diagnostics_busy"}, refused
 
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_a_second_diagnostic_request_is_refused_while_one_plan_is_in_flight(client, db_session, monkeypatch):
-    """One diagnostic plan a process. A request that arrives while it is computed is answered at once - 503 (E007,
+async def test_a_second_diagnostic_request_is_refused_while_one_plan_is_in_flight(
+    client, db_session, monkeypatch, tmp_path
+):
+    """One diagnostic plan a process. A request that arrives while it is computed is answered - 503 (E007,
     `details.reason = diagnostics_busy`) with a request id, not queued and not an empty list; when the plan is done
-    the next request answers."""
+    the next request answers. The first plan is held behind a gate, so "while it is computed" does not depend on
+    how long authentication or anything else on the HTTP path takes."""
 
     code = (await _three_triangles(db_session, "QB"))[0]
     factory = sessionmaker_of(db_session)
     user = await register_and_login(client, "P035A1Busy")
     url = f"/api/v1/clearing/cycles?equivalent={code}"
-    handed = _slow_the_planner(monkeypatch, lambda _pool: 0.5)
+    gate, handed = _hold_diagnostic_plans(monkeypatch, tmp_path)
 
     first = asyncio.create_task(_diagnose(factory, code))
     await _until(lambda: handed)
-    started = time.perf_counter()
     busy = await client.get(url, headers=user["headers"])
-    refused_in = time.perf_counter() - started
-    assert not first.done(), "stand: the first plan ended before the second request was answered"
+    assert not first.done(), "stand: the held plan ended while the gate was closed"
     assert busy.status_code == 503, busy.text
     error = busy.json()["error"]
     assert (error["code"], error["details"]["reason"]) == ("E007", "diagnostics_busy") and error["request_id"], error
     assert error["details"]["retry_after_seconds"] > 0 and "cycles" not in busy.json()
-    assert refused_in < 0.5 and len(handed) == 1, (refused_in, handed)
+    assert len(handed) == 1, "the refused request was handed to a worker (queued), not refused"
 
+    gate.open()
     assert len(await first) == 1
     after = await client.get(url, headers=user["headers"])
     assert after.status_code == 200 and len(after.json()["cycles"]) == 1, after.text
@@ -383,59 +446,75 @@ async def test_a_second_diagnostic_request_is_refused_while_one_plan_is_in_fligh
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_a_diagnostic_plan_past_its_time_is_refused_its_worker_replaced_and_a_pass_not_delayed(
-    client, db_session, monkeypatch
-):
-    """The diagnostic plan has one upper bound of time. Past it the request is answered 503 (E007,
-    `details.reason = diagnostics_timeout`), the worker that is still computing is terminated and a new one serves
-    the next request - an abandoned plan cannot hold the one slot. A clearing pass that runs WHILE the diagnostic
-    plan hangs takes what it takes with no diagnostics around."""
+async def test_a_pass_beside_a_hung_diagnostic_plan_is_not_delayed(db_session, monkeypatch, tmp_path):
+    """A clearing pass that runs WHILE a diagnostic plan hangs in its worker takes what it takes with no diagnostics
+    around. The plan hangs behind a gate that is never opened and the time bound is out of reach, so the overlap
+    holds for as long as the pass needs; the pass's own time is the subject and is measured against the control."""
 
-    control_code, busy_code, diagnosed_code = await _three_triangles(db_session, "QT")
+    control_code, busy_code, diagnosed_code = await _three_triangles(db_session, "QP")
     factory = sessionmaker_of(db_session)
-    user = await register_and_login(client, "P035A1Timeout")
-    url = f"/api/v1/clearing/cycles?equivalent={diagnosed_code}"
     await asyncio.wrap_future(runner._default_planner_executor().submit(flow_planner.plan_clearing, []))
     assert len(await _diagnose(factory, diagnosed_code)) == 1
-    pass_pool, hung_pool = runner._planner_executor, runner._diagnostic_executor
-    assert hung_pool is not None and hung_pool is not pass_pool
-    hung_workers = list(hung_pool._processes.values())
-    assert hung_workers and all(worker.is_alive() for worker in hung_workers)
-
     control, control_seconds = await _timed_pass(factory, control_code)
     assert len(control.committed) == 1
 
-    delays = {"diagnostics": 30.0}
-    handed = _slow_the_planner(
-        monkeypatch, lambda pool: 0.0 if pool is runner._planner_executor else delays["diagnostics"])
-    default_bound = runner.DIAGNOSTIC_PLAN_TIMEOUT_SECONDS
-    monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", 1.5)
-    started = time.perf_counter()
+    gate, handed = _hold_diagnostic_plans(monkeypatch, tmp_path)
+    monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", 600.0)
     hung = asyncio.create_task(_diagnose(factory, diagnosed_code))
-    await _until(lambda: handed)
-    result, seconds = await _timed_pass(factory, busy_code)
-    assert not hung.done(), "stand: the diagnostic plan ended before the pass did"
-    assert len(result.committed) == 1
+    await _until(gate.started, seconds=60.0)
+    try:
+        result, seconds = await _timed_pass(factory, busy_code)
+        assert not hung.done(), "stand: the held plan ended while the gate was closed"
+    finally:
+        hung.cancel()  # the worker of the abandoned plan is terminated with it (the cancellation test below)
+        with pytest.raises(asyncio.CancelledError):
+            await hung
+    assert len(result.committed) == 1 and len(handed) == 1
     assert seconds < control_seconds + 1.0, (
         f"the pass beside a hung diagnostic plan took actual={seconds:.3f} s, control={control_seconds:.3f} s, "
         f"threshold=control+1.0 s"
     )
 
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_diagnostic_plan_past_its_time_is_refused_and_its_worker_replaced(
+    client, db_session, monkeypatch, tmp_path
+):
+    """The planning phase of a diagnostic request has an upper bound of time. Past it the request is answered 503
+    (E007, `details.reason = diagnostics_timeout`), the worker that is still computing is terminated and a new one
+    serves the next request - an abandoned plan cannot hold the slot.
+
+    Nothing overlaps here: the plan hangs behind a closed gate, so the bound is the only thing that can end the
+    request, however long that takes on this machine."""
+
+    code = (await _three_triangles(db_session, "QT"))[0]
+    factory = sessionmaker_of(db_session)
+    user = await register_and_login(client, "P035A1Timeout")
+    url = f"/api/v1/clearing/cycles?equivalent={code}"
+    gate, handed = _hold_diagnostic_plans(monkeypatch, tmp_path)
+    default_bound = runner.DIAGNOSTIC_PLAN_TIMEOUT_SECONDS
+    monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", 1.0)
+
+    hung = asyncio.create_task(_diagnose(factory, code))
+    await _until(lambda: handed)
+    hung_pool = handed[0]
+    hung_workers = list(hung_pool._processes.values())
+    assert hung_workers, "stand: the pool started no worker at hand-over"
     with pytest.raises(runner.ClearingDiagnosticsUnavailable) as refused:
         await hung
     assert refused.value.details["reason"] == "diagnostics_timeout"
-    assert time.perf_counter() - started < 10.0, "the bound of 1.5 s did not end a 30 s plan"
-    assert runner._diagnostic_executor is not hung_pool and runner._planner_executor is pass_pool
+    assert runner._diagnostic_executor is not hung_pool
     for worker in hung_workers:
-        worker.join(15)
+        worker.join(60)
     assert not any(worker.is_alive() for worker in hung_workers), "the worker of the abandoned plan is still running"
 
-    # The same refusal over HTTP (a new worker, the plan hangs again), then a plan that fits: 200 from a new worker.
+    # The same refusal over HTTP (a new worker, the plan hangs again), then the gate opens: 200 from a new worker.
     timed_out = await client.get(url, headers=user["headers"])
     assert timed_out.status_code == 503, timed_out.text
     error = timed_out.json()["error"]
     assert (error["code"], error["details"]["reason"]) == ("E007", "diagnostics_timeout") and error["request_id"]
-    delays["diagnostics"] = 0.0
+    gate.open()
     monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", default_bound)  # the new worker starts cold
     recovered = await client.get(url, headers=user["headers"])
     assert recovered.status_code == 200 and len(recovered.json()["cycles"]) == 1, recovered.text
@@ -443,32 +522,30 @@ async def test_a_diagnostic_plan_past_its_time_is_refused_its_worker_replaced_an
 
 @MODE_B
 @pytest.mark.asyncio
-async def test_a_cancelled_diagnostic_request_leaves_no_plan_running_in_the_slot(db_session, monkeypatch):
+async def test_a_cancelled_diagnostic_request_leaves_no_plan_running_in_the_slot(db_session, monkeypatch, tmp_path):
     """A client that goes away cancels the request, not the worker's computation. The worker of the abandoned plan
     is terminated with it, so the next request is neither refused as busy nor queued behind a plan nobody awaits."""
 
     code = (await _three_triangles(db_session, "QC"))[0]
     factory = sessionmaker_of(db_session)
-    assert len(await _diagnose(factory, code)) == 1
-    abandoned_pool = runner._diagnostic_executor
-    abandoned_workers = list(abandoned_pool._processes.values())
-    delays = {"diagnostics": 30.0}
-    handed = _slow_the_planner(monkeypatch, lambda _pool: delays["diagnostics"])
+    gate, handed = _hold_diagnostic_plans(monkeypatch, tmp_path)
+    monkeypatch.setattr(runner, "DIAGNOSTIC_PLAN_TIMEOUT_SECONDS", 600.0)
 
     request = asyncio.create_task(_diagnose(factory, code))
-    # RUNNING, not merely handed over: a plan cancelled while still queued is simply dropped and needs no termination.
-    await _until(lambda: handed.futures and handed.futures[0].running())
+    # RUNNING IN THE WORKER, not merely handed over: a plan cancelled while still queued is simply dropped and needs
+    # no termination.
+    await _until(gate.started, seconds=60.0)
+    abandoned_workers = list(handed[0]._processes.values())
     request.cancel()
     with pytest.raises(asyncio.CancelledError):
         await request
     for worker in abandoned_workers:
-        worker.join(15)
-    assert not any(worker.is_alive() for worker in abandoned_workers)
+        worker.join(60)
+    assert abandoned_workers and not any(worker.is_alive() for worker in abandoned_workers)
+    assert runner._diagnostic_executor is not handed[0]
 
-    delays["diagnostics"] = 0.0
-    started = time.perf_counter()
-    assert len(await _diagnose(factory, code)) == 1
-    assert time.perf_counter() - started < 10.0
+    gate.open()
+    assert len(await _diagnose(factory, code)) == 1 and len(handed) == 2
 
 
 # ---------------------------------------------------------------- the plan is offered where the pass would refuse

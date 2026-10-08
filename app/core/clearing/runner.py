@@ -294,13 +294,18 @@ async def _plan_off_the_loop(edges, executor: Optional[Executor], state: _PassSt
 
 # ---------------------------------------------------------------------------------------------- diagnostics
 
-#: The upper bound of ONE diagnostic plan, from its hand-over to the worker (a cold worker's start included). Past it
-#: the request is refused and the worker terminated. Chosen from the review of `b2a9caea` (2026-10-08), not measured in
-#: production: a plan of ~200 participants / 3000 debts took 0.4 s and of 400 / 8000 took 2.35 s, growing roughly
-#: quadratically - so 5 s answers every graph a simulator tick could still clear inside its own hard timeout (2 s at
-#: the floor, 8 s at the cap) and refuses the ones only an unbounded `/clearing/auto` could.
+#: The bound of the AWAITED PLANNING PHASE of one diagnostic request: the wait for the worker's answer, a cold
+#: worker's start included. Past it the request is refused and the worker terminated. It bounds that wait and nothing
+#: else: the snapshot read, the rollback, the creation of the pool and the synchronous hand-over run before it, so it
+#: is not the longest the slot can stay taken.
+#:
+#: A CHOSEN value, not a proven performance bound and not measured in production. The review of `b2a9caea`
+#: (2026-10-08) measured a plan of ~200 participants / 3000 debts at 0.4 s and of 400 / 8000 at 2.35 s, growing
+#: roughly quadratically; 5 s sits above both. It does NOT follow the passes' budgets: a plan of 5.1 s still fits a
+#: simulator tick's 8 s cap and is refused here. What protects the passes is not this number but the isolation - the
+#: diagnostic worker and its one slot are not the passes'.
 DIAGNOSTIC_PLAN_TIMEOUT_SECONDS = 5.0
-#: What a refused client is told to wait: the bound above is the longest the slot can stay taken.
+#: What a refused client is told to wait before asking again. A hint, not a promise that the slot is free by then.
 DIAGNOSTIC_RETRY_AFTER_SECONDS = 1
 
 _diagnostic_executor: Optional[ProcessPoolExecutor] = None
@@ -345,7 +350,8 @@ def _discard_diagnostic_executor(pool: Executor, *, terminate: bool) -> None:
 
 
 async def _diagnostic_plan(edges, executor: Optional[Executor]):
-    """`plan_clearing(edges)` in the diagnostic worker, bounded by `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS`."""
+    """`plan_clearing(edges)` in the diagnostic worker; the wait for its answer is bounded by
+    `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` (the hand-over itself, `submit`, is synchronous and outside that bound)."""
 
     pool = executor or _default_diagnostic_executor()
     try:
@@ -377,11 +383,13 @@ async def planned_cycles_for_diagnostics(session, equivalent_code: str, *, execu
     and the plan is computed in a planner PROCESS - never on the event loop. Read-only: no lease, no lock, no write.
     It does not ask whether a pass would be allowed to run (a stopped or held equivalent, clearing switched off).
 
-    DIAGNOSTICS NEVER DELAY A PASS AND NEVER QUEUE (review of `b2a9caea`): the worker is the diagnostic one
-    (`_default_diagnostic_executor`), not the passes'; one diagnostic plan a process is in flight at a time and a
-    request that meets it is refused at once (`ClearingDiagnosticsUnavailable`, `diagnostics_busy`); a plan past
-    `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` is refused (`diagnostics_timeout`) and its worker terminated, as is the worker
-    of a request that was cancelled while its plan ran.
+    DIAGNOSTICS DO NOT STAND IN THE PASSES' PLANNER QUEUE AND DO NOT QUEUE THEMSELVES (review of `b2a9caea`): the
+    worker is the diagnostic one (`_default_diagnostic_executor`), not the passes'; in ONE SERVER PROCESS one
+    diagnostic request is in flight at a time (several server processes have a slot and a worker each) and a request
+    that meets it is refused at once (`ClearingDiagnosticsUnavailable`, `diagnostics_busy`); a plan whose awaited
+    planning phase runs past `DIAGNOSTIC_PLAN_TIMEOUT_SECONDS` is refused (`diagnostics_timeout`) and its worker
+    terminated, as is the worker of a request that was cancelled while its plan ran. The isolation is of the planner
+    queue: the diagnostic worker still shares the machine's CPU with everything else.
 
     Each cycle is a list of `{debt_id, debtor, creditor, amount}`; `amount` is the debt's amount on the snapshot at
     the equivalent's precision, not the cycle's `c`. A missing equivalent raises `GeoException`, as `load_snapshot`

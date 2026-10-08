@@ -8,6 +8,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+#: How long a held plan waits for its test before it gives up: a stand that forgot to release (or to terminate) the
+#: worker must not leave a process spinning for the rest of the session.
+_HELD_PLAN_GIVES_UP_AFTER_SECONDS = 120.0
+
+
+def _rotated(plan):
+    return replace(plan, cycles=tuple(replace(c, edges=c.edges[1:] + c.edges[:1]) for c in plan.cycles))
+
 
 def slow_rotated_plan(delay_seconds: float, edges):
     """Sleep, then the real planner, with every cycle ROTATED by one edge.
@@ -22,5 +30,28 @@ def slow_rotated_plan(delay_seconds: float, edges):
     from app.core.clearing.flow_planner import plan_clearing
 
     time.sleep(delay_seconds)
-    plan = plan_clearing(edges)
-    return replace(plan, cycles=tuple(replace(c, edges=c.edges[1:] + c.edges[:1]) for c in plan.cycles))
+    return _rotated(plan_clearing(edges))
+
+
+def held_rotated_plan(started_path: str, release_path: str, edges):
+    """A plan that stays IN FLIGHT until the test lets it go - a barrier, not a duration.
+
+    The worker creates `started_path` when the plan has begun in it, then waits for `release_path` to exist, and
+    only then runs the real planner (rotated, as above). Two files, because a `spawn` worker shares nothing else
+    with the test that a pool's `submit` can carry. The test asserts its outcome while the barrier is closed and
+    opens it afterwards (or terminates the worker), so no assertion depends on how fast either side runs.
+    """
+
+    import os
+    import time
+
+    from app.core.clearing.flow_planner import plan_clearing
+
+    with open(started_path, "w"):
+        pass
+    gives_up_at = time.monotonic() + _HELD_PLAN_GIVES_UP_AFTER_SECONDS
+    while not os.path.exists(release_path):
+        if time.monotonic() > gives_up_at:
+            raise TimeoutError("p035: the test never released the held plan")
+        time.sleep(0.01)
+    return _rotated(plan_clearing(edges))

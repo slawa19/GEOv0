@@ -60,9 +60,10 @@ async def list_cycles(
 ):
     """The cycles of the plan a clearing pass would compute now, on a fresh snapshot (035 A1, П1-(а)).
 
-    The plan is computed in the diagnostic planner process, never on the event loop and never in front of a pass's
-    plan. Diagnostics that cannot answer say so with a `request_id` - busy or past the time bound is 503, a planner
-    that failed is 500 - never an empty list and never another detector. The pass itself may still refuse to run
+    The plan is computed in the diagnostic planner process, never on the event loop and never in the passes' planner
+    queue. Diagnostics that cannot answer say so with a `request_id` - busy (one diagnostic request at a time in
+    this server process) or planning past its time bound is 503, a planner that failed is 500 - never an empty list
+    and never another detector. The pass itself may still refuse to run
     (a stopped or held equivalent, clearing switched off): this route does not ask.
     """
 
