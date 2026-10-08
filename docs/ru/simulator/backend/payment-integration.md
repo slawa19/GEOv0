@@ -66,7 +66,7 @@ Source of truth:
 
 ### 1.2 Clearing
 В текущем backend есть Clearing API:
-- `GET /api/v1/clearing/cycles?equivalent=...` — найти циклы
+- `GET /api/v1/clearing/cycles?equivalent=...` — циклы плана, который вычислил бы проход клиринга (без `max_depth`)
 - `POST /api/v1/clearing/auto?equivalent=...` — выполнить auto clearing
 
 Ключевые свойства:

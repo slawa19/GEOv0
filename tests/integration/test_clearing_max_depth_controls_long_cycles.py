@@ -77,21 +77,29 @@ async def test_clearing_max_depth_blocks_and_allows_length_5_cycle(client: Async
             )
     await db_session.commit()
 
-    # With max_depth=4, the length-5 cycle should not be detected.
+    # CHANGED 2026-10-08, programme 035 A1 (owner decision П1-(а)): the diagnostic `/cycles` answers with the cycles
+    # of the flow plan and has no depth either. It used to hide the length-5 cycle at `max_depth=4` (`cycles == []`)
+    # and show it at 5; now it shows it with no parameter at all, and refuses the parameter as `/auto` does.
+    resp = await client.get(
+        "/api/v1/clearing/cycles",
+        params={"equivalent": "USD"},
+        headers=user["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert [len(cycle) for cycle in resp.json().get("cycles")] == [5]
+
     resp = await client.get(
         "/api/v1/clearing/cycles",
         params={"equivalent": "USD", "max_depth": 4},
         headers=user["headers"],
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json().get("cycles") == []
+    assert resp.status_code == 422, resp.text
 
     # MOVED 2026-09-28, programme 023 slice (d) (spec 023, Verification plan §3; decision 8): the depth no longer
-    # controls EXECUTION. The depth assertions stay on the diagnostic `/cycles` (above: 4 does not see the 5-cycle;
-    # below: 5 does), and `/auto` - which refuses `max_depth` with 422 - clears the 5-cycle with no depth at all.
+    # controls EXECUTION: `/auto` - which refuses `max_depth` with 422 - clears the 5-cycle with no depth at all.
     resp = await client.get(
         "/api/v1/clearing/cycles",
-        params={"equivalent": "USD", "max_depth": 5},
+        params={"equivalent": "USD"},
         headers=user["headers"],
     )
     assert resp.status_code == 200, resp.text
@@ -114,7 +122,7 @@ async def test_clearing_max_depth_blocks_and_allows_length_5_cycle(client: Async
 
     resp = await client.get(
         "/api/v1/clearing/cycles",
-        params={"equivalent": "USD", "max_depth": 5},
+        params={"equivalent": "USD"},
         headers=user["headers"],
     )
     assert resp.status_code == 200, resp.text

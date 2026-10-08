@@ -74,7 +74,6 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1 import clearing as clearing_route
 from app.core.balance.service import BalanceService
 from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
@@ -99,7 +98,9 @@ def _api_default_max_depth() -> int:
     `test_p012_money_form_and_detector_reach_postgres.py`.
     """
 
-    marker = inspect.signature(clearing_route.list_cycles).parameters["max_depth"].default
+    # 035 A1 (2026-10-08, owner decision П1-(а)): the route answers with the flow plan and has no `max_depth`; the
+    # detectors this module covers keep their own default, the same value, read from `find_cycles`.
+    marker = inspect.signature(ClearingService.find_cycles).parameters["max_depth"].default
     return int(getattr(marker, "default", marker))
 
 
