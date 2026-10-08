@@ -994,23 +994,12 @@ class PaymentService:
         are values of a DENY list and are copied unchanged - intersecting them with an allow
         list is backwards, and would weaken the restriction the day someone applies it to an
         endpoint rather than a hop.
+
+        035 A6 (`T3511`): the narrowing itself is `PaymentRouter.confine_to_participants`, public for the
+        simulator's read of a run; this name stays for its callers.
         """
 
-        router.graph = {
-            u: {v: cap for v, cap in adj.items() if v in allowed}
-            for u, adj in router.graph.items()
-            if u in allowed
-        }
-        router.edge_can_be_intermediate = {
-            u: {v: flag for v, flag in adj.items() if v in allowed}
-            for u, adj in router.edge_can_be_intermediate.items()
-            if u in allowed
-        }
-        router.edge_blocked_participants = {
-            u: {v: blocked for v, blocked in adj.items() if v in allowed}
-            for u, adj in router.edge_blocked_participants.items()
-            if u in allowed
-        }
+        router.confine_to_participants(allowed)
 
     async def create_payment_internal(
         self,
