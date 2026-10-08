@@ -196,7 +196,9 @@ tests/performance/simulator/
 
 Где смотреть артефакты:
 - скачанные для анализа: `.local-run/analysis/<run_id>/events.ndjson` и соседние файлы;
-- оригинальные runtime-артефакты: `.local-run/simulator/runs/<run_id>/artifacts/`.
+- оригинальные runtime-артефакты: `<каталог состояния симулятора>/runs/<run_id>/artifacts/`. У тестового
+  процесса это `.local-run/test-runs/<TaskSlug>/artifacts/simulator/runs/...` (с 034 S1c, 2026-10-08:
+  `tests/conftest.py` задаёт `SIMULATOR_STATE_DIR`); у dev-сервера по умолчанию — `.local-run/simulator/runs/...`.
 
 ---
 

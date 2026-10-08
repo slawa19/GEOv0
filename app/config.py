@@ -111,7 +111,7 @@ def _require_read_committed_isolation(value: str) -> str:
 _LENIENT_SIMULATOR_INTS = (
     "SIMULATOR_TICK_MS_BASE", "SIMULATOR_ACTIONS_PER_TICK_MAX", "SIMULATOR_CLEARING_EVERY_N_TICKS",
     "SIMULATOR_MAX_ACTIVE_RUNS", "SIMULATOR_MAX_RUN_RECORDS", "SIMULATOR_RUN_PERSIST_EVERY_MS",
-    "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS", "SIMULATOR_ARTIFACTS_TTL_HOURS", "SIMULATOR_ARTIFACTS_MAX_RUNS",
+    "SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS", "SIMULATOR_ARTIFACTS_TTL_HOURS",
     "SIMULATOR_ARTIFACT_SHA_MAX_BYTES", "SIMULATOR_EVENT_BUFFER_SIZE", "SIMULATOR_EVENT_BUFFER_TTL_SEC",
     "SIMULATOR_SSE_SUB_QUEUE_MAX", "SIMULATOR_SSE_MAX_CONNECTIONS", "SIMULATOR_SSE_MAX_CONNECTIONS_PER_RUN",
     "SIMULATOR_REAL_MAX_IN_FLIGHT", "SIMULATOR_REAL_MAX_CONSEC_TICK_FAILURES",
@@ -246,17 +246,13 @@ class Settings(BaseSettings):
     SIMULATOR_MAX_RUN_RECORDS: int = 200
     SIMULATOR_RUN_PERSIST_EVERY_MS: int = 5000
     SIMULATOR_RUN_PERSIST_DIRTY_EVERY_MS: int = 1000
-    # 034 S1c, `F-034-8` (AGENTS.md §12): the retention of `<state dir>/runs/*`, applied when the runtime starts and
-    # after every finalize (`ArtifactsManager.cleanup_old_runs`). A run directory not written for longer than the
-    # TTL is removed; if more than the limit are left, the least recently written go. 0 switches a rule off, and
-    # BOTH ARE OFF BY DEFAULT: switching them on removes what is already there, which is a decision for whoever
-    # owns the directory. A run this process may still write to, and a directory written within the last hour by
-    # any process, are never removed.
     SIMULATOR_ARTIFACTS_TTL_HOURS: int = 0
-    SIMULATOR_ARTIFACTS_MAX_RUNS: int = 0
-    # Where the simulator keeps its runtime state (`runs/<run_id>/artifacts`, uploaded `scenarios/`). Empty: the
-    # checkout's `.local-run/simulator`. A relative path is taken from the repository root. Sessions that share a
-    # checkout but must not share this directory set it - the test tier does (`tests/conftest.py`).
+    # 034 S1c: where the simulator keeps its runtime state - `runs/<run_id>/artifacts` and uploaded `scenarios/`.
+    # Empty (the default): the checkout's `.local-run/simulator`, as before. A relative path is taken from the
+    # repository root, never from the working directory. The directory MUST BE THE SIMULATOR'S OWN: whatever
+    # cleans it - the runtime at start when `SIMULATOR_ARTIFACTS_TTL_HOURS` > 0, `scripts/cleanup_simulator_runs.py`
+    # - treats every directory under its `runs/` as a run and removes it. Sessions that share a checkout but must
+    # not share this state set it; the test tier does (`tests/conftest.py`). One resolver: `local_state_dir()`.
     SIMULATOR_STATE_DIR: str = ""
     SIMULATOR_ARTIFACT_SHA_MAX_BYTES: int = 524288
     SIMULATOR_EVENT_BUFFER_SIZE: int = 2000

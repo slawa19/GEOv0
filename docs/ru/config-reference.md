@@ -139,7 +139,8 @@ configuration persistence.
 Состояние симулятора тестового процесса (артефакты ранов, загруженные сценарии) лежит под тем же корнем:
 `tests/conftest.py` задаёт `SIMULATOR_STATE_DIR=<GEO_TEST_ARTIFACT_ROOT>/simulator` до импорта `app.config`
 (034 S1c, 2026-10-08), у прямого pytest — `.local-run/test-runs/direct-pytest/artifacts/simulator`. Каталог
-разработчика `.local-run/simulator` тесты не пишут и не чистят. Правила хранения —
+разработчика `.local-run/simulator` тесты не пишут. Настройка `SIMULATOR_STATE_DIR` доступна и вне тестов;
+каталог обязан быть выделенным под симулятор — подробности в
 [`simulator/backend/run-storage.md`](simulator/backend/run-storage.md), раздел 4.2.
 
 Тир тестов идёт только на PostgreSQL (017, стадия 2c, 2026-09-23). Свою базу задавайте

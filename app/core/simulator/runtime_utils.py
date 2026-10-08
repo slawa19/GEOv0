@@ -27,7 +27,11 @@ def local_state_dir() -> Path:
     """The simulator's runtime state directory: `SIMULATOR_STATE_DIR`, else the checkout's `.local-run/simulator`
     (ignored by .gitignore). A relative setting is taken from the repository root, never from the process's
     working directory. 034 S1c: the override exists so that a session sharing the checkout - the test tier above
-    all - does not write into, or clean, the developer's directory (AGENTS.md §7, §12)."""
+    all - does not write into, or clean, the developer's directory (AGENTS.md §7, §12).
+
+    THE ONE RESOLVER: the runtime, `scripts/cleanup_simulator_runs.py` and
+    `scripts/check_latest_simulator_artifacts.py` all ask this function, so a script cannot work on a directory the
+    application is not using. The directory must be the simulator's own (see `Settings.SIMULATOR_STATE_DIR`)."""
 
     configured = str(settings.SIMULATOR_STATE_DIR or "").strip()
     if not configured:
