@@ -77,6 +77,10 @@ make the session green again:
   `tests/integration/test_p035_a3_trustlines_page_is_not_a_query_per_line.py` (the statement count of a page and the
   page against the single-line read). Measured with `python -m pytest --collect-only -q -m "not slow"` on the branch
   merged with `dd019a31` (on `4a1768d5` the same two cases read 3219 -> 3221, by the guard's own refusal).
+* 2026-10-08, 035 slice A4 (F-035-3), merged after A3 (`origin/main` `9b19fc04`): 3235 -> 3239 (+4; on `dd019a31` alone it read 3233 -> 3237). Four new cases in
+  `tests/integration/test_p035_a4_neutrality_reads_the_cycle_as_a_set.py` (the statement count, two counterexamples,
+  the set read against the per-participant read). Measured with `python -m pytest --collect-only -q -m "not slow"` on
+  the branch merged with `dd019a31` (on `4a1768d5` the same four cases read 3219 -> 3223, by the guard's own refusal).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -119,7 +123,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3235
+EXPECTED_SELECTED_ITEMS = 3239
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

@@ -273,6 +273,31 @@ class InvariantChecker:
 
         return (credits or Decimal("0")) - (debts or Decimal("0"))
 
+    async def net_positions(
+        self, participant_ids: List[UUID], equivalent_id: UUID, pairs: Optional[set] = None
+    ) -> Dict[UUID, Decimal]:
+        """`_calculate_net_position` for a SET of participants in two statements - one sum of what each is owed, one
+        of what each owes - instead of two per participant (035 A4, `F-035-3`). The same rows, the same `pairs`
+        scope and the same arithmetic; a participant with no row on a side counts zero there."""
+
+        ids = list(dict.fromkeys(participant_ids))
+        if not ids:
+            return {}
+        scope = [] if pairs is None else [or_(false(), *(and_(Debt.debtor_id == d, Debt.creditor_id == c)
+                                                         for d, c in pairs))]
+
+        async def _sums(side) -> Dict[UUID, Decimal]:
+            rows = await self.session.execute(
+                select(side, func.sum(Debt.amount))
+                .where(side.in_(ids), Debt.equivalent_id == equivalent_id, *scope)
+                .group_by(side)
+            )
+            return {participant: total for participant, total in rows}
+
+        credits = await _sums(Debt.creditor_id)
+        debts = await _sums(Debt.debtor_id)
+        return {pid: (credits.get(pid) or Decimal("0")) - (debts.get(pid) or Decimal("0")) for pid in ids}
+
     async def verify_clearing_neutrality(
         self,
         cycle_participant_ids: List[UUID],
@@ -283,8 +308,9 @@ class InvariantChecker:
         """Verify that clearing didn't change net positions for cycle participants (over `pairs`, as read before)."""
 
         violations: List[dict] = []
+        positions_after = await self.net_positions(cycle_participant_ids, equivalent_id, pairs)
         for pid in cycle_participant_ids:
-            position_after = await self._calculate_net_position(pid, equivalent_id, pairs)
+            position_after = positions_after[pid]
             position_before = positions_before.get(pid, Decimal("0"))
 
             if position_before != position_after:
