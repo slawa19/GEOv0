@@ -101,6 +101,12 @@ make the session green again:
 * 2026-10-08, 035 slice A6 (`T3511`), on `origin/main` `213c84e3`: 3252 -> 3254 (+2). Two new cases in
   `tests/integration/test_p035_a6_payment_targets_public_router_method.py`. The number is the guard's own refusal
   ("selected 3254 case(s), expected exactly 3252", `python -m pytest --collect-only -q -m "not slow"`).
+* 2026-10-08, 034 slice S4 (F-034-14, the status part), on `origin/main` `213c84e3`: 3252 -> 3262 (+10; 3277 with the 15
+  `slow` cases). One new module, `tests/integration/test_p034_s4_inject_status_follows_the_seeder_postgres.py`: six
+  control cases, one anti-vacuum case, three cases of the reproducer. Measured with
+  `python -m pytest --collect-only -q -m "not slow"`; the guard refused the collection first ("selected 3262 case(s),
+  expected exactly 3252 ... MORE than recorded", exit 4).
+* 2026-10-09, 034 slice S4 merged after 035 A6 (`origin/main` at the merge of PR #181, 3254): 3254 -> 3264 (+10, the S4 module above; the numbers in the S4 line are those of the branch on `213c84e3`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -143,7 +149,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3254
+EXPECTED_SELECTED_ITEMS = 3264
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
