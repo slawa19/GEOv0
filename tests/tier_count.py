@@ -67,9 +67,16 @@ make the session green again:
   `tests/p035_support.py`) and 034 S1a (PR #167: three `test_p034_s1_*` modules, `test_p034_s1_launch_epoch_and_post_commit_publication.py`)
   plus additions to existing modules. The guard itself refused the first merged collection ("MORE than recorded", exit 4)
   - the case it is for. Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
-* 2026-10-08, 035 slice A5 (F-035-4), on `origin/main` `4a1768d5`: 3219 -> 3220 (+1). One new case in
-  `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py`. The number is the guard's own refusal on the
-  merged tree ("selected 3220 ... MORE than recorded", exit 4, `scripts/verify_local.ps1 -BackendOnly`).
+* 2026-10-08, 034 slice S1b: 3219 -> 3233 (+14; 3248 with the 15 `slow` cases). Four new modules of the slice:
+  `tests/unit/test_p034_s1b_artifact_event_drops.py` (4), `tests/unit/test_p034_s1b_interact_silent_failures_are_logged.py` (2),
+  `tests/unit/test_p034_s1b_heartbeat_failure_is_not_silent.py` (4) and
+  `tests/integration/test_p034_s1b_payment_edge_patch_names_the_line_postgres.py` (4). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `origin/main` `4a1768d5`; the guard refused
+  the collection first ("selected 3233 case(s), expected exactly 3219 ... MORE than recorded", exit 4).
+* 2026-10-08, 035 slice A5 (F-035-4), on `origin/main` `dd019a31`: 3233 -> 3234 (+1). One new case in
+  `tests/integration/test_p035_a5_verify_does_not_lose_its_audit_row.py`. Measured with
+  `python -m pytest --collect-only -q -m "not slow"` on the branch merged with `dd019a31` (on `4a1768d5` the same case
+  read 3219 -> 3220, by the guard's own refusal).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -112,7 +119,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3220
+EXPECTED_SELECTED_ITEMS = 3234
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

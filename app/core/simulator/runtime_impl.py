@@ -884,6 +884,55 @@ class _SimulatorRuntimeBase:
             limits=snap.limits,
         )
 
+    async def _heartbeat_failed(self, run_id: str, error: Exception) -> None:
+        """An iteration of the heartbeat raised: the run is stopped as failed, visibly (034 `F-034-10`).
+
+        The loop used to catch `CancelledError` only. Any other exception - a status publication, the registry, a
+        failure inside the tick's own failure handling - ended the task and left the run `running` with nothing
+        ticking it, no `last_error` and no log line of the application. There is no retry here: what failed is
+        not known to be transient, and a run that is not ticked must not say `running`. The run goes to `error`
+        with `last_error`, through the same `fail_run` a failing tick uses; `resume` brings it back (024 T2416.2).
+        Never raises (a cancellation aside).
+        """
+
+        logger.error(
+            "simulator.heartbeat.failed run_id=%s error_type=%s",
+            str(run_id),
+            type(error).__name__,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        # ONLY THE TYPE of the exception goes out: `last_error` is published in `run_status`, served by the API and
+        # stored in `simulator_runs`, and the text of an `OSError` or a database error carries local paths and SQL
+        # (AGENTS.md §12). The full text is in the log line above, found by the run id.
+        message = f"The heartbeat failed: {type(error).__name__}"
+        try:
+            await self._real_runner.fail_run(run_id, code="HEARTBEAT_FAILED", message=message)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("simulator.heartbeat.fail_run_failed run_id=%s", str(run_id), exc_info=True)
+        # `fail_run` raised. It moves the state first and then publishes and stores; when it is the publication
+        # that failed (the usual way to get here: it is what failed the heartbeat too), the run is `error` in
+        # memory and NOTHING of that was stored - the `simulator_runs` row would keep saying `running`. So the
+        # state is made sure of here (for the case where `fail_run` could not even start) and the row is written.
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is not None and run.state == "running":
+                run.state = "error"
+                run.stopped_at = _utc_now()
+                run.current_phase = None
+                run.errors_total += 1
+                run.last_error = {"code": "HEARTBEAT_FAILED", "message": message, "at": _utc_now().isoformat()}
+        if run is None:
+            return  # the registry no longer has the run: there is nothing left to mark or to store
+        try:
+            await simulator_storage.upsert_run(run)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("simulator.heartbeat.fail_run_upsert_failed run_id=%s", str(run_id), exc_info=True)
+
     async def _heartbeat_loop(self, run_id: str) -> None:
         try:
             while True:
@@ -981,6 +1030,9 @@ class _SimulatorRuntimeBase:
                     run._persist_last_sig = sig
         except asyncio.CancelledError:
             return
+        except Exception as error:
+            # 034 `F-034-10`: the loop ends here either way; the run must not stay `running` behind it.
+            await self._heartbeat_failed(run_id, error)
 
 
 class SimulatorRuntime(_SimulatorRuntimeBase):
