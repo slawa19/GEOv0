@@ -102,8 +102,12 @@ _HERE = Path(__file__).resolve().parent
 #: run (whole tier, `-m "not slow"`, no selector) whose selected count differs from a recorded constant
 #: - two RED cases until the count is implemented (a deselect; a dropped module) - and three
 #: counter-checks that the unmodified tier, a selector run and the wide profile are not refused.
+#:
+#: 2026-10-08, 035 slice C1 (F-035-14): portable 197 -> 200. Three cases added to the same module, now that the count
+#: exists (`tests/tier_count.py`): the comparison refuses growth and loss alike, the profile decision in both
+#: outcomes, and each named skip is still declared where the count module says. The two reproducer cases went green.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 197,
+    "portable": 200,
     "powershell": 235,
 }
 

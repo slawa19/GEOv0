@@ -110,6 +110,7 @@ settings.INTEGRITY_CHECKPOINT_ENABLED = False
 # module import time is deliberate: this conftest is imported before collection, which is
 # the only point that is unambiguously earlier than every request.
 from tests.contract import openapi_response_conformance as _openapi_conformance  # noqa: E402
+from tests import tier_count as _tier_count  # noqa: E402
 
 _openapi_conformance.HARNESS.install()
 
@@ -124,12 +125,34 @@ def pytest_collection_modifyitems(session, config, items) -> None:
     _openapi_conformance.move_report_test_last(items)
 
 
-# `pytest_collection_finish` USED TO LIVE HERE AND IS GONE WITH THE MARKER (017 stage 2c). It failed
+# THE FIRST `pytest_collection_finish` OF THIS FILE IS GONE WITH THE MARKER (017 stage 2c). It failed
 # the session closed when a `postgres`-marked test was SELECTED on a non-PostgreSQL URL. Its question -
 # "can a test that needs PostgreSQL run without it?" - is now answered for the whole tier, earlier, by
 # `_require_a_postgres_tier_url` above: nothing is collected on another backend, so a check after
 # collection would be a check that can never fire. The refusal and its control are
 # `tooling-tests/powershell/test_the_tier_refuses_a_database_that_is_not_postgres.py`.
+
+
+def pytest_collection_finish(session) -> None:
+    """The canonical profile selects exactly the recorded number of cases (035 F-035-14, `tests/tier_count.py`).
+
+    A different hook, a different question from the one above: not "can this test run here" but "is the tier still
+    whole". It judges only the whole tier under `-m "not slow"` (what `scripts/verify_local.ps1 -BackendOnly` runs) and
+    never a path selector or the wide profile; the full statement of the rule and of what it does not see is in
+    `tests/tier_count.py`. Refused with exit 4 at the end of collection, so it holds under `--collect-only` too.
+    """
+
+    config = session.config
+    if not _tier_count.is_canonical_profile(
+        markexpr=getattr(config.option, "markexpr", ""),
+        args=list(config.args),
+        invocation_dir=config.invocation_params.dir,
+        root=config.rootpath,
+    ):
+        return
+    problem = _tier_count.count_problem(selected=len(session.items))
+    if problem is not None:
+        pytest.exit(f"backend tier refused: {problem}", returncode=pytest.ExitCode.USAGE_ERROR)
 
 
 _use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"

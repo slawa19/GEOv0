@@ -7,7 +7,8 @@ count: `tests/conftest.py` only reorders the conformance aggregate, so deleting 
 path), `--collect-only -q -m "not slow"`: 3150 selected / 15 deselected; with one `--deselect` of one
 case: 3149 selected / 16 deselected, exit 0. Nothing in the session notices.
 
-THE RULE THIS FILE HOLDS (target, not yet implemented; the cases marked RED below fail until it is).
+THE RULE THIS FILE HOLDS (implemented 2026-10-08 in `tests/tier_count.py`, called from `tests/conftest.py`; the two
+cases that were RED on `75dafc82` are the reproducer and stay as the regression test).
 On the CANONICAL PROFILE - the whole tier, no positional selector, marker expression `not slow` (the
 runner's default, `scripts/verify_local.ps1`) - a backend session whose number of selected cases differs
 from a constant recorded in the repository ends with a usage error (exit 4) that names both numbers. The
@@ -33,10 +34,9 @@ confirm in their own message that the baseline collected a positive number of ca
 deselection or ignore really removed some, so a typo in the node id cannot make them pass or fail by
 accident.
 
-WHAT THIS DOES NOT SEE. The GROWTH direction (an unrecorded new case): to reach it a case would have to
-add a test file under `tests/`, which this file does not do; the comparison is one expression that
-judges both directions, and the implementer's own unit check of that expression (a number above the
-constant) is where growth is held. Which tests are present: the count says how many, not which - a case
+WHAT THIS DOES NOT SEE. The GROWTH direction (an unrecorded new case) cannot be reached by a subprocess run
+without adding a test file under `tests/`, which this file does not do; it is held by calling the comparison
+(`count_problem`) and the profile test (`is_canonical_profile`) directly, with a number above the constant. Which tests are present: the count says how many, not which - a case
 swapped for a weaker one under the same number passes. A run started with `-o addopts=...` or
 `PYTEST_ADDOPTS` that ends pytest before the count: the runner is not defended against reconfiguring
 itself (see the limits in `tooling-tests/conftest.py`).
@@ -44,6 +44,7 @@ itself (see the limits in `tooling-tests/conftest.py`).
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -115,7 +116,7 @@ def _a_unit_module(baseline: subprocess.CompletedProcess[str]) -> tuple[str, str
 
 
 def test_a_deselected_case_ends_the_canonical_backend_run(baseline: subprocess.CompletedProcess[str]) -> None:
-    """RED until the count exists: one `--deselect` on the whole tier must refuse the run, not pass it."""
+    """Reproducer (red on 75dafc82): one `--deselect` on the whole tier must refuse the run, not pass it."""
 
     nodeid, _ = _a_unit_module(baseline)
     before = _selected(baseline)
@@ -128,11 +129,14 @@ def test_a_deselected_case_ends_the_canonical_backend_run(baseline: subprocess.C
         f"exited {result.returncode}, not {_USAGE_ERROR}: the tier has no count of what it collects "
         f"(F-035-14)"
     )
-    assert str(before) in result.stdout + result.stderr, "the refusal must name the expected number"
+    output = result.stdout + result.stderr
+    assert f"selected {after} case(s), expected exactly {before}" in output, (
+        "the refusal must name the actual and the expected number"
+    )
 
 
 def test_a_module_dropped_from_the_run_ends_the_canonical_backend_run(baseline: subprocess.CompletedProcess[str]) -> None:
-    """RED until the count exists: the loss of a whole module (`--ignore`, or a deleted file) must refuse the run."""
+    """Reproducer (red on 75dafc82): the loss of a whole module (`--ignore`, or a deleted file) must refuse the run."""
 
     _, module = _a_unit_module(baseline)
     before = _selected(baseline)
@@ -145,6 +149,7 @@ def test_a_module_dropped_from_the_run_ends_the_canonical_backend_run(baseline: 
         f"pytest exited {result.returncode}, not {_USAGE_ERROR}: the tier has no count of what it "
         f"collects (F-035-14)"
     )
+    assert f"selected {after} case(s), expected exactly {before}" in result.stdout + result.stderr
 
 
 def test_the_unmodified_canonical_profile_is_not_refused(baseline: subprocess.CompletedProcess[str]) -> None:
@@ -175,3 +180,68 @@ def test_the_wide_profile_is_not_counted_by_this_rule(baseline: subprocess.Compl
         f"the wide profile with a deselect was refused (exit {wide.returncode}); this rule counts the "
         f"canonical profile only:\n{wide.stdout[-800:]}"
     )
+
+
+def _tier_count_module():
+    path = _ROOT / "tests" / "tier_count.py"
+    spec = importlib.util.spec_from_file_location("p035_c_tier_count_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_comparison_refuses_growth_and_loss_alike_and_accepts_the_recorded_number() -> None:
+    """Unit check of the comparison, both directions (the subprocess cases above can reach only the loss)."""
+
+    tier = _tier_count_module()
+    expected = tier.EXPECTED_SELECTED_ITEMS
+    assert expected > 0
+    assert tier.count_problem(selected=expected) is None
+    for selected, word in ((expected + 1, "MORE"), (expected - 1, "FEWER")):
+        problem = tier.count_problem(selected=selected)
+        assert problem is not None, f"{selected} selected against {expected} was accepted"
+        assert f"selected {selected} case(s), expected exactly {expected}" in problem
+        assert word in problem
+
+
+def test_only_the_whole_tier_under_the_canonical_marker_expression_is_counted() -> None:
+    """The profile decision in both outcomes: a rule that counted nothing, or everything, fails one row."""
+
+    tier = _tier_count_module()
+    root = _ROOT
+    here = root
+
+    def counted(markexpr, *args):
+        return tier.is_canonical_profile(markexpr=markexpr, args=list(args), invocation_dir=here, root=root)
+
+    assert counted("not slow")  # no argument: `testpaths = tests`
+    assert counted("not slow", "tests")
+    assert counted(" not slow ", "tests", "tests/")
+    assert not counted("", "tests")  # -IncludeExpensive
+    assert not counted(None)
+    assert not counted("not slow and not x", "tests")
+    assert not counted("not slow", "tests/unit")  # -BackendSelector
+    assert not counted("not slow", "tests/unit/test_admin_audit_log_list.py")
+    assert not counted("not slow", "tests/unit/test_admin_audit_log_list.py::test_x")
+    assert not counted("not slow", "tests", "tests/unit")
+    assert not counted("not slow", "docs")
+
+
+def test_every_named_skip_is_still_declared_where_the_count_module_says_it_is() -> None:
+    """The skipped cases of the canonical run are named in `tests/tier_count.py`; each name must still be true.
+
+    Form check only: the file holds the decorator and the reason the list quotes. Whether the list is complete is
+    read from `-rs` in the CI log, not from here.
+    """
+
+    named = (
+        ("tests/unit/test_deployment_config.py", 'os.name == "nt" or shutil.which("bash") is None'),
+        ("tests/unit/test_settings_guardrails.py", '@pytest.mark.skipif(os.name == "nt"'),
+        ("tests/unit/test_p024_scenario_id_is_a_safe_path_segment.py", '@pytest.mark.skipif(os.name != "nt"'),
+    )
+    docstring = (_ROOT / "tests" / "tier_count.py").read_text(encoding="utf-8")
+    for relative, declaration in named:
+        assert relative in docstring, f"{relative} is not named in tests/tier_count.py"
+        source = (_ROOT / relative).read_text(encoding="utf-8")
+        assert declaration in source, f"{relative} no longer declares {declaration!r}; update the named list"
