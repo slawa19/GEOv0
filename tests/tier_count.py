@@ -107,6 +107,13 @@ make the session green again:
   `python -m pytest --collect-only -q -m "not slow"`; the guard refused the collection first ("selected 3262 case(s),
   expected exactly 3252 ... MORE than recorded", exit 4).
 * 2026-10-09, 034 slice S4 merged after 035 A6 (`origin/main` at the merge of PR #181, 3254): 3254 -> 3264 (+10, the S4 module above; the numbers in the S4 line are those of the branch on `213c84e3`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-08, 034 slice S3 (F-034-7, -12, -14), on `origin/main` `1faf261b` (without S4): 3252 -> 3253 (+1; 3268 with the
+  15 `slow` cases). +2 `tests/integration/test_p034_s3_a_healthy_clearing_tick_logs_no_warning_postgres.py`, +2
+  `tests/integration/test_p034_s3_total_debt_is_the_runs_own_postgres.py`, -1 `test_count_active_runs` (the method is
+  removed), -2 in `tests/unit/test_topology_changed_no_empty_payload.py` (five cases of a removed function became three
+  on the live emitter). Measured with `python -m pytest --collect-only -q -m "not slow"`; the guard refused first
+  ("selected 3253 case(s), expected exactly 3252 ... MORE than recorded", exit 4).
+* 2026-10-09, 034 slice S3 merged after 035 A6 and 034 S4 (`origin/main` `bfae3cda`, 3264): 3264 -> 3265 (+1, the S3 changes above; the numbers in the S3 line are those of the branch on `1faf261b`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -149,7 +156,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3264
+EXPECTED_SELECTED_ITEMS = 3265
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

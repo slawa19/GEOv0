@@ -643,6 +643,7 @@ def _tick_run(tick_index: int = 1) -> SimpleNamespace:
         _real_total_debt_by_eq={"UAH": Decimal("42")},
         _real_total_debt_tick=0,
         _edges_by_equivalent={"UAH": [("alice", "bob")]},
+        _real_participants=[],  # 034 S3: the snapshot reads the run's perimeter; a `RunRecord` always has the field
     )
 
 

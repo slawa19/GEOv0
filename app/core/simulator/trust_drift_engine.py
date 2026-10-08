@@ -24,13 +24,12 @@ from app.core.simulator.models import (
     TrustDriftResult,
 )
 from app.core.simulator.scenario_equivalent import effective_equivalent
-from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
+from app.core.simulator.sse_broadcast import SseBroadcast
 from app.core.trustlines.service import TrustLineService, TrustLineWriteBatch
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
 from app.db.models.trustline import TrustLine
-from app.schemas.simulator import TopologyChangedPayload
 from app.schemas.trustline import TrustLineUpdateRequest
 
 # The grain of the ledger, not of a currency's display. `trust_lines.limit` and `debts.amount` are
@@ -73,70 +72,6 @@ async def _set_limit_internally(
         TrustLineUpdateRequest(limit=format(new_limit, "f"), signature=_UNSIGNED),
         require_signature=False,
     )
-
-
-def broadcast_trust_drift_changed(
-    *,
-    sse: SseBroadcast,
-    utc_now,
-    logger: logging.Logger,
-    run_id: str,
-    run: RunRecord,
-    reason: str,
-    equivalents: list[str] | set[str],
-    edge_patches_by_eq: dict[str, list[dict]] | None = None,
-) -> None:
-    """Broadcast SSE topology.changed for trust-drift limit changes.
-
-    When *edge_patches_by_eq* is provided, each event carries a non-empty
-    ``payload.edge_patch`` so the frontend can apply incremental updates
-    **without** a full snapshot refresh.  If no edge_patch is available for
-    a given equivalent the event is **skipped** — sending an empty payload
-    would trigger ``refreshSnapshot()`` on every tick and cause visible
-    jitter / "sticking" in the UI.
-
-    Best-effort: errors are logged but never crash the tick.
-    """
-
-    try:
-        emitter = SseEventEmitter(sse=sse, utc_now=utc_now, logger=logger)
-
-        for eq in equivalents:
-            eq_upper = str(eq).strip().upper()
-            if not eq_upper:
-                continue
-
-            edge_patch = (edge_patches_by_eq or {}).get(eq_upper) or []
-            if not edge_patch:
-                # Skip: empty topology.changed would trigger full refreshSnapshot()
-                # on the frontend and cause jitter.
-                logger.debug(
-                    "simulator.real.trust_drift.topology_changed_skipped_empty eq=%s reason=%s",
-                    eq_upper,
-                    reason,
-                )
-                continue
-
-            payload = TopologyChangedPayload(edge_patch=edge_patch)
-            emitter.emit_topology_changed(
-                run_id=run_id,
-                run=run,
-                equivalent=eq_upper,
-                payload=payload,
-                reason=reason,
-            )
-            logger.info(
-                "simulator.real.trust_drift.topology_changed eq=%s reason=%s edges=%d",
-                eq_upper,
-                reason,
-                len(edge_patch),
-            )
-    except Exception:
-        logger.warning(
-            "simulator.real.trust_drift.topology_changed_broadcast_error reason=%s",
-            reason,
-            exc_info=True,
-        )
 
 
 async def commit_trust_drift(
@@ -728,24 +663,4 @@ class TrustDriftEngine:
             touched_equivalents=set(touched_eq_codes),
             touched_edges_by_eq={k: set(v) for k, v in touched_edges_by_eq.items()},
             committed_limit_updates=tuple(committed_limit_updates),
-        )
-
-    def broadcast_trust_drift_changed(
-        self,
-        *,
-        run_id: str,
-        run: RunRecord,
-        reason: str,
-        equivalents: list[str] | set[str],
-        edge_patches_by_eq: dict[str, list[dict]] | None = None,
-    ) -> None:
-        broadcast_trust_drift_changed(
-            sse=self._sse,
-            utc_now=self._utc_now,
-            logger=self._logger,
-            run_id=run_id,
-            run=run,
-            reason=reason,
-            equivalents=equivalents,
-            edge_patches_by_eq=edge_patches_by_eq,
         )

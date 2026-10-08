@@ -31,7 +31,7 @@ from app.core.simulator.models import (
     TrustDriftConfig,
     TrustDriftResult,
 )
-from app.core.simulator.trust_drift_engine import TrustDriftEngine, broadcast_trust_drift_changed
+from app.core.simulator.trust_drift_engine import TrustDriftEngine
 from app.schemas.simulator import (
     SimulatorTopologyChangedEvent,
     TopologyChangedPayload,

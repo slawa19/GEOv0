@@ -1,13 +1,10 @@
 import logging
 
+from app.core.simulator.cache_invalidator import invalidate_caches_after_inject
 from app.core.simulator.models import RunRecord
-from app.core.simulator.real_runner_impl import RealRunnerImpl
 
 
 def test_freeze_participant_does_not_overwrite_non_active_trustline_status_in_scenario() -> None:
-    runner = RealRunnerImpl.__new__(RealRunnerImpl)
-    runner._logger = logging.getLogger(__name__)
-
     run = RunRecord(run_id="r1", scenario_id="s1", mode="real", state="running")
     run._edges_by_equivalent = {
         "EUR": [("FROZEN", "B"), ("FROZEN", "C"), ("A", "B")],
@@ -27,7 +24,10 @@ def test_freeze_participant_does_not_overwrite_non_active_trustline_status_in_sc
         ],
     }
 
-    runner._invalidate_caches_after_inject(
+    # 034 S3: called where the inject executor calls it (`InjectExecutor.invalidate_caches_after_inject`); until then
+    # through `RealRunnerImpl._invalidate_caches_after_inject`, a wrapper only this test used.
+    invalidate_caches_after_inject(
+        logger=logging.getLogger(__name__),
         run=run,
         scenario=scenario,
         affected_equivalents=set(),

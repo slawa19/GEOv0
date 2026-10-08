@@ -973,7 +973,7 @@ class RealTick:
 
             try:
                 eq_t0 = time.monotonic()
-                rr._logger.warning(
+                rr._logger.info(
                     "simulator.real.clearing_eq_enter run_id=%s tick=%s eq=%s", str(run.run_id), int(run.tick_index), eq
                 )
                 with rr._lock:
@@ -1007,7 +1007,7 @@ class RealTick:
                     # Progress is durable: publish it below, then let the cause take its classification.
                     execution_error = failed.cause
                 else:
-                    rr._logger.warning(
+                    rr._logger.info(
                         "simulator.real.clearing_pass_done run_id=%s tick=%s eq=%s status=%s reason=%s "
                         "committed=%s remaining_cycles=%s elapsed_ms=%s",
                         str(run.run_id),
@@ -1053,7 +1053,7 @@ class RealTick:
                     # 026 `T2603.2`: the patches were read after the occurrences committed (`on_committed`).
                     await publish_closed_trustlines(emitter=emitter, lock=rr._lock, run_id=run_id, run=run,
                                                     equivalent=eq, pairs=closed)
-                    rr._logger.warning(
+                    rr._logger.info(
                         "simulator.real.clearing_eq_done run_id=%s tick=%s eq=%s elapsed_ms=%s cleared_cycles=%s",
                         str(run.run_id),
                         int(run.tick_index),
@@ -1187,7 +1187,7 @@ class RealTick:
         rr = self._runner
         node_patch: list[dict[str, Any]] | None = None
         edge_patch: list[dict[str, Any]] | None = None
-        rr._logger.warning(
+        rr._logger.info(
             "simulator.real.clearing_patch_start run_id=%s tick=%s eq=%s touched_nodes=%s touched_edges=%s "
             "cleared_cycles=%s",
             str(run.run_id),
@@ -1250,7 +1250,7 @@ class RealTick:
                 eq,
                 patch_ms,
             )
-        rr._logger.warning(
+        rr._logger.info(
             "simulator.real.clearing_patch_done run_id=%s tick=%s eq=%s elapsed_ms=%s",
             str(run.run_id),
             int(run.tick_index),
@@ -1289,7 +1289,7 @@ class RealTick:
                 int((time.monotonic() - tick_t0) * 1000.0),
             )
 
-        rr._logger.warning(
+        rr._logger.info(
             "simulator.real.tick_clearing_enter run_id=%s tick=%s eqs=%s planned=%s",
             str(run.run_id),
             tick_index,
@@ -1363,7 +1363,7 @@ class RealTick:
                 exc_info=True,
             )
 
-        rr._logger.warning(
+        rr._logger.info(
             "simulator.real.tick_clearing_done run_id=%s tick=%s elapsed_ms=%s",
             str(run.run_id),
             tick_index,
@@ -1516,10 +1516,18 @@ class RealTick:
                     )
                 ).all()
                 eq_id_by_code = {str(code): eq_id for (eq_id, code) in eq_rows}
+                with rr._lock:
+                    perimeter_ids = [participant_id for participant_id, _pid in (run._real_participants or [])]
                 for eq_code, eq_id in eq_id_by_code.items():
+                    # 034 S3 (F-034-14): the debts among the run's own participants - its perimeter, as for the
+                    # tick's clearing - not every debt of the equivalent: another run's debts are not this run's.
                     total = (
                         await session.execute(
-                            select(func.coalesce(func.sum(Debt.amount), 0)).where(Debt.equivalent_id == eq_id)
+                            select(func.coalesce(func.sum(Debt.amount), 0)).where(
+                                Debt.equivalent_id == eq_id,
+                                Debt.debtor_id.in_(perimeter_ids),
+                                Debt.creditor_id.in_(perimeter_ids),
+                            )
                         )
                     ).scalar_one()
                     # 2026-08-20 / p007_t715: `total_debt` is money; the SUM over Numeric(20, 8) stays Decimal.
