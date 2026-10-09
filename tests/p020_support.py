@@ -86,7 +86,7 @@ def ring(pids: Sequence[str], amounts: Sequence[str], ids: Sequence[uuid.UUID]) 
 
 
 def identity(cycle: Iterable[dict]) -> tuple[str, ...]:
-    """The canonical identity of a `find_cycles` cycle: the sorted tuple of all its debt UUIDs."""
+    """The canonical identity of a cycle given as `{debt_id, ...}` edges: the sorted tuple of all its debt UUIDs."""
 
     return tuple(sorted(str(uuid.UUID(str(e["debt_id"]))) for e in cycle))
 

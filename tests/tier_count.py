@@ -132,11 +132,19 @@ make the session green again:
   `python -m pytest --collect-only -q -m "not slow"` on the branch merged with it (on `bfae3cda` the same sixteen read
   3264 -> 3280).
 * 2026-10-09, 035 slice A2a merged after 034 S4b (`origin/main` at the merge of PR #186, 3275): 3275 -> 3291 (+16, the A2a cases above; the numbers in the A2a lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 034 slice S2 (F-034-11), on `origin/main` `0d153390`: 3265 -> 3267 (+2). One new module,
+  `tests/integration/test_p034_s2_payment_targets_route_answers_as_before.py` (the route byte for byte, and the refusals
+  around it). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3267/3282 tests collected`).
+* 2026-10-09, 034 slice S2 merged after 034 S4b (`origin/main` `906cae90`, 3275): 3275 -> 3277 (+2, the S2 module above; the numbers in the S2 line are those of the branch on `0d153390`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 034 slice S2 merged after 035 A2a (`origin/main` `a0d25e7c`, 3291): 3291 -> 3293 (+2, the S2 module; the earlier S2 lines are those of the branch on `0d153390` and `906cae90`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 slice A2b (the detectors removed from `app/core/clearing/service.py`): 3291 -> 3273 (-18, tests of the removed contract: `test_a_long_cycle_appears_exactly_when_the_caller_asks_deep_enough` 5, `test_retention_each_depth_finds_its_lengths_and_nothing_longer` 5, `test_retention_same_length_ties_follow_the_full_identity` 2, `test_the_merged_answer_reports_one_cycle_once` 1, `test_within_a_length_the_largest_executable_cycle_comes_first` 1, `test_sql_and_dfs_produce_same_cycles` 1, `test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d` 1, `test_the_sql_producer_itself_is_scoped` 1, `test_the_expanding_bind_works_on_postgresql` 1; two more tests were narrowed and renamed, one case each, count unchanged). Each removed test has a dated note where it stood. Measured with the same command on base `a0d25e7c`.
+* 2026-10-09, 035 slice A2b merged after 034 S2 (`origin/main` at the merge of PR #187, 3293): 3293 -> 3275 (-18, the detector-only cases named in the A2b line above; its numbers are those of the branch on `a0d25e7c`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 035 money storability past the decimal context (review of 034 S4b), on `origin/main` `a0d25e7c`:
   3291 -> 3355 (+64). One new module, `tests/integration/test_p035_money_storability_does_not_depend_on_the_decimal_
   context.py`: the rule itself (boundary table, values past the context, a narrow context), the simulator's three
   entries and ten cases of the two HTTP money doors. Measured with `python -m pytest --collect-only -q -m "not slow"`
   on the branch merged with `a0d25e7c` (on `906cae90` the same 64 read 3275 -> 3339, by the guard's own refusal).
+* 2026-10-09, the money-storability fix merged after 034 S2 and 035 A2b (`origin/main` at the merge of PR #189, 3275): 3275 -> 3339 (+64, the module named in the line above; its numbers are those of the branch on `a0d25e7c`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -179,7 +187,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3355
+EXPECTED_SELECTED_ITEMS = 3339
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

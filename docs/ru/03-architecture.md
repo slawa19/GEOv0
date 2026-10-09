@@ -209,7 +209,7 @@ GEOv0-PROJECT/
 > | `TrustLineService.get_available_credit` | нет: ёмкость считают `PaymentRouter` (`app/core/payments/router.py`) и `/balance` (`app/core/balance/service.py`) |
 > | `RoutingService.find_paths/split_payment` | нет такого класса: `PaymentRouter.find_flow_routes` (`app/core/payments/router.py`) |
 > | `PaymentEngine` | удалён 2026-09-25 (019): `PaymentService.pay`/`execute` (`app/core/payments/service.py`) |
-> | `ClearingEngine.find_cycles/execute_clearing` | `ClearingService` (`app/core/clearing/service.py`): `find_cycles`, `execute_occurrence`, `execute_clearing_with_amount`; планирование — `app/core/clearing/flow_planner.py`, периодический проход — `app/core/clearing/runner.py` |
+> | `ClearingEngine.find_cycles/execute_clearing` | `ClearingService` (`app/core/clearing/service.py`): `execute_occurrence`, `execute_clearing_with_amount`; поиска циклов в сервисе нет (`find_cycles` и SQL-детекторы удалены 2026-10-09, программа 035 A2b) — циклы даёт план: `app/core/clearing/flow_planner.py`; периодический проход и диагностика `GET /clearing/cycles` — `app/core/clearing/runner.py` |
 > | `ClearingEngine.process_triggered` | нет |
 > | `IntegrityChecker` | нет такого класса: инварианты — `InvariantChecker` (`app/core/invariants.py`; `check_zero_sum` удалён — он не мог провалиться), контрольные точки — `app/core/integrity.py`, обнаружение расхождений и hold — `app/core/ledger/reconciliation.py` |
 
