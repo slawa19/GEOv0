@@ -161,6 +161,7 @@ REFUSED = [
     ("payment amount with 19 fraction digits", _set(["events", 1, "amount"], "0.1234567890123456789"), "events/1/amount"),
     ("payment amount of 51 digits", _set(["events", 1, "amount"], "1" * 51), "events/1/amount"),
     ("payment amount with a terminal newline", _set(["events", 1, "amount"], "5.00\n"), "events/1/amount"),
+    ("payment amount with an Arabic-Indic digit", _set(["events", 1, "amount"], "٣"), "events/1/amount"),
     ("payment amount with an exponent", _set(["events", 1, "amount"], "1e3"), "events/1/amount"),
     ("anchor amount with a terminal newline", _set(["events", 1, "anchor", "amount"], "5.00\n"), "events/1/anchor/amount"),
     ("anchor amount with 19 fraction digits", _set(["events", 1, "anchor", "amount"], "0.1234567890123456789"),

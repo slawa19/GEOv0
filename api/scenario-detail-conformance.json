@@ -1,0 +1,450 @@
+{
+  "_comment": "Shared by tests/integration/test_p036_a_scenario_detail_conformance.py (the route answers `detail` for the uploaded `scenario`; created_at is the upload time and is compared as null) and by simulator-ui/v2/src/api/simulatorApi.contract.test.ts (the decoder accepts every `detail`). One file, so the backend and the decoder cannot drift apart unseen (036 slice A fix-delta, review of 1afe0b09, finding 8). Authored by hand, not captured from the backend.",
+  "cases": [
+    {
+      "name": "a full story: every kind of anchor, the boundary amounts and playback values, an inject-introduced participant",
+      "scenario": {
+        "schema_version": "scenario/1",
+        "scenario_id": "conformance-story",
+        "equivalents": [
+          "UAH"
+        ],
+        "participants": [
+          {
+            "id": "A",
+            "type": "person"
+          },
+          {
+            "id": "B",
+            "type": "person"
+          },
+          {
+            "id": "C",
+            "type": "person"
+          }
+        ],
+        "trustlines": [],
+        "events": [
+          {
+            "time": 0,
+            "type": "inject",
+            "effects": [
+              {
+                "op": "add_participant",
+                "participant": {
+                  "id": "NEWCOMER",
+                  "type": "person"
+                }
+              }
+            ]
+          },
+          {
+            "time": 1000,
+            "type": "note",
+            "caption": {
+              "ru": "Знакомство",
+              "en": "Meeting"
+            }
+          },
+          {
+            "time": 5000,
+            "type": "payment",
+            "from": "A",
+            "to": "B",
+            "amount": "00005.50",
+            "equivalent": "UAH",
+            "caption": {
+              "ru": "Первая покупка",
+              "en": "First purchase"
+            },
+            "pause_after": true,
+            "focus": {
+              "pids": [
+                "A",
+                "B",
+                "NEWCOMER"
+              ],
+              "edges": [
+                {
+                  "from": "B",
+                  "to": "A"
+                }
+              ]
+            },
+            "anchor": {
+              "event": "tx.updated",
+              "from": "A",
+              "to": "B",
+              "amount": "999999999999.99999999",
+              "equivalent": "UAH",
+              "time_ms": 5000
+            }
+          },
+          {
+            "time": 7000,
+            "type": "payment",
+            "from": "A",
+            "to": "C",
+            "amount": "7",
+            "caption": {
+              "ru": "Отказ",
+              "en": "Refusal"
+            },
+            "anchor": {
+              "event": "tx.failed",
+              "from": "A",
+              "to": "C",
+              "equivalent": "UAH"
+            }
+          },
+          {
+            "time": 9000,
+            "type": "clearing",
+            "equivalent": "UAH",
+            "caption": {
+              "ru": "Клиринг",
+              "en": "Clearing"
+            },
+            "expected_cycle": [
+              "A",
+              "B",
+              "C"
+            ],
+            "anchor": {
+              "event": "clearing.done",
+              "time_ms": 9000
+            }
+          },
+          {
+            "time": 11000,
+            "type": "note",
+            "caption": {
+              "ru": "Итог",
+              "en": "Summary"
+            },
+            "anchor": {
+              "event": "topology.changed"
+            }
+          }
+        ],
+        "description": {
+          "ru": "Описание",
+          "en": "Description"
+        },
+        "settings": {
+          "playback": {
+            "tick_seconds": 0.25,
+            "intensity_percent": 100,
+            "inject_enabled": false
+          }
+        }
+      },
+      "detail": {
+        "api_version": "simulator-api/1",
+        "scenario_id": "conformance-story",
+        "name": null,
+        "description": {
+          "ru": "Описание",
+          "en": "Description"
+        },
+        "created_at": null,
+        "participants_count": 3,
+        "trustlines_count": 0,
+        "equivalents": [
+          "UAH"
+        ],
+        "clusters_count": null,
+        "hubs_count": null,
+        "tags": null,
+        "episodes": [
+          {
+            "index": 1,
+            "time_ms": 1000,
+            "caption": {
+              "ru": "Знакомство",
+              "en": "Meeting"
+            },
+            "pause_after": false,
+            "kind": "note",
+            "focus": null,
+            "anchor": null,
+            "expected_cycle": null
+          },
+          {
+            "index": 2,
+            "time_ms": 5000,
+            "caption": {
+              "ru": "Первая покупка",
+              "en": "First purchase"
+            },
+            "pause_after": true,
+            "kind": "payment",
+            "focus": {
+              "pids": [
+                "A",
+                "B",
+                "NEWCOMER"
+              ],
+              "edges": [
+                {
+                  "from": "B",
+                  "to": "A"
+                }
+              ]
+            },
+            "anchor": {
+              "event": "tx.updated",
+              "from": "A",
+              "to": "B",
+              "amount": "999999999999.99999999",
+              "equivalent": "UAH",
+              "time_ms": 5000
+            },
+            "expected_cycle": null
+          },
+          {
+            "index": 3,
+            "time_ms": 7000,
+            "caption": {
+              "ru": "Отказ",
+              "en": "Refusal"
+            },
+            "pause_after": false,
+            "kind": "payment",
+            "focus": null,
+            "anchor": {
+              "event": "tx.failed",
+              "from": "A",
+              "to": "C",
+              "amount": null,
+              "equivalent": "UAH",
+              "time_ms": null
+            },
+            "expected_cycle": null
+          },
+          {
+            "index": 4,
+            "time_ms": 9000,
+            "caption": {
+              "ru": "Клиринг",
+              "en": "Clearing"
+            },
+            "pause_after": false,
+            "kind": "clearing",
+            "focus": null,
+            "anchor": {
+              "event": "clearing.done",
+              "from": null,
+              "to": null,
+              "amount": null,
+              "equivalent": null,
+              "time_ms": 9000
+            },
+            "expected_cycle": [
+              "A",
+              "B",
+              "C"
+            ]
+          },
+          {
+            "index": 5,
+            "time_ms": 11000,
+            "caption": {
+              "ru": "Итог",
+              "en": "Summary"
+            },
+            "pause_after": false,
+            "kind": "note",
+            "focus": null,
+            "anchor": {
+              "event": "topology.changed",
+              "from": null,
+              "to": null,
+              "amount": null,
+              "equivalent": null,
+              "time_ms": null
+            },
+            "expected_cycle": null
+          }
+        ],
+        "playback": {
+          "tick_seconds": 0.25,
+          "intensity_percent": 100,
+          "inject_enabled": false
+        }
+      }
+    },
+    {
+      "name": "a bare scenario: no description, no events, no playback",
+      "scenario": {
+        "schema_version": "scenario/1",
+        "scenario_id": "conformance-bare",
+        "equivalents": [
+          "UAH"
+        ],
+        "participants": [
+          {
+            "id": "A",
+            "type": "person"
+          },
+          {
+            "id": "B",
+            "type": "person"
+          },
+          {
+            "id": "C",
+            "type": "person"
+          }
+        ],
+        "trustlines": [],
+        "events": []
+      },
+      "detail": {
+        "api_version": "simulator-api/1",
+        "scenario_id": "conformance-bare",
+        "name": null,
+        "description": null,
+        "created_at": null,
+        "participants_count": 3,
+        "trustlines_count": 0,
+        "equivalents": [
+          "UAH"
+        ],
+        "clusters_count": null,
+        "hubs_count": null,
+        "tags": null,
+        "episodes": [],
+        "playback": null
+      }
+    },
+    {
+      "name": "an older scenario: a plain string description (served as both languages) and no captions",
+      "scenario": {
+        "schema_version": "scenario/1",
+        "scenario_id": "conformance-legacy",
+        "equivalents": [
+          "UAH"
+        ],
+        "participants": [
+          {
+            "id": "A",
+            "type": "person"
+          },
+          {
+            "id": "B",
+            "type": "person"
+          },
+          {
+            "id": "C",
+            "type": "person"
+          }
+        ],
+        "trustlines": [],
+        "events": [
+          {
+            "time": 5,
+            "type": "note",
+            "description": "n"
+          }
+        ],
+        "description": "Plain"
+      },
+      "detail": {
+        "api_version": "simulator-api/1",
+        "scenario_id": "conformance-legacy",
+        "name": null,
+        "description": {
+          "ru": "Plain",
+          "en": "Plain"
+        },
+        "created_at": null,
+        "participants_count": 3,
+        "trustlines_count": 0,
+        "equivalents": [
+          "UAH"
+        ],
+        "clusters_count": null,
+        "hubs_count": null,
+        "tags": null,
+        "episodes": [],
+        "playback": null
+      }
+    },
+    {
+      "name": "an integral float time (3000.0) is stored and served as the integer 3000",
+      "scenario": {
+        "schema_version": "scenario/1",
+        "scenario_id": "conformance-float",
+        "equivalents": [
+          "UAH"
+        ],
+        "participants": [
+          {
+            "id": "A",
+            "type": "person"
+          },
+          {
+            "id": "B",
+            "type": "person"
+          },
+          {
+            "id": "C",
+            "type": "person"
+          }
+        ],
+        "trustlines": [],
+        "events": [
+          {
+            "time": 3000.0,
+            "type": "note",
+            "caption": {
+              "ru": "Поздно",
+              "en": "Later"
+            }
+          }
+        ],
+        "settings": {
+          "playback": {
+            "tick_seconds": 5,
+            "intensity_percent": 0.0
+          }
+        }
+      },
+      "detail": {
+        "api_version": "simulator-api/1",
+        "scenario_id": "conformance-float",
+        "name": null,
+        "description": null,
+        "created_at": null,
+        "participants_count": 3,
+        "trustlines_count": 0,
+        "equivalents": [
+          "UAH"
+        ],
+        "clusters_count": null,
+        "hubs_count": null,
+        "tags": null,
+        "episodes": [
+          {
+            "index": 0,
+            "time_ms": 3000,
+            "caption": {
+              "ru": "Поздно",
+              "en": "Later"
+            },
+            "pause_after": false,
+            "kind": "note",
+            "focus": null,
+            "anchor": null,
+            "expected_cycle": null
+          }
+        ],
+        "playback": {
+          "tick_seconds": 5.0,
+          "intensity_percent": 0,
+          "inject_enabled": null
+        }
+      }
+    }
+  ]
+}

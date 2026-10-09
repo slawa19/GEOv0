@@ -305,8 +305,7 @@
         "from": { "$ref": "#/$defs/id", "description": "payment: the sender (debtor)." },
         "to": { "$ref": "#/$defs/id", "description": "payment: the receiver (creditor)." },
         "amount": {
-          "type": "string",
-          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "$ref": "#/$defs/scenarioAmount",
           "description": "payment: a decimal string, never a number."
         },
         "equivalent": {
@@ -387,15 +386,31 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["event"],
-      "description": "The event whose arrival shows the episode's caption: the first not yet consumed event with these fields that arrives after the episode's time. tx.updated matches on from, to, amount, equivalent; tx.failed on from, to, equivalent only (a failure has no amount). time_ms is the fallback for episodes that announce no action.",
+      "description": "The event whose arrival shows the episode's caption: the first not yet consumed event with these fields that arrives after the episode's time. tx.updated matches on from, to, amount, equivalent (all four required); tx.failed on from, to, equivalent (all three required, and NO amount: a failure carries none); clearing.done and topology.changed need only the event name. time_ms is the fallback for episodes that announce no action.",
       "properties": {
         "event": { "type": "string", "enum": ["tx.updated", "tx.failed", "clearing.done", "topology.changed"] },
         "from": { "$ref": "#/$defs/id" },
         "to": { "$ref": "#/$defs/id" },
-        "amount": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "amount": { "$ref": "#/$defs/scenarioAmount" },
         "equivalent": { "type": "string", "minLength": 1 },
         "time_ms": { "type": "integer", "minimum": 0 }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "event": { "const": "tx.updated" } }, "required": ["event"] },
+          "then": { "required": ["from", "to", "amount", "equivalent"] }
+        },
+        {
+          "if": { "properties": { "event": { "const": "tx.failed" } }, "required": ["event"] },
+          "then": { "required": ["from", "to", "equivalent"], "not": { "required": ["amount"] } }
+        }
+      ]
+    },
+
+    "scenarioAmount": {
+      "type": "string",
+      "pattern": "^(?!(?:\\.?[0-9]){51})[0-9]+(?:\\.[0-9]{1,18})?(?![\\s\\S])",
+      "description": "A money amount as the product's money door reads it: plain digits, at most 18 fraction digits and 50 digits in all, no sign, exponent, space or text after the last digit (`(?![\\s\\S])` is the end of the string; `$` would let a terminal newline through). Leading zeros are allowed, as everywhere. Upload additionally checks that the value is storable (Numeric(20, 8)) and positive."
     },
 
     "injectEffectAddParticipant": {

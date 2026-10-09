@@ -100,6 +100,7 @@ from app.schemas.simulator import (
     SimulatorPaymentTargetsResponse,
     SimulatorPaymentTargetsItem,
 )
+from app.core.simulator.scenario_story import payment_equivalents
 from app.schemas.common import ErrorEnvelope
 from app.utils.exceptions import (
     BadRequestException,
@@ -2686,12 +2687,30 @@ async def list_scenarios(
 async def upload_scenario(
     body: ScenarioUploadRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
+    db=Depends(deps.get_db),
 ):
-    rec = runtime.save_uploaded_scenario(body.scenario)
+    # 036: a scripted payment finer than the accounting step of its equivalent is refused at upload. The precision is
+    # the equivalent's own (`require_money_step`); an equivalent the database does not know is left to the runtime.
+    codes = payment_equivalents(body.scenario)
+    precisions: dict[str, int] = {}
+    if codes:
+        rows = await db.execute(select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(sorted(codes))))
+        precisions = {str(code): int(precision) for code, precision in rows.all()}
+    rec = runtime.save_uploaded_scenario(body.scenario, equivalent_precisions=precisions)
     return rec.summary()
 
 
-@router.get("/scenarios/{scenario_id}", response_model=ScenarioDetail)
+@router.get(
+    "/scenarios/{scenario_id}",
+    response_model=ScenarioDetail,
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "The stored scenario's story cannot be served as written - SCENARIO_INVALID, with the path of "
+            "every bad field in details.errors",
+        }
+    },
+)
 async def get_scenario_summary(
     scenario_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),

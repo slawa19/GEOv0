@@ -2,6 +2,8 @@
 
 > Спецификация приложения для симуляции и тестирования поведения «живого сообщества» в сети GEO (описание UI/визуализации вынесено в отдельные спецификации)
 
+> **Про примеры JSON.** Примеры ниже иллюстрируют идею и не являются форматом `scenario.json` (например, `effects` с `targetGroup` и тип `recovery` схемой не заданы): формат — `fixtures/simulator/scenario.schema.json`, описание — [scenario-schema.md](scenario-schema.md). Время события `time` — **целое число миллисекунд от старта прогона**; строковые токены вида `day_10` схема отказывает (036, F-036-1): раннер их никогда не исполнял. В примерах 10 дней записаны как `864000000`, 15 дней — как `1296000000`.
+
 ---
 
 ## Оглавление
@@ -367,7 +369,7 @@
   ],
   "events": [
     {
-      "time": "day_10",
+      "time": 864000000,
       "type": "stress",
       "description": "Паника в районе B",
       "effects": [
@@ -615,7 +617,7 @@ AI‑сервис:
       "patch": {
         "events": [
           {
-            "time": "day_15",
+            "time": 1296000000,
             "type": "stress",
             "description": "Liquidity shock in cluster B",
             "effects": [
@@ -636,7 +638,7 @@ AI‑сервис:
       "patch": {
         "events": [
           {
-            "time": "day_10",
+            "time": 864000000,
             "type": "stress",
             "description": "Hub h1 suspended",
             "effects": [
@@ -644,7 +646,7 @@ AI‑сервис:
             ]
           },
           {
-            "time": "day_15",
+            "time": 1296000000,
             "type": "recovery",
             "description": "Hub h1 back online",
             "effects": [

@@ -139,6 +139,8 @@ BAD_AMOUNTS = {
     "1e12 (capacity)": "1000000000000",
     "51 digits": "1" * 51,
     "a comma": "5,5",
+    # the money door itself accepts Arabic-Indic digits (Decimal reads them); the scenario grammar is ASCII
+    "an Arabic-Indic digit": "٣",
 }
 
 

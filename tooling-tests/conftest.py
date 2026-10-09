@@ -115,8 +115,13 @@ _HERE = Path(__file__).resolve().parent
 #: against the scenario schema (5), the validator refuses a broken live fixture (1), the archive's only schema failure is its
 #: string time (1), the story scenario validates (1), twenty-two one-mutation refusals of the new episode fields, the removed `params` block (F-036-3), the string
 #: time and `settings.playback`, and the compatibility case (older string description, no captions) (1).
+#:
+#: 2026-10-09, 036 slice A fix-delta (review of `1afe0b09`): portable 233 -> 252. Nineteen cases added to the same module: the
+#: tx.updated / tx.failed anchor requirements (6 refusals), the money grammar of `amount` (7 refusals: 19 fraction digits, 51
+#: digits, a terminal newline, an exponent, an Arabic-Indic digit, on the payment and on the anchor), their boundary controls (5), a complete
+#: tx.failed anchor (1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 233,
+    "portable": 252,
     "powershell": 235,
 }
 

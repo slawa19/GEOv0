@@ -160,6 +160,10 @@ make the session green again:
   `tests/integration/test_p036_a_scenario_detail_serves_the_story.py` (6), `tests/integration/test_p036_t3601_time_token_is_refused_at_upload.py` (4: the token, its control, and the two equivalent sources of the new event fields) and
   `tests/unit/test_p036_t3601_fixture_controls.py` (4, the pinned stress multipliers and the absent `params`). Measured with
   `python -m pytest --collect-only -q -m "not slow"` (`3369/3384 tests collected`); the guard refused the collection first (exit 4).
+* 2026-10-09, 036 slice A fix-delta (review of `1afe0b09`), on `origin/main` `71c66dda`: 3369 -> 3459 (+90). New: `tests/integration/test_p036_a2_story_is_validated_at_upload.py` (51),
+  `tests/integration/test_p036_a2_stored_story_is_refused_not_trimmed.py` (4), `tests/integration/test_p036_a_scenario_detail_conformance.py` (2);
+  `tests/unit/test_p036_a_episodes_projection.py` 6 -> 39 (+33: the cases that pinned the silent drop were rewritten as refusals). The number is
+  the guard's own refusal ("selected 3459 case(s), expected exactly 3369", `python -m pytest --collect-only -q -m "not slow"`, `3459/3474`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -202,7 +206,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3369
+EXPECTED_SELECTED_ITEMS = 3459
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

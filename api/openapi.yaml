@@ -1128,6 +1128,11 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          # A stored or shipped scenario whose story cannot be served as written is refused, never trimmed:
+          # `error.details.simulator_error` is `SCENARIO_INVALID` and `error.details.errors` lists `{path, message}` for
+          # every bad field (paths in the `/` spelling of the upload refusal, e.g. `events/3/caption/en`).
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '403':
@@ -7126,13 +7131,15 @@ components:
 
     LocalizedText:
       type: object
-      description: A text of the scenario in both languages.
+      description: A text of the scenario in both languages; both are non-empty.
       required: [ru, en]
       properties:
         ru:
           type: string
+          minLength: 1
         en:
           type: string
+          minLength: 1
       additionalProperties: false
 
     ScenarioDetail:
@@ -7227,8 +7234,10 @@ components:
         expected_cycle:
           type: array
           nullable: true
+          minItems: 2
           items:
             type: string
+            minLength: 1
       additionalProperties: false
 
     ScenarioEpisodeFocus:
@@ -7240,6 +7249,7 @@ components:
           type: array
           items:
             type: string
+            minLength: 1
         edges:
           type: array
           items:
@@ -7249,9 +7259,11 @@ components:
     ScenarioEpisodeAnchor:
       type: object
       description: >-
-        The event whose arrival shows the caption. `tx.updated` matches on `from`, `to`, `amount`, `equivalent`;
-        `tx.failed` on `from`, `to`, `equivalent` (a failure carries no amount); `time_ms` is the fallback
-        for an episode that announces no action.
+        The event whose arrival shows the caption. A `tx.updated` anchor names `from`, `to`, `amount` and `equivalent`
+        (all four, non-null); a `tx.failed` anchor names `from`, `to` and `equivalent` (all three) and its `amount` is
+        always null, because a failure carries none; `clearing.done` and `topology.changed` need only the event name.
+        `time_ms` is the fallback for an episode that announces no action. (OpenAPI 3.0.3 cannot express the
+        conditional requirement; the scenario schema and the application enforce it.)
       required: [event]
       properties:
         event:
@@ -7259,16 +7271,21 @@ components:
           enum: [tx.updated, tx.failed, clearing.done, topology.changed]
         from:
           type: string
+          minLength: 1
           nullable: true
         to:
           type: string
+          minLength: 1
           nullable: true
         amount:
           type: string
           nullable: true
-          description: Decimal string.
+          # The scenario money grammar: plain digits, at most 18 fraction digits and 50 digits in all, nothing after the
+          # last digit (`(?![\s\S])` is the end of the string, which `$` is not when a newline follows).
+          pattern: '^(?!(?:\.?[0-9]){51})[0-9]+(?:\.[0-9]{1,18})?(?![\s\S])'
         equivalent:
           type: string
+          minLength: 1
           nullable: true
         time_ms:
           type: integer
@@ -7282,9 +7299,13 @@ components:
       properties:
         tick_seconds:
           type: number
+          minimum: 0.25
+          maximum: 5
           nullable: true
         intensity_percent:
           type: integer
+          minimum: 0
+          maximum: 100
           nullable: true
         inject_enabled:
           type: boolean
