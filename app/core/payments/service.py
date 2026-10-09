@@ -205,8 +205,8 @@ async def drain_call(
     return (box[0] if box else None), error
 
 
-#: The name this module's own callers and `app/core/simulator/money_replay.py` use; the same object. The
-#: simulator's import moves to the public name in 034 `T3431`.
+#: The name this module's own callers use; the same object. Nothing outside this module imports it since the
+#: simulator moved to the public name (034 `T3431`).
 _drain_call = drain_call
 
 
@@ -554,7 +554,8 @@ def public_error_of_stored(result: PaymentResult) -> GeoException | None:
     return GeoException(message, code=code, details=details, status_code=400)
 
 
-#: The name this module's own callers and `app/core/simulator/money_replay.py` use; the same object (034 `T3431`).
+#: The name this module's own callers use; the same object. Under `app/` and `scripts/` nothing else imports it
+#: since the simulator moved to the public name (034 `T3431`); one test still does.
 _public_error_of_stored = public_error_of_stored
 
 
@@ -1001,9 +1002,9 @@ class PaymentService:
         Instance state only.  A cache hit copies the graph and the policy maps into the
         instance (`app/core/payments/router.py:167-173`), and a cache miss stores its own
         copies (`:342-351`), so narrowing here cannot reach the shared cache.  The cache key
-        stays `equivalent_code`: making it composite would silently break the two callers
-        that reach into `_graph_cache` directly and the invalidation done per equivalent by
-        trustlines, clearing and integrity - none of which this program may edit.
+        stays `equivalent_code`: the invalidation done per equivalent by trustlines, clearing and
+        integrity is keyed on it. (Until 034 `T3431` two callers outside the router also reached into
+        `_graph_cache` directly; under `app/` and `scripts/` none does now - only tests.)
 
         `graph` is what actually decides the route; the policy maps default to permissive
         (`router.py:369-373`), so narrowing them changes no outcome today and is here to keep
@@ -1163,8 +1164,13 @@ class PaymentService:
         record_refusal: bool = True,
         emit_start: bool = True,
         release_before_routing: bool = False,
+        attempt_state: "_PaymentAttempt | None" = None,
     ) -> StagedPaymentResult:
         """Execute a payment INSIDE THE CALLER'S TRANSACTION; it commits nothing.
+
+        `attempt_state` (035 A11; only `pay()` passes it): the state this call works on instead of a new empty
+        one - `_pay_attempt`'s, which carries the identity of an earlier admission of the same request. Every
+        other caller gets a new empty state, as before.
 
         The caller's transaction is not rolled back either, with one deliberate exception:
         `release_before_routing=True` (set only by `pay()` for a session it opened itself) rolls the
@@ -1206,7 +1212,7 @@ class PaymentService:
         """
         if emit_start:
             _count_payment("create", "start")
-        attempt = self._attempt = _PaymentAttempt()
+        attempt = self._attempt = attempt_state if attempt_state is not None else _PaymentAttempt()
 
         # The checks that need no database (`_checked_without_sql`): deliberately the FIRST thing this method does
         # with the request.
@@ -2329,31 +2335,84 @@ class PaymentService:
         owns_sessions = _service_for is None  # a borrowed session's transaction is its caller's: never rolled back
         while True:
             attempt_no += 1
-            async with sessions() as session:
-                service = make_service(session)
-                outcome = await service._pay_attempt(
-                    sessions,
-                    sender_id,
-                    request,
-                    require_signature=require_signature,
-                    allowed_participant_pids=allowed_participant_pids,
-                    deadline=deadline,
-                    attempt_no=attempt_no,
-                    attempts=attempts,
-                    admission=admission,
-                    fresh_graph=fresh_graph,
-                    may_reroute=reroutes_left > 0,
-                    release_before_routing=owns_sessions,
-                )
-            if isinstance(outcome, _RetryAttempt):
-                admission = outcome.admission or admission
-                fresh_graph = outcome.reroute
-                if outcome.reroute:  # not a conflict retry: it spends no attempt of the conflict budget
-                    reroutes_left -= 1
-                    attempt_no -= 1
-                await asyncio.sleep(outcome.delay_seconds)
-                continue
+            outcome = None
+            try:
+                async with sessions() as session:
+                    service = make_service(session)
+                    outcome = await service._pay_attempt(
+                        sessions,
+                        sender_id,
+                        request,
+                        require_signature=require_signature,
+                        allowed_participant_pids=allowed_participant_pids,
+                        deadline=deadline,
+                        attempt_no=attempt_no,
+                        attempts=attempts,
+                        admission=admission,
+                        fresh_graph=fresh_graph,
+                        may_reroute=reroutes_left > 0,
+                        release_before_routing=owns_sessions,
+                    )
+                if isinstance(outcome, _RetryAttempt):
+                    admission = outcome.admission or admission
+                    fresh_graph = outcome.reroute
+                    if outcome.reroute:  # not a conflict retry: it spends no attempt of the conflict budget
+                        reroutes_left -= 1
+                        attempt_no -= 1
+                    await asyncio.sleep(outcome.delay_seconds)
+                    continue
+            except asyncio.CancelledError as cancelled:
+                # 035 A11. A cancellation INSIDE an attempt is settled by the attempt and arrives here with
+                # `outcome` unset: nothing more to do. One that arrives AFTER the attempt returned a retry - at the
+                # close of its session, or in the wait above - has no attempt to settle it; the loop itself and the
+                # retry decision are as they were.
+                if isinstance(outcome, _RetryAttempt):
+                    await service._record_cancelled_between_attempts(
+                        sessions, outcome.admission or admission, allowed_participant_pids, cancelled, deadline
+                    )
+                raise
             return outcome
+
+    @staticmethod
+    def _state_after(
+        admission: "_Admission | None", allowed_participant_pids: "AbstractSet[str] | None"
+    ) -> "_PaymentAttempt":
+        """A fresh attempt state: empty, or - when an earlier attempt of the request was ADMITTED - carrying that
+        admission's identity and the current perimeter (`admitted` stays False, `row` None; `_Admission.covers`
+        then holds for it). The identity comes from `pay()`'s own `_Admission`, never from the raw request."""
+
+        if admission is None:
+            return _PaymentAttempt()
+        return _PaymentAttempt(
+            tx_id=admission.tx_id,
+            fingerprint=admission.fingerprint,
+            sender_id=admission.sender_id,
+            allowed_participant_pids=allowed_participant_pids,
+        )
+
+    async def _record_cancelled_between_attempts(
+        self,
+        sessions,
+        admission: "_Admission | None",
+        allowed_participant_pids: "AbstractSet[str] | None",
+        cancelled: asyncio.CancelledError,
+        deadline: float,
+    ) -> None:
+        """A cancellation that reached `pay()` BETWEEN two attempts - while the failed attempt's session was being
+        closed, or during the wait before the next one (035 A11).
+
+        No attempt is running, so no attempt settles it. When an earlier attempt was admitted, it is the refusal
+        every other window records: `ABORTED/E007` "Payment cancelled", through `_record_refusal` - the winner is
+        resolved, the wait for a connection is bounded, and a recording that cannot establish the outcome leaves
+        the cancellation as the answer. The rollback it requires is confirmed: the attempt that returned the retry
+        ended its transaction (`_end_failed_attempt`) before returning. Without an admission nothing is recorded.
+        """
+
+        if admission is None:
+            return
+        refusal = _definitive_refusal(self._state_after(admission, allowed_participant_pids), cancelled, admission)
+        if refusal is not None:
+            await self._record_refusal(sessions, refusal, cancelled=cancelled, deadline=deadline)
 
     async def _pay_attempt(
         self,
@@ -2382,12 +2441,11 @@ class PaymentService:
         # AFTER ADMISSION THAT IS ANY NON-RETRYABLE FAILURE OF THE CHECKOUT, not only a timeout: a one-off
         # infrastructure failure of it is recorded `ABORTED/E010` like every non-retryable internal failure after
         # admission (spec 019), and the signed identity is spent - the same request again is answered `ABORTED`.
-        self._attempt = _PaymentAttempt() if admission is None else _PaymentAttempt(
-            tx_id=admission.tx_id,
-            fingerprint=admission.fingerprint,
-            sender_id=admission.sender_id,
-            allowed_participant_pids=allowed_participant_pids,
-        )
+        # 035 A11: `execute()` is handed THIS state (`attempt_state`) instead of replacing it with an empty one, so
+        # the identity also covers `execute()`'s reads before it establishes the identity itself. A cancellation
+        # there, after an earlier admission, was settled as "never admitted": no row, and the same signed request
+        # ran when sent again (spec 019 requires `ABORTED/E007` and forbids the later execution).
+        self._attempt = self._state_after(admission, allowed_participant_pids)
         try:
             # Fix-delta of the §15 review of `c27a2fbe` (Н2): what the request is refused for WITHOUT SQL is checked
             # before the connection is taken - `execute()` checks it again as its first act, from the same
@@ -2406,6 +2464,7 @@ class PaymentService:
                 release_before_routing=release_before_routing,
                 record_refusal=False,
                 emit_start=False,
+                attempt_state=self._attempt,
             )
         except BaseException as exc:
             return await self._settle_failed_attempt(
