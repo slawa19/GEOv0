@@ -71,6 +71,7 @@ import app.core.payments.service as payment_service
 import app.db.session as product_db
 from app.api.deps import get_db, get_payment_session_factory
 from app.config import settings
+from app.core.money_boundary import MoneyBoundary
 from app.core.payments.service import PaymentService
 from app.db.models.equivalent import Equivalent
 from app.db.models.transaction import Transaction
@@ -624,3 +625,168 @@ async def test_a_reused_service_does_not_settle_against_the_previous_payment(cli
         assert await stand.row(first["tx_id"]) == ("COMMITTED", None)
         assert await stand.row(second["tx_id"]) is None, "the second payment was settled with a stored row"
         assert await stand.debts() == ["10.00000000"]
+
+
+# ------------------------------------------------------- 035 A11: a cancellation between admission and an outcome
+#
+# Spec 019, "Окончательный отказ...": a cancellation AFTER ADMISSION, with the rollback confirmed, is a final
+# `ABORTED/E007` (the cancellation still propagates), and the same signed identity must not execute later. The
+# windows `pay()` already settled write exactly that - `_definitive_refusal`: code `E007`, message
+# "Payment cancelled". The closing review of programme 035 read two windows where it was NOT written, and the
+# enumeration of the windows for A11 found a third of the same kind:
+#
+#   "the first read"  - the next attempt has its connection and is cancelled on `execute()`'s first statement,
+#                       before `execute()` has re-established the request's identity;
+#   "the backoff"     - cancelled while `pay()` waits before the next attempt;
+#   "the close"       - cancelled while the failed attempt's session is being closed, between the two.
+#
+# Each is held on an EVENT at that exact point and the request task is cancelled there: no timer, no sleep. The
+# control of each: WITHOUT an earlier admission the same cancellation leaves no row and the request runs when sent
+# again - "never admitted" must not become `ABORTED`.
+
+_WINDOWS = ["the first read", "the backoff", "the close"]
+
+
+class _AsyncioWithItsSleepHeld:
+    """`asyncio` as `app.core.payments.service` sees it, with `sleep` replaced - its only `sleep` is the backoff."""
+
+    def __init__(self, sleep) -> None:
+        self.sleep = sleep
+
+    def __getattr__(self, name: str):
+        return getattr(asyncio, name)
+
+
+async def _cancelled_in(stand: _Stand, monkeypatch, window: str, *, admitted: bool) -> tuple[dict, list[int]]:
+    """Send one payment whose first attempt meets a retryable conflict - after admission, or (the control) before
+    it - hold the request in `window`, cancel it there, and wait for it. Returns the body and the operations run."""
+
+    reached, release = asyncio.Event(), asyncio.Event()
+    armed = {"on": False}
+
+    async def hold() -> None:
+        armed["on"] = False
+        reached.set()
+        await release.wait()
+
+    # --- the conflict that sends the first attempt to a retry ---
+    original_operation = PaymentService._run_payment_operation
+    original_build = PaymentService._build_route_graph
+    operations: list[int] = []
+    conflicted = {"done": False}
+
+    def conflict() -> None:
+        conflicted["done"] = True
+        if window != "the first read":
+            armed["on"] = True  # the next backoff / the next session close is the one to hold
+        raise RetryablePaymentConflictException()
+
+    async def operation(service, attempt, **kwargs):
+        operations.append(1)
+        if admitted and not conflicted["done"]:
+            assert attempt.admitted, "premise: the operation runs after admission"
+            conflict()
+        return await original_operation(service, attempt, **kwargs)
+
+    async def build(service, equivalent_code, *, cached):
+        if not admitted and not conflicted["done"]:
+            assert not service._attempt.admitted, "premise: routing runs before admission"
+            conflict()
+        return await original_build(service, equivalent_code, cached=cached)
+
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", operation)
+    monkeypatch.setattr(PaymentService, "_build_route_graph", build)
+
+    # --- the three barriers; only the one of `window` is ever armed ---
+    if window == "the first read":
+        original_read = MoneyBoundary.require_read_committed
+
+        async def first_read(session, *, writer):
+            if armed["on"]:
+                await hold()
+            return await original_read(session, writer=writer)
+
+        monkeypatch.setattr(MoneyBoundary, "require_read_committed", staticmethod(first_read))
+
+        async def arm(_kwargs: dict) -> None:
+            armed["on"] = True
+
+        _hook_attempts(monkeypatch, {2: arm})  # the attempt after the conflict
+    elif window == "the backoff":
+
+        async def backoff(delay: float) -> None:
+            if armed["on"]:
+                await hold()
+
+        monkeypatch.setattr(payment_service, "asyncio", _AsyncioWithItsSleepHeld(backoff))
+    else:
+        original_close = AsyncSession.close
+
+        async def close(session) -> None:
+            if armed["on"]:
+                await hold()
+            await original_close(session)
+
+        monkeypatch.setattr(AsyncSession, "close", close)
+
+    body = stand.body()
+    request = stand.send(body)
+    waiting = asyncio.ensure_future(reached.wait())
+    stand.launched.append(waiting)
+    await asyncio.wait({waiting, request}, timeout=_BUDGET_SECONDS, return_when=asyncio.FIRST_COMPLETED)
+    assert reached.is_set() and not request.done(), f"premise: the request is held in {window}"
+
+    request.cancel()
+    if window == "the close":
+        # The close runs in a task of its own, shielded: the cancellation is delivered to the request while the
+        # close is still held. Let the request take the cancellation, then let the close finish.
+        await asyncio.wait({request}, timeout=_BUDGET_SECONDS)
+        release.set()
+    outcome = await asyncio.wait({request}, timeout=_BUDGET_SECONDS)
+    release.set()
+    assert request in outcome[0] and request.cancelled(), "the cancellation must still reach the caller"
+    return body, operations
+
+
+@MODE_B
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", _WINDOWS)
+async def test_a_cancellation_after_admission_is_recorded_and_the_identity_does_not_run_later(
+    client: AsyncClient, db_session, monkeypatch, window: str
+) -> None:
+    async with contextlib.AsyncExitStack() as stack:
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+
+        body, operations = await _cancelled_in(stand, monkeypatch, window, admitted=True)
+
+        assert await stand.row(body["tx_id"]) == ("ABORTED", "E007"), (
+            f"cancelled in {window} after an earlier attempt was admitted: the stored row is "
+            f"{await stand.row(body['tx_id'])}, expected ('ABORTED', 'E007') - without it the same signed request "
+            f"runs when it is sent again"
+        )
+        assert await stand.debts() == [] and operations == [1]
+
+        status, replay = await stand.answer(body)
+        assert (status, replay["status"], replay["error"]["code"]) == (200, "ABORTED", "E007"), (status, replay)
+        assert replay["error"]["message"] == "Payment cancelled", replay
+        assert operations == [1] and await stand.debts() == [], "the same identity ran a payment after its refusal"
+        assert stand.pool.checkedout() == 0
+
+
+@MODE_B
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", _WINDOWS)
+async def test_a_cancellation_before_any_admission_leaves_nothing_in_the_same_windows(
+    client: AsyncClient, db_session, monkeypatch, window: str
+) -> None:
+    """The control: the same cancellation, the first attempt refused by a conflict BEFORE admission."""
+
+    async with contextlib.AsyncExitStack() as stack:
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+
+        body, operations = await _cancelled_in(stand, monkeypatch, window, admitted=False)
+
+        assert operations == [], "premise: no attempt of this request reached the payment operation"
+        await stand.nothing_is_left(body["tx_id"])
+        await stand.executes_afresh(body)
+        assert operations == [1]

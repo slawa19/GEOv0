@@ -199,6 +199,7 @@ make the session green again:
 * 2026-10-09, 036 slice C fix-delta (two reviews of `e94f13fb`), on that tree (3603): 3603 -> 3613 (+10). New: `tests/integration/test_p036_c_expected_cycle_postgres.py` (7: an announced cycle that was cleared, in three rotations, carries no
   reason; one over other edges, one announced over a pass that cleared nothing, and one cleared by an earlier attempt of the same event; a clearing that announces nothing) and 3 in `tests/integration/test_p036_c_community_story_postgres.py`
   (the flag for injects off, a second run on the same database, a periodic clearing every 10 ticks); the anchors test was rewritten (same count) and the allowlist test of the shape module now says the story is NOT in the default list.
+* 2026-10-10, 035 slice A11 (a cancellation between admission and an outcome), on `f471e50f` (3613): 3613 -> 3619 (+6, all in `tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py`: three windows - the next attempt's first read, the backoff, the close of the failed attempt's session - each cancelled after an earlier admission, and each again without one as the control). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3619/3639`).
   Measured with `python -m pytest --collect-only -q -m "not slow"` (`3613/3633`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
@@ -242,7 +243,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3613
+EXPECTED_SELECTED_ITEMS = 3619
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
