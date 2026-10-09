@@ -69,7 +69,6 @@ def _scenario_allowlist() -> Optional[set[str]]:
         "greenfield-village-100-realistic-v2",
         "riverside-town-50-realistic-v2",
         "clearing-demo-10",
-        "community-story-10",
     }
 
 

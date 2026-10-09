@@ -122,7 +122,7 @@ class _Story:
         self.listed = False
 
 
-async def _run_story(factory, monkeypatch, *, inject: bool = True) -> _Story:  # noqa: F811
+async def _run_story(factory, monkeypatch, *, inject: bool = True, period: int = 25) -> _Story:  # noqa: F811
     """One run of the story to its end. Every patch is undone when it returns, so a second run on the same database is clean."""
 
     story = _Story()
@@ -136,6 +136,7 @@ async def _run_story(factory, monkeypatch, *, inject: bool = True) -> _Story:  #
         mp.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", SCENARIO_ID)  # the operator's override: not in the default list
         story.listed = SCENARIO_ID in [s.scenario_id for s in runtime.list_scenarios()]
         assert runtime._clearing_every_n_ticks == 25, runtime._clearing_every_n_ticks  # the cadence the story is built around
+        mp.setattr(runtime._real_runner._tick, "_clearing_every_n_ticks", period)  # 25 unless a test asks to show another cadence
 
         real_sleep = asyncio.sleep
 
@@ -343,5 +344,20 @@ async def test_a_second_run_on_the_same_database_inherits_the_first_one(factory,
     report = {i: (p.status, p.reason) for i, p in sorted(second.progress.items())}
     assert report[2][0] == "refused", report  # Taras is suspended: the payment through him is refused
     assert report[6][0] == "refused" and report[7][0] == "refused", report  # Dmytro exists in the base but is outside this run's perimeter
+    assert (report[6], report[8]) == (("refused", "ROUTING_NO_ROUTE"), ("done", "expected_cycle_not_cleared")), report
+    assert 5 not in report and 9 not in report  # the skipped injects leave no trace in the report
     assert second.final_debts != FINAL and second.final_debts[("olena", "bakery")] == D("80"), second.final_debts  # the first purchase is paid again
     assert (second.taras_status, second.dmytro_status) == ("suspended", "active")
+
+
+@pytest.mark.asyncio
+async def test_a_periodic_clearing_every_10_ticks_takes_the_cycle_and_the_report_says_so(factory, monkeypatch) -> None:  # noqa: F811
+    """`run_full_stack.ps1` documents `SIMULATOR_CLEARING_EVERY_N_TICKS=10` as its example. At 10 (and at 20 or 40) the periodic
+    clearing of tick 40 takes the circle that closed on tick 38, before the scripted clearing of tick 43 comes: the debts end
+    the same, but the episode's own clearing cleared nothing - and says so, instead of a silent `done`."""
+
+    s = await _run_story(factory, monkeypatch, period=10)
+
+    c = s.progress[CLEARING]
+    assert (c.status, c.cleared_cycles, c.reason) == ("done", 0, "expected_cycle_not_cleared"), c
+    assert s.final_debts == FINAL  # the ledger agrees with the story either way; the REPORT of the episode is what differs

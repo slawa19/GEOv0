@@ -1039,6 +1039,7 @@ class RealTick:
             self._scripted_event_status(
                 run, idx, int(t0), epoch, eq, "done" if outcome == "complete" else "incomplete",
                 None if outcome == "complete" else outcome, cycles, spend=outcome == "complete",
+                expected_cycle=evt.get("expected_cycle"),
             )
         return volume, frozenset(attempted)
 
@@ -1054,6 +1055,7 @@ class RealTick:
         new_cycles: list[dict[str, Any]],
         *,
         spend: bool,
+        expected_cycle: list[str] | None = None,
     ) -> None:
         """Record the outcome of one scripted clearing attempt through the runner's one progress writer: discarded if the run
         was restarted since `epoch`, the cycles cumulative within the epoch, the event spent only for a complete pass, a
@@ -1062,7 +1064,9 @@ class RealTick:
         record: dict[str, Any] = {"kind": "clearing", "status": status, "equivalent": eq}
         if reason is not None:
             record["reason"] = reason
-        self._runner._write_story_progress(run, idx, t0, epoch, record, spend=spend, add_cycles=new_cycles)
+        self._runner._write_story_progress(
+            run, idx, t0, epoch, record, spend=spend, add_cycles=new_cycles, expected_cycle=expected_cycle
+        )
 
     def _should_warn(self, run: RunRecord, key: str) -> bool:
         try:

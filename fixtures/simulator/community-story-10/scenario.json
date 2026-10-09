@@ -388,8 +388,8 @@
       "type": "clearing",
       "equivalent": "UAH",
       "caption": {
-        "ru": "Клиринг. Круг гасится целиком на 40, ничего не платя: Магазин остаётся должен Ферме 20, Ферма Млину — 10, остальные в расчёте.",
-        "en": "Clearing. The circle is wiped out by 40 without paying anything: the Shop still owes the Farm 20, the Farm owes the Mill 10, everyone else is square."
+        "ru": "Клиринг. Круг долгов уменьшен на 40 по каждому звену, и никто ничего не платил. Долги Млина Дмитру и Дмитра Магазину исчезли целиком, долг Магазина Ферме уменьшился с 60 до 20, долг Фермы Млину — с 50 до 10. Чистая позиция каждого участника осталась прежней.",
+        "en": "Clearing. The circle of debts is reduced by 40 on every link and nobody paid anything. The Mill's debt to Dmytro and Dmytro's debt to the Shop are gone entirely, the Shop's debt to the Farm fell from 60 to 20 and the Farm's debt to the Mill from 50 to 10. Nobody's net position changed."
       },
       "pause_after": true,
       "expected_cycle": [
@@ -446,8 +446,8 @@
       "amount": "25.00",
       "equivalent": "UAH",
       "caption": {
-        "ru": "Петро хочет заплатить Нине, но с Ниной никто не связан доверием. Платёж отклонён: сеть не выдумывает кредит за людей.",
-        "en": "Petro wants to pay Nina, but nobody trusts Nina. The payment is refused: the network does not invent credit on anyone's behalf."
+        "ru": "Петро хочет заплатить Нине, но у Нины нет ни одной линии доверия, и платёж не может до неё дойти. Платёж отклонён, ничего не сдвинулось: сеть не выдумывает кредит за людей.",
+        "en": "Petro wants to pay Nina, but Nina has no line of trust at all, so the payment has no way to reach her. It is refused and nothing moves: the network does not invent credit on anyone's behalf."
       },
       "focus": {
         "pids": [
