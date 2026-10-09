@@ -369,3 +369,72 @@ async def test_a_run_without_a_tracked_event_has_no_progress(factory, monkeypatc
     await ticks(runner, run, 1)
 
     require_target(_progress(run) is None, f"episode_progress {_progress(run)!r} (expected null: nothing is tracked)")
+
+
+# ------------------------------------------------------------------- the guards found by the mutation pass (2026-10-09)
+
+
+@pytest.mark.asyncio
+async def test_the_pause_rule_does_not_pause_a_launch_other_than_the_one_that_spent_the_episode(factory, monkeypatch) -> None:  # noqa: F811
+    """The epoch guard of `_pause_after_spent_episodes`, called directly: it is defence in depth (a restart clears the fired
+    set, so a stale tick has usually nothing to pause for), which is why a tick-level test cannot reach it. Control: the same
+    call with the epoch of the launch pauses."""
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], [_note(0, pause_after=True)])
+    run._real_fired_scenario_event_indexes.add(0)
+
+    runner._pause_after_spent_episodes(run, frozenset(), run._launch_epoch + 1)  # the tick belonged to another launch
+    after_other_launch = run.state
+    runner._pause_after_spent_episodes(run, frozenset(), run._launch_epoch)  # control: the same call for this launch
+
+    assert (after_other_launch, run.state) == ("running", "paused"), (after_other_launch, run.state)
+
+
+@pytest.mark.asyncio
+async def test_a_restart_during_the_scripted_clearing_leaves_no_progress_of_the_old_launch(factory, monkeypatch) -> None:  # noqa: F811
+    """A clearing pass that finishes after `restart` belongs to a launch that is over: its outcome is neither spent nor
+    reported (the writer's epoch guard). Control: the pass did run, in the old launch, and the new launch is the one running."""
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B", "C"], CYCLE_LINES, CYCLE_DEBTS, lambda e, q: [_clearing_event(e)])
+    original = clearing_runner.run_clearing_pass
+    state = {"calls": 0}
+
+    async def restart_then_clear(*args, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            await _restart(run, runner._lock)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(clearing_runner, "run_clearing_pass", restart_then_clear)
+
+    await ticks(runner, run, 1)
+
+    assert state["calls"] >= 1 and run._launch_epoch == 1, (state, run._launch_epoch)
+    assert run._real_story_progress == {} and run._real_fired_scenario_event_indexes == set(), (
+        run._real_story_progress, run._real_fired_scenario_event_indexes)
+
+
+@pytest.mark.asyncio
+async def test_cycles_cleared_by_an_attempt_that_did_not_complete_are_kept_when_the_next_attempt_completes(factory, monkeypatch) -> None:  # noqa: F811
+    """The cycles of a clearing event are cumulative within a launch: an attempt that committed a cycle and then failed
+    leaves the event pending, and the attempt that completes it (an empty pass - the cycle is already closed) must not erase
+    what the first one cleared."""
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B", "C"], CYCLE_LINES, CYCLE_DEBTS, lambda e, q: [_clearing_event(e)])
+    original = clearing_runner.run_clearing_pass
+    calls = {"n": 0}
+
+    async def commits_then_fails(*args, **kwargs):
+        calls["n"] += 1
+        result = await original(*args, **kwargs)
+        if calls["n"] == 1:
+            raise RuntimeError("p036 b2: the pass fails after it committed the cycle")
+        return result
+
+    monkeypatch.setattr(clearing_runner, "run_clearing_pass", commits_then_fails)
+
+    await ticks(runner, run, 1)
+    first = [(i.status, i.cleared_cycles, i.attempts) for i in _progress(run) or []]
+    run.state, run.errors_total, run.last_error = "running", 0, None
+    await ticks(runner, run, 1)
+    second = [(i.status, i.cleared_cycles, i.attempts, i.cycles[0].cleared_amount if i.cycles else None) for i in _progress(run) or []]
+
+    assert first == [("incomplete", 1, 1)], first  # control: the failed attempt did commit one cycle and the event waits
+    assert second == [("done", 1, 2, "10.00")], second
