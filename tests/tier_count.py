@@ -189,6 +189,10 @@ make the session green again:
   stress; the `inject_enabled` ceiling in four cases; `episode_progress` of a payment done, refused and unresolved, of a clearing with its cycles on the wire aliases, of a skipped inject; three guards the mutation pass found unguarded)
   and `tests/integration/test_p036_b2_run_creation.py` (a damaged story refused at run creation with no run made; the intensity order request, scenario, 30; `episode_progress` on the wire). Measured with
   `python -m pytest --collect-only -q -m "not slow"` (`3561/3581`).
+* 2026-10-09, 036 slice B2 fix-delta (two reviews of `7c11ee0f`), on that tree (3561): 3561 -> 3595 (+34). New: `tests/integration/test_p036_b2_fixdelta_postgres.py` (10: the attempts of a payment - first try, core refusal, unresolved then landed, after a restart -; one note per skipped inject in three
+  spellings and the control; one status per pause on the product heartbeat and its control), `tests/unit/test_p036_b2_pause_after_is_a_boolean_on_every_event.py` (11: an uncaptioned event, six wrong spellings, four good ones),
+  9 in `tests/unit/test_p036_b2_tick_pace_follows_the_scenario.py` (a `tick_seconds` outside 0.25-5 or not a number keeps the default pace) and 4 in `tests/integration/test_p036_b2_run_creation.py` (a damaged story
+  and a non-boolean `pause_after` refused at creation in `fixtures` and in `real`). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3595/3615`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -231,7 +235,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3561
+EXPECTED_SELECTED_ITEMS = 3595
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
