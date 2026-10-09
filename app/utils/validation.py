@@ -333,7 +333,8 @@ def money_storability_violation(
     each answering under its own name, because each excludes values the others let through:
 
     * `MONEY_FINITENESS` - not a finite number (`NaN`, `Infinity`, or not a number at all);
-    * `MONEY_MAGNITUDE` - `abs(value) >= 10**max_integer_digits`: PostgreSQL raises on overflow;
+    * `MONEY_MAGNITUDE` - `abs(value) >= 10**max_integer_digits`: PostgreSQL raises on overflow (answered for
+      every finite value, however large - see the note at the check);
     * `MONEY_QUANTIZATION` - more than `max_scale` fraction digits that are not all zero:
       PostgreSQL ROUNDS them away silently, so the stored value would differ from the one given.
 
@@ -364,7 +365,16 @@ def money_storability_violation(
     # Magnitude first: `quantize` below raises on operands too large for the arithmetic
     # context, so asking about the fraction before the magnitude would fail for exactly the
     # values this predicate exists to reject.
-    if abs(value) >= Decimal(10) ** max_integer_digits:
+    #
+    # READ OFF THE NUMBER, NOT COMPUTED IN A CONTEXT (035, review of 034 S4b, 2026-10-09). This was
+    # `abs(value) >= Decimal(10) ** max_integer_digits`, and `abs()` is an operation of the decimal
+    # context: for a finite value whose exponent is past the context's `Emax` (`Decimal("1E1000000")`)
+    # it raised `decimal.Overflow` instead of answering - the one value this branch exists for - and
+    # under a narrow context it rounded first (`999999999999.99999999` at six digits is `1.00000E+12`).
+    # `adjusted()` is the exponent of the most significant digit, a fact about the stored digits that
+    # no context changes: for a non-zero value, `abs(value) >= 10**n` exactly when `adjusted() >= n`.
+    # Zero has no significant digit - `0E1000000` is zero - so it is never too large.
+    if value != 0 and value.adjusted() >= max_integer_digits:
         return MONEY_MAGNITUDE
 
     exponent = value.as_tuple().exponent
