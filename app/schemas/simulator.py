@@ -392,9 +392,20 @@ def scenario_amount_is_well_formed(value: Any) -> bool:
     return isinstance(value, str) and _SCENARIO_AMOUNT_RE.fullmatch(value) is not None
 
 
+class ScenarioFocusEdge(BaseModel):
+    """An edge the camera is pointed at. Its own model, not the SSE `SimulatorEventEdgeRef` (a protected wire shape that
+    accepts empty ends): both ends are non-empty, and the Python spelling `from_` is NOT accepted as input - the wire and
+    the scenario schema have only `from`, and a spelling the reference check does not read must not be one the model takes."""
+
+    from_: ScenarioPid = Field(alias="from")
+    to: ScenarioPid
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ScenarioEpisodeFocus(BaseModel):
     pids: List[ScenarioPid] = Field(default_factory=list)
-    edges: List[SimulatorEventEdgeRef] = Field(default_factory=list)
+    edges: List[ScenarioFocusEdge] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -413,7 +424,9 @@ class ScenarioEpisodeAnchor(BaseModel):
 
     # 'from' (not 'from_') on the wire: the response route dumps by alias; a direct dump uses `by_alias=True`
     # (`serialize_by_alias` of the sibling edge models is a pydantic 2.11 setting and a no-op on the pinned 2.5.3).
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # No `populate_by_name`: `from_` in a source is an unknown key, so the reference check, which reads `from`, sees every
+    # participant the model would have taken.
+    model_config = ConfigDict(extra="forbid")
 
     @field_validator("amount")
     @classmethod

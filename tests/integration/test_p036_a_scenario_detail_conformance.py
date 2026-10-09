@@ -74,5 +74,6 @@ def test_the_set_holds_the_boundaries_the_review_found() -> None:
 
     text = json.dumps(CONFORMANCE["cases"])
     assert "999999999999.99999999" in text  # the largest storable amount: 12 integer + 8 fraction digits
+    assert "1.000000000000000000" in text and "0" * 49 + "1" in text  # 18 fraction digits; 50 digits in all
     assert '"tx.failed"' in text and '"clearing.done"' in text and '"topology.changed"' in text and '"tx.updated"' in text
     assert "3000.0" in json.dumps(CONFORMANCE["cases"][3]["scenario"])  # an integral float time, normalised on upload

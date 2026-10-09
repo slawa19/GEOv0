@@ -7,6 +7,12 @@ its precision can change after it. The arbiter's decision: upload keeps the lexi
 (positive, storable in `Numeric(20, 8)`) and the references; the step check (`require_money_step` with the precision read
 from the database) belongs to slice B, at the point of use.
 
+WHAT SLICE B OWES (nothing at upload checks it any more): a scripted payment is a multiple of its equivalent's accounting
+step, checked at execution - the equivalent is the explicit one or the declared `baseEquivalent` (never the first of
+`equivalents[]`), read from the database at the point of use; `require_money_step` refuses a finer amount without rounding
+(`"1.500"` is fine at precision 2); an equivalent unknown to the database is refused or reported at execution, and a
+precision changed after the upload is the precision that counts.
+
 The trap records every statement the request's session executes after the actor has been established. Red on `3b60dc03`:
 the upload of a scenario with a payment ran one `SELECT ... FROM equivalents`.
 """

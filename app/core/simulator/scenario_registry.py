@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -228,15 +228,12 @@ class ScenarioRegistry:
         self.load_fixture_scenarios()
         self.load_uploaded_scenarios()
 
-    def save_uploaded_scenario(
-        self, scenario: dict[str, Any], *, equivalent_precisions: Optional[Mapping[str, int]] = None
-    ) -> ScenarioRecord:
+    def save_uploaded_scenario(self, scenario: dict[str, Any]) -> ScenarioRecord:
         validate_scenario_or_400(raw=scenario, schema_path=self._schema_path)
         # 036: the schema checked the shape; the story (participants named, money, anchors) is checked by the one rule the
-        # REST projection also uses, after integral numbers are stored as integers. `equivalent_precisions` are the
-        # precisions of the equivalents the caller looked up (the upload route reads them from the database).
+        # REST projection also uses, after integral numbers are stored as integers. No database is read here.
         normalize_integral_numbers(scenario)
-        story = story_errors(scenario, equivalent_precisions=equivalent_precisions)
+        story = story_errors(scenario)
         if story:
             raise BadRequestException(
                 "Scenario invalid",

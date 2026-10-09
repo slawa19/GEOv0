@@ -11,27 +11,29 @@ was uploaded (review of `1afe0b09`, findings 1-5).
   integers. Anything not integral stays as it is and the schema refuses it.
 * `build_story` - the projection, and an INTEGRITY BOUNDARY (AGENTS.md section 9): an event with no `caption` is not an
   episode and that is not an error; a captioned event that cannot be served as written, an invalid `settings.playback` or
-  an invalid `description` is refused with the path of every bad field (`ScenarioStoryInvalid`, 409 - the class the
-  stored-scenario refusals already use). Nothing is dropped and no meaning is altered; the source is never touched.
-* `story_errors` - the upload check: the projection's errors plus the one that needs the database, a scripted payment
-  finer than its equivalent's accounting step (`require_money_step`, never a rounding), when the equivalent resolves.
+  an invalid `description` is refused with the path of every bad field (`ScenarioStoryInvalid`, 409 / `E008`). Nothing is
+  dropped and no meaning is altered; the source is never touched. 409 is the policy of THIS boundary - an existing resource
+  whose story cannot be served as written - and not the reuse of an established registry-wide class: an invalid equivalent
+  code in a stored scenario is 400/E009 at the upload and, at load, drops the record (a later GET is then 404). The outcome
+  therefore still depends on WHICH field of a stored scenario is damaged (review of `c2d84180`, N1; BACKLOG).
+* `story_errors` - the upload check: the same collection, nothing else. It reads no database.
 
 WHAT THIS DOES NOT SEE. Whether a participant exists in the DATABASE, is active, or was introduced before the moment an
-episode names it; whether the equivalent exists or has the precision the upload saw; whether the anchor will ever arrive.
-Those are the runtime's (slice B). An equivalent that is not resolved - no `equivalent` on the event and no declared
-`baseEquivalent` (the first of `equivalents[]` is NOT a default) - is not stepped.
+episode names it; whether the equivalent exists; whether a scripted payment is a multiple of its equivalent's accounting
+step (`require_money_step` with the precision read from the database) - upload deliberately reads no database, so storage
+does not depend on the environment, and the equivalent may be unknown at upload or change its precision afterwards; whether
+the anchor will ever arrive. Those are the runtime's, at the point of use (slice B). When it resolves a payment's equivalent
+it must use the explicit one or the declared `baseEquivalent` - the first of `equivalents[]` is NOT a default.
 
 Paths use the `/` spelling of `SCENARIO_INVALID` (`events/3/caption/en`).
 """
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any, Mapping, NamedTuple, Optional
 
 from pydantic import ValidationError
 
-from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.schemas.simulator import (
     LocalizedText,
     ScenarioEpisode,
@@ -39,7 +41,7 @@ from app.schemas.simulator import (
     scenario_amount_is_well_formed,
 )
 from app.utils.exceptions import BadRequestException, ConflictException
-from app.utils.validation import parse_money_amount, require_money_step
+from app.utils.validation import parse_money_amount
 
 SCENARIO_INVALID = "SCENARIO_INVALID"
 
@@ -271,36 +273,7 @@ def build_story(raw: Mapping[str, Any]) -> Story:
 # --------------------------------------------------------------------------------------------------- upload
 
 
-def payment_equivalents(raw: Mapping[str, Any]) -> set[str]:
-    """The equivalent codes the scripted payments of `raw` resolve to (explicit, or the declared default)."""
+def story_errors(raw: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Every problem of the story of `raw` at upload (the REST detail raises them through `build_story`)."""
 
-    codes: set[str] = set()
-    events = raw.get("events") if isinstance(raw, Mapping) else None
-    for event in events if isinstance(events, list) else []:
-        if isinstance(event, dict) and event.get("type") == "payment":
-            code = effective_equivalent(raw, event)
-            if code:
-                codes.add(code)
-    return codes
-
-
-def story_errors(
-    raw: Mapping[str, Any], *, equivalent_precisions: Optional[Mapping[str, int]] = None
-) -> list[dict[str, str]]:
-    """Every problem of the story of `raw` at upload. `equivalent_precisions` maps the codes the caller could look up
-    to their precision (= the accounting step); a payment whose resolved equivalent is in it must be a multiple of that
-    step - a value rule, so `"1.500"` is fine at precision 2 - and is never rounded. A code not in it is not stepped."""
-
-    _, errors = _collect(raw)
-    precisions = {str(k).upper(): int(v) for k, v in (equivalent_precisions or {}).items()}
-    events = raw.get("events")
-    for index, event in enumerate(events if isinstance(events, list) else []):
-        if not isinstance(event, dict) or event.get("type") != "payment" or money_problem(event.get("amount")):
-            continue
-        code = effective_equivalent(raw, event)
-        if code in precisions:
-            try:
-                require_money_step(Decimal(event["amount"]), precision=precisions[code], equivalent=code)
-            except BadRequestException as exc:
-                errors.append({"path": f"events/{index}/amount", "message": exc.message})
-    return _distinct(errors)
+    return _collect(raw)[1]

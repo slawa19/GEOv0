@@ -1,5 +1,5 @@
 {
-  "_comment": "Shared by tests/integration/test_p036_a_scenario_detail_conformance.py (the route answers `detail` for the uploaded `scenario`; created_at is the upload time and is compared as null) and by simulator-ui/v2/src/api/simulatorApi.contract.test.ts (the decoder accepts every `detail`). One file, so the backend and the decoder cannot drift apart unseen (036 slice A fix-delta, review of 1afe0b09, finding 8). Authored by hand, not captured from the backend.",
+  "_comment": "Shared POSITIVE cases of the scenario detail. tests/integration/test_p036_a_scenario_detail_conformance.py uploads each `scenario` and requires the route to answer `detail` (created_at is the upload time and is compared as null); simulator-ui/v2/src/api/simulatorApi.contract.test.ts requires the decoder to accept every `detail` unchanged. So a backend answer in these shapes that the decoder rejects, or the reverse, fails on the same file. WHAT IT DOES NOT COVER: refusals (the 400 and 409 have their own tests), stored-only inputs, combinations not written here, lexical bounds other than the two spelled in the last case (the 18-fraction-digit payment amount and the 50-digit anchor amount; the scale-8 storability bound and the 12 integer digits are in the first case), exact large integers, timestamps, and a real HTTP transport. Authored by hand, not captured from the backend.",
   "cases": [
     {
       "name": "a full story: every kind of anchor, the boundary amounts and playback values, an inject-introduced participant",
@@ -444,6 +444,90 @@
           "intensity_percent": 0,
           "inject_enabled": null
         }
+      }
+    },
+    {
+      "name": "the lexical bounds of the money grammar: 18 fraction digits in a payment, 50 digits in all in an anchor (both are the value 1)",
+      "scenario": {
+        "schema_version": "scenario/1",
+        "scenario_id": "conformance-bounds",
+        "equivalents": [
+          "UAH"
+        ],
+        "participants": [
+          {
+            "id": "A",
+            "type": "person"
+          },
+          {
+            "id": "B",
+            "type": "person"
+          },
+          {
+            "id": "C",
+            "type": "person"
+          }
+        ],
+        "trustlines": [],
+        "events": [
+          {
+            "time": 100,
+            "type": "payment",
+            "from": "A",
+            "to": "B",
+            "amount": "1.000000000000000000",
+            "equivalent": "UAH",
+            "caption": {
+              "ru": "Границы",
+              "en": "Bounds"
+            },
+            "anchor": {
+              "event": "tx.updated",
+              "from": "A",
+              "to": "B",
+              "amount": "00000000000000000000000000000000000000000000000001",
+              "equivalent": "UAH"
+            }
+          }
+        ]
+      },
+      "detail": {
+        "api_version": "simulator-api/1",
+        "scenario_id": "conformance-bounds",
+        "name": null,
+        "description": null,
+        "created_at": null,
+        "participants_count": 3,
+        "trustlines_count": 0,
+        "equivalents": [
+          "UAH"
+        ],
+        "clusters_count": null,
+        "hubs_count": null,
+        "tags": null,
+        "episodes": [
+          {
+            "index": 0,
+            "time_ms": 100,
+            "caption": {
+              "ru": "Границы",
+              "en": "Bounds"
+            },
+            "pause_after": false,
+            "kind": "payment",
+            "focus": null,
+            "anchor": {
+              "event": "tx.updated",
+              "from": "A",
+              "to": "B",
+              "amount": "00000000000000000000000000000000000000000000000001",
+              "equivalent": "UAH",
+              "time_ms": null
+            },
+            "expected_cycle": null
+          }
+        ],
+        "playback": null
       }
     }
   ]

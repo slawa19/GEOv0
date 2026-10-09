@@ -100,7 +100,6 @@ from app.schemas.simulator import (
     SimulatorPaymentTargetsResponse,
     SimulatorPaymentTargetsItem,
 )
-from app.core.simulator.scenario_story import payment_equivalents
 from app.schemas.common import ErrorEnvelope
 from app.utils.exceptions import (
     BadRequestException,
@@ -2687,16 +2686,10 @@ async def list_scenarios(
 async def upload_scenario(
     body: ScenarioUploadRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
-    db=Depends(deps.get_db),
 ):
-    # 036: a scripted payment finer than the accounting step of its equivalent is refused at upload. The precision is
-    # the equivalent's own (`require_money_step`); an equivalent the database does not know is left to the runtime.
-    codes = payment_equivalents(body.scenario)
-    precisions: dict[str, int] = {}
-    if codes:
-        rows = await db.execute(select(Equivalent.code, Equivalent.precision).where(Equivalent.code.in_(sorted(codes))))
-        precisions = {str(code): int(precision) for code, precision in rows.all()}
-    rec = runtime.save_uploaded_scenario(body.scenario, equivalent_precisions=precisions)
+    # Storage reads no row of the database (036 slice A, review N2): the step of a scripted payment against its equivalent's
+    # precision is checked where the payment is executed (slice B), not here.
+    rec = runtime.save_uploaded_scenario(body.scenario)
     return rec.summary()
 
 

@@ -442,8 +442,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # application enforces it with `re.fullmatch`), `minimum`/`maximum` written as integers against FastAPI's floats
 # (`playback.intensity_percent`, `playback.tick_seconds`), and the `required` of a defaulted model unchanged. List and upload
 # entries keep their differences. Measured with the per-entry dump (`.local-run/p036a_dump_drift.py`, not committed).
+# Third move, 036 slice A second fix-delta (review of `c2d84180`): count HOLDS at 61, digest moves, and NO difference is added to
+# the entry or removed from it. The entry hashes both complete response halves, and the focus edges changed on both: they were
+# the protected SSE edge reference (empty ends allowed) and are now the scenario's own `ScenarioFocusEdge` (both ends non-empty),
+# in the canon and in the model. The paths where the halves differ are the same as before the move (measured with the per-entry
+# dump, `.local-run/p036a_dump_drift.py`, not committed); like the two moves above, it is a change of recorded content, not an
+# improvement.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "8f366b1c80b2b3cc0991bafdf3234527b3dd93796367ec5f1f735a9b0302ca91"
+    "231823ac68bfc1160c6dc6ef37f9d5fa6cd7dc3233981ff7a995fec60976b768"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;

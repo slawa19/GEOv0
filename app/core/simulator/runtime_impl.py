@@ -344,12 +344,8 @@ class _SimulatorRuntimeBase:
             raise NotFoundException(f"Scenario {scenario_id} not found")
         return rec
 
-    def save_uploaded_scenario(
-        self, scenario: dict[str, Any], *, equivalent_precisions: Optional[dict[str, int]] = None
-    ) -> ScenarioRecord:
-        return self._scenario_registry.save_uploaded_scenario(
-            scenario, equivalent_precisions=equivalent_precisions
-        )
+    def save_uploaded_scenario(self, scenario: dict[str, Any]) -> ScenarioRecord:
+        return self._scenario_registry.save_uploaded_scenario(scenario)
 
     async def build_scenario_preview(
         self,

@@ -7253,7 +7253,22 @@ components:
         edges:
           type: array
           items:
-            $ref: '#/components/schemas/SimulatorEventEdgeRef'
+            $ref: '#/components/schemas/ScenarioFocusEdge'
+      additionalProperties: false
+
+    ScenarioFocusEdge:
+      type: object
+      description: >-
+        An edge the camera is pointed at. Not `SimulatorEventEdgeRef` (a protected SSE shape that allows empty ends): both
+        ends are non-empty.
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          minLength: 1
+        to:
+          type: string
+          minLength: 1
       additionalProperties: false
 
     ScenarioEpisodeAnchor:

@@ -8,8 +8,8 @@ there and must stay green.
   Python `int`: the episode vanished. Integral numbers are normalised once, at ingestion.
 * finding 3 - the money grammar of `amount` (event and anchor) is the product's money door: plain decimal, at most 18
   fraction digits and 50 digits in all, no sign or exponent or space, nothing after the last digit (a terminal newline
-  included), storable in `Numeric(20, 8)`; and, when the event's equivalent resolves (explicit, or the declared default
-  `baseEquivalent` - never "the first of the list"), a multiple of that equivalent's step, never rounded.
+  included), storable in `Numeric(20, 8)` and positive. The accounting step of the equivalent is checked at execution
+  (slice B), not here: upload reads no database.
 * finding 4 - a `tx.updated` anchor names from, to, amount and equivalent; a `tx.failed` anchor names from, to and
   equivalent and NO amount (the SSE event has none); the other two events need only the event name (spec 036, "Якорь").
 * finding 5 - a participant named by the story (focus, expected cycle, scripted payment, anchor) is one of the
@@ -28,7 +28,6 @@ import pytest
 from app.config import settings
 from app.core.simulator.runtime import runtime
 from app.core.simulator.scenario_registry import ScenarioRegistry
-from app.db.models.equivalent import Equivalent
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ORIGIN = {"Origin": "http://localhost:5176"}
@@ -163,51 +162,6 @@ async def test_an_anchor_amount_outside_the_money_grammar_is_refused(client, reg
 
     assert response.status_code == 400, f"anchor amount {amount!r} answered {response.status_code}: {response.text[:200]}"
     assert _paths(response) == ["events/0/anchor/amount"], response.text
-
-
-async def _equivalent(db_session, code: str, precision: int) -> None:
-    db_session.add(Equivalent(code=code, precision=precision, is_active=True, metadata_={}))
-    await db_session.flush()
-
-
-@pytest.mark.asyncio
-async def test_a_payment_finer_than_its_equivalents_step_is_refused_never_rounded(client, registry, db_session) -> None:
-    await _equivalent(db_session, "P36STEP", 2)
-    fine = _scenario("step-fine", [_payment("1.505", equivalent="P36STEP")], equivalents=["P36STEP"])
-    exact = _scenario("step-exact", [_payment("1.500", equivalent="P36STEP")], equivalents=["P36STEP"])
-
-    assert (await _upload(client, exact)).status_code == 200  # control: "1.500" is a multiple of 0.01 (a value rule)
-    refused = await _upload(client, fine)
-
-    assert refused.status_code == 400, refused.text
-    assert _paths(refused) == ["events/0/amount"], refused.text
-    assert PREFIX + "step-fine" not in runtime._scenarios
-
-
-@pytest.mark.asyncio
-async def test_the_declared_default_equivalent_resolves_the_step_but_the_first_of_the_list_does_not(
-    client, registry, db_session
-) -> None:
-    await _equivalent(db_session, "P36DEF", 2)
-    event = {"time": 0, "type": "payment", "from": "A", "to": "B", "amount": "1.505"}  # no `equivalent`
-    declared = _scenario("step-default", [event], equivalents=["P36DEF"], baseEquivalent="P36DEF")
-    listed = _scenario("step-listed", [event], equivalents=["P36DEF", "UAH"])  # nothing is declared as the default
-
-    refused = await _upload(client, declared)
-    accepted = await _upload(client, listed)
-
-    assert refused.status_code == 400 and _paths(refused) == ["events/0/amount"], refused.text
-    assert accepted.status_code == 200, accepted.text  # the runtime (slice B) resolves and rechecks; A does not guess
-
-
-@pytest.mark.asyncio
-async def test_an_equivalent_unknown_to_the_database_is_not_stepped(client, registry) -> None:
-    """Control: no precision is added to the scenario and none is guessed - an unknown equivalent is left to the runtime."""
-
-    response = await _upload(client, _scenario("step-unknown", [_payment("1.505", equivalent="NOSUCHEQ")],
-                                               equivalents=["NOSUCHEQ"]))
-
-    assert response.status_code == 200, response.text
 
 
 # ----------------------------------------------------------------------------------------------- finding 4: anchors
