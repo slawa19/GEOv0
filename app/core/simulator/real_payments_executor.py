@@ -307,6 +307,13 @@ class RealPaymentsResult:
     # ORIGINAL identifiers the replay reads when a commit's outcome is unknown, to establish
     # whether the attempt landed before it is allowed to decide anything.
     staged_tx_ids: frozenset[str] = frozenset()
+    # 036 B1 fix-delta: the seqs whose payment ended WITHOUT an established outcome - an exception that is not a definitive
+    # business refusal (a timeout, a 5xx, an unexpected error). What the payment did is not known from here: the handler
+    # also covers work after the savepoint was released, and a durable row may exist (a replay that timed out while reading
+    # it). A scripted event whose payment is in this set is NOT spent: the next tick runs it again under the SAME key, and
+    # the payment service answers a repeat with the stored payment if one exists, so the debt moves at most once. A
+    # committed payment, a 4xx refusal and a durable ABORTED row returned by the core are terminal and are not in it.
+    unresolved_seqs: frozenset[int] = frozenset()
 
 
 def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[str, Any] | None]:
@@ -407,6 +414,7 @@ class RealPaymentsExecutor:
         # conflict this exists for propagates out of this function and the prefix that was already
         # staged is exactly what has to be identifiable afterwards.
         staged_tx_ids: set[str] = set()
+        unresolved: set[int] = set()
 
         per_eq: dict[str, dict[str, int]] = {
             str(eq): {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}
@@ -447,6 +455,23 @@ class RealPaymentsExecutor:
             """Execute one action under a SAVEPOINT and return its staged result."""
 
             sender_id = sender_id_by_pid.get(str(action.sender_pid))
+            if sender_id is None and isinstance(getattr(action, "idempotency_key", None), str):
+                # 036 B1: a scripted payment of a sender the run does not hold is a REFUSAL of the story (the participant
+                # may not be introduced yet), not an error of the run: it is reported as `tx.failed` and does not spend
+                # the error budget. A planned payment keeps the old classification below.
+                return (
+                    int(action.seq),
+                    str(action.equivalent),
+                    str(action.sender_pid),
+                    str(action.receiver_pid),
+                    str(action.amount),
+                    "REJECTED",
+                    None,
+                    {"reason": "SENDER_NOT_FOUND"},
+                    0.0,
+                    [],
+                    None,
+                )
             if sender_id is None:
                 return (
                     int(action.seq),
@@ -462,7 +487,8 @@ class RealPaymentsExecutor:
                     None,
                 )
 
-            idem = self._sim_idempotency_key(
+            event_key = getattr(action, "idempotency_key", None)
+            idem = event_key if isinstance(event_key, str) and event_key else self._sim_idempotency_key(
                 run_id=run.run_id,
                 tick_ms=run.tick_index,
                 sender_pid=str(action.sender_pid),
@@ -577,6 +603,12 @@ class RealPaymentsExecutor:
                     raise
                 except Exception as e:
                     status, code, err_details = _classify_refusal(e)
+                    if status is None:
+                        # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the outcome is NOT established
+                        # here - a durable row may exist. Safety is the repeat under the same key, not an absent row.
+                        # Terminal outcomes either returned above (committed, a durable ABORTED row) or are a 4xx
+                        # business refusal (`status` REJECTED).
+                        unresolved.add(int(action.seq))
 
                     return (
                         int(action.seq),
@@ -843,6 +875,7 @@ class RealPaymentsExecutor:
             deferred_effects=deferred_effects,
             stop_requested=stop_requested,
             staged_tx_ids=frozenset(staged_tx_ids),
+            unresolved_seqs=frozenset(unresolved),
         )
 
     async def build_patches_after_commit(

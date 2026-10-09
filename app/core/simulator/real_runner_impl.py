@@ -28,6 +28,7 @@ from app.core.simulator.real_payment_action import _RealPaymentAction
 from app.core.simulator.real_payment_planner import RealPaymentPlanner
 from app.core.simulator.real_payments_executor import RealPaymentsExecutor
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+from app.core.simulator.scenario_equivalent import effective_equivalent
 from app.config import settings
 from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
 from app.core.simulator.tick import RealTick
@@ -56,6 +57,19 @@ def _is_transient_inject_db_error(exc: BaseException) -> bool:
     # 019 stage 5 (`T1909`, precondition 1): a concurrent writer inserted the same new debt row - a
     # `23505` on exactly `uq_debts_debtor_creditor_equivalent`, transient like 40001; no other 23505.
     return code in _INJECT_TRANSIENT_SQLSTATES or is_debt_pair_collision(exc)
+
+
+def scripted_event_idempotency_key(run_id: str, epoch: int, event_index: int) -> str:
+    """The idempotency key (and `tx_id`) of a scenario's scripted `payment` event: run id, LAUNCH epoch, event index.
+
+    036 B1. NOT the tick's key (`RealRunnerImpl._sim_idempotency_key` carries the tick number): a scripted event is
+    not tied to the tick it happens to run at. If a tick fails before the event is marked spent and the event runs
+    again one tick later, the key is the same and the payment service answers with the stored payment - the debt
+    moves once. After a `restart` the epoch differs, so the same event is a NEW operation that moves money again; the
+    first launch's key is never repeated (the class of F-034-1: a stored payment must not be reported as paid)."""
+
+    material = f"scripted|{run_id}|{int(epoch)}|{int(event_index)}"
+    return "sim:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
 
 class RealRunnerImpl:
@@ -309,6 +323,14 @@ class RealRunnerImpl:
                     event=evt,
                     pid_to_participant_id=pid_to_participant_id,
                 )
+                continue
+
+            if evt_type in ("payment", "clearing"):
+                # 036 B1: executed by the TICK, not here. A payment is a planned payment of the money phase (it needs
+                # the owner locks and the phase's commit) and is marked fired only once that commit is durable
+                # (`scripted_payments_due`, `TickPaymentsPhase.apply_deferred_effects`); a clearing runs after the
+                # payments phase (`RealTick.run_scripted_clearings`). Marking either fired here would spend an event
+                # that nothing has executed (F-036-2).
                 continue
 
             # Unknown / unsupported event types are ignored, but we still mark them fired once due.
@@ -644,6 +666,95 @@ class RealRunnerImpl:
             debt_snapshot=debt_snapshot,
             precision_by_eq=precision_by_eq,
         )
+
+    # ── scripted `payment` / `clearing` events (036 B1) ───────────────────────────────────────────────
+
+    def _refuse_scripted_event(self, run: RunRecord, index: int, event: dict[str, Any], reason: str, **extra: Any) -> None:
+        """An event that cannot even be attempted (malformed, unresolved equivalent): said aloud, then spent.
+
+        Never a silent skip: a warning in the log, a note in the events artifact and the run's story progress. A
+        refusal the CORE gives (no route, a step finer than the equivalent's, an unknown participant) is not this - it
+        is an ordinary `tx.failed` of the payment itself."""
+
+        stats = {"status": "refused", "reason": reason, "epoch": int(run._launch_epoch), **extra}
+        self._logger.warning(
+            "simulator.real.scripted_event_refused run_id=%s event_index=%s type=%s reason=%s",
+            str(run.run_id), int(index), str(event.get("type")), reason,
+        )
+        with self._lock:
+            run._real_story_progress[int(index)] = stats
+            run._real_fired_scenario_event_indexes.add(int(index))
+        self._inject_executor.enqueue_inject_note(
+            run.run_id, run=run, event_index=index, event_time_ms=int(event.get("time") or 0),
+            description=f"scripted {event.get('type')} refused: {reason}", stats=stats,
+        )
+
+    def scripted_payments_due(
+        self, run: RunRecord, scenario: dict[str, Any], *, first_seq: int
+    ) -> tuple[list[_RealPaymentAction], dict[int, int], int]:
+        """The scripted `payment` events that are due and not spent, as payments of the coming money phase.
+
+        Called once per ATTEMPT of the phase (a replayed attempt asks again: nothing is spent until the commit is
+        durable). Each action carries the event's own key, so a repeat never pays twice. Seqs continue the planned
+        ones (`first_seq`...): the executor orders its results by a contiguous seq. Returns the actions, the event index
+        by seq, and the launch EPOCH they were planned under: whatever is recorded for them afterwards is discarded if the
+        run has been restarted meanwhile (`mark_scripted_events_fired`)."""
+
+        events = scenario.get("events")
+        actions: list[_RealPaymentAction] = []
+        index_by_seq: dict[int, int] = {}
+        epoch = int(run._launch_epoch)
+        for idx, evt in enumerate(events if isinstance(events, list) else []):
+            if not isinstance(evt, dict) or evt.get("type") != "payment" or idx in run._real_fired_scenario_event_indexes:
+                continue
+            t0 = self._parse_event_time_ms(evt)
+            if t0 is None or int(run.sim_time_ms) < int(t0):
+                continue
+            sender, receiver, amount = evt.get("from"), evt.get("to"), evt.get("amount")
+            equivalent = effective_equivalent(scenario, evt)
+            if not (isinstance(sender, str) and sender and isinstance(receiver, str) and receiver
+                    and isinstance(amount, str) and amount):
+                self._refuse_scripted_event(run, idx, evt, "malformed_payment")
+                continue
+            if not equivalent:
+                # No `equivalent` on the event and no declared `baseEquivalent`: the first of `equivalents[]` is NOT a
+                # default, and guessing would pay in a currency the author never named.
+                self._refuse_scripted_event(run, idx, evt, "unresolved_equivalent")
+                continue
+            if equivalent not in {str(x).upper() for x in (run._real_equivalents or [])}:
+                # The money phase locked the lines of the RUN's equivalents as its first statement (027 stage 2); a payment
+                # in any other equivalent would run without those locks. Refused aloud, not attempted.
+                self._refuse_scripted_event(run, idx, evt, "equivalent_not_in_the_run", equivalent=equivalent)
+                continue
+            actions.append(
+                _RealPaymentAction(
+                    seq=int(first_seq) + len(actions),
+                    equivalent=equivalent,
+                    sender_pid=sender,
+                    receiver_pid=receiver,
+                    amount=amount,
+                    idempotency_key=scripted_event_idempotency_key(run.run_id, epoch, idx),
+                )
+            )
+            index_by_seq[int(first_seq) + len(actions) - 1] = idx
+        return actions, index_by_seq, epoch
+
+    def mark_scripted_events_fired(self, run: RunRecord, indexes: frozenset[int], epoch: int) -> None:
+        """The money phase that carried these payments is DURABLE (committed, or landed after an unknown commit).
+
+        Only the events that reached a TERMINAL outcome are passed in (the caller leaves out a payment that failed
+        transiently before admission). `epoch` is the launch the phase was planned under: if the run has been restarted
+        since, the events are those of a launch that is over and the NEW epoch's events are still due - nothing is
+        marked."""
+
+        with self._lock:
+            if int(run._launch_epoch) != int(epoch):
+                self._logger.info(
+                    "simulator.real.scripted_events_not_spent_after_restart run_id=%s planned_epoch=%s epoch=%s",
+                    str(run.run_id), int(epoch), int(run._launch_epoch),
+                )
+                return
+            run._real_fired_scenario_event_indexes.update(int(i) for i in indexes)
 
     def _sim_idempotency_key(
         self,

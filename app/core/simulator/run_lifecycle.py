@@ -498,6 +498,11 @@ class RunLifecycle:
             # 034 `F-034-1`: the tick numbers start again under the same `run_id`, so the launch is what tells this
             # tick's payments from the stored payments of the same tick number before the restart.
             run._launch_epoch += 1
+            # 036 B1 (BACKLOG 034-3 (g)): the story starts over - the scenario's events are due again and the scripted
+            # ones are new operations of the new epoch. The debts of the launch before stay (a restart undoes nothing;
+            # a story replayed from scratch is a new run).
+            run._real_fired_scenario_event_indexes.clear()
+            run._real_story_progress.clear()
             # 024 Sh6 fix-delta (§15 P2): the flush mark and the tail it refers to belong to the old tick
             # sequence; a retained mark >= the new tick numbers made the final flush skip a lost new tail.
             run._real_last_tick_storage_flushed_tick = -1

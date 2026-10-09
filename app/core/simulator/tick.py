@@ -105,6 +105,11 @@ class TickPaymentsPhase:
     # Programme 015 / P1: the identifiers of the payments this attempt staged, for resolving an unknown commit
     # outcome. See `app/core/simulator/money_replay.py`.
     staged_tx_ids: frozenset[str] = frozenset()
+    # 036 B1: the scripted `payment` events this attempt carried, and what to do once the phase is DURABLE: spend them.
+    # An event is marked fired only when its payment is durable (committed, or landed after an unknown commit): a tick
+    # that fails or is replayed first leaves it pending, and the event's own key keeps a repeat from paying twice.
+    scripted_event_indexes: frozenset[int] = frozenset()
+    on_durable: Callable[[frozenset[int]], None] | None = None
 
     def discard_observations(self) -> bool:
         """Destroy this attempt's observations without publishing them (a superseded attempt)."""
@@ -119,6 +124,12 @@ class TickPaymentsPhase:
             await self.deferred_effects.build_post_commit_patches(open_session)
 
     def apply_deferred_effects(self) -> bool:
+        """The money phase is durable: spend the scripted events it carried, publish the observations once.
+
+        Both callers (the commit's confirmation and the landing after an unknown commit) come through here, and a
+        second call (the tail's `_commit_and_resolve`) finds the set already spent - adding to it again is a no-op."""
+        if self.on_durable is not None and self.scripted_event_indexes:
+            self.on_durable(self.scripted_event_indexes)
         if self.deferred_effects is None:
             return False
         return self.deferred_effects.apply_after_commit()
@@ -289,6 +300,20 @@ class RealTick:
                     if money.should_stop:
                         return
 
+                    # 036 B1: the scenario's scripted clearings run FIRST, so the periodic clearing of this tick cannot take
+                    # the cycle an episode is about, and the periodic pass of an equivalent that has just had a scripted pass
+                    # does not run on this tick. Their committed volume belongs to the tick's `clearing_volume`.
+                    scripted_volume, scripted_attempted = await self.run_scripted_clearings(
+                        session=session,
+                        run_id=run_id,
+                        run=run,
+                        scenario=scenario,
+                        equivalents=equivalents,
+                        planned_len=len(payments_phase.planned or []),
+                        tick_t0=tick_t0,
+                        payments_result=payments_phase,
+                    )
+
                     clearing_volume_by_eq = await self.maybe_run_clearing(
                         session=session,
                         run_id=run_id,
@@ -297,7 +322,10 @@ class RealTick:
                         planned_len=len(payments_phase.planned or []),
                         tick_t0=tick_t0,
                         payments_result=payments_phase,
+                        skip_equivalents=scripted_attempted,
                     )
+                    for eq_code, amount in scripted_volume.items():
+                        clearing_volume_by_eq[eq_code] = clearing_volume_by_eq.get(eq_code, Decimal("0")) + amount
 
                     await self.apply_trust_decay_and_broadcast(
                         session=session,
@@ -629,6 +657,10 @@ class RealTick:
             )
         debt_snapshot, precision_by_eq = planning_inputs
         planned = rr._plan_real_payments(run, scenario, debt_snapshot=debt_snapshot, precision_by_eq=precision_by_eq)
+        # 036 B1: the scenario's due `payment` events join the phase as ordinary planned payments (staged under a
+        # savepoint, published after the commit, refused by the core like any other) with the event's own key.
+        scripted, scripted_index_by_seq, scripted_epoch = rr.scripted_payments_due(run, scenario, first_seq=len(planned))
+        planned = [*planned, *scripted]
         with rr._lock:
             run.ops_sec = float(len(planned))
             run.queue_depth = len(planned)
@@ -690,6 +722,13 @@ class RealTick:
             stall_ticks=stall_ticks,
             deferred_effects=payments_res.deferred_effects,
             staged_tx_ids=frozenset(getattr(payments_res, "staged_tx_ids", ()) or ()),
+            # Only the events whose payment reached a TERMINAL outcome are spent by this phase's durability: one whose
+            # outcome is not established (a timeout, an unexpected error) waits and is run again by the next tick, under the
+            # same key (a repeat of a payment that did land is answered with the stored one).
+            scripted_event_indexes=frozenset(
+                idx for seq, idx in scripted_index_by_seq.items() if seq not in payments_res.unresolved_seqs
+            ),
+            on_durable=lambda indexes: rr.mark_scripted_events_fired(run, indexes, scripted_epoch),
         )
 
         if should_stop:
@@ -838,8 +877,12 @@ class RealTick:
         planned_len: int,
         tick_t0: float,
         payments_result: Any | None = None,
+        skip_equivalents: frozenset[str] = frozenset(),
     ) -> dict[str, Decimal]:
         """The tick's clearing on the static cadence; the committed volume per equivalent, always `Decimal`.
+
+        `skip_equivalents` (036 B1): the equivalents a scripted clearing already ran a pass for on this tick - no periodic
+        pass of them runs on it.
 
         2026-08-20 / p007_t715: the cleared volume is money and feeds the `clearing_volume` metric series, so it
         stays Decimal across every branch - including the early returns.
@@ -851,15 +894,160 @@ class RealTick:
         if int(run.tick_index) % int(self._clearing_every_n_ticks) != 0:
             return {str(eq): Decimal("0") for eq in equivalents}
 
-        return await self._execute_clearing_with_timeout(
+        target = [eq for eq in equivalents if str(eq).upper() not in skip_equivalents]
+        if not target:
+            return {str(eq): Decimal("0") for eq in equivalents}
+        volumes = await self._execute_clearing_with_timeout(
             session=session,
             run_id=run_id,
             run=run,
-            equivalents=equivalents,
+            equivalents=target,
             planned_len=planned_len,
             tick_t0=tick_t0,
             payments_result=payments_result,
         )
+        return {str(eq): volumes.get(str(eq), Decimal("0")) for eq in equivalents}
+
+    async def run_scripted_clearings(
+        self,
+        *,
+        session: Any,
+        run_id: str,
+        run: RunRecord,
+        scenario: dict[str, Any],
+        equivalents: list[str],
+        planned_len: int,
+        tick_t0: float,
+        payments_result: Any | None,
+    ) -> tuple[dict[str, Decimal], frozenset[str]]:
+        """The scenario's due `clearing` events (036 B1), after the payments phase and BEFORE the periodic clearing.
+
+        Returns the volume committed per equivalent (it belongs to the tick's `clearing_volume`) and the equivalents a
+        scripted pass was attempted for on this tick: the periodic clearing leaves those out for this tick, so it cannot
+        take the cycle the episode is about (the periodic clearing of an EARLIER tick can; that is not repaired here).
+
+        The pass is the tick's own (`_execute_clearing_with_timeout` -> `_run_clearing` -> `run_clearing_pass` in the
+        run's perimeter, its hard timeout, `clearing.done` of the equivalent's step). WHAT IT REPORTS IS WHAT HAPPENED:
+        the outcome of the pass comes back from the runner (`outcomes`), and only a COMPLETE pass - an empty one included -
+        is `done` and spends the event. A pass that did not complete (the equivalent stopped, the pass raised, the hard
+        timeout, a clearing still running) leaves the event for the next tick; the progress says `incomplete` with the
+        reason and keeps the cycles committed so far (cumulative within the epoch), and a change of status is logged once.
+        An event whose equivalent is not the run's, or with clearing disabled, is refused aloud (progress and note).
+        The epoch is taken before the pass: a `restart` during it discards the record (the event belongs to a launch that
+        is over). A cancellation leaves the event pending."""
+
+        rr = self._runner
+        volume: dict[str, Decimal] = {}
+        attempted: set[str] = set()
+        events = scenario.get("events")
+        for idx, evt in enumerate(events if isinstance(events, list) else []):
+            if not isinstance(evt, dict) or evt.get("type") != "clearing" or idx in run._real_fired_scenario_event_indexes:
+                continue
+            t0 = rr._parse_event_time_ms(evt)
+            if t0 is None or int(run.sim_time_ms) < int(t0):
+                continue
+            epoch = int(run._launch_epoch)
+            eq = effective_equivalent(scenario, evt)
+            if not eq:
+                rr._refuse_scripted_event(run, idx, evt, "unresolved_equivalent")
+                continue
+            if eq not in {str(x).upper() for x in equivalents}:
+                rr._refuse_scripted_event(run, idx, evt, "equivalent_not_in_the_run", equivalent=eq)
+                continue
+            if not settings.CLEARING_ENABLED:
+                rr._refuse_scripted_event(run, idx, evt, "clearing_disabled", equivalent=eq)
+                continue
+            try:
+                # Before the pass, as `_run_clearing` does: every ending then knows the equivalent's step.
+                precision = await self._equivalent_precision(db_session.AsyncSessionLocal, eq)
+            except Exception:
+                self._scripted_event_status(run, idx, int(t0), epoch, eq, "incomplete", "equivalent_unavailable", [], spend=False)
+                continue
+
+            occurrences: list[Any] = []
+            outcomes: dict[str, str] = {}
+            volumes = await self._execute_clearing_with_timeout(
+                session=session,
+                run_id=run_id,
+                run=run,
+                equivalents=[eq],
+                planned_len=planned_len,
+                tick_t0=tick_t0,
+                payments_result=payments_result,
+                on_occurrence=lambda _eq, occurrence: occurrences.append(occurrence),
+                outcomes=outcomes,
+            )
+            attempted.add(eq)
+            volume[eq] = volume.get(eq, Decimal("0")) + volumes.get(eq, Decimal("0"))
+            with rr._lock:
+                pid_by_id = {participant_id: str(pid) for (participant_id, pid) in (run._real_participants or [])}
+            cycles = []
+            for occurrence in occurrences:
+                edges = []
+                for edge in occurrence.edges:
+                    creditor, debtor = pid_by_id.get(edge.creditor_id), pid_by_id.get(edge.debtor_id)
+                    if creditor and debtor and creditor != debtor:
+                        edges.append({"from": creditor, "to": debtor})
+                cycles.append({"cleared_amount": self._cleared_amount_str(precision, occurrence.amount), "edges": edges})
+            outcome = outcomes.get(eq, "no_outcome")
+            self._scripted_event_status(
+                run, idx, int(t0), epoch, eq, "done" if outcome == "complete" else "incomplete",
+                None if outcome == "complete" else outcome, cycles, spend=outcome == "complete",
+            )
+        return volume, frozenset(attempted)
+
+    def _scripted_event_status(
+        self,
+        run: RunRecord,
+        idx: int,
+        t0: int,
+        epoch: int,
+        eq: str,
+        status: str,
+        reason: str | None,
+        new_cycles: list[dict[str, Any]],
+        *,
+        spend: bool,
+    ) -> None:
+        """Record the outcome of one scripted clearing attempt in the run's story progress, discarding it if the run was
+        restarted since `epoch`; spend the event only for a complete pass; say it in the log and the artifact only when
+        the (status, reason) CHANGED (AGENTS.md section 12: not on every tick)."""
+
+        rr = self._runner
+        with rr._lock:
+            if int(run._launch_epoch) != int(epoch):
+                rr._logger.info(
+                    "simulator.real.scripted_event_discarded_after_restart run_id=%s event_index=%s planned_epoch=%s epoch=%s",
+                    str(run.run_id), int(idx), int(epoch), int(run._launch_epoch),
+                )
+                return
+            previous = run._real_story_progress.get(idx) or {}
+            same_epoch = previous.get("epoch") == epoch
+            cycles = [*(previous.get("cycles") or [] if same_epoch else []), *new_cycles]
+            progress: dict[str, Any] = {
+                "status": status,
+                "epoch": epoch,
+                "equivalent": eq,
+                "attempts": int(previous.get("attempts", 0) if same_epoch else 0) + 1,
+                "cleared_cycles": len(cycles),
+                "cycles": cycles,
+            }
+            if reason is not None:
+                progress["reason"] = reason
+            changed = (previous.get("status"), previous.get("reason")) != (status, reason) or not same_epoch
+            run._real_story_progress[idx] = progress
+            if spend:
+                run._real_fired_scenario_event_indexes.add(idx)
+        if changed:
+            log = rr._logger.info if status == "done" else rr._logger.warning
+            log(
+                "simulator.real.scripted_event_status run_id=%s event_index=%s status=%s reason=%s attempts=%s cleared_cycles=%s",
+                str(run.run_id), int(idx), status, reason, progress["attempts"], progress["cleared_cycles"],
+            )
+            rr._inject_executor.enqueue_inject_note(
+                run.run_id, run=run, event_index=idx, event_time_ms=int(t0),
+                description=f"scripted clearing {status}", stats=progress,
+            )
 
     def _should_warn(self, run: RunRecord, key: str) -> bool:
         try:
@@ -927,6 +1115,8 @@ class RealTick:
         run: RunRecord,
         equivalents: list[str],
         committed: dict[str, Decimal],
+        on_occurrence: Callable[[str, Any], None] | None = None,
+        outcomes: dict[str, str] | None = None,
     ) -> None:
         """THE ONE CALL from the tick to the common clearing runner (023 (d); 021 `T2109` removed the driver).
 
@@ -969,6 +1159,8 @@ class RealTick:
 
             def _on_committed(occurrence, eq: str = eq) -> None:
                 nonlocal cleared_cycles, cleared_amount
+                if on_occurrence is not None:
+                    on_occurrence(eq, occurrence)  # 036 B1: a scripted clearing keeps the exact cycles; records only
                 committed[eq] = committed.get(eq, Decimal("0")) + occurrence.amount
                 cleared_cycles += 1
                 cleared_amount += occurrence.amount
@@ -1020,7 +1212,16 @@ class RealTick:
                         raise failed.cause
                     # Progress is durable: publish it below, then let the cause take its classification.
                     execution_error = failed.cause
+                    if outcomes is not None:
+                        outcomes[eq] = f"pass_error:{type(failed.cause).__name__}"
                 else:
+                    # 036 B1: the OUTCOME of the pass goes to the caller that asked for it (a scripted clearing), who must
+                    # not infer success from the fact that this method returned: it swallows every ending below.
+                    if outcomes is not None:
+                        outcomes[eq] = (
+                            "complete" if result.status == "complete"
+                            else f"interrupted:{'unknown' if result.reason is None else result.reason.value}"
+                        )
                     rr._logger.info(
                         "simulator.real.clearing_pass_done run_id=%s tick=%s eq=%s status=%s reason=%s "
                         "committed=%s remaining_cycles=%s elapsed_ms=%s",
@@ -1105,6 +1306,11 @@ class RealTick:
                 raise
             except Exception as exc:
                 refusal_reason = (exc.details or {}).get("reason") if isinstance(exc, ConflictException) else None
+                if outcomes is not None and eq not in outcomes:
+                    outcomes[eq] = (
+                        f"equivalent_stopped:{refusal_reason}" if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS
+                        else f"clearing_error:{type(exc).__name__}"
+                    )
                 if refusal_reason in MoneyBoundary.MONEY_STOP_REASONS:
                     # T1544: the operator's stop refuses clearing in THIS equivalent; it is not a failure of the run.
                     # Same rule as a refused payment: skip the equivalent without touching `errors_total`,
@@ -1283,6 +1489,8 @@ class RealTick:
         planned_len: int,
         tick_t0: float,
         payments_result: Any | None,
+        on_occurrence: Callable[[str, Any], None] | None = None,
+        outcomes: dict[str, str] | None = None,
     ) -> dict[str, Decimal]:
         rr = self._runner
         tick_index = int(run.tick_index)
@@ -1325,7 +1533,8 @@ class RealTick:
             committed: dict[str, Decimal] = {str(eq): Decimal("0") for eq in equivalents}
             clearing_task = asyncio.create_task(
                 self._run_clearing(
-                    session=session, run_id=run_id, run=run, equivalents=equivalents, committed=committed
+                    session=session, run_id=run_id, run=run, equivalents=equivalents, committed=committed,
+                    on_occurrence=on_occurrence, outcomes=outcomes,
                 )
             )
             self._clearing_progress[clearing_task] = committed
@@ -1338,6 +1547,9 @@ class RealTick:
                 str(run.run_id),
                 tick_index,
             )
+            if outcomes is not None:  # the pass in flight is not ours: its outcome is not ours to report
+                for eq in equivalents:
+                    outcomes.setdefault(str(eq), "clearing_already_running")
 
         try:
             await asyncio.wait_for(clearing_task, timeout=clearing_hard_timeout_sec)
@@ -1351,6 +1563,9 @@ class RealTick:
                 tick_index,
                 clearing_hard_timeout_sec,
             )
+            if outcomes is not None:
+                for eq in equivalents:
+                    outcomes.setdefault(str(eq), "hard_timeout")
             # Managed timeout: cancel best-effort so we don't leak background clearing.
             try:
                 clearing_task.cancel()
@@ -1367,6 +1582,9 @@ class RealTick:
                     run._real_clearing_task = None
                 run.current_phase = None
         except Exception:
+            if outcomes is not None:
+                for eq in equivalents:
+                    outcomes.setdefault(str(eq), "clearing_task_failed")
             with rr._lock:
                 if run._real_clearing_task is clearing_task:
                     run._real_clearing_task = None
