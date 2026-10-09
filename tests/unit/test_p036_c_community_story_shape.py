@@ -88,9 +88,18 @@ def test_a_periodic_clearing_cannot_take_the_cycle_of_an_episode() -> None:
     assert _stolen(STORY, period=40) == [(8, 40)]
 
 
-def test_the_story_is_in_the_default_allowlist_and_in_the_registry(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "")
+def test_the_story_is_not_in_the_default_allowlist_and_is_selectable_by_the_override(monkeypatch) -> None:
+    """R1 (fix-delta 2026-10-09): the story needs three things a person picking it from a list is not given - the process flag for
+    injects, intensity 0 and a base that has not run it - and the Simulator UI cannot supply the second (it sends 30). So it
+    is NOT in the default list; the existing override (`SIMULATOR_SCENARIO_ALLOWLIST`) lists it, and the registry has it either
+    way. The session that adds the launch flow (S9) adds it to the default list."""
 
-    assert SCENARIO_ID in (_scenario_allowlist() or set())
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "")
+    assert SCENARIO_ID not in (_scenario_allowlist() or set())
+    assert SCENARIO_ID not in [s.scenario_id for s in runtime.list_scenarios()]
+    assert runtime.get_scenario(SCENARIO_ID).raw["scenario_id"] == SCENARIO_ID  # in the registry all the same
+
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", SCENARIO_ID)
+    assert [s.scenario_id for s in runtime.list_scenarios()] == [SCENARIO_ID]  # the override makes it the one listed
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "*")
     assert SCENARIO_ID in [s.scenario_id for s in runtime.list_scenarios()]
-    assert runtime.get_scenario(SCENARIO_ID).raw["scenario_id"] == SCENARIO_ID

@@ -8,7 +8,6 @@ def test_list_scenarios_default_allowlist_contains_only_canonical_presets() -> N
     scenario_ids = [s.scenario_id for s in runtime.list_scenarios()]
     assert scenario_ids == [
         "clearing-demo-10",
-        "community-story-10",
         "greenfield-village-100-realistic-v2",
         "riverside-town-50-realistic-v2",
     ]
