@@ -210,6 +210,10 @@ def _reference_and_money_errors(raw: Mapping[str, Any], errors: list[dict[str, s
         if not isinstance(event, dict):
             continue
         base = f"events/{index}"
+        # The schema types `pause_after` boolean on EVERY event (`$defs/timelineEvent`), an uncaptioned one included - the
+        # engine obeys it there - so the type is checked here, not only through the projection of a captioned event.
+        if "pause_after" in event and not isinstance(event["pause_after"], bool):
+            errors.append({"path": f"{base}/pause_after", "message": "pause_after must be a boolean"})
         if event.get("type") == "payment":
             for key in ("from", "to"):
                 if not isinstance(event.get(key), str) or not event.get(key):

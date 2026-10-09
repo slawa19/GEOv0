@@ -41,7 +41,7 @@ import secrets
 import time
 import uuid
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -109,7 +109,9 @@ class TickPaymentsPhase:
     # An event is marked fired only when its payment is durable (committed, or landed after an unknown commit): a tick
     # that fails or is replayed first leaves it pending, and the event's own key keeps a repeat from paying twice.
     scripted_event_indexes: frozenset[int] = frozenset()
-    on_durable: Callable[[frozenset[int]], None] | None = None
+    # ... and the outcome of every scripted payment of the phase by event index (written when the phase is durable).
+    scripted_progress: dict[int, dict[str, Any]] = field(default_factory=dict)
+    on_durable: Callable[[frozenset[int], dict[int, dict[str, Any]]], None] | None = None
 
     def discard_observations(self) -> bool:
         """Destroy this attempt's observations without publishing them (a superseded attempt)."""
@@ -128,8 +130,8 @@ class TickPaymentsPhase:
 
         Both callers (the commit's confirmation and the landing after an unknown commit) come through here, and a
         second call (the tail's `_commit_and_resolve`) finds the set already spent - adding to it again is a no-op."""
-        if self.on_durable is not None and self.scripted_event_indexes:
-            self.on_durable(self.scripted_event_indexes)
+        if self.on_durable is not None and (self.scripted_event_indexes or self.scripted_progress):
+            self.on_durable(self.scripted_event_indexes, self.scripted_progress)
         if self.deferred_effects is None:
             return False
         return self.deferred_effects.apply_after_commit()
@@ -709,6 +711,17 @@ class RealTick:
             )
             should_stop = True
 
+        # `apply_deferred_effects` is reached twice by one durable phase (the commit's confirmation and the tail's
+        # `_commit_and_resolve`): the progress of THIS attempt is written once, or `attempts` counts the second visit too.
+        durable_reported = False
+
+        def report_durable(indexes: frozenset[int], progress: dict[int, dict[str, Any]]) -> None:
+            nonlocal durable_reported
+            if durable_reported:
+                return
+            durable_reported = True
+            rr.mark_scripted_events_fired(run, indexes, scripted_epoch, progress)
+
         res = TickPaymentsPhase(
             planned=planned,
             per_eq_metric_values=per_eq_metric_values,
@@ -728,7 +741,10 @@ class RealTick:
             scripted_event_indexes=frozenset(
                 idx for seq, idx in scripted_index_by_seq.items() if seq not in payments_res.unresolved_seqs
             ),
-            on_durable=lambda indexes: rr.mark_scripted_events_fired(run, indexes, scripted_epoch),
+            scripted_progress=self._scripted_payment_progress(
+                scripted_index_by_seq, payments_res.unresolved_seqs, payments_res.deferred_effects
+            ),
+            on_durable=report_durable,
         )
 
         if should_stop:
@@ -739,6 +755,36 @@ class RealTick:
             )
 
         return res, should_stop
+
+    @staticmethod
+    def _scripted_payment_progress(
+        index_by_seq: dict[int, int], unresolved_seqs: frozenset[int], deferred_effects: DeferredRealPaymentEffects | None
+    ) -> dict[int, dict[str, Any]]:
+        """The TRUE outcome of each scripted payment of a phase, by event index (036 B2): a committed payment is `done`
+        one the core refused is `refused` with the code its `tx.failed` carries, one whose outcome is not established is
+        `incomplete` with the code of the failure; each carries what was attempted (from, to, amount, equivalent).
+        Built from the observations the phase already resolves - no second source of truth about a payment."""
+
+        if not index_by_seq or deferred_effects is None:
+            return {}
+        by_seq = {item.seq: item for item in deferred_effects.items}
+        out: dict[int, dict[str, Any]] = {}
+        for seq, index in index_by_seq.items():
+            item = by_seq.get(seq)
+            if item is None:
+                continue
+            if item.outcome == "committed":
+                status, reason = "done", None
+            elif seq in unresolved_seqs:
+                status, reason = "incomplete", item.error_code
+            else:
+                status, reason = "refused", item.error_code
+            record: dict[str, Any] = {"kind": "payment", "status": status, "equivalent": item.equivalent}
+            if reason is not None:
+                record["reason"] = str(reason)
+            record["payment"] = {"from": item.sender_pid, "to": item.receiver_pid, "amount": item.amount, "equivalent": item.equivalent}
+            out[index] = record
+        return out
 
     async def _record_money_conflict_tick(
         self,
@@ -1009,45 +1055,14 @@ class RealTick:
         *,
         spend: bool,
     ) -> None:
-        """Record the outcome of one scripted clearing attempt in the run's story progress, discarding it if the run was
-        restarted since `epoch`; spend the event only for a complete pass; say it in the log and the artifact only when
-        the (status, reason) CHANGED (AGENTS.md section 12: not on every tick)."""
+        """Record the outcome of one scripted clearing attempt through the runner's one progress writer: discarded if the run
+        was restarted since `epoch`, the cycles cumulative within the epoch, the event spent only for a complete pass, a
+        change of status logged once."""
 
-        rr = self._runner
-        with rr._lock:
-            if int(run._launch_epoch) != int(epoch):
-                rr._logger.info(
-                    "simulator.real.scripted_event_discarded_after_restart run_id=%s event_index=%s planned_epoch=%s epoch=%s",
-                    str(run.run_id), int(idx), int(epoch), int(run._launch_epoch),
-                )
-                return
-            previous = run._real_story_progress.get(idx) or {}
-            same_epoch = previous.get("epoch") == epoch
-            cycles = [*(previous.get("cycles") or [] if same_epoch else []), *new_cycles]
-            progress: dict[str, Any] = {
-                "status": status,
-                "epoch": epoch,
-                "equivalent": eq,
-                "attempts": int(previous.get("attempts", 0) if same_epoch else 0) + 1,
-                "cleared_cycles": len(cycles),
-                "cycles": cycles,
-            }
-            if reason is not None:
-                progress["reason"] = reason
-            changed = (previous.get("status"), previous.get("reason")) != (status, reason) or not same_epoch
-            run._real_story_progress[idx] = progress
-            if spend:
-                run._real_fired_scenario_event_indexes.add(idx)
-        if changed:
-            log = rr._logger.info if status == "done" else rr._logger.warning
-            log(
-                "simulator.real.scripted_event_status run_id=%s event_index=%s status=%s reason=%s attempts=%s cleared_cycles=%s",
-                str(run.run_id), int(idx), status, reason, progress["attempts"], progress["cleared_cycles"],
-            )
-            rr._inject_executor.enqueue_inject_note(
-                run.run_id, run=run, event_index=idx, event_time_ms=int(t0),
-                description=f"scripted clearing {status}", stats=progress,
-            )
+        record: dict[str, Any] = {"kind": "clearing", "status": status, "equivalent": eq}
+        if reason is not None:
+            record["reason"] = reason
+        self._runner._write_story_progress(run, idx, t0, epoch, record, spend=spend, add_cycles=new_cycles)
 
     def _should_warn(self, run: RunRecord, key: str) -> bool:
         try:

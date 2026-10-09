@@ -11,10 +11,14 @@ import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import RunRecord
+from app.core.simulator.scenario_story import build_story
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.schemas.simulator import RunMode, RunStatus
 from app.utils.exceptions import ConflictException
 from app.utils.exceptions import NotFoundException
+
+#: The intensity of a run when neither the request nor the scenario's `settings.playback.intensity_percent` names one (036 B2).
+DEFAULT_RUN_INTENSITY_PERCENT = 30
 
 
 class RunLifecycle:
@@ -192,13 +196,23 @@ class RunLifecycle:
         *,
         scenario_id: str,
         mode: RunMode,
-        intensity_percent: int,
+        intensity_percent: Optional[int] = None,
         owner_id: str = "",
         owner_kind: str = "",
         created_by: Optional[dict] = None,
     ) -> str:
         # Validate scenario exists (even for real mode for now).
-        _ = self._get_scenario_raw(scenario_id)
+        scenario_for_story = self._get_scenario_raw(scenario_id)
+        # 036 B2: a scenario whose story cannot be served as written is refused HERE, by the rule and with the answer of the
+        # detail read (`build_story`: 409/E008, SCENARIO_INVALID, the path of every bad field). Nothing is created.
+        build_story(scenario_for_story)
+        # The run's intensity: the request's value (0 included), else the scenario's `settings.playback.intensity_percent`,
+        # else 30. The Simulator UI always sends a number, so the scenario's default is not reached from it yet.
+        if intensity_percent is None:
+            settings_block = scenario_for_story.get("settings") if isinstance(scenario_for_story, dict) else None
+            playback = settings_block.get("playback") if isinstance(settings_block, dict) else None
+            from_scenario = playback.get("intensity_percent") if isinstance(playback, dict) else None
+            intensity_percent = int(from_scenario) if isinstance(from_scenario, int) and not isinstance(from_scenario, bool) else DEFAULT_RUN_INTENSITY_PERCENT
 
         run_id = self._new_run_id()
         seed_material = hashlib.sha256(run_id.encode("utf-8")).digest()

@@ -184,6 +184,15 @@ make the session green again:
   Fewer: `tests/unit/test_p036_b1_scripted_events_are_spent_when_durable.py` (3, thin wiring of `TickPaymentsPhase`; replaced by those observable cases). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3519/3539`).
 * 2026-10-09, 036 slice B1, post-review (Codex on `f7c04109`), on that tree (3519): 3519 -> 3520 (+1). One case in `tests/integration/test_p036_b1_scripted_events_postgres.py`: a money phase whose rollback fails (unknown
   transaction outcome) spends no scripted event - the branch the removed thin unit test covered, on the real path. Measured with `python -m pytest --collect-only -q -m "not slow"` (`3520/3540`).
+* 2026-10-09, 036 slice B2 (`T3620`, second part), on `origin/main` `7df35fcf` (3520): 3520 -> 3561 (+41). New: `tests/unit/test_p036_b2_tick_pace_follows_the_scenario.py` (the tick period of `settings.playback.tick_seconds`
+  with a virtual clock, three values and the controls: default, pause, resume, stop while paused), `tests/integration/test_p036_b2_playback_story_postgres.py` (22: `pause_after` and its controls - incomplete clearing, stop in progress, restart,
+  stress; the `inject_enabled` ceiling in four cases; `episode_progress` of a payment done, refused and unresolved, of a clearing with its cycles on the wire aliases, of a skipped inject; three guards the mutation pass found unguarded)
+  and `tests/integration/test_p036_b2_run_creation.py` (a damaged story refused at run creation with no run made; the intensity order request, scenario, 30; `episode_progress` on the wire). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3561/3581`).
+* 2026-10-09, 036 slice B2 fix-delta (two reviews of `7c11ee0f`), on that tree (3561): 3561 -> 3595 (+34). New: `tests/integration/test_p036_b2_fixdelta_postgres.py` (10: the attempts of a payment - first try, core refusal, unresolved then landed, after a restart -; one note per skipped inject in three
+  spellings and the control; one status per pause on the product heartbeat and its control), `tests/unit/test_p036_b2_pause_after_is_a_boolean_on_every_event.py` (11: an uncaptioned event, six wrong spellings, four good ones),
+  9 in `tests/unit/test_p036_b2_tick_pace_follows_the_scenario.py` (a `tick_seconds` outside 0.25-5 or not a number keeps the default pace) and 4 in `tests/integration/test_p036_b2_run_creation.py` (a damaged story
+  and a non-boolean `pause_after` refused at creation in `fixtures` and in `real`). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3595/3615`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -226,7 +235,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3520
+EXPECTED_SELECTED_ITEMS = 3595
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

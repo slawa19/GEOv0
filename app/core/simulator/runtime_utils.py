@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.config import simulator_state_dir
-from app.schemas.simulator import SIMULATOR_API_VERSION, RunStatus
+from app.schemas.simulator import SIMULATOR_API_VERSION, EpisodeProgress, RunStatus
 from app.core.simulator.models import RunRecord
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
@@ -78,6 +79,26 @@ def dict_to_last_error(raw: Optional[dict[str, Any]]):
     return raw
 
 
+def episode_progress_of(run: RunRecord) -> list[EpisodeProgress] | None:
+    """The run's `_real_story_progress` as typed entries ordered by the event index; None when nothing is tracked.
+
+    A record this module cannot type is a bug of the writer, not a reason to fail the status read (pause, resume and stop
+    answer with the status): it is skipped with a warning naming the event."""
+
+    records = dict(run._real_story_progress)
+    if not records:
+        return None
+    out: list[EpisodeProgress] = []
+    for index in sorted(records):
+        try:
+            out.append(EpisodeProgress.model_validate({**records[index], "index": int(index)}))
+        except ValueError:  # pydantic.ValidationError is a ValueError
+            logging.getLogger(__name__).warning(
+                "simulator.run_status.episode_progress_record_untyped run_id=%s event_index=%s", run.run_id, index, exc_info=True
+            )
+    return out or None
+
+
 def run_to_status(run: RunRecord) -> RunStatus:
     cutoff = time.time() - 60.0
     # Best-effort: timestamps are pruned on write; we only count here.
@@ -109,4 +130,5 @@ def run_to_status(run: RunRecord) -> RunStatus:
         last_error=dict_to_last_error(run.last_error),
         last_event_type=run.last_event_type,
         current_phase=run.current_phase,
+        episode_progress=episode_progress_of(run),
     )

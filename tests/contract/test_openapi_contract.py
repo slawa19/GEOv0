@@ -448,8 +448,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # in the canon and in the model. The paths where the halves differ are the same as before the move (measured with the per-entry
 # dump, `.local-run/p036a_dump_drift.py`, not committed); like the two moves above, it is a change of recorded content, not an
 # improvement.
+# Fourth move, 2026-10-09, 036 slice B2: count HOLDS at 61, digest moves. `RunStatus` gained the optional `episode_progress`
+# (the true outcome of the story's tracked events, `EpisodeProgress*`), and the six run-status entries that already differ
+# (get, intensity, pause, restart, resume, stop) gain one more member of a class already recorded in them: the canon writes
+# the integer `minimum` of `index`/`epoch`/`attempts`/`cleared_cycles` where FastAPI emits the float (1 against 1.0). Nothing
+# else differs on those paths (measured with `.local-run/p036b2_drift.py`, not committed); a change of recorded content, not an
+# improvement.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "231823ac68bfc1160c6dc6ef37f9d5fa6cd7dc3233981ff7a995fec60976b768"
+    "bfd9924a818699947d8a480aaae8eac86d1d9b7104f39b67bf5d5a022f7f9867"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -1294,6 +1300,7 @@ def test_run_status_schema_preserves_stop_and_counter_fields() -> None:
             "timeouts_total",
             "errors_last_1m",
             "consec_all_rejected_ticks",
+            "episode_progress",
             "last_error",
             "last_event_type",
             "current_phase",

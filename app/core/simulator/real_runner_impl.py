@@ -391,15 +391,22 @@ class RealRunnerImpl:
         executor = self._inject_executor
         fired = run._real_fired_scenario_event_indexes
 
-        if not self._real_enable_inject:
-            executor.enqueue_inject_note(
-                run_id,
-                run=run,
-                event_index=event_index,
-                event_time_ms=event_time_ms,
-                description="inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)",
+        # 036 B2: the scenario's opt-in (`settings.playback.inject_enabled`) can only narrow the process flag, never raise it.
+        # Absent: the flag alone decides, as before. A skipped inject is said aloud - the events artifact and the run's
+        # progress - and is spent (a flag does not change during a run).
+        playback = ((scenario.get("settings") or {}).get("playback") or {}) if isinstance(scenario, dict) else {}
+        scenario_disables = isinstance(playback, dict) and playback.get("inject_enabled") is False
+        if not self._real_enable_inject or scenario_disables:
+            reason = "inject_disabled_by_process" if not self._real_enable_inject else "inject_disabled_by_scenario"
+            # ONE note, written by the progress writer, with the reason in words (not a second, direct one).
+            self._write_story_progress(
+                run, event_index, event_time_ms, int(run._launch_epoch), {"kind": "inject", "status": "refused", "reason": reason},
+                spend=True,
+                note=(
+                    "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)" if not self._real_enable_inject
+                    else "inject skipped (settings.playback.inject_enabled=false)"
+                ),
             )
-            fired.add(event_index)
             return
 
         effects = (event or {}).get("effects")
@@ -647,7 +654,39 @@ class RealRunnerImpl:
         await self._tick.flush_pending_storage(run_id)
 
     async def tick_real_mode(self, run_id: str) -> None:
+        run = self._get_run(run_id)
+        spent_before = frozenset(run._real_fired_scenario_event_indexes)
+        epoch = int(run._launch_epoch)
+        # `RealTick.tick` answers the failures of a tick's work itself (a failed tick is counted and the run goes on or
+        # stops) and returns, so a pause that belongs to a tick whose money went durable is decided here on the normal
+        # return. What still leaves it pauses nothing: cancellation, and an exception raised inside its own failure
+        # handlers (e.g. the status publish of `fail_run`) - by then the run is already `error`, not `running`.
         await self._tick.tick(run_id)
+        self._pause_after_spent_episodes(run, spent_before, epoch)
+
+    def _pause_after_spent_episodes(self, run: RunRecord, spent_before: frozenset[int], epoch: int) -> None:
+        """036 B2: pause the run after the tick that SPENT an episode with `pause_after: true` (after its money phase and
+        clearing; the sim time stands until `resume`). "Spent" is the B1 meaning: a clearing that did not complete, a
+        payment whose outcome is not established and an event of another launch are not spent and do not pause. A run that
+        is stopping, stopped or already paused is left alone."""
+
+        with self._lock:
+            if int(run._launch_epoch) != int(epoch) or run.state != "running":
+                return
+            events = self._scenario_of(run).get("events")
+            pausing = sorted(
+                index
+                for index in run._real_fired_scenario_event_indexes - spent_before
+                if isinstance(events, list) and 0 <= index < len(events)
+                and isinstance(events[index], dict) and events[index].get("pause_after") is True
+            )
+            if not pausing:
+                return
+            run.state = "paused"
+        # The status is published by the heartbeat loop right after the tick returns (`_heartbeat_loop`), once: not here.
+        self._logger.info(
+            "simulator.real.paused_after_episode run_id=%s event_index=%s tick=%s", str(run.run_id), pausing[0], int(run.tick_index)
+        )
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None:
         await self._tick.fail_run(run_id, code=code, message=message)
@@ -676,18 +715,72 @@ class RealRunnerImpl:
         refusal the CORE gives (no route, a step finer than the equivalent's, an unknown participant) is not this - it
         is an ordinary `tx.failed` of the payment itself."""
 
-        stats = {"status": "refused", "reason": reason, "epoch": int(run._launch_epoch), **extra}
-        self._logger.warning(
-            "simulator.real.scripted_event_refused run_id=%s event_index=%s type=%s reason=%s",
-            str(run.run_id), int(index), str(event.get("type")), reason,
+        self._write_story_progress(
+            run, int(index), int(event.get("time") or 0), int(run._launch_epoch),
+            {"kind": str(event.get("type")), "status": "refused", "reason": reason, **extra}, spend=True,
         )
+
+    def _write_story_progress(
+        self,
+        run: RunRecord,
+        index: int,
+        event_time_ms: int,
+        epoch: int,
+        record: dict[str, Any],
+        *,
+        spend: bool,
+        add_cycles: list[dict[str, Any]] | None = None,
+        note: str | None = None,
+    ) -> None:
+        """THE ONE WRITER of the run's story progress (036 B2): `record` for event `index` of launch `epoch`.
+
+        Discarded if the run has been restarted since `epoch` (the event belongs to a launch that is over). `add_cycles`
+        (a clearing) are appended to the cycles this event already committed in this epoch, so an event that needs several
+        attempts reports everything it cleared. `spend` marks the event fired. A change of (status, reason) - and only
+        that - is logged and written to the events artifact (AGENTS.md section 12: not on every tick), as `note` when the
+        caller says it in its own words, else as "scripted <kind> <status>".
+
+        ONE attempt is one call: `attempts` counts the calls that reach here for an event within an epoch, so a caller that
+        reports the same attempt twice (the money phase does: see `report_durable` in `tick.py`) would count it twice."""
+
         with self._lock:
-            run._real_story_progress[int(index)] = stats
-            run._real_fired_scenario_event_indexes.add(int(index))
-        self._inject_executor.enqueue_inject_note(
-            run.run_id, run=run, event_index=index, event_time_ms=int(event.get("time") or 0),
-            description=f"scripted {event.get('type')} refused: {reason}", stats=stats,
-        )
+            if int(run._launch_epoch) != int(epoch):
+                self._logger.info(
+                    "simulator.real.scripted_event_discarded_after_restart run_id=%s event_index=%s planned_epoch=%s epoch=%s",
+                    str(run.run_id), int(index), int(epoch), int(run._launch_epoch),
+                )
+                return
+            previous = run._real_story_progress.get(int(index)) or {}
+            same_epoch = previous.get("epoch") == int(epoch)
+            stored = {**record, "epoch": int(epoch), "attempts": int(previous.get("attempts", 0) if same_epoch else 0) + 1}
+            if add_cycles is not None:
+                cycles = [*((previous.get("cycles") or []) if same_epoch else []), *add_cycles]
+                stored["cycles"], stored["cleared_cycles"] = cycles, len(cycles)
+            changed = (previous.get("status"), previous.get("reason")) != (stored["status"], stored.get("reason")) or not same_epoch
+            run._real_story_progress[int(index)] = stored
+            if spend:
+                run._real_fired_scenario_event_indexes.add(int(index))
+        if changed:
+            log = self._logger.info if stored["status"] == "done" else self._logger.warning
+            log(
+                "simulator.real.scripted_event_status run_id=%s event_index=%s kind=%s status=%s reason=%s attempts=%s",
+                str(run.run_id), int(index), stored.get("kind"), stored["status"], stored.get("reason"), stored["attempts"],
+            )
+            self._inject_executor.enqueue_inject_note(
+                run.run_id, run=run, event_index=index, event_time_ms=int(event_time_ms),
+                description=note or f"scripted {stored.get('kind')} {stored['status']}", stats=stored,
+            )
+
+    def _scenario_of(self, run: RunRecord) -> dict[str, Any]:
+        """The scenario a tick of this run reads: the run's own deep copy, else the registry's (as `RealTick.tick` does)."""
+
+        return getattr(run, "_scenario_raw", None) or self._get_scenario_raw(run.scenario_id) or {}
+
+    def _event_time_ms_of(self, run: RunRecord, index: int) -> int:
+        events = self._scenario_of(run).get("events")
+        event = events[index] if isinstance(events, list) and 0 <= index < len(events) else None
+        time_ms = event.get("time") if isinstance(event, dict) else 0
+        return int(time_ms) if isinstance(time_ms, int) and not isinstance(time_ms, bool) else 0
 
     def scripted_payments_due(
         self, run: RunRecord, scenario: dict[str, Any], *, first_seq: int
@@ -739,13 +832,16 @@ class RealRunnerImpl:
             index_by_seq[int(first_seq) + len(actions) - 1] = idx
         return actions, index_by_seq, epoch
 
-    def mark_scripted_events_fired(self, run: RunRecord, indexes: frozenset[int], epoch: int) -> None:
+    def mark_scripted_events_fired(
+        self, run: RunRecord, indexes: frozenset[int], epoch: int, progress: dict[int, dict[str, Any]] | None = None
+    ) -> None:
         """The money phase that carried these payments is DURABLE (committed, or landed after an unknown commit).
 
         Only the events that reached a TERMINAL outcome are passed in (the caller leaves out a payment that failed
         transiently before admission). `epoch` is the launch the phase was planned under: if the run has been restarted
         since, the events are those of a launch that is over and the NEW epoch's events are still due - nothing is
-        marked."""
+        marked. `progress` is the outcome of each scripted payment of the phase (done, refused, or incomplete for one whose
+        outcome is not established); it is written here, once, when the phase is durable."""
 
         with self._lock:
             if int(run._launch_epoch) != int(epoch):
@@ -755,6 +851,8 @@ class RealRunnerImpl:
                 )
                 return
             run._real_fired_scenario_event_indexes.update(int(i) for i in indexes)
+        for index, record in sorted((progress or {}).items()):
+            self._write_story_progress(run, int(index), self._event_time_ms_of(run, int(index)), int(epoch), record, spend=False)
 
     def _sim_idempotency_key(
         self,
