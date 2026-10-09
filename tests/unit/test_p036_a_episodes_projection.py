@@ -70,6 +70,16 @@ BAD_EPISODES = [
     ("a focus with an unknown key", _with(GOOD, focus={"zoom": 2}), "events/1/focus/zoom"),
     ("an expected cycle of one", _with(GOOD, expected_cycle=["A"]), "events/1/expected_cycle"),
     ("a focus naming nobody", _with(GOOD, focus={"pids": ["NOBODY"]}), "events/1/focus/pids/0"),
+    # review of `c2d84180`, R1: what the model accepts and what the reference check reads must be the same set
+    ("a focus edge with an empty start", _with(GOOD, focus={"edges": [{"from": "", "to": "A"}]}),
+     "events/1/focus/edges/0/from"),
+    ("a focus edge with an empty end", _with(GOOD, focus={"edges": [{"from": "A", "to": ""}]}),
+     "events/1/focus/edges/0/to"),
+    ("a focus edge in the Python spelling from_", _with(GOOD, focus={"edges": [{"from_": "GHOST", "to": "A"}]}),
+     ["events/1/focus/edges/0/from", "events/1/focus/edges/0/from_"]),
+    ("an anchor in the Python spelling from_",
+     _with(GOOD, anchor={"event": "tx.failed", "from_": "GHOST", "to": "A", "equivalent": "UAH"}),
+     "events/1/anchor/from_"),
 ]
 
 
@@ -82,7 +92,8 @@ def test_a_bad_captioned_episode_refuses_the_detail_and_names_the_path(name: str
 
     assert refused.value.status_code == 409
     assert refused.value.details["simulator_error"] == "SCENARIO_INVALID"
-    assert [e["path"] for e in refused.value.details["errors"]] == [path], refused.value.details
+    expected = [path] if isinstance(path, str) else path
+    assert sorted(e["path"] for e in refused.value.details["errors"]) == sorted(expected), refused.value.details
 
 
 BAD_PLAYBACK = [
