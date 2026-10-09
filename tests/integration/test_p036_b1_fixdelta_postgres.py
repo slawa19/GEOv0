@@ -29,7 +29,6 @@ from sqlalchemy import update
 
 import app.core.clearing.runner as clearing_runner
 from app.core.payments.service import PaymentService
-from app.core.simulator.tick import RealTick
 from app.db.models.equivalent import Equivalent
 from app.utils.exceptions import TimeoutException
 from tests.integration.test_p034_s1_restart_repeats_the_idempotency_key_postgres import _restart
@@ -124,13 +123,29 @@ async def test_a_stopped_equivalent_does_not_spend_the_clearing_event(factory, m
 @pytest.mark.asyncio
 async def test_a_hard_timeout_does_not_spend_the_clearing_event(factory, monkeypatch) -> None:  # noqa: F811
     eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B", "C"], CYCLE_LINES, CYCLE_DEBTS, lambda e, q: [_clearing_event(e)])
-    never = asyncio.Event()  # never set: the pass waits until the hard timeout cancels it (no sleeping)
+    never = asyncio.Event()  # never set: the pass waits until the hard timeout cancels it
 
     async def stuck(*_a, **_kw):
         await never.wait()
 
+    # THE SEAM: the tick waits for its clearing task with `asyncio.wait_for(task, timeout=hard_timeout)`. In the tick module
+    # only, that wait expires at once (the task is cancelled by the tick's own timeout branch, as a real expiry does) - no
+    # timer runs, no sleeping. Everything else of `asyncio` is the real one.
+    real_asyncio = asyncio
+
+    class _TickAsyncio:
+        def __getattr__(self, name):
+            return getattr(real_asyncio, name)
+
+        @staticmethod
+        async def wait_for(awaitable, timeout=None):
+            await real_asyncio.sleep(0)  # let the pass start and block on `never`
+            raise real_asyncio.TimeoutError()
+
+    import app.core.simulator.tick as tick_module
+
     monkeypatch.setattr(clearing_runner, "run_clearing_pass", stuck)
-    monkeypatch.setattr(RealTick, "clearing_hard_timeout_sec", lambda self: 0.1)
+    monkeypatch.setattr(tick_module, "asyncio", _TickAsyncio())
 
     await ticks(runner, run, 1)
 

@@ -307,11 +307,13 @@ class RealPaymentsResult:
     # ORIGINAL identifiers the replay reads when a commit's outcome is unknown, to establish
     # whether the attempt landed before it is allowed to decide anything.
     staged_tx_ids: frozenset[str] = frozenset()
-    # 036 B1 fix-delta: the seqs whose payment ended in a TRANSIENT failure with no payment row - the routing or the
-    # payment timed out, or an unexpected error left the savepoint, before a row was admitted (019 stage 1). A scripted
-    # event whose payment is in this set is NOT spent: the next tick runs it again under the same key. A committed
-    # payment, a logical refusal and a durable ABORTED row are terminal and are not in it.
-    unadmitted_seqs: frozenset[int] = frozenset()
+    # 036 B1 fix-delta: the seqs whose payment ended WITHOUT an established outcome - an exception that is not a definitive
+    # business refusal (a timeout, a 5xx, an unexpected error). What the payment did is not known from here: the handler
+    # also covers work after the savepoint was released, and a durable row may exist (a replay that timed out while reading
+    # it). A scripted event whose payment is in this set is NOT spent: the next tick runs it again under the SAME key, and
+    # the payment service answers a repeat with the stored payment if one exists, so the debt moves at most once. A
+    # committed payment, a 4xx refusal and a durable ABORTED row returned by the core are terminal and are not in it.
+    unresolved_seqs: frozenset[int] = frozenset()
 
 
 def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[str, Any] | None]:
@@ -412,7 +414,7 @@ class RealPaymentsExecutor:
         # conflict this exists for propagates out of this function and the prefix that was already
         # staged is exactly what has to be identifiable afterwards.
         staged_tx_ids: set[str] = set()
-        unadmitted: set[int] = set()
+        unresolved: set[int] = set()
 
         per_eq: dict[str, dict[str, int]] = {
             str(eq): {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}
@@ -602,10 +604,11 @@ class RealPaymentsExecutor:
                 except Exception as e:
                     status, code, err_details = _classify_refusal(e)
                     if status is None:
-                        # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the savepoint rolled back and
-                        # no payment row exists. Terminal outcomes either returned above (committed, a durable ABORTED
-                        # row) or are a 4xx business refusal (`status` REJECTED).
-                        unadmitted.add(int(action.seq))
+                        # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the outcome is NOT established
+                        # here - a durable row may exist. Safety is the repeat under the same key, not an absent row.
+                        # Terminal outcomes either returned above (committed, a durable ABORTED row) or are a 4xx
+                        # business refusal (`status` REJECTED).
+                        unresolved.add(int(action.seq))
 
                     return (
                         int(action.seq),
@@ -872,7 +875,7 @@ class RealPaymentsExecutor:
             deferred_effects=deferred_effects,
             stop_requested=stop_requested,
             staged_tx_ids=frozenset(staged_tx_ids),
-            unadmitted_seqs=frozenset(unadmitted),
+            unresolved_seqs=frozenset(unresolved),
         )
 
     async def build_patches_after_commit(

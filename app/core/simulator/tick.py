@@ -722,10 +722,11 @@ class RealTick:
             stall_ticks=stall_ticks,
             deferred_effects=payments_res.deferred_effects,
             staged_tx_ids=frozenset(getattr(payments_res, "staged_tx_ids", ()) or ()),
-            # Only the events whose payment reached a TERMINAL outcome are spent by this phase's durability: one that
-            # failed transiently before admission (no payment row) is run again by the next tick, under the same key.
+            # Only the events whose payment reached a TERMINAL outcome are spent by this phase's durability: one whose
+            # outcome is not established (a timeout, an unexpected error) waits and is run again by the next tick, under the
+            # same key (a repeat of a payment that did land is answered with the stored one).
             scripted_event_indexes=frozenset(
-                idx for seq, idx in scripted_index_by_seq.items() if seq not in payments_res.unadmitted_seqs
+                idx for seq, idx in scripted_index_by_seq.items() if seq not in payments_res.unresolved_seqs
             ),
             on_durable=lambda indexes: rr.mark_scripted_events_fired(run, indexes, scripted_epoch),
         )

@@ -182,6 +182,8 @@ make the session green again:
   pass, a stopped equivalent, a hard timeout, an empty complete pass; the periodic pass and its control; the tick metric; a restart during the money phase and during the clearing pass; a pre-admission timeout and
   its control; SENDER_NOT_FOUND) and 3 in `tests/integration/test_p036_b1_scripted_events_postgres.py` (a successful payment is spent and not published again; a replayed money phase; a stop-request rollback).
   Fewer: `tests/unit/test_p036_b1_scripted_events_are_spent_when_durable.py` (3, thin wiring of `TickPaymentsPhase`; replaced by those observable cases). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3519/3539`).
+* 2026-10-09, 036 slice B1, post-review (Codex on `f7c04109`), on that tree (3519): 3519 -> 3520 (+1). One case in `tests/integration/test_p036_b1_scripted_events_postgres.py`: a money phase whose rollback fails (unknown
+  transaction outcome) spends no scripted event - the branch the removed thin unit test covered, on the real path. Measured with `python -m pytest --collect-only -q -m "not slow"` (`3520/3540`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -224,7 +226,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3519
+EXPECTED_SELECTED_ITEMS = 3520
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

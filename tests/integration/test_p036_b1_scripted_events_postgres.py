@@ -276,6 +276,57 @@ async def test_a_money_phase_rolled_back_by_a_stop_request_spends_nothing(factor
 
 
 @pytest.mark.asyncio
+async def test_a_money_phase_whose_transaction_outcome_is_unknown_spends_nothing(factory, monkeypatch) -> None:  # noqa: F811
+    """The branch the thin unit test used to cover, on the real path: the operator stops the run while the phase stages, and
+    the ROLLBACK itself fails - the outcome of the transaction is unknown (`apply_unknown_transaction_observations`, not
+    the rollback's). The scripted event, carried by this phase (non-empty indexes), must stay pending; the next tick pays
+    once."""
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], lambda e, q: [_payment_event(e, q["A"], q["B"], "5.00")])
+    original_execute = runner._real_payments_executor.execute_planned_payments
+    original_rollback = AsyncSession.rollback
+    state = {"stopped": False, "rollbacks_failed": 0}
+    carried: list[frozenset[int]] = []
+
+    async def stop_then_stage(**kwargs):
+        if not state["stopped"]:
+            state["stopped"] = True
+            run.state = "stopping"
+        return await original_execute(**kwargs)
+
+    async def failing_rollback(self_):
+        if state["stopped"] and state["rollbacks_failed"] == 0:
+            state["rollbacks_failed"] += 1
+            raise RuntimeError("p036 b1: the rollback of the stopped phase fails - its outcome is unknown")
+        return await original_rollback(self_)
+
+    from app.core.simulator.tick import TickPaymentsPhase
+
+    original_unknown = TickPaymentsPhase.apply_unknown_transaction_observations
+
+    def recording_unknown(self_):
+        carried.append(self_.scripted_event_indexes)
+        return original_unknown(self_)
+
+    monkeypatch.setattr(runner._real_payments_executor, "execute_planned_payments", stop_then_stage)
+    monkeypatch.setattr(AsyncSession, "rollback", failing_rollback)
+    monkeypatch.setattr(TickPaymentsPhase, "apply_unknown_transaction_observations", recording_unknown)
+
+    await ticks(runner, run, 1)
+    after = (sorted(run._real_fired_scenario_event_indexes), runner._sse.published("tx.updated"))
+    monkeypatch.setattr(AsyncSession, "rollback", original_rollback)
+    run.state, run.errors_total, run.last_error = "running", 0, None
+    await ticks(runner, run, 1)
+
+    assert carried and carried[0] == frozenset({0}), carried  # the unknown-outcome branch ran, carrying the event
+    assert after == ([], 0), after
+    assert await _debts(factory, eq, p) == {("A", "B"): Decimal("5.00")}
+    assert sorted(run._real_fired_scenario_event_indexes) == [0]
+
+
+@pytest.mark.asyncio
 async def test_a_tick_whose_money_phase_failed_does_not_spend_the_event(factory, monkeypatch) -> None:  # noqa: F811
     """The event is marked fired only after the money phase COMMITTED. A tick that fails inside it leaves the event
     pending; the next tick runs it - once."""
