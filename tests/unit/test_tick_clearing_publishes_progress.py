@@ -55,6 +55,10 @@ class _ScalarResult:
     def all(self) -> list:
         return []
 
+    def one_or_none(self) -> tuple:
+        # 034 S2b: the tick's read of `Equivalent.precision` before a pass; this stand's equivalents (USD, EUR) are 2.
+        return (2,)
+
 
 class _Session:
     async def execute(self, _statement) -> _ScalarResult:
@@ -377,9 +381,6 @@ async def test_each_pass_gets_the_tick_budget_as_its_deadline(monkeypatch) -> No
     clock = {"now": 1000.0}  # any reading: the comparison below repeats the product's own float expression
     monkeypatch.setattr(loop, "time", lambda: clock["now"])
     run = _run("deadline-run", 2)
-    # 034 S2b: the tick takes the equivalent's viz helper (its precision) BEFORE the pass; the stand's session reads
-    # nothing, so the second equivalent of this test gets its helper here, as `_run` gives USD its own.
-    run._real_viz_by_eq["EUR"] = _VizHelper()
     seen: list[tuple[str, float, float, object]] = []
 
     async def _clearing_pass(_session_factory, equivalent, *, allowed_participant_pids, on_committed, deadline):

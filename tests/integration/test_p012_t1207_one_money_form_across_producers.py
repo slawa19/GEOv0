@@ -529,21 +529,34 @@ async def test_a_precision_zero_equivalent_is_rendered_at_its_own_precision(
 
 
 class _ClearingScalarResult:
+    def __init__(self, precision: int) -> None:
+        self._precision = precision
+
     def scalars(self):
         return self
 
     def all(self) -> list:
         return []
 
+    def one_or_none(self) -> tuple:
+        # 034 S2b: the tick reads `Equivalent.precision` before a pass; this double answers the driven precision.
+        return (self._precision,)
+
 
 class _ClearingSession:
+    def __init__(self, precision: int) -> None:
+        self._precision = precision
+
     async def execute(self, _statement) -> _ClearingScalarResult:
-        return _ClearingScalarResult()
+        return _ClearingScalarResult(self._precision)
 
 
 class _ClearingSessionContext:
+    def __init__(self, precision: int) -> None:
+        self._precision = precision
+
     async def __aenter__(self) -> _ClearingSession:
-        return _ClearingSession()
+        return _ClearingSession(self._precision)
 
     async def __aexit__(self, *_exc) -> None:
         return None
@@ -649,7 +662,7 @@ async def _drive_clearing(monkeypatch, *, precision: int, failure_kind: str, amo
     tick = clearing_unit_tick(
         monkeypatch,
         sse=sse,
-        session_factory=lambda: _ClearingSessionContext(),
+        session_factory=lambda: _ClearingSessionContext(precision),
         runner_pass=_cycle_pass(failure_kind, amount),
         apply_trust_growth=_apply_trust_growth,
         edge_patch_builder=_NoopEdgePatchBuilder(),

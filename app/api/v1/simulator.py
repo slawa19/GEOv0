@@ -216,8 +216,9 @@ async def _emit_interact_clearing_done_best_effort(
     precision: int,
     on_emitted: Callable[[], None] | None = None,
 ) -> None:
-    """`on_emitted` is called right after `clearing.done` went out, with no await in between: the caller's
-    cancellation ending must know the event is already published (034 S2b)."""
+    """`on_emitted` is called right after `clearing.done` WAS PUBLISHED (the emitter returned its event id), with
+    no await in between: the caller's cancellation ending must know the event is already out (034 S2b). An emit the
+    emitter swallowed is not a publication."""
     if cleared_count <= 0:
         return
 
@@ -245,7 +246,7 @@ async def _emit_interact_clearing_done_best_effort(
             closed=closed,
         )
 
-        emitter.emit_clearing_done(
+        event_id = emitter.emit_clearing_done(
             run_id=run_id,
             run=run,
             equivalent=equivalent_code,
@@ -256,7 +257,8 @@ async def _emit_interact_clearing_done_best_effort(
             node_patch=node_patch,
             edge_patch=edge_patch,
         )
-        if on_emitted is not None:
+        # The emitter catches its own failure and answers None: only an event that has an id was published.
+        if event_id is not None and on_emitted is not None:
             on_emitted()
     except Exception:
         logger.warning(
