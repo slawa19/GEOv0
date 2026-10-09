@@ -14,9 +14,10 @@ What it checks, statically (AST - a comment or a docstring does not count):
 * under `app/`, only `app/core/clearing/service.py` calls the shared executor `execute_clearing_with_amount`, only
   `service.py` and `runner.py` call `execute_occurrence`, and nothing calls `auto_clear` or the compatibility
   wrapper `execute_clearing` - both gone from `ClearingService` (R4: safe delete; the wrapper: 024 `T2417`);
-* `find_cycles` (the retired detectors) is called by nothing under `app/` outside `service.py` itself: since 035 A1
-  (owner decision П1-(а), 2026-10-08) `GET /clearing/cycles` answers with the flow plan through the runner, and
-  the admin copy of the route left in 032 S5. Its remaining callers are the seed tool and tests, until they move;
+* `find_cycles` (the detectors that predate the flow plan) is called by nothing under `app/` - `service.py`
+  included since 035 A2b (2026-10-09), which removed it together with `find_triangles_sql` and
+  `find_quadrangles_sql` - and none of the three is an attribute of `ClearingService` again. (History: 035 A1,
+  owner decision П1-(а), moved `GET /clearing/cycles` to the flow plan; A2a moved the seed tool and the tests.);
 * the diagnostic route names `planned_cycles_for_diagnostics`, and the diagnostic path of the runner
   (`planned_cycles_for_diagnostics`, `_diagnostic_plan`) calls neither the passes' planner pool
   (`_default_planner_executor`) nor the passes' planning step (`_plan_off_the_loop`): a diagnostic plan must never
@@ -106,12 +107,12 @@ def test_only_the_service_and_the_runner_reach_the_executors_and_auto_clear_is_g
         called = _called(_parse(path))
         allowed = set()
         if relative == "app/core/clearing/service.py":
-            allowed = {"execute_clearing_with_amount", "execute_occurrence", "find_cycles"}
+            allowed = {"execute_clearing_with_amount", "execute_occurrence"}
         elif relative == "app/core/clearing/runner.py":
             allowed = {"execute_occurrence"}
         if bad := sorted((called & _EXECUTORS) - allowed):
             offenders[relative] = bad
-    gone = ("auto_clear", "execute_clearing")
+    gone = ("auto_clear", "execute_clearing", "find_cycles", "find_triangles_sql", "find_quadrangles_sql")
     require_target(
         offenders == {} and not any(hasattr(ClearingService, name) for name in gone),
         f"executor calls outside their owners: {offenders}; present on ClearingService: "

@@ -487,7 +487,7 @@ async def load_snapshot(
 
     Consent is decided by the production parser itself, `ClearingService._policy_flag`, on the stored JSON, so
     admission cannot differ from execution's by construction (020 review P2-2). Statuses are the production
-    constant. A missing equivalent raises `GeoException`, as `find_cycles` does.
+    constant. A missing equivalent raises `GeoException`.
     """
 
     from app.core.clearing.service import _CLEARABLE_TRUSTLINE_STATUSES, ClearingService
