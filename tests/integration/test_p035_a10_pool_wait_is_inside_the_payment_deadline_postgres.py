@@ -17,18 +17,36 @@ WHAT IS REQUIRED NOW.
   recording itself cannot get a connection, the answer is the retryable 409/E008 and no row claims a refusal.
 * A cancellation while waiting for the pool leaves nothing checked out.
 * A service that runs several payments does not settle a failed checkout against the previous payment's state.
+* A request the payment refuses WITHOUT ANY SQL (an amount the ledger cannot hold, a malformed equivalent code or
+  `tx_id`) takes no connection for the payment and gets its own 400 - also when the pool is exhausted (§15 review
+  of `c27a2fbe`, Н2: the first edition of A10 took the connection first, and answered such a request 504).
+* AFTER ADMISSION ANY NON-RETRYABLE FAILURE OF THE CHECKOUT IS FINAL, not only a timeout (same review, Н1 - declared
+  and pinned here, not changed): a one-off infrastructure failure of the next attempt's checkout is recorded
+  `ABORTED/E010`, and the signed identity is spent - the same request again is answered `ABORTED`. Without an
+  earlier admission the same failure leaves no row and the request may be sent again.
 
 THE STAND IS THE PRODUCT'S WIRING ON A REAL POOL, as in the A9 test: an engine built by `_create_engine()` on the
 mode-B clone (5 + 10 connections), the real `get_db` and payment session factory. The pool is EXHAUSTED by the test
 holding real connections of that engine, at an exact point chosen by a hook on an existing method - before an
 attempt, before or after the route graph is built.
 
-NO PRODUCT TIMER DECIDES A TEST, AND NOTHING SLEEPS (the lesson of the A9 review). "The deadline comes first" is
-arranged by handing the attempt a deadline that has already passed while the pool's timeout is 900 s; "the pool
-comes first" by a pool timeout of 1 s while every payment timer is 900 s. Either way the other timer is too far to
-interfere. Every wait of the test is for an answer or an event, under the test's own `_BUDGET_SECONDS` (how long a
-BROKEN run may take to say so). Resources are registered with one `AsyncExitStack` and released on every exit:
-request tasks cancelled and awaited first, then the held connections, the observer and the engine.
+WHICH CASES WAIT FOR A REAL TIMER, AND WHERE THEY RUN (§15 review of `c27a2fbe`; AGENTS §11). Nothing here sleeps,
+and every wait of a test is for an answer or an event under the test's own `_BUDGET_SECONDS` (how long a BROKEN run
+may take to say so). But the cases differ in what makes the refusal happen:
+
+* NO TIMER (the ordinary tier). "The deadline comes first" hands the attempt a deadline that has ALREADY PASSED
+  while the pool's timeout is 900 s, so the refusal is immediate; a cancellation is delivered on an event; a
+  checkout failure that is not a timeout is injected. One case of each new behaviour is of this kind.
+* A REAL TIMER MUST RUN OUT (`@pytest.mark.slow`; run with `scripts/verify_local.ps1 -IncludeExpensive`,
+  PostgreSQL as for the whole tier, no other prerequisite). "The pool comes first" waits for the pool's own
+  timeout, set to 1 s while every payment timer is 900 s - the attempt's checkout, the route reader's, the
+  re-acquisition after routing; and a refusal that cannot be recorded waits out the recording's budget (the 500 ms
+  grace) or the pool's 1 s. These five cannot be had without a timer: the pool's timeout is the subject.
+
+Resources are registered with one `AsyncExitStack` and released on every exit: request tasks cancelled and awaited
+first, then the held connections, the observer and the engine. A request that does not answer within the budget is
+NOT cancelled-and-awaited by the guard (its recording runs shielded and would hold the test until the session
+timeout): the guard frees the held connections, so the request can finish, and then fails.
 
 NOT SEEN: a statement that hangs on a connection already taken (nothing here bounds it; recorded in the backlog);
 Redis; several workers; the simulator's staged owner, whose recording of a refusal is not changed by A10.
@@ -45,6 +63,8 @@ import asyncpg
 import pytest
 from httpx import AsyncClient
 from nacl.signing import SigningKey
+from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.core.payments.service as payment_service
@@ -119,6 +139,12 @@ class _Stand:
         self.stack.push_async_callback(self.engine.dispose)
         self.pool = self.engine.sync_engine.pool
         assert self.pool.size() + settings.DB_MAX_OVERFLOW == _POOL, "the stand is written for the settings' pool"
+        self.checkouts = 0  # every connection handed out by the pool, to whoever asked (dies with the engine)
+
+        def count_checkout(_connection, _record, _proxy) -> None:
+            self.checkouts += 1
+
+        event.listen(self.engine.sync_engine, "checkout", count_checkout)
         self.monkeypatch.setattr(product_db, "engine", self.engine)
         self.sessions = async_sessionmaker(bind=self.engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
         self.monkeypatch.setattr(product_db, "AsyncSessionLocal", self.sessions)
@@ -174,12 +200,15 @@ class _Stand:
         return task
 
     async def answer(self, body: dict) -> tuple[int, dict]:
-        try:
-            response = await asyncio.wait_for(self.send(body), _BUDGET_SECONDS)
-        except asyncio.TimeoutError:
+        request = self.send(body)
+        # `wait`, not `wait_for`: it does not cancel-and-await the request, whose settlement may run shielded.
+        done, _pending = await asyncio.wait({request}, timeout=_BUDGET_SECONDS)
+        if not done:
+            await self.release()  # the guard frees what the request waits for, then fails
             raise AssertionError(
                 f"no answer within {_BUDGET_SECONDS:.0f} s: the payment is waiting for the pool past its deadline"
-            ) from None
+            )
+        response = request.result()
         return response.status_code, response.json()
 
     async def row(self, tx_id: str) -> tuple[str, str | None] | None:
@@ -252,7 +281,7 @@ def _past_deadline(kwargs: dict) -> None:
 
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("first", ["the deadline", "the pool timeout"])
+@pytest.mark.parametrize("first", ["the deadline", pytest.param("the pool timeout", marks=pytest.mark.slow)])
 async def test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_nothing(
     client: AsyncClient, db_session, monkeypatch, first: str
 ) -> None:
@@ -281,6 +310,7 @@ async def test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_n
         assert attempts == [1, 2]
 
 
+@pytest.mark.slow
 @MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("where", ["the route reader's checkout", "the re-acquisition after routing"])
@@ -343,6 +373,83 @@ async def test_a_cancellation_while_waiting_for_the_pool_leaves_nothing(client: 
         await stand.executes_afresh(body)  # the second `_pay_attempt` of the test: not hooked
 
 
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_request_refused_without_sql_takes_no_connection_and_keeps_its_own_answer(
+    client: AsyncClient, db_session, monkeypatch
+) -> None:
+    """An amount the ledger cannot hold is refused by `execute()` before its first statement. Such a request must
+    not check a connection out for the payment (the request's authentication takes the only one), and with the
+    pool exhausted it is still answered 400 - not made to wait and refused by time."""
+
+    async with contextlib.AsyncExitStack() as stack:
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+
+        async def exhausted(kwargs: dict) -> None:
+            await stand.exhaust()
+            _past_deadline(kwargs)
+
+        _hook_attempts(monkeypatch, {2: exhausted})
+
+        before = stand.checkouts
+        status, answer = await stand.answer(stand.body("0.000000001"))
+        assert (status, answer["error"]["code"]) == (400, "E009"), (status, answer)
+        assert stand.checkouts - before == 1, (
+            f"a request refused without SQL checked out {stand.checkouts - before} connection(s): "
+            f"only the request's authentication needs one"
+        )
+
+        body = stand.body("0.000000001")
+        status, answer = await stand.answer(body)  # the second `_pay_attempt`: the pool is exhausted
+        assert stand.pool.checkedout() == _POOL, "premise: the pool was exhausted when the payment was refused"
+        assert (status, answer["error"]["code"]) == (400, "E009"), (
+            f"the pool is exhausted and the request is invalid without any SQL: answered {status} {answer}, "
+            f"expected its own 400/E009"
+        )
+        await stand.nothing_is_left(body["tx_id"])
+
+
+def _one_checkout_fails(monkeypatch) -> dict:
+    """Arm it, and the next `AsyncSession.connection()` fails once with an error that is not a timeout and carries
+    no retryable SQLSTATE - a one-off infrastructure failure of a checkout."""
+
+    original = AsyncSession.connection
+    state = {"armed": False, "failed": 0}
+
+    async def connection(session, *args, **kwargs):
+        if state["armed"]:
+            state["armed"] = False
+            state["failed"] += 1
+            raise OperationalError("checkout", None, RuntimeError("the server closed the connection"))
+        return await original(session, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "connection", connection)
+    return state
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_checkout_failure_that_is_not_a_timeout_leaves_nothing_before_admission(
+    client: AsyncClient, db_session, monkeypatch
+) -> None:
+    async with contextlib.AsyncExitStack() as stack:
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+        failure = _one_checkout_fails(monkeypatch)
+
+        async def arm(_kwargs: dict) -> None:
+            failure["armed"] = True
+
+        _hook_attempts(monkeypatch, {1: arm})
+        body = stand.body()
+
+        with pytest.raises(OperationalError):  # the in-process client re-raises what a server answers 500
+            await stand.answer(body)
+
+        assert failure["failed"] == 1, "premise: the attempt's checkout is what failed"
+        await stand.nothing_is_left(body["tx_id"])
+        await stand.executes_afresh(body)
+
+
 # ------------------------------------------------------------------------------- admitted by an earlier attempt
 
 
@@ -365,8 +472,8 @@ async def _admitted_then_no_connection(stand: _Stand, monkeypatch, *, deadline_f
 @pytest.mark.asyncio
 async def test_a_request_admitted_earlier_is_recorded_aborted_and_replays(client: AsyncClient, db_session, monkeypatch) -> None:
     async with contextlib.AsyncExitStack() as stack:
-        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=1)
-        attempts, operations = await _admitted_then_no_connection(stand, monkeypatch, deadline_first=False)
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+        attempts, operations = await _admitted_then_no_connection(stand, monkeypatch, deadline_first=True)
         original_record = payment_service.record_definitive_refusal
         recorded: list[str] = []
 
@@ -395,12 +502,45 @@ async def test_a_request_admitted_earlier_is_recorded_aborted_and_replays(client
 
 @MODE_B
 @pytest.mark.asyncio
+async def test_after_admission_a_checkout_failure_that_is_not_a_timeout_is_final_too(
+    client: AsyncClient, db_session, monkeypatch
+) -> None:
+    """DECLARED, NOT CHANGED (§15 review of `c27a2fbe`, Н1). Spec 019's table: a non-retryable internal failure
+    after admission is recorded `ABORTED`. A10 made the next attempt's checkout a place where that can happen: a
+    one-off failure of it, after an earlier attempt was admitted, spends the signed identity - the caller gets the
+    500, the row says `ABORTED/E010`, and the same request again is answered with it instead of being run."""
+
+    async with contextlib.AsyncExitStack() as stack:
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+        operations = _conflict_on_the_first_operation(monkeypatch)
+        failure = _one_checkout_fails(monkeypatch)
+
+        async def arm(_kwargs: dict) -> None:
+            failure["armed"] = True
+
+        attempts = _hook_attempts(monkeypatch, {2: arm})
+        body = stand.body()
+
+        with pytest.raises(OperationalError):
+            await stand.answer(body)
+
+        assert (attempts, operations, failure["failed"]) == ([1, 2], [1], 1), (attempts, operations, failure)
+        assert await stand.row(body["tx_id"]) == ("ABORTED", "E010"), await stand.row(body["tx_id"])
+        assert await stand.debts() == [] and stand.pool.checkedout() == 0
+
+        status, replay = await stand.answer(body)
+        assert (status, replay["status"], replay["error"]["code"]) == (200, "ABORTED", "E010"), (status, replay)
+        assert operations == [1] and await stand.debts() == [], "the replay ran a payment operation"
+
+
+@MODE_B
+@pytest.mark.asyncio
 async def test_a_committed_row_of_the_same_request_wins_and_is_not_overwritten(
     client: AsyncClient, db_session, monkeypatch
 ) -> None:
     async with contextlib.AsyncExitStack() as stack:
-        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=1)
-        await _admitted_then_no_connection(stand, monkeypatch, deadline_first=False)
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
+        await _admitted_then_no_connection(stand, monkeypatch, deadline_first=True)
         original_record = payment_service.record_definitive_refusal
 
         async def a_winner_committed_first(sessions, refusal, **kwargs):
@@ -422,6 +562,7 @@ async def test_a_committed_row_of_the_same_request_wins_and_is_not_overwritten(
         assert stand.pool.checkedout() == 0
 
 
+@pytest.mark.slow
 @MODE_B
 @pytest.mark.asyncio
 @pytest.mark.parametrize("first", ["the recording's budget", "the pool timeout"])
@@ -458,16 +599,21 @@ async def test_a_reused_service_does_not_settle_against_the_previous_payment(cli
     state (admitted, with a row) is what the service last held."""
 
     async with contextlib.AsyncExitStack() as stack:
-        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=1)
+        stand = await _Stand(client, monkeypatch, stack).open(db_session, pool_timeout=_FAR)
         payer_id = await stand.observer.fetchval("select id from participants where pid = $1", stand.payer["pid"])
         first, second = stand.body(), stand.body()
+
+        async def exhausted(kwargs: dict) -> None:  # the second payment's attempt: no connection, the deadline passed
+            await stand.exhaust()
+            _past_deadline(kwargs)
+
+        _hook_attempts(monkeypatch, {2: exhausted})
 
         async with stand.sessions() as session:
             service = PaymentService(session)
             done = await service.create_payment(payer_id, PaymentCreateRequest.model_validate(first))
             assert done.status == "COMMITTED" and stand.pool.checkedout() == 0, done
 
-            await stand.exhaust()
             with pytest.raises(TimeoutException) as refused:
                 await asyncio.wait_for(
                     service.create_payment(payer_id, PaymentCreateRequest.model_validate(second)), _BUDGET_SECONDS
