@@ -10,13 +10,18 @@ WHERE A REAL INPUT REACHES IT (inventory of 2026-10-09):
 * the simulator, which builds `Decimal(str(...))` out of scenario text and asks the rule directly - an initial line of
   `add_participant` and a `create_trustline` effect (`inject_executor.py`, `unstorable_limit`), and a trust line of the
   scenario being seeded (`real_scenario_seeder.py`). These RAISED; the tests below are red on `906cae90`.
-* NOT the HTTP money doors. `parse_money_amount` refuses exponent notation, more than 50 digits and more than twelve
-  integer digits on the STRING, before any `Decimal` exists, so a payment amount or a trust-line limit like these
-  never reaches the rule. The two HTTP tests below were green before the fix and record that.
+* NOT the HTTP money doors for the RAISING values. `parse_money_amount` refuses exponent notation and more than 50
+  digits on the STRING, before any `Decimal` exists, so a payment amount or a trust-line limit like `1E1000000`
+  never reaches the rule. The two HTTP tests below were green before the fix and record that. (Plain digit strings
+  do reach the rule through `is_storable_money` - thirteen integer digits, or the long-fraction class named in
+  `_RENAMED` - and are refused with 400 before and after; the section-15 review of `646c8007` corrected an earlier
+  wording here that said the string grammar stops them.)
 
 The fix reads the magnitude off the number's own digits and exponent (`adjusted()`), which no context can change.
-For every value the old form could answer, the answer is the same - held by the table below, which also runs the
-rule under a deliberately narrow context.
+For the values of the table below the answer is the same as before, and the table also runs the magnitude half of
+the rule under a deliberately narrow context. ONE class changes its reason, not its refusal - see `_RENAMED`: a
+value below the bound written with more than 28 significant digits was called `money_magnitude` only because
+`abs()` rounded it up; it is `money_quantization` now (arbiter's decision 2026-10-09: ACCEPT-RENAME).
 
 What this does not see: the fraction half of the rule (`quantize`), which still runs in the caller's context - it
 has no input that fails under the application's contexts, and is recorded, not changed.
