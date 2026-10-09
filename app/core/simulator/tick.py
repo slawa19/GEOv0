@@ -867,23 +867,35 @@ class RealTick:
         except Exception:
             return True
 
-    def _cleared_amount_str(self, run: RunRecord, eq: str, amount: Decimal) -> str:
-        """The single rendering of `clearing.done.cleared_amount` (012 / `T1207`).
+    @staticmethod
+    def _cleared_amount_str(helper: VizPatchHelper, amount: Decimal) -> str:
+        """The single rendering of `clearing.done.cleared_amount` (012 / `T1207`): in the equivalent's step.
 
-        One field, one scale, whichever way the clearing ended: the precision is the equivalent's, from the
-        `VizPatchHelper` cached on the run (no DB round trip), and 2 - the codebase's default for a missing
-        `Equivalent.precision` - before the first helper exists, on every path alike. The field used to be produced
-        three times with two scales, chosen by whether the clearing had been cancelled.
+        One field, one scale, whichever way the clearing ended: the precision is the equivalent's own, as `helper`
+        read it from the equivalent's row. `_run_clearing` takes that helper BEFORE the pass (`_viz_helper`,
+        034 S2b / F-034-3) and holds it for the pass, so no ending is without it and none awaits for it. Until then
+        the precision was looked up on the run at publication, with the constant 2 when the run had no helper - and
+        a cancelled pass publishes without patches, so without having created one: `"2.00"` in a whole-unit
+        equivalent, where the interactive action writes `"2"`.
         """
-        precision = 2
-        try:
+        return to_money_str(amount, int(helper.precision))
+
+    async def _viz_helper(self, run: RunRecord, eq: str, session_local: Any) -> VizPatchHelper:
+        """The run's `VizPatchHelper` for `eq`; created and cached if the run has none (one read of the equivalent's
+        row, on a session of its own). The same creation `_clearing_patches` did after the pass, when it was too
+        late for the cancellation ending."""
+        with self._runner._lock:
+            helper = run._real_viz_by_eq.get(eq)
+        if helper is None:
+            async with session_local() as helper_session:
+                helper = await VizPatchHelper.create(
+                    helper_session,
+                    equivalent_code=eq,
+                    refresh_every_ticks=int(settings.SIMULATOR_VIZ_QUANTILE_REFRESH_TICKS or 10),
+                )
             with self._runner._lock:
-                helper = (run._real_viz_by_eq or {}).get(str(eq))
-            if helper is not None:
-                precision = int(2 if getattr(helper, "precision", None) is None else helper.precision)
-        except Exception:
-            precision = 2
-        return to_money_str(amount, precision)
+                run._real_viz_by_eq[eq] = helper
+        return helper
 
     def _done_cycle_edges(
         self, run: RunRecord, eq: str, touched_edges: set[tuple[str, str]]
@@ -951,6 +963,7 @@ class RealTick:
             plan_id = f"plan_{secrets.token_hex(6)}"
             cleared_cycles = 0
             cleared_amount = Decimal("0")
+            helper: Any = None  # taken before the pass; nothing is committed, so nothing is published, before that
             touched_nodes: set[str] = set()
             touched_edges: set[tuple[str, str]] = set()
             done_emitted = False
@@ -979,6 +992,8 @@ class RealTick:
                 with rr._lock:
                     run.current_phase = "clearing"
 
+                # Before the pass, so that every ending - the cancelled one too - knows the equivalent's step.
+                helper = await self._viz_helper(run, eq, session_local)
                 execution_error: Exception | None = None
                 try:
                     result = await clearing_runner.run_clearing_pass(
@@ -1044,7 +1059,7 @@ class RealTick:
                         plan_id=plan_id,
                         cleared_cycles=cleared_cycles,
                         # `to_money_str` is total and cannot raise: no `str(Decimal)` fallback (`1E-8` on the wire).
-                        cleared_amount=self._cleared_amount_str(run, eq, cleared_amount) if cleared_amount > 0 else None,
+                        cleared_amount=self._cleared_amount_str(helper, cleared_amount) if cleared_amount > 0 else None,
                         cycle_edges=self._done_cycle_edges(run, eq, touched_edges) if touched_edges else None,
                         node_patch=node_patch,
                         edge_patch=edge_patch,
@@ -1075,7 +1090,7 @@ class RealTick:
                             equivalent=eq,
                             plan_id=plan_id,
                             cleared_cycles=cleared_cycles,
-                            cleared_amount=self._cleared_amount_str(run, eq, cleared_amount),
+                            cleared_amount=self._cleared_amount_str(helper, cleared_amount),
                             cycle_edges=self._done_cycle_edges(run, eq, touched_edges),
                             node_patch=None,
                             edge_patch=None,

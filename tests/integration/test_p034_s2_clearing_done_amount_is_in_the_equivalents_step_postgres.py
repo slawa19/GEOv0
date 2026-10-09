@@ -4,7 +4,7 @@ Two orchestrations publish `clearing.done` around the same runner: the tick (`ap
 `RealTick._run_clearing`) and the interactive action (`app/api/v1/simulator.py`, `action_clearing_real`). They take
 the scale of `cleared_amount` from different places: the action from the equivalent's row (`eq.precision`), the tick
 from the `VizPatchHelper` cached on the run - and, when the run has no helper for the equivalent yet, from the
-constant 2 (`RealTick._cleared_amount_str`). On the tick's ordinary ending the helper is created just before the
+constant 2 (`RealTick._cleared_amount_str`, before 034 S2b). On the tick's ordinary ending the helper was created just before the
 event; on a CANCELLED pass that already committed (the hard timeout) the event goes out without patches and so without
 a helper. In an equivalent whose precision is not 2 the tick then writes the amount in a step that is not the
 equivalent's: `"2.00"` for a whole-unit equivalent, where the action writes `"2"`.
@@ -57,11 +57,12 @@ async def _cancelled_after_one_commit(factory, monkeypatch, *, precision: int,  
             await asyncio.sleep(hard_timeout + 5.0)
 
     calls = _spy_execute(monkeypatch, before)
-    await stand.tick()
-    # Controls: the second occurrence started and was cut, the first is durable and published once, and the run
-    # had no viz helper for the equivalent - the state in which the tick has no precision of its own.
-    assert len(calls) == 2 and await stand.clearings() == 1, (len(calls), await stand.clearings())
+    # Control: the run enters the tick with no viz helper for the equivalent - the state in which the tick had no
+    # precision of its own and wrote two digits.
     assert stand.run._real_viz_by_eq.get(CODE) is None
+    await stand.tick()
+    # Controls: the second occurrence started and was cut, the first is durable and published once, without patches.
+    assert len(calls) == 2 and await stand.clearings() == 1, (len(calls), await stand.clearings())
     [done] = stand.done_events()
     assert done["node_patch"] is None and done["edge_patch"] is None, done
     amount = (before_total - await stand.total()) / 3
