@@ -657,9 +657,10 @@ class RealRunnerImpl:
         run = self._get_run(run_id)
         spent_before = frozenset(run._real_fired_scenario_event_indexes)
         epoch = int(run._launch_epoch)
-        # `RealTick.tick` answers every `Exception` itself (a failed tick is counted and the run goes on or stops) and
-        # returns, so a pause that belongs to a tick whose money went durable is decided here on the normal return. Nothing
-        # else leaves it but cancellation, which pauses nothing.
+        # `RealTick.tick` answers the failures of a tick's work itself (a failed tick is counted and the run goes on or
+        # stops) and returns, so a pause that belongs to a tick whose money went durable is decided here on the normal
+        # return. What still leaves it pauses nothing: cancellation, and an exception raised inside its own failure
+        # handlers (e.g. the status publish of `fail_run`) - by then the run is already `error`, not `running`.
         await self._tick.tick(run_id)
         self._pause_after_spent_episodes(run, spent_before, epoch)
 

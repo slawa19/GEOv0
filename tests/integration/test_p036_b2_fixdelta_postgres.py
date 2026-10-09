@@ -4,8 +4,9 @@ Each TARGET below is RED on `7c11ee0f`; a CONTROL is the same stand with the inp
 
 1. `episode_progress[].attempts` counts REAL attempts. The writer was reached twice per money phase (the commit's
    confirmation and the tail's `_commit_and_resolve` both call `apply_deferred_effects`), so one payment, one call of the
-   core, reported 2. One increment per attempt; an attempt whose outcome is not established and the one that lands after
-   it are two.
+   core, reported 2. One increment per attempt REPORTED BY A DURABLE MONEY PHASE; an attempt whose outcome is not
+   established and the one that lands after it are two. Not covered here: a phase rolled back and replayed whole on a
+   serialization conflict is not reported, so two calls of the core can then show as one attempt.
 2. A skipped inject writes ONE note to the events artifact, and it names the reason; it was two (the direct one and the
    progress writer's "scripted inject refused").
 4. A pause publishes `run_status` once. Measured on the PRODUCT `_heartbeat_loop`: the runner published, then the loop
