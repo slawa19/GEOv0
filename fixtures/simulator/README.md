@@ -14,6 +14,7 @@
 | **`greenfield-village-100-realistic-v2`** | 100 | Основной рабочий сценарий. Realistic behaviorProfiles (10 подтипов), seasonal events, settings (warmup, trust_drift, flow). UI default. |
 | **`riverside-town-50-realistic-v2`** | 50 | Компактная альтернатива. Те же фичи, быстрее для тестов и демо. |
 | **`clearing-demo-10`** | 10 | Минимальный сценарий для интерактивной демонстрации клиринга. **Дефолтный датасет Interact Mode.** 4 бизнеса + 6 людей, множество потенциальных циклов. Запускать с `intensity_percent=0`. |
+| **`community-story-10`** | 10 (+1 по `inject`) | Сюжетный сценарий (036): 12 эпизодов с подписями и паузами — прямая покупка, посредник, круг долгов и клиринг, заморозка, отказ без доверия. Нужны `SIMULATOR_REAL_ENABLE_INJECT=1` и intensity 0; описание — [`scenarios-and-engine.md` §2.13](../../docs/ru/simulator/scenarios-and-engine.md). |
 | **`minimal`** | 2 | Минимальный валидный сценарий для unit-тестов валидатора/схемы. |
 | **`negative/`** | — | 2 невалидных JSON для тестов валидатора schema. |
 
@@ -26,6 +27,7 @@ fixtures/simulator/
 ├── greenfield-village-100-realistic-v2/scenario.json   ← основной (100)
 ├── riverside-town-50-realistic-v2/scenario.json        ← компактный (50)
 ├── clearing-demo-10/scenario.json                      ← демо клиринга (10)
+├── community-story-10/scenario.json                    ← сюжетная история (036)
 ├── minimal/scenario.json                               ← unit-тесты
 ├── negative/                                           ← тесты валидатора
 └── _archive/                                           ← устаревшие сценарии (не загружаются runtime)
