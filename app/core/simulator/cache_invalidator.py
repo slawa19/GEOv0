@@ -11,7 +11,8 @@ from app.core.simulator.scenario_equivalent import effective_equivalent
 
 def invalidate_routing_cache(*, equivalents: set[str]) -> None:
     for eq in equivalents:
-        PaymentRouter._graph_cache.pop(eq, None)
+        if eq:  # an empty code evicts nothing, as before 034 `T3431`; `invalidate_cache("")` would clear every equivalent
+            PaymentRouter.invalidate_cache(eq)
 
 
 def invalidate_viz_cache(*, run: RunRecord, equivalents: set[str]) -> None:
