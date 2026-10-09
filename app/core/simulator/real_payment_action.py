@@ -10,3 +10,6 @@ class _RealPaymentAction:
     sender_pid: str
     receiver_pid: str
     amount: str
+    # 036 B1: a payment of a scenario's `payment` event carries the key of the EVENT (run, launch epoch, event index), not
+    # the tick's: see `scripted_event_idempotency_key`. None = the tick's key, as for every planned payment.
+    idempotency_key: str | None = None

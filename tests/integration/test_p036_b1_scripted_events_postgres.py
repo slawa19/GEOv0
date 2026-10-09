@@ -267,15 +267,43 @@ async def test_a_payment_finer_than_the_equivalents_step_is_refused_by_the_core_
 
 
 @pytest.mark.asyncio
-async def test_a_payment_in_an_equivalent_the_database_does_not_know_is_refused_not_dropped(factory, monkeypatch) -> None:  # noqa: F811
-    eq, p, run, runner = await _refusal_case(
-        factory, monkeypatch,
-        lambda e, q: [{**_payment_event(e, q["A"], q["B"], "1.00"), "equivalent": "NOSUCHEQ"}])
+async def test_a_payment_in_an_equivalent_the_run_does_not_have_is_refused_aloud_and_never_attempted(factory, monkeypatch) -> None:  # noqa: F811
+    """The money phase locked the lines of the RUN's equivalents as its first statement (027 stage 2). A payment in any
+    other equivalent - one the database does not know, or one it knows (here: a second, real one) - would run without
+    those locks, so it is not attempted: the event is spent with a refusal in the story progress, the log and the events
+    artifact. No payment, so no `tx.failed`; the caption of the episode is what explains it."""
 
-    assert run.state == "running", (run.state, run.last_error)  # control: the tick survived
-    failed = runner._sse.published("tx.failed")
-    require_target(failed == 1 and 0 in run._real_fired_scenario_event_indexes,
-                   f"tx.failed {failed}, fired {sorted(run._real_fired_scenario_event_indexes)}")
+    other, _ = await world(factory, ["A", "B"], [], [])  # a REAL equivalent of the database, not the run's
+    for code in ("NOSUCHEQ", other.code):
+        eq, p, run, runner = await _stand(
+            factory, monkeypatch, ["A", "B", "C"], PAY_LINES, [],
+            lambda e, q, code=code: [{**_payment_event(e, q["A"], q["B"], "1.00"), "equivalent": code}])
+
+        await ticks(runner, run, 1)
+
+        assert run.state == "running", (run.state, run.last_error)  # control
+        progress = getattr(run, "_real_story_progress", {})
+        require_target(
+            progress.get(0, {}).get("reason") == "equivalent_not_in_the_run" and 0 in run._real_fired_scenario_event_indexes
+            and runner._sse.published("tx.updated") == 0 and runner._sse.published("tx.failed") == 0
+            and await _debts(factory, eq, p) == {},
+            f"{code}: progress {progress}, fired {sorted(run._real_fired_scenario_event_indexes)}",
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_payment_with_no_resolvable_equivalent_is_refused_aloud(factory, monkeypatch) -> None:  # noqa: F811
+    """No `equivalent` on the event and no declared `baseEquivalent`: the first of `equivalents[]` is NOT a default."""
+
+    eq, p, run, runner = await _stand(
+        factory, monkeypatch, ["A", "B"], PAY_LINES, [],
+        lambda e, q: [{k: v for k, v in _payment_event(e, q["A"], q["B"], "1.00").items() if k != "equivalent"}])
+
+    await ticks(runner, run, 1)
+
+    progress = getattr(run, "_real_story_progress", {})
+    require_target(progress.get(0, {}).get("reason") == "unresolved_equivalent" and await _debts(factory, eq, p) == {},
+                   f"progress {progress}")
 
 
 @pytest.mark.asyncio

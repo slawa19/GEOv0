@@ -976,7 +976,9 @@ class InjectExecutor:
                     frm = str(tl.get("from") or "").strip()
                     to = str(tl.get("to") or "").strip()
                     eq = effective_equivalent(scenario=scenario, payload=(tl or {}))
-                    st = str(tl.get("status") or "").strip().lower()
+                    # F-036-6: a line of a shipped scenario has no `status` (the schema has none); the seeder reads such a
+                    # line as `active` (`real_scenario_seeder.py`), so the frozen participant's lines are dimmed too.
+                    st = str(tl.get("status") or "active").strip().lower()
                     if (frm in frozen_set or to in frozen_set) and st == "active":
                         frozen_edges_for_sse.append(
                             {

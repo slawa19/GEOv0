@@ -462,7 +462,7 @@ class RealPaymentsExecutor:
                     None,
                 )
 
-            idem = self._sim_idempotency_key(
+            idem = getattr(action, "idempotency_key", None) or self._sim_idempotency_key(
                 run_id=run.run_id,
                 tick_ms=run.tick_index,
                 sender_pid=str(action.sender_pid),

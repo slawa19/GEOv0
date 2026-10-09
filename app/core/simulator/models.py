@@ -274,6 +274,10 @@ class RunRecord:
 
     # Real-mode scenario timeline events state (best-effort, in-memory).
     _real_fired_scenario_event_indexes: set[int] = field(default_factory=set)
+    # 036 B1: the outcome of the scripted events of THIS launch, by event index (a `clearing` event: its exact cycles, as
+    # `clearing-real` reports them; a refused event: why). Cleared by `restart` with the fired set; in memory only - the
+    # events artifact carries the same record as a note.
+    _real_story_progress: dict[int, dict[str, Any]] = field(default_factory=dict)
 
     # Real-mode clearing execution can be slow and may be guarded by timeouts.
     # Keep track of an in-flight clearing task to prevent overlapping clearing runs.
