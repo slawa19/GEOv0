@@ -1121,6 +1121,36 @@ class PaymentService:
                 raise asyncio.TimeoutError("Payment staged line lock timed out") from exc
             raise _classify_payment_db_error(exc) from exc
 
+    @staticmethod
+    def _checked_without_sql(request: PaymentCreateRequest) -> "tuple[Decimal, str]":
+        """What a payment request is refused for before any statement: the amount, the equivalent code, the `tx_id`.
+
+        Returns the parsed amount and the validated `tx_id`. One definition, run twice on the API path: by
+        `_pay_attempt` BEFORE the attempt takes its connection (035 A10 fix-delta - a request refused here must not
+        check a connection out, nor wait for an exhausted pool to be told so), and by `execute()` as its first
+        act, for every caller. The statements are the ones `execute()` had, in their order, with its metric.
+        """
+
+        try:
+            # Storage-capacity door (012 / F-012-1).  Deliberately the FIRST thing done
+            # with the request: the signature is taken over `request.amount`
+            # verbatim further down (`payload` / `verify_signature` in `execute()`), so an amount
+            # the ledger cannot hold must never become a signed obligation - and the
+            # rounds-to-zero case must not reach the positivity CHECK, where it used to
+            # escape as HTTP 500 E010 instead of a 400 naming the amount.
+            amount = parse_money_amount(
+                request.amount, field="amount", require_positive=True
+            )
+        except BadRequestException:
+            # Preserve existing metrics semantics for invalid user input.
+            _count_payment("create", "bad_request")
+            raise
+
+        validate_equivalent_code(request.equivalent)
+
+        # Mandatory idempotency key (client-generated).
+        return amount, validate_tx_id(request.tx_id)
+
     async def execute(
         self,
         sender_id: uuid.UUID,
@@ -1178,25 +1208,9 @@ class PaymentService:
             _count_payment("create", "start")
         attempt = self._attempt = _PaymentAttempt()
 
-        try:
-            # Storage-capacity door (012 / F-012-1).  Deliberately the FIRST thing this
-            # method does with the request: the signature is taken over `request.amount`
-            # verbatim further down (`payload` / `verify_signature` below), so an amount
-            # the ledger cannot hold must never become a signed obligation - and the
-            # rounds-to-zero case must not reach the positivity CHECK, where it used to
-            # escape as HTTP 500 E010 instead of a 400 naming the amount.
-            amount = parse_money_amount(
-                request.amount, field="amount", require_positive=True
-            )
-        except BadRequestException:
-            # Preserve existing metrics semantics for invalid user input.
-            _count_payment("create", "bad_request")
-            raise
-
-        validate_equivalent_code(request.equivalent)
-
-        # Mandatory idempotency key (client-generated).
-        tx_id_str = validate_tx_id(request.tx_id)
+        # The checks that need no database (`_checked_without_sql`): deliberately the FIRST thing this method does
+        # with the request.
+        amount, tx_id_str = self._checked_without_sql(request)
 
         # The capacity read and the one-direction rule of the flows below hold under concurrency only at
         # READ COMMITTED behind the line locks (027 stage 2; 019 `T1907` required SERIALIZABLE). The FIRST
@@ -2365,6 +2379,9 @@ class PaymentService:
         # from the raw request), the state carries that identity and the current perimeter, so that a failure
         # before `execute()` establishes them is settled as what it is: a refusal after admission
         # (`_Admission.covers`, unchanged, then holds). Not admitted here: `admitted` stays False and `row` None.
+        # AFTER ADMISSION THAT IS ANY NON-RETRYABLE FAILURE OF THE CHECKOUT, not only a timeout: a one-off
+        # infrastructure failure of it is recorded `ABORTED/E010` like every non-retryable internal failure after
+        # admission (spec 019), and the signed identity is spent - the same request again is answered `ABORTED`.
         self._attempt = _PaymentAttempt() if admission is None else _PaymentAttempt(
             tx_id=admission.tx_id,
             fingerprint=admission.fingerprint,
@@ -2372,6 +2389,10 @@ class PaymentService:
             allowed_participant_pids=allowed_participant_pids,
         )
         try:
+            # Fix-delta of the §15 review of `c27a2fbe` (Н2): what the request is refused for WITHOUT SQL is checked
+            # before the connection is taken - `execute()` checks it again as its first act, from the same
+            # definition. An invalid request checks nothing out and is answered its own 400 on an exhausted pool.
+            self._checked_without_sql(request)
             await self._connect_within(deadline)
             staged = await self.execute(
                 sender_id,
@@ -2433,6 +2454,12 @@ class PaymentService:
         WHAT THIS DOES NOT BOUND: a statement already running on the connection. The reads `execute()` makes
         before it enters its deadline, and any statement after, are limited by nothing here (the engine sets no
         `statement_timeout` or `command_timeout`). `pay()` has no complete wall-clock bound.
+        Nor the two OTHER checkouts `pay()` makes while settling (found by the review of `c27a2fbe`, recorded in
+        `specs/BACKLOG.md`, not changed): the read of the winner after a `tx_id` collision
+        (`_settle_failed_attempt` -> `_read_existing`) waits for the pool outside the deadline and lets the pool's
+        raw `TimeoutError` out; the read after a COMMIT of unknown outcome (`_settle_failed_commit` ->
+        `_read_existing_row` under `_drain_call`) waits for the pool with no bound of its own and is not ended by
+        a cancellation.
         """
 
         try:
