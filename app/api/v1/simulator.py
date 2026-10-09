@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
@@ -214,7 +214,10 @@ async def _emit_interact_clearing_done_best_effort(
     cleared_count: int,
     total: Decimal,
     precision: int,
+    on_emitted: Callable[[], None] | None = None,
 ) -> None:
+    """`on_emitted` is called right after `clearing.done` went out, with no await in between: the caller's
+    cancellation ending must know the event is already published (034 S2b)."""
     if cleared_count <= 0:
         return
 
@@ -253,6 +256,8 @@ async def _emit_interact_clearing_done_best_effort(
             node_patch=node_patch,
             edge_patch=edge_patch,
         )
+        if on_emitted is not None:
+            on_emitted()
     except Exception:
         logger.warning(
             "Best-effort SSE emission failed: interact.clearing_real run_id=%s",
@@ -1879,6 +1884,12 @@ async def action_clearing_real(
     def _shape() -> None:
         executed[:] = [_interact_cycle_of(occurrence, pid_by_id, eq_precision) for occurrence in committed]
 
+    done_emitted = False
+
+    def _mark_done_emitted() -> None:
+        nonlocal done_emitted
+        done_emitted = True
+
     async def _emit_known_progress() -> None:
         _shape()
         try:
@@ -1891,11 +1902,17 @@ async def action_clearing_real(
                 cleared_count=cleared_count,
                 total=total,
                 precision=eq_precision,
+                on_emitted=_mark_done_emitted,
             )
         except asyncio.CancelledError:
             # Cancellation may arrive while patches are being computed, before
             # the synchronous broadcast. Publish already-durable progress
             # without entering another await, then preserve cancellation.
+            # 034 S2b: it may also arrive AFTER the broadcast, while the lines the clearing closed are being
+            # published - then the event is out already and is not published a second time (the tick's
+            # `done_emitted`, `RealTick._run_clearing`).
+            if done_emitted:
+                raise
             _emit_interact_clearing_done_without_patches_best_effort(
                 run_id=run_id,
                 run=run,
