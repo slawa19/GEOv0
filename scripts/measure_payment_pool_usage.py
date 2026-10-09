@@ -7,17 +7,28 @@ them `idle in transaction`, against a pool of `DB_POOL_SIZE` + `DB_MAX_OVERFLOW`
 before any decision. A measurement nobody can re-run is an assertion, so the generator lives here (the precedent
 is `scripts/measure_clearing_min_amount_plan.py`). It changes no product code and decides nothing.
 
+WHAT IT READ, AND WHAT CAME OF IT. On `7e21abc1` (before 035 A9): two connections per payment, both
+`idle in transaction`; at N = 15 against a pool of 15 no payment arrived at binding and none committed until the
+pool timeout. 035 A9 closes the request session before the payment (`app/api/v1/payments.py::create_payment`);
+on that code the same run reads one connection per payment and N = 15 commits. The text above describes the
+hypothesis as it stood; the script is unchanged in what it measures.
+
 WHAT IT MEASURES. The application in-process (`app.main.app` through `httpx.ASGITransport`) on its REAL wiring:
 the real `get_db`, the real `app.db.session.engine` with the pool the settings give it, the real
 `get_payment_session_factory`. No dependency is overridden. For each N it sends N payments at once, each from its
 own payer to its own payee over its own trust line (so no two share a debt row, a line or a Redis lock key), holds
-every one of them at the same point INSIDE `pay()` - the entry of `PaymentService._bind_payment`, after routing,
-with the attempt's session open - and reads, while they are held:
+every one of them at the same point - ARRIVAL AT `PaymentService._bind_payment`, which is after routing and with
+the attempt's session open (not "entry into `pay()`": a request waiting for its attempt's connection is already
+inside `pay()`) - and reads, while they are held:
 
 * the pool's own counters (`checkedout`, `overflow`);
 * `pg_stat_activity` for this database through a connection OUTSIDE the pool: sessions by `state`, and the last
   statement of the `idle in transaction` ones (which shows whose they are);
-* how many of the N payments reached the gate. The rest are waiting for a connection.
+* where each of the N requests is: `at_binding` (arrived at the gate), `already_answered` (finished before the
+  reading - a refusal, a pool timeout shorter than `--settle`), and `before_binding` (neither: still
+  authenticating, routing, or waiting for a connection). `before_binding` is NOT by itself "waiting for a
+  connection" (corrected 2026-10-09 after the §15 review of A8, which found the first edition calling every
+  non-arrival a pool waiter); it reads as that only together with the pool counter standing at its limit.
 
 Then it opens the gate and records every answer's status code and the slowest answer's time.
 
@@ -184,11 +195,14 @@ async def _round(client: httpx.AsyncClient, observer: asyncpg.Connection, gate: 
             last, since = gate.arrived, time.perf_counter()
         await asyncio.sleep(0.02)
     states, idle_queries = await _activity(observer)
+    answered = sum(1 for task in tasks if task.done())
     reading = {
         "n": n,
-        "reached_the_gate": gate.arrived,
-        "waiting_for_a_connection": n - gate.arrived,
+        "at_binding": gate.arrived,
+        "already_answered": answered,
+        "before_binding": n - gate.arrived - answered,
         "pool_checked_out": pool.checkedout(),
+        "pool_limit": settings.DB_POOL_SIZE + settings.DB_MAX_OVERFLOW,
         "pool_overflow_in_use": max(0, pool.overflow()),
         "pg_states": dict(sorted(states.items())),
         "idle_in_transaction_last_statements": idle_queries,
@@ -247,7 +261,7 @@ async def main() -> int:
                 print(json.dumps(reading))
                 if reading["pool_checked_out_after"] != 0:
                     failures.append(f"N={n}: {reading['pool_checked_out_after']} connection(s) still checked out after the round")
-                if n == 1 and (reading["reached_the_gate"] != 1 or reading["answers"] != {"200 COMMITTED": 1}):
+                if n == 1 and (reading["at_binding"] != 1 or reading["answers"] != {"200 COMMITTED": 1}):
                     failures.append(f"N=1 did not reach the gate and commit: {reading}")
     finally:
         await observer.close()
