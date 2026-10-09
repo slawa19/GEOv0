@@ -137,6 +137,8 @@ make the session green again:
   around it). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3267/3282 tests collected`).
 * 2026-10-09, 034 slice S2 merged after 034 S4b (`origin/main` `906cae90`, 3275): 3275 -> 3277 (+2, the S2 module above; the numbers in the S2 line are those of the branch on `0d153390`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 034 slice S2 merged after 035 A2a (`origin/main` `a0d25e7c`, 3291): 3291 -> 3293 (+2, the S2 module; the earlier S2 lines are those of the branch on `0d153390` and `906cae90`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 slice A2b (the detectors removed from `app/core/clearing/service.py`): 3291 -> 3273 (-18, tests of the removed contract: `test_a_long_cycle_appears_exactly_when_the_caller_asks_deep_enough` 5, `test_retention_each_depth_finds_its_lengths_and_nothing_longer` 5, `test_retention_same_length_ties_follow_the_full_identity` 2, `test_the_merged_answer_reports_one_cycle_once` 1, `test_within_a_length_the_largest_executable_cycle_comes_first` 1, `test_sql_and_dfs_produce_same_cycles` 1, `test_find_quadrangles_sql_rejects_repeated_vertex_b_equals_d` 1, `test_the_sql_producer_itself_is_scoped` 1, `test_the_expanding_bind_works_on_postgresql` 1; two more tests were narrowed and renamed, one case each, count unchanged). Each removed test has a dated note where it stood. Measured with the same command on base `a0d25e7c`.
+* 2026-10-09, 035 slice A2b merged after 034 S2 (`origin/main` at the merge of PR #187, 3293): 3293 -> 3275 (-18, the detector-only cases named in the A2b line above; its numbers are those of the branch on `a0d25e7c`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 034 slice S2b (F-034-3, divergences 1 and 3), on `claude/p034-s2` `0b67a3cb` (3293): 3293 -> 3299 (+6).
   `tests/integration/test_p034_s2_clearing_done_amount_is_in_the_equivalents_step_postgres.py` (4: a control, two
   precisions, amounts finer than hundredths) and
@@ -146,6 +148,7 @@ make the session green again:
   `tests/integration/test_p034_s2b_clearing_done_reads_the_precision_before_the_pass_postgres.py` and one more in
   `tests/integration/test_p034_s2b_interact_clearing_done_is_published_once_postgres.py`. Measured with
   `python -m pytest --collect-only -q -m "not slow"` (`3303/3318 tests collected`).
+* 2026-10-09, 034 slice S2b merged after 035 A2b (`origin/main` `94891571`, 3275): 3275 -> 3285 (+10, the three S2b modules: 4 + 3 + 3; the S2b lines above are those of the branch before the merge). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -188,7 +191,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3303
+EXPECTED_SELECTED_ITEMS = 3285
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

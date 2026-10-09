@@ -24,6 +24,12 @@ triangle+quadrangle pair needs no PostgreSQL behavior at all.
 
 MUTATIONS THESE CATCH: restoring `and not cycles` on the quadrangle call (pin 1);
 `_debt_id_key = str` / keying the dedup on the raw spelling (pin 2).
+
+REMOVED 2026-10-09 (035 A2b): the text above is history. `find_cycles`, both SQL queries and
+`_debt_id_key` are gone from `app/`. Pin 1's property (two independent cycles are both offered)
+was moved to the planner in A2a and stays; pin 2 and the union's order within a length had no
+subject but the detectors' merge and were removed with it (see the notes where they stood).
+What remains in this module is asked of the planner or of the production pass.
 """
 
 from __future__ import annotations
@@ -34,7 +40,6 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.core.clearing.service import ClearingService
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
@@ -135,37 +140,16 @@ async def test_a_triangle_does_not_hide_a_disjoint_quadrangle(db_session) -> Non
     )
 
 
-@pytest.mark.asyncio
-async def test_the_merged_answer_reports_one_cycle_once(db_session) -> None:
-    """One triangle, depth past the SQL reach: both detectors find it, the answer holds it ONCE.
-
-    At `max_depth=5` the SQL fast path and the ORM DFS both run and both find the same
-    triangle.  On SQLite they spell its debt ids differently (stored 32-hex against
-    hyphenated), so a dedup keyed on the raw spelling counts the same cycle twice -- which is
-    exactly how the first edition passed the Postgres tier (where the spellings coincide) and
-    doubled every cycle on the default one.  `_debt_id_key` folds the spelling to the value.
-
-    This is the INTENT pin for that key: the prior red on a revert was a fixture-precondition
-    assert in `test_p1_clearing_run_perimeter.py`, whose failure message blames the stand.
-    """
-
-    await _seed_graph(db_session, [["t1", "t2", "t3"]])
-
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(_EQ, max_depth=5)
-
-    assert len(cycles) == 1, (
-        f"one triangle in the graph, one cycle in the answer; got {len(cycles)}. Two means "
-        f"the merge is keyed on the debt-id SPELLING again (`_debt_id_key` reverted): the "
-        f"raw-SQL path and the DFS spell the same debt differently on SQLite, and each "
-        f"rendition passed as a distinct cycle."
-    )
+# REMOVED 2026-10-09 (035 A2b): `test_the_merged_answer_reports_one_cycle_once` pinned `_debt_id_key` - the merge of
+# the SQL detectors' answer with the DFS's must not count one triangle twice when the two spell its debt ids
+# differently. Both detectors and the merge are removed; one producer has nothing to merge. That the planner offers
+# a single triangle exactly once is asserted where its answer is read on the wire
+# (`tests/integration/test_p012_money_form_and_detector_reach_postgres.py::
+# test_an_ordinary_debt_has_one_exact_string_on_the_diagnostic`, precondition `== [triangle]`).
 
 
-# The reviewer's reproducer (T1211): two same-length cycles SHARING the edge a->b, so the
-# order of execution decides which debts remain.  The low-amount cycle is seeded FIRST -
-# insertion order is what the DFS tends to reproduce, so a merge that lets discovery order
-# stand executes the small cycle first and leaves a different ledger.
+# The reviewer's reproducer (T1211): two same-length cycles SHARING the edge a->b. It was built for the order of
+# the detectors' union (below); it now feeds the production-pass test that follows.
 _SHARED_EDGE = [
     ("a", "b", "100"),  # shared edge
     ("b", "c", "10"),   # low cycle a-b-c-a, executable amount 10, seeded first
@@ -175,31 +159,11 @@ _SHARED_EDGE = [
 ]
 
 
-@pytest.mark.asyncio
-async def test_within_a_length_the_largest_executable_cycle_comes_first(db_session) -> None:
-    """Two triangles over one shared edge: the amount-100 cycle precedes the amount-10 one.
-
-    The SQL detectors deliberately ORDER BY `LEAST(...) DESC` and `_deduplicate_cycles`
-    preserves first occurrence FOR that heuristic - but the first edition of the merge
-    sorted the union by length alone, so among same-length cycles DFS discovery order
-    (insertion order here) replaced the recorded heuristic.  Found by T1211: ordering IS
-    behavior, because auto_clear executes the first cycle that succeeds.
-
-    MUTATION THIS CATCHES: `final_cycles.sort(key=len)` - sorting the union by length only.
-    """
-
-    await _seed_graph(db_session, edges=_SHARED_EDGE)
-
-    service = ClearingService(db_session)
-    cycles = await service.find_cycles(_EQ, max_depth=6)
-
-    assert len(cycles) == 2, f"two triangles over the shared edge, got {len(cycles)}"
-    amounts = [min(Decimal(e["amount"]) for e in c) for c in cycles]
-    assert amounts == [Decimal("100"), Decimal("10")], (
-        f"within one length the union must rank by executable amount (min edge) descending, "
-        f"the recorded heuristic of the SQL detectors; got {amounts!r} - discovery order is "
-        f"deciding again, and with a shared edge that order decides which debts survive."
-    )
+# REMOVED 2026-10-09 (035 A2b): `test_within_a_length_the_largest_executable_cycle_comes_first` pinned the ORDER of
+# the detectors' union within one length (amount descending - `_cycle_order_key`), because `auto_clear` used to
+# execute the first cycle that succeeded. Nothing has executed from that list since 023 slice (d) and the list
+# itself is removed. What the order protected - which debts survive over a shared edge - is the next test's subject,
+# on the production pass and against the exhaustive oracle.
 
 
 async def _pass(db_session):
@@ -260,9 +224,8 @@ async def test_auto_clear_over_a_shared_edge_clears_the_large_cycle_and_leaves_t
 # DELETED 2026-09-28, programme 023 slice (d): `test_auto_clear_orders_the_union_when_the_sql_path_is_down` pinned
 # the ORDER in which `auto_clear` executed the union of the detectors' answers (SQL detectors down, the union sort
 # alone deciding which cycle ran first). Nothing executes from that list any more - the executor is the flow plan -
-# so the execution half has no subject. The union sort itself keeps its pin on the diagnostic answer:
-# `test_within_a_length_the_largest_executable_cycle_comes_first` above (the same mutation, `sort(key=len)`, reddens
-# it).
+# so the execution half has no subject. The union sort itself kept a pin on the diagnostic answer
+# (`test_within_a_length_the_largest_executable_cycle_comes_first`) until 035 A2b removed the union.
 
 
 @MODE_B

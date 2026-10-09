@@ -23,7 +23,7 @@ from tests.p023_support import TEST_PLAN_ID, occurrence_of, planned_cycles
 # 035 A2a (2026-10-08): the tests below that ask "which cycle is offered" or only need the stand's cycle to execute
 # read the PLANNER (`planned_cycles`: the decomposition of the flow plan on the session's snapshot) where they read
 # the retired detectors (`ClearingService.find_cycles`). Their assertions are unchanged. The one test of the
-# detectors themselves (`test_sql_and_dfs_produce_same_cycles`) still calls them and leaves with them (A2b).
+# detectors themselves (`test_sql_and_dfs_produce_same_cycles`) left with them 2026-10-09 (A2b).
 from tests.conftest import MODE_B, sessionmaker_of
 
 
@@ -312,58 +312,10 @@ async def test_no_trustline_means_no_consent(db_session):
     assert [len(cycle) for cycle in await planned_cycles(db_session, eq.code)] == [3]
 
 
-@pytest.mark.asyncio
-async def test_sql_and_dfs_produce_same_cycles(db_session, monkeypatch):
-    eq = _mk_eq("S")
-    a, b, c = _mk_participant("A"), _mk_participant("B"), _mk_participant("C")
-    db_session.add_all([eq, a, b, c])
-    await db_session.flush()
-
-    debts = [
-        Debt(debtor_id=a.id, creditor_id=b.id, equivalent_id=eq.id, amount=Decimal("10")),
-        Debt(debtor_id=b.id, creditor_id=c.id, equivalent_id=eq.id, amount=Decimal("10")),
-        Debt(debtor_id=c.id, creditor_id=a.id, equivalent_id=eq.id, amount=Decimal("10")),
-    ]
-    async with debt_fixture_setup(db_session, label="setup"):
-        db_session.add_all(debts)
-
-    await _add_controlling_trustlines(
-        db_session,
-        eq_id=eq.id,
-        edges=[(a, b), (b, c), (c, a)],
-        policy={"auto_clearing": True},
-    )
-    await db_session.commit()
-
-    service = ClearingService(db_session)
-
-    sql_cycles = await service.find_triangles_sql(eq.id)
-    sql_cycles = service._deduplicate_cycles(sql_cycles)
-    sql_cycles = await service._filter_cycles_by_auto_clearing_policy_sql(
-        sql_cycles, equivalent_id=eq.id
-    )
-
-    # Force DFS fallback by making SQL detectors fail.
-    async def _boom(*args, **kwargs):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(service, "find_triangles_sql", _boom)
-    monkeypatch.setattr(service, "find_quadrangles_sql", _boom)
-
-    dfs_cycles = await service.find_cycles(eq.code, max_depth=3)
-
-    def _norm_debt_id(val: str) -> str:
-        return uuid.UUID(str(val)).hex
-
-    sql_keys = {
-        tuple(sorted(_norm_debt_id(e["debt_id"]) for e in cycle)) for cycle in sql_cycles
-    }
-    dfs_keys = {
-        tuple(sorted(_norm_debt_id(e["debt_id"]) for e in cycle)) for cycle in dfs_cycles
-    }
-
-    assert sql_keys
-    assert sql_keys == dfs_keys
+# REMOVED 2026-10-09 (035 A2b): `test_sql_and_dfs_produce_same_cycles` compared the SQL triangle detector with the
+# DFS fallback on one consented triangle - two implementations of one answer agreeing. Both are removed; there is
+# one producer and nothing to compare. That this stand's triangle IS offered by the producer is the positive
+# control of `test_no_trustline_means_no_consent` above (same triangle, same lines).
 
 
 @pytest.mark.asyncio

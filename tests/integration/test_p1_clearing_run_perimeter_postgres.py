@@ -154,35 +154,8 @@ async def test_interlock_path_still_clears_for_the_owning_run(
     assert after == [], f"the owning run's cycle should be gone, got {after}"
 
 
-@pytest.mark.asyncio
-async def test_the_expanding_bind_works_on_postgresql(engine_bound_sessions) -> None:
-    """The SQL predicate must actually run here, not be masked by the DFS fallback.
-
-    `find_cycles` wraps the whole SQL block in a broad `except` and falls through to the DFS
-    producer, whose load is narrowed too - so a scoped-SQL that fails on this dialect still
-    yields a correct result, silently, after loading every debt of the equivalent.  The
-    binding is the dialect-specific part: raw `text()` needs an expanding bind for `IN`, and
-    the UUIDs go through `_bind_uuid`, which behaves differently on SQLite.  So the producer
-    is called directly here.
-    """
-
-    sessionmaker = engine_bound_sessions
-    _eq_code, eq_id, ids = await _seed(sessionmaker)
-
-    async with sessionmaker() as session:
-        service = ClearingService(session)
-
-        unscoped = await service.find_triangles_sql(eq_id)
-        assert len(unscoped) == 3, (
-            f"one triangle, one row per starting vertex: {unscoped}"
-        )
-
-        foreign = {ids["a1"], ids["a2"], ids["a3"]}
-        assert await service.find_triangles_sql(
-            eq_id, allowed_participant_ids=foreign
-        ) == [], "the SQL producer returned another run's cycle"
-
-        own = {ids["b1"], ids["b2"], ids["b3"]}
-        assert len(
-            await service.find_triangles_sql(eq_id, allowed_participant_ids=own)
-        ) == 3, "the predicate rejected the owning run as well"
+# REMOVED 2026-10-09 (035 A2b): `test_the_expanding_bind_works_on_postgresql` called `find_triangles_sql` directly to
+# show that its raw-SQL perimeter predicate (an expanding `IN` bind, `_bind_uuid`) really ran on this engine and was
+# not masked by `find_cycles`' fall-through to the DFS. The query, the bind and the fall-through are removed. The
+# live half - on this engine the owning perimeter sees its cycle and a foreign one sees nothing - is the two
+# `planned_cycles` assertions of `test_interlock_path_still_clears_for_the_owning_run` above.
