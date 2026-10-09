@@ -200,6 +200,7 @@ make the session green again:
   reason; one over other edges, one announced over a pass that cleared nothing, and one cleared by an earlier attempt of the same event; a clearing that announces nothing) and 3 in `tests/integration/test_p036_c_community_story_postgres.py`
   (the flag for injects off, a second run on the same database, a periodic clearing every 10 ticks); the anchors test was rewritten (same count) and the allowlist test of the shape module now says the story is NOT in the default list.
 * 2026-10-10, 035 slice A11 (a cancellation between admission and an outcome), on `f471e50f` (3613): 3613 -> 3619 (+6, all in `tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py`: three windows - the next attempt's first read, the backoff, the close of the failed attempt's session - each cancelled after an earlier admission, and each again without one as the control). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3619/3639`).
+* 2026-10-10, 035 slice A11, the product change: 3619 -> 3620 (+1, no new test: the float scan of `tests/unit/test_p012_t1211_money_path_never_types_a_float.py` builds its list from the tree and now also sees `PaymentService._record_cancelled_between_attempts(deadline: float)`, a clock value). Measured by the guard's own refusal on the full tier (`selected 3620 case(s), expected exactly 3619`).
   Measured with `python -m pytest --collect-only -q -m "not slow"` (`3613/3633`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
@@ -243,7 +244,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3619
+EXPECTED_SELECTED_ITEMS = 3620
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
