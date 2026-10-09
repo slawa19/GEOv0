@@ -424,8 +424,32 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # its enum value removed on both halves: 21 -> 18, the ego `allOf` difference unchanged). Measured with a per-entry
 # dump of every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed), differences
 # listed path by path for each changed entry: no other entry of any ledger differs.
+# 2026-10-09 / programme 036 slice A (`T3610`): count HOLDS at 61, digest moves. `GET /simulator/scenarios/{scenario_id}` now
+# answers `ScenarioDetail` (the summary plus `episodes[]` and `playback`) and `description` joins `ScenarioSummary`. ONE
+# entry changes content and none enters or leaves: `GET /simulator/scenarios/{scenario_id}` gains, besides the summary's
+# own differences it already had, the SAME classes the ledger already records elsewhere and no new one: `minimum` 0 against
+# FastAPI's 0.0 (`episodes[].index`, `.time_ms`, `.anchor.time_ms`), `required` of a defaulted model (`episodes` on the
+# detail, `pause_after` on an episode, `pids`/`edges` of a focus) and the default `false` of `pause_after`. The list and the
+# upload entries keep exactly the differences they had: `description` is declared on both halves and compares equal, and the
+# null-able blocks (`description`, `playback`, `focus`, `anchor`) use the `oneOf` + null branch the normaliser collapses.
+# Measured with a per-entry dump of the success ledger (`.local-run/p036a_dump_drift.py`, not committed), path by path.
+# Same day, second move, 036 slice A fix-delta (review of `1afe0b09`): count HOLDS at 61, digest moves. This is RECORDED DRIFT
+# GROWTH inside the one entry `GET /simulator/scenarios/{scenario_id}`, not an improvement - the first move above also
+# only added differences to that entry, and the entry count staying at 61 says nothing about how much is recorded in it. The
+# response models were tightened to the upload schema (non-empty texts, the playback ranges, strict types, the anchor
+# conditional) and the canon followed, so two classes already in this ledger gain members and one new member appears: the
+# canon-only `pattern` of `episodes[].anchor.amount` (the money grammar, with a lookahead pydantic 2.5.3 cannot emit; the
+# application enforces it with `re.fullmatch`), `minimum`/`maximum` written as integers against FastAPI's floats
+# (`playback.intensity_percent`, `playback.tick_seconds`), and the `required` of a defaulted model unchanged. List and upload
+# entries keep their differences. Measured with the per-entry dump (`.local-run/p036a_dump_drift.py`, not committed).
+# Third move, 036 slice A second fix-delta (review of `c2d84180`): count HOLDS at 61, digest moves, and NO difference is added to
+# the entry or removed from it. The entry hashes both complete response halves, and the focus edges changed on both: they were
+# the protected SSE edge reference (empty ends allowed) and are now the scenario's own `ScenarioFocusEdge` (both ends non-empty),
+# in the canon and in the model. The paths where the halves differ are the same as before the move (measured with the per-entry
+# dump, `.local-run/p036a_dump_drift.py`, not committed); like the two moves above, it is a change of recorded content, not an
+# improvement.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "69e65521edd83f28063b397ee292fafd37d21c74551d616fbc49e08d8e04713d"
+    "231823ac68bfc1160c6dc6ef37f9d5fa6cd7dc3233981ff7a995fec60976b768"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -594,8 +618,13 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # always gave, in the canon AND on the decorator, so it stays out of this dictionary. Measured with a per-entry dump of
 # every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
 # the removed key equals the new one entry by entry.
+# 2026-10-09 / programme 036 slice A fix-delta: count HOLDS at 46, digest moves. `GET /simulator/scenarios/{scenario_id}`
+# (already in this ledger for its older difference, the canon-only `404`) now declares the `409` a damaged stored story is
+# refused with, in the canon AND on the decorator, so the entry gains an EQUAL pair and no difference: the only path where the
+# two halves differ in the entry is still `/404`. Measured with the per-entry dump (`.local-run/p036a_dump_drift.py`, not
+# committed): the entry's differences before and after are the same one.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "7d2ff6d9a1a4e412f1b49ae0fcc643d4165bf46a47c5b555816e0608ac6dd971"
+    "5433fc719235af4728fea439419aeedfed115724d2f3f6cfe051145a1480974b"
 )
 ERROR_RESPONSE_DRIFT_COUNT = 46
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.

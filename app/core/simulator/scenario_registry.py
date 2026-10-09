@@ -17,6 +17,7 @@ from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
+from app.core.simulator.scenario_story import normalize_integral_numbers, story_errors
 from app.utils.exceptions import BadRequestException
 from app.utils.validation import validate_equivalent_code
 
@@ -102,6 +103,15 @@ def _scenario_equivalent_sources(raw: dict[str, Any]) -> Iterator[tuple[str, str
     for event_index, event in enumerate(raw.get("events") or []):
         if not isinstance(event, dict):
             continue
+        # 036: a `payment` / `clearing` event and an episode anchor name an equivalent too.
+        code = str(event.get("equivalent") or "").strip().upper()
+        if code:
+            yield f"events/{event_index}/equivalent", code
+        anchor = event.get("anchor")
+        if isinstance(anchor, dict):
+            code = str(anchor.get("equivalent") or "").strip().upper()
+            if code:
+                yield f"events/{event_index}/anchor/equivalent", code
         for effect_index, effect in enumerate(event.get("effects") or []):
             if not isinstance(effect, dict):
                 continue
@@ -153,6 +163,9 @@ def scenario_to_record(
     source_path: Optional[Path],
     created_at: Optional[datetime],
 ) -> ScenarioRecord:
+    # 036: the record, the runner and the REST projection see integers where the file has an integral number (`1000.0`).
+    # In memory only: the source file of a stored or shipped scenario is not rewritten.
+    normalize_integral_numbers(raw)
     _validate_scenario_equivalent_codes(raw)
 
     scenario_id = str(raw.get("scenario_id") or raw.get("id") or "").strip()
@@ -217,6 +230,15 @@ class ScenarioRegistry:
 
     def save_uploaded_scenario(self, scenario: dict[str, Any]) -> ScenarioRecord:
         validate_scenario_or_400(raw=scenario, schema_path=self._schema_path)
+        # 036: the schema checked the shape; the story (participants named, money, anchors) is checked by the one rule the
+        # REST projection also uses, after integral numbers are stored as integers. No database is read here.
+        normalize_integral_numbers(scenario)
+        story = story_errors(scenario)
+        if story:
+            raise BadRequestException(
+                "Scenario invalid",
+                details={"simulator_error": "SCENARIO_INVALID", "errors": story[:50]},
+            )
 
         raw_id = scenario.get("scenario_id")
         if raw_id is None or (isinstance(raw_id, str) and not raw_id.strip()):

@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    StrictInt,
+    constr,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from pydantic.config import ConfigDict
 
 
@@ -334,11 +344,25 @@ class ScenarioUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LocalizedText(BaseModel):
+    """A text of the scenario in both languages (036): the content lives in the scenario, not in the UI dictionary.
+
+    Both languages are non-empty text; the model is as strict as the upload schema (`localizedText`), so a damaged
+    stored scenario cannot be served in a weaker shape than it could have been uploaded in."""
+
+    ru: constr(strict=True, min_length=1)  # type: ignore[valid-type]
+    en: constr(strict=True, min_length=1)  # type: ignore[valid-type]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ScenarioSummary(BaseModel):
     api_version: str = Field(default=SIMULATOR_API_VERSION)
 
     scenario_id: str
     name: Optional[str] = None
+    # 036: always the pair; a scenario whose description is a plain string serves it as both languages.
+    description: Optional[LocalizedText] = None
     created_at: Optional[datetime] = None
 
     participants_count: int = Field(ge=0)
@@ -350,6 +374,114 @@ class ScenarioSummary(BaseModel):
     tags: Optional[List[str]] = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+#: A participant id named by a story: non-empty text (the reference to a declared participant is checked on the raw
+#: scenario, `app/core/simulator/scenario_story.py`).
+ScenarioPid = constr(strict=True, min_length=1)
+
+#: The money grammar of a scripted amount and of an anchor amount (spec 036; the product's money door): plain digits, at
+#: most 18 fraction digits, at most 50 digits in all, no sign, exponent or space, nothing after the last digit. The same
+#: expression is `amount.pattern` of the scenario schema and of the canon (`(?![\s\S])` is "end of string": `$` would let
+#: a terminal newline through).
+SCENARIO_AMOUNT_PATTERN = r"(?!(?:\.?[0-9]){51})[0-9]+(?:\.[0-9]{1,18})?"
+_SCENARIO_AMOUNT_RE = re.compile(SCENARIO_AMOUNT_PATTERN)
+
+
+def scenario_amount_is_well_formed(value: Any) -> bool:
+    return isinstance(value, str) and _SCENARIO_AMOUNT_RE.fullmatch(value) is not None
+
+
+class ScenarioFocusEdge(BaseModel):
+    """An edge the camera is pointed at. Its own model, not the SSE `SimulatorEventEdgeRef` (a protected wire shape that
+    accepts empty ends): both ends are non-empty, and the Python spelling `from_` is NOT accepted as input - the wire and
+    the scenario schema have only `from`, and a spelling the reference check does not read must not be one the model takes."""
+
+    from_: ScenarioPid = Field(alias="from")
+    to: ScenarioPid
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioEpisodeFocus(BaseModel):
+    pids: List[ScenarioPid] = Field(default_factory=list)
+    edges: List[ScenarioFocusEdge] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioEpisodeAnchor(BaseModel):
+    """The event whose arrival shows the caption. Per spec 036 a `tx.updated` anchor names `from`, `to`, `amount` and
+    `equivalent`; a `tx.failed` anchor names `from`, `to` and `equivalent` and NO amount (the SSE event has none);
+    `clearing.done` and `topology.changed` need only the event name."""
+
+    event: Literal["tx.updated", "tx.failed", "clearing.done", "topology.changed"]
+    from_: Optional[ScenarioPid] = Field(default=None, alias="from")
+    to: Optional[ScenarioPid] = None
+    amount: Optional[str] = None
+    equivalent: Optional[constr(strict=True, min_length=1)] = None  # type: ignore[valid-type]
+    time_ms: Optional[StrictInt] = Field(default=None, ge=0)
+
+    # 'from' (not 'from_') on the wire: the response route dumps by alias; a direct dump uses `by_alias=True`
+    # (`serialize_by_alias` of the sibling edge models is a pydantic 2.11 setting and a no-op on the pinned 2.5.3).
+    # No `populate_by_name`: `from_` in a source is an unknown key, so the reference check, which reads `from`, sees every
+    # participant the model would have taken.
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("amount")
+    @classmethod
+    def _amount_is_the_scenario_money_grammar(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not scenario_amount_is_well_formed(value):
+            raise ValueError("amount must be a plain decimal string: digits, at most 18 fraction digits, 50 digits in all")
+        return value
+
+    @model_validator(mode="after")
+    def _the_fields_the_event_is_matched_on(self) -> "ScenarioEpisodeAnchor":
+        if self.event == "tx.updated":
+            required = {"from": self.from_, "to": self.to, "amount": self.amount, "equivalent": self.equivalent}
+        elif self.event == "tx.failed":
+            required = {"from": self.from_, "to": self.to, "equivalent": self.equivalent}
+            if self.amount is not None:
+                raise ValueError("a tx.failed anchor has no amount (the event carries none)")
+        else:
+            return self
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise ValueError(f"a {self.event} anchor names {', '.join(required)}; missing: {', '.join(missing)}")
+        return self
+
+
+class ScenarioEpisode(BaseModel):
+    """One event of the scenario that carries a caption (036). `index` is its position in the scenario's `events[]`."""
+
+    index: StrictInt = Field(ge=0)
+    time_ms: StrictInt = Field(ge=0)
+    caption: LocalizedText
+    pause_after: StrictBool = False
+    kind: Literal["payment", "clearing", "stress", "inject", "note"]
+    focus: Optional[ScenarioEpisodeFocus] = None
+    anchor: Optional[ScenarioEpisodeAnchor] = None
+    expected_cycle: Optional[List[ScenarioPid]] = Field(default=None, min_length=2)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioPlayback(BaseModel):
+    """`settings.playback` of the scenario as written; an absent field is null, no default is invented here.
+    The ranges are those of the upload schema."""
+
+    tick_seconds: Optional[float] = Field(default=None, ge=0.25, le=5, strict=True)
+    intensity_percent: Optional[StrictInt] = Field(default=None, ge=0, le=100)
+    inject_enabled: Optional[StrictBool] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioDetail(ScenarioSummary):
+    """`GET /simulator/scenarios/{scenario_id}`: the summary plus the story (036). The list does not carry it."""
+
+    episodes: List[ScenarioEpisode] = Field(default_factory=list)
+    playback: Optional[ScenarioPlayback] = None
 
 
 class ScenariosListResponse(BaseModel):
