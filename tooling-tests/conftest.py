@@ -120,8 +120,12 @@ _HERE = Path(__file__).resolve().parent
 #: tx.updated / tx.failed anchor requirements (6 refusals), the money grammar of `amount` (7 refusals: 19 fraction digits, 51
 #: digits, a terminal newline, an exponent, an Arabic-Indic digit, on the payment and on the anchor), their boundary controls (5), a complete
 #: tx.failed anchor (1).
+#:
+#: 2026-10-09, 036 slice C (`T3630`): portable 252 -> 254. The new live fixture `community-story-10` is one more parametrised case of
+#: `test_every_live_fixture_validates_against_the_schema` (+1), and `test_the_validator_refuses_a_broken_community_story` shows the guard is
+#: not blind to it (+1); the live-set test only changed its list.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 252,
+    "portable": 254,
     "powershell": 235,
 }
 
