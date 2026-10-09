@@ -39,6 +39,7 @@ function paymentSuccess(): SimulatorActionPaymentRealResponse {
     amount: '1.00',
     equivalent: 'UAH',
     status: 'COMMITTED',
+    routes: [],
   }
 }
 

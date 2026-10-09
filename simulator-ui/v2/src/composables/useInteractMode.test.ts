@@ -47,6 +47,7 @@ describe('useInteractMode', () => {
       equivalent: 'UAH',
       amount: '1.00',
       status: 'accepted',
+      routes: [],
     }
   }
 

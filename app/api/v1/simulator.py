@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import secrets
 import logging
@@ -35,7 +36,12 @@ from app.core.clearing.runner import (
 )
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
-from app.core.payments.service import PaymentService, public_refusal_details, public_refusal_message
+from app.core.payments.service import (
+    PaymentService,
+    public_error_of_stored,
+    public_refusal_details,
+    public_refusal_message,
+)
 from app.core.simulator.edge_patch_builder import EdgePatchBuilder, line_pairs_of_payment_hops
 from app.core.simulator.inject_executor import SIMULATED_TRUSTLINE_POLICY
 from app.core.simulator.real_scenario_seeder import (
@@ -55,6 +61,7 @@ from app.core.simulator.viz_patch_helper import VizPatchHelper
 from app.db.models.debt import Debt
 from app.db.models.equivalent import Equivalent
 from app.db.models.participant import Participant
+from app.db.models.transaction import Transaction
 from app.db.models.trustline import TrustLine
 from app.schemas.simulator import (
     ActiveRunResponse,
@@ -85,8 +92,10 @@ from app.schemas.simulator import (
     SimulatorActionTrustlineUpdateResponse,
     SimulatorActionTrustlineCloseRequest,
     SimulatorActionTrustlineCloseResponse,
+    SimulatorActionPaymentHop,
     SimulatorActionPaymentRealRequest,
     SimulatorActionPaymentRealResponse,
+    SimulatorActionPaymentRoute,
     SimulatorActionClearingRealRequest,
     SimulatorActionClearingRealResponse,
     SimulatorActionClearingCycle,
@@ -1643,6 +1652,42 @@ async def action_trustline_close(
     )
 
 
+def manual_payment_tx_id(run_id: str, client_key: str) -> str:
+    """The `tx_id` (and idempotency key) the core sees for a manual payment sent with a client key (037 A1).
+
+    The core keys a payment by `tx_id`, globally and run-blind, and simulator participants are shared by `pid` between
+    runs and owners; a raw client key would hand one run the stored payment of another. So the key is only an INPUT:
+    the identity is derived from the run id and the key, with its own prefix (`sim:` is the tick's and the scripted
+    event's, `man:` is this one's). The launch epoch is NOT part of it: a manual key is unique per intent, a restart
+    undoes no debt, and a retry after a restart must return the payment that was made.
+    """
+    material = "manual|" + run_id + "|" + client_key
+    return "man:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
+    """Every route the core recorded for `result`: adjacent pairs of each `path`, the route's amount on each step.
+
+    Nothing is invented: a result without routes, a route shorter than one step or an amount that is not a decimal
+    string yields no entry for it (an empty list when none is left), never a direct route made up from the endpoints.
+    """
+    out: list[SimulatorActionPaymentRoute] = []
+    for route in getattr(result, "routes", None) or []:
+        try:
+            path = [str(pid) for pid in route.path]
+            amount = format(Decimal(str(route.amount)), "f")
+        except Exception:
+            continue
+        if len(path) < 2:
+            continue
+        out.append(
+            SimulatorActionPaymentRoute(
+                hops=[SimulatorActionPaymentHop(from_=a, to=b, amount=amount) for a, b in zip(path, path[1:])]
+            )
+        )
+    return out
+
+
 @router.post(
     "/runs/{run_id}/actions/payment-real",
     response_model=SimulatorActionPaymentRealResponse,
@@ -1676,6 +1721,9 @@ async def action_payment_real(
         return err
     assert parties is not None
     scoped_pids, from_p, to_p, eq = parties.scoped_pids, parties.from_p, parties.to_p, parties.eq
+    # Plain values from here on: a payment that lost an insert race is settled by a rollback of the request's session,
+    # which expires every ORM object loaded before it, and reading an attribute of one would be a lazy load (500).
+    eq_code, from_pid, to_pid = str(eq.code), str(from_p.pid), str(to_p.pid)
 
     # Amount validation per spec.
     try:
@@ -1690,16 +1738,33 @@ async def action_payment_real(
     if (err := _step_error_or_none(amount_dec, eq, field="amount", raw=req.amount)) is not None:
         return err
 
+    # 037 A1: with a client key the core is handed the DERIVED identity (`manual_payment_tx_id`), never the raw key.
+    tx_id_hint: str | None = None
+    already_stored = False
+    if req.idempotency_key is not None:
+        tx_id_hint = manual_payment_tx_id(run_id, req.idempotency_key)
+        # A HINT for the publication only. The service is called either way, so its identity, fingerprint and
+        # perimeter checks decide what the request gets; this read decides nothing but whether to publish again.
+        already_stored = (
+            await db.execute(select(Transaction.id).where(Transaction.tx_id == tx_id_hint).limit(1))
+        ).first() is not None
+
     try:
         service = PaymentService(db)
         res = await service.create_payment_internal(
             from_p.id,
-            to_pid=to_p.pid,
-            equivalent=eq.code,
+            to_pid=to_pid,
+            equivalent=eq_code,
             amount=req.amount,
-            idempotency_key=None,
+            idempotency_key=tx_id_hint,
             allowed_participant_pids=scoped_pids,
         )
+        # The service also RETURNS a stored refusal (`ABORTED`) without raising: that is not a payment. It answers
+        # through the same mapping below as the refusal did when it was first raised.
+        if str(res.status) != "COMMITTED":
+            raise public_error_of_stored(res) or GeoException(
+                "The stored payment is not committed", code=ErrorCode.E010, status_code=500
+            )
     except RetryablePaymentConflictException as exc:
         return _action_error(
             status_code=exc.status_code,
@@ -1720,9 +1785,9 @@ async def action_payment_real(
             code=code,
             message=exc.message,
             details={
-                "equivalent": eq.code,
-                "from_pid": from_p.pid,
-                "to_pid": to_p.pid,
+                "equivalent": eq_code,
+                "from_pid": from_pid,
+                "to_pid": to_pid,
                 "requested": req.amount,
                 **reason,
             },
@@ -1732,7 +1797,7 @@ async def action_payment_real(
             status_code=503,
             code="ENGINE_TIMEOUT",
             message=str(getattr(exc, "message", None) or "Engine timeout"),
-            details={"equivalent": eq.code, "from_pid": from_p.pid, "to_pid": to_p.pid, "reason": "timeout"},
+            details={"equivalent": eq_code, "from_pid": from_pid, "to_pid": to_pid, "reason": "timeout"},
         )
     except GeoException as exc:
         # Best-effort mapping for unexpected business errors.
@@ -1744,68 +1809,72 @@ async def action_payment_real(
         )
 
     # Success: emit best-effort tx.updated SSE. `run` already fetched by _get_run_checked above.
+    # Only for a payment THIS request made as far as the hint can tell (037 A1): a replay of a stored payment moved no
+    # money and must not fly again. Two concurrent identical requests may both publish (accepted residual race).
     closed: set[tuple[str, str]] = set()
-    try:
-        emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
-
-        edges: list[dict[str, Any]] = []
+    if not already_stored:
         try:
-            routes = res.routes or []
-            if routes:
-                path = routes[0].path
-                edges = [{"from": str(a), "to": str(b)} for a, b in zip(path, path[1:])]
+            emitter = SseEventEmitter(sse=runtime._sse, utc_now=_utc_now, logger=logger)  # type: ignore[attr-defined]
+
+            edges: list[dict[str, Any]] = []
+            try:
+                routes = res.routes or []
+                if routes:
+                    path = routes[0].path
+                    edges = [{"from": str(a), "to": str(b)} for a, b in zip(path, path[1:])]
+            except Exception:
+                edges = []
+            if not edges:
+                edges = [{"from": from_pid, "to": to_pid}]
+
+            edges_pairs: list[tuple[str, str]] = []
+            for e in edges:
+                a = str(e.get("from") or "").strip()
+                b = str(e.get("to") or "").strip()
+                if a and b:
+                    edges_pairs.append((a, b))
+
+            edge_patch, node_patch = await _compute_viz_patches_best_effort(
+                session=db,
+                run=run,
+                equivalent_code=eq_code,
+                # The LINES of the route's hops (payee -> payer and its reverse), not the hops themselves: 034 S1b.
+                edges_pairs=line_pairs_of_payment_hops(edges_pairs),
+                closed=closed,
+            )
+
+            emitter.emit_tx_updated(
+                run_id=run_id,
+                run=run,
+                equivalent=eq_code,
+                from_pid=from_pid,
+                to_pid=to_pid,
+                amount=req.amount,
+                amount_flyout=True,
+                ttl_ms=1200,
+                edges=edges,
+                node_badges=None,
+                edge_patch=edge_patch,
+                node_patch=node_patch,
+            )
         except Exception:
-            edges = []
-        if not edges:
-            edges = [{"from": from_p.pid, "to": to_p.pid}]
-
-        edges_pairs: list[tuple[str, str]] = []
-        for e in edges:
-            a = str(e.get("from") or "").strip()
-            b = str(e.get("to") or "").strip()
-            if a and b:
-                edges_pairs.append((a, b))
-
-        edge_patch, node_patch = await _compute_viz_patches_best_effort(
-            session=db,
-            run=run,
-            equivalent_code=eq.code,
-            # The LINES of the route's hops (payee -> payer and its reverse), not the hops themselves: 034 S1b.
-            edges_pairs=line_pairs_of_payment_hops(edges_pairs),
-            closed=closed,
-        )
-
-        emitter.emit_tx_updated(
-            run_id=run_id,
-            run=run,
-            equivalent=eq.code,
-            from_pid=from_p.pid,
-            to_pid=to_p.pid,
-            amount=req.amount,
-            amount_flyout=True,
-            ttl_ms=1200,
-            edges=edges,
-            node_badges=None,
-            edge_patch=edge_patch,
-            node_patch=node_patch,
-        )
-    except Exception:
-        # TODO(interact): use VizPatchHelper + EdgePatchBuilder.build_edge_patch_for_pairs for immediate UI updates.
-        logger.warning(
-            "Best-effort SSE emission failed: interact.payment_real run_id=%s",
-            run_id,
-            exc_info=True,
-        )
-    # 026 `T2603.2`: the payment is committed (`create_payment_internal`); a line its book operation closed leaves.
-    await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=eq.code, pairs=closed)
+            # TODO(interact): use VizPatchHelper + EdgePatchBuilder.build_edge_patch_for_pairs for immediate UI updates.
+            logger.warning(
+                "Best-effort SSE emission failed: interact.payment_real run_id=%s",
+                run_id,
+                exc_info=True,
+            )
+        # 026 `T2603.2`: the payment is committed (`create_payment_internal`); a line its book operation closed leaves.
+        await _publish_closed_best_effort(run_id=run_id, run=run, equivalent=eq_code, pairs=closed)
 
     return SimulatorActionPaymentRealResponse(
         payment_id=str(res.tx_id),
-        from_pid=from_p.pid,
-        to_pid=to_p.pid,
-        equivalent=eq.code,
+        from_pid=from_pid,
+        to_pid=to_pid,
+        equivalent=eq_code,
         amount=str(req.amount),
         status=str(res.status),
+        routes=_payment_routes_of(res),
         client_action_id=req.client_action_id,
     )
 

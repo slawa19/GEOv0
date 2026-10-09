@@ -179,6 +179,7 @@ function paymentRealSuccess(req: PaymentRealReq): ActionResult {
       equivalent: req.equivalent,
       amount: String(req.amount),
       status: 'committed',
+      routes: [],
       client_action_id: req.client_action_id ?? null,
     },
   }

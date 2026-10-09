@@ -299,6 +299,15 @@ const uncheckedActionCases = [
       equivalent: 'UAH',
       amount: '12.50000000',
       status: 'committed',
+      // 037 A1: two steps of one route, named, with the route's amount on each.
+      routes: [
+        {
+          hops: [
+            { from: 'alice', to: 'carol', amount: '12.50000000' },
+            { from: 'carol', to: 'bob', amount: '12.50000000' },
+          ],
+        },
+      ],
       client_action_id: null,
     },
     call: () =>
@@ -605,6 +614,33 @@ describe('Simulator critical REST response contracts', () => {
       call: () => getMetrics(cfg, 'run-1', 'UAH', metricsQuery),
       contract: 'metrics',
       diagnostic: '$.step_ms',
+    },
+    {
+      label: 'payment-real answer without routes',
+      payload: { ok: true, payment_id: 'p1', from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', amount: '1', status: 'COMMITTED' },
+      call: () => actionPaymentReal(cfg, 'run-1', { from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', amount: '1' }),
+      contract: 'action-payment-real',
+      diagnostic: '$.routes',
+    },
+    {
+      label: 'payment-real hop with the python-side from_ alias',
+      payload: {
+        ok: true, payment_id: 'p1', from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', amount: '1', status: 'COMMITTED',
+        routes: [{ hops: [{ from_: 'alice', to: 'bob', amount: '1' }] }],
+      },
+      call: () => actionPaymentReal(cfg, 'run-1', { from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', amount: '1' }),
+      contract: 'action-payment-real',
+      diagnostic: '$.routes[0].hops[0].from_',
+    },
+    {
+      label: 'payment-real hop amount that is not a decimal string',
+      payload: {
+        ok: true, payment_id: 'p1', from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', amount: '1', status: 'COMMITTED',
+        routes: [{ hops: [{ from: 'alice', to: 'bob', amount: 1 }] }],
+      },
+      call: () => actionPaymentReal(cfg, 'run-1', { from_pid: 'alice', to_pid: 'bob', equivalent: 'UAH', amount: '1' }),
+      contract: 'action-payment-real',
+      diagnostic: '$.routes[0].hops[0].amount',
     },
     {
       label: 'legacy bottleneck item shape',

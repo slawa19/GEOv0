@@ -834,6 +834,31 @@ class SimulatorActionPaymentRealRequest(BaseModel):
     equivalent: str
     amount: str
     client_action_id: Optional[str] = None
+    # 037 A1: the client's key of one payment INTENT. Optional: without it the payment has no replay guarantee (a fresh
+    # `tx_id` per call, as before). Strict string, no trimming or case folding - the key is only an input of the
+    # handler's `tx_id` derivation (`manual_payment_tx_id`), and the grammar is the one `tx_id` itself has so that
+    # nothing the handler derives from it can be refused later by the core.
+    idempotency_key: Optional[str] = Field(
+        default=None, strict=True, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SimulatorActionPaymentHop(BaseModel):
+    """One step of a route of a committed payment: `from` -> `to`, carrying `amount` (a decimal string)."""
+
+    from_: str = Field(alias="from")
+    to: str
+    amount: str
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class SimulatorActionPaymentRoute(BaseModel):
+    """One route the core used for the payment: its steps in order, each with the route's amount."""
+
+    hops: List[SimulatorActionPaymentHop]
 
     model_config = ConfigDict(extra="forbid")
 
@@ -846,6 +871,8 @@ class SimulatorActionPaymentRealResponse(BaseModel):
     equivalent: str
     amount: str
     status: str
+    # 037 A1: every route the core recorded for the payment (empty when it recorded none - no route is invented).
+    routes: List[SimulatorActionPaymentRoute]
     client_action_id: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")

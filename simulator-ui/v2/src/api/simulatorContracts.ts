@@ -31,6 +31,7 @@ import type {
   SimulatorActionClearingRealResponse,
   SimulatorActionParticipantsListResponse,
   SimulatorActionPaymentRealResponse,
+  SimulatorActionPaymentRoute,
   SimulatorActionTrustlineCloseResponse,
   SimulatorActionTrustlineCreateResponse,
   SimulatorActionTrustlineUpdateResponse,
@@ -740,6 +741,7 @@ function decodePaymentReal(value: unknown, path: string): SimulatorActionPayment
     'equivalent',
     'amount',
     'status',
+    'routes',
     'client_action_id',
   ])
   requireOk(raw, path)
@@ -751,7 +753,27 @@ function decodePaymentReal(value: unknown, path: string): SimulatorActionPayment
     equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
     amount: decimalStringAt(raw.amount, `${path}.amount`),
     status: stringAt(raw.status, `${path}.status`),
+    routes: arrayAt(raw.routes, `${path}.routes`).map((route, index) =>
+      decodePaymentRoute(route, `${path}.routes[${index}]`),
+    ),
     ...clientActionId(raw, path),
+  }
+}
+
+function decodePaymentRoute(value: unknown, path: string): SimulatorActionPaymentRoute {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['hops'])
+  return {
+    hops: arrayAt(raw.hops, `${path}.hops`).map((hop, index) => {
+      const hopPath = `${path}.hops[${index}]`
+      const item = objectAt(hop, hopPath)
+      onlyKeys(item, hopPath, ['from', 'to', 'amount'])
+      return {
+        from: stringAt(item.from, `${hopPath}.from`),
+        to: stringAt(item.to, `${hopPath}.to`),
+        amount: decimalStringAt(item.amount, `${hopPath}.amount`),
+      }
+    }),
   }
 }
 

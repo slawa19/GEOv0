@@ -189,6 +189,8 @@ export type SimulatorActionPaymentRealRequest = {
   equivalent: string
   amount: string
   client_action_id?: string | null
+  /** 037 A1: the key of one payment intent (1-128 of `[A-Za-z0-9._:-]`); the server scopes it to the run. */
+  idempotency_key?: string | null
 }
 
 export type SimulatorActionPaymentRealResponse = {
@@ -199,7 +201,20 @@ export type SimulatorActionPaymentRealResponse = {
   equivalent: string
   amount: string
   status: string
+  /** 037 A1: every route the core recorded, step by step; empty when it recorded none. */
+  routes: SimulatorActionPaymentRoute[]
   client_action_id?: string | null
+}
+
+export type SimulatorActionPaymentHop = {
+  from: string
+  to: string
+  /** The route's amount (a decimal string) carried by this step. */
+  amount: string
+}
+
+export type SimulatorActionPaymentRoute = {
+  hops: SimulatorActionPaymentHop[]
 }
 
 export type SimulatorActionEdgeRef = {

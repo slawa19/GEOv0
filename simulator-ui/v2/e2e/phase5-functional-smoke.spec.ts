@@ -355,6 +355,7 @@ async function installRealMocks(
         equivalent: 'UAH',
         amount: body.amount,
         status: 'committed',
+        routes: [],
       })
       return
     }

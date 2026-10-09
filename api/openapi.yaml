@@ -3733,17 +3733,30 @@ components:
         client_action_id:
           type: string
           nullable: true
+        idempotency_key:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+          description: >-
+            The client's key of one payment intent (037). The server derives the payment's `tx_id` from the run and this
+            key (`man:` + a digest), so the key is scoped to the run it is sent to. A repeat of the same run, key and
+            body answers the stored payment and moves no money; the same key with another sender, receiver, equivalent
+            or amount (the amount's SPELLING counts: `10` and `10.00` differ) is refused 409 `tx_id_reused`. Without a
+            key a repeat is a new payment.
 
     SimulatorActionPaymentRealResponse:
       type: object
       additionalProperties: false
-      required: [payment_id, from_pid, to_pid, equivalent, amount, status]
+      required: [payment_id, from_pid, to_pid, equivalent, amount, status, routes]
       properties:
         ok:
           type: boolean
           default: true
         payment_id:
           type: string
+          description: The core's `tx_id` of the payment; for a request with a key, the derived `man:` identity.
         from_pid:
           type: string
         to_pid:
@@ -3754,9 +3767,38 @@ components:
           type: string
         status:
           type: string
+        routes:
+          type: array
+          description: >-
+            Every route the core recorded for the payment, in the order it recorded them. Empty when it recorded none.
+          items:
+            $ref: '#/components/schemas/SimulatorActionPaymentRoute'
         client_action_id:
           type: string
           nullable: true
+
+    SimulatorActionPaymentRoute:
+      type: object
+      additionalProperties: false
+      required: [hops]
+      properties:
+        hops:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorActionPaymentHop'
+
+    SimulatorActionPaymentHop:
+      type: object
+      additionalProperties: false
+      required: [from, to, amount]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        amount:
+          type: string
+          description: The route's amount (a decimal string), carried by this step.
 
     SimulatorActionClearingRealRequest:
       type: object
