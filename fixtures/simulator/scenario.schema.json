@@ -318,11 +318,6 @@
           "type": "array",
           "items": { "type": "object", "additionalProperties": true }
         },
-        "params": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Event-type-specific parameters. For stress events: multiplier (number), duration_ms (integer), label (string)"
-        },
         "metadata": { "type": "object", "additionalProperties": true }
       },
       "allOf": [

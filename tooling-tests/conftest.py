@@ -110,13 +110,13 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-08, 035 slice C1 review fix-delta: portable 200 -> 201. One case added to the same module: a collection error on the
 #: canonical profile stays pytest's exit 2 (reproducer red on 7edf4cb8, exit 4 "a test was lost").
 #:
-#: 2026-10-09, 036 slice A (F-036-1, F-036-5): portable 201 -> 232. Thirty-one cases added,
+#: 2026-10-09, 036 slice A (F-036-1, F-036-5): portable 201 -> 233. Thirty-two cases added,
 #: `portable/test_p036_a_scenario_schema_and_the_live_fixtures.py`: the live set (1), each live fixture validates
 #: against the scenario schema (5), the validator refuses a broken live fixture (1), the archive's only schema failure is its
-#: string time (1), the story scenario validates (1), twenty-one one-mutation refusals of the new episode fields, the string
+#: string time (1), the story scenario validates (1), twenty-two one-mutation refusals of the new episode fields, the removed `params` block (F-036-3), the string
 #: time and `settings.playback`, and the compatibility case (older string description, no captions) (1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 232,
+    "portable": 233,
     "powershell": 235,
 }
 

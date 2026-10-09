@@ -331,11 +331,6 @@ def _make_seasonal_stress_events() -> list[dict[str, Any]]:
             "type": "stress",
             "label": "weekend_market",
             "description": "Weekend market day — increased consumer activity",
-            "params": {
-                "multiplier": 1.3,
-                "duration_ms": 30000,
-                "label": "weekend_market",
-            },
             "effects": [
                 {"op": "mult", "field": "tx_rate", "scope": "group:households", "value": 1.5},
                 {"op": "mult", "field": "tx_rate", "scope": "group:retail", "value": 1.3},
@@ -347,11 +342,6 @@ def _make_seasonal_stress_events() -> list[dict[str, Any]]:
             "type": "stress",
             "label": "quiet_period",
             "description": "Midweek quiet period — reduced economic activity",
-            "params": {
-                "multiplier": 0.7,
-                "duration_ms": 20000,
-                "label": "quiet_period",
-            },
             "effects": [
                 {"op": "mult", "field": "tx_rate", "scope": "all", "value": 0.7},
             ],
@@ -362,11 +352,6 @@ def _make_seasonal_stress_events() -> list[dict[str, Any]]:
             "type": "stress",
             "label": "harvest_festival",
             "description": "Harvest festival — peak seasonal demand, producers and retail booming",
-            "params": {
-                "multiplier": 1.8,
-                "duration_ms": 40000,
-                "label": "harvest_festival",
-            },
             "effects": [
                 {"op": "mult", "field": "tx_rate", "scope": "group:producers", "value": 2.0},
                 {"op": "mult", "field": "tx_rate", "scope": "group:retail", "value": 1.8},
@@ -379,11 +364,6 @@ def _make_seasonal_stress_events() -> list[dict[str, Any]]:
             "type": "stress",
             "label": "winter_lull",
             "description": "Winter lull — minimal economic activity, people stay home",
-            "params": {
-                "multiplier": 0.5,
-                "duration_ms": 15000,
-                "label": "winter_lull",
-            },
             "effects": [
                 {"op": "mult", "field": "tx_rate", "scope": "all", "value": 0.5},
             ],

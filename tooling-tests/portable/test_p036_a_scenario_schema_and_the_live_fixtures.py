@@ -159,7 +159,8 @@ REFUSED = [
     ("playback tick above the ceiling", _set(["settings", "playback", "tick_seconds"], 6), "settings/playback/tick_seconds"),
     ("playback intensity over 100", _set(["settings", "playback", "intensity_percent"], 101), "settings/playback/intensity_percent"),
     ("playback unknown key", _set(["settings", "playback", "speed"], 2), "settings/playback"),
-    ("description without en", _set(["description"], {"ru": "x"}), "description"),
+    ("an event with the removed params block", _set(["events", 0, "params"], {"multiplier": 1.3}), "events/0"),
+    ("description without en",_set(["description"], {"ru": "x"}), "description"),
 ]
 
 

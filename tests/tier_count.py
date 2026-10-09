@@ -156,10 +156,10 @@ make the session green again:
   `python -m pytest --collect-only -q -m "not slow"` (`3303/3318 tests collected`).
 * 2026-10-09, 034 slice S2b merged after 035 A2b (`origin/main` `94891571`, 3275): 3275 -> 3285 (+10, the three S2b modules: 4 + 3 + 3; the S2b lines above are those of the branch before the merge). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 034 slice S2b merged after the money-storability fix (`origin/main` at the merge of PR #188, 3339): 3339 -> 3349 (+10, the three S2b modules above; the numbers in the S2b lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
-* 2026-10-09, 036 slice A (`T3610`), on `origin/main` `71c66dda` (3349): 3349 -> 3367 (+18). New: `tests/unit/test_p036_a_episodes_projection.py` (6),
+* 2026-10-09, 036 slice A (`T3610`), on `origin/main` `71c66dda` (3349): 3349 -> 3369 (+20). New: `tests/unit/test_p036_a_episodes_projection.py` (6),
   `tests/integration/test_p036_a_scenario_detail_serves_the_story.py` (6), `tests/integration/test_p036_t3601_time_token_is_refused_at_upload.py` (4: the token, its control, and the two equivalent sources of the new event fields) and
-  `tests/unit/test_p036_t3601_fixture_controls.py` (2, the stress-multiplier control). Measured with
-  `python -m pytest --collect-only -q -m "not slow"` (`3367/3382 tests collected`); the guard refused the collection first (exit 4).
+  `tests/unit/test_p036_t3601_fixture_controls.py` (4, the pinned stress multipliers and the absent `params`). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3369/3384 tests collected`); the guard refused the collection first (exit 4).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -202,7 +202,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3367
+EXPECTED_SELECTED_ITEMS = 3369
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
