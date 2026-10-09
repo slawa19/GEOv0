@@ -2306,8 +2306,8 @@ async def payment_targets(
 
     # Programme 024 (external review P2): a read of the run, confined like its money path.
     # `from_pid` is resolved within the run perimeter, and the router instance is narrowed to it
-    # with the payment service's own mechanism (`allowed_participant_pids` ->
-    # `_confine_router_to_perimeter`), so no target, hop or capacity outside the run - and no
+    # with the mechanism the payment service uses for `allowed_participant_pids`
+    # (`PaymentRouter.confine_to_participants`), so no target, hop or capacity outside the run - and no
     # route THROUGH a participant outside it - is computed at all.
     scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
     if not perimeter_available:
@@ -2322,35 +2322,17 @@ async def payment_targets(
     # Build the capacity graph (edges included only if capacity > 0).
     router = PaymentRouter(db)
     await router.build_graph(eq.code)
-    PaymentService._confine_router_to_perimeter(router, scoped_pids)
+    router.confine_to_participants(scoped_pids)
 
+    # 034 S2 (F-034-11): the router's own public answer (035 A6) - policy-aware reachability, nearest first then by
+    # pid, cut by `limit`. Until then this route ran that loop itself over the router's private search. `limit` is
+    # at least 1 here (the query refuses 0), so the old loop's "zero means no cut" has no caller.
     src = str(from_p.pid)
-    if src not in (router.graph or {}):
-        return SimulatorPaymentTargetsResponse(items=[])
-
-    # Evaluate reachability per target using router's BFS (policy-aware), then sort by hops.
-    results: list[tuple[int, str, list[str]]] = []  # (hops, to_pid, path)
-    for to_pid in (router.graph or {}).keys():
-        dst = str(to_pid)
-        if not dst or dst == src:
-            continue
-
-        path = router._bfs_single_path(src, dst, Decimal("0"), max_hops=int(max_hops))
-        if not path:
-            continue
-
-        hops = max(0, len(path) - 1)
-        if hops <= 0:
-            continue
-
-        results.append((hops, dst, path))
-
-    results.sort(key=lambda x: (x[0], x[1]))
-    if limit and len(results) > int(limit):
-        results = results[: int(limit)]
+    targets = router.payment_targets(src, max_hops=int(max_hops), limit=int(limit))
 
     items: list[SimulatorPaymentTargetsItem] = []
-    for hops, dst, path in results:
+    for target in targets:
+        hops, dst = target.hops, target.to_pid
         max_avail: str | None = None
         if include_max_available:
             # Best-effort: use existing max-flow implementation.
