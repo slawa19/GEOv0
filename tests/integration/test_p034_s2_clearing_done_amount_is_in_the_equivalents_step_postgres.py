@@ -34,14 +34,22 @@ from tests.integration.test_p023_d_tick_driver_through_runner_postgres import ( 
     _Stand,
     factory,
 )
-from tests.p020_support import seed_graph
+from tests.p020_support import debt_uuid, ring, seed_graph
 
 
-async def _cancelled_after_one_commit(factory, monkeypatch, *, precision: int) -> tuple[dict, Decimal]:  # noqa: F811
+#: Two triangles whose amounts are finer than hundredths (for an equivalent of precision 4).
+FINE1 = ring(["p034fa", "p034fb", "p034fc"], ["0.0050"] * 3, [debt_uuid(0x34F3, k) for k in range(3)])
+FINE2 = ring(["p034fd", "p034fe", "p034ff"], ["0.0075"] * 3, [debt_uuid(0x34F3, 10 + k) for k in range(3)])
+
+
+async def _cancelled_after_one_commit(factory, monkeypatch, *, precision: int,  # noqa: F811
+                                      edges=None, amounts=(Decimal("2"), Decimal("3"))) -> tuple[dict, Decimal]:
     """One tick whose pass is cut by the hard timeout after its first occurrence; (`clearing.done`, the amount)."""
+    edges = T1 + T2 if edges is None else edges
     async with factory() as session:
-        await seed_graph(session, CODE, T1 + T2, precision=precision)
-    stand = _Stand(factory, T1 + T2)
+        await seed_graph(session, CODE, edges, precision=precision)
+    stand = _Stand(factory, edges)
+    before_total = await stand.total()
     hard_timeout = _budget_does_not_bind(monkeypatch, stand)
 
     async def before(n: int) -> None:
@@ -56,8 +64,8 @@ async def _cancelled_after_one_commit(factory, monkeypatch, *, precision: int) -
     assert stand.run._real_viz_by_eq.get(CODE) is None
     [done] = stand.done_events()
     assert done["node_patch"] is None and done["edge_patch"] is None, done
-    amount = (Decimal("15") - await stand.total()) / 3
-    assert amount in (Decimal("2"), Decimal("3")), amount
+    amount = (before_total - await stand.total()) / 3
+    assert amount in amounts, amount
     return done, amount
 
 
@@ -77,3 +85,13 @@ async def test_a_cancelled_tick_writes_the_cleared_amount_in_the_equivalents_ste
     assert done["cleared_amount"] == expected, (
         f"equivalent precision {precision}: the tick's clearing.done says cleared_amount {done['cleared_amount']!r}, "
         f"the equivalent's step is {expected!r}")
+
+
+@pytest.mark.asyncio
+async def test_an_amount_finer_than_hundredths_keeps_its_value_and_the_step(factory, monkeypatch) -> None:  # noqa: F811
+    """Precision 4 and amounts of 0.0050 / 0.0075. `to_money_str` never erases a digit the value needs, so the old
+    two-digit rendering kept the VALUE (`"0.005"`) and lost only the step (`"0.0050"`); both are held here."""
+    done, amount = await _cancelled_after_one_commit(
+        factory, monkeypatch, precision=4, edges=FINE1 + FINE2, amounts=(Decimal("0.0050"), Decimal("0.0075")))
+    assert Decimal(done["cleared_amount"]) == amount, (done["cleared_amount"], amount)
+    assert done["cleared_amount"] == to_money_str(amount, 4) and done["cleared_amount"] in ("0.0050", "0.0075"), done
