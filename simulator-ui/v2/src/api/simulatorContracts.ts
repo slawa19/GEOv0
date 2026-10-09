@@ -13,6 +13,14 @@ import type {
   MetricsResponse,
   RunError,
   RunStatus,
+  LocalizedText,
+  ScenarioAnchorEvent,
+  ScenarioDetail,
+  ScenarioEpisode,
+  ScenarioEpisodeAnchor,
+  ScenarioEpisodeFocus,
+  ScenarioEpisodeKind,
+  ScenarioPlayback,
   ScenarioSummary,
   ScenariosListResponse,
   SimulatorActionClearingRealResponse,
@@ -169,27 +177,57 @@ function apiVersionAt(value: unknown, path: string): string {
   return version
 }
 
+function booleanAt(value: unknown, path: string): boolean {
+  if (typeof value !== 'boolean') fail(path, 'expected boolean')
+  return value
+}
+
+function optionalBoolean(value: JsonObject, key: string, path: string): boolean | null | undefined {
+  const item = value[key]
+  if (item === undefined || item === null) return item
+  return booleanAt(item, `${path}.${key}`)
+}
+
+function decodeLocalizedText(value: unknown, path: string): LocalizedText {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['ru', 'en'])
+  return { ru: stringAt(raw.ru, `${path}.ru`), en: stringAt(raw.en, `${path}.en`) }
+}
+
+const SCENARIO_SUMMARY_KEYS = [
+  'api_version',
+  'scenario_id',
+  'name',
+  'description',
+  'created_at',
+  'participants_count',
+  'trustlines_count',
+  'equivalents',
+  'clusters_count',
+  'hubs_count',
+  'tags',
+] as const
+
 function decodeScenarioSummary(value: unknown, path: string): ScenarioSummary {
   const raw = objectAt(value, path)
-  onlyKeys(raw, path, [
-    'api_version',
-    'scenario_id',
-    'name',
-    'created_at',
-    'participants_count',
-    'trustlines_count',
-    'equivalents',
-    'clusters_count',
-    'hubs_count',
-    'tags',
-  ])
+  onlyKeys(raw, path, SCENARIO_SUMMARY_KEYS)
+  return decodeScenarioSummaryFields(raw, path)
+}
 
+/** The summary fields of an already key-checked object; the detail decoder adds its own keys around it. */
+function decodeScenarioSummaryFields(raw: JsonObject, path: string): ScenarioSummary {
   const tagsRaw = raw.tags
   const tags = tagsRaw === undefined || tagsRaw === null ? tagsRaw : stringArrayAt(tagsRaw, `${path}.tags`)
+  const descriptionRaw = raw.description
+  const description =
+    descriptionRaw === undefined || descriptionRaw === null
+      ? descriptionRaw
+      : decodeLocalizedText(descriptionRaw, `${path}.description`)
   return {
     api_version: apiVersionAt(raw.api_version, `${path}.api_version`),
     scenario_id: stringAt(raw.scenario_id, `${path}.scenario_id`),
     name: optionalString(raw, 'name', path),
+    description,
     created_at: optionalDateTime(raw, 'created_at', path),
     participants_count: numberAt(raw.participants_count, `${path}.participants_count`, { integer: true, min: 0 }),
     trustlines_count: numberAt(raw.trustlines_count, `${path}.trustlines_count`, { integer: true, min: 0 }),
@@ -208,6 +246,96 @@ function decodeScenariosList(value: unknown, path: string): ScenariosListRespons
     items: arrayAt(raw.items, `${path}.items`).map((item, index) =>
       decodeScenarioSummary(item, `${path}.items[${index}]`),
     ),
+  }
+}
+
+const EPISODE_KINDS = new Set<string>(['payment', 'clearing', 'stress', 'inject', 'note'])
+const ANCHOR_EVENTS = new Set<string>(['tx.updated', 'tx.failed', 'clearing.done', 'topology.changed'])
+
+function decodeEpisodeFocus(value: unknown, path: string): ScenarioEpisodeFocus {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['pids', 'edges'])
+  return {
+    pids: stringArrayAt(raw.pids, `${path}.pids`),
+    edges: arrayAt(raw.edges, `${path}.edges`).map((item, index) => {
+      const edgePath = `${path}.edges[${index}]`
+      const edge = objectAt(item, edgePath)
+      onlyKeys(edge, edgePath, ['from', 'to'])
+      return { from: stringAt(edge.from, `${edgePath}.from`), to: stringAt(edge.to, `${edgePath}.to`) }
+    }),
+  }
+}
+
+function decodeEpisodeAnchor(value: unknown, path: string): ScenarioEpisodeAnchor {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['event', 'from', 'to', 'amount', 'equivalent', 'time_ms'])
+  const event = stringAt(raw.event, `${path}.event`)
+  if (!ANCHOR_EVENTS.has(event)) fail(`${path}.event`, 'expected a simulator event name')
+  return {
+    event: event as ScenarioAnchorEvent,
+    from: optionalString(raw, 'from', path),
+    to: optionalString(raw, 'to', path),
+    amount: optionalDecimalString(raw, 'amount', path),
+    equivalent: optionalString(raw, 'equivalent', path),
+    time_ms: optionalNumber(raw, 'time_ms', path, { integer: true, min: 0 }),
+  }
+}
+
+function decodeScenarioEpisode(value: unknown, path: string): ScenarioEpisode {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, [
+    'index',
+    'time_ms',
+    'caption',
+    'pause_after',
+    'kind',
+    'focus',
+    'anchor',
+    'expected_cycle',
+  ])
+  const kind = stringAt(raw.kind, `${path}.kind`)
+  if (!EPISODE_KINDS.has(kind)) fail(`${path}.kind`, 'expected a scenario event type')
+  const focus = raw.focus === undefined || raw.focus === null ? raw.focus : decodeEpisodeFocus(raw.focus, `${path}.focus`)
+  const anchor =
+    raw.anchor === undefined || raw.anchor === null ? raw.anchor : decodeEpisodeAnchor(raw.anchor, `${path}.anchor`)
+  const cycleRaw = raw.expected_cycle
+  return {
+    index: numberAt(raw.index, `${path}.index`, { integer: true, min: 0 }),
+    time_ms: numberAt(raw.time_ms, `${path}.time_ms`, { integer: true, min: 0 }),
+    caption: decodeLocalizedText(raw.caption, `${path}.caption`),
+    pause_after: booleanAt(raw.pause_after, `${path}.pause_after`),
+    kind: kind as ScenarioEpisodeKind,
+    focus,
+    anchor,
+    expected_cycle:
+      cycleRaw === undefined || cycleRaw === null ? cycleRaw : stringArrayAt(cycleRaw, `${path}.expected_cycle`),
+  }
+}
+
+function decodeScenarioPlayback(value: unknown, path: string): ScenarioPlayback {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['tick_seconds', 'intensity_percent', 'inject_enabled'])
+  return {
+    tick_seconds: optionalNumber(raw, 'tick_seconds', path),
+    intensity_percent: optionalNumber(raw, 'intensity_percent', path, { integer: true }),
+    inject_enabled: optionalBoolean(raw, 'inject_enabled', path),
+  }
+}
+
+/** `ScenarioDetail`: the summary fields, `episodes` (required by the canon, an empty array for a scenario without
+ * captions) and the nullable `playback`. */
+function decodeScenarioDetail(value: unknown, path: string): ScenarioDetail {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, [...SCENARIO_SUMMARY_KEYS, 'episodes', 'playback'])
+  return {
+    ...decodeScenarioSummaryFields(raw, path),
+    episodes: arrayAt(raw.episodes, `${path}.episodes`).map((item, index) =>
+      decodeScenarioEpisode(item, `${path}.episodes[${index}]`),
+    ),
+    playback:
+      raw.playback === undefined || raw.playback === null
+        ? raw.playback
+        : decodeScenarioPlayback(raw.playback, `${path}.playback`),
   }
 }
 
@@ -772,8 +900,10 @@ export function decodeScenariosListResponse(value: unknown): ScenariosListRespon
   return decodeSimulatorResponse('scenario-list', value, decodeScenariosList)
 }
 
-export function decodeScenarioSummaryResponse(value: unknown): ScenarioSummary {
-  return decodeSimulatorResponse('scenario-detail', value, decodeScenarioSummary)
+/** The answer of `GET /simulator/scenarios/{scenario_id}`: a `ScenarioDetail` (a `ScenarioSummary` for every caller
+ * that reads only the summary fields). The name is kept so `simulatorApi.ts` does not change. */
+export function decodeScenarioSummaryResponse(value: unknown): ScenarioDetail {
+  return decodeSimulatorResponse('scenario-detail', value, decodeScenarioDetail)
 }
 
 export function decodeRunStatusResponse(value: unknown): RunStatus {
