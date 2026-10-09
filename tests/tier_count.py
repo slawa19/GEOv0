@@ -156,6 +156,8 @@ make the session green again:
   `python -m pytest --collect-only -q -m "not slow"` (`3303/3318 tests collected`).
 * 2026-10-09, 034 slice S2b merged after 035 A2b (`origin/main` `94891571`, 3275): 3275 -> 3285 (+10, the three S2b modules: 4 + 3 + 3; the S2b lines above are those of the branch before the merge). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 034 slice S2b merged after the money-storability fix (`origin/main` at the merge of PR #188, 3339): 3339 -> 3349 (+10, the three S2b modules above; the numbers in the S2b lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 slice A8 (public names for the staged owner, the payment read side moved to `app/core/payments/read.py`): 3339 -> 3352 (+13: `tests/unit/test_p035_a8_public_names_for_the_staged_owner.py` 12, `tests/integration/test_p035_a8_payment_read_side_answers_as_before.py` 1). Measured with the same command on base `7e21abc1`.
+* 2026-10-09, 035 slice A8 merged after 034 S2b (`origin/main` at the merge of PR #191, 3349): 3349 -> 3362 (+13, the two A8 modules above; the numbers in the A8 line are those of the branch on `7e21abc1`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -198,7 +200,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3349
+EXPECTED_SELECTED_ITEMS = 3362
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
