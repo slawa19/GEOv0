@@ -102,6 +102,15 @@ def _scenario_equivalent_sources(raw: dict[str, Any]) -> Iterator[tuple[str, str
     for event_index, event in enumerate(raw.get("events") or []):
         if not isinstance(event, dict):
             continue
+        # 036: a `payment` / `clearing` event and an episode anchor name an equivalent too.
+        code = str(event.get("equivalent") or "").strip().upper()
+        if code:
+            yield f"events/{event_index}/equivalent", code
+        anchor = event.get("anchor")
+        if isinstance(anchor, dict):
+            code = str(anchor.get("equivalent") or "").strip().upper()
+            if code:
+                yield f"events/{event_index}/anchor/equivalent", code
         for effect_index, effect in enumerate(event.get("effects") or []):
             if not isinstance(effect, dict):
                 continue

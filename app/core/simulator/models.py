@@ -10,7 +10,15 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
-from app.schemas.simulator import RunMode, RunState, ScenarioSummary
+from app.schemas.simulator import (
+    LocalizedText,
+    RunMode,
+    RunState,
+    ScenarioDetail,
+    ScenarioEpisode,
+    ScenarioPlayback,
+    ScenarioSummary,
+)
 
 
 @dataclass(frozen=True)
@@ -61,11 +69,83 @@ class ScenarioRecord:
             api_version=SIMULATOR_API_VERSION,
             scenario_id=self.scenario_id,
             name=self.name,
+            description=scenario_description(self.raw),
             created_at=self.created_at,
             participants_count=self.participants_count,
             trustlines_count=self.trustlines_count,
             equivalents=self.equivalents,
         )
+
+    def detail(self) -> ScenarioDetail:
+        """The summary plus the story (036): the episodes (events with a caption) and the playback settings."""
+
+        return ScenarioDetail(
+            **self.summary().model_dump(),
+            episodes=scenario_episodes(self.raw),
+            playback=scenario_playback(self.raw),
+        )
+
+
+def _localized(value: Any, *, plain_string_ok: bool = True) -> LocalizedText | None:
+    """`{ru, en}` as written, or (only where `plain_string_ok`) a plain string served as both languages; anything else
+    is not served. A description may be a plain string (older scenarios); a caption is new in 036 and never is."""
+
+    if isinstance(value, str) and plain_string_ok:
+        return LocalizedText(ru=value, en=value) if value.strip() else None
+    if isinstance(value, dict) and isinstance(value.get("ru"), str) and isinstance(value.get("en"), str):
+        return LocalizedText(ru=value["ru"], en=value["en"])
+    return None
+
+
+def scenario_description(raw: dict[str, Any]) -> LocalizedText | None:
+    return _localized(raw.get("description"))
+
+
+def scenario_episodes(raw: dict[str, Any]) -> list[ScenarioEpisode]:
+    """The events of `raw["events"]` that carry a caption, in scenario order, `index` = position in `events[]`.
+
+    Uploaded scenarios are validated against the schema; the fixtures the runtime loads are not (F-034-14 / F-036-5,
+    guarded in the tooling tier), so an event whose caption or time cannot be served is left out rather than
+    failing the whole response.
+    """
+
+    out: list[ScenarioEpisode] = []
+    events = raw.get("events")
+    for index, evt in enumerate(events if isinstance(events, list) else []):
+        if not isinstance(evt, dict) or "caption" not in evt:
+            continue
+        caption = _localized(evt.get("caption"), plain_string_ok=False)
+        time_ms = evt.get("time")
+        kind = evt.get("type")
+        if caption is None or isinstance(time_ms, bool) or not isinstance(time_ms, int) or time_ms < 0:
+            continue
+        try:
+            out.append(
+                ScenarioEpisode(
+                    index=index,
+                    time_ms=time_ms,
+                    caption=caption,
+                    pause_after=evt.get("pause_after") is True,
+                    kind=kind,
+                    focus=evt.get("focus"),
+                    anchor=evt.get("anchor"),
+                    expected_cycle=evt.get("expected_cycle"),
+                )
+            )
+        except ValueError:  # pydantic.ValidationError is a ValueError
+            continue
+    return out
+
+
+def scenario_playback(raw: dict[str, Any]) -> ScenarioPlayback | None:
+    settings = raw.get("settings")
+    playback = settings.get("playback") if isinstance(settings, dict) else None
+    if not isinstance(playback, dict):
+        return None
+    try:
+        return ScenarioPlayback(**playback)
+    except ValueError:
+        return None
 
 
 @dataclass

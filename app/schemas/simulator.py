@@ -334,11 +334,22 @@ class ScenarioUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LocalizedText(BaseModel):
+    """A text of the scenario in both languages (036): the content lives in the scenario, not in the UI dictionary."""
+
+    ru: str
+    en: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ScenarioSummary(BaseModel):
     api_version: str = Field(default=SIMULATOR_API_VERSION)
 
     scenario_id: str
     name: Optional[str] = None
+    # 036: always the pair; a scenario whose description is a plain string serves it as both languages.
+    description: Optional[LocalizedText] = None
     created_at: Optional[datetime] = None
 
     participants_count: int = Field(ge=0)
@@ -350,6 +361,58 @@ class ScenarioSummary(BaseModel):
     tags: Optional[List[str]] = None
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioEpisodeFocus(BaseModel):
+    pids: List[str] = Field(default_factory=list)
+    edges: List[SimulatorEventEdgeRef] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioEpisodeAnchor(BaseModel):
+    event: Literal["tx.updated", "tx.failed", "clearing.done", "topology.changed"]
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+    amount: Optional[str] = None
+    equivalent: Optional[str] = None
+    time_ms: Optional[int] = Field(default=None, ge=0)
+
+    # 'from' (not 'from_') on the wire: the response route dumps by alias; a direct dump uses `by_alias=True`
+    # (`serialize_by_alias` of the sibling edge models is a pydantic 2.11 setting and a no-op on the pinned 2.5.3).
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class ScenarioEpisode(BaseModel):
+    """One event of the scenario that carries a caption (036). `index` is its position in the scenario's `events[]`."""
+
+    index: int = Field(ge=0)
+    time_ms: int = Field(ge=0)
+    caption: LocalizedText
+    pause_after: bool = False
+    kind: Literal["payment", "clearing", "stress", "inject", "note"]
+    focus: Optional[ScenarioEpisodeFocus] = None
+    anchor: Optional[ScenarioEpisodeAnchor] = None
+    expected_cycle: Optional[List[str]] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioPlayback(BaseModel):
+    """`settings.playback` of the scenario as written; an absent field is null, no default is invented here."""
+
+    tick_seconds: Optional[float] = None
+    intensity_percent: Optional[int] = None
+    inject_enabled: Optional[bool] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioDetail(ScenarioSummary):
+    """`GET /simulator/scenarios/{scenario_id}`: the summary plus the story (036). The list does not carry it."""
+
+    episodes: List[ScenarioEpisode] = Field(default_factory=list)
+    playback: Optional[ScenarioPlayback] = None
 
 
 class ScenariosListResponse(BaseModel):

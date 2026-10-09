@@ -23,9 +23,9 @@
 - `trustline`: направленный лимит `from → to` (кредитор → должник).
 
 ## MVP договорённости
-- Время в `events[].time` — одно из:
-	- **миллисекунды от старта прогона** (integer)
-	- простой токен (string), например `day_10` (для будущей интерпретации runner)
+- Время в `events[].time` — **только миллисекунды от старта прогона** (integer ≥ 0). Строковые токены (`day_10`) схема отказывает с 036 (F-036-1): раннер их никогда не понимал, и событие молча не срабатывало.
+- Повествовательные поля события (036, срез A; движок читает их в срезе B, пока они валидируются и отдаются по REST): `caption {ru, en}` — подпись эпизода на обоих языках (событие с подписью — эпизод); `pause_after`; `focus {pids, edges[{from,to}]}`; `anchor {event, from?, to?, amount?, equivalent?, time_ms?}`; `expected_cycle [pid, ...]`; для `payment` — `from`, `to`, `amount` (десятичная строка), `equivalent?`; для `clearing` — `equivalent?`. `description` сценария — строка либо `{ru, en}`; `settings.playback {tick_seconds 0.25–5, intensity_percent, inject_enabled}`.
+- REST: `GET /simulator/scenarios/{scenario_id}` отдаёт `description` (всегда парой), `episodes[]` и `playback`; список — только `description`. Формат — `api/openapi.yaml` (`ScenarioDetail`).
 - `behaviorProfiles`/`events` допускаются схемой как расширение поведения:
 	- **real mode:** runner интерпретирует подмножество `behaviorProfiles.props` (см. [behavior-model-spec.md](behavior-model-spec.md)).
 	- `events[]` на текущем этапе считаются future и не интерпретируются.

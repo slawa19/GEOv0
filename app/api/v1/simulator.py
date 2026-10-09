@@ -65,6 +65,7 @@ from app.schemas.simulator import (
     RunCreateRequest,
     RunCreateResponse,
     RunStatus,
+    ScenarioDetail,
     ScenarioSummary,
     ScenarioUploadRequest,
     ScenariosListResponse,
@@ -2690,12 +2691,12 @@ async def upload_scenario(
     return rec.summary()
 
 
-@router.get("/scenarios/{scenario_id}", response_model=ScenarioSummary)
+@router.get("/scenarios/{scenario_id}", response_model=ScenarioDetail)
 async def get_scenario_summary(
     scenario_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
-    return runtime.get_scenario(scenario_id).summary()
+    return runtime.get_scenario(scenario_id).detail()
 
 
 @router.get("/scenarios/{scenario_id}/graph/preview", response_model=SimulatorGraphSnapshot)

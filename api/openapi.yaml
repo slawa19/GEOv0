@@ -1111,16 +1111,19 @@ paths:
   /simulator/scenarios/{scenario_id}:
     get:
       tags: [Simulator]
-      summary: Get simulator scenario summary (Real Mode control plane)
+      summary: Get simulator scenario detail (Real Mode control plane)
+      description: >-
+        The scenario summary plus its story: `episodes` (the scenario events that carry a caption)
+        and `playback` (`settings.playback` as written). The list endpoint carries neither.
       parameters:
         - $ref: '#/components/parameters/ScenarioIdPath'
       responses:
         '200':
-          description: Scenario summary
+          description: Scenario detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScenarioSummary'
+                $ref: '#/components/schemas/ScenarioDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -7087,6 +7090,13 @@ components:
         name:
           type: string
           nullable: true
+        description:
+          # Always the pair when present: a scenario whose description is a plain string serves it as both
+          # languages. Null when the scenario has none.
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - nullable: true
+              enum: [null]
         created_at:
           type: string
           format: date-time
@@ -7112,6 +7122,173 @@ components:
           nullable: true
           items:
             type: string
+      additionalProperties: false
+
+    LocalizedText:
+      type: object
+      description: A text of the scenario in both languages.
+      required: [ru, en]
+      properties:
+        ru:
+          type: string
+        en:
+          type: string
+      additionalProperties: false
+
+    ScenarioDetail:
+      type: object
+      description: >-
+        `ScenarioSummary` plus the story of the scenario. Spelled out in full (not `allOf`) because
+        `additionalProperties: false` does not compose in OpenAPI 3.0.3.
+      required: [api_version, scenario_id, participants_count, trustlines_count, equivalents, episodes]
+      properties:
+        api_version:
+          type: string
+          example: simulator-api/1
+        scenario_id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        description:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - nullable: true
+              enum: [null]
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        participants_count:
+          type: integer
+          minimum: 0
+        trustlines_count:
+          type: integer
+          minimum: 0
+        equivalents:
+          type: array
+          items:
+            type: string
+        clusters_count:
+          type: integer
+          nullable: true
+        hubs_count:
+          type: integer
+          nullable: true
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+        episodes:
+          type: array
+          description: >-
+            The events of the scenario that carry a caption, in scenario order. Empty for a scenario
+            without captions.
+          items:
+            $ref: '#/components/schemas/ScenarioEpisode'
+        playback:
+          # `settings.playback` as written in the scenario; null when it has none. (No sibling `description`: the
+          # contract test collapses a `oneOf` with a null branch only when it stands alone.)
+          oneOf:
+            - $ref: '#/components/schemas/ScenarioPlayback'
+            - nullable: true
+              enum: [null]
+      additionalProperties: false
+
+    ScenarioEpisode:
+      type: object
+      required: [index, time_ms, caption, pause_after, kind]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: Position of the event in the scenario's `events[]` (not a consecutive episode number).
+        time_ms:
+          type: integer
+          minimum: 0
+        caption:
+          $ref: '#/components/schemas/LocalizedText'
+        pause_after:
+          type: boolean
+        kind:
+          type: string
+          enum: [payment, clearing, stress, inject, note]
+        focus:
+          oneOf:
+            - $ref: '#/components/schemas/ScenarioEpisodeFocus'
+            - nullable: true
+              enum: [null]
+        anchor:
+          oneOf:
+            - $ref: '#/components/schemas/ScenarioEpisodeAnchor'
+            - nullable: true
+              enum: [null]
+        expected_cycle:
+          type: array
+          nullable: true
+          items:
+            type: string
+      additionalProperties: false
+
+    ScenarioEpisodeFocus:
+      type: object
+      description: Where the camera and the highlight go; empty lists mean the whole graph.
+      required: [pids, edges]
+      properties:
+        pids:
+          type: array
+          items:
+            type: string
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorEventEdgeRef'
+      additionalProperties: false
+
+    ScenarioEpisodeAnchor:
+      type: object
+      description: >-
+        The event whose arrival shows the caption. `tx.updated` matches on `from`, `to`, `amount`, `equivalent`;
+        `tx.failed` on `from`, `to`, `equivalent` (a failure carries no amount); `time_ms` is the fallback
+        for an episode that announces no action.
+      required: [event]
+      properties:
+        event:
+          type: string
+          enum: [tx.updated, tx.failed, clearing.done, topology.changed]
+        from:
+          type: string
+          nullable: true
+        to:
+          type: string
+          nullable: true
+        amount:
+          type: string
+          nullable: true
+          description: Decimal string.
+        equivalent:
+          type: string
+          nullable: true
+        time_ms:
+          type: integer
+          minimum: 0
+          nullable: true
+      additionalProperties: false
+
+    ScenarioPlayback:
+      type: object
+      description: Pace and defaults written in the scenario; an absent field is null.
+      properties:
+        tick_seconds:
+          type: number
+          nullable: true
+        intensity_percent:
+          type: integer
+          nullable: true
+        inject_enabled:
+          type: boolean
+          nullable: true
       additionalProperties: false
 
     ScenariosListResponse:

@@ -424,8 +424,17 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # its enum value removed on both halves: 21 -> 18, the ego `allOf` difference unchanged). Measured with a per-entry
 # dump of every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed), differences
 # listed path by path for each changed entry: no other entry of any ledger differs.
+# 2026-10-09 / programme 036 slice A (`T3610`): count HOLDS at 61, digest moves. `GET /simulator/scenarios/{scenario_id}` now
+# answers `ScenarioDetail` (the summary plus `episodes[]` and `playback`) and `description` joins `ScenarioSummary`. ONE
+# entry changes content and none enters or leaves: `GET /simulator/scenarios/{scenario_id}` gains, besides the summary's
+# own differences it already had, the SAME classes the ledger already records elsewhere and no new one: `minimum` 0 against
+# FastAPI's 0.0 (`episodes[].index`, `.time_ms`, `.anchor.time_ms`), `required` of a defaulted model (`episodes` on the
+# detail, `pause_after` on an episode, `pids`/`edges` of a focus) and the default `false` of `pause_after`. The list and the
+# upload entries keep exactly the differences they had: `description` is declared on both halves and compares equal, and the
+# null-able blocks (`description`, `playback`, `focus`, `anchor`) use the `oneOf` + null branch the normaliser collapses.
+# Measured with a per-entry dump of the success ledger (`.local-run/p036a_dump_drift.py`, not committed), path by path.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "69e65521edd83f28063b397ee292fafd37d21c74551d616fbc49e08d8e04713d"
+    "d6111fc4c7248cd0397d26f604201b6e35d19fc62adc744618d0c7898cf56e38"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;

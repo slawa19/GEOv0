@@ -83,3 +83,36 @@ async def test_a_string_event_time_is_refused_at_upload(client, monkeypatch, tmp
     assert any(e["path"].startswith("events/0") for e in error["details"]["errors"]), error["details"]["errors"]
     assert "p036-day-10" not in registry._scenarios
     assert not (tmp_path / "scenarios" / "p036-day-10").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event", "error_path"),
+    [
+        ({"time": 0, "type": "clearing", "equivalent": "MY-TOKEN"}, "events/0/equivalent"),
+        (
+            {"time": 0, "type": "note", "caption": {"ru": "р", "en": "e"},
+             "anchor": {"event": "clearing.done", "equivalent": "MY-TOKEN"}},
+            "events/0/anchor/equivalent",
+        ),
+    ],
+    ids=["event-equivalent", "anchor-equivalent"],
+)
+async def test_the_equivalents_the_new_event_fields_name_are_checked_like_every_other(
+    client, monkeypatch, tmp_path: Path, event: dict, error_path: str
+) -> None:
+    """036 slice A sibling of the 'noncanonical equivalent' check (`test_simulator_scenario_upload_validation.py`): the
+    `equivalent` of a payment / clearing event and of an anchor is a code the scenario names, so it is refused the same way
+    (400 naming the path) and nothing is stored."""
+
+    registry = _registry(tmp_path)
+    scenario = _scenario("p036-bad-eq", 0)
+    scenario["events"] = [event]
+
+    response = await _upload(client, monkeypatch, registry, scenario)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["details"]["errors"] == [
+        {"path": error_path, "message": "Noncanonical equivalent code: MY-TOKEN"}
+    ]
+    assert "p036-bad-eq" not in registry._scenarios
