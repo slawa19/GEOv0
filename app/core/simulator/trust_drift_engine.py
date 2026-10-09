@@ -239,7 +239,9 @@ class TrustDriftEngine:
                     break
 
         for equivalent in result.touched_equivalents:
-            PaymentRouter._graph_cache.pop(str(equivalent).strip().upper(), None)
+            code = str(equivalent).strip().upper()
+            if code:  # an empty code evicts nothing (`invalidate_cache("")` would clear every equivalent)
+                PaymentRouter.invalidate_cache(code)
 
     def init_trust_drift(self, run: RunRecord, scenario: dict[str, Any]) -> None:
         """Initialize trust drift config and edge clearing history from scenario."""

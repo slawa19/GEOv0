@@ -71,9 +71,9 @@ from sqlalchemy.exc import DBAPIError
 from app.core.ledger.book import DebtVersionConflict
 from app.core.payments.service import (
     DefinitiveRefusal,
-    _public_error_of_stored,
+    public_error_of_stored,
     PaymentTransactionUnusable,
-    _drain_call,
+    drain_call,
     collect_admitted_refusals,
     commit_refused_by_server,
     is_debt_pair_collision,
@@ -444,7 +444,7 @@ async def _record_admitted_refusals(
     the caller's duty. A failure is logged and leaves that refusal unrecorded."""
 
     for refusal in refusals:
-        _stored, failure = await _drain_call(
+        _stored, failure = await drain_call(
             lambda refusal=refusal: record_definitive_refusal(open_session, refusal)
         )
         if failure is not None:
@@ -485,7 +485,7 @@ async def _settle_cancelled_phase(
             return
         await _record_admitted_refusals(admitted, open_session=open_session, logger=logger, run_id=run_id)
 
-    await _drain_call(settle)
+    await drain_call(settle)
 
 
 async def _settle_unusable_phase(
@@ -529,7 +529,7 @@ async def _settle_unusable_phase(
         )
     if refusal is None:
         return
-    stored, failure = await _drain_call(lambda: record_definitive_refusal(open_session, refusal))
+    stored, failure = await drain_call(lambda: record_definitive_refusal(open_session, refusal))
     if failure is not None:
         logger.error(
             "simulator.real.staged_refusal_record_failed run_id=%s tx_id=%s error_type=%s",
@@ -558,7 +558,7 @@ async def _settle_unusable_phase(
             # 030 `T3094` #1: a stored `ABORTED` of the same request it yielded to is the outcome - published as such.
             yielded = stored is not None and stored.status == "ABORTED" and stored.error is not None
             if yielded:
-                error.publish_refusal(_public_error_of_stored(stored))
+                error.publish_refusal(public_error_of_stored(stored))
             else:
                 error.publish_refusal()
         except Exception:
