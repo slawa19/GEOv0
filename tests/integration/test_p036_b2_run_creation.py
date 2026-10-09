@@ -71,6 +71,44 @@ async def test_a_damaged_story_is_refused_at_run_creation_and_no_run_is_made(cli
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["fixtures", "real"])
+async def test_a_damaged_story_is_refused_in_either_mode(client, auth_headers, monkeypatch, mode) -> None:
+    """Fix-delta: the refusal is of the story, not of a mode. `real` is the mode the story is played in; the product answers
+    409 / E008 there too and creates nothing (a guard against `build_story` being called for `fixtures` only)."""
+
+    scenario_id = _register(monkeypatch, f"p036-b2-damaged-{mode}", events=DAMAGED)
+    runs_before = set(runtime._runs)
+
+    response = await _start(client, auth_headers, scenario_id, mode=mode, intensity_percent=10)
+    try:
+        assert response.status_code == 409, f"{mode}: {response.status_code}: {response.text[:300]}"
+        assert response.json()["error"]["details"]["simulator_error"] == "SCENARIO_INVALID"
+        assert set(runtime._runs) == runs_before
+    finally:
+        await _stop(client, auth_headers, response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["fixtures", "real"])
+async def test_a_pause_after_that_is_not_a_boolean_on_an_event_without_a_caption_is_refused_at_run_creation(
+    client, auth_headers, monkeypatch, mode
+) -> None:
+    """TARGET (red on 7c11ee0f: 200, the bad value silently paused nothing)."""
+
+    scenario_id = _register(monkeypatch, f"p036-b2-pause-{mode}", events=[{"time": 0, "type": "note", "pause_after": "yes"}])
+    runs_before = set(runtime._runs)
+
+    response = await _start(client, auth_headers, scenario_id, mode=mode, intensity_percent=10)
+    try:
+        assert response.status_code == 409, f"{mode}: {response.status_code}: {response.text[:300]}"
+        error = response.json()["error"]
+        assert error["code"] == "E008" and [e["path"] for e in error["details"]["errors"]] == ["events/0/pause_after"]
+        assert set(runtime._runs) == runs_before
+    finally:
+        await _stop(client, auth_headers, response)
+
+
+@pytest.mark.asyncio
 async def test_control_a_good_story_and_a_scenario_without_captions_create_runs(client, auth_headers, monkeypatch) -> None:
     good = _register(monkeypatch, "p036-b2-good", events=[{"time": 0, "type": "note", "caption": {"ru": "р", "en": "e"}}])
     plain = _register(monkeypatch, "p036-b2-plain", events=[{"time": "day_10", "type": "note"}])  # a legacy stored shape

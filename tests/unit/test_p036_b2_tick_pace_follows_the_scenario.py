@@ -171,3 +171,24 @@ async def test_a_paused_run_does_not_tick_resumes_where_it_was_and_a_run_stopped
     assert len(clock.tick_starts) == 5, clock.tick_starts  # resumed from tick 2: ticks 3, 4 and 5, none lost or doubled
     assert run.tick_index == 5 and run.sim_time_ms == 5 * runtime._tick_ms_base
     assert run.state == "stopping" and clock.guard == 12  # the loop ended at the first sleep that saw the stop
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tick_seconds",
+    [0, -1, 0.1, 0.24, 5.01, 60, True, "2", None],
+    ids=["zero", "negative", "0.1", "0.24", "5.01", "60", "bool", "string", "null"],
+)
+async def test_a_tick_seconds_outside_the_schema_range_is_not_trusted_and_the_default_pace_stays(monkeypatch, tick_seconds) -> None:
+    """Fix-delta guard (the range 0.25-5 of the schema is enforced where the loop reads it, not only at creation): a stored
+    scenario's value outside it, or not a number, gives the 1.0 s default - and the two edges (0.25, 5.0) above are accepted,
+    so the range is neither widened (`> 0`) nor shut."""
+
+    raw = _scenario({"tick_seconds": tick_seconds})
+    run = _run_over(raw)
+    clock = _install_clock(monkeypatch, run, raw)
+
+    await runtime._heartbeat_loop(run.run_id)
+
+    assert len(clock.tick_starts) == TICKS, clock.tick_starts
+    assert _periods(clock) == pytest.approx([1.0 + TICK_COST_S] * (TICKS - 1)), (tick_seconds, _periods(clock))
