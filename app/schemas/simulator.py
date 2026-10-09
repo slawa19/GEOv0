@@ -598,7 +598,7 @@ class RunStatus(BaseModel):
     current_phase: Optional[str] = None
 
     # 036 B2: what happened to the tracked events of the scenario's story in this launch; null when nothing is tracked.
-    # Not in the SSE `run_status` event (its shape is protected) and not stored anywhere: it is the run's memory.
+    # Not in the SSE `run_status` event (its shape is protected) and not stored as state that can be restored (no table, nothing read back): it is the run's memory. At stop it lands in the run's artifacts with the final status (`status.json`, `summary.json`, `bundle.zip`).
     episode_progress: Optional[List[EpisodeProgress]] = None
 
     model_config = ConfigDict(extra="forbid")

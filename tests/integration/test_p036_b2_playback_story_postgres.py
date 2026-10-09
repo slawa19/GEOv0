@@ -65,12 +65,13 @@ async def test_a_tick_that_spends_an_episode_with_pause_after_pauses_the_run(fac
     """TARGET (red on 7df35fcf: the run stays `running`)."""
 
     eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], [_note(500, pause_after=True), _note(60_000)])
-    published = _record_publishes(runner)
 
     await ticks(runner, run, 1)
 
     assert run._real_fired_scenario_event_indexes == {0}  # control: the episode was spent, the next one is not due
-    require_target(run.state == "paused" and len(published) >= 1, f"state {run.state!r}, status published {len(published)}x")
+    # The status of the pause is published by the heartbeat loop after the tick: see
+    # `test_a_pause_publishes_run_status_once_on_the_product_heartbeat` in `test_p036_b2_fixdelta_postgres.py`.
+    require_target(run.state == "paused", f"state {run.state!r}")
 
 
 @pytest.mark.asyncio
@@ -108,7 +109,8 @@ async def test_two_episodes_with_pause_after_on_one_tick_pause_once(factory, mon
 
     await ticks(runner, run, 1)
 
-    require_target(run.state == "paused" and len(published) == 1 and run._real_fired_scenario_event_indexes == {0, 1},
+    # one pause for two spent episodes; the runner publishes nothing itself (the heartbeat publishes once after the tick)
+    require_target(run.state == "paused" and published == [] and run._real_fired_scenario_event_indexes == {0, 1},
                    f"state {run.state!r}, published {len(published)}, fired {sorted(run._real_fired_scenario_event_indexes)}")
 
 

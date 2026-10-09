@@ -711,6 +711,17 @@ class RealTick:
             )
             should_stop = True
 
+        # `apply_deferred_effects` is reached twice by one durable phase (the commit's confirmation and the tail's
+        # `_commit_and_resolve`): the progress of THIS attempt is written once, or `attempts` counts the second visit too.
+        durable_reported = False
+
+        def report_durable(indexes: frozenset[int], progress: dict[int, dict[str, Any]]) -> None:
+            nonlocal durable_reported
+            if durable_reported:
+                return
+            durable_reported = True
+            rr.mark_scripted_events_fired(run, indexes, scripted_epoch, progress)
+
         res = TickPaymentsPhase(
             planned=planned,
             per_eq_metric_values=per_eq_metric_values,
@@ -733,7 +744,7 @@ class RealTick:
             scripted_progress=self._scripted_payment_progress(
                 scripted_index_by_seq, payments_res.unresolved_seqs, payments_res.deferred_effects
             ),
-            on_durable=lambda indexes, progress: rr.mark_scripted_events_fired(run, indexes, scripted_epoch, progress),
+            on_durable=report_durable,
         )
 
         if should_stop:

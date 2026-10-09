@@ -398,18 +398,14 @@ class RealRunnerImpl:
         scenario_disables = isinstance(playback, dict) and playback.get("inject_enabled") is False
         if not self._real_enable_inject or scenario_disables:
             reason = "inject_disabled_by_process" if not self._real_enable_inject else "inject_disabled_by_scenario"
-            executor.enqueue_inject_note(
-                run_id,
-                run=run,
-                event_index=event_index,
-                event_time_ms=event_time_ms,
-                description=(
+            # ONE note, written by the progress writer, with the reason in words (not a second, direct one).
+            self._write_story_progress(
+                run, event_index, event_time_ms, int(run._launch_epoch), {"kind": "inject", "status": "refused", "reason": reason},
+                spend=True,
+                note=(
                     "inject skipped (SIMULATOR_REAL_ENABLE_INJECT=0)" if not self._real_enable_inject
                     else "inject skipped (settings.playback.inject_enabled=false)"
                 ),
-            )
-            self._write_story_progress(
-                run, event_index, event_time_ms, int(run._launch_epoch), {"kind": "inject", "status": "refused", "reason": reason}, spend=True
             )
             return
 
@@ -661,14 +657,10 @@ class RealRunnerImpl:
         run = self._get_run(run_id)
         spent_before = frozenset(run._real_fired_scenario_event_indexes)
         epoch = int(run._launch_epoch)
-        try:
-            await self._tick.tick(run_id)
-        except asyncio.CancelledError:
-            raise
-        except BaseException:
-            # The money of this tick may be durable and its episode spent: the pause still belongs to it.
-            self._pause_after_spent_episodes(run, spent_before, epoch)
-            raise
+        # `RealTick.tick` answers every `Exception` itself (a failed tick is counted and the run goes on or stops) and
+        # returns, so a pause that belongs to a tick whose money went durable is decided here on the normal return. Nothing
+        # else leaves it but cancellation, which pauses nothing.
+        await self._tick.tick(run_id)
         self._pause_after_spent_episodes(run, spent_before, epoch)
 
     def _pause_after_spent_episodes(self, run: RunRecord, spent_before: frozenset[int], epoch: int) -> None:
@@ -690,10 +682,10 @@ class RealRunnerImpl:
             if not pausing:
                 return
             run.state = "paused"
+        # The status is published by the heartbeat loop right after the tick returns (`_heartbeat_loop`), once: not here.
         self._logger.info(
             "simulator.real.paused_after_episode run_id=%s event_index=%s tick=%s", str(run.run_id), pausing[0], int(run.tick_index)
         )
-        self._publish_run_status(run.run_id)
 
     async def fail_run(self, run_id: str, *, code: str, message: str) -> None:
         await self._tick.fail_run(run_id, code=code, message=message)
@@ -737,13 +729,18 @@ class RealRunnerImpl:
         *,
         spend: bool,
         add_cycles: list[dict[str, Any]] | None = None,
+        note: str | None = None,
     ) -> None:
         """THE ONE WRITER of the run's story progress (036 B2): `record` for event `index` of launch `epoch`.
 
         Discarded if the run has been restarted since `epoch` (the event belongs to a launch that is over). `add_cycles`
         (a clearing) are appended to the cycles this event already committed in this epoch, so an event that needs several
         attempts reports everything it cleared. `spend` marks the event fired. A change of (status, reason) - and only
-        that - is logged and written to the events artifact (AGENTS.md section 12: not on every tick)."""
+        that - is logged and written to the events artifact (AGENTS.md section 12: not on every tick), as `note` when the
+        caller says it in its own words, else as "scripted <kind> <status>".
+
+        ONE attempt is one call: `attempts` counts the calls that reach here for an event within an epoch, so a caller that
+        reports the same attempt twice (the money phase does: see `report_durable` in `tick.py`) would count it twice."""
 
         with self._lock:
             if int(run._launch_epoch) != int(epoch):
@@ -770,7 +767,7 @@ class RealRunnerImpl:
             )
             self._inject_executor.enqueue_inject_note(
                 run.run_id, run=run, event_index=index, event_time_ms=int(event_time_ms),
-                description=f"scripted {stored.get('kind')} {stored['status']}", stats=stored,
+                description=note or f"scripted {stored.get('kind')} {stored['status']}", stats=stored,
             )
 
     def _scenario_of(self, run: RunRecord) -> dict[str, Any]:

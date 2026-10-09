@@ -7480,7 +7480,7 @@ components:
           nullable: true
           description: >-
             What happened to the tracked events of the scenario's story in this launch of the run, ordered by event index; null
-            when nothing is tracked. Not part of the SSE `run_status` event and not stored: it is the run's memory.
+            when nothing is tracked. Not part of the SSE `run_status` event and not stored as state that can be restored (no table, nothing read back): it is the run's memory. At stop it lands in the run's artifacts with the final status (`status.json`, `summary.json`, `bundle.zip`).
           items:
             $ref: '#/components/schemas/EpisodeProgress'
       additionalProperties: false
