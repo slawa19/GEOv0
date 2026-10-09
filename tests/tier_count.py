@@ -170,9 +170,14 @@ make the session green again:
 * 2026-10-09, 036 slice A second fix-delta (review of `c2d84180`), on `origin/main` `6738cec3` (3472): 3472 -> 3476 (+4). New: `tests/integration/test_p036_a3_upload_reads_no_database.py` (3: the trap's anti-vacuum, a
   control without a payment, the upload with a payment); `tests/unit/test_p036_a_episodes_projection.py` +4 (a focus edge with an empty start, an empty end, the `from_` spelling; an anchor in the `from_`
   spelling). Fewer: the three upload tests of the equivalent's step in `test_p036_a2_story_is_validated_at_upload.py` (the check moved to slice B, execution). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3476/3491`).
+* 2026-10-09, 035 slice A9 (`POST /payments` closes its request session before the payment): 3362 -> 3363 (+1: `tests/integration/test_p035_a9_payment_request_releases_its_session_postgres.py`). Measured with the same command on base `b90dd8f2`.
+* 2026-10-09, 035 slice A9 merged after 036 slice A (`origin/main` at the merge of PR #195, 3476): 3476 -> 3477 (+1, the A9 module above; the numbers in the A9 line are those of the branch on `6738cec3`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 035 slice A10 (the pool wait is inside the payment's deadline), on the branch merged with `80020bfe`: 3477 -> 3488 (+11: `tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py` 10; and 1 from a source that builds its list from the tree - the float scan of `tests/unit/test_p012_t1211_money_path_never_types_a_float.py` now also sees `PaymentService._connect_within(deadline: float)`, a clock value). Measured with the same command (`3488/3503`).
+* 2026-10-09, 035 slice A10 fix-delta (review of `c27a2fbe`): 3488 -> 3486 (-2). The A10 module is 13 cases now, 8 in this profile: +3 new (a request refused without SQL takes no connection; a checkout failure that is not a timeout, before and after admission) and -5 marked `slow` - the cases that wait for a real timer (the pool's 1 s timeout at three checkouts, a refusal that cannot be recorded, two ways); they run with `-IncludeExpensive`. Measured with the same command (`3486/3506`).
 * 2026-10-09, 036 slice B1 (`T3620`), on `origin/main` `24b09d83` (3476): 3476 -> 3497 (+21). New: `tests/integration/test_p036_b1_scripted_events_postgres.py` (18: the scripted payment, its time, its key, the
   restart, a failed tick, the core's refusals, the equivalents outside the run, the scripted clearing, the restart reset, F-036-6 with its control) and
   `tests/unit/test_p036_b1_scripted_events_are_spent_when_durable.py` (3). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3497/3512`).
+2026-10-09: merge of main (035 A10, 3486) into 036 B1 (+21) -> 3507.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -215,7 +220,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3497
+EXPECTED_SELECTED_ITEMS = 3507
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

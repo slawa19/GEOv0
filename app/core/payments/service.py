@@ -14,6 +14,7 @@ from sqlalchemy import select, and_, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError  # the pool gave no connection within `pool_timeout`
 
 from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
@@ -1120,6 +1121,36 @@ class PaymentService:
                 raise asyncio.TimeoutError("Payment staged line lock timed out") from exc
             raise _classify_payment_db_error(exc) from exc
 
+    @staticmethod
+    def _checked_without_sql(request: PaymentCreateRequest) -> "tuple[Decimal, str]":
+        """What a payment request is refused for before any statement: the amount, the equivalent code, the `tx_id`.
+
+        Returns the parsed amount and the validated `tx_id`. One definition, run twice on the API path: by
+        `_pay_attempt` BEFORE the attempt takes its connection (035 A10 fix-delta - a request refused here must not
+        check a connection out, nor wait for an exhausted pool to be told so), and by `execute()` as its first
+        act, for every caller. The statements are the ones `execute()` had, in their order, with its metric.
+        """
+
+        try:
+            # Storage-capacity door (012 / F-012-1).  Deliberately the FIRST thing done
+            # with the request: the signature is taken over `request.amount`
+            # verbatim further down (`payload` / `verify_signature` in `execute()`), so an amount
+            # the ledger cannot hold must never become a signed obligation - and the
+            # rounds-to-zero case must not reach the positivity CHECK, where it used to
+            # escape as HTTP 500 E010 instead of a 400 naming the amount.
+            amount = parse_money_amount(
+                request.amount, field="amount", require_positive=True
+            )
+        except BadRequestException:
+            # Preserve existing metrics semantics for invalid user input.
+            _count_payment("create", "bad_request")
+            raise
+
+        validate_equivalent_code(request.equivalent)
+
+        # Mandatory idempotency key (client-generated).
+        return amount, validate_tx_id(request.tx_id)
+
     async def execute(
         self,
         sender_id: uuid.UUID,
@@ -1177,25 +1208,9 @@ class PaymentService:
             _count_payment("create", "start")
         attempt = self._attempt = _PaymentAttempt()
 
-        try:
-            # Storage-capacity door (012 / F-012-1).  Deliberately the FIRST thing this
-            # method does with the request: the signature is taken over `request.amount`
-            # verbatim further down (`payload` / `verify_signature` below), so an amount
-            # the ledger cannot hold must never become a signed obligation - and the
-            # rounds-to-zero case must not reach the positivity CHECK, where it used to
-            # escape as HTTP 500 E010 instead of a 400 naming the amount.
-            amount = parse_money_amount(
-                request.amount, field="amount", require_positive=True
-            )
-        except BadRequestException:
-            # Preserve existing metrics semantics for invalid user input.
-            _count_payment("create", "bad_request")
-            raise
-
-        validate_equivalent_code(request.equivalent)
-
-        # Mandatory idempotency key (client-generated).
-        tx_id_str = validate_tx_id(request.tx_id)
+        # The checks that need no database (`_checked_without_sql`): deliberately the FIRST thing this method does
+        # with the request.
+        amount, tx_id_str = self._checked_without_sql(request)
 
         # The capacity read and the one-direction rule of the flows below hold under concurrency only at
         # READ COMMITTED behind the line locks (027 stage 2; 019 `T1907` required SERIALIZABLE). The FIRST
@@ -1508,7 +1523,10 @@ class PaymentService:
                 # Staged: the caller owns the transaction, and the outcome goes back through its
                 # savepoint as a RESULT (`_settle_staged_failure`).
                 return await self._settle_staged_failure(attempt, exc)
-            if isinstance(exc, asyncio.TimeoutError):
+            # 035 A10: the pool's own timeout (the route reader's checkout, or this session's re-acquisition after
+            # routing, when `DB_POOL_TIMEOUT_SECONDS` runs out before the payment's deadline) is the same refusal
+            # as the deadline's - it used to leave as a raw `sqlalchemy.exc.TimeoutError`, answered 500/E010.
+            if isinstance(exc, (asyncio.TimeoutError, PoolTimeoutError)):
                 if attempt.admitted:
                     attempt.refusal = ("Payment timeout", ErrorCode.E007.value, {}, "timeout_abort")
                 raise TimeoutException("Payment timed out") from exc
@@ -2353,7 +2371,29 @@ class PaymentService:
         may_reroute: bool = False,
         release_before_routing: bool = False,
     ) -> "PaymentResult | _RetryAttempt":
+        # 035 A10. THE ATTEMPT'S STATE IS FRESH BEFORE ANYTHING OF THE ATTEMPT CAN FAIL. `execute()` resets it too,
+        # but the connection is now taken before `execute()`, and a service that runs several payments
+        # (`create_payment`, `create_payment_internal`: `_service_for` hands out `self`) would otherwise settle a
+        # failed checkout against the PREVIOUS payment's state.
+        # When an earlier attempt of THIS request was admitted (`admission`, `pay()`'s own memory - never derived
+        # from the raw request), the state carries that identity and the current perimeter, so that a failure
+        # before `execute()` establishes them is settled as what it is: a refusal after admission
+        # (`_Admission.covers`, unchanged, then holds). Not admitted here: `admitted` stays False and `row` None.
+        # AFTER ADMISSION THAT IS ANY NON-RETRYABLE FAILURE OF THE CHECKOUT, not only a timeout: a one-off
+        # infrastructure failure of it is recorded `ABORTED/E010` like every non-retryable internal failure after
+        # admission (spec 019), and the signed identity is spent - the same request again is answered `ABORTED`.
+        self._attempt = _PaymentAttempt() if admission is None else _PaymentAttempt(
+            tx_id=admission.tx_id,
+            fingerprint=admission.fingerprint,
+            sender_id=admission.sender_id,
+            allowed_participant_pids=allowed_participant_pids,
+        )
         try:
+            # Fix-delta of the §15 review of `c27a2fbe` (Н2): what the request is refused for WITHOUT SQL is checked
+            # before the connection is taken - `execute()` checks it again as its first act, from the same
+            # definition. An invalid request checks nothing out and is answered its own 400 on an exhausted pool.
+            self._checked_without_sql(request)
+            await self._connect_within(deadline)
             staged = await self.execute(
                 sender_id,
                 request,
@@ -2396,6 +2436,37 @@ class PaymentService:
         if staged.post_commit_effects is not None:
             staged.post_commit_effects.apply_once()
         return staged.result
+
+    async def _connect_within(self, deadline: float) -> None:
+        """Take the attempt's connection, waiting for the pool no longer than the payment's deadline (035 A10).
+
+        Until here the first checkout happened inside `execute()`'s first statement, BEFORE the deadline was
+        entered: with the pool exhausted a payment waited `DB_POOL_TIMEOUT_SECONDS` (30 s against a 10 s budget,
+        measured) and then left as a raw `sqlalchemy.exc.TimeoutError`, answered 500/E010. Either timeout - the
+        deadline's or the pool's own - is now the declared refusal by time (504/E007), raised to the owner of the
+        attempt, which settles it like any failure of `execute()`.
+
+        No statement is sent: `connection()` begins the session's transaction and checks a connection out, so
+        `SHOW transaction_isolation` is still the first statement of the payment. A session that already holds
+        its connection returns at once. The wait is this coroutine's own - not shielded, not moved to a task - so
+        a cancellation of the caller ends it and nothing is left checked out.
+
+        WHAT THIS DOES NOT BOUND: a statement already running on the connection. The reads `execute()` makes
+        before it enters its deadline, and any statement after, are limited by nothing here (the engine sets no
+        `statement_timeout` or `command_timeout`). `pay()` has no complete wall-clock bound.
+        Nor the two OTHER checkouts `pay()` makes while settling (found by the review of `c27a2fbe`, recorded in
+        `specs/BACKLOG.md`, not changed): the read of the winner after a `tx_id` collision
+        (`_settle_failed_attempt` -> `_read_existing`) waits for the pool outside the deadline and lets the pool's
+        raw `TimeoutError` out; the read after a COMMIT of unknown outcome (`_settle_failed_commit` ->
+        `_read_existing_row` under `_drain_call`) waits for the pool with no bound of its own and is not ended by
+        a cancellation.
+        """
+
+        try:
+            async with asyncio.timeout_at(deadline):
+                await self.session.connection()
+        except (asyncio.TimeoutError, PoolTimeoutError) as exc:
+            raise TimeoutException("Payment timed out") from exc
 
     def _retry_or_none(
         self,
@@ -2663,8 +2734,11 @@ class PaymentService:
         a winner in either terminal state is returned as the stored result (030 `F-030-11`).
         """
 
+        # 035 A10: `pay()` bounds the recording's wait for a connection too (the pool may still be exhausted - that
+        # can be why the attempt was refused). A wait that gives up is `RefusalNotRecorded` below, never a refusal
+        # reported as stored.
         stored, failure = await _drain_call(
-            lambda: record_definitive_refusal(sessions, refusal, deadline=deadline)
+            lambda: record_definitive_refusal(sessions, refusal, deadline=deadline, bound_connection_wait=True)
         )
         if failure is None:
             return stored
@@ -2742,7 +2816,11 @@ class PaymentService:
 
 
 async def record_definitive_refusal(
-    sessions, refusal: DefinitiveRefusal, *, deadline: float | None = None
+    sessions,
+    refusal: DefinitiveRefusal,
+    *,
+    deadline: float | None = None,
+    bound_connection_wait: bool = False,
 ) -> PaymentResult | None:
     """Record `refusal` as an `ABORTED` row in a SHORT TRANSACTION OF ITS OWN (019 stage 3, `T1905`).
 
@@ -2759,6 +2837,13 @@ async def record_definitive_refusal(
     outcome every replay answers, so this request answers it too instead of its own error. Returns None
     only when THIS refusal was recorded. An outcome it cannot establish - the bounded lock wait gave up,
     or the transient retries ran out - is `RefusalNotRecorded`, never a recorded refusal.
+
+    `bound_connection_wait` (035 A10; `pay()` sets it, the default is the behaviour before it): the wait for
+    this short transaction's CONNECTION is bounded by the same budget as its lock wait - the rest of the
+    deadline, at least the grace - and a wait that gives up, by that budget or by the pool's own timeout, is
+    `RefusalNotRecorded` as well. Without it the first statement waits for the pool as long as
+    `DB_POOL_TIMEOUT_SECONDS` and a pool timeout leaves as `sqlalchemy.exc.TimeoutError`; that is still the
+    simulator's money-phase owner's path, which this argument deliberately does not change.
     """
 
     values = dict(refusal.row)
@@ -2774,6 +2859,12 @@ async def record_definitive_refusal(
         lock_timeout_ms = max(_REFUSAL_RECORD_LOCK_GRACE_MS, remaining_ms)
         async with sessions() as session:
             try:
+                if bound_connection_wait:
+                    try:
+                        async with asyncio.timeout(lock_timeout_ms / 1000):
+                            await session.connection()
+                    except (asyncio.TimeoutError, PoolTimeoutError) as exc:
+                        raise RefusalNotRecorded(refusal.tx_id) from exc
                 await session.execute(text(f"SET LOCAL lock_timeout = '{int(lock_timeout_ms)}ms'"))
                 inserted = (
                     await session.execute(

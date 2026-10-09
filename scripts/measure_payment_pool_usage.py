@@ -7,17 +7,33 @@ them `idle in transaction`, against a pool of `DB_POOL_SIZE` + `DB_MAX_OVERFLOW`
 before any decision. A measurement nobody can re-run is an assertion, so the generator lives here (the precedent
 is `scripts/measure_clearing_min_amount_plan.py`). It changes no product code and decides nothing.
 
+WHAT IT READ, AND WHAT CAME OF IT. On `7e21abc1` (before 035 A9): two connections per payment, both
+`idle in transaction`; at N = 15 against a pool of 15 no payment arrived at binding and none committed until the
+pool timeout. 035 A9 closes the request session before the payment (`app/api/v1/payments.py::create_payment`);
+on that code the same run reads one connection per payment and N = 15 commits. The text above describes the
+hypothesis as it stood; the script is unchanged in what it measures.
+
 WHAT IT MEASURES. The application in-process (`app.main.app` through `httpx.ASGITransport`) on its REAL wiring:
 the real `get_db`, the real `app.db.session.engine` with the pool the settings give it, the real
 `get_payment_session_factory`. No dependency is overridden. For each N it sends N payments at once, each from its
 own payer to its own payee over its own trust line (so no two share a debt row, a line or a Redis lock key), holds
-every one of them at the same point INSIDE `pay()` - the entry of `PaymentService._bind_payment`, after routing,
-with the attempt's session open - and reads, while they are held:
+every one of them at the same point - ARRIVAL AT `PaymentService._bind_payment`, which is after routing and with
+the attempt's session open (not "entry into `pay()`": a request waiting for its attempt's connection is already
+inside `pay()`) - and reads, while they are held:
 
 * the pool's own counters (`checkedout`, `overflow`);
 * `pg_stat_activity` for this database through a connection OUTSIDE the pool: sessions by `state`, and the last
   statement of the `idle in transaction` ones (which shows whose they are);
-* how many of the N payments reached the gate. The rest are waiting for a connection.
+* where each of the N requests is NOW, each in exactly one place (the script asserts the four add up to N):
+  `before_binding` (has not arrived at the gate: still authenticating, routing, or waiting for a connection),
+  `at_binding` (standing at the gate), `past_binding` (arrived, then left the gate while it was still closed -
+  the product's own binding timeout, `PREPARE_TIMEOUT_SECONDS`, does that to a request held longer than it -
+  and not answered yet), `already_answered` (finished before the reading).
+  `before_binding` is NOT by itself "waiting for a connection": it reads as that only together with the pool
+  counter standing at its limit. HISTORY of this observation: the first edition called every non-arrival a pool
+  waiter (§15 review of A8); the second counted ARRIVALS, so a request that arrived and then timed out behind
+  the closed gate was both "at binding" and "answered" and `before_binding` could go negative with a long
+  `--settle` (§15 review of A9). The places are now current states kept per request.
 
 Then it opens the gate and records every answer's status code and the slowest answer's time.
 
@@ -53,6 +69,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextvars
 import json
 import os
 import sys
@@ -128,29 +145,51 @@ def _payment(payer: dict, payee: dict) -> dict:
     return {**body, "signature": _sign(payer["priv"], body)}
 
 
+#: Which request of the round the running code belongs to. Set by the sender; the application runs the request in
+#: tasks that copy the sender's context, so the gate inside `_bind_payment` reads the same number.
+_REQUEST: contextvars.ContextVar[int | None] = contextvars.ContextVar("measured_request", default=None)
+
+#: The four places a request of a round can be, each request in exactly one (see the module docstring).
+BEFORE_BINDING, AT_BINDING, PAST_BINDING, ANSWERED = "before_binding", "at_binding", "past_binding", "already_answered"
+
+
 class _Gate:
-    """Holds every payment at the entry of `_bind_payment` until `open()`."""
+    """Holds every payment at the entry of `_bind_payment` until `open()`, and knows where each request is NOW.
+
+    `where[i]` is the CURRENT place of request i, not a count of arrivals: a request that arrived and then left
+    the barrier without the gate opening (its binding timed out, it was cancelled) moves to `past_binding`, so it
+    is never counted both as "at binding" and as "answered".
+    """
 
     def __init__(self) -> None:
-        self.arrived = 0
+        self.where: dict[int, str] = {}
         self._release = asyncio.Event()
         self._release.set()
         original = PaymentService._bind_payment
         gate = self
 
         async def held(service, *args, **kwargs):
-            gate.arrived += 1
-            await gate._release.wait()
+            request = _REQUEST.get()
+            if request is not None:
+                gate.where[request] = AT_BINDING
+            try:
+                await gate._release.wait()
+            finally:
+                if request is not None:
+                    gate.where[request] = PAST_BINDING
             return await original(service, *args, **kwargs)
 
         PaymentService._bind_payment = held  # the one hook (see the module docstring)
 
-    def close(self) -> None:
-        self.arrived = 0
+    def close(self, n: int) -> None:
+        self.where = {request: BEFORE_BINDING for request in range(n)}
         self._release.clear()
 
     def open(self) -> None:
         self._release.set()
+
+    def count(self, place: str) -> int:
+        return sum(1 for current in self.where.values() if current == place)
 
 
 async def _activity(observer: asyncpg.Connection) -> tuple[dict[str, int], list[str]]:
@@ -167,28 +206,35 @@ async def _activity(observer: asyncpg.Connection) -> tuple[dict[str, int], list[
 
 async def _round(client: httpx.AsyncClient, observer: asyncpg.Connection, gate: _Gate, pairs: list, n: int) -> dict:
     pool = db_session.engine.sync_engine.pool
-    gate.close()
+    gate.close(n)
     started = time.perf_counter()
 
-    async def one(payer: dict, payee: dict) -> tuple[int, float, str]:
-        response = await client.post("/api/v1/payments", json=_payment(payer, payee), headers=payer["headers"])
+    async def one(request: int, payer: dict, payee: dict) -> tuple[int, float, str]:
+        _REQUEST.set(request)
+        try:
+            response = await client.post("/api/v1/payments", json=_payment(payer, payee), headers=payer["headers"])
+        finally:
+            gate.where[request] = ANSWERED
         body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
         outcome = body.get("status") or (body.get("error") or {}).get("code") or "?"
         return response.status_code, time.perf_counter() - started, str(outcome)
 
-    tasks = [asyncio.create_task(one(payer, payee)) for payer, payee in pairs[:n]]
-    # Read once the arrivals stop: all N at the gate, or no new one for `--settle` seconds.
-    last, since = -1, time.perf_counter()
-    while gate.arrived < n and time.perf_counter() - since < ARGS.settle:
-        if gate.arrived != last:
-            last, since = gate.arrived, time.perf_counter()
+    tasks = [asyncio.create_task(one(index, payer, payee)) for index, (payer, payee) in enumerate(pairs[:n])]
+    # Read once the picture stops changing: all N at the gate, or no request moved for `--settle` seconds.
+    last, since = None, time.perf_counter()
+    while gate.count(AT_BINDING) < n and time.perf_counter() - since < ARGS.settle:
+        picture = dict(gate.where)
+        if picture != last:
+            last, since = picture, time.perf_counter()
         await asyncio.sleep(0.02)
     states, idle_queries = await _activity(observer)
+    places = {place: gate.count(place) for place in (BEFORE_BINDING, AT_BINDING, PAST_BINDING, ANSWERED)}
+    assert sum(places.values()) == n, f"a request is in no place or in two: {places} for n={n}"
     reading = {
         "n": n,
-        "reached_the_gate": gate.arrived,
-        "waiting_for_a_connection": n - gate.arrived,
+        **places,
         "pool_checked_out": pool.checkedout(),
+        "pool_limit": settings.DB_POOL_SIZE + settings.DB_MAX_OVERFLOW,
         "pool_overflow_in_use": max(0, pool.overflow()),
         "pg_states": dict(sorted(states.items())),
         "idle_in_transaction_last_statements": idle_queries,
@@ -247,7 +293,7 @@ async def main() -> int:
                 print(json.dumps(reading))
                 if reading["pool_checked_out_after"] != 0:
                     failures.append(f"N={n}: {reading['pool_checked_out_after']} connection(s) still checked out after the round")
-                if n == 1 and (reading["reached_the_gate"] != 1 or reading["answers"] != {"200 COMMITTED": 1}):
+                if n == 1 and (reading["at_binding"] != 1 or reading["answers"] != {"200 COMMITTED": 1}):
                     failures.append(f"N=1 did not reach the gate and commit: {reading}")
     finally:
         await observer.close()

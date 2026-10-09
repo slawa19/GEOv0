@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Optional, Literal
 
@@ -74,16 +75,27 @@ async def create_payment(
 
     028 `F-028-42`: every refusal - the error envelope here, the stored `ABORTED` result - carries `details.reason`.
     """
+    # 035 A9 (F-035-8, 2026-10-09): THE REQUEST SESSION IS GIVEN BACK BEFORE THE PAYMENT RUNS. It only authenticated
+    # the caller (one SELECT), and the payment opens sessions of its own, one per attempt. Left open, it kept a
+    # pool connection `idle in transaction` for the whole payment: two connections per payment, and with as many
+    # simultaneous payments as the pool has connections every one held one and waited for a second - none
+    # committed (measured: `scripts/measure_payment_pool_usage.py`).
+    # The id is taken FIRST, and nothing below touches `current_participant` or `session` again. `close()`, not
+    # `rollback()` (a rollback expires the loaded participant, and a later attribute read would do IO) and not
+    # `commit()` (there is nothing of this request to commit). Whether the payer is still active is not decided
+    # by that SELECT: the payment checks it under the participant lock
+    # (`MoneyBoundary.refuse_suspended_participants`).
+    payer_id: uuid.UUID = current_participant.id
+    await session.close()
     try:
-        return public_payment_result(await _create_payment(
-            payment_in, current_participant, redis_client, payment_sessions))
+        return public_payment_result(await _create_payment(payment_in, payer_id, redis_client, payment_sessions))
     except GeoException as exc:
         # A copy: the raised exception may be held elsewhere (a stored refusal is written from it unfiltered).
         raise GeoException(exc.message, code=exc.code, details=public_refusal_details(exc.details, exc.code),
                            status_code=exc.status_code) from exc
 
 
-async def _create_payment(payment_in: dict, current_participant: Participant, redis_client, payment_sessions):
+async def _create_payment(payment_in: dict, payer_id: uuid.UUID, redis_client, payment_sessions):
     try:
         payment_req = PaymentCreateRequest.model_validate(payment_in)
     except ValidationError as exc:
@@ -92,7 +104,7 @@ async def _create_payment(payment_in: dict, current_participant: Participant, re
             details={"validation": exc.errors()},
         )
 
-    lock_key = f"dlock:payment:{current_participant.id}:{payment_req.equivalent}"
+    lock_key = f"dlock:payment:{payer_id}:{payment_req.equivalent}"
     async with redis_distributed_lock(
         redis_client,
         lock_key,
@@ -100,10 +112,10 @@ async def _create_payment(payment_in: dict, current_participant: Participant, re
         wait_timeout_seconds=2.0,
     ):
         # 019 stage 3: the payment is ONE transaction on sessions of its own, one per attempt; the
-        # request's session above only authenticated the caller.
+        # request's session only authenticated the caller and is closed by now (035 A9).
         return await PaymentService.pay(
             payment_sessions,
-            current_participant.id,
+            payer_id,
             payment_req,
         )
 
