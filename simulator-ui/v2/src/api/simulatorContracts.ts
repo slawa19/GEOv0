@@ -208,7 +208,9 @@ function optionalNonEmptyString(value: JsonObject, key: string, path: string): s
 
 /** The scenario money grammar (the canon's `ScenarioEpisodeAnchor.amount`, the scenario schema's `scenarioAmount`, the
  * backend's `SCENARIO_AMOUNT_PATTERN`): plain digits, at most 18 fraction digits and 50 digits in all, no sign, exponent
- * or space. The same expression on all four sides, so what an upload accepts is what this decoder accepts. */
+ * or space. The same grammar on all four sides, so what an upload accepts is what this decoder accepts. Spelling differs
+ * only at the end: the scenario schema and the canon write `(?![\s\S])` (Python's `$` lets a terminal newline through) and
+ * the application matches with `fullmatch`, while here `$` is the end of the input (no `m` flag): the behaviour agrees. */
 const SCENARIO_AMOUNT = /^(?!(?:\.?[0-9]){51})[0-9]+(?:\.[0-9]{1,18})?$/
 
 function scenarioAmountAt(value: unknown, path: string): string {
@@ -284,7 +286,7 @@ function decodeEpisodeFocus(value: unknown, path: string): ScenarioEpisodeFocus 
       const edgePath = `${path}.edges[${index}]`
       const edge = objectAt(item, edgePath)
       onlyKeys(edge, edgePath, ['from', 'to'])
-      return { from: stringAt(edge.from, `${edgePath}.from`), to: stringAt(edge.to, `${edgePath}.to`) }
+      return { from: nonEmptyStringAt(edge.from, `${edgePath}.from`), to: nonEmptyStringAt(edge.to, `${edgePath}.to`) }
     }),
   }
 }

@@ -389,6 +389,8 @@ describe('Simulator critical REST response contracts', () => {
     // non-vacuity: the set holds the boundary spellings the decoder is accused of mishandling
     const text = JSON.stringify(conformance.cases)
     expect(text).toContain('999999999999.99999999') // 20 digits, 8 of them fraction: the largest storable amount
+    expect(text).toContain('1.000000000000000000') // 18 fraction digits (a payment amount)
+    expect(text).toContain(`${'0'.repeat(49)}1`) // 50 digits in all (an anchor amount)
     expect(conformance.cases.some((c) => JSON.stringify(c.detail).includes('"tx.failed"'))).toBe(true)
   })
 
@@ -932,6 +934,16 @@ describe('Simulator critical REST response contracts', () => {
       call: () => getScenario(cfg, 'scenario-1'),
       contract: 'scenario-detail',
       diagnostic: '$.episodes[0].focus.edges[0].from_',
+    },
+    {
+      label: 'focus edge with an empty end',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], focus: { pids: [], edges: [{ from: '', to: 'A' }] } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].focus.edges[0].from',
     },
     {
       label: 'playback extra field',
