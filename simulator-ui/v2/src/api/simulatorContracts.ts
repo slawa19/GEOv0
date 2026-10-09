@@ -191,7 +191,30 @@ function optionalBoolean(value: JsonObject, key: string, path: string): boolean 
 function decodeLocalizedText(value: unknown, path: string): LocalizedText {
   const raw = objectAt(value, path)
   onlyKeys(raw, path, ['ru', 'en'])
-  return { ru: stringAt(raw.ru, `${path}.ru`), en: stringAt(raw.en, `${path}.en`) }
+  return { ru: nonEmptyStringAt(raw.ru, `${path}.ru`), en: nonEmptyStringAt(raw.en, `${path}.en`) }
+}
+
+function nonEmptyStringAt(value: unknown, path: string): string {
+  const text = stringAt(value, path)
+  if (text.length === 0) fail(path, 'expected non-empty string')
+  return text
+}
+
+function optionalNonEmptyString(value: JsonObject, key: string, path: string): string | null | undefined {
+  const item = value[key]
+  if (item === undefined || item === null) return item
+  return nonEmptyStringAt(item, `${path}.${key}`)
+}
+
+/** The scenario money grammar (the canon's `ScenarioEpisodeAnchor.amount`, the scenario schema's `scenarioAmount`, the
+ * backend's `SCENARIO_AMOUNT_PATTERN`): plain digits, at most 18 fraction digits and 50 digits in all, no sign, exponent
+ * or space. The same expression on all four sides, so what an upload accepts is what this decoder accepts. */
+const SCENARIO_AMOUNT = /^(?!(?:\.?[0-9]){51})[0-9]+(?:\.[0-9]{1,18})?$/
+
+function scenarioAmountAt(value: unknown, path: string): string {
+  const text = stringAt(value, path)
+  if (!SCENARIO_AMOUNT.test(text)) fail(path, 'expected plain decimal string (18 fraction digits, 50 digits at most)')
+  return text
 }
 
 const SCENARIO_SUMMARY_KEYS = [
@@ -256,7 +279,7 @@ function decodeEpisodeFocus(value: unknown, path: string): ScenarioEpisodeFocus 
   const raw = objectAt(value, path)
   onlyKeys(raw, path, ['pids', 'edges'])
   return {
-    pids: stringArrayAt(raw.pids, `${path}.pids`),
+    pids: arrayAt(raw.pids, `${path}.pids`).map((item, index) => nonEmptyStringAt(item, `${path}.pids[${index}]`)),
     edges: arrayAt(raw.edges, `${path}.edges`).map((item, index) => {
       const edgePath = `${path}.edges[${index}]`
       const edge = objectAt(item, edgePath)
@@ -271,14 +294,25 @@ function decodeEpisodeAnchor(value: unknown, path: string): ScenarioEpisodeAncho
   onlyKeys(raw, path, ['event', 'from', 'to', 'amount', 'equivalent', 'time_ms'])
   const event = stringAt(raw.event, `${path}.event`)
   if (!ANCHOR_EVENTS.has(event)) fail(`${path}.event`, 'expected a simulator event name')
-  return {
+  const anchor: ScenarioEpisodeAnchor = {
     event: event as ScenarioAnchorEvent,
-    from: optionalString(raw, 'from', path),
-    to: optionalString(raw, 'to', path),
-    amount: optionalDecimalString(raw, 'amount', path),
-    equivalent: optionalString(raw, 'equivalent', path),
+    from: optionalNonEmptyString(raw, 'from', path),
+    to: optionalNonEmptyString(raw, 'to', path),
+    amount: raw.amount === undefined || raw.amount === null ? raw.amount : scenarioAmountAt(raw.amount, `${path}.amount`),
+    equivalent: optionalNonEmptyString(raw, 'equivalent', path),
     time_ms: optionalNumber(raw, 'time_ms', path, { integer: true, min: 0 }),
   }
+  // Spec 036: a tx.updated anchor names from, to, amount and equivalent; a tx.failed anchor names from, to and
+  // equivalent and has NO amount (the SSE event carries none). The other two events need only their name.
+  const need = (key: 'from' | 'to' | 'amount' | 'equivalent') => {
+    if (anchor[key] === undefined || anchor[key] === null) fail(`${path}.${key}`, `expected a ${event} anchor to name ${key}`)
+  }
+  if (event === 'tx.updated') (['from', 'to', 'amount', 'equivalent'] as const).forEach(need)
+  if (event === 'tx.failed') {
+    ;(['from', 'to', 'equivalent'] as const).forEach(need)
+    if (anchor.amount !== undefined && anchor.amount !== null) fail(`${path}.amount`, 'expected a tx.failed anchor without amount')
+  }
+  return anchor
 }
 
 function decodeScenarioEpisode(value: unknown, path: string): ScenarioEpisode {
@@ -307,17 +341,22 @@ function decodeScenarioEpisode(value: unknown, path: string): ScenarioEpisode {
     kind: kind as ScenarioEpisodeKind,
     focus,
     anchor,
-    expected_cycle:
-      cycleRaw === undefined || cycleRaw === null ? cycleRaw : stringArrayAt(cycleRaw, `${path}.expected_cycle`),
+    expected_cycle: cycleRaw === undefined || cycleRaw === null ? cycleRaw : expectedCycleAt(cycleRaw, `${path}.expected_cycle`),
   }
+}
+
+function expectedCycleAt(value: unknown, path: string): string[] {
+  const cycle = arrayAt(value, path).map((item, index) => nonEmptyStringAt(item, `${path}[${index}]`))
+  if (cycle.length < 2) fail(path, 'expected at least 2 participants')
+  return cycle
 }
 
 function decodeScenarioPlayback(value: unknown, path: string): ScenarioPlayback {
   const raw = objectAt(value, path)
   onlyKeys(raw, path, ['tick_seconds', 'intensity_percent', 'inject_enabled'])
   return {
-    tick_seconds: optionalNumber(raw, 'tick_seconds', path),
-    intensity_percent: optionalNumber(raw, 'intensity_percent', path, { integer: true }),
+    tick_seconds: optionalNumber(raw, 'tick_seconds', path, { min: 0.25, max: 5 }),
+    intensity_percent: optionalNumber(raw, 'intensity_percent', path, { integer: true, min: 0, max: 100 }),
     inject_enabled: optionalBoolean(raw, 'inject_enabled', path),
   }
 }

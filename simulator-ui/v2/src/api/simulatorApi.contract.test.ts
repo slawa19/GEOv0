@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SimulatorContractError } from './simulatorContracts'
+import type { ScenarioDetail } from './simulatorTypes'
 import {
   actionClearingOnce,
   actionClearingReal,
@@ -34,6 +39,16 @@ const scenario = {
   clusters_count: null,
   hubs_count: 1,
   tags: ['smoke'],
+}
+
+/** The details the backend answers for the scenarios of `api/scenario-detail-conformance.json`. The backend test
+ * (`tests/integration/test_p036_a_scenario_detail_conformance.py`) uploads each `scenario` and requires the route's answer
+ * to equal `detail`; this file requires the decoder to accept every `detail` unchanged. One file, two readers: the backend
+ * and this decoder cannot drift apart unseen. */
+const here = dirname(fileURLToPath(import.meta.url))
+const CONFORMANCE_PATH = resolve(here, '../../../../api/scenario-detail-conformance.json')
+const conformance = JSON.parse(readFileSync(CONFORMANCE_PATH, 'utf8')) as {
+  cases: Array<{ name: string; detail: Record<string, unknown> }>
 }
 
 /** `ScenarioDetail` of the canon: the summary plus the required `episodes` and the nullable `playback`. */
@@ -364,6 +379,28 @@ describe('Simulator critical REST response contracts', () => {
     expect(detail.episodes.map((e) => e.index)).toEqual([1, 2, 3]) // non-vacuity: the episodes really came through
     expect(detail.episodes[1]?.focus?.edges).toEqual([{ from: 'B', to: 'A' }])
   })
+
+  it('decodes every detail the backend answers for the shared conformance scenarios', async () => {
+    expect(conformance.cases.length, `no cases in ${CONFORMANCE_PATH}`).toBeGreaterThanOrEqual(4)
+    for (const { name, detail } of conformance.cases) {
+      respondWith(detail)
+      await expect(getScenario(cfg, String(detail.scenario_id)), name).resolves.toEqual(detail)
+    }
+    // non-vacuity: the set holds the boundary spellings the decoder is accused of mishandling
+    const text = JSON.stringify(conformance.cases)
+    expect(text).toContain('999999999999.99999999') // 20 digits, 8 of them fraction: the largest storable amount
+    expect(conformance.cases.some((c) => JSON.stringify(c.detail).includes('"tx.failed"'))).toBe(true)
+  })
+
+  it.each(['0.123456789012345678', '0'.repeat(50), `${'1'.repeat(32)}.${'1'.repeat(18)}`, '00005.50', '5'])(
+    'accepts the anchor amount %s, a spelling the scenario money grammar allows',
+    async (amount) => {
+      const anchor = { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount }
+      respondWith({ ...scenarioDetail, episodes: [{ ...storyEpisodes[1], anchor: { ...anchor, time_ms: null } }] })
+      const detail = (await getScenario(cfg, 'scenario-1')) as ScenarioDetail
+      expect(detail.episodes[0]?.anchor?.amount).toBe(amount)
+    },
+  )
 
   it('accepts a list item with a description pair or a null one, and a detail without the optional keys', async () => {
     const described = { ...scenario, description: { ru: 'Описание', en: 'Description' } }
