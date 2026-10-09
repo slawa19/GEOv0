@@ -122,8 +122,8 @@ def tick_unit_runner(**collaborators: Any):
         _db_enabled=lambda: True,
         _should_warn_this_tick=lambda _run, key: True,
         # 036 B1: a scenario with no scripted `payment` event (the unit stands have none): nothing joins the phase
-        scripted_payments_due=lambda _run, _scenario, *, first_seq: ([], frozenset()),
-        mark_scripted_events_fired=lambda _run, _indexes: None,
+        scripted_payments_due=lambda _run, _scenario, *, first_seq: ([], {}, 0),
+        mark_scripted_events_fired=lambda _run, _indexes, _epoch: None,
     )
     for name, value in collaborators.items():
         setattr(runner, name, value)

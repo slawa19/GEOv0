@@ -88,6 +88,11 @@ async def _stand(factory, monkeypatch, roles, lines, debts, events, *, clearing_
     scenario = _scenario(eq, p, lines, events(eq, p) if callable(events) else events, line_status=line_status)
     run = run_for(list(p.values()), eq.code)
     runner = runner_for(run, scenario, clearing_every=clearing_every)
+    # A clearing pass is `complete` only when a re-plan on a fresh snapshot is empty, and the pass's budget is checked before
+    # that re-plan: with the default 250 ms a slow machine ends a pass that cleared everything as `budget_exhausted`
+    # (the event is then run once more on the next tick, which is the point of the fix-delta, but not what these stands are
+    # about). A generous budget keeps them deterministic; the incomplete endings have their own tests.
+    runner._tick._real_clearing_time_budget_ms = 20_000
     install_tick_stand(monkeypatch, factory)
     return eq, p, run, runner
 
@@ -196,6 +201,78 @@ async def test_after_a_restart_the_event_pays_again_as_a_new_operation(factory, 
         and len({c["key"] for c in paid}) == 2 and all(c["written_here"] for c in paid) and len(paid) == 2,
         f"first launch {first}, after the restart {second}; payments {paid}",
     )
+
+
+@pytest.mark.asyncio
+async def test_a_successful_scripted_payment_is_spent_and_not_published_again(factory, monkeypatch) -> None:  # noqa: F811
+    """The positive half of 'spent when durable': after the tick that paid, the event is in the fired set and the next tick
+    neither pays nor publishes again (one `tx.updated`, the debt still 5.00)."""
+
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], lambda e, q: [_payment_event(e, q["A"], q["B"], "5.00")])
+
+    await ticks(runner, run, 1)
+    after_first = (sorted(run._real_fired_scenario_event_indexes), runner._sse.published("tx.updated"))
+    await ticks(runner, run, 1)
+
+    _healthy(run)
+    assert after_first == ([0], 1), after_first
+    assert runner._sse.published("tx.updated") == 1
+    assert await _debts(factory, eq, p) == {("A", "B"): Decimal("5.00")}
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_money_phase_pays_the_event_once_and_spends_it_only_after_the_durable_attempt(factory, monkeypatch) -> None:  # noqa: F811
+    """The money boundary's replay: attempt 1 hits a transient conflict (discarded, rolled back), attempt 2 commits. The
+    event is not spent by the discarded attempt; the payment is made once; the event is spent after attempt 2."""
+
+    from app.utils.exceptions import RetryablePaymentConflictException
+
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], lambda e, q: [_payment_event(e, q["A"], q["B"], "5.00")])
+    original = runner._real_payments_executor.execute_planned_payments
+    seen: list[list[int]] = []
+
+    async def conflict_once(**kwargs):
+        seen.append(sorted(run._real_fired_scenario_event_indexes))  # what was spent when this attempt started
+        if len(seen) == 1:
+            raise RetryablePaymentConflictException("p036 b1: a transient conflict in attempt 1")
+        return await original(**kwargs)
+
+    monkeypatch.setattr(runner._real_payments_executor, "execute_planned_payments", conflict_once)
+
+    await ticks(runner, run, 1)
+
+    _healthy(run)
+    assert seen == [[], []], seen  # attempt 2 started with nothing spent: the discarded attempt spent nothing
+    assert await _debts(factory, eq, p) == {("A", "B"): Decimal("5.00")}
+    assert sorted(run._real_fired_scenario_event_indexes) == [0]
+    assert runner._sse.published("tx.updated") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_money_phase_rolled_back_by_a_stop_request_spends_nothing(factory, monkeypatch) -> None:  # noqa: F811
+    """The operator stops the run while the phase is staging: the phase is rolled back (nothing durable) and its observations
+    are resolved as a rollback. The event must stay pending - and pays once when the run is running again."""
+
+    eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], lambda e, q: [_payment_event(e, q["A"], q["B"], "5.00")])
+    original = runner._real_payments_executor.execute_planned_payments
+    state = {"stopped": False}
+
+    async def stop_then_stage(**kwargs):
+        if not state["stopped"]:
+            state["stopped"] = True
+            run.state = "stopping"  # the executor sees a run that is not running: `stop_requested`
+        return await original(**kwargs)
+
+    monkeypatch.setattr(runner._real_payments_executor, "execute_planned_payments", stop_then_stage)
+
+    await ticks(runner, run, 1)
+    after_stop = (sorted(run._real_fired_scenario_event_indexes), await _debts(factory, eq, p), runner._sse.published("tx.updated"))
+    run.state = "running"
+    await ticks(runner, run, 1)
+
+    assert after_stop == ([], {}, 0), after_stop
+    assert await _debts(factory, eq, p) == {("A", "B"): Decimal("5.00")}
+    assert sorted(run._real_fired_scenario_event_indexes) == [0] and runner._sse.published("tx.updated") == 1
 
 
 @pytest.mark.asyncio
@@ -402,6 +479,7 @@ async def test_a_restart_clears_the_fired_events_and_the_story_progress(factory,
     eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], [{"time": 0, "type": "note", "description": "n"}])
     await ticks(runner, run, 1)
     assert run._real_fired_scenario_event_indexes == {0}  # control: the note fired
+    run._real_story_progress[0] = {"status": "done", "epoch": 0, "cycles": []}  # control: there is progress to clear
 
     await _restart(run, runner._lock)
 

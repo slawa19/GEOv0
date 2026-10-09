@@ -307,6 +307,11 @@ class RealPaymentsResult:
     # ORIGINAL identifiers the replay reads when a commit's outcome is unknown, to establish
     # whether the attempt landed before it is allowed to decide anything.
     staged_tx_ids: frozenset[str] = frozenset()
+    # 036 B1 fix-delta: the seqs whose payment ended in a TRANSIENT failure with no payment row - the routing or the
+    # payment timed out, or an unexpected error left the savepoint, before a row was admitted (019 stage 1). A scripted
+    # event whose payment is in this set is NOT spent: the next tick runs it again under the same key. A committed
+    # payment, a logical refusal and a durable ABORTED row are terminal and are not in it.
+    unadmitted_seqs: frozenset[int] = frozenset()
 
 
 def _classify_refusal(e: BaseException) -> tuple[str | None, str | None, dict[str, Any] | None]:
@@ -407,6 +412,7 @@ class RealPaymentsExecutor:
         # conflict this exists for propagates out of this function and the prefix that was already
         # staged is exactly what has to be identifiable afterwards.
         staged_tx_ids: set[str] = set()
+        unadmitted: set[int] = set()
 
         per_eq: dict[str, dict[str, int]] = {
             str(eq): {"committed": 0, "rejected": 0, "errors": 0, "timeouts": 0}
@@ -447,6 +453,23 @@ class RealPaymentsExecutor:
             """Execute one action under a SAVEPOINT and return its staged result."""
 
             sender_id = sender_id_by_pid.get(str(action.sender_pid))
+            if sender_id is None and isinstance(getattr(action, "idempotency_key", None), str):
+                # 036 B1: a scripted payment of a sender the run does not hold is a REFUSAL of the story (the participant
+                # may not be introduced yet), not an error of the run: it is reported as `tx.failed` and does not spend
+                # the error budget. A planned payment keeps the old classification below.
+                return (
+                    int(action.seq),
+                    str(action.equivalent),
+                    str(action.sender_pid),
+                    str(action.receiver_pid),
+                    str(action.amount),
+                    "REJECTED",
+                    None,
+                    {"reason": "SENDER_NOT_FOUND"},
+                    0.0,
+                    [],
+                    None,
+                )
             if sender_id is None:
                 return (
                     int(action.seq),
@@ -578,6 +601,11 @@ class RealPaymentsExecutor:
                     raise
                 except Exception as e:
                     status, code, err_details = _classify_refusal(e)
+                    if status is None:
+                        # Not a definitive refusal (a timeout, a 5xx, an unexpected error): the savepoint rolled back and
+                        # no payment row exists. Terminal outcomes either returned above (committed, a durable ABORTED
+                        # row) or are a 4xx business refusal (`status` REJECTED).
+                        unadmitted.add(int(action.seq))
 
                     return (
                         int(action.seq),
@@ -844,6 +872,7 @@ class RealPaymentsExecutor:
             deferred_effects=deferred_effects,
             stop_requested=stop_requested,
             staged_tx_ids=frozenset(staged_tx_ids),
+            unadmitted_seqs=frozenset(unadmitted),
         )
 
     async def build_patches_after_commit(

@@ -178,6 +178,10 @@ make the session green again:
   restart, a failed tick, the core's refusals, the equivalents outside the run, the scripted clearing, the restart reset, F-036-6 with its control) and
   `tests/unit/test_p036_b1_scripted_events_are_spent_when_durable.py` (3). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3497/3512`).
 2026-10-09: merge of main (035 A10, 3486) into 036 B1 (+21) -> 3507.
+* 2026-10-09, 036 slice B1 fix-delta (two reviews of `46330763`), on that tree (3507): 3507 -> 3519 (+12). New: `tests/integration/test_p036_b1_fixdelta_postgres.py` (12: the clearing outcome - a failed
+  pass, a stopped equivalent, a hard timeout, an empty complete pass; the periodic pass and its control; the tick metric; a restart during the money phase and during the clearing pass; a pre-admission timeout and
+  its control; SENDER_NOT_FOUND) and 3 in `tests/integration/test_p036_b1_scripted_events_postgres.py` (a successful payment is spent and not published again; a replayed money phase; a stop-request rollback).
+  Fewer: `tests/unit/test_p036_b1_scripted_events_are_spent_when_durable.py` (3, thin wiring of `TickPaymentsPhase`; replaced by those observable cases). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3519/3539`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -220,7 +224,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3507
+EXPECTED_SELECTED_ITEMS = 3519
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

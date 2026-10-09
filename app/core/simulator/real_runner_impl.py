@@ -691,16 +691,19 @@ class RealRunnerImpl:
 
     def scripted_payments_due(
         self, run: RunRecord, scenario: dict[str, Any], *, first_seq: int
-    ) -> tuple[list[_RealPaymentAction], frozenset[int]]:
+    ) -> tuple[list[_RealPaymentAction], dict[int, int], int]:
         """The scripted `payment` events that are due and not spent, as payments of the coming money phase.
 
         Called once per ATTEMPT of the phase (a replayed attempt asks again: nothing is spent until the commit is
         durable). Each action carries the event's own key, so a repeat never pays twice. Seqs continue the planned
-        ones (`first_seq`...): the executor orders its results by a contiguous seq."""
+        ones (`first_seq`...): the executor orders its results by a contiguous seq. Returns the actions, the event index
+        by seq, and the launch EPOCH they were planned under: whatever is recorded for them afterwards is discarded if the
+        run has been restarted meanwhile (`mark_scripted_events_fired`)."""
 
         events = scenario.get("events")
         actions: list[_RealPaymentAction] = []
-        indexes: list[int] = []
+        index_by_seq: dict[int, int] = {}
+        epoch = int(run._launch_epoch)
         for idx, evt in enumerate(events if isinstance(events, list) else []):
             if not isinstance(evt, dict) or evt.get("type") != "payment" or idx in run._real_fired_scenario_event_indexes:
                 continue
@@ -730,16 +733,27 @@ class RealRunnerImpl:
                     sender_pid=sender,
                     receiver_pid=receiver,
                     amount=amount,
-                    idempotency_key=scripted_event_idempotency_key(run.run_id, run._launch_epoch, idx),
+                    idempotency_key=scripted_event_idempotency_key(run.run_id, epoch, idx),
                 )
             )
-            indexes.append(idx)
-        return actions, frozenset(indexes)
+            index_by_seq[int(first_seq) + len(actions) - 1] = idx
+        return actions, index_by_seq, epoch
 
-    def mark_scripted_events_fired(self, run: RunRecord, indexes: frozenset[int]) -> None:
-        """The money phase that carried these payments is DURABLE (committed, or landed after an unknown commit)."""
+    def mark_scripted_events_fired(self, run: RunRecord, indexes: frozenset[int], epoch: int) -> None:
+        """The money phase that carried these payments is DURABLE (committed, or landed after an unknown commit).
+
+        Only the events that reached a TERMINAL outcome are passed in (the caller leaves out a payment that failed
+        transiently before admission). `epoch` is the launch the phase was planned under: if the run has been restarted
+        since, the events are those of a launch that is over and the NEW epoch's events are still due - nothing is
+        marked."""
 
         with self._lock:
+            if int(run._launch_epoch) != int(epoch):
+                self._logger.info(
+                    "simulator.real.scripted_events_not_spent_after_restart run_id=%s planned_epoch=%s epoch=%s",
+                    str(run.run_id), int(epoch), int(run._launch_epoch),
+                )
+                return
             run._real_fired_scenario_event_indexes.update(int(i) for i in indexes)
 
     def _sim_idempotency_key(
