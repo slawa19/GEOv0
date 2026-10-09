@@ -1761,7 +1761,7 @@ async def action_payment_real(
         )
         # The service also RETURNS a stored refusal (`ABORTED`) without raising: that is not a payment. It answers
         # through the same mapping below as the refusal did when it was first raised.
-        if str(res.status) != "COMMITTED":
+        if str(res.status).upper() != "COMMITTED":
             raise public_error_of_stored(res) or GeoException(
                 "The stored payment is not committed", code=ErrorCode.E010, status_code=500
             )
