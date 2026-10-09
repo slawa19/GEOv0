@@ -6,7 +6,7 @@ import asyncio
 import random
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import AbstractSet, Any, Awaitable, Callable, List, Literal, NoReturn
 
@@ -17,6 +17,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.ledger.book import Book, DebtVersionConflict, PaymentFlow, operation_for
 from app.core.money_boundary import MoneyBoundary
+from app.core.payments import read as payment_read
 from app.core.payments.capacity import pair_capacity, pair_rules, pending_pair_capacity, route_breaks_policy
 from app.core.payments.router import PaymentRouter
 from app.config import settings
@@ -35,7 +36,6 @@ from app.schemas.payment import (
     PaymentCreateRequest,
     PaymentResult,
     PaymentRoute,
-    PaymentError,
 )
 from app.core.auth.crypto import verify_signature
 from app.core.auth.canonical import canonical_json
@@ -186,10 +186,14 @@ async def _drain_payment_cleanup(
     return caller_cancellation or operation_error
 
 
-async def _drain_call(
+async def drain_call(
     operation: Callable[[], Awaitable[Any]],
 ) -> tuple[Any, BaseException | None]:
-    """Run `operation` to a terminal result under caller cancellation; return (result, error)."""
+    """Run `operation` to a terminal result under caller cancellation; return (result, error).
+
+    Public since 2026-10-09 (035 A8): the owner of a staged payment's transaction outside this module (the
+    simulator's money phase) settles and records with it.
+    """
 
     box: list[Any] = []
 
@@ -198,6 +202,11 @@ async def _drain_call(
 
     error = await _drain_payment_cleanup(run)
     return (box[0] if box else None), error
+
+
+#: The name this module's own callers and `app/core/simulator/money_replay.py` use; the same object. The
+#: simulator's import moves to the public name in 034 `T3431`.
+_drain_call = drain_call
 
 
 def _count_payment(event: str, result: str) -> None:
@@ -515,11 +524,14 @@ class PaymentTransactionUnusable(Exception):
         self.publish_refusal: Callable[..., Any] | None = None
 
 
-def _public_error_of_stored(result: PaymentResult) -> GeoException | None:
+def public_error_of_stored(result: PaymentResult) -> GeoException | None:
     """The public error a STORED `ABORTED` result was refused with, as the exception class that carried
     it when it was raised (019 stage-3 review, P2 #6): the staged executor classifies a replayed refusal
     by it - a stored `E007` is a timeout, `E010` an internal error, a routing code a routing refusal -
-    exactly as it classified the refusal the first time. None for anything but an `ABORTED` result."""
+    exactly as it classified the refusal the first time. None for anything but an `ABORTED` result.
+
+    Public since 2026-10-09 (035 A8): the simulator's money-phase owner publishes a winner's stored refusal
+    with it."""
 
     if result.status != "ABORTED" or result.error is None:
         return None
@@ -539,6 +551,10 @@ def _public_error_of_stored(result: PaymentResult) -> GeoException | None:
     if code == ErrorCode.E010.value:
         return GeoException(message, code=ErrorCode.E010, details=details, status_code=500)
     return GeoException(message, code=code, details=details, status_code=400)
+
+
+#: The name this module's own callers and `app/core/simulator/money_replay.py` use; the same object (034 `T3431`).
+_public_error_of_stored = public_error_of_stored
 
 
 def _definitive_refusal(
@@ -2677,6 +2693,9 @@ class PaymentService:
             raise failure
         raise GeoException() from failure
 
+    # THE READ SIDE lives in `app/core/payments/read.py` since 2026-10-09 (035 A8, F-035-5); the three names below
+    # stay on the class and delegate, with the signatures they had.
+
     async def get_payment_for_participant(
         self,
         tx_id: str,
@@ -2684,54 +2703,16 @@ class PaymentService:
         requester_participant_id: uuid.UUID,
         requester_pid: str,
     ) -> PaymentResult:
-        tx = (
-            await self.session.execute(
-                select(Transaction).where(Transaction.tx_id == tx_id)
-            )
-        ).scalar_one_or_none()
-        if not tx or tx.type != "PAYMENT":
-            raise NotFoundException(f"Payment {tx_id} not found")
-
-        payload = tx.payload or {}
-        # Access rule (MVP): allow initiator or receiver; otherwise return 404 to avoid leaking existence.
-        if (
-            tx.initiator_id != requester_participant_id
-            and str(payload.get("to", "")) != requester_pid
-        ):
-            raise NotFoundException(f"Payment {tx_id} not found")
-
-        return self._tx_to_payment_result(tx)
-
-    @staticmethod
-    def _tx_to_payment_result(tx: Transaction) -> PaymentResult:
-        payload = tx.payload or {}
-        routes_payload = payload.get("routes")
-        routes = None
-        if routes_payload is not None:
-            routes = [PaymentRoute.model_validate(r) for r in routes_payload] or None
-
-        committed_at = tx.updated_at if tx.state == "COMMITTED" else None
-        error = None
-        if tx.error:
-            error = PaymentError(
-                code=str(tx.error.get("code") or ErrorCode.E010.value),
-                message=str(tx.error.get("message", "")),
-                details=tx.error.get("details"),
-            )
-
-        status = tx.state if tx.state in {"COMMITTED", "ABORTED"} else "ABORTED"
-        return PaymentResult(
-            tx_id=tx.tx_id,
-            status=status,
-            **{"from": str(payload.get("from", ""))},
-            to=str(payload.get("to", "")),
-            equivalent=str(payload.get("equivalent", "")),
-            amount=str(payload.get("amount", "")),
-            routes=routes,
-            error=error,
-            created_at=tx.created_at,
-            committed_at=committed_at,
+        return await payment_read.get_payment_for_participant(
+            self.session,
+            tx_id,
+            requester_participant_id=requester_participant_id,
+            requester_pid=requester_pid,
         )
+
+    #: A stored row as a `PaymentResult`. Also what the idempotent replay answers with
+    #: (`_resolve_existing_payment`, `_settle_staged_failure`), under this name, unchanged.
+    _tx_to_payment_result = staticmethod(payment_read.tx_to_payment_result)
 
     async def list_payments(
         self,
@@ -2746,64 +2727,18 @@ class PaymentService:
         page: int = 1,
         per_page: int = 20,
     ) -> List[PaymentResult]:
-        def _normalize_dt(value: datetime | None) -> datetime | None:
-            if value is None:
-                return None
-            # For client/server DBs (e.g. Postgres), prefer aware UTC.
-            if value.tzinfo is None:
-                return value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc)
-
-        from_date = _normalize_dt(from_date)
-        to_date = _normalize_dt(to_date)
-
-        offset = (page - 1) * per_page
-
-        clauses = [Transaction.type == "PAYMENT"]
-        if status != "all":
-            clauses.append(Transaction.state == status)
-        if from_date is not None:
-            clauses.append(Transaction.created_at >= from_date)
-        if to_date is not None:
-            clauses.append(Transaction.created_at <= to_date)
-
-        # Direction filtering.
-        payload = Transaction.payload
-        to_expr = payload["to"].as_string()
-        from_expr = payload["from"].as_string()
-        eq_expr = payload["equivalent"].as_string()
-
-        if direction == "sent":
-            clauses.append(
-                or_(
-                    Transaction.initiator_id == requester_participant_id,
-                    from_expr == requester_pid,
-                )
-            )
-        elif direction == "received":
-            clauses.append(to_expr == requester_pid)
-        else:
-            clauses.append(
-                or_(
-                    Transaction.initiator_id == requester_participant_id,
-                    to_expr == requester_pid,
-                    from_expr == requester_pid,
-                )
-            )
-
-        if equivalent:
-            clauses.append(eq_expr == equivalent)
-
-        stmt = (
-            select(Transaction)
-            .where(and_(*clauses))
-            .order_by(Transaction.created_at.desc())
-            .limit(per_page)
-            .offset(offset)
+        return await payment_read.list_payments(
+            self.session,
+            requester_participant_id=requester_participant_id,
+            requester_pid=requester_pid,
+            direction=direction,
+            equivalent=equivalent,
+            status=status,
+            from_date=from_date,
+            to_date=to_date,
+            page=page,
+            per_page=per_page,
         )
-
-        txs = (await self.session.execute(stmt)).scalars().all()
-        return [self._tx_to_payment_result(tx) for tx in txs]
 
 
 async def record_definitive_refusal(

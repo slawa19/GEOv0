@@ -97,7 +97,8 @@ async def _evaluate_invariants(
 def _unverified_names(invariants: dict[str, InvariantOutcome]) -> list[str]:
     """Names carrying no verdict, derived from the values rather than hard-coded.
 
-    Hard-coding `["zero_sum"]` would keep saying "not verified" after 015 restores a real check.
+    Hard-coding `["zero_sum"]` would keep saying "not verified" if a real check is ever restored (015 closed
+    without one).
     """
     return sorted(k for k, v in invariants.items() if isinstance(v, InvariantWithdrawn))
 
