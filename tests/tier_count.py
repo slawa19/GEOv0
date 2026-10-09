@@ -170,6 +170,8 @@ make the session green again:
 * 2026-10-09, 036 slice A second fix-delta (review of `c2d84180`), on `origin/main` `6738cec3` (3472): 3472 -> 3476 (+4). New: `tests/integration/test_p036_a3_upload_reads_no_database.py` (3: the trap's anti-vacuum, a
   control without a payment, the upload with a payment); `tests/unit/test_p036_a_episodes_projection.py` +4 (a focus edge with an empty start, an empty end, the `from_` spelling; an anchor in the `from_`
   spelling). Fewer: the three upload tests of the equivalent's step in `test_p036_a2_story_is_validated_at_upload.py` (the check moved to slice B, execution). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3476/3491`).
+* 2026-10-09, 035 slice A9 (`POST /payments` closes its request session before the payment): 3362 -> 3363 (+1: `tests/integration/test_p035_a9_payment_request_releases_its_session_postgres.py`). Measured with the same command on base `b90dd8f2`.
+* 2026-10-09, 035 slice A9 merged after 036 slice A (`origin/main` at the merge of PR #195, 3476): 3476 -> 3477 (+1, the A9 module above; the numbers in the A9 line are those of the branch on `6738cec3`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -212,7 +214,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3476
+EXPECTED_SELECTED_ITEMS = 3477
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
