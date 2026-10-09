@@ -99,3 +99,52 @@ async def test_a_clearing_cancelled_while_its_closed_line_is_published_says_done
     assert len(done) == 1, (
         f"one committed cycle, {len(done)} clearing.done event(s): plan_ids {[d.get('plan_id') for d in done]}, "
         f"patches {[(d.get('node_patch') is not None, d.get('edge_patch') is not None) for d in done]}")
+
+
+class _FailsTheFirstDone(RecordingSse):
+    """An SSE surface whose FIRST `clearing.done` broadcast fails - the emitter then catches it and returns no id."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refused = 0
+
+    def broadcast(self, run_id, payload) -> None:
+        if isinstance(payload, dict) and payload.get("type") == "clearing.done" and not self.refused:
+            self.refused += 1
+            raise RuntimeError("the first clearing.done of this stand is not delivered")
+        super().broadcast(run_id, payload)
+
+
+@MODE_B
+@pytest.mark.asyncio
+async def test_a_done_that_was_not_published_is_published_by_the_cancellation_ending(
+    client, db_session, monkeypatch
+) -> None:
+    """034 S2b fix-delta (review of `ed3271fe`, P3): the flag stands for a PUBLISHED event, not for an attempt. The
+    first emit fails inside the emitter (which returns no event id), then the cancellation arrives on the re-read of
+    the closed line: the durable progress must still be published - once."""
+    code, p, lines, run, _sse = await _stand(client, db_session, monkeypatch)
+    sse = _FailsTheFirstDone()
+    monkeypatch.setattr(simulator_module.runtime, "_sse", sse)
+    inside, release = asyncio.Event(), asyncio.Event()
+
+    async def _held(_eq, _pairs):
+        inside.set()
+        await release.wait()
+        return set()
+
+    monkeypatch.setattr(sse_broadcast, "_live_pairs", _held)
+    request = asyncio.create_task(_post(client, run, code))
+    await asyncio.wait_for(inside.wait(), timeout=30)
+    # Controls: the emit was attempted and refused, nothing is published yet, the clearing is committed.
+    assert sse.refused == 1 and _done(sse) == [], (sse.refused, _done(sse))
+    assert (await _line(client, db_session, p["A"], lines["AB"]))["status"] == "closed"
+
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+
+    done = _done(sse)
+    assert len(done) == 1 and done[0]["cleared_cycles"] == 1, (
+        f"one committed cycle whose first clearing.done was not delivered: {len(done)} published after the "
+        f"cancellation, expected 1: {done}")
