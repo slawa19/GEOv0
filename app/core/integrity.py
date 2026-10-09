@@ -91,7 +91,9 @@ async def compute_integrity_checkpoint_for_equivalent(
     # `overall_status`, to `alerts` or to `passed`: an unverified check must not be able to make
     # the summary healthier, and must not be able to make it worse either.
     #
-    # Building a real zero-sum check is programme 015. The key stays, and says what it is.
+    # No real zero-sum check has replaced it (programme 015 closed without one: the book's integrity is
+    # established by the reconciliation of `app/core/ledger/reconciliation.py`, not by this summary).
+    # The key stays, and says what it is.
     checks["zero_sum"] = dict(ZERO_SUM_WITHDRAWN)
     unverified = ["zero_sum"]
 

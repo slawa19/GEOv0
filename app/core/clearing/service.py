@@ -402,27 +402,12 @@ class ClearingService:
 
     @classmethod
     def _is_retryable_concurrency_error(cls, exc: BaseException) -> bool:
-        # PostgreSQL SQLSTATEs only, and that is a decision rather than an omission (T1525,
-        # 2026-09-12). Since SQLite transactions take a real read snapshot, a clearing execution
-        # that reads and then writes can be refused with SQLITE_BUSY_SNAPSHOT, which this predicate
-        # does NOT call retryable: that execution ends there.
-        #
-        # ACCEPTED, BUT ONLY THE SIMULATOR GETS THE "LATER TICK" - corrected 2026-09-12, this
-        # comment used to justify the decision with "the simulator attempts it again on a later
-        # tick" full stop, which is true of one caller and false of the other:
-        #   * simulator: a postponed clearing rather than lost money, because there IS a next tick.
-        #     The cost is that the failure feeds `run.errors_total`, which can stop a run once
-        #     `SIMULATOR_REAL_MAX_ERRORS_TOTAL` is reached.
-        #   * HTTP `POST /api/v1/clearing/auto`: there is NO next tick. The busy becomes E010 and
-        #     the caller gets HTTP 500. Cycles already cleared in that call stay committed, so the
-        #     remainder is refused rather than lost, but the caller is told "internal error" for
-        #     what is a transient lock conflict.
-        # Neither loses money - unlike the inject, whose owner would mark the
-        # event fired and drop it (`real_runner_impl._is_transient_inject_db_error`). It appeared in
-        # no measurement of T1525: two 180 s multi-session simulator runs, four full default tiers
-        # and five multi-session modules ten times each, all with zero busy errors from clearing.
-        # HISTORY: the SQLite half of this note no longer applies - SQLite, its busy predicate and
-        # `app/db/sqlite_transaction_control.py` left the application in programme 017 stage 3.
+        # Retryable is what the SERVER ended by rolling the transaction back (`ROLLED_BACK_SQLSTATES`,
+        # `app/db/sqlstate.py`: 40001, 40P01), found on the deliberate chain only (`_postgres_error_codes`).
+        # Nothing else is retried here.
+        # REMOVED 2026-10-09 (035 A7): a twenty-line note on why SQLite's busy-snapshot refusal was not in this
+        # set and what each caller then answered. SQLite left the application in programme 017, so the note
+        # described no reachable case; its text is in `git log -S "SQLITE_BUSY_SNAPSHOT" -- <this file>`.
         return bool(cls._postgres_error_codes(exc) & ROLLED_BACK_SQLSTATES)
 
     async def _reconcile_committed_execution(
