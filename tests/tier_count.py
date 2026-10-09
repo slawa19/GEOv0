@@ -142,6 +142,10 @@ make the session green again:
   precisions, amounts finer than hundredths) and
   `tests/integration/test_p034_s2b_interact_clearing_done_is_published_once_postgres.py` (2). Measured with
   `python -m pytest --collect-only -q -m "not slow"` (`3299/3314 tests collected`).
+* 2026-10-09, 034 slice S2b, fix-delta of the review of `ed3271fe`: 3299 -> 3303 (+4). Three cases of the new
+  `tests/integration/test_p034_s2b_clearing_done_reads_the_precision_before_the_pass_postgres.py` and one more in
+  `tests/integration/test_p034_s2b_interact_clearing_done_is_published_once_postgres.py`. Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3303/3318 tests collected`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -184,7 +188,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3299
+EXPECTED_SELECTED_ITEMS = 3303
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
