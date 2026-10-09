@@ -6,7 +6,7 @@ Every target is RED on `7df35fcf`; controls are the same stand with the input in
 * `pause_after` (spec 036): after the tick on which an episode with `pause_after: true` was SPENT, the run is `paused`
   (after the money phase and the clearing of that tick). "Spent" is the B1 meaning: a clearing that did not complete
   (`incomplete`) is not spent and does not pause; a restart during the tick, a stop in progress and a tick of another epoch
-  do not pause. A `stress` event is never "spent" (it is a time window, not an occurrence) and never pauses.
+  do not pause. A `stress` event is spent on the tick it becomes due (its window goes on regardless) and pauses then.
 * `inject_enabled`: the scenario's opt-in is NEVER higher than the process flag; an absent setting leaves the flag alone;
   a skipped inject is said aloud (the events artifact and the run's episode progress), not silent.
 * `RunStatus.episode_progress`: one typed entry per tracked event (a scripted payment or clearing, a skipped inject): the
@@ -184,16 +184,20 @@ async def test_a_run_that_is_being_stopped_is_not_turned_into_a_paused_one(facto
 
 
 @pytest.mark.asyncio
-async def test_control_a_stress_event_with_pause_after_never_pauses(factory, monkeypatch) -> None:  # noqa: F811
-    """Declared: a `stress` event is a time window with no 'spent' moment, so `pause_after` on it has no effect."""
+async def test_a_stress_event_with_pause_after_pauses_once_when_it_becomes_due(factory, monkeypatch) -> None:  # noqa: F811
+    """Declared: a `stress` event is 'spent' on the tick it becomes due (the window it opens goes on regardless), so
+    `pause_after` on it pauses once, at that tick - a story can stop at 'the market day begins'."""
 
-    stress = {"time": 0, "type": "stress", "caption": CAPTION, "pause_after": True, "metadata": {"duration_ms": 60_000},
+    stress = {"time": 1500, "type": "stress", "caption": CAPTION, "pause_after": True, "metadata": {"duration_ms": 60_000},
               "effects": [{"op": "mult", "field": "tx_rate", "scope": "all", "value": 2}]}
     eq, p, run, runner = await _stand(factory, monkeypatch, ["A", "B"], PAY_LINES, [], [stress])
 
-    await ticks(runner, run, 2)
+    await ticks(runner, run, 1)  # sim time 2000: due
+    first = run.state
+    run.state = "running"
+    await ticks(runner, run, 1)  # the window is open, the event is spent: no second pause
 
-    _healthy(run)
+    require_target(first == "paused" and run.state == "running", f"first {first!r}, second {run.state!r}")
 
 
 # ----------------------------------------------------------------------------------------------------- inject_enabled

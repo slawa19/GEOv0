@@ -7342,7 +7342,7 @@ components:
 
     RunCreateRequest:
       type: object
-      required: [scenario_id, mode, intensity_percent]
+      required: [scenario_id, mode]
       properties:
         scenario_id:
           type: string
@@ -7351,8 +7351,12 @@ components:
           enum: [fixtures, real]
         intensity_percent:
           type: integer
+          nullable: true
           minimum: 0
           maximum: 100
+          description: >-
+            Optional (absent or null = not given). The request's value wins (0 included); when absent the run takes `settings.playback.intensity_percent`
+            of the scenario, and 30 when the scenario names none.
       additionalProperties: false
 
     RunCreateResponse:
@@ -7471,6 +7475,90 @@ components:
         current_phase:
           type: string
           nullable: true
+        episode_progress:
+          type: array
+          nullable: true
+          description: >-
+            What happened to the tracked events of the scenario's story in this launch of the run, ordered by event index; null
+            when nothing is tracked. Not part of the SSE `run_status` event and not stored: it is the run's memory.
+          items:
+            $ref: '#/components/schemas/EpisodeProgress'
+      additionalProperties: false
+
+    EpisodeProgress:
+      type: object
+      description: >-
+        The TRUE outcome of one tracked event of the story: a scripted `payment` or `clearing` event, or an `inject` that was
+        skipped. `done`: a payment committed, a clearing pass completed (an empty one included). `incomplete`: not finished -
+        the event is still pending and the next tick runs it again; `reason` says why. `refused`: it was not attempted, or the
+        core refused it for good; `reason` is the code. `epoch` is the launch (a restart starts a new one).
+      required: [index, epoch, kind, status]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: Position of the event in the scenario's `events[]`.
+        epoch:
+          type: integer
+          minimum: 0
+        kind:
+          type: string
+          enum: [payment, clearing, inject]
+        status:
+          type: string
+          enum: [done, incomplete, refused]
+        reason:
+          type: string
+          nullable: true
+        equivalent:
+          type: string
+          nullable: true
+        attempts:
+          type: integer
+          minimum: 1
+          nullable: true
+        payment:
+          oneOf:
+            - $ref: '#/components/schemas/EpisodeProgressPayment'
+            - nullable: true
+              enum: [null]
+        cleared_cycles:
+          type: integer
+          minimum: 0
+          nullable: true
+        cycles:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/EpisodeProgressCycle'
+      additionalProperties: false
+
+    EpisodeProgressPayment:
+      type: object
+      description: The scripted payment as attempted; `amount` is the scenario's decimal string as written.
+      required: [from, to, amount, equivalent]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        amount:
+          type: string
+        equivalent:
+          type: string
+      additionalProperties: false
+
+    EpisodeProgressCycle:
+      type: object
+      description: One committed clearing cycle, as `clearing-real` reports it; edges run creditor -> debtor.
+      required: [cleared_amount, edges]
+      properties:
+        cleared_amount:
+          type: string
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorEventEdgeRef'
       additionalProperties: false
 
     # 011/T1110 (2026-08-24): the three JSON documents `GET /simulator/runs/{run_id}/artifacts/

@@ -497,7 +497,9 @@ RunMode = Literal["fixtures", "real"]
 class RunCreateRequest(BaseModel):
     scenario_id: str
     mode: RunMode
-    intensity_percent: int = Field(ge=0, le=100)
+    # 036 B2 (MAKE-OPTIONAL): the request's value (0 included), else `settings.playback.intensity_percent` of the scenario,
+    # else 30.
+    intensity_percent: Optional[int] = Field(default=None, ge=0, le=100)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -512,6 +514,49 @@ class RunCreateResponse(BaseModel):
 class ActiveRunResponse(BaseModel):
     api_version: str = Field(default=SIMULATOR_API_VERSION)
     run_id: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class EpisodeProgressCycle(BaseModel):
+    """One committed clearing cycle of a scripted `clearing` event, as `clearing-real` reports it: the amount (a decimal
+    string) and the edges creditor -> debtor, `from`/`to` on the wire."""
+
+    cleared_amount: str
+    edges: List[SimulatorEventEdgeRef]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class EpisodeProgressPayment(BaseModel):
+    """The scripted payment of a `payment` event: who paid whom, how much (the scenario's decimal string as written)."""
+
+    from_: str = Field(alias="from")
+    to: str
+    amount: str
+    equivalent: str
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class EpisodeProgress(BaseModel):
+    """What happened to one tracked event of the scenario's story in THIS run (036 B2, in memory, per launch).
+
+    Tracked: a scripted `payment` or `clearing` event and an `inject` that was skipped. `status` is the TRUTH about the event:
+    `done` (a payment committed; a clearing pass that completed, an empty one included), `incomplete` (not finished - the
+    event is still pending and the next tick runs it again; `reason` says why) or `refused` (it was not, and will not be,
+    attempted or the core refused it for good; `reason` is the code). `epoch` is the launch (a restart starts a new one)."""
+
+    index: int = Field(ge=0)
+    epoch: int = Field(ge=0)
+    kind: Literal["payment", "clearing", "inject"]
+    status: Literal["done", "incomplete", "refused"]
+    reason: Optional[str] = None
+    equivalent: Optional[str] = None
+    attempts: Optional[int] = Field(default=None, ge=1)
+    payment: Optional[EpisodeProgressPayment] = None
+    cleared_cycles: Optional[int] = Field(default=None, ge=0)
+    cycles: Optional[List[EpisodeProgressCycle]] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -551,6 +596,10 @@ class RunStatus(BaseModel):
     last_error: Optional[SimulatorLastError] = None
     last_event_type: Optional[str] = None
     current_phase: Optional[str] = None
+
+    # 036 B2: what happened to the tracked events of the scenario's story in this launch; null when nothing is tracked.
+    # Not in the SSE `run_status` event (its shape is protected) and not stored anywhere: it is the run's memory.
+    episode_progress: Optional[List[EpisodeProgress]] = None
 
     model_config = ConfigDict(extra="forbid")
 

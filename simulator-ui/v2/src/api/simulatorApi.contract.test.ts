@@ -425,6 +425,39 @@ describe('Simulator critical REST response contracts', () => {
     expect(result.queue_depth).toBeNull()
   })
 
+  it('036 B2: a run status carries the true outcome of the story events, with and without them', async () => {
+    const progress = [
+      {
+        index: 1,
+        epoch: 0,
+        kind: 'clearing',
+        status: 'done',
+        equivalent: 'UAH',
+        attempts: 1,
+        cleared_cycles: 1,
+        cycles: [{ cleared_amount: '10.00', edges: [{ from: 'A', to: 'B' }, { from: 'B', to: 'A' }] }],
+      },
+      { index: 2, epoch: 0, kind: 'payment', status: 'incomplete', reason: 'TIMEOUT', attempts: 2, payment: null },
+      {
+        index: 3,
+        epoch: 1,
+        kind: 'payment',
+        status: 'done',
+        payment: { from: 'A', to: 'B', amount: '5.00', equivalent: 'UAH' },
+      },
+      { index: 4, epoch: 1, kind: 'inject', status: 'refused', reason: 'inject_disabled_by_scenario' },
+    ]
+    respondWith({ ...runStatus, episode_progress: progress })
+    const result = await getRun(cfg, 'run-1')
+    expect(result.episode_progress).toEqual(progress)
+    expect(result.episode_progress?.[0]?.cycles?.[0]?.edges[1]).toEqual({ from: 'B', to: 'A' })
+
+    respondWith({ ...runStatus, episode_progress: null })
+    await expect(getRun(cfg, 'run-1')).resolves.toMatchObject({ episode_progress: null })
+    respondWith(runStatus)
+    await expect(getRun(cfg, 'run-1')).resolves.not.toHaveProperty('episode_progress', expect.anything())
+  })
+
   it('026 S4: a snapshot link keeps the close request', async () => {
     const asked = '2026-10-02T08:00:00Z'
     respondWith({ ...snapshot, links: [{ ...snapshot.links[0], trust_limit: '0.00', close_requested_at: asked }] })
@@ -965,6 +998,41 @@ describe('Simulator critical REST response contracts', () => {
       call: () => getRun(cfg, 'run-1'),
       contract: 'run-status',
       diagnostic: '$.sim_time_ms',
+    },
+    {
+      label: 'run status episode progress with an unknown status',
+      payload: { ...runStatus, episode_progress: [{ index: 0, epoch: 0, kind: 'payment', status: 'pending' }] },
+      call: () => getRun(cfg, 'run-1'),
+      contract: 'run-status',
+      diagnostic: '$.episode_progress[0].status',
+    },
+    {
+      label: 'run status episode progress with an unknown kind',
+      payload: { ...runStatus, episode_progress: [{ index: 0, epoch: 0, kind: 'note', status: 'done' }] },
+      call: () => getRun(cfg, 'run-1'),
+      contract: 'run-status',
+      diagnostic: '$.episode_progress[0].kind',
+    },
+    {
+      label: 'run status episode progress with an extra field',
+      payload: { ...runStatus, episode_progress: [{ index: 0, epoch: 0, kind: 'payment', status: 'done', tx_id: 'x' }] },
+      call: () => getRun(cfg, 'run-1'),
+      contract: 'run-status',
+      diagnostic: '$.episode_progress[0].tx_id',
+    },
+    {
+      label: 'run status episode progress with a float amount',
+      payload: { ...runStatus, episode_progress: [{ index: 0, epoch: 0, kind: 'clearing', status: 'done', cycles: [{ cleared_amount: 1.5, edges: [] }] }] },
+      call: () => getRun(cfg, 'run-1'),
+      contract: 'run-status',
+      diagnostic: '$.episode_progress[0].cycles[0].cleared_amount',
+    },
+    {
+      label: 'run status episode progress with aliased-away edge ends',
+      payload: { ...runStatus, episode_progress: [{ index: 0, epoch: 0, kind: 'clearing', status: 'done', cycles: [{ cleared_amount: '1.00', edges: [{ source: 'A', target: 'B' }] }] }] },
+      call: () => getRun(cfg, 'run-1'),
+      contract: 'run-status',
+      diagnostic: '$.episode_progress[0].cycles[0].edges[0].source',
     },
     {
       label: 'run status invalid error date-time',

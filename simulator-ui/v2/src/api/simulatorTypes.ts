@@ -282,6 +282,29 @@ export type RunError = {
   at: string
 }
 
+// 036 B2: the true outcome of one tracked event of the scenario's story in this launch of the run (REST only: it is not part
+// of the SSE `run_status` event). `incomplete` = still pending, the next tick runs it again; `refused` = not attempted or
+// refused for good. Amounts are decimal strings; edges run creditor -> debtor.
+export type EpisodeProgressStatus = 'done' | 'incomplete' | 'refused'
+export type EpisodeProgressKind = 'payment' | 'clearing' | 'inject'
+export type EpisodeProgressCycle = {
+  cleared_amount: string
+  edges: Array<{ from: string; to: string }>
+}
+export type EpisodeProgressPayment = { from: string; to: string; amount: string; equivalent: string }
+export type EpisodeProgress = {
+  index: number
+  epoch: number
+  kind: EpisodeProgressKind
+  status: EpisodeProgressStatus
+  reason?: string | null
+  equivalent?: string | null
+  attempts?: number | null
+  payment?: EpisodeProgressPayment | null
+  cleared_cycles?: number | null
+  cycles?: EpisodeProgressCycle[] | null
+}
+
 export type RunStatus = {
   api_version?: string
   run_id: string
@@ -303,6 +326,7 @@ export type RunStatus = {
   last_event_type?: string | null
   current_phase?: string | null
   last_error?: RunError | null
+  episode_progress?: EpisodeProgress[] | null
 
   // Backend-first cumulative stats (authoritative; sent in every run_status event).
   attempts_total?: number | null

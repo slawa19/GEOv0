@@ -12,6 +12,11 @@ import type {
   MetricUnit,
   MetricsResponse,
   RunError,
+  EpisodeProgress,
+  EpisodeProgressCycle,
+  EpisodeProgressKind,
+  EpisodeProgressPayment,
+  EpisodeProgressStatus,
   RunStatus,
   LocalizedText,
   ScenarioAnchorEvent,
@@ -420,6 +425,7 @@ function decodeRunStatus(value: unknown, path: string): RunStatus {
     'last_error',
     'last_event_type',
     'current_phase',
+    'episode_progress',
   ])
 
   const mode = stringAt(raw.mode, `${path}.mode`)
@@ -457,7 +463,78 @@ function decodeRunStatus(value: unknown, path: string): RunStatus {
     last_error: lastError,
     last_event_type: optionalString(raw, 'last_event_type', path),
     current_phase: optionalString(raw, 'current_phase', path),
+    episode_progress: decodeEpisodeProgressList(raw.episode_progress, `${path}.episode_progress`),
   }
+}
+
+const EPISODE_PROGRESS_KINDS = new Set(['payment', 'clearing', 'inject'])
+const EPISODE_PROGRESS_STATUSES = new Set(['done', 'incomplete', 'refused'])
+
+function decodeEpisodeProgressPayment(value: unknown, path: string): EpisodeProgressPayment {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['from', 'to', 'amount', 'equivalent'])
+  return {
+    from: stringAt(raw.from, `${path}.from`),
+    to: stringAt(raw.to, `${path}.to`),
+    amount: decimalStringAt(raw.amount, `${path}.amount`),
+    equivalent: stringAt(raw.equivalent, `${path}.equivalent`),
+  }
+}
+
+function decodeEpisodeProgressCycle(value: unknown, path: string): EpisodeProgressCycle {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, ['cleared_amount', 'edges'])
+  return {
+    cleared_amount: decimalStringAt(raw.cleared_amount, `${path}.cleared_amount`),
+    edges: arrayAt(raw.edges, `${path}.edges`).map((edge, index) => decodeClearingEdge(edge, `${path}.edges[${index}]`)),
+  }
+}
+
+function decodeEpisodeProgress(value: unknown, path: string): EpisodeProgress {
+  const raw = objectAt(value, path)
+  onlyKeys(raw, path, [
+    'index',
+    'epoch',
+    'kind',
+    'status',
+    'reason',
+    'equivalent',
+    'attempts',
+    'payment',
+    'cleared_cycles',
+    'cycles',
+  ])
+  const kind = stringAt(raw.kind, `${path}.kind`)
+  if (!EPISODE_PROGRESS_KINDS.has(kind)) fail(`${path}.kind`, 'expected payment, clearing or inject')
+  const status = stringAt(raw.status, `${path}.status`)
+  if (!EPISODE_PROGRESS_STATUSES.has(status)) fail(`${path}.status`, 'expected done, incomplete or refused')
+  const payment =
+    raw.payment === undefined || raw.payment === null
+      ? raw.payment
+      : decodeEpisodeProgressPayment(raw.payment, `${path}.payment`)
+  const cycles =
+    raw.cycles === undefined || raw.cycles === null
+      ? raw.cycles
+      : arrayAt(raw.cycles, `${path}.cycles`).map((cycle, index) =>
+          decodeEpisodeProgressCycle(cycle, `${path}.cycles[${index}]`),
+        )
+  return {
+    index: numberAt(raw.index, `${path}.index`, { integer: true, min: 0 }),
+    epoch: numberAt(raw.epoch, `${path}.epoch`, { integer: true, min: 0 }),
+    kind: kind as EpisodeProgressKind,
+    status: status as EpisodeProgressStatus,
+    reason: optionalString(raw, 'reason', path),
+    equivalent: optionalString(raw, 'equivalent', path),
+    attempts: optionalNumber(raw, 'attempts', path, { integer: true, min: 1 }),
+    payment,
+    cleared_cycles: optionalNumber(raw, 'cleared_cycles', path, { integer: true, min: 0 }),
+    cycles,
+  }
+}
+
+function decodeEpisodeProgressList(value: unknown, path: string): EpisodeProgress[] | null | undefined {
+  if (value === undefined || value === null) return value
+  return arrayAt(value, path).map((item, index) => decodeEpisodeProgress(item, `${path}[${index}]`))
 }
 
 function nullableStringOrNumber(value: unknown, path: string): string | number | undefined {

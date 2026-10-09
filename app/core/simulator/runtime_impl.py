@@ -389,7 +389,7 @@ class _SimulatorRuntimeBase:
         *,
         scenario_id: str,
         mode: RunMode,
-        intensity_percent: int,
+        intensity_percent: Optional[int] = None,
         owner_id: str = "",
         owner_kind: str = "",
         created_by: Optional[dict] = None,
@@ -928,10 +928,24 @@ class _SimulatorRuntimeBase:
         except Exception:
             logger.error("simulator.heartbeat.fail_run_upsert_failed run_id=%s", str(run_id), exc_info=True)
 
+    @staticmethod
+    def _tick_seconds_of(run: RunRecord) -> float:
+        """The real duration of a tick of this run: `settings.playback.tick_seconds` of its scenario (036 B2), a LOWER bound of
+        the period (the work of the tick comes on top), 1.0 - the pace before B2 - when the scenario says nothing. The value
+        was checked against the schema's range when the run was created (`build_story`); a value outside it is not trusted
+        here either and falls back to the default."""
+
+        settings_block = (getattr(run, "_scenario_raw", None) or {}).get("settings")
+        playback = settings_block.get("playback") if isinstance(settings_block, dict) else None
+        value = playback.get("tick_seconds") if isinstance(playback, dict) else None
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not (0.25 <= float(value) <= 5.0):
+            return 1.0
+        return float(value)
+
     async def _heartbeat_loop(self, run_id: str) -> None:
         try:
             while True:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(self._tick_seconds_of(self.get_run(run_id)))
                 run = self.get_run(run_id)
 
                 with self._lock:
