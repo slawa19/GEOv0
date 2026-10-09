@@ -149,6 +149,22 @@ REFUSED = [
     ("anchor of an unknown event", _set(["events", 1, "anchor", "event"], "run_status"), "events/1/anchor/event"),
     ("anchor with an unknown key", _set(["events", 1, "anchor", "cleared_amount"], "1"), "events/1/anchor"),
     ("anchor amount as a number", _set(["events", 1, "anchor", "amount"], 5), "events/1/anchor/amount"),
+    ("tx.updated anchor without an amount", _set(["events", 1, "anchor", "amount"], _DELETE), "events/1/anchor"),
+    ("tx.updated anchor without an equivalent", _set(["events", 1, "anchor", "equivalent"], _DELETE), "events/1/anchor"),
+    ("tx.updated anchor without a sender", _set(["events", 1, "anchor", "from"], _DELETE), "events/1/anchor"),
+    ("tx.updated anchor with only the event", _set(["events", 1, "anchor"], {"event": "tx.updated"}), "events/1/anchor"),
+    ("tx.failed anchor carrying an amount",
+     _set(["events", 1, "anchor"], {"event": "tx.failed", "from": "A", "to": "B", "equivalent": "UAH", "amount": "5.00"}),
+     "events/1/anchor"),
+    ("tx.failed anchor without an equivalent", _set(["events", 1, "anchor"], {"event": "tx.failed", "from": "A", "to": "B"}),
+     "events/1/anchor"),
+    ("payment amount with 19 fraction digits", _set(["events", 1, "amount"], "0.1234567890123456789"), "events/1/amount"),
+    ("payment amount of 51 digits", _set(["events", 1, "amount"], "1" * 51), "events/1/amount"),
+    ("payment amount with a terminal newline", _set(["events", 1, "amount"], "5.00\n"), "events/1/amount"),
+    ("payment amount with an exponent", _set(["events", 1, "amount"], "1e3"), "events/1/amount"),
+    ("anchor amount with a terminal newline", _set(["events", 1, "anchor", "amount"], "5.00\n"), "events/1/anchor/amount"),
+    ("anchor amount with 19 fraction digits", _set(["events", 1, "anchor", "amount"], "0.1234567890123456789"),
+     "events/1/anchor/amount"),
     ("focus with an unknown key", _set(["events", 1, "focus", "zoom"], 2), "events/1/focus"),
     ("focus edge without to", _set(["events", 1, "focus", "edges"], [{"from": "A"}]), "events/1/focus/edges/0"),
     ("expected_cycle of one", _set(["events", 2, "expected_cycle"], ["A"]), "events/2/expected_cycle"),
@@ -171,6 +187,25 @@ def test_the_schema_refuses_one_broken_field(name: str, mutate, path: str) -> No
     paths = [p for p, _ in _errors(scenario)]
     assert paths, f"{name}: the schema accepted it"
     assert any(p == path or p.startswith(path + "/") or path.startswith(p + "/") for p in paths), (name, paths)
+
+
+@pytest.mark.parametrize(
+    "amount", ["0.123456789012345678", "0" * 50, "1" * 32 + "." + "1" * 18, "00005.50", "5"], ids=str
+)
+def test_the_amount_grammar_keeps_its_boundaries_open(amount: str) -> None:
+    """Controls for the bounds above (18 fraction digits, 50 digits in all, leading zeros) - a pattern that refused
+    everything would pass every refusal case."""
+
+    scenario = deepcopy(_story())
+    scenario["events"][1]["amount"] = amount
+    scenario["events"][1]["anchor"]["amount"] = amount
+    assert _errors(scenario) == []
+
+
+def test_a_complete_tx_failed_anchor_validates() -> None:
+    scenario = deepcopy(_story())
+    scenario["events"][1]["anchor"] = {"event": "tx.failed", "from": "A", "to": "B", "equivalent": "UAH"}
+    assert _errors(scenario) == []
 
 
 def test_a_plain_string_description_and_a_scenario_without_episodes_still_validate() -> None:

@@ -780,10 +780,111 @@ describe('Simulator critical REST response contracts', () => {
     },
     {
       label: 'anchor amount not a decimal string',
-      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated', amount: 5 } }] },
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: 5 } }],
+      },
       call: () => getScenario(cfg, 'scenario-1'),
       contract: 'scenario-detail',
       diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'tx.updated anchor without an amount',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH' } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'tx.updated anchor with only the event',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated' } }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.from',
+    },
+    {
+      label: 'tx.failed anchor carrying an amount (a failure has none)',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          {
+            ...storyEpisodes[1],
+            anchor: { event: 'tx.failed', from: 'A', to: 'B', equivalent: 'UAH', amount: '5.00' },
+          },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'tx.failed anchor without an equivalent',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.failed', from: 'A', to: 'B' } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.equivalent',
+    },
+    {
+      label: 'anchor amount with a sign (the scenario money grammar has none)',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          {
+            ...storyEpisodes[1],
+            anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: '-5.00' },
+          },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'anchor amount with 19 fraction digits',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          {
+            ...storyEpisodes[1],
+            anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: '0.1234567890123456789' },
+          },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'anchor amount with a terminal newline',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          { ...storyEpisodes[1], anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: '5\n' } },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'caption with an empty language',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[0], caption: { ru: 'x', en: '' } }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].caption.en',
+    },
+    {
+      label: 'playback tick below the canon floor',
+      payload: { ...scenarioDetail, playback: { tick_seconds: 0.1 } },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.playback.tick_seconds',
     },
     {
       label: 'focus edge in the Python spelling from_',
