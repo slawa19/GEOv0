@@ -26,7 +26,11 @@
       "type": "string"
     },
     "description": {
-      "type": "string"
+      "description": "A plain string (older scenarios) or a {ru, en} pair. The REST detail always returns the pair; a string is returned as both languages.",
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/$defs/localizedText" }
+      ]
     },
     "seed": {
       "type": "integer",
@@ -70,6 +74,29 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "playback": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Pace and defaults of a run of this scenario (036). Every field is optional; an absent field keeps today's behaviour. Slice A validates and serves these fields over REST; the engine reads them in slice B, so until then they change nothing in a run.",
+          "properties": {
+            "tick_seconds": {
+              "type": "number",
+              "minimum": 0.25,
+              "maximum": 5,
+              "description": "Real duration of one tick, a lower bound of the period (the work of the tick comes on top). Absent = 1.0."
+            },
+            "intensity_percent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Default intensity of a run of this scenario."
+            },
+            "inject_enabled": {
+              "type": "boolean",
+              "description": "Opt-in of this scenario to inject events. The process flag SIMULATOR_REAL_ENABLE_INJECT stays the upper permission; a scenario without the field behaves as before (inject by the process flag)."
+            }
+          }
+        },
         "warmup": {
           "type": "object",
           "additionalProperties": false,
@@ -242,11 +269,9 @@
       "required": ["time", "type"],
       "properties": {
         "time": {
-          "description": "Event time in simulation timeline. MVP supports: integer milliseconds from run start OR simple tokens like 'day_10' (runner interprets).",
-          "oneOf": [
-            { "type": "integer", "minimum": 0 },
-            { "type": "string", "minLength": 1, "maxLength": 50 }
-          ]
+          "type": "integer",
+          "minimum": 0,
+          "description": "Event time in simulation timeline: integer milliseconds from run start. String tokens (e.g. 'day_10') are refused: the runner never understood them, so the event would silently never fire (036 F-036-1)."
         },
         "type": {
           "type": "string",
@@ -261,18 +286,47 @@
           "description": "Optional human-readable label for the event"
         },
         "description": { "type": "string" },
+        "caption": {
+          "$ref": "#/$defs/localizedText",
+          "description": "What the viewer reads about this episode, in both languages (036). An event with a caption is an episode."
+        },
+        "pause_after": {
+          "type": "boolean",
+          "description": "The run pauses itself after this episode (slice B reads it)."
+        },
+        "focus": { "$ref": "#/$defs/episodeFocus" },
+        "anchor": { "$ref": "#/$defs/episodeAnchor" },
+        "expected_cycle": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/id" },
+          "description": "Participants of the cycle a clearing episode announces. The UI draws it only if all its edges are among those of the arriving clearing.done."
+        },
+        "from": { "$ref": "#/$defs/id", "description": "payment: the sender (debtor)." },
+        "to": { "$ref": "#/$defs/id", "description": "payment: the receiver (creditor)." },
+        "amount": {
+          "$ref": "#/$defs/scenarioAmount",
+          "description": "payment: a decimal string, never a number."
+        },
+        "equivalent": {
+          "type": "string",
+          "minLength": 1,
+          "description": "payment / clearing: the equivalent code; absent = the scenario's default equivalent."
+        },
         "effects": {
           "type": "array",
           "items": { "type": "object", "additionalProperties": true }
         },
-        "params": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Event-type-specific parameters. For stress events: multiplier (number), duration_ms (integer), label (string)"
-        },
         "metadata": { "type": "object", "additionalProperties": true }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "payment" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["from", "to", "amount"] }
+        },
         {
           "if": {
             "properties": { "type": { "const": "inject" } },
@@ -295,6 +349,68 @@
           }
         }
       ]
+    },
+
+    "localizedText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ru", "en"],
+      "properties": {
+        "ru": { "type": "string", "minLength": 1 },
+        "en": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "episodeFocus": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the camera and the highlight go for an episode; empty or absent = the whole graph.",
+      "properties": {
+        "pids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "$ref": "#/$defs/id" },
+              "to": { "$ref": "#/$defs/id" }
+            }
+          }
+        }
+      }
+    },
+
+    "episodeAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event"],
+      "description": "The event whose arrival shows the episode's caption: the first not yet consumed event with these fields that arrives after the episode's time. tx.updated matches on from, to, amount, equivalent (all four required); tx.failed on from, to, equivalent (all three required, and NO amount: a failure carries none); clearing.done and topology.changed need only the event name. time_ms is the fallback for episodes that announce no action.",
+      "properties": {
+        "event": { "type": "string", "enum": ["tx.updated", "tx.failed", "clearing.done", "topology.changed"] },
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "amount": { "$ref": "#/$defs/scenarioAmount" },
+        "equivalent": { "type": "string", "minLength": 1 },
+        "time_ms": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "event": { "const": "tx.updated" } }, "required": ["event"] },
+          "then": { "required": ["from", "to", "amount", "equivalent"] }
+        },
+        {
+          "if": { "properties": { "event": { "const": "tx.failed" } }, "required": ["event"] },
+          "then": { "required": ["from", "to", "equivalent"], "not": { "required": ["amount"] } }
+        }
+      ]
+    },
+
+    "scenarioAmount": {
+      "type": "string",
+      "pattern": "^(?!(?:\\.?[0-9]){51})[0-9]+(?:\\.[0-9]{1,18})?(?![\\s\\S])",
+      "description": "A money amount as the product's money door reads it: plain digits, at most 18 fraction digits and 50 digits in all, no sign, exponent, space or text after the last digit (`(?![\\s\\S])` is the end of the string; `$` would let a terminal newline through). Leading zeros are allowed, as everywhere. Upload additionally checks that the value is storable (Numeric(20, 8)) and positive."
     },
 
     "injectEffectAddParticipant": {

@@ -2,10 +2,15 @@ import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingDoneE
 
 export type SimulatorMode = 'fixtures' | 'real'
 
+/** A text of the scenario in both languages (036): the content lives in the scenario, not in the UI dictionary. */
+export type LocalizedText = { ru: string; en: string }
+
 export type ScenarioSummary = {
   api_version?: string
   scenario_id: string
   name?: string | null
+  /** Always the pair when present; the backend serves a plain-string description as both languages. */
+  description?: LocalizedText | null
   /** UI-only compatibility field; REST decoder accepts only canonical backend fields. */
   label?: string
   mode?: string
@@ -17,6 +22,50 @@ export type ScenarioSummary = {
   clusters_count?: number | null
   hubs_count?: number | null
   tags?: string[] | null
+}
+
+export type ScenarioEpisodeKind = 'payment' | 'clearing' | 'stress' | 'inject' | 'note'
+
+export type ScenarioAnchorEvent = 'tx.updated' | 'tx.failed' | 'clearing.done' | 'topology.changed'
+
+export type ScenarioEpisodeFocus = {
+  pids: string[]
+  edges: Array<{ from: string; to: string }>
+}
+
+export type ScenarioEpisodeAnchor = {
+  event: ScenarioAnchorEvent
+  from?: string | null
+  to?: string | null
+  /** Decimal string. */
+  amount?: string | null
+  equivalent?: string | null
+  time_ms?: number | null
+}
+
+/** One event of the scenario that carries a caption. `index` is its position in the scenario's `events[]`. */
+export type ScenarioEpisode = {
+  index: number
+  time_ms: number
+  caption: LocalizedText
+  pause_after: boolean
+  kind: ScenarioEpisodeKind
+  focus?: ScenarioEpisodeFocus | null
+  anchor?: ScenarioEpisodeAnchor | null
+  expected_cycle?: string[] | null
+}
+
+/** `settings.playback` as written in the scenario; an absent field is null. */
+export type ScenarioPlayback = {
+  tick_seconds?: number | null
+  intensity_percent?: number | null
+  inject_enabled?: boolean | null
+}
+
+/** `GET /simulator/scenarios/{scenario_id}`: the summary plus the story. The list carries neither field. */
+export type ScenarioDetail = ScenarioSummary & {
+  episodes: ScenarioEpisode[]
+  playback?: ScenarioPlayback | null
 }
 
 export type ScenariosListResponse = {
