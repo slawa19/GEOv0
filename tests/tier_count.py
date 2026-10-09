@@ -145,7 +145,19 @@ make the session green again:
   entries and ten cases of the two HTTP money doors. Measured with `python -m pytest --collect-only -q -m "not slow"`
   on the branch merged with `a0d25e7c` (on `906cae90` the same 64 read 3275 -> 3339, by the guard's own refusal).
 * 2026-10-09, the money-storability fix merged after 034 S2 and 035 A2b (`origin/main` at the merge of PR #189, 3275): 3275 -> 3339 (+64, the module named in the line above; its numbers are those of the branch on `a0d25e7c`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 034 slice S2b (F-034-3, divergences 1 and 3), on `claude/p034-s2` `0b67a3cb` (3293): 3293 -> 3299 (+6).
+  `tests/integration/test_p034_s2_clearing_done_amount_is_in_the_equivalents_step_postgres.py` (4: a control, two
+  precisions, amounts finer than hundredths) and
+  `tests/integration/test_p034_s2b_interact_clearing_done_is_published_once_postgres.py` (2). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3299/3314 tests collected`).
+* 2026-10-09, 034 slice S2b, fix-delta of the review of `ed3271fe`: 3299 -> 3303 (+4). Three cases of the new
+  `tests/integration/test_p034_s2b_clearing_done_reads_the_precision_before_the_pass_postgres.py` and one more in
+  `tests/integration/test_p034_s2b_interact_clearing_done_is_published_once_postgres.py`. Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3303/3318 tests collected`).
+* 2026-10-09, 034 slice S2b merged after 035 A2b (`origin/main` `94891571`, 3275): 3275 -> 3285 (+10, the three S2b modules: 4 + 3 + 3; the S2b lines above are those of the branch before the merge). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 034 slice S2b merged after the money-storability fix (`origin/main` at the merge of PR #188, 3339): 3339 -> 3349 (+10, the three S2b modules above; the numbers in the S2b lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 035 slice A8 (public names for the staged owner, the payment read side moved to `app/core/payments/read.py`): 3339 -> 3352 (+13: `tests/unit/test_p035_a8_public_names_for_the_staged_owner.py` 12, `tests/integration/test_p035_a8_payment_read_side_answers_as_before.py` 1). Measured with the same command on base `7e21abc1`.
+* 2026-10-09, 035 slice A8 merged after 034 S2b (`origin/main` at the merge of PR #191, 3349): 3349 -> 3362 (+13, the two A8 modules above; the numbers in the A8 line are those of the branch on `7e21abc1`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -188,7 +200,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3352
+EXPECTED_SELECTED_ITEMS = 3362
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

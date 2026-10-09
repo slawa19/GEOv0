@@ -55,6 +55,10 @@ class _ScalarResult:
     def all(self) -> list:
         return []
 
+    def one_or_none(self) -> tuple:
+        # 034 S2b: the tick's read of `Equivalent.precision` before a pass; this stand's equivalents (USD, EUR) are 2.
+        return (2,)
+
 
 class _Session:
     async def execute(self, _statement) -> _ScalarResult:
