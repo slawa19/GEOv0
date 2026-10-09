@@ -28,8 +28,25 @@ Then the gate opens: fifteen `COMMITTED`, and the pool is back to zero. The roun
 (no payment has been routed on this clone yet), the second finds whatever the first left cached.
 
 THE TRAP ON THE REQUEST SESSION. Every ORM statement on the product engine is recorded per session. A request
-session is the one whose FIRST statement is the authentication SELECT; it must have run NOTHING else and begun exactly one
-transaction - so no implicit reload of the participant, no second use of the session after it was closed.
+session is the one whose FIRST statement is the authentication SELECT; it must have run NOTHING else and begun
+exactly one transaction - so no implicit reload of the participant, no second use of the session after it was
+closed.
+
+NO PRODUCT TIMER DECIDES THIS TEST, AND IT SLEEPS NOWHERE (§15 review of A9, 2026-10-09). A held payment sits inside
+the product's binding timeout (`PREPARE_TIMEOUT_SECONDS`, 3 s) and the payment's total deadline (10 s); on a slow
+machine the fifteenth arrival could come after the first payment had already timed out, and a correct release would
+read red. The four timers a held payment lives under are therefore raised for the test to `_PRODUCT_TIMERS`
+(existing settings, patched; the product is not changed), and every wait is an EVENT with the test's own budget
+`_BUDGET_SECONDS`: the fifteenth arrival sets one, the pool's last check-in sets the other. The budget is how long
+a broken run may take to say so; a correct run waits for nothing but the events.
+
+NOTHING IS LEFT BEHIND ON ANY EXIT (same review). Every resource is registered with one `AsyncExitStack` the moment
+it exists - the engine, the listeners on `Session` (process-wide: monkeypatch does not restore SQLAlchemy events),
+the observer connection - and the first thing the stack does on the way out is open the gate, cancel every request
+task that was ever started and wait for all of them, before the observer and the engine are closed. The settings,
+the engine and factory of `app.db.session`, the dependency overrides and the binding hook are monkeypatch's and
+are restored by it after that. The listeners are module-level functions, so "is it still registered" can be asked
+from outside (`sqlalchemy.event.contains`).
 
 NOT SEEN HERE: Redis (absent in the tier; the per-payer lock is a no-op, which is why the payers are distinct);
 several workers; the other routes that hold authentication while something else opens sessions
@@ -40,6 +57,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import uuid
 
 import asyncpg
@@ -66,6 +84,51 @@ from tests.integration.test_scenarios import (
 PAYMENTS = 15
 _AUTHENTICATION = "WHERE participants.pid ="
 
+#: How long a BROKEN run may wait before it says so. A correct run waits for events, not for this.
+_BUDGET_SECONDS = 120.0
+
+#: The product timers a payment held at the barrier lives under, raised so that none of them can end a held payment
+#: before the test opens the gate. `DB_POOL_TIMEOUT_SECONDS` is deliberately NOT here: the pool is the subject.
+_PRODUCT_TIMERS = {
+    "PREPARE_TIMEOUT_SECONDS": 900,
+    "PAYMENT_TOTAL_TIMEOUT_SECONDS": 900,
+    "COMMIT_TIMEOUT_SECONDS": 900,
+    "ROUTING_PATH_FINDING_TIMEOUT_MS": 900_000,
+}
+
+
+class _Trap:
+    """Every ORM statement and every transaction begin on one engine, per session."""
+
+    def __init__(self, engine) -> None:
+        self.sync_engine = engine.sync_engine
+        self.statements: dict[int, list[str]] = {}
+        self.begins: dict[int, int] = {}
+        self.kept: list[Session] = []  # strong references, so an id is never reused within the test
+
+
+_TRAP: _Trap | None = None
+
+
+def _on_execute(state) -> None:
+    trap = _TRAP
+    if trap is None or state.session.get_bind() is not trap.sync_engine:
+        return
+    if id(state.session) not in trap.statements:
+        trap.kept.append(state.session)
+    trap.statements.setdefault(id(state.session), []).append(" ".join(str(state.statement).split()))
+
+
+def _on_begin(session, _transaction, _connection) -> None:
+    trap = _TRAP
+    if trap is not None and session.get_bind() is trap.sync_engine:
+        trap.begins[id(session)] = trap.begins.get(id(session), 0) + 1
+
+
+def _disarm_trap() -> None:
+    global _TRAP
+    _TRAP = None
+
 
 def _payment(payer: dict, payee: dict, amount: str = "1.00") -> dict:
     tx_id = str(uuid.uuid4())
@@ -88,6 +151,8 @@ def _payment(payer: dict, payee: dict, amount: str = "1.00") -> dict:
 @MODE_B
 @pytest.mark.asyncio
 async def test_fifteen_simultaneous_payments_fit_a_pool_of_fifteen(client: AsyncClient, db_session, monkeypatch) -> None:
+    global _TRAP
+
     db_session.add(Equivalent(code="USD", description="USD", precision=2))
     await db_session.commit()
 
@@ -115,67 +180,97 @@ async def test_fifteen_simultaneous_payments_fit_a_pool_of_fifteen(client: Async
         pairs.append((payer, payee))
     await db_session.commit()
 
-    # --- the product's wiring on a real pool over the clone -------------------------------------------------
-    clone = db_session.info["geo_committed_database"].sessionmaker.kw["bind"].url
-    monkeypatch.setattr(settings, "DATABASE_URL", clone.render_as_string(hide_password=False))
-    engine = product_db._create_engine()
-    pool = engine.sync_engine.pool
-    assert (pool.size(), settings.DB_MAX_OVERFLOW) == (5, 10), "the stand is written for the settings' pool of 15"
-    monkeypatch.setattr(product_db, "engine", engine)
-    monkeypatch.setattr(
-        product_db,
-        "AsyncSessionLocal",
-        async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False),
-    )
-    monkeypatch.delitem(app.dependency_overrides, get_db)
-    monkeypatch.delitem(app.dependency_overrides, get_payment_session_factory)
+    for name, value in _PRODUCT_TIMERS.items():
+        monkeypatch.setattr(settings, name, value)  # raising: the setting must exist
 
-    # --- the trap: every ORM statement and every transaction begin, per session of the product engine -------
-    statements: dict[int, list[str]] = {}
-    begins: dict[int, int] = {}
-    kept: list[Session] = []  # strong references, so an id is never reused within the test
+    loop = asyncio.get_running_loop()
+    launched: list[asyncio.Task] = []  # every request task ever started, for the unconditional drain
+    gate = {"arrived": 0, "open": asyncio.Event(), "all_arrived": asyncio.Event()}
+    pool_idle = asyncio.Event()
 
-    def on_execute(state) -> None:
-        if state.session.get_bind() is engine.sync_engine:
-            if id(state.session) not in statements:
-                kept.append(state.session)
-            statements.setdefault(id(state.session), []).append(" ".join(str(state.statement).split()))
+    async def drain_requests() -> None:
+        """Open the gate, cancel what still runs, and wait for every request task - whatever happened."""
 
-    def on_begin(session, _transaction, _connection) -> None:
-        if session.get_bind() is engine.sync_engine:
-            begins[id(session)] = begins.get(id(session), 0) + 1
+        gate["open"].set()
+        for task in launched:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*launched, return_exceptions=True)
 
-    event.listen(Session, "do_orm_execute", on_execute)
-    event.listen(Session, "after_begin", on_begin)
+    async with contextlib.AsyncExitStack() as stack:
+        # --- the product's wiring on a real pool over the clone ---------------------------------------------
+        clone = db_session.info["geo_committed_database"].sessionmaker.kw["bind"].url
+        monkeypatch.setattr(settings, "DATABASE_URL", clone.render_as_string(hide_password=False))
+        engine = product_db._create_engine()
+        stack.push_async_callback(engine.dispose)
+        pool = engine.sync_engine.pool
+        assert (pool.size(), settings.DB_MAX_OVERFLOW) == (5, 10), "the stand is written for the settings' pool of 15"
+        monkeypatch.setattr(product_db, "engine", engine)
+        monkeypatch.setattr(
+            product_db,
+            "AsyncSessionLocal",
+            async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False),
+        )
+        monkeypatch.delitem(app.dependency_overrides, get_db)
+        monkeypatch.delitem(app.dependency_overrides, get_payment_session_factory)
 
-    # --- the gate at the entry of `_bind_payment` -----------------------------------------------------------
-    original_bind = PaymentService._bind_payment
-    gate = {"arrived": 0, "open": asyncio.Event()}
+        def on_checkin(_connection, _record) -> None:
+            # The pool's counter moves after this event; look at it on the next turn of the loop.
+            loop.call_soon(lambda: pool.checkedout() == 0 and pool_idle.set())
 
-    async def held(service, *args, **kwargs):
-        gate["arrived"] += 1
-        await gate["open"].wait()
-        return await original_bind(service, *args, **kwargs)
+        event.listen(engine.sync_engine, "checkin", on_checkin)  # dies with the engine
 
-    monkeypatch.setattr(PaymentService, "_bind_payment", held)
+        # --- the trap: process-wide listeners, removed by the stack on any exit ------------------------------
+        trap = _TRAP = _Trap(engine)
+        stack.callback(_disarm_trap)
+        event.listen(Session, "do_orm_execute", _on_execute)
+        stack.callback(event.remove, Session, "do_orm_execute", _on_execute)
+        event.listen(Session, "after_begin", _on_begin)
+        stack.callback(event.remove, Session, "after_begin", _on_begin)
 
-    observer = await asyncpg.connect(
-        host=clone.host, port=clone.port or 5432, user=clone.username, password=clone.password, database=clone.database
-    )
+        # --- the gate at the entry of `_bind_payment` --------------------------------------------------------
+        original_bind = PaymentService._bind_payment
 
-    async def round_of_fifteen(label: str) -> list[dict]:
-        gate["arrived"] = 0
-        gate["open"].clear()
-        bodies = [_payment(payer, payee) for payer, payee in pairs]
-        tasks = [
-            asyncio.create_task(client.post("/api/v1/payments", json=body, headers=payer["headers"]))
-            for body, (payer, _payee) in zip(bodies, pairs)
-        ]
-        try:
-            waited = 0.0
-            while gate["arrived"] < PAYMENTS and waited < 10.0 and not any(task.done() for task in tasks):
-                await asyncio.sleep(0.05)
-                waited += 0.05
+        async def held(service, *args, **kwargs):
+            gate["arrived"] += 1
+            if gate["arrived"] == PAYMENTS:
+                gate["all_arrived"].set()
+            await gate["open"].wait()
+            return await original_bind(service, *args, **kwargs)
+
+        monkeypatch.setattr(PaymentService, "_bind_payment", held)
+
+        observer = await asyncpg.connect(
+            host=clone.host, port=clone.port or 5432, user=clone.username, password=clone.password,
+            database=clone.database,
+        )
+        stack.push_async_callback(observer.close)
+        # Registered LAST, so it runs FIRST: requests are drained before the observer and the engine close.
+        stack.push_async_callback(drain_requests)
+
+        async def pool_is_idle(label: str) -> None:
+            pool_idle.clear()
+            if pool.checkedout() == 0:
+                return
+            try:
+                await asyncio.wait_for(pool_idle.wait(), _BUDGET_SECONDS)
+            except asyncio.TimeoutError:
+                raise AssertionError(f"{label}: {pool.checkedout()} connection(s) not returned to the pool") from None
+
+        async def round_of_fifteen(label: str) -> list[dict]:
+            gate["arrived"] = 0
+            gate["open"].clear()
+            gate["all_arrived"].clear()
+            bodies = [_payment(payer, payee) for payer, payee in pairs]
+            tasks = [
+                asyncio.create_task(client.post("/api/v1/payments", json=body, headers=payer["headers"]))
+                for body, (payer, _payee) in zip(bodies, pairs)
+            ]
+            launched.extend(tasks)
+            # Until the fifteenth arrival - or until any request ENDS, which before the gate opens is a failure.
+            arrival = asyncio.ensure_future(gate["all_arrived"].wait())
+            launched.append(arrival)
+            await asyncio.wait({arrival, *tasks}, timeout=_BUDGET_SECONDS, return_when=asyncio.FIRST_COMPLETED)
             held_authentication = await observer.fetchval(
                 "select count(*) from pg_stat_activity where datname = current_database() "
                 "and pid <> pg_backend_pid() and state = 'idle in transaction' and query like $1",
@@ -192,24 +287,17 @@ async def test_fifteen_simultaneous_payments_fit_a_pool_of_fifteen(client: Async
                 f"{(PAYMENTS, PAYMENTS, 0, PAYMENTS)}: each payment must hold ONE connection - its attempt's - "
                 f"and none may keep the request's authentication transaction open"
             )
-        except BaseException:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-        finally:
             gate["open"].set()
-        answers = await asyncio.gather(*tasks)
-        outcomes = sorted((answer.status_code, answer.json().get("status")) for answer in answers)
-        assert outcomes == [(200, "COMMITTED")] * PAYMENTS, f"{label}: {outcomes}"
-        for _ in range(100):  # an answer is sent before its request's session is closed
-            if pool.checkedout() == 0:
-                break
-            await asyncio.sleep(0.02)
-        assert pool.checkedout() == 0, f"{label}: {pool.checkedout()} connection(s) not returned to the pool"
-        return bodies
+            answers = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), _BUDGET_SECONDS)
+            outcomes = sorted(
+                (answer.status_code, answer.json().get("status")) if not isinstance(answer, BaseException)
+                else (0, repr(answer))
+                for answer in answers
+            )
+            assert outcomes == [(200, "COMMITTED")] * PAYMENTS, f"{label}: {outcomes}"
+            await pool_is_idle(label)
+            return bodies
 
-    try:
         await round_of_fifteen("cold round")
         bodies = await round_of_fifteen("second round")
 
@@ -223,21 +311,16 @@ async def test_fifteen_simultaneous_payments_fit_a_pool_of_fifteen(client: Async
         unsigned = dict(_payment(payer, payee), signature="AAAA")
         refused = await client.post("/api/v1/payments", json=unsigned, headers=payer["headers"])
         assert refused.status_code == 400 and refused.json()["error"]["code"] == "E005", refused.text
-        assert pool.checkedout() == 0
-    finally:
-        event.remove(Session, "do_orm_execute", on_execute)
-        event.remove(Session, "after_begin", on_begin)
-        await observer.close()
-        await engine.dispose()
+        await pool_is_idle("after the replay and the refusals")
 
     # --- the trap's verdict ---------------------------------------------------------------------------------
     # A request session STARTS with the authentication SELECT; an attempt's session starts with
     # `SHOW transaction_isolation` and looks participants up by pid only later.
-    request_sessions = {key: ran for key, ran in statements.items() if _AUTHENTICATION in ran[0]}
+    request_sessions = {key: ran for key, ran in trap.statements.items() if _AUTHENTICATION in ran[0]}
     assert len(request_sessions) == 2 * PAYMENTS + 3, (
         f"premise: one authenticating request session per request, got {len(request_sessions)}"
     )
-    reused = {key: ran for key, ran in request_sessions.items() if len(ran) != 1 or begins.get(key) != 1}
+    reused = {key: ran for key, ran in request_sessions.items() if len(ran) != 1 or trap.begins.get(key) != 1}
     assert not reused, (
         "a request session ran something besides the one authentication SELECT, or began a second transaction "
         f"after it was closed: {list(reused.values())[:2]}"

@@ -24,11 +24,16 @@ inside `pay()`) - and reads, while they are held:
 * the pool's own counters (`checkedout`, `overflow`);
 * `pg_stat_activity` for this database through a connection OUTSIDE the pool: sessions by `state`, and the last
   statement of the `idle in transaction` ones (which shows whose they are);
-* where each of the N requests is: `at_binding` (arrived at the gate), `already_answered` (finished before the
-  reading - a refusal, a pool timeout shorter than `--settle`), and `before_binding` (neither: still
-  authenticating, routing, or waiting for a connection). `before_binding` is NOT by itself "waiting for a
-  connection" (corrected 2026-10-09 after the §15 review of A8, which found the first edition calling every
-  non-arrival a pool waiter); it reads as that only together with the pool counter standing at its limit.
+* where each of the N requests is NOW, each in exactly one place (the script asserts the four add up to N):
+  `before_binding` (has not arrived at the gate: still authenticating, routing, or waiting for a connection),
+  `at_binding` (standing at the gate), `past_binding` (arrived, then left the gate while it was still closed -
+  the product's own binding timeout, `PREPARE_TIMEOUT_SECONDS`, does that to a request held longer than it -
+  and not answered yet), `already_answered` (finished before the reading).
+  `before_binding` is NOT by itself "waiting for a connection": it reads as that only together with the pool
+  counter standing at its limit. HISTORY of this observation: the first edition called every non-arrival a pool
+  waiter (§15 review of A8); the second counted ARRIVALS, so a request that arrived and then timed out behind
+  the closed gate was both "at binding" and "answered" and `before_binding` could go negative with a long
+  `--settle` (§15 review of A9). The places are now current states kept per request.
 
 Then it opens the gate and records every answer's status code and the slowest answer's time.
 
@@ -64,6 +69,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextvars
 import json
 import os
 import sys
@@ -139,29 +145,51 @@ def _payment(payer: dict, payee: dict) -> dict:
     return {**body, "signature": _sign(payer["priv"], body)}
 
 
+#: Which request of the round the running code belongs to. Set by the sender; the application runs the request in
+#: tasks that copy the sender's context, so the gate inside `_bind_payment` reads the same number.
+_REQUEST: contextvars.ContextVar[int | None] = contextvars.ContextVar("measured_request", default=None)
+
+#: The four places a request of a round can be, each request in exactly one (see the module docstring).
+BEFORE_BINDING, AT_BINDING, PAST_BINDING, ANSWERED = "before_binding", "at_binding", "past_binding", "already_answered"
+
+
 class _Gate:
-    """Holds every payment at the entry of `_bind_payment` until `open()`."""
+    """Holds every payment at the entry of `_bind_payment` until `open()`, and knows where each request is NOW.
+
+    `where[i]` is the CURRENT place of request i, not a count of arrivals: a request that arrived and then left
+    the barrier without the gate opening (its binding timed out, it was cancelled) moves to `past_binding`, so it
+    is never counted both as "at binding" and as "answered".
+    """
 
     def __init__(self) -> None:
-        self.arrived = 0
+        self.where: dict[int, str] = {}
         self._release = asyncio.Event()
         self._release.set()
         original = PaymentService._bind_payment
         gate = self
 
         async def held(service, *args, **kwargs):
-            gate.arrived += 1
-            await gate._release.wait()
+            request = _REQUEST.get()
+            if request is not None:
+                gate.where[request] = AT_BINDING
+            try:
+                await gate._release.wait()
+            finally:
+                if request is not None:
+                    gate.where[request] = PAST_BINDING
             return await original(service, *args, **kwargs)
 
         PaymentService._bind_payment = held  # the one hook (see the module docstring)
 
-    def close(self) -> None:
-        self.arrived = 0
+    def close(self, n: int) -> None:
+        self.where = {request: BEFORE_BINDING for request in range(n)}
         self._release.clear()
 
     def open(self) -> None:
         self._release.set()
+
+    def count(self, place: str) -> int:
+        return sum(1 for current in self.where.values() if current == place)
 
 
 async def _activity(observer: asyncpg.Connection) -> tuple[dict[str, int], list[str]]:
@@ -178,29 +206,33 @@ async def _activity(observer: asyncpg.Connection) -> tuple[dict[str, int], list[
 
 async def _round(client: httpx.AsyncClient, observer: asyncpg.Connection, gate: _Gate, pairs: list, n: int) -> dict:
     pool = db_session.engine.sync_engine.pool
-    gate.close()
+    gate.close(n)
     started = time.perf_counter()
 
-    async def one(payer: dict, payee: dict) -> tuple[int, float, str]:
-        response = await client.post("/api/v1/payments", json=_payment(payer, payee), headers=payer["headers"])
+    async def one(request: int, payer: dict, payee: dict) -> tuple[int, float, str]:
+        _REQUEST.set(request)
+        try:
+            response = await client.post("/api/v1/payments", json=_payment(payer, payee), headers=payer["headers"])
+        finally:
+            gate.where[request] = ANSWERED
         body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
         outcome = body.get("status") or (body.get("error") or {}).get("code") or "?"
         return response.status_code, time.perf_counter() - started, str(outcome)
 
-    tasks = [asyncio.create_task(one(payer, payee)) for payer, payee in pairs[:n]]
-    # Read once the arrivals stop: all N at the gate, or no new one for `--settle` seconds.
-    last, since = -1, time.perf_counter()
-    while gate.arrived < n and time.perf_counter() - since < ARGS.settle:
-        if gate.arrived != last:
-            last, since = gate.arrived, time.perf_counter()
+    tasks = [asyncio.create_task(one(index, payer, payee)) for index, (payer, payee) in enumerate(pairs[:n])]
+    # Read once the picture stops changing: all N at the gate, or no request moved for `--settle` seconds.
+    last, since = None, time.perf_counter()
+    while gate.count(AT_BINDING) < n and time.perf_counter() - since < ARGS.settle:
+        picture = dict(gate.where)
+        if picture != last:
+            last, since = picture, time.perf_counter()
         await asyncio.sleep(0.02)
     states, idle_queries = await _activity(observer)
-    answered = sum(1 for task in tasks if task.done())
+    places = {place: gate.count(place) for place in (BEFORE_BINDING, AT_BINDING, PAST_BINDING, ANSWERED)}
+    assert sum(places.values()) == n, f"a request is in no place or in two: {places} for n={n}"
     reading = {
         "n": n,
-        "at_binding": gate.arrived,
-        "already_answered": answered,
-        "before_binding": n - gate.arrived - answered,
+        **places,
         "pool_checked_out": pool.checkedout(),
         "pool_limit": settings.DB_POOL_SIZE + settings.DB_MAX_OVERFLOW,
         "pool_overflow_in_use": max(0, pool.overflow()),
