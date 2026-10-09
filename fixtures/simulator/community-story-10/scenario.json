@@ -1,0 +1,482 @@
+{
+  "schema_version": "scenario/1",
+  "scenario_id": "community-story-10",
+  "name": "История сообщества (10 жителей)",
+  "description": {
+    "ru": "Короткая объяснимая история: прямая покупка, покупка через посредника, накопление долгов, новый участник, круг долгов и его клиринг, заморозка участника и отказ без доверия. Запуск: intensity 0, инъекции включены (SIMULATOR_REAL_ENABLE_INJECT=1).",
+    "en": "A short explainable story: a direct purchase, a purchase through an intermediary, debts piling up, a newcomer, a circle of debts and its clearing, a frozen participant and a refusal without trust. Run with intensity 0 and injects enabled (SIMULATOR_REAL_ENABLE_INJECT=1)."
+  },
+  "baseEquivalent": "UAH",
+  "equivalents": [
+    "UAH"
+  ],
+  "participants": [
+    {
+      "id": "cs_olena",
+      "name": "Олена",
+      "type": "person",
+      "status": "active",
+      "groupId": "people"
+    },
+    {
+      "id": "cs_taras",
+      "name": "Тарас",
+      "type": "person",
+      "status": "active",
+      "groupId": "people"
+    },
+    {
+      "id": "cs_maria",
+      "name": "Марія",
+      "type": "person",
+      "status": "active",
+      "groupId": "people"
+    },
+    {
+      "id": "cs_ivan",
+      "name": "Іван",
+      "type": "person",
+      "status": "active",
+      "groupId": "people"
+    },
+    {
+      "id": "cs_petro",
+      "name": "Петро",
+      "type": "person",
+      "status": "active",
+      "groupId": "people"
+    },
+    {
+      "id": "cs_nina",
+      "name": "Ніна",
+      "type": "person",
+      "status": "active",
+      "groupId": "people"
+    },
+    {
+      "id": "cs_bakery",
+      "name": "Пекарня",
+      "type": "business",
+      "status": "active",
+      "groupId": "business"
+    },
+    {
+      "id": "cs_farm",
+      "name": "Ферма",
+      "type": "business",
+      "status": "active",
+      "groupId": "business"
+    },
+    {
+      "id": "cs_mill",
+      "name": "Млин",
+      "type": "business",
+      "status": "active",
+      "groupId": "business"
+    },
+    {
+      "id": "cs_shop",
+      "name": "Магазин",
+      "type": "business",
+      "status": "active",
+      "groupId": "business"
+    }
+  ],
+  "groups": [
+    {
+      "id": "people",
+      "label": "Люди"
+    },
+    {
+      "id": "business",
+      "label": "Бизнес"
+    }
+  ],
+  "trustlines": [
+    {
+      "from": "cs_bakery",
+      "to": "cs_olena",
+      "equivalent": "UAH",
+      "limit": "200.00"
+    },
+    {
+      "from": "cs_shop",
+      "to": "cs_taras",
+      "equivalent": "UAH",
+      "limit": "200.00"
+    },
+    {
+      "from": "cs_farm",
+      "to": "cs_shop",
+      "equivalent": "UAH",
+      "limit": "300.00"
+    },
+    {
+      "from": "cs_mill",
+      "to": "cs_farm",
+      "equivalent": "UAH",
+      "limit": "200.00"
+    },
+    {
+      "from": "cs_mill",
+      "to": "cs_bakery",
+      "equivalent": "UAH",
+      "limit": "200.00"
+    },
+    {
+      "from": "cs_shop",
+      "to": "cs_maria",
+      "equivalent": "UAH",
+      "limit": "100.00"
+    },
+    {
+      "from": "cs_shop",
+      "to": "cs_ivan",
+      "equivalent": "UAH",
+      "limit": "100.00"
+    },
+    {
+      "from": "cs_bakery",
+      "to": "cs_petro",
+      "equivalent": "UAH",
+      "limit": "100.00"
+    }
+  ],
+  "settings": {
+    "playback": {
+      "tick_seconds": 2.5,
+      "intensity_percent": 0,
+      "inject_enabled": true
+    }
+  },
+  "events": [
+    {
+      "time": 3000,
+      "type": "note",
+      "caption": {
+        "ru": "Знакомство. Десять жителей села. Каждый видит, кто кому доверяет, — и больше ничего: денег у сети нет, есть только доверие.",
+        "en": "Meet the village: ten neighbours. Everyone can see who trusts whom and nothing more: the network holds no money, only trust."
+      },
+      "pause_after": true,
+      "focus": {
+        "pids": [],
+        "edges": []
+      }
+    },
+    {
+      "time": 8000,
+      "type": "payment",
+      "from": "cs_olena",
+      "to": "cs_bakery",
+      "amount": "40.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Олена покупает хлеб в пекарне. Пекарня ей доверяет, поэтому платёж идёт напрямую, и у Олены появляется долг перед пекарней на 40.",
+        "en": "Olena buys bread at the bakery. The bakery trusts her, so the payment goes straight through and Olena now owes the bakery 40."
+      },
+      "focus": {
+        "pids": [
+          "cs_olena",
+          "cs_bakery"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.updated",
+        "from": "cs_olena",
+        "to": "cs_bakery",
+        "amount": "40.00",
+        "equivalent": "UAH",
+        "time_ms": 8000
+      },
+      "pause_after": true
+    },
+    {
+      "time": 13000,
+      "type": "payment",
+      "from": "cs_taras",
+      "to": "cs_farm",
+      "amount": "60.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Тарас покупает у фермы, но напрямую они не связаны. Платёж идёт через Магазин: Тарас должен Магазину, Магазин должен Ферме.",
+        "en": "Taras buys from the farm, but they are not connected directly. The payment goes through the Shop: Taras owes the Shop, the Shop owes the Farm."
+      },
+      "focus": {
+        "pids": [
+          "cs_taras",
+          "cs_farm"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.updated",
+        "from": "cs_taras",
+        "to": "cs_farm",
+        "amount": "60.00",
+        "equivalent": "UAH",
+        "time_ms": 13000
+      },
+      "pause_after": true
+    },
+    {
+      "time": 18000,
+      "type": "payment",
+      "from": "cs_farm",
+      "to": "cs_mill",
+      "amount": "50.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Ферма платит Млину за муку: долг Фермы перед Млином — 50. Долги копятся, деньги никуда не переезжали.",
+        "en": "The Farm pays the Mill for flour: the Farm owes the Mill 50. Debts pile up; no money has moved anywhere."
+      },
+      "focus": {
+        "pids": [
+          "cs_farm",
+          "cs_mill"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.updated",
+        "from": "cs_farm",
+        "to": "cs_mill",
+        "amount": "50.00",
+        "equivalent": "UAH",
+        "time_ms": 18000
+      }
+    },
+    {
+      "time": 23000,
+      "type": "payment",
+      "from": "cs_bakery",
+      "to": "cs_mill",
+      "amount": "30.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Пекарня тоже берёт муку на Млине: ещё 30 долга. Пока это цепочки, а не круг.",
+        "en": "The Bakery also buys flour from the Mill: 30 more in debt. So far these are chains, not a circle."
+      },
+      "focus": {
+        "pids": [
+          "cs_bakery",
+          "cs_mill"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.updated",
+        "from": "cs_bakery",
+        "to": "cs_mill",
+        "amount": "30.00",
+        "equivalent": "UAH",
+        "time_ms": 23000
+      }
+    },
+    {
+      "time": 28000,
+      "type": "inject",
+      "caption": {
+        "ru": "В село приезжает Дмитро. Магазин готов ему доверять, а он доверяет Млину: в сети появились две новые линии доверия.",
+        "en": "Dmytro arrives in the village. The Shop is willing to trust him and he trusts the Mill: two new lines of trust appear."
+      },
+      "pause_after": true,
+      "focus": {
+        "pids": [
+          "cs_dmytro",
+          "cs_shop",
+          "cs_mill"
+        ],
+        "edges": [
+          {
+            "from": "cs_shop",
+            "to": "cs_dmytro"
+          },
+          {
+            "from": "cs_dmytro",
+            "to": "cs_mill"
+          }
+        ]
+      },
+      "anchor": {
+        "event": "topology.changed",
+        "time_ms": 28000
+      },
+      "effects": [
+        {
+          "op": "add_participant",
+          "participant": {
+            "id": "cs_dmytro",
+            "name": "Дмитро",
+            "type": "person",
+            "groupId": "people"
+          },
+          "initial_trustlines": [
+            {
+              "sponsor": "cs_shop",
+              "equivalent": "UAH",
+              "limit": "150.00",
+              "direction": "sponsor_credits_new"
+            },
+            {
+              "sponsor": "cs_mill",
+              "equivalent": "UAH",
+              "limit": "150.00",
+              "direction": "new_credits_sponsor"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "time": 33000,
+      "type": "payment",
+      "from": "cs_mill",
+      "to": "cs_dmytro",
+      "amount": "40.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Млин расплачивается с Дмитром: долг Млина перед Дмитром — 40.",
+        "en": "The Mill pays Dmytro: the Mill owes Dmytro 40."
+      },
+      "focus": {
+        "pids": [
+          "cs_mill",
+          "cs_dmytro"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.updated",
+        "from": "cs_mill",
+        "to": "cs_dmytro",
+        "amount": "40.00",
+        "equivalent": "UAH",
+        "time_ms": 33000
+      }
+    },
+    {
+      "time": 38000,
+      "type": "payment",
+      "from": "cs_dmytro",
+      "to": "cs_shop",
+      "amount": "40.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Дмитро платит Магазину, и долги замыкаются в круг: Магазин должен Ферме, Ферма — Млину, Млин — Дмитру, Дмитро — Магазину.",
+        "en": "Dmytro pays the Shop and the debts close into a circle: the Shop owes the Farm, the Farm owes the Mill, the Mill owes Dmytro, Dmytro owes the Shop."
+      },
+      "focus": {
+        "pids": [
+          "cs_dmytro",
+          "cs_shop"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.updated",
+        "from": "cs_dmytro",
+        "to": "cs_shop",
+        "amount": "40.00",
+        "equivalent": "UAH",
+        "time_ms": 38000
+      },
+      "pause_after": true
+    },
+    {
+      "time": 43000,
+      "type": "clearing",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Клиринг. Круг долгов уменьшен на 40 по каждому звену, и никто ничего не платил. Долги Млина Дмитру и Дмитра Магазину исчезли целиком, долг Магазина Ферме уменьшился с 60 до 20, долг Фермы Млину — с 50 до 10. Чистая позиция каждого участника осталась прежней.",
+        "en": "Clearing. The circle of debts is reduced by 40 on every link and nobody paid anything. The Mill's debt to Dmytro and Dmytro's debt to the Shop are gone entirely, the Shop's debt to the Farm fell from 60 to 20 and the Farm's debt to the Mill from 50 to 10. Nobody's net position changed."
+      },
+      "pause_after": true,
+      "expected_cycle": [
+        "cs_farm",
+        "cs_shop",
+        "cs_dmytro",
+        "cs_mill"
+      ],
+      "focus": {
+        "pids": [
+          "cs_farm",
+          "cs_shop",
+          "cs_dmytro",
+          "cs_mill"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "clearing.done",
+        "time_ms": 43000
+      }
+    },
+    {
+      "time": 48000,
+      "type": "inject",
+      "caption": {
+        "ru": "Тарас выбывает из сети: его участие заморожено. Долг Тараса Магазину — 60 — остаётся на виду, но платежи через него больше невозможны.",
+        "en": "Taras drops out of the network: his participation is frozen. His 60 debt to the Shop stays in plain sight, but nothing can be routed through him any more."
+      },
+      "pause_after": true,
+      "focus": {
+        "pids": [
+          "cs_taras",
+          "cs_shop"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "topology.changed",
+        "time_ms": 48000
+      },
+      "effects": [
+        {
+          "op": "freeze_participant",
+          "participant_id": "cs_taras"
+        }
+      ]
+    },
+    {
+      "time": 53000,
+      "type": "payment",
+      "from": "cs_petro",
+      "to": "cs_nina",
+      "amount": "25.00",
+      "equivalent": "UAH",
+      "caption": {
+        "ru": "Петро хочет заплатить Нине, но у Нины нет ни одной линии доверия, и платёж не может до неё дойти. Платёж отклонён, ничего не сдвинулось: сеть не выдумывает кредит за людей.",
+        "en": "Petro wants to pay Nina, but Nina has no line of trust at all, so the payment has no way to reach her. It is refused and nothing moves: the network does not invent credit on anyone's behalf."
+      },
+      "focus": {
+        "pids": [
+          "cs_petro",
+          "cs_nina"
+        ],
+        "edges": []
+      },
+      "anchor": {
+        "event": "tx.failed",
+        "from": "cs_petro",
+        "to": "cs_nina",
+        "equivalent": "UAH",
+        "time_ms": 53000
+      },
+      "pause_after": true
+    },
+    {
+      "time": 58000,
+      "type": "note",
+      "caption": {
+        "ru": "Итог. Долги видны, круг погашен без денег, а там, где нет доверия, платежа нет. Это и есть сеть взаимного кредита.",
+        "en": "In short: debts are visible, a circle was wiped out without any money, and where there is no trust there is no payment. That is a mutual-credit network."
+      },
+      "pause_after": true,
+      "focus": {
+        "pids": [],
+        "edges": []
+      }
+    }
+  ]
+}

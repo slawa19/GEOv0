@@ -43,9 +43,10 @@ def _errors(scenario: dict) -> list[tuple[str, str]]:
     return [("/".join(str(p) for p in e.absolute_path), e.message[:90]) for e in VALIDATOR.iter_errors(scenario)]
 
 
-def test_the_live_set_is_the_five_scenarios_the_runtime_loads() -> None:
+def test_the_live_set_is_the_six_scenarios_the_runtime_loads() -> None:
     assert [p.parent.name for p in LIVE] == [
         "clearing-demo-10",
+        "community-story-10",
         "greenfield-village-100-realistic-v2",
         "minimal",
         "riverside-town-50-realistic-v2",
@@ -67,6 +68,32 @@ def test_the_validator_refuses_a_broken_live_fixture() -> None:
     broken["events"][0]["time"] = "day_10"
     paths = sorted(path for path, _ in _errors(broken))
     assert paths == ["events/0/time", "trustlines/0"], paths
+
+
+def test_the_validator_refuses_a_broken_community_story() -> None:
+    """036 C (T3630), anti-vacuum for the story fixture: the guard above is not blind to the NEW fixture. The story is valid
+    as committed (the parametrised case above), and one broken field of each class the story uses is refused with its path:
+    a payment amount that is a JSON number, an unknown field on an episode, a caption without its English half, an
+    `expected_cycle` of one participant, a time that is a string."""
+
+    story = _load(ROOT / "community-story-10" / "scenario.json")
+    assert _errors(story) == []
+    payment = next(i for i, e in enumerate(story["events"]) if e["type"] == "payment")
+    clearing = next(i for i, e in enumerate(story["events"]) if e["type"] == "clearing")
+    broken = deepcopy(story)
+    broken["events"][payment]["amount"] = 40
+    broken["events"][payment]["not_a_field"] = 1
+    del broken["events"][0]["caption"]["en"]
+    broken["events"][clearing]["expected_cycle"] = ["cs_farm"]
+    broken["events"][1]["time"] = "day_10"
+    paths = sorted(path for path, _ in _errors(broken))
+    assert paths == sorted([
+        f"events/{payment}",  # the unknown field (additionalProperties)
+        f"events/{payment}/amount",
+        "events/0/caption",
+        f"events/{clearing}/expected_cycle",
+        "events/1/time",
+    ]), paths
 
 
 def test_the_archive_exception_is_exactly_the_string_time() -> None:

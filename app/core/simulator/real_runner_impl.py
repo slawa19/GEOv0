@@ -48,6 +48,9 @@ from app.db.sqlstate import ROLLED_BACK_SQLSTATES, sqlstate
 # single retry is spent. Nothing else is retried.
 _INJECT_TRANSIENT_SQLSTATES = ROLLED_BACK_SQLSTATES | {"55P03"}
 
+#: 036 C: the `reason` of a `done` scripted clearing whose announced `expected_cycle` is not among the cycles it cleared.
+EXPECTED_CYCLE_NOT_CLEARED = "expected_cycle_not_cleared"
+
 
 def _is_transient_inject_db_error(exc: BaseException) -> bool:
     if not isinstance(exc, DBAPIError):
@@ -731,6 +734,7 @@ class RealRunnerImpl:
         spend: bool,
         add_cycles: list[dict[str, Any]] | None = None,
         note: str | None = None,
+        expected_cycle: list[str] | None = None,
     ) -> None:
         """THE ONE WRITER of the run's story progress (036 B2): `record` for event `index` of launch `epoch`.
 
@@ -739,6 +743,12 @@ class RealRunnerImpl:
         attempts reports everything it cleared. `spend` marks the event fired. A change of (status, reason) - and only
         that - is logged and written to the events artifact (AGENTS.md section 12: not on every tick), as `note` when the
         caller says it in its own words, else as "scripted <kind> <status>".
+
+        `expected_cycle` (a clearing that announces a cycle): when the pass is complete (`done`) and the cycles this event has
+        committed in this launch contain none over the edges of the announced one, the record carries
+        `reason: "expected_cycle_not_cleared"` - still `done` (the pass completed) and still spent. Edges are compared as a
+        SET, creditor -> debtor, consecutive pairs and the last to the first, so a rotation of the cycle matches; the amount is
+        not compared (the announcement has none).
 
         ONE attempt is one call: `attempts` counts the calls that reach here for an event within an epoch, so a caller that
         reports the same attempt twice (the money phase does: see `report_durable` in `tick.py`) would count it twice."""
@@ -756,12 +766,16 @@ class RealRunnerImpl:
             if add_cycles is not None:
                 cycles = [*((previous.get("cycles") or []) if same_epoch else []), *add_cycles]
                 stored["cycles"], stored["cleared_cycles"] = cycles, len(cycles)
+                if expected_cycle and stored["status"] == "done" and stored.get("reason") is None:
+                    announced = {(str(a).strip(), str(b).strip()) for a, b in zip(expected_cycle, [*expected_cycle[1:], expected_cycle[0]])}
+                    if not any({(e["from"], e["to"]) for e in c["edges"]} == announced for c in cycles):
+                        stored["reason"] = EXPECTED_CYCLE_NOT_CLEARED
             changed = (previous.get("status"), previous.get("reason")) != (stored["status"], stored.get("reason")) or not same_epoch
             run._real_story_progress[int(index)] = stored
             if spend:
                 run._real_fired_scenario_event_indexes.add(int(index))
         if changed:
-            log = self._logger.info if stored["status"] == "done" else self._logger.warning
+            log = self._logger.info if stored["status"] == "done" and not stored.get("reason") else self._logger.warning
             log(
                 "simulator.real.scripted_event_status run_id=%s event_index=%s kind=%s status=%s reason=%s attempts=%s",
                 str(run.run_id), int(index), stored.get("kind"), stored["status"], stored.get("reason"), stored["attempts"],

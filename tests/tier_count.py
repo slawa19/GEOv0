@@ -193,6 +193,13 @@ make the session green again:
   spellings and the control; one status per pause on the product heartbeat and its control), `tests/unit/test_p036_b2_pause_after_is_a_boolean_on_every_event.py` (11: an uncaptioned event, six wrong spellings, four good ones),
   9 in `tests/unit/test_p036_b2_tick_pace_follows_the_scenario.py` (a `tick_seconds` outside 0.25-5 or not a number keeps the default pace) and 4 in `tests/integration/test_p036_b2_run_creation.py` (a damaged story
   and a non-boolean `pause_after` refused at creation in `fixtures` and in `real`). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3595/3615`).
+* 2026-10-09, 036 slice C (`T3630`), on `origin/main` `5febf242` (3595): 3595 -> 3603 (+8). New: `tests/integration/test_p036_c_community_story_postgres.py` (4: the story on the product tick and heartbeat - its pauses, the debts after every
+  pause, the progress of each payment, of the clearing (one cycle, 40.00, the edges of `expected_cycle`) and of the one refusal, the anchors of the episodes as real events) and `tests/unit/test_p036_c_community_story_shape.py` (4: size,
+  `build_story`, the periodic-clearing rule with its anti-vacuum, allowlist and registry). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3603/3623`).
+* 2026-10-09, 036 slice C fix-delta (two reviews of `e94f13fb`), on that tree (3603): 3603 -> 3613 (+10). New: `tests/integration/test_p036_c_expected_cycle_postgres.py` (7: an announced cycle that was cleared, in three rotations, carries no
+  reason; one over other edges, one announced over a pass that cleared nothing, and one cleared by an earlier attempt of the same event; a clearing that announces nothing) and 3 in `tests/integration/test_p036_c_community_story_postgres.py`
+  (the flag for injects off, a second run on the same database, a periodic clearing every 10 ticks); the anchors test was rewritten (same count) and the allowlist test of the shape module now says the story is NOT in the default list.
+  Measured with `python -m pytest --collect-only -q -m "not slow"` (`3613/3633`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -235,7 +242,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3595
+EXPECTED_SELECTED_ITEMS = 3613
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
