@@ -158,6 +158,18 @@ make the session green again:
 * 2026-10-09, 034 slice S2b merged after the money-storability fix (`origin/main` at the merge of PR #188, 3339): 3339 -> 3349 (+10, the three S2b modules above; the numbers in the S2b lines are those of the branch on earlier bases). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
 * 2026-10-09, 035 slice A8 (public names for the staged owner, the payment read side moved to `app/core/payments/read.py`): 3339 -> 3352 (+13: `tests/unit/test_p035_a8_public_names_for_the_staged_owner.py` 12, `tests/integration/test_p035_a8_payment_read_side_answers_as_before.py` 1). Measured with the same command on base `7e21abc1`.
 * 2026-10-09, 035 slice A8 merged after 034 S2b (`origin/main` at the merge of PR #191, 3349): 3349 -> 3362 (+13, the two A8 modules above; the numbers in the A8 line are those of the branch on `7e21abc1`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 036 slice A (`T3610`), on `origin/main` `71c66dda` (3349): 3349 -> 3369 (+20). New: `tests/unit/test_p036_a_episodes_projection.py` (6),
+  `tests/integration/test_p036_a_scenario_detail_serves_the_story.py` (6), `tests/integration/test_p036_t3601_time_token_is_refused_at_upload.py` (4: the token, its control, and the two equivalent sources of the new event fields) and
+  `tests/unit/test_p036_t3601_fixture_controls.py` (4, the pinned stress multipliers and the absent `params`). Measured with
+  `python -m pytest --collect-only -q -m "not slow"` (`3369/3384 tests collected`); the guard refused the collection first (exit 4).
+* 2026-10-09, 036 slice A fix-delta (review of `1afe0b09`), on `origin/main` `71c66dda`: 3369 -> 3459 (+90). New: `tests/integration/test_p036_a2_story_is_validated_at_upload.py` (51),
+  `tests/integration/test_p036_a2_stored_story_is_refused_not_trimmed.py` (4), `tests/integration/test_p036_a_scenario_detail_conformance.py` (2);
+  `tests/unit/test_p036_a_episodes_projection.py` 6 -> 39 (+33: the cases that pinned the silent drop were rewritten as refusals). The number is
+  the guard's own refusal ("selected 3459 case(s), expected exactly 3369", `python -m pytest --collect-only -q -m "not slow"`, `3459/3474`).
+* 2026-10-09, 036 slice A merged after 035 A8 and A7 (`origin/main` at the merge of PR #193, 3362): 3362 -> 3472 (+110, the 036 A modules above; the numbers in the 036 A lines are those of the branch on `71c66dda`). Measured with `python -m pytest --collect-only -q -m "not slow"` on the merged tree.
+* 2026-10-09, 036 slice A second fix-delta (review of `c2d84180`), on `origin/main` `6738cec3` (3472): 3472 -> 3476 (+4). New: `tests/integration/test_p036_a3_upload_reads_no_database.py` (3: the trap's anti-vacuum, a
+  control without a payment, the upload with a payment); `tests/unit/test_p036_a_episodes_projection.py` +4 (a focus edge with an empty start, an empty end, the `from_` spelling; an anchor in the `from_`
+  spelling). Fewer: the three upload tests of the equivalent's step in `test_p036_a2_story_is_validated_at_upload.py` (the check moved to slice B, execution). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3476/3491`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -200,7 +212,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3362
+EXPECTED_SELECTED_ITEMS = 3476
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

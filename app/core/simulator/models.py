@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
-from app.schemas.simulator import RunMode, RunState, ScenarioSummary
+from app.schemas.simulator import RunMode, RunState, ScenarioDetail, ScenarioSummary
 
 
 @dataclass(frozen=True)
@@ -55,16 +55,32 @@ class ScenarioRecord:
 
     def summary(self) -> ScenarioSummary:
         # Import locally to avoid import-time cycles.
+        from app.core.simulator.scenario_story import scenario_description_or_none
         from app.schemas.simulator import SIMULATOR_API_VERSION
 
         return ScenarioSummary(
             api_version=SIMULATOR_API_VERSION,
             scenario_id=self.scenario_id,
             name=self.name,
+            description=scenario_description_or_none(self.raw),
             created_at=self.created_at,
             participants_count=self.participants_count,
             trustlines_count=self.trustlines_count,
             equivalents=self.equivalents,
+        )
+
+    def detail(self) -> ScenarioDetail:
+        """The summary plus the story (036): the episodes (events with a caption) and the playback settings.
+
+        Raises `ScenarioStoryInvalid` (409) when the story cannot be served as written - see `scenario_story`."""
+
+        from app.core.simulator.scenario_story import build_story
+
+        story = build_story(self.raw)
+        return ScenarioDetail(
+            **{**self.summary().model_dump(), "description": story.description},
+            episodes=story.episodes,
+            playback=story.playback,
         )
 
 

@@ -65,6 +65,7 @@ from app.schemas.simulator import (
     RunCreateRequest,
     RunCreateResponse,
     RunStatus,
+    ScenarioDetail,
     ScenarioSummary,
     ScenarioUploadRequest,
     ScenariosListResponse,
@@ -2686,16 +2687,28 @@ async def upload_scenario(
     body: ScenarioUploadRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    # Storage reads no row of the database (036 slice A, review N2): the step of a scripted payment against its equivalent's
+    # precision is checked where the payment is executed (slice B), not here.
     rec = runtime.save_uploaded_scenario(body.scenario)
     return rec.summary()
 
 
-@router.get("/scenarios/{scenario_id}", response_model=ScenarioSummary)
+@router.get(
+    "/scenarios/{scenario_id}",
+    response_model=ScenarioDetail,
+    responses={
+        409: {
+            "model": ErrorEnvelope,
+            "description": "The stored scenario's story cannot be served as written - SCENARIO_INVALID, with the path of "
+            "every bad field in details.errors",
+        }
+    },
+)
 async def get_scenario_summary(
     scenario_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
-    return runtime.get_scenario(scenario_id).summary()
+    return runtime.get_scenario(scenario_id).detail()
 
 
 @router.get("/scenarios/{scenario_id}/graph/preview", response_model=SimulatorGraphSnapshot)

@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SimulatorContractError } from './simulatorContracts'
+import type { ScenarioDetail } from './simulatorTypes'
 import {
   actionClearingOnce,
   actionClearingReal,
@@ -34,6 +39,59 @@ const scenario = {
   clusters_count: null,
   hubs_count: 1,
   tags: ['smoke'],
+}
+
+/** The details the backend answers for the scenarios of `api/scenario-detail-conformance.json`. The backend test
+ * (`tests/integration/test_p036_a_scenario_detail_conformance.py`) uploads each `scenario` and requires the route's answer
+ * to equal `detail`; this file requires the decoder to accept every `detail` unchanged. One file, two readers: the backend
+ * and this decoder cannot drift apart unseen. */
+const here = dirname(fileURLToPath(import.meta.url))
+const CONFORMANCE_PATH = resolve(here, '../../../../api/scenario-detail-conformance.json')
+const conformance = JSON.parse(readFileSync(CONFORMANCE_PATH, 'utf8')) as {
+  cases: Array<{ name: string; detail: Record<string, unknown> }>
+}
+
+/** `ScenarioDetail` of the canon: the summary plus the required `episodes` and the nullable `playback`. */
+const scenarioDetail = { ...scenario, episodes: [] as unknown[], playback: null }
+
+const storyEpisodes = [
+  {
+    index: 1,
+    time_ms: 1000,
+    caption: { ru: 'Знакомство', en: 'Meeting' },
+    pause_after: false,
+    kind: 'note',
+    focus: null,
+    anchor: null,
+    expected_cycle: null,
+  },
+  {
+    index: 2,
+    time_ms: 5000,
+    caption: { ru: 'Первая покупка', en: 'First purchase' },
+    pause_after: true,
+    kind: 'payment',
+    focus: { pids: ['A', 'B'], edges: [{ from: 'B', to: 'A' }] },
+    anchor: { event: 'tx.updated', from: 'A', to: 'B', amount: '5.00', equivalent: 'UAH', time_ms: null },
+    expected_cycle: null,
+  },
+  {
+    index: 3,
+    time_ms: 9000,
+    caption: { ru: 'Клиринг', en: 'Clearing' },
+    pause_after: false,
+    kind: 'clearing',
+    focus: null,
+    anchor: { event: 'clearing.done', from: null, to: null, amount: null, equivalent: null, time_ms: 9000 },
+    expected_cycle: ['A', 'B', 'C'],
+  },
+]
+
+const storyDetail = {
+  ...scenario,
+  description: { ru: 'Описание', en: 'Description' },
+  episodes: storyEpisodes,
+  playback: { tick_seconds: 2.5, intensity_percent: 0, inject_enabled: true },
 }
 
 const runStatus = {
@@ -305,12 +363,56 @@ describe('Simulator critical REST response contracts', () => {
     respondWith({ api_version: 'simulator-api/1', items: [scenario] })
     await expect(listScenarios(cfg)).resolves.toEqual({ api_version: 'simulator-api/1', items: [scenario] })
 
-    respondWith(scenario)
-    await expect(getScenario(cfg, 'scenario-1')).resolves.toEqual(scenario)
+    respondWith(scenarioDetail)
+    await expect(getScenario(cfg, 'scenario-1')).resolves.toEqual(scenarioDetail)
 
-    const offsetScenario = { ...scenario, created_at: '2026-08-08T12:00:00.123456+02:00' }
+    const offsetScenario = { ...scenarioDetail, created_at: '2026-08-08T12:00:00.123456+02:00' }
     respondWith(offsetScenario)
     await expect(getScenario(cfg, 'scenario-1')).resolves.toEqual(offsetScenario)
+  })
+
+  it('decodes the story of a scenario: description pair, episodes and playback (036)', async () => {
+    respondWith(storyDetail)
+    const detail = (await getScenario(cfg, 'scenario-1')) as typeof storyDetail
+
+    expect(detail).toEqual(storyDetail)
+    expect(detail.episodes.map((e) => e.index)).toEqual([1, 2, 3]) // non-vacuity: the episodes really came through
+    expect(detail.episodes[1]?.focus?.edges).toEqual([{ from: 'B', to: 'A' }])
+  })
+
+  it('decodes every detail the backend answers for the shared conformance scenarios', async () => {
+    expect(conformance.cases.length, `no cases in ${CONFORMANCE_PATH}`).toBeGreaterThanOrEqual(4)
+    for (const { name, detail } of conformance.cases) {
+      respondWith(detail)
+      await expect(getScenario(cfg, String(detail.scenario_id)), name).resolves.toEqual(detail)
+    }
+    // non-vacuity: the set holds the boundary spellings the decoder is accused of mishandling
+    const text = JSON.stringify(conformance.cases)
+    expect(text).toContain('999999999999.99999999') // 20 digits, 8 of them fraction: the largest storable amount
+    expect(text).toContain('1.000000000000000000') // 18 fraction digits (a payment amount)
+    expect(text).toContain(`${'0'.repeat(49)}1`) // 50 digits in all (an anchor amount)
+    expect(conformance.cases.some((c) => JSON.stringify(c.detail).includes('"tx.failed"'))).toBe(true)
+  })
+
+  it.each(['0.123456789012345678', '0'.repeat(50), `${'1'.repeat(32)}.${'1'.repeat(18)}`, '00005.50', '5'])(
+    'accepts the anchor amount %s, a spelling the scenario money grammar allows',
+    async (amount) => {
+      const anchor = { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount }
+      respondWith({ ...scenarioDetail, episodes: [{ ...storyEpisodes[1], anchor: { ...anchor, time_ms: null } }] })
+      const detail = (await getScenario(cfg, 'scenario-1')) as ScenarioDetail
+      expect(detail.episodes[0]?.anchor?.amount).toBe(amount)
+    },
+  )
+
+  it('accepts a list item with a description pair or a null one, and a detail without the optional keys', async () => {
+    const described = { ...scenario, description: { ru: 'Описание', en: 'Description' } }
+    respondWith({ api_version: 'simulator-api/1', items: [described, { ...scenario, description: null }, scenario] })
+    const list = await listScenarios(cfg)
+    expect(list.items.map((s) => s.description ?? null)).toEqual([{ ru: 'Описание', en: 'Description' }, null, null])
+
+    // the canon requires `episodes` on a detail and nothing else of the story: description and playback may be absent
+    respondWith({ ...scenario, episodes: [] })
+    await expect(getScenario(cfg, 'scenario-1')).resolves.toMatchObject({ scenario_id: 'scenario-1', episodes: [] })
   })
 
   it('accepts nullable run metrics from the canonical RunStatus response', async () => {
@@ -633,17 +735,229 @@ describe('Simulator critical REST response contracts', () => {
     },
     {
       label: 'scenario detail extra field',
-      payload: { ...scenario, label: 'legacy field is not in backend schema' },
+      payload: { ...scenarioDetail, label: 'legacy field is not in backend schema' },
       call: () => getScenario(cfg, 'scenario-1'),
       contract: 'scenario-detail',
       diagnostic: '$.label',
     },
     {
       label: 'scenario detail non-date-time date',
-      payload: { ...scenario, created_at: '2026-08-08' },
+      payload: { ...scenarioDetail, created_at: '2026-08-08' },
       call: () => getScenario(cfg, 'scenario-1'),
       contract: 'scenario-detail',
       diagnostic: '$.created_at',
+    },
+    {
+      label: 'scenario detail without the required episodes',
+      payload: scenario,
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes',
+    },
+    {
+      label: 'scenario list item carrying the story (the list does not)',
+      payload: { api_version: 'simulator-api/1', items: [{ ...scenario, episodes: [] }] },
+      call: () => listScenarios(cfg),
+      contract: 'scenario-list',
+      diagnostic: '$.items[0].episodes',
+    },
+    {
+      label: 'scenario list item description without a language',
+      payload: { api_version: 'simulator-api/1', items: [{ ...scenario, description: { ru: 'x' } }] },
+      call: () => listScenarios(cfg),
+      contract: 'scenario-list',
+      diagnostic: '$.items[0].description.en',
+    },
+    {
+      label: 'scenario description as a plain string (the backend always sends the pair)',
+      payload: { ...scenarioDetail, description: 'plain' },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.description',
+    },
+    {
+      label: 'a third language in a text pair',
+      payload: { ...scenarioDetail, description: { ru: 'x', en: 'y', fr: 'z' } },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.description.fr',
+    },
+    {
+      label: 'episode extra field',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[0], zoom: 2 }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].zoom',
+    },
+    {
+      label: 'episode caption without a language',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[0], caption: { ru: 'x' } }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].caption.en',
+    },
+    {
+      label: 'episode pause_after not boolean',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[0], pause_after: 'yes' }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].pause_after',
+    },
+    {
+      label: 'episode of an unknown kind',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[0], kind: 'teleport' }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].kind',
+    },
+    {
+      label: 'anchor of an unknown event',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[1], anchor: { event: 'run_status' } }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.event',
+    },
+    {
+      label: 'anchor amount not a decimal string',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: 5 } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'tx.updated anchor without an amount',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH' } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'tx.updated anchor with only the event',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.updated' } }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.from',
+    },
+    {
+      label: 'tx.failed anchor carrying an amount (a failure has none)',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          {
+            ...storyEpisodes[1],
+            anchor: { event: 'tx.failed', from: 'A', to: 'B', equivalent: 'UAH', amount: '5.00' },
+          },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'tx.failed anchor without an equivalent',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], anchor: { event: 'tx.failed', from: 'A', to: 'B' } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.equivalent',
+    },
+    {
+      label: 'anchor amount with a sign (the scenario money grammar has none)',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          {
+            ...storyEpisodes[1],
+            anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: '-5.00' },
+          },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'anchor amount with 19 fraction digits',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          {
+            ...storyEpisodes[1],
+            anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: '0.1234567890123456789' },
+          },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'anchor amount with a terminal newline',
+      payload: {
+        ...scenarioDetail,
+        episodes: [
+          { ...storyEpisodes[1], anchor: { event: 'tx.updated', from: 'A', to: 'B', equivalent: 'UAH', amount: '5\n' } },
+        ],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].anchor.amount',
+    },
+    {
+      label: 'caption with an empty language',
+      payload: { ...scenarioDetail, episodes: [{ ...storyEpisodes[0], caption: { ru: 'x', en: '' } }] },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].caption.en',
+    },
+    {
+      label: 'playback tick below the canon floor',
+      payload: { ...scenarioDetail, playback: { tick_seconds: 0.1 } },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.playback.tick_seconds',
+    },
+    {
+      label: 'focus edge in the Python spelling from_',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], focus: { pids: [], edges: [{ from_: 'A', to: 'B' }] } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].focus.edges[0].from_',
+    },
+    {
+      label: 'focus edge with an empty end',
+      payload: {
+        ...scenarioDetail,
+        episodes: [{ ...storyEpisodes[1], focus: { pids: [], edges: [{ from: '', to: 'A' }] } }],
+      },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.episodes[0].focus.edges[0].from',
+    },
+    {
+      label: 'playback extra field',
+      payload: { ...scenarioDetail, playback: { speed: 2 } },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.playback.speed',
+    },
+    {
+      label: 'playback inject_enabled not boolean',
+      payload: { ...scenarioDetail, playback: { inject_enabled: 'yes' } },
+      call: () => getScenario(cfg, 'scenario-1'),
+      contract: 'scenario-detail',
+      diagnostic: '$.playback.inject_enabled',
     },
     {
       label: 'run status metric',
