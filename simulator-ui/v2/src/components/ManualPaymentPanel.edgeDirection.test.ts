@@ -102,3 +102,52 @@ describe('the sentence follows the pair the panel was opened with, however the p
     expect(NOTE).not.toMatch(/adds to the debtor.s debt on this line/)
   })
 })
+
+describe('a panel opened from a line: the amount has the focus, and the sentence is folded away', () => {
+  it('the amount is focused (it is empty, nothing is sent), and the sentence sits in a CLOSED details that is always in the DOM', async () => {
+    const { host } = mountPanel((fsm) => { fsm.startPaymentFlowWithFrom('alice'); fsm.setPaymentToPid('bob') })
+    await settle()
+
+    expect(document.activeElement).toBe(host.querySelector('#mp-amount'))
+    const details = q(host, 'mp-line-direction') as HTMLDetailsElement
+    expect(details.tagName).toBe('DETAILS')
+    expect(details.open, 'closed by default: the confirm step is the tallest one on a phone').toBe(false)
+    expect(text(host, 'mp-line-direction-note')).toBe(NOTE)
+    expect(details.querySelector('summary')!.textContent).toBe('Why is the direction reversed?')
+  })
+
+  it('nothing is sent by that focus: Enter in the empty amount, held or not, confirms nothing', async () => {
+    const calls = { confirm: vi.fn() }
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const fsm = useInteractFSM({ snapshot: ref(null), findActiveTrustline: () => null })
+    fsm.startPaymentFlowWithFrom('alice')
+    fsm.setPaymentToPid('bob')
+    createApp({
+      render: () => h(ManualPaymentPanel as Component, {
+        phase: fsm.state.phase, state: fsm.state, unit: 'UAH', availableCapacity: '10.00', trustlinesLoading: false, paymentTargetsLoading: false,
+        paymentTargetsLastError: null, paymentToTargetIds: new Set(['alice', 'bob', 'carol']), trustlines: [], participants: PEOPLE, busy: false,
+        canSendPayment: true, confirmPayment: calls.confirm, cancel: vi.fn(), setFromPid: fsm.setPaymentFromPid, setToPid: fsm.setPaymentToPid,
+      }),
+    }).mount(host)
+    await settle()
+    const input = host.querySelector('#mp-amount') as HTMLInputElement
+    expect(document.activeElement).toBe(input)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }))
+    await settle()
+    expect(calls.confirm).not.toHaveBeenCalled()
+  })
+
+  it('the node card (the sender only) and the ordinary way do NOT take the focus into an amount', async () => {
+    const card = mountPanel((fsm) => { fsm.startPaymentFlowWithFrom('alice') })
+    await settle()
+    expect(card.host.querySelector('#mp-amount')).toBeNull()
+    document.body.innerHTML = ''
+
+    const ordinary = mountPanel((f) => { f.startPaymentFlow() })
+    await settle()
+    expect(ordinary.host.querySelector('#mp-amount')).toBeNull()
+    expect(q(ordinary.host, 'mp-line-direction')).toBeNull()
+  })
+})

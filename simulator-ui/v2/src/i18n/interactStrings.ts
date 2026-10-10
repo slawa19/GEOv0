@@ -48,6 +48,7 @@ export const interactStrings = {
   clearingNothing: 'Nothing was cleared: no cycle of debts was found.',
 
   // A payment started from a line goes against the line's arrow (F-037-4).
+  lineDirectionTitle: 'Why is the direction reversed?',
   lineDirectionNote: 'This line runs from creditor to debtor; Pay starts a payment from debtor to creditor. For the part sent directly, any reverse debt is offset first, and only the remainder increases the debtor’s debt under this line’s limit; it does not repay that debt. The server may route some or all of the payment through other participants.',
 
   // The progression of the form: what the form announces when it opens the next list for the user.
