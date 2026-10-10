@@ -1,138 +1,19 @@
 /**
- * Programme 037, `T3701` - reproducers that need a browser: the PATH (number of user actions, page reload on
- * entry, a result screen with `payment_id`) and the 390x844 LAYOUT of the CURRENT manual payment flow.
+ * Programme 037, `T3701` - reproducers that need a browser: the PATH (number of user actions), the page reload on
+ * entry (a known DEBT, characterised below - not a met budget) and the 390x844 LAYOUT of the manual payment flow.
  *
- * Backend is mocked exactly like `manual-operations-interact.spec.ts` (E-2): `page.route`, no real server.
- * The mock below is a trimmed copy of that file's `mockRealInteractApp`; it is copied, not imported, because a
- * spec file exports nothing and `manual-operations-interact.spec.ts` is rewritten by slice B (its E-1/E-2/E-4
- * assertions must survive there, not here).
+ * Backend is mocked exactly like `manual-operations-interact.spec.ts` (E-2): `page.route`, no real server. The mock
+ * is a trimmed copy of that file's `mockRealInteractApp`, kept in `helpers/p037Mock.ts` (shared with the panel-container
+ * spec); it is copied, not imported, because `manual-operations-interact.spec.ts` is a spec file and exports nothing.
  *
  * Every test records the number it measured with `console.log('P037 ...')` and a test annotation, so the
  * "before" figures survive in the run output even when the assertion at the end is the failing one.
- * The assertions are the TARGET of the spec (<= 5 actions, no reload, result screen, 390x844 fits) - red now.
  *
- * What this does NOT see: the wizard (does not exist); the real `/session/ensure` + real backend (mocked);
- * a physical touch device (Playwright `hasTouch` + `tap()` emulate touch events, not a phone's browser chrome).
+ * What this does NOT see: the real `/session/ensure` + real backend (mocked); a physical touch device (Playwright
+ * `hasTouch` + `tap()` emulate touch events, not a phone's browser chrome).
  */
-import { expect, test, type Page, type Route } from '@playwright/test'
-
-type Participant = { pid: string; name: string }
-
-const PARTICIPANTS: Participant[] = [
-  { pid: 'alice', name: 'Alice' },
-  { pid: 'bob', name: 'Bob' },
-  { pid: 'carol', name: 'Carol' },
-]
-const RUN_ID = 'run-p037'
-const SCENARIO_ID = 'greenfield-village-100-realistic-v2'
-const PAYMENT_ID = 'payment-p037-1'
-
-function snapshot() {
-  return {
-    equivalent: 'UAH',
-    generated_at: new Date('2026-02-01T00:00:00Z').toISOString(),
-    palette: { default: { color: '#64748b', label: 'Default' } },
-    limits: { max_particles: 120 },
-    nodes: PARTICIPANTS.map((p) => ({
-      id: p.pid, name: p.name, type: 'person', status: 'active', links_count: 0, net_balance_atoms: '0',
-      net_sign: 0, net_balance: '0', viz_color_key: 'default', viz_shape_key: 'default',
-      viz_size: { w: 24, h: 24 }, viz_badge_key: '',
-    })),
-    links: [
-      // payment alice -> bob is carried by the line bob -> alice (creditor -> debtor)
-      { source: 'bob', target: 'alice', trust_limit: '100', used: '0', available: '100', status: 'active',
-        viz_color_key: 'default', viz_width_key: 'default', viz_alpha_key: 'default' },
-    ],
-  }
-}
-
-async function mockApp(
-  page: Page,
-  o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number; paymentRealNetworkFailures?: { left: number } },
-) {
-  await page.addInitScript(({ scenarioId, runId }) => {
-    try {
-      localStorage.clear()
-      localStorage.setItem('geo.sim.v2.apiBase', '/api/v1')
-      localStorage.setItem('geo.sim.v2.selectedScenarioId', scenarioId)
-      localStorage.setItem('geo.sim.v2.runId', runId)
-    } catch { /* ignore */ }
-  }, { scenarioId: SCENARIO_ID, runId: RUN_ID })
-
-  const json = (route: Route, body: unknown, status = 200) =>
-    route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
-  const runBody = {
-    api_version: 'simulator-api/1', run_id: RUN_ID, scenario_id: SCENARIO_ID, mode: 'real', state: 'paused',
-    sim_time_ms: 0, intensity_percent: 0, ops_sec: 0, queue_depth: 0,
-  }
-
-  await page.route('**/simulator/session/ensure', (r) => json(r, { actor_kind: 'anon', owner_id: 'owner-p037' }))
-  await page.route('**/simulator/runs/active', (r) => json(r, { run_id: null }))
-  await page.route(/\/simulator\/scenarios$/i, (r) =>
-    json(r, {
-      api_version: 'simulator-api/1',
-      items: [{ api_version: 'simulator-api/1', scenario_id: SCENARIO_ID, name: 'Greenfield-village-100',
-        participants_count: 3, trustlines_count: 1, equivalents: ['UAH'] }],
-    }))
-  await page.route(/\/simulator\/scenarios\/[^/]+\/graph\/preview/i, (r) => json(r, snapshot()))
-  await page.route(/\/simulator\/runs$/i, (r) => json(r, { run_id: RUN_ID }))
-  await page.route(`**/simulator/runs/${RUN_ID}/pause`, (r) => json(r, runBody))
-  await page.route(`**/simulator/runs/${RUN_ID}`, (r) => json(r, runBody))
-  await page.route(new RegExp(`/simulator/runs/${RUN_ID}/graph/snapshot`, 'i'), (r) => json(r, snapshot()))
-  await page.route(new RegExp(`/simulator/runs/${RUN_ID}/events`, 'i'), (r) =>
-    r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' }, body: ':ok\n\n' }))
-  await page.route(`**/simulator/runs/${RUN_ID}/actions/participants-list`, (r) => json(r, { items: PARTICIPANTS }))
-  await page.route(new RegExp(`/simulator/runs/${RUN_ID}/actions/trustlines-list`, 'i'), (r) =>
-    o.trustlinesStatus && o.trustlinesStatus !== 200 ? json(r, { code: 'BOOM', message: 'down' }, o.trustlinesStatus) : json(r, {
-      items: [{ from_pid: 'bob', from_name: 'Bob', to_pid: 'alice', to_name: 'Alice', equivalent: 'UAH',
-        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }],
-    }))
-  await page.route(new RegExp(`/simulator/runs/${RUN_ID}/payment-targets`, 'i'), (r) => {
-    const from = new URL(r.request().url()).searchParams.get('from_pid')
-    json(r, { items: from === 'alice' ? [{ to_pid: 'bob', hops: 1 }] : [] })
-  })
-  await page.route(`**/simulator/runs/${RUN_ID}/actions/payment-real`, async (r) => {
-    const req = JSON.parse((await r.request().postData()) ?? '{}') as Record<string, unknown>
-    o.paymentRealBodies.push(req)
-    if (o.paymentRealNetworkFailures && o.paymentRealNetworkFailures.left > 0) {
-      o.paymentRealNetworkFailures.left -= 1
-      await r.abort('failed') // the request left; no answer came back
-      return
-    }
-    await json(r, {
-      ok: true, payment_id: PAYMENT_ID, from_pid: req.from_pid, to_pid: req.to_pid, equivalent: req.equivalent,
-      amount: String(req.amount), status: 'COMMITTED', client_action_id: req.client_action_id ?? null,
-      routes: [{ hops: [{ from: req.from_pid, to: req.to_pid, amount: String(req.amount) }] }],
-    })
-  })
-}
-
-async function ready(page: Page, withActionBar: boolean) {
-  await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
-  if (withActionBar) await expect(page.locator('[data-testid="actionbar-payment"]')).toBeVisible({ timeout: 20_000 })
-}
-
-/** One user action = one click/tap/fill. Counted, never inferred. */
-class Counter {
-  readonly steps: string[] = []
-  constructor(private readonly page: Page, private readonly touch: boolean) {}
-  async press(label: string, css: string) {
-    this.steps.push(label)
-    const loc = this.page.locator(css)
-    await expect(loc).toBeVisible()
-    await expect(loc).toBeEnabled()
-    if (this.touch) await loc.tap()
-    else await loc.click()
-  }
-  async type(label: string, css: string, value: string) {
-    this.steps.push(label)
-    await this.page.locator(css).fill(value)
-  }
-  async pick(label: string, selectId: string, value: string) {
-    await this.press(`${label}: open list`, `#${selectId}__trigger`)
-    await this.press(`${label}: choose option`, `#${selectId}__surface [role="option"][data-option-value="${value}"]`)
-  }
-}
+import { expect, test, type Page } from '@playwright/test'
+import { Counter, PAYMENT_ID, mockApp, ready } from './helpers/p037Mock.js'
 
 /** The ordinary path on the current panel: Send Payment, From, To, amount, Confirm. */
 async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>) {
@@ -228,16 +109,21 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     expect({ ...bodies[1]!, client_action_id: null }).toEqual({ ...bodies[0]!, client_action_id: null })
   })
 
-  // SLICE B (the wizard), not A2: the budget is five actions and the entry does not reload. Marked as an EXPECTED failure so
-  // the day the wizard lands this test goes red and has to be turned into a plain assertion.
-  test('BUDGET (slice B, expected to fail until the wizard): not more than 5 user actions after "Send Payment"', async ({ page }) => {
-    test.fail(true, 'slice B: the five-action wizard is not built yet; the current panel needs six')
+  // The budget is five actions after "Send Payment". Decision 037-B (PANEL-PLUS, 2026-10-10): the wizard is NOT built; the
+  // path is shortened on the existing panel (PR B2), which removes this marker and turns the test into a plain assertion.
+  test('BUDGET (expected to fail until PR B2): not more than 5 user actions after "Send Payment"', async ({ page }) => {
+    test.fail(true, 'PR B2 (037-B PANEL-PLUS): the From -> To progression is not shortened yet; the current panel needs six')
     const { c } = await payAliceToBob(page, [])
     expect(c.steps.length, `current path: ${c.steps.join(' -> ')}`).toBeLessThanOrEqual(5)
   })
 
-  test('ENTRY (slice B, expected to fail until it is built): switching into Interact from another mode does not reload the page', async ({ page }, testInfo) => {
-    test.fail(true, 'slice B: `goInteract` still reloads the page (SimulatorAppRoot.vue)')
+  // KNOWN DEBT, not a met budget (BACKLOG 037-3, owner: the simulator mode-entry/bootstrap maintainer; decision 037-B
+  // 2026-10-10: POSTPONE-TO-BACKLOG). `goInteract` still reloads the page; the target is ZERO document navigations.
+  // This test CHARACTERISES the debt: entry happened (positive), the ActionBar is ready, exactly one navigation of the
+  // document, and the window marker is gone. It is not an expected-failure test: a broken entry (segment disabled, the
+  // ActionBar never appears) fails here for ITS OWN reason instead of hiding behind the debt. If the entry stops
+  // reloading, this test goes RED on purpose - replace it by the positive zero-reload assertion (BACKLOG 037-3).
+  test('ENTRY (known debt 037-3, characterisation): switching into Interact from Auto-Run still reloads the page once', async ({ page }, testInfo) => {
     await mockApp(page, { paymentRealBodies: [] })
     await page.goto('/?mode=real&e2eReal=1')
     await ready(page, false)
@@ -248,23 +134,21 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
 
     const interactSegment = page.getByRole('button', { name: 'Interact', exact: true })
     await expect(interactSegment).toBeVisible()
-    const enabled = await interactSegment.isEnabled()
-    if (!enabled) {
-      console.log('P037 ENTRY {"interactSegmentEnabled":false}')
-      testInfo.annotations.push({ type: 'P037-ENTRY', description: 'Interact segment disabled in the mocked state: UNVERIFIED in browser' })
-      expect(enabled).toBe(true)
-      return
-    }
+    await expect(interactSegment, 'precondition: the Interact segment is available in real mode').toBeEnabled()
     await interactSegment.click()
+
+    // The entry itself, stated positively: the address says Interact and the Interact ActionBar is ready.
     await page.waitForURL(/ui=interact/, { timeout: 15_000 })
-    await page.waitForLoadState('load')
+    await expect(page.locator('[data-testid="actionbar-payment"]'), 'the entry did not reach a ready Interact screen').toBeVisible({ timeout: 20_000 })
+
     const markerSurvived = await page.evaluate(() => (window as unknown as { __p037Marker?: number }).__p037Marker === 1)
     const numbers = { navigations, markerSurvived }
     console.log(`P037 ENTRY ${JSON.stringify(numbers)}`)
     testInfo.annotations.push({ type: 'P037-ENTRY', description: JSON.stringify(numbers) })
 
-    // TARGET (slice B, spec "Путь" + "Чего нет" item 9): entry without a page reload (state kept).
-    expect(markerSurvived, 'entering Interact reloaded the page (window state lost)').toBe(true)
+    const improved = 'the entry no longer reloads the page: replace this characterisation by the positive zero-reload assertion (BACKLOG 037-3)'
+    expect(navigations, improved).toBe(1)
+    expect(markerSurvived, improved).toBe(false)
   })
 })
 
