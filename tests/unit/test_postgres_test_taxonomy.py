@@ -113,8 +113,11 @@ def _skip_sites(tree: ast.Module) -> list[tuple[int, str, bool]]:
                     asked is not None and any(_asks_which_database(c) for c in conditions),
                 )
             )
-        elif _is_skipif_mark(node) and node.args:
-            sites.append((node.lineno, ast.unparse(node.args[0]), _asks_which_database(node.args[0])))
+        elif _is_skipif_mark(node):
+            # pytest accepts the condition positionally or as `condition=` (`_pytest/skipping.py`): read both.
+            condition = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "condition"), None)
+            if condition is not None:
+                sites.append((node.lineno, ast.unparse(condition), _asks_which_database(condition)))
         for child in ast.iter_child_nodes(node):
             visit(child, conditions)
 
@@ -224,8 +227,9 @@ _PLANTED_OTHER_SKIPS = {
 }
 
 
-def test_the_database_skip_detector_sees_every_form_and_only_those() -> None:
-    """Anti-vacuum for the invariant below: planted positives are found, planted negatives are not flagged as database skips."""
+def test_the_database_skip_detector_recognises_the_lexical_forms_it_plants() -> None:
+    """Anti-vacuum for the invariant below, bounded to what it shows: planted positives are recognised, planted negatives
+    are not flagged as database skips. It says nothing about forms that are not planted (see the invariant's message)."""
 
     for label, source in _PLANTED_DATABASE_SKIPS.items():
         sites = _skip_sites(ast.parse(source))
@@ -235,6 +239,16 @@ def test_the_database_skip_detector_sees_every_form_and_only_those() -> None:
         assert sites, f"{label}: the detector did not see the skip at all"
         assert not any(asks for _, _, asks in sites), f"{label}: wrongly flagged as a database skip: {sites}"
     assert _skip_sites(ast.parse('"""pytest.skip(x) in prose"""\n# pytest.skip(y)\nx = 1\n')) == []
+
+
+_BOUNDARIES = (
+    "This guard reads `pytest.skip(...)` calls and `pytest.mark.skipif(...)` marks (positional or `condition=`) in the flat "
+    "`tests/integration/*.py` by their LEXICAL form: it recognises a condition that names TEST_DATABASE_URL, a `dialect`, a "
+    "`postgres`/`sqlite` string or `get_backend_name`; it does not judge the polarity or the reachability of the condition. It does "
+    "NOT see `importorskip`, `unittest.SkipTest`, the `skip` marker, `pytest.param(..., marks=skip)`, aliases of `pytest.skip`, "
+    "conditions computed elsewhere, or subdirectories. Verify by hand with "
+    "`git grep -n \"pytest.skip\\|skipif\" -- tests/integration`."
+)
 
 
 def test_no_integration_test_skips_because_of_the_database_url_or_dialect() -> None:
@@ -248,14 +262,15 @@ def test_no_integration_test_skips_because_of_the_database_url_or_dialect() -> N
                 database_skips.append(f"{name}:{line}: {condition}")
             else:
                 other_skips.add((name, condition))
-    assert database_skips == [], (
-        "an integration test is skipped by a question about the database URL or dialect; "
-        f"tests/conftest.py refuses a non-PostgreSQL URL before collection, so the skip is dead: {database_skips}"
+    assert database_skips == [], _BOUNDARIES + (
+        f" RECOGNISED a skip whose condition asks which database the tier runs on (URL, driver or dialect): {database_skips}. "
+        "Check the condition: a skip by the database URL or dialect is forbidden in an integration test in EITHER direction "
+        "(`tests/conftest.py` refuses a non-PostgreSQL URL before collection, so a skip taken on a non-PostgreSQL answer is dead, "
+        "and one taken on a PostgreSQL answer removes a test from the gate)."
     )
-    assert other_skips == _LIVE_SKIPS, (
-        f"executable skips under tests/integration other than the named live one: {sorted(other_skips - _LIVE_SKIPS)}; "
-        f"named but gone: {sorted(_LIVE_SKIPS - other_skips)}. A new conditional skip needs its own line in _LIVE_SKIPS "
-        "with the reason it can really fire."
+    assert other_skips == _LIVE_SKIPS, _BOUNDARIES + (
+        f" Executable skips other than the one named live: {sorted(other_skips - _LIVE_SKIPS)}; named but gone: "
+        f"{sorted(_LIVE_SKIPS - other_skips)}. A new conditional skip needs its own line in _LIVE_SKIPS with the reason it can really fire."
     )
 
 
