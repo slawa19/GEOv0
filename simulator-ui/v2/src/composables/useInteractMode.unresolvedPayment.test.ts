@@ -34,7 +34,9 @@ function snapshot(): GraphSnapshot {
   }
 }
 
-function mode(sendPayment: Send, runId = ref('run_1')) {
+type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
+
+function mode(sendPayment: Send, runId = ref('run_1'), intentStorage?: Store) {
   window.history.replaceState({}, '', '/?mode=real&ui=interact')
   const actions = {
     actionsDisabled: ref(false), sendPayment,
@@ -45,7 +47,10 @@ function mode(sendPayment: Send, runId = ref('run_1')) {
     fetchTrustlines: vi.fn(async () => []),
     fetchPaymentTargets: vi.fn(async () => [{ to_pid: 'bob', hops: 1, max_available: '100.00' }]),
   } as unknown as Actions
-  const im = useInteractMode({ actions, runId: computed(() => runId.value), equivalent: computed(() => 'UAH'), snapshot: ref(snapshot()) })
+  const im = useInteractMode({
+    actions, runId: computed(() => runId.value), equivalent: computed(() => 'UAH'), snapshot: ref(snapshot()),
+    ...(intentStorage !== undefined ? { intentStorage } : {}),
+  })
   return { im, runId }
 }
 
@@ -54,8 +59,8 @@ async function settle() {
   await nextTick()
 }
 
-async function atConfirm(send: Send) {
-  const ctx = mode(send)
+async function atConfirm(send: Send, intentStorage?: Store) {
+  const ctx = mode(send, ref('run_1'), intentStorage)
   ctx.im.startPaymentFlow()
   ctx.im.selectNode('alice')
   ctx.im.selectNode('bob')
@@ -318,5 +323,89 @@ describe('the unresolved payment is held, shown and resolved only by a person (R
 
     expect(im.paymentOutcome.value?.kind).toBe('success')
     expect(window.sessionStorage.length).toBe(0)
+  })
+})
+
+const ENTRY_KEY = 'geo.sim.v2.unresolvedPayment.run_1'
+const FROZEN = { runId: 'run_1', from: 'alice', to: 'bob', equivalent: 'UAH', amount: '10.00' }
+
+describe('a damaged stored record never sends a payment without a key (money-side consequence)', () => {
+  it.each([
+    ['an empty key', { v: 1, key: '', intent: FROZEN }],
+    ['a key with a space', { v: 1, key: 'bad key', intent: FROZEN }],
+    ['a key with a slash', { v: 1, key: 'bad/key', intent: FROZEN }],
+    ['a key longer than the server accepts', { v: 1, key: 'k'.repeat(129), intent: FROZEN }],
+    ['an amount that is not an amount', { v: 1, key: 'k-1', intent: { ...FROZEN, amount: 'abc' } }],
+    ['an empty receiver', { v: 1, key: 'k-1', intent: { ...FROZEN, to: '' } }],
+  ])('%s: nothing is restored, nothing is sent by Check / repeat, the entry is removed', async (_what, entry) => {
+    window.sessionStorage.setItem(ENTRY_KEY, JSON.stringify(entry))
+    const send = vi.fn().mockResolvedValue(COMMITTED)
+    const { im } = mode(send)
+
+    await im.retryPayment()
+
+    expect(send, 'a request left on the strength of a damaged record').not.toHaveBeenCalled()
+    expect(im.paymentOutcome.value).toBeNull()
+    expect(window.sessionStorage.getItem(ENTRY_KEY)).toBeNull()
+  })
+})
+
+describe('a storage whose removal fails does not lock the run', () => {
+  /** getItem/setItem work; removeItem throws - the entry written stays where it is. */
+  function stubbornStorage() {
+    const map = new Map<string, string>()
+    return {
+      map,
+      storage: {
+        getItem: (k: string) => map.get(k) ?? null,
+        setItem: (k: string, v: string) => void map.set(k, v),
+        removeItem: () => { throw new Error('removal denied') },
+      },
+    }
+  }
+
+  it('after COMMITTED the banner does not come back, and the next payment goes under a new key', async () => {
+    const { storage } = stubbornStorage()
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send, storage)
+    await im.confirmPayment('10.00')
+
+    await im.retryPayment()
+    expect(im.paymentOutcome.value?.kind).toBe('success')
+    im.dismissPaymentResult()
+    expect(im.paymentOutcome.value, 'the closed record was lifted out of the storage again').toBeNull()
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(3)
+    expect(keyOf(send, 2)).not.toBe(keyOf(send, 0))
+  })
+
+  it('after an explicit discard the banner does not come back, and another payment is free', async () => {
+    const { storage } = stubbornStorage()
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send, storage)
+    await im.confirmPayment('10.00')
+
+    im.discardUnresolvedPayment()
+    expect(im.paymentOutcome.value).toBeNull()
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('a refusal of the repeat does not take the unresolved payment out of the storage', () => {
+  it('unknown -> the repeat is refused (403) -> the page is reloaded (composable re-created): the banner and the key are still there', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockRejectedValueOnce(refusal(403, 'ACCESS_DENIED')).mockResolvedValue(COMMITTED)
+    const first = await atConfirm(send)
+    await first.im.confirmPayment('10.00')
+    await first.im.retryPayment()
+    expect(first.im.paymentOutcome.value?.kind).toBe('unknown')
+
+    const reloaded = mode(send)
+    expect(reloaded.im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00' })
+    await reloaded.im.retryPayment()
+
+    expect(keyOf(send, 2)).toBe(keyOf(send, 0))
   })
 })

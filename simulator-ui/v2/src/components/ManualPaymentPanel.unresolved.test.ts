@@ -21,6 +21,7 @@ const UNKNOWN = {
 function mount(props: Record<string, unknown> = {}) {
   const host = document.createElement('div')
   document.body.appendChild(host)
+  const live = reactive({ phase: 'confirm-payment' })
   const state = reactive({
     phase: 'confirm-payment', fromPid: 'alice', toPid: 'bob', selectedEdgeKey: null as string | null,
     edgeAnchor: null as { x: number; y: number } | null, error: null as string | null, lastClearing: null,
@@ -28,7 +29,7 @@ function mount(props: Record<string, unknown> = {}) {
   const calls = { confirm: vi.fn(), retry: vi.fn(), discard: vi.fn(), cancel: vi.fn() }
   createApp({
     render: () => h(panel, {
-      phase: 'confirm-payment', state, unit: 'UAH', availableCapacity: '100.00',
+      phase: live.phase, state, unit: 'UAH', availableCapacity: '100.00',
       trustlinesLoading: false, paymentTargetsLoading: false, paymentTargetsLastError: null,
       paymentToTargetIds: new Set(['bob']), trustlines: [],
       participants: [{ pid: 'alice', name: 'Alice' }, { pid: 'bob', name: 'Bob' }],
@@ -39,7 +40,7 @@ function mount(props: Record<string, unknown> = {}) {
       ...props,
     }),
   }).mount(host)
-  return { host, calls }
+  return { host, calls, live }
 }
 
 const q = (host: HTMLElement, id: string) => host.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
@@ -133,5 +134,23 @@ describe('the banner of an unresolved payment', () => {
     await nextTick()
     expect(q(host, 'mp-outcome-unknown')).toBeNull()
     expect(host.querySelector('#mp-amount')).not.toBeNull()
+  })
+})
+
+describe('the second step of the discard', () => {
+  it('does not survive closing the panel: a reopened panel starts from the first step', async () => {
+    const { host, live } = mount()
+    await nextTick()
+    q(host, 'mp-discard')!.click()
+    await nextTick()
+    expect(q(host, 'mp-discard-confirm'), 'premise: step two is showing').not.toBeNull()
+
+    live.phase = 'idle' // the panel is closed (the component instance may live on, hidden)
+    await nextTick()
+    live.phase = 'confirm-payment' // and opened again
+    await nextTick()
+
+    expect(q(host, 'mp-discard-confirm'), 'a reopened panel offered "Discard it" at once').toBeNull()
+    expect(q(host, 'mp-retry')).not.toBeNull()
   })
 })

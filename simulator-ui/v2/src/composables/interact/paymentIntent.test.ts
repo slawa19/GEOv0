@@ -243,3 +243,73 @@ describe('an unresolved intent is held (R1, R3)', () => {
     expect(createPaymentIntentKeeper({ storage, runId: sameRun }).peek()).toBeNull()
   })
 })
+
+describe('a stored record is validated like a request (the key by the server grammar, the intent by shape)', () => {
+  const run = () => 'run_1'
+  const entryKey = 'geo.sim.v2.unresolvedPayment.run_1'
+
+  function storeWith(entry: unknown) {
+    const map = new Map<string, string>([[entryKey, JSON.stringify(entry)]])
+    return {
+      map,
+      storage: {
+        getItem: (k: string) => map.get(k) ?? null,
+        setItem: (k: string, v: string) => void map.set(k, v),
+        removeItem: (k: string) => void map.delete(k),
+      },
+    }
+  }
+
+  it.each([
+    ['an empty key', ''],
+    ['a key with a space', 'a b'],
+    ['a key with a slash', 'a/b'],
+    ['a key with a non-ASCII letter', 'ключ'],
+    ['a key of 129 characters', 'k'.repeat(129)],
+  ])('%s is not restored, and the entry is removed', (_what, key) => {
+    const { map, storage } = storeWith({ v: 1, key, intent })
+    expect(createPaymentIntentKeeper({ storage, runId: run }).peek()).toBeNull()
+    expect(map.has(entryKey)).toBe(false)
+  })
+
+  it.each([
+    ['an amount that is not an amount', { amount: 'abc' }],
+    ['a negative amount', { amount: '-1' }],
+    ['an empty receiver', { to: '' }],
+    ['an empty sender', { from: '' }],
+    ['an empty equivalent', { equivalent: '' }],
+  ])('an intent with %s is not restored, and the entry is removed', (_what, damage) => {
+    const { map, storage } = storeWith({ v: 1, key: 'k-1', intent: { ...intent, runId: 'run_1', ...damage } })
+    expect(createPaymentIntentKeeper({ storage, runId: run }).peek()).toBeNull()
+    expect(map.has(entryKey)).toBe(false)
+  })
+
+  it('anti-vacuum: a well-formed record (key at the grammar edge, 128 characters) IS restored', () => {
+    const { storage } = storeWith({ v: 1, key: 'A.b_c:d-'.repeat(16), intent: { ...intent, runId: 'run_1' } })
+    expect(createPaymentIntentKeeper({ storage, runId: run }).peek()).toMatchObject({ unknown: true })
+  })
+
+  it('a closed record is remembered by the instance and is not lifted from a storage that could not remove it', () => {
+    const map = new Map<string, string>()
+    const storage = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: () => { throw new Error('denied') },
+    }
+    const keeper = createPaymentIntentKeeper({ storage, runId: run })
+    const record = begin(keeper, { ...intent, runId: 'run_1' })
+    keeper.markSent(record)
+    keeper.markUnknown(record)
+    keeper.settle(record)
+    expect(keeper.peek()).toBeNull()
+
+    const second = begin(keeper, { ...intent, runId: 'run_1' })
+    keeper.markSent(second)
+    keeper.discard()
+    expect(keeper.peek()).toBeNull()
+    expect(map.size, 'premise: the entry is still in the storage').toBe(1)
+
+    // a NEW instance (a reload) honestly finds it again
+    expect(createPaymentIntentKeeper({ storage, runId: run }).peek()).not.toBeNull()
+  })
+})
