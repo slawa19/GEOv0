@@ -49,12 +49,6 @@ from tests.tier_on_a_clone import tier_on_a_clone  # noqa: E402,F401 - opt-in fi
 
 
 
-def _require_postgres(db_session) -> None:
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: validates staged transaction advisory locks")
-
-
 async def _seed_staged_world() -> dict:
     """A, B, C; B trusts A and C trusts B for 50.00; opening debts A->B 1 and B->C 1. No payment."""
 
@@ -140,8 +134,6 @@ async def test_a_staged_batch_writes_one_payment_audit_row_per_committed_payment
     MUTATIONS: drop `_write_integrity_audit` from `PaymentService._apply_payment` - no audit row, red;
     write it twice - two rows for a payment, red.
     """
-
-    _require_postgres(db_session)
 
     from tests.conftest import TestingSessionLocal
 

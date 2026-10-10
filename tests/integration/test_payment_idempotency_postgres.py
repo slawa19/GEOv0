@@ -51,13 +51,7 @@ async def test_concurrent_duplicate_payment_request_never_regresses_terminal_sta
     db_session,
     monkeypatch,
 ):
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: validates concurrent tx_id uniqueness semantics")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     from app.config import settings
     from app.core.payments.service import PaymentService

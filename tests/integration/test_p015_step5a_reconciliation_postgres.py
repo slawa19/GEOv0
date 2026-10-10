@@ -63,8 +63,6 @@ _TABLES = (
 def _postgres_url() -> str:
     from tests.conftest import TEST_DATABASE_URL
 
-    if "postgresql" not in TEST_DATABASE_URL:
-        pytest.skip(f"this module needs a PostgreSQL TEST_DATABASE_URL, got {TEST_DATABASE_URL!r}")
     return TEST_DATABASE_URL
 
 

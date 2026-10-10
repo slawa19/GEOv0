@@ -58,13 +58,11 @@ from tests.unit.test_p015_step5a_reconciliation import _fixture_debts, _verify
 
 
 def _postgres_url() -> str:
-    """The refusal that makes every engine this module builds PostgreSQL-only (T1525 guard): it is
-    defined HERE, because the guard reads this module's own source for it."""
+    """The tier's database URL. It is PostgreSQL by construction: `tests/conftest.py` refuses any other URL
+    before collection (017 stage 2c), so no check is repeated here."""
 
     from tests.conftest import TEST_DATABASE_URL
 
-    if "postgresql" not in TEST_DATABASE_URL:
-        pytest.skip(f"this module needs a PostgreSQL TEST_DATABASE_URL, got {TEST_DATABASE_URL!r}")
     return TEST_DATABASE_URL
 
 
