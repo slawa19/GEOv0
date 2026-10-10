@@ -37,11 +37,14 @@ may take to say so). But the cases differ in what makes the refusal happen:
 * NO TIMER (the ordinary tier). "The deadline comes first" hands the attempt a deadline that has ALREADY PASSED
   while the pool's timeout is 900 s, so the refusal is immediate; a cancellation is delivered on an event; a
   checkout failure that is not a timeout is injected. One case of each new behaviour is of this kind.
-* A REAL TIMER MUST RUN OUT (`@pytest.mark.slow`; run with `scripts/verify_local.ps1 -IncludeExpensive`,
-  PostgreSQL as for the whole tier, no other prerequisite). "The pool comes first" waits for the pool's own
+* A REAL TIMER MUST RUN OUT (`@pytest.mark.a10_real_pool_timeout`). "The pool comes first" waits for the pool's own
   timeout, set to 1 s while every payment timer is 900 s - the attempt's checkout, the route reader's, the
   re-acquisition after routing; and a refusal that cannot be recorded waits out the recording's budget (the 500 ms
-  grace) or the pool's 1 s. These five cannot be had without a timer: the pool's timeout is the subject.
+  grace) or the pool's 1 s. These five cannot be had without a timer: the pool's timeout is the subject. They were
+  `slow` until 2026-10-10 and ran only by hand: nothing scheduled selected them, so a regression of the timeout
+  translation or of the refusal recording's bound was visible nowhere (035 closing review, decision of 2026-10-10).
+  They now run in the required tier WITHOUT `slow`, as a closed exception: `tests/tier_count.py` owns the exact list
+  of the five, `tests/conftest.py` checks it at collection, and the configured waits total 5.5 s.
 
 Resources are registered with one `AsyncExitStack` and released on every exit: request tasks cancelled and awaited
 first, then the held connections, the observer and the engine. A request that does not answer within the budget is
@@ -282,7 +285,9 @@ def _past_deadline(kwargs: dict) -> None:
 
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("first", ["the deadline", pytest.param("the pool timeout", marks=pytest.mark.slow)])
+@pytest.mark.parametrize(
+    "first", ["the deadline", pytest.param("the pool timeout", marks=pytest.mark.a10_real_pool_timeout)]
+)
 async def test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_nothing(
     client: AsyncClient, db_session, monkeypatch, first: str
 ) -> None:
@@ -311,10 +316,15 @@ async def test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_n
         assert attempts == [1, 2]
 
 
-@pytest.mark.slow
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("where", ["the route reader's checkout", "the re-acquisition after routing"])
+@pytest.mark.parametrize(
+    "where",
+    [
+        pytest.param("the route reader's checkout", marks=pytest.mark.a10_real_pool_timeout),
+        pytest.param("the re-acquisition after routing", marks=pytest.mark.a10_real_pool_timeout),
+    ],
+)
 async def test_no_connection_around_routing_is_the_timeout_refusal_and_leaves_nothing(
     client: AsyncClient, db_session, monkeypatch, where: str
 ) -> None:
@@ -563,10 +573,15 @@ async def test_a_committed_row_of_the_same_request_wins_and_is_not_overwritten(
         assert stand.pool.checkedout() == 0
 
 
-@pytest.mark.slow
 @MODE_B
 @pytest.mark.asyncio
-@pytest.mark.parametrize("first", ["the recording's budget", "the pool timeout"])
+@pytest.mark.parametrize(
+    "first",
+    [
+        pytest.param("the recording's budget", marks=pytest.mark.a10_real_pool_timeout),
+        pytest.param("the pool timeout", marks=pytest.mark.a10_real_pool_timeout),
+    ],
+)
 async def test_a_refusal_that_cannot_be_recorded_is_the_retryable_conflict_and_claims_nothing(
     client: AsyncClient, db_session, monkeypatch, first: str
 ) -> None:
