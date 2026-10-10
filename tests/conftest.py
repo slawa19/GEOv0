@@ -175,9 +175,15 @@ def pytest_runtest_makereport(item, call):
         return
     report = outcome.get_result()
     if report.skipped:
-        reason = report.longrepr[2] if isinstance(report.longrepr, tuple) and len(report.longrepr) == 3 else report.longrepr
+        reason = getattr(report, "wasxfail", None) or (
+            report.longrepr[2] if isinstance(report.longrepr, tuple) and len(report.longrepr) == 3 else report.longrepr
+        )
         report.outcome = "failed"
         report.longrepr = _tier_count.a10_skip_refusal(item.nodeid, reason)
+        # pytest 7.4 counts a failed report as a failure only WITHOUT `wasxfail` (`_pytest/main.py`, `pytest_runtest_logreport`):
+        # left in place, a member that is xfailed (marker or `pytest.xfail()`) would be reported as failed and still exit 0.
+        if hasattr(report, "wasxfail"):
+            del report.wasxfail
     item.config.stash.setdefault(_A10_OUTCOMES, {}).setdefault(item.nodeid, {})[report.when] = (
         report.outcome,
         float(report.duration),

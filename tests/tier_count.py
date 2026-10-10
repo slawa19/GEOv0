@@ -340,6 +340,9 @@ def count_problem(*, selected: int, expected: int = EXPECTED_SELECTED_ITEMS) -> 
 def _a10_required_members(args: Sequence[str], invocation_dir: Path, root: Path) -> frozenset[str]:
     """The listed members the REQUESTED SCOPE obliges this run to collect.
 
+    Package selectors (`--pyargs tests.integration`) are NOT supported: such an argument is read as a literal path, matches
+    nothing and obliges no member (the canonical runner and CI never use it).
+
     All five when the whole tier or the A10 module (or a directory holding it) is requested - an empty argument list is
     `testpaths = tests`. For a node selector inside the module (`file.py::test_name`, or a full node id) only the members
     that selector covers. None when every argument points elsewhere. A scope that includes the module but then loses its
@@ -405,7 +408,7 @@ def a10_skip_refusal(node_id: str, reason: object) -> str:
     """The failure text for a listed member that was skipped (or expected to fail) instead of passing."""
 
     return (
-        f"the A10 exception: the listed case {node_id} was skipped ({reason}), not executed. The five real-pool-timeout "
+        f"the A10 exception: the listed case {node_id} was skipped or expected to fail ({reason}), not executed. The five real-pool-timeout "
         "cases are mandatory in the required tier; a skip, a true skipif, an xfail or a runtime pytest.skip() takes one "
         "out of the gate while the count and the membership stay right (AGENTS.md section 11)."
     )
