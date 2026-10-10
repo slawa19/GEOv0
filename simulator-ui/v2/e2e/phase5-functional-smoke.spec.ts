@@ -564,6 +564,10 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await amount.fill('1.00')
     await amount.press('Enter')
     await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
+    // 037 A2: a committed payment stays on screen, with the focus on its result; closing it returns the focus to the opener.
+    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText('payment-1')
+    await expect(page.locator('[data-testid="mp-result"]')).toBeFocused()
+    await activateButton(page, 'Close')
     await expect(page.locator('[data-testid="actionbar-payment"]')).toBeFocused()
     expect(mock.paymentRequests).toHaveLength(1)
 

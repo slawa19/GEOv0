@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 import type {
   InteractPhase,
@@ -169,6 +169,15 @@ const estimateText = computed(() => {
 
 const outcome = computed(() => props.paymentOutcome ?? null)
 const success = computed(() => (outcome.value && outcome.value.kind === 'success' ? outcome.value : null))
+
+// The result replaces the controls the user was on: move the focus onto it so a keyboard or screen-reader user lands on
+// the payment id instead of on nothing (the element that held the focus is gone).
+const resultEl = ref<HTMLElement | null>(null)
+watch(success, async (now) => {
+  if (!now) return
+  await nextTick()
+  resultEl.value?.focus()
+})
 const unknownOutcome = computed(() => (outcome.value && outcome.value.kind === 'unknown' ? outcome.value : null))
 
 function moneyText(amount: string, unit: string): string {
@@ -466,7 +475,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div v-if="success" class="ds-stack" data-testid="mp-result">
+      <div v-if="success" ref="resultEl" class="ds-stack" tabindex="-1" role="status" data-testid="mp-result">
         <div class="ds-h2" data-testid="mp-result-title">{{ interactText('resultTitle') }}</div>
         <div class="ds-row ds-row--space">
           <div class="ds-label">{{ interactText('resultPaymentId') }}</div>
