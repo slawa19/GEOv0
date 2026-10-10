@@ -53,12 +53,17 @@ const isRunning = computed(() => props.phase === 'clearing-running')
 // user closes it; an error (a refusal) leaves it open with the message. No timer ends it.
 const isPreview = computed(() => props.phase === 'clearing-preview')
 const isConfirm = computed(() => props.phase === 'confirm-clearing')
-const failed = computed(() => isPreview.value && !last.value && !!props.state.error)
-const waiting = computed(() => isRunning.value || (isPreview.value && !last.value && !props.state.error))
+// The refusal is a state of its own (`state.clearingFailure`), not the transient error toast: the application clears `state.error`
+// when the toast expires, and the explanation (with its request reference) must outlive that. "Running" is shown only while a
+// request is really in flight (`busy`) - never inferred from the absence of an answer.
+const errorText = computed(() => (isPreview.value ? (props.state.clearingFailure ?? props.state.error) : props.state.error))
+const waiting = computed(() => isRunning.value || (isPreview.value && !last.value && !errorText.value && props.busy))
 const nothingCleared = computed(() => !!last.value && cyclesCount.value === 0 && cycles.value.length === 0)
 
 /** The equivalent of the ANSWER: the one the clearing was run for, not the one selected when it came back. */
 const resultUnit = computed(() => String(last.value?.equivalent ?? props.equivalent))
+/** Before the run: the equivalent that WILL be run. Once there is a result: the equivalent of that result, whatever is selected now. */
+const shownEquivalent = computed(() => (isConfirm.value || !last.value ? props.equivalent : resultUnit.value))
 
 function nameOf(pid: string): string {
   const found = (props.participants ?? []).find((p) => p.pid === pid)
@@ -104,10 +109,10 @@ const closeDisabled = computed(() => waiting.value)
     <div class="ds-panel__body ds-stack">
       <div class="ds-label cp-equivalent-row">
         <span>Equivalent:</span>
-        <span class="ds-mono">{{ equivalent }}</span>
+        <span class="ds-mono" data-testid="clearing-equivalent">{{ shownEquivalent }}</span>
       </div>
 
-      <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ state.error }}</div>
+      <div v-if="errorText" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ errorText }}</div>
 
       <template v-if="isConfirm">
         <div
@@ -154,6 +159,7 @@ const closeDisabled = computed(() => waiting.value)
           <div class="ds-label" data-testid="clearing-total">
             {{ interactText('clearingTotal') }}: <span class="ds-mono">{{ last.total_cleared_amount }} {{ resultUnit }}</span>
           </div>
+          <div class="ds-help ds-muted" data-testid="clearing-total-note">{{ interactText('clearingTotalNote') }}</div>
 
           <div v-for="(c, i) in cycles" :key="i" class="ds-stack cp-cycle" data-testid="clearing-cycle">
             <div class="ds-label" data-testid="clearing-cycle-title">

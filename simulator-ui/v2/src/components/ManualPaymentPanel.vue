@@ -270,14 +270,22 @@ const open = computed(() => {
 // debtor as the sender and the creditor as the recipient). Reaching the confirm step by choosing in the panel is not that. Decided
 // when the panel opens; a change of either party in the lists ends it (the note is about how the panel was filled, not about the
 // fields afterwards).
-const startedFromLine = ref(false)
+// The sentence belongs to the PAIR the panel opened with: it is shown while both parties are still that pair, however they were
+// changed (a list, or a click on the canvas) - compared with the pair, not tied to the events that change it.
+const openedPair = ref<{ from: string; to: string } | null>(null)
 watch(
   open,
   (isOpen) => {
-    startedFromLine.value = isOpen && props.phase === 'confirm-payment' && !!props.state.fromPid && !!props.state.toPid
+    const from = props.state.fromPid
+    const to = props.state.toPid
+    openedPair.value = isOpen && props.phase === 'confirm-payment' && from && to ? { from, to } : null
   },
   { immediate: true },
 )
+const startedFromLine = computed(() => {
+  const pair = openedPair.value
+  return !!pair && props.state.fromPid === pair.from && props.state.toPid === pair.to
+})
 
 // Giving up a payment always starts from the FIRST step: closing the panel (the instance may live on, hidden), opening it again
 // or removing it does not carry step two over.
@@ -548,7 +556,6 @@ function onToOpenChange(isOpen: boolean) {
 
 function onFromChange(v: string) {
   const pid = v ? v : null
-  startedFromLine.value = false
   firstPass.from = pid != null && !props.state.toPid
   props.setFromPid?.(pid)
   // If To is now invalid, clear it.
@@ -557,7 +564,6 @@ function onFromChange(v: string) {
 }
 
 function onToChange(v: string) {
-  startedFromLine.value = false
   firstPass.to = !!v && !props.state.toPid
   props.setToPid?.(v ? v : null)
   toSelectionInvalidWarning.value = null

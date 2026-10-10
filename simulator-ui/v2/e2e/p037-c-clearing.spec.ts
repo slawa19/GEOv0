@@ -83,6 +83,49 @@ test.describe('037 C - the clearing result in a real browser', () => {
   })
 })
 
+test.describe('037 C - what a held result survives', () => {
+  test('a refusal outlives the error toast: when the toast is gone the explanation and a working Close are still on the panel', async ({ page }) => {
+    await open(page, { clearing: 'refused' })
+    await runClearing(page)
+    await expect(page.locator('[data-testid="clearing-error"]')).toBeVisible()
+    const message = (await page.locator('[data-testid="clearing-error"]').textContent())!.trim()
+
+    // The REAL toast: it shows the same sentence for a few seconds and then the application clears the error.
+    await expect(page.getByLabel('Error notification')).toBeVisible()
+    await expect(page.getByLabel('Error notification')).toBeHidden({ timeout: 15_000 })
+
+    await expect(page.locator('[data-testid="clearing-error"]')).toHaveText(message)
+    await expect(page.locator('[data-testid="clearing-running"]')).toHaveCount(0)
+    await expect(page.locator('[data-testid="clearing-close"]')).toBeEnabled()
+    await page.locator('[data-testid="clearing-close"]').click()
+    await expect(page.locator('[data-testid="clearing-panel"]')).toBeHidden()
+  })
+
+  test('a click on the empty canvas does not remove a finished clearing result', async ({ page }) => {
+    await open(page)
+    await runClearing(page)
+    await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(2)
+
+    await page.mouse.click(900, 560) // empty canvas on this fixture (the nodes are elsewhere)
+    await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(2)
+    await expect(page.locator('[data-testid="clearing-panel"]')).toBeVisible()
+  })
+
+  test('...and not a committed PAYMENT result either', async ({ page }) => {
+    await open(page)
+    await page.locator('[data-testid="actionbar-payment"]').click()
+    await page.locator('#mp-from__trigger').click()
+    await page.locator('#mp-from__surface [data-option-value="alice"]').click()
+    await page.locator('#mp-to__surface [data-option-value="bob"]').click()
+    await page.keyboard.type('1.00')
+    await page.keyboard.press('Enter')
+    await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+
+    await page.mouse.click(900, 560)
+    await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+  })
+})
+
 const VIEWPORTS = [{ w: 390, h: 844 }, { w: 375, h: 667 }, { w: 360, h: 640 }, { w: 844, h: 390 }]
 
 for (const vp of VIEWPORTS) {

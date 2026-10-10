@@ -140,7 +140,7 @@ describe('ClearingPanel', () => {
         h(ClearingPanel, {
           phase: 'clearing-preview',
           state,
-          busy: false,
+          busy: true,
           equivalent: 'EQ',
           confirmClearing: vi.fn(),
           cancel: vi.fn(),
@@ -199,7 +199,7 @@ describe('ClearingPanel', () => {
     const result = host.querySelector('.cp-preview-stack')
     expect(result?.getAttribute('role')).toBe('status')
     expect(result?.getAttribute('aria-live')).toBe('polite')
-    expect(result?.textContent).toContain('Total cleared')
+    expect(result?.textContent).toContain('Total over cycles')
     expect(result?.querySelector('[role="alert"]')).toBeNull()
 
     app.unmount()

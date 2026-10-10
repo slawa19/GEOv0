@@ -38,6 +38,13 @@ export type InteractState = {
    * Must NOT be reset in `resetToIdle()`.
    */
   lastClearing: SimulatorActionClearingRealResponse | null
+
+  /**
+   * 037 C: the text of a clearing that did not succeed (a refusal, or no usable answer), kept as a state of the panel: the error
+   * toast that shows it for a few seconds is cleared by the application and must not take the explanation with it. Set when the
+   * clearing fails, cleared when the next clearing starts and when the panel is closed (`resetToIdle`).
+   */
+  clearingFailure?: string | null
 }
 
 function findActiveLink(snapshot: GraphSnapshot | null, from: string | null, to: string | null): GraphLink | null {
@@ -82,7 +89,7 @@ export function useInteractFSM(opts: {
   // Clearing helpers
   enterClearingPreview: () => void
   setLastClearing: (r: SimulatorActionClearingRealResponse | null) => void
-  enterClearingRunning: () => void
+  setClearingFailure: (message: string | null) => void
 } {
   const state = reactive<InteractState>({
     phase: 'idle',
@@ -94,6 +101,7 @@ export function useInteractFSM(opts: {
     error: null,
 
     lastClearing: null,
+    clearingFailure: null,
   })
 
   const phase = computed(() => state.phase)
@@ -139,6 +147,7 @@ export function useInteractFSM(opts: {
     state.edgeAnchor = null
     state.error = null
     // lastClearing intentionally preserved — see InteractState.lastClearing JSDoc.
+    state.clearingFailure = null
   }
 
   function startNewFlow(p: InteractPhase) {
@@ -393,15 +402,15 @@ export function useInteractFSM(opts: {
     clearError()
     state.phase = 'clearing-preview'
     state.lastClearing = null
+    state.clearingFailure = null
   }
 
   function setLastClearing(r: SimulatorActionClearingRealResponse | null) {
     state.lastClearing = r
   }
 
-  function enterClearingRunning() {
-    clearError()
-    state.phase = 'clearing-running'
+  function setClearingFailure(message: string | null) {
+    state.clearingFailure = message
   }
 
   return {
@@ -430,6 +439,6 @@ export function useInteractFSM(opts: {
 
     enterClearingPreview,
     setLastClearing,
-    enterClearingRunning,
+    setClearingFailure,
   }
 }

@@ -87,6 +87,11 @@ export function useInteractMode(opts: {
   selectNode: (nodeId: string) => void
   selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => boolean
   cancel: () => void
+  /**
+   * 037 C: the user clicked EMPTY canvas. Cancels what is only being filled in, but NOT a held result (a finished clearing or its
+   * refusal, a committed payment): those end by Close/Esc (`cancel`) or by a deliberate replacement, never by a stray click.
+   */
+  cancelFromCanvas: () => void
 
   // Actions
   confirmPayment: (amount: string) => Promise<void>
@@ -496,6 +501,17 @@ export function useInteractMode(opts: {
     return undefined
   })
 
+  /** A result the user has not closed yet: it must survive a click that was not aimed at it. */
+  const resultHeld = computed(() =>
+    (state.phase === 'clearing-preview' && (!!state.lastClearing || !!state.clearingFailure))
+    || paymentOutcome.value?.kind === 'success',
+  )
+
+  function cancelFromCanvas() {
+    if (resultHeld.value) return
+    cancel()
+  }
+
   function cancel() {
     // Invalidate any in-flight result (success/error) so it can't update state after cancel.
     // IMPORTANT: bump epoch BEFORE abort so an AbortError can't leak into state.error.
@@ -569,6 +585,7 @@ export function useInteractMode(opts: {
     if (busyRef.value) return
     if (state.phase !== 'idle') return
     fsm.startClearingFlow()
+    successMessage.value = null // an earlier clearing's announcement is not this one's
     // 037 C: the result names participants. Clearing may be the first thing done in a session, so the list is asked for now,
     // while the user reads the confirm step (the graph snapshot's nodes are the fallback; an id is shown only when neither knows).
     void refreshParticipants()
@@ -584,6 +601,8 @@ export function useInteractMode(opts: {
 
   function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
     if (busyRef.value) return false
+    // A line clicked while a result is held does not replace it: the user closes the result first (037 C, decided).
+    if (resultHeld.value) return false
     fsm.selectEdge(edgeKey, anchor)
 
     // Opening edit UI: try to have trustlines list ready for dropdown + accurate details.
@@ -711,6 +730,7 @@ export function useInteractMode(opts: {
       return
     }
     const names = { from: participantName(from), to: participantName(to) }
+    successMessage.value = null
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
       // The record that lets a reload check this payment is saved BEFORE the request leaves; if it cannot be, nothing is sent.
@@ -907,7 +927,10 @@ export function useInteractMode(opts: {
 
       // 031 item 17: the step refusal (409 CLEARING_REFUSED, 030 S2) is shown as the client's text, not the server hint.
       const res = await opts.actions.runClearing(eq, { signal }).catch((e: unknown) => {
-        throw new Error(clearingRefusalText(e, eq))
+        const message = clearingRefusalText(e, eq)
+        // The text stays as a state of the panel when the error toast is gone (the toast clears `state.error`).
+        if (isCurrent()) fsm.setClearingFailure(message)
+        throw new Error(message)
       })
       if (!isCurrent()) return
       fsm.setLastClearing(res)
@@ -948,6 +971,7 @@ export function useInteractMode(opts: {
     selectNode,
     selectEdge,
     cancel,
+    cancelFromCanvas,
 
     confirmPayment,
     retryPayment,

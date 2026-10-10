@@ -41,13 +41,14 @@ export const interactStrings = {
   clearingResultTitle: 'Clearing result',
   clearingRunning: 'Running clearing…',
   clearingCycles: 'Cycles cleared',
-  clearingTotal: 'Total cleared',
+  clearingTotal: 'Total over cycles',
+  clearingTotalNote: 'Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.',
   clearingCycle: 'Cycle {n} of {total}: {amount} {unit}',
   clearingEdgeLine: '{debtor}’s debt to {creditor} reduced by {amount} {unit}',
   clearingNothing: 'Nothing was cleared: no cycle of debts was found.',
 
   // A payment started from a line goes against the line's arrow (F-037-4).
-  lineDirectionNote: 'The line runs from creditor to debtor, so a payment started from it goes the other way: the debtor pays the creditor.',
+  lineDirectionNote: 'The line runs from creditor to debtor, so a payment started from it goes the other way: the debtor pays the creditor. That adds to the debtor’s debt on this line (after offsetting any debt the creditor owes back); it does not repay it.',
 
   // The progression of the form: what the form announces when it opens the next list for the user.
   nextChoiceRecipient: 'Choose the recipient.',
