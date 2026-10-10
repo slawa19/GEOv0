@@ -2,6 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 
 
 import type { GraphSnapshot } from '../types'
 import { extractErrorMessage } from '../utils/errorMessage'
+import { interactText } from '../i18n/interactStrings'
 import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import type { ParticipantInfo, SimulatorActionClearingRealResponse, TrustlineInfo } from '../api/simulatorTypes'
@@ -10,8 +11,46 @@ import { useInteractDataCache } from './interact/useInteractDataCache'
 import type { TrustlinesFetchState } from './interact/trustlinesSourceState'
 import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
 import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
+import { createPaymentIntentKeeper, isKeySpent, type PaymentIntent } from './interact/paymentIntent'
 
 export type { InteractPhase, InteractState }
+
+/** One step of a route of a committed manual payment, with the names to show. */
+export type ManualPaymentHop = { from: string; to: string; fromName: string; toName: string; amount: string }
+
+/**
+ * What the manual-payment panel shows after an attempt (037 A2). `success`: the payment is COMMITTED and stays on screen
+ * until dismissed. `unknown`: an attempt of the payment has no verdict - the user checks / repeats under the same key.
+ */
+export type ManualPaymentOutcome =
+  | {
+      kind: 'success'
+      paymentId: string
+      status: string
+      amount: string
+      equivalent: string
+      fromPid: string
+      toPid: string
+      fromName: string
+      toName: string
+      routes: Array<{ hops: ManualPaymentHop[] }>
+    }
+  | {
+      kind: 'unknown'
+      message: string
+      amount: string
+      equivalent: string
+      fromPid: string
+      toPid: string
+      fromName: string
+      toName: string
+    }
+
+/** The server's estimate for the chosen recipient (`payment-targets` with `include_max_available`), with the state of the answer. */
+export type PaymentTargetEstimate =
+  | { state: 'loading' }
+  | { state: 'failed' }
+  | { state: 'received'; hops: number; maxAvailable: string | null }
 
 export function useInteractMode(opts: {
   actions: ReturnType<typeof useInteractActions>
@@ -43,6 +82,14 @@ export function useInteractMode(opts: {
 
   // Actions
   confirmPayment: (amount: string) => Promise<void>
+  /** Repeat the payment whose result is unknown: the same frozen intent under the same idempotency key. */
+  retryPayment: () => Promise<void>
+  /** Leave the result screen of a committed payment for the recipient step (same sender). */
+  dismissPaymentResult: () => void
+  /** The committed payment / the unknown result the panel shows (null: nothing to show). */
+  paymentOutcome: ComputedRef<ManualPaymentOutcome | null>
+  /** The server's estimate for the chosen recipient, or null when no recipient / sender is chosen. */
+  paymentTargetEstimate: ComputedRef<PaymentTargetEstimate | null>
   confirmTrustlineCreate: (limit: string) => Promise<void>
   confirmTrustlineUpdate: (newLimit: string) => Promise<void>
   confirmTrustlineClose: () => Promise<void>
@@ -226,6 +273,24 @@ export function useInteractMode(opts: {
   const phase = fsm.phase
   const isPickingPhase = fsm.isPickingPhase
     const isCanvasNodePickPhase = fsm.isCanvasNodePickPhase
+  // 037 A2: the manual payment's result on screen, and the life of its idempotency key (see `paymentIntent.ts`).
+  const paymentOutcomeRef = ref<ManualPaymentOutcome | null>(null)
+  const paymentOutcome = computed(() => paymentOutcomeRef.value)
+  const paymentIntents = createPaymentIntentKeeper()
+  watch(
+    () => [state.fromPid, state.toPid, state.phase],
+    () => {
+      // Another pair, or no payment step any more: what was on screen belonged to the earlier one.
+      paymentOutcomeRef.value = null
+    },
+  )
+
+  function participantName(pid: string): string {
+    const found = participants.value.find((p) => p.pid === pid)
+    const name = String(found?.name ?? '').trim()
+    return name || pid
+  }
+
   const paymentTargetsActiveKey = computed(() => {
     const runId = normalizeRunId(opts.runId.value)
     const eq = normalizeEq(opts.equivalent.value)
@@ -283,6 +348,20 @@ export function useInteractMode(opts: {
     // Payment `from -> to` uses capacity of trustline `to -> from` (creditor -> debtor).
     const tl = findActiveTrustline(state.toPid, state.fromPid)
     return parseAmountStringOrNull(tl?.available)
+  })
+
+  const paymentTargetEstimate = computed<PaymentTargetEstimate | null>(() => {
+    const key = paymentTargetsActiveKey.value
+    const to = normalizePid(state.toPid)
+    if (!key || !to) return null
+    if (dataCache.paymentTargetsLoadingByKey.value.get(key) === true) return { state: 'loading' }
+    if (dataCache.paymentTargetsLastErrorByKey.value.get(key)) return { state: 'failed' }
+    const details = dataCache.paymentTargetDetailsByKey.value.get(key)
+    if (!details) return { state: 'loading' }
+    const d = details.get(to)
+    // A recipient the answer does not list has no estimate to show (the To list is filtered by the same answer).
+    if (!d) return null
+    return { state: 'received', hops: d.hops, maxAvailable: d.max_available }
   })
 
   const canSendPayment = computed(() => {
@@ -383,6 +462,7 @@ export function useInteractMode(opts: {
     // Invalidate any in-flight result (success/error) so it can't update state after cancel.
     // IMPORTANT: bump epoch BEFORE abort so an AbortError can't leak into state.error.
     epoch += 1
+    paymentOutcomeRef.value = null
 
     // RACE-4: abort active HTTP (best-effort).
     const ctrl = activeAbort?.ctrl
@@ -528,21 +608,116 @@ export function useInteractMode(opts: {
     const eq = opts.equivalent.value
     const from = state.fromPid
     const to = state.toPid
-    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
-      if (!from || !to) throw new Error('Select From and To first')
-      // 028 F-028-51: the refusal text is composed here from code + reason + details (owner В-6).
-      await opts.actions.sendPayment(from, to, amount, eq, { signal }).catch((e: unknown) => {
-        throw new Error(paymentRefusalText(e, eq))
+    if (!from || !to) {
+      await runBusy(async () => {
+        throw new Error('Select From and To first')
       })
+      return
+    }
+    await submitPayment({ runId: normalizeRunId(opts.runId.value), from, to, equivalent: eq, amount })
+  }
+
+  /** The result of an attempt that has no verdict: the payment is repeated by this, under the same key. */
+  async function retryPayment(): Promise<void> {
+    const record = paymentIntents.peek()
+    if (!record || !record.unknown || busyRef.value) return
+    fsm.clearError()
+    await submitPayment(record.intent)
+  }
+
+  function dismissPaymentResult(): void {
+    if (busyRef.value) return
+    paymentOutcomeRef.value = null
+    fsm.setPaymentToPid(null)
+  }
+
+  /**
+   * One attempt of a manual payment. The key belongs to the INTENT (`paymentIntent.ts`): the same frozen intent is sent
+   * under the same key until the server says the key is spent or the payment is known to be made; a change of the intent
+   * is a new payment with a new key.
+   */
+  async function submitPayment(intent: PaymentIntent): Promise<void> {
+    const { from, to, equivalent: eq, amount } = intent
+    const record = paymentIntents.begin(intent)
+    const names = { from: participantName(from), to: participantName(to) }
+    await runBusy(async ({ isCurrent, signal }) => {
+      let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
+      try {
+        res = await opts.actions.sendPayment(from, to, amount, eq, { signal, idempotencyKey: record.key })
+      } catch (e: unknown) {
+        const err = (e && typeof e === 'object' ? e : {}) as {
+          outcomeUnknown?: unknown
+          details?: unknown
+          code?: unknown
+          message?: unknown
+        }
+        const spent = isKeySpent(err.details)
+        const unknownNow = err.outcomeUnknown === true
+        if (spent) paymentIntents.settle(record)
+        else if (unknownNow) paymentIntents.markUnknown(record)
+        // RUN_TERMINAL, 401, 403 and a retryable 409 after an unknown attempt say nothing about THAT payment.
+        const stillUnknown = !spent && (unknownNow || record.unknown)
+        const base = { amount, equivalent: eq, fromPid: from, toPid: to, fromName: names.from, toName: names.to }
+        const shown = { amount, unit: eq, from: names.from, to: names.to }
+        // 028 F-028-51: the refusal text is composed here from code + reason + details (owner В-6).
+        const text = unknownNow
+          ? err.code === 'TIMEOUT' && typeof err.message === 'string'
+            ? err.message
+            : interactText('unknownNoAnswer', shown)
+          : paymentRefusalText(e, eq, undefined, { keyed: true })
+        if (isCurrent()) {
+          paymentOutcomeRef.value = stillUnknown
+            ? { kind: 'unknown', message: unknownNow ? text : interactText('unknownEarlier', shown), ...base }
+            : null
+        }
+        throw new Error(text)
+      }
+
+      // The answer is a verdict only if it says COMMITTED: a success-shaped answer for a stored refusal is not a payment.
+      const status = String(res.status ?? '').toUpperCase()
+      if (status !== 'COMMITTED') {
+        const refused = status === 'ABORTED'
+        if (refused) paymentIntents.settle(record)
+        else paymentIntents.markUnknown(record)
+        const message = interactText('notCommitted', { status: String(res.status) })
+        if (isCurrent()) {
+          paymentOutcomeRef.value = refused
+            ? null
+            : { kind: 'unknown', message, amount, equivalent: eq, fromPid: from, toPid: to, fromName: names.from, toName: names.to }
+        }
+        throw new Error(message)
+      }
+
+      paymentIntents.settle(record)
       if (!isCurrent()) return
 
+      paymentOutcomeRef.value = {
+        kind: 'success',
+        paymentId: String(res.payment_id),
+        status: String(res.status),
+        amount: String(res.amount ?? amount),
+        equivalent: String(res.equivalent ?? eq),
+        fromPid: from,
+        toPid: to,
+        fromName: names.from,
+        toName: names.to,
+        routes: (res.routes ?? []).map((route) => ({
+          hops: route.hops.map((hop) => ({
+            from: hop.from,
+            to: hop.to,
+            fromName: participantName(hop.from),
+            toName: participantName(hop.to),
+            amount: hop.amount,
+          })),
+        })),
+      }
       setSuccessToastMessage(`Payment sent: ${amount} ${eq}`)
 
-      // BUG-5: log to history
-      pushHistory('💸', `Payment ${amount} ${eq}: ${from} → ${to}`)
+      // BUG-5: log to history (037 A2: names, not pids)
+      pushHistory('💸', `Payment ${amount} ${eq}: ${names.from} → ${names.to}`)
       // Payment changes used/available; refresh trustlines so dropdowns/capacity can update.
       void refreshTrustlines({ force: true })
-      resetToIdle()
+      // The panel stays on the result: it is dismissed by the user (`dismissPaymentResult` / `cancel`), not by a reset.
     })
   }
 
@@ -726,6 +901,10 @@ export function useInteractMode(opts: {
     cancel,
 
     confirmPayment,
+    retryPayment,
+    dismissPaymentResult,
+    paymentOutcome,
+    paymentTargetEstimate,
     confirmTrustlineCreate,
     confirmTrustlineUpdate,
     confirmTrustlineClose,

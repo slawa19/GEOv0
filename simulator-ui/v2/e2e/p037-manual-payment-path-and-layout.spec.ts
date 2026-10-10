@@ -46,7 +46,7 @@ function snapshot() {
   }
 }
 
-async function mockApp(page: Page, o: { paymentRealBodies: Array<Record<string, unknown>> }) {
+async function mockApp(page: Page, o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number }) {
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
       localStorage.clear()
@@ -80,7 +80,7 @@ async function mockApp(page: Page, o: { paymentRealBodies: Array<Record<string, 
     r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' }, body: ':ok\n\n' }))
   await page.route(`**/simulator/runs/${RUN_ID}/actions/participants-list`, (r) => json(r, { items: PARTICIPANTS }))
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/actions/trustlines-list`, 'i'), (r) =>
-    json(r, {
+    o.trustlinesStatus && o.trustlinesStatus !== 200 ? json(r, { code: 'BOOM', message: 'down' }, o.trustlinesStatus) : json(r, {
       items: [{ from_pid: 'bob', from_name: 'Bob', to_pid: 'alice', to_name: 'Alice', equivalent: 'UAH',
         limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }],
     }))
@@ -93,7 +93,8 @@ async function mockApp(page: Page, o: { paymentRealBodies: Array<Record<string, 
     o.paymentRealBodies.push(req)
     await json(r, {
       ok: true, payment_id: PAYMENT_ID, from_pid: req.from_pid, to_pid: req.to_pid, equivalent: req.equivalent,
-      amount: String(req.amount), status: 'committed', routes: [], client_action_id: req.client_action_id ?? null,
+      amount: String(req.amount), status: 'COMMITTED', client_action_id: req.client_action_id ?? null,
+      routes: [{ hops: [{ from: req.from_pid, to: req.to_pid, amount: String(req.amount) }] }],
     })
   })
 }
@@ -125,52 +126,77 @@ class Counter {
   }
 }
 
-test.describe('037 T3701 - manual payment path (current flow, mocked backend)', () => {
-  test('PATH: alice -> bob takes <= 5 user actions after "Send Payment", with a result screen carrying payment_id', async ({ page }, testInfo) => {
+/** The ordinary path on the current panel: Send Payment, From, To, amount, Confirm. */
+async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>) {
+  await mockApp(page, { paymentRealBodies: bodies })
+  await page.goto('/?mode=real&ui=interact&e2eReal=1')
+  await ready(page, true)
+
+  const loads: string[] = []
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) loads.push(f.url()) })
+
+  const c = new Counter(page, false)
+  // The opening click is counted separately: the budget is "from Send Payment to submit".
+  await page.locator('[data-testid="actionbar-payment"]').click()
+  await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
+
+  await c.pick('From', 'mp-from', 'alice')
+  await c.pick('To', 'mp-to', 'bob')
+  await c.type('Amount', '#mp-amount', '1.00')
+  await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
+
+  await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
+  expect(bodies, 'precondition: the mocked payment-real was reached exactly once').toHaveLength(1)
+  return { c, loads }
+}
+
+test.describe('037 A2 - manual payment path (current panel, mocked backend)', () => {
+  test('RESULT: the payment stays on screen with its id and its route by name, and the request carried a key', async ({ page }, testInfo) => {
     const bodies: Array<Record<string, unknown>> = []
-    await mockApp(page, { paymentRealBodies: bodies })
-    await page.goto('/?mode=real&ui=interact&e2eReal=1')
-    await ready(page, true)
+    const { c, loads } = await payAliceToBob(page, bodies)
 
-    const loads: string[] = []
-    page.on('framenavigated', (f) => { if (f === page.mainFrame()) loads.push(f.url()) })
+    const panel = page.locator('[data-testid="manual-payment-panel"]')
+    await expect(panel).toBeVisible()
+    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
+    await expect(page.locator('[data-testid="mp-result-route-chain"]')).toHaveText('Alice → Bob')
+    await expect(page.locator('[data-testid="mp-result-parties"]')).toHaveText('Alice → Bob')
 
-    const c = new Counter(page, false)
-    // The opening click is counted separately: the spec budget is "from Send Payment to submit".
-    await page.locator('[data-testid="actionbar-payment"]').click()
-    await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
-
-    await c.pick('From', 'mp-from', 'alice')
-    await c.pick('To', 'mp-to', 'bob')
-    await c.type('Amount', '#mp-amount', '1.00')
-    await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
-
-    await expect(page.getByLabel('Success notification')).toContainText('Payment sent: 1.00 UAH')
-    expect(bodies, 'precondition: the mocked payment-real was reached exactly once').toHaveLength(1)
-
-    const resultScreenShowsPaymentId = await page.getByText(PAYMENT_ID).first().isVisible().catch(() => false)
-    const panelStillOpen = await page.locator('[data-testid="manual-payment-panel"]').isVisible().catch(() => false)
     const numbers = {
       userActionsAfterSendPayment: c.steps.length,
-      userActionsIncludingTheOpeningClick: c.steps.length + 1,
       steps: c.steps,
       pageNavigationsDuringThePath: loads.length,
       paymentRealBodyKeys: Object.keys(bodies[0] ?? {}).sort(),
-      panelStillOpenAfterSuccess: panelStillOpen,
-      paymentIdVisibleOnScreen: resultScreenShowsPaymentId,
+      panelStillOpenAfterSuccess: await panel.isVisible(),
+      paymentIdVisibleOnScreen: await page.getByText(PAYMENT_ID).first().isVisible(),
     }
-    console.log(`P037 PATH ${JSON.stringify(numbers)}`)
-    testInfo.annotations.push({ type: 'P037-PATH', description: JSON.stringify(numbers) })
+    console.log(`P037 PATH-A2 ${JSON.stringify(numbers)}`)
+    testInfo.annotations.push({ type: 'P037-PATH-A2', description: JSON.stringify(numbers) })
 
-    // TARGET (spec "Путь"): not more than 5 actions: from, to, amount, arm the confirmation, confirm.
-    expect.soft(c.steps.length, `current path: ${c.steps.join(' -> ')}`).toBeLessThanOrEqual(5)
-    // TARGET: the result screen holds until the user closes it and shows payment_id.
-    expect.soft(resultScreenShowsPaymentId, 'no result screen: payment_id of the server answer is not on screen').toBe(true)
-    // CONTROL (green now): no page reload inside the flow itself - the reload is on ENTRY, measured below.
+    expect(bodies[0]!.idempotency_key, 'the request carries the key of the intent').toMatch(/^[A-Za-z0-9._:-]{1,128}$/)
     expect(loads, 'the flow itself must not navigate').toHaveLength(0)
+
+    // The result is dismissed by the user, not by a reset: "Close" closes the panel.
+    await page.locator('[data-testid="mp-result-close"]').click()
+    await expect(panel).toBeHidden()
   })
 
-  test('ENTRY: switching into Interact from another mode does not reload the page', async ({ page }, testInfo) => {
+  test('RESULT: "Another payment" leaves the result for the recipient step with the same sender', async ({ page }) => {
+    await payAliceToBob(page, [])
+    await page.locator('[data-testid="mp-result-another"]').click()
+    await expect(page.locator('[data-testid="mp-result"]')).toBeHidden()
+    await expect(page.locator('#mp-to__trigger')).toBeVisible()
+  })
+
+  // SLICE B (the wizard), not A2: the budget is five actions and the entry does not reload. Marked as an EXPECTED failure so
+  // the day the wizard lands this test goes red and has to be turned into a plain assertion.
+  test('BUDGET (slice B, expected to fail until the wizard): not more than 5 user actions after "Send Payment"', async ({ page }) => {
+    test.fail(true, 'slice B: the five-action wizard is not built yet; the current panel needs six')
+    const { c } = await payAliceToBob(page, [])
+    expect(c.steps.length, `current path: ${c.steps.join(' -> ')}`).toBeLessThanOrEqual(5)
+  })
+
+  test('ENTRY (slice B, expected to fail until it is built): switching into Interact from another mode does not reload the page', async ({ page }, testInfo) => {
+    test.fail(true, 'slice B: `goInteract` still reloads the page (SimulatorAppRoot.vue)')
     await mockApp(page, { paymentRealBodies: [] })
     await page.goto('/?mode=real&e2eReal=1')
     await ready(page, false)
@@ -196,7 +222,7 @@ test.describe('037 T3701 - manual payment path (current flow, mocked backend)', 
     console.log(`P037 ENTRY ${JSON.stringify(numbers)}`)
     testInfo.annotations.push({ type: 'P037-ENTRY', description: JSON.stringify(numbers) })
 
-    // TARGET (spec "Путь" + "Чего нет" item 9): entry without a page reload (state kept).
+    // TARGET (slice B, spec "Путь" + "Чего нет" item 9): entry without a page reload (state kept).
     expect(markerSurvived, 'entering Interact reloaded the page (window state lost)').toBe(true)
   })
 })
@@ -281,6 +307,12 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await expect(page.locator('#mp-amount')).toBeVisible()
     measurements.push(await measure(page, 'confirm'))
 
+    // The result screen (A2) is a step of the flow too: it must fit and be reachable by touch.
+    await page.locator('#mp-amount').fill('1.00')
+    await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
+    await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+    measurements.push(await measure(page, 'result'))
+
     const perPhase = measurements.map((m) => ({ phase: m.phase, scrollWidth: m.scrollWidth, container: m.container,
       controls: m.controls, violations: violations(m) }))
     const surfaceInside = surfaceFrom ? surfaceFrom.x >= 0 && surfaceFrom.x + surfaceFrom.width <= 390 : null
@@ -291,5 +323,24 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
       expect.soft(p.violations, `phase ${p.phase}`).toEqual([])
     }
     expect.soft(surfaceInside, 'the dropdown surface of the From list fits the width').toBe(true)
+  })
+
+  test('LAYOUT: with the figures from the snapshot only (the trustlines answer failed) the confirm step still fits and is reachable', async ({ page }, testInfo) => {
+    await mockApp(page, { paymentRealBodies: [], trustlinesStatus: 500 })
+    await page.goto('/?mode=real&ui=interact&e2eReal=1')
+    await ready(page, true)
+
+    const c = new Counter(page, true)
+    await c.press('open payment', '[data-testid="actionbar-payment"]')
+    await c.pick('From', 'mp-from', 'alice')
+    await c.pick('To', 'mp-to', 'bob')
+    await expect(page.locator('#mp-amount')).toBeVisible()
+    const source = await page.locator('[data-testid="mp-figures-source"]').getAttribute('data-figures-source')
+    const m = await measure(page, 'confirm-snapshot-only')
+    console.log(`P037 LAYOUT-SNAPSHOT ${JSON.stringify({ source, container: m.container, violations: violations(m) })}`)
+    testInfo.annotations.push({ type: 'P037-LAYOUT-SNAPSHOT', description: JSON.stringify({ source, violations: violations(m) }) })
+
+    expect(source, 'precondition: the figures are NOT the server\'s').not.toBe('server')
+    expect(violations(m)).toEqual([])
   })
 })

@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import type { InteractPhase, InteractState } from '../composables/useInteractMode'
+import type {
+  InteractPhase,
+  InteractState,
+  ManualPaymentOutcome,
+  PaymentTargetEstimate,
+} from '../composables/useInteractMode'
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
-import { amountStepHint } from '../config/equivalentPrecision'
+import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecision'
+import { interactText } from '../i18n/interactStrings'
+import { compareMoney, formatMoney } from '../utils/money'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
@@ -52,6 +59,21 @@ type Props = {
 
   confirmPayment: (amount: string) => Promise<void> | void
   cancel: () => void
+
+  /**
+   * 037 A2 (F-037-1): where the trustlines the numbers come from stand. `answered` = the server answered; anything else
+   * means the figures of this panel are the snapshot's, which nobody has confirmed. When the parent does not say, the
+   * state is derived from `trustlinesLoading` / `trustlinesLastError`.
+   */
+  trustlinesState?: 'answered' | 'loading' | 'failed' | 'never-asked'
+  /** The committed payment (result screen) or the unknown result (banner with the repeat action). */
+  paymentOutcome?: ManualPaymentOutcome | null
+  /** Repeat the payment whose result is unknown, under the same key. */
+  retryPayment?: () => Promise<void> | void
+  /** Leave the result screen for the recipient step. */
+  dismissPaymentResult?: () => void
+  /** The server's estimate for the chosen recipient (shortest path in steps, estimated maximum). */
+  targetEstimate?: PaymentTargetEstimate | null
 }
 
 const props = defineProps<Props>()
@@ -84,31 +106,92 @@ watch(
   { immediate: true },
 )
 
-const amountNum = computed(() => {
-  if (amountNormalized.value == null) return NaN
-  return parseAmountNumber(amountNormalized.value)
-})
+/** Exact, no `Number`: `compareMoney` (037 F-037-3). */
+const amountPositive = computed(() => amountNormalized.value != null && compareMoney(amountNormalized.value, '0') === 1)
 
-const amountValid = computed(() => amountNum.value > 0)
+const amountValid = computed(() => amountPositive.value)
 
 const availableNormalized = computed(() => parseAmountStringOrNull(props.availableCapacity))
 
-const availableNum = computed(() => {
-  if (availableNormalized.value == null) return NaN
-  return parseAmountNumber(availableNormalized.value)
+const exceedsCapacity = computed(() => {
+  if (amountNormalized.value == null || availableNormalized.value == null) return false
+  return compareMoney(amountNormalized.value, availableNormalized.value) === 1
 })
 
-const exceedsCapacity = computed(() => {
-  if (!Number.isFinite(availableNum.value)) return false
-  if (!Number.isFinite(amountNum.value)) return false
-  return amountNum.value > availableNum.value
+/** Where the figures of this panel come from (037 F-037-1). */
+const figuresSource = computed<'server' | 'loading' | 'failed' | 'snapshot'>(() => {
+  const given = props.trustlinesState
+  if (given === 'answered') return 'server'
+  if (given === 'loading') return 'loading'
+  if (given === 'failed') return 'failed'
+  if (given === 'never-asked') return 'snapshot'
+  if (props.trustlinesLoading) return 'loading'
+  if (props.trustlinesLastError) return 'failed'
+  return 'server'
 })
+
+const figuresSourceText = computed(() => {
+  switch (figuresSource.value) {
+    case 'server':
+      return interactText('sourceServer')
+    case 'loading':
+      return interactText('sourceLoading')
+    case 'failed':
+      return interactText('sourceFailed')
+    default:
+      return interactText('sourceSnapshot')
+  }
+})
+
+/** A number is shown plainly only when the server's answer stands behind it. */
+const figuresConfirmed = computed(() => figuresSource.value === 'server')
+
+const estimate = computed(() => props.targetEstimate ?? null)
+
+const estimateMax = computed(() => {
+  const e = estimate.value
+  return e && e.state === 'received' ? e.maxAvailable : null
+})
+
+const exceedsEstimate = computed(() => {
+  if (estimateMax.value == null || amountNormalized.value == null) return false
+  return compareMoney(amountNormalized.value, estimateMax.value) === 1
+})
+
+const estimateText = computed(() => {
+  const e = estimate.value
+  if (!e) return null
+  if (e.state === 'loading') return interactText('estimateLoading')
+  if (e.state === 'failed') return interactText('estimateFailed')
+  if (e.maxAvailable == null) return interactText('estimateNotEstimated')
+  return `${formatMoney(e.maxAvailable, equivalentPrecision(props.unit))} ${props.unit}`
+})
+
+const outcome = computed(() => props.paymentOutcome ?? null)
+const success = computed(() => (outcome.value && outcome.value.kind === 'success' ? outcome.value : null))
+const unknownOutcome = computed(() => (outcome.value && outcome.value.kind === 'unknown' ? outcome.value : null))
+
+function moneyText(amount: string, unit: string): string {
+  return `${formatMoney(amount, equivalentPrecision(unit))} ${unit}`
+}
+
+function routeChain(hops: Array<{ fromName: string; toName: string }>): string {
+  if (!hops.length) return ''
+  return [hops[0].fromName, ...hops.map((h) => h.toName)].join(' → ')
+}
 
 const confirmInlineWarning = computed<string | null>(() => {
   if (props.busy) return null
   // 028 F-028-48: a client hint of the equivalent's step; the server decides (F-028-23).
   const stepHint = amountStepHint(amountNormalized.value, props.unit)
   if (stepHint) return stepHint
+  // 037: once the server has estimated the maximum for this recipient, THAT is what the amount is weighed against;
+  // the direct line is only one of the ways the payment can go. Non-blocking either way - the server decides.
+  if (estimateMax.value != null) {
+    return exceedsEstimate.value
+      ? interactText('estimateExceeded', { max: formatMoney(estimateMax.value, equivalentPrecision(props.unit)), unit: props.unit })
+      : null
+  }
   if (!exceedsCapacity.value) return null
   // Non-blocking warning: allow confirm, but set expectations.
   return `Amount may exceed direct trustline capacity (${props.availableCapacity ?? '—'} ${props.unit}). Multi-hop may still succeed; backend will validate.`
@@ -123,8 +206,7 @@ const confirmDisabledReason = computed<string | null>(() => {
 
   if (amountNormalized.value == null) return "Invalid amount format. Use digits and '.' for decimals."
 
-  const n = parseAmountNumber(amountNormalized.value)
-  if (!(n > 0)) return 'Enter a positive amount.'
+  if (!amountPositive.value) return 'Enter a positive amount.'
 
   // Phase 2.5 multi-hop: exceeding direct capacity must NOT block confirm.
   // It is expressed as a non-blocking warning (see confirmInlineWarning).
@@ -312,6 +394,8 @@ function toOptionLabel(p: ParticipantInfo): string {
   // 026 `T2602`: a negative `available` is trust excess, not an amount this payment can carry; no amount is shown
   // and the recipient stays selectable (another route may exist).
   if (String(cap).trim().startsWith('-')) return participantLabel(p)
+  // 037 F-037-1: a snapshot figure is not offered as a capacity; the Direct capacity row says what it is.
+  if (!figuresConfirmed.value) return participantLabel(p)
   return `${participantLabel(p)} — ${cap} ${props.unit}`
 }
 
@@ -382,6 +466,52 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
     </div>
 
     <div class="ds-panel__body ds-stack">
+      <div v-if="success" class="ds-stack" data-testid="mp-result">
+        <div class="ds-h2" data-testid="mp-result-title">{{ interactText('resultTitle') }}</div>
+        <div class="ds-row ds-row--space">
+          <div class="ds-label">{{ interactText('resultPaymentId') }}</div>
+          <div class="ds-value ds-mono" data-testid="mp-result-payment-id">{{ success.paymentId }}</div>
+        </div>
+        <div class="ds-row ds-row--space">
+          <div class="ds-label">{{ interactText('resultStatus') }}</div>
+          <div class="ds-value ds-mono" data-testid="mp-result-status">{{ success.status }}</div>
+        </div>
+        <div class="ds-row ds-row--space">
+          <div class="ds-label">{{ interactText('resultAmount') }}</div>
+          <div class="ds-value ds-mono" data-testid="mp-result-amount">{{ moneyText(success.amount, success.equivalent) }}</div>
+        </div>
+        <div class="ds-row ds-row--space">
+          <div class="ds-label">{{ interactText('resultParties') }}</div>
+          <div class="ds-value" data-testid="mp-result-parties">{{ success.fromName }} → {{ success.toName }}</div>
+        </div>
+        <template v-if="success.routes.length">
+          <div
+            v-for="(route, index) in success.routes"
+            :key="index"
+            class="ds-stack"
+            :data-testid="`mp-result-route-${index + 1}`"
+          >
+            <div class="ds-label">
+              {{ success.routes.length > 1 ? interactText('resultRoutes', { n: index + 1, total: success.routes.length }) : 'Route' }}:
+              <span class="ds-mono" data-testid="mp-result-route-chain">{{ routeChain(route.hops) }}</span>
+            </div>
+            <div v-for="(hop, hopIndex) in route.hops" :key="hopIndex" class="ds-help ds-mono" data-testid="mp-result-hop">
+              {{ interactText('resultRouteStep', { from: hop.fromName, to: hop.toName, amount: formatMoney(hop.amount, equivalentPrecision(success.equivalent)), unit: success.equivalent }) }}
+            </div>
+          </div>
+        </template>
+        <div v-else class="ds-help ds-muted" data-testid="mp-result-no-routes">{{ interactText('resultNoRoutes') }}</div>
+        <div class="ds-row ds-row--actions">
+          <button class="ds-btn ds-btn--primary" type="button" data-testid="mp-result-another" @click="dismissPaymentResult?.()">
+            {{ interactText('resultAnother') }}
+          </button>
+          <button class="ds-btn ds-btn--ghost" type="button" data-testid="mp-result-close" @click="cancel()">
+            {{ interactText('resultClose') }}
+          </button>
+        </div>
+      </div>
+
+      <template v-if="!success">
       <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label id="mp-from-label" class="ds-label" for="mp-from__trigger">From</label>
         <OverlaySelect
@@ -438,11 +568,29 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <template v-if="isConfirm">
         <div class="ds-row ds-row--space">
           <div class="ds-label">Direct capacity</div>
-          <div class="ds-value ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</div>
+          <div class="ds-value ds-mono">
+            {{ availableCapacity ?? '—' }} {{ unit }}
+            <span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">· {{ figuresSourceText }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="estimateText"
+          class="ds-row ds-row--space"
+          data-testid="mp-estimate"
+          :title="estimate && estimate.state === 'received' ? interactText('estimateShortestTitle', { n: estimate.hops }) : undefined"
+        >
+          <div class="ds-label">{{ interactText('estimateTitle') }}</div>
+          <div class="ds-value ds-mono">
+            <span data-testid="mp-estimate-max">{{ estimateText }}</span>
+            <span v-if="estimate && estimate.state === 'received'" class="ds-muted" data-testid="mp-estimate-hops">
+              · {{ interactText('estimateShortest', { n: estimate.hops }) }}
+            </span>
+          </div>
         </div>
 
         <div class="ds-help ds-muted" data-testid="mp-direct-capacity-help">
-          Direct capacity is a 1-hop hint. Recipients list is backend-routed (multi-hop, max hops: {{ paymentTargetsMaxHopsLabel }}).
+          1-hop hint; recipients are server-routed (max hops: {{ paymentTargetsMaxHopsLabel }}).
         </div>
 
         <div class="ds-controls__row ds-controls__row--compact">
@@ -480,6 +628,21 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
       <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
 
+      <div v-if="unknownOutcome" class="ds-alert ds-alert--warn" data-testid="mp-outcome-unknown">
+        <div class="ds-label">{{ interactText('unknownTitle') }}</div>
+        <div class="ds-help">{{ unknownOutcome.message }}</div>
+        <div class="ds-help ds-muted">{{ interactText('unknownRetryHint') }}</div>
+        <button
+          class="ds-btn ds-btn--ghost"
+          type="button"
+          data-testid="mp-retry"
+          :disabled="busy"
+          @click="retryPayment?.()"
+        >
+          {{ interactText('unknownRetry') }}
+        </button>
+      </div>
+
       <div class="ds-row ds-row--actions mp-actions">
         <button
           v-if="isConfirm"
@@ -501,6 +664,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           Cancel
         </button>
       </div>
+      </template>
     </div>
   </div>
 </template>

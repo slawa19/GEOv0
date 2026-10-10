@@ -46,7 +46,7 @@ describe('useInteractMode', () => {
       to_pid: 'bob',
       equivalent: 'UAH',
       amount: '1.00',
-      status: 'accepted',
+      status: 'COMMITTED',
       routes: [],
     }
   }
@@ -113,7 +113,7 @@ describe('useInteractMode', () => {
     }
   }
 
-  it('payment flow: idle -> picking -> confirm -> idle', async () => {
+  it('payment flow: idle -> picking -> confirm -> result (stays) -> idle on close', async () => {
     const snapshot = ref<GraphSnapshot | null>({
       equivalent: 'UAH',
       generated_at: '2026-01-01T00:00:00Z',
@@ -146,8 +146,13 @@ describe('useInteractMode', () => {
     await im.confirmPayment('1.00')
     expect(actions.sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH', expect.anything())
     expect(im.successMessage.value).toBe('Payment sent: 1.00 UAH')
-    expect(im.phase.value).toBe('idle')
+    // 037 A2: a committed payment is not closed silently - the result stays until it is dismissed.
+    expect(im.phase.value).toBe('confirm-payment')
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'success', paymentId: 'payment-1', fromName: 'Alice', toName: 'Bob' })
     expect(im.busy.value).toBe(false)
+    im.cancel()
+    expect(im.phase.value).toBe('idle')
+    expect(im.paymentOutcome.value).toBeNull()
   })
 
   it('trustline flow: goes to editing-trustline when link exists', () => {
@@ -760,7 +765,7 @@ describe('useInteractMode', () => {
     }
   })
 
-  it('confirmPayment uses resetToIdle (not cancel) on success — epoch not double-incremented', async () => {
+  it('after a success the result stays; closing it and starting again works — epoch not corrupted', async () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
     const runId = computed(() => 'run_test')
@@ -772,12 +777,14 @@ describe('useInteractMode', () => {
 
     await im.confirmPayment('10.00')
 
-    // After success: phase=idle, busy=false, no error
-    expect(im.phase.value).toBe('idle')
+    // After success: the result is on screen (037 A2), busy=false, no error
+    expect(im.phase.value).toBe('confirm-payment')
+    expect(im.paymentOutcome.value?.kind).toBe('success')
     expect(im.busy.value).toBe(false)
     expect(im.state.error).toBeNull()
 
-    // Subsequent action should work immediately (epoch not corrupted)
+    // Closing the result and starting again should work immediately (epoch not corrupted)
+    im.cancel()
     im.startPaymentFlow()
     expect(im.phase.value).toBe('picking-payment-from')
   })

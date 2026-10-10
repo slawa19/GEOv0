@@ -72,7 +72,8 @@ describe('F-037-5 wire: payment-targets is requested with include_max_available=
     const q = new URL(urls[0]!).searchParams
     expect(q.get('max_hops')).toBe('8')
     expect(q.get('equivalent')).toBe('UAH')
-    expect(q.has('include_max_available')).toBe(false)
+    // The estimate flag rides on every request the UI makes for the list (the cost is measured and small), not only the first.
+    expect(q.get('include_max_available')).toBe('true')
   })
 })
 
@@ -109,13 +110,10 @@ describe('F-037-5 cache: hops and max_available survive per target', () => {
     return { cache, scope }
   }
 
-  /** What the cache holds for `bob` under the key of (run, UAH, alice, 6), whatever the container is. */
+  /** What the cache holds for `pid` under the key of (run, UAH, alice, 6): `paymentTargetsByKey` stays a Set of ids (pinned by its own test), the per-target answer is `paymentTargetDetailsByKey`. */
   function recordFor(cache: ReturnType<typeof mk>['cache'], pid: string): Record<string, unknown> | undefined {
     const key = cache.paymentTargetsKey({ runId: 'run_p037', eq: 'UAH', fromPid: 'alice', maxHops: 6 })
-    const entry: unknown = cache.paymentTargetsByKey.value.get(key)
-    if (entry instanceof Map) return entry.get(pid) as Record<string, unknown> | undefined
-    if (Array.isArray(entry)) return entry.find((r) => r?.to_pid === pid)
-    return undefined // a Set<string> carries ids only
+    return cache.paymentTargetDetailsByKey.value.get(key)?.get(pid) as Record<string, unknown> | undefined
   }
 
   it('REPRODUCER (red now): the cache keeps hops and max_available of each target', async () => {

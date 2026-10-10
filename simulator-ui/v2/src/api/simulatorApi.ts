@@ -373,12 +373,13 @@ export function getPaymentTargets(
   runId: string,
   equivalent: string,
   fromPid: string,
-  opts?: { maxHops?: number },
+  opts?: { maxHops?: number; includeMaxAvailable?: boolean },
 ): Promise<SimulatorPaymentTargetsResponse> {
   const q = new URLSearchParams({
     equivalent,
     from_pid: fromPid,
     ...(opts?.maxHops != null ? { max_hops: String(opts.maxHops) } : {}),
+    ...(opts?.includeMaxAvailable ? { include_max_available: 'true' } : {}),
   }).toString()
   return simulatorContractJson(
     cfg,
