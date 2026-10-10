@@ -39,7 +39,8 @@ export async function mockApp(
   o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number; paymentRealNetworkFailures?: { left: number };
     /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number;
     /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean;
-    /** A second line, alice -> bob: Bob is a sender as well as Alice. */ bobCanPay?: boolean },
+    /** A second line, alice -> bob: Bob is a sender as well as Alice. */ bobCanPay?: boolean;
+    /** What `clearing-real` answers. `many` needs `extraTargets` >= 5. */ clearing?: 'cycles' | 'many' | 'none' | 'refused'; clearingRequests?: { n: number } },
 ) {
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
@@ -86,6 +87,26 @@ export async function mockApp(
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/payment-targets`, 'i'), (r) => {
     const from = new URL(r.request().url()).searchParams.get('from_pid')
     json(r, { items: from === 'alice' ? [{ to_pid: 'bob', hops: 1 }, ...extras().map((e) => ({ to_pid: e.pid, hops: 1 }))] : [] })
+  })
+  await page.route(`**/simulator/runs/${RUN_ID}/actions/clearing-real`, async (r) => {
+    if (o.clearingRequests) o.clearingRequests.n += 1
+    const edge = (from: string, to: string) => ({ from, to })
+    const kind = o.clearing ?? 'cycles'
+    if (kind === 'refused') {
+      await json(r, { code: 'CLEARING_REFUSED', message: 'refused', details: { reason: 'occurrence_amount_not_in_step' } }, 409)
+      return
+    }
+    // The edges of the answer run creditor -> debtor: { from: alice, to: bob } = "Bob owes Alice".
+    const cycles = kind === 'none' ? [] : kind === 'many'
+      ? [1, 2, 3].map((i) => ({ cleared_amount: `${i}.00`, edges: ['x01', 'x02', 'x03', 'x04', 'x05'].map((p, k, a) => edge(p, a[(k + 1) % a.length]!)) }))
+      : [
+          { cleared_amount: '7.00', edges: [edge('alice', 'bob'), edge('bob', 'carol'), edge('carol', 'alice')] },
+          { cleared_amount: '3.00', edges: [edge('alice', 'carol'), edge('carol', 'alice')] },
+        ]
+    await json(r, {
+      ok: true, equivalent: 'UAH', cleared_cycles: cycles.length,
+      total_cleared_amount: kind === 'none' ? '0.00' : kind === 'many' ? '6.00' : '10.00', cycles, client_action_id: null,
+    })
   })
   await page.route(`**/simulator/runs/${RUN_ID}/actions/payment-real`, async (r) => {
     const req = JSON.parse((await r.request().postData()) ?? '{}') as Record<string, unknown>
@@ -147,16 +168,16 @@ export class Counter {
  * of the transition, not of the step. Four identical samples, two animation frames apart; no click, no scroll. Not a sleep: it
  * ends as soon as the shell is still, and it fails the measurement (by timing out) if the shell never settles.
  */
-export async function settleShell(page: Page): Promise<void> {
+export async function settleShell(page: Page, panelId = 'manual-payment-panel'): Promise<void> {
   let prev = ''
   let same = 0
   for (let i = 0; i < 60 && same < 4; i += 1) {
-    const cur = await page.evaluate(() => new Promise<string>((resolve) => {
+    const cur = await page.evaluate((panelId) => new Promise<string>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => {
-        const shell = document.querySelector('[data-testid="manual-payment-panel"]')?.closest('.ws-shell')
+        const shell = document.querySelector(`[data-testid="${panelId}"]`)?.closest('.ws-shell')
         resolve(shell ? JSON.stringify(shell.getBoundingClientRect()) : '')
       }))
-    }))
+    }), panelId)
     if (cur === prev) same += 1
     else { same = 0; prev = cur }
   }
