@@ -62,8 +62,9 @@ export function useInteractMode(opts: {
   snapshot: Ref<GraphSnapshot | null>
   onNodeClick?: (nodeId: string) => void
   /**
-   * Where the one unresolved manual payment is kept across a page reload (`sessionStorage` by default; `null`: memory only,
-   * which is also what happens when the browser refuses the storage).
+   * Where the one unresolved manual payment is kept across a page reload (`sessionStorage` by default). `null` means there
+   * is no storage, and then NO manual payment is sent - the same as when the browser refuses the storage: a payment whose
+   * record cannot be saved could not be checked safely after a reload.
    */
   intentStorage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
   /** BUG-3: called after successful clearing to trigger FX animation (gold pulse on cycle edges). */
