@@ -57,39 +57,84 @@ def _is_pytest_skip(node: ast.AST) -> bool:
     )
 
 
-def _is_non_postgres_dialect_guard(node: ast.AST) -> bool:
-    if not isinstance(node, ast.Compare) or not any(
-        isinstance(operator, ast.NotIn) for operator in node.ops
-    ):
-        return False
-    for comparator in node.comparators:
-        if not isinstance(comparator, (ast.Set, ast.List, ast.Tuple)):
-            continue
-        values = {
-            item.value.lower()
-            for item in comparator.elts
-            if isinstance(item, ast.Constant) and isinstance(item.value, str)
-        }
-        if {"postgresql", "postgres"} <= values:
+def _is_skipif_mark(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "skipif"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "mark"
+    )
+
+
+#: What makes a condition a question about WHICH DATABASE the tier runs on: the tier's URL, its environment variable, the
+#: driver or backend name, or the fixture's dialect. Since 017 stage 2c `tests/conftest.py` refuses anything but a PostgreSQL
+#: `TEST_DATABASE_URL` before collection, so such a condition can never be true and a skip behind it is dead code.
+_DATABASE_QUESTION_NAMES = {"TEST_DATABASE_URL", "dialect"}
+_DATABASE_QUESTION_ATTRIBUTES = {"dialect", "get_backend_name"}
+_DATABASE_QUESTION_STRINGS = ("postgres", "TEST_DATABASE_URL", "sqlite")
+
+
+def _asks_which_database(condition: ast.AST) -> bool:
+    for node in ast.walk(condition):
+        if isinstance(node, ast.Name) and node.id in _DATABASE_QUESTION_NAMES:
             return True
+        if isinstance(node, ast.Attribute) and node.attr in _DATABASE_QUESTION_ATTRIBUTES:
+            return True
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if any(token in node.value.lower() for token in (t.lower() for t in _DATABASE_QUESTION_STRINGS)):
+                return True
     return False
 
 
-def _has_postgres_only_dialect_skip(tree: ast.Module) -> bool:
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.If)
-            and any(
-                _is_non_postgres_dialect_guard(item) for item in ast.walk(node.test)
+def _skip_sites(tree: ast.Module) -> list[tuple[int, str, bool]]:
+    """Every executable `pytest.skip(...)` call and every `pytest.mark.skipif(...)` mark of a module.
+
+    Each is `(line, source of its condition, whether the condition asks which database the tier runs on)`. A `pytest.skip()`
+    call's condition is the nearest enclosing `if` test; a `skipif`'s is its first argument. A skip with no enclosing `if`
+    has the condition `<unconditional>`. Calls inside docstrings or comments are not nodes, so prose is never read.
+    """
+
+    sites: list[tuple[int, str, bool]] = []
+
+    def visit(node: ast.AST, conditions: tuple[ast.AST, ...]) -> None:
+        if isinstance(node, ast.If):
+            inner = conditions + (node.test,)
+            for child in node.body + node.orelse:  # the else branch answers the same question
+                visit(child, inner)
+            visit(node.test, conditions)
+            return
+        if _is_pytest_skip(node):
+            asked = conditions[-1] if conditions else None
+            sites.append(
+                (
+                    node.lineno,
+                    ast.unparse(asked) if asked is not None else "<unconditional>",
+                    asked is not None and any(_asks_which_database(c) for c in conditions),
+                )
             )
-            and any(
-                _is_pytest_skip(item)
-                for statement in node.body
-                for item in ast.walk(statement)
-            )
-        ):
-            return True
-    return False
+        elif _is_skipif_mark(node) and node.args:
+            sites.append((node.lineno, ast.unparse(node.args[0]), _asks_which_database(node.args[0])))
+        for child in ast.iter_child_nodes(node):
+            visit(child, conditions)
+
+    visit(tree, ())
+    return sites
+
+
+#: THE ONE LIVE SKIP of `tests/integration` (2026-10-10, 035 Q-A): the simulator's storage can be switched off by
+#: `SIMULATOR_DB_ENABLED` (`app/core/simulator/storage.py`, `app/config.py`), which no tier precondition covers. Every other
+#: executable skip in this directory needs its own line here, with its reason, or it is refused.
+_LIVE_SKIPS = {
+    ("test_p1_tick_session_ownership_postgres.py", "not simulator_storage.db_enabled()"),
+}
+
+
+def _integration_sources() -> dict[str, ast.Module]:
+    return {
+        path.name: ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for path in sorted(_INTEGRATION_ROOT.glob("*.py"))
+    }
 
 
 def _indented_blocks(text: str, *, key: str, indent: int) -> list[str]:
@@ -128,19 +173,14 @@ def _executable_command(run_block: str) -> str:
 # else) and the marker is gone, so the same protection now reads: no module may take itself out of
 # that tier by a `postgres` marker. Under `--strict-markers` an unregistered marker already fails
 # collection; this names the module instead of leaving a collection error to be read. The suffix
-# stays as history and still owns the PostgreSQL-only dialect skips, which are now unreachable but
-# name the module's premise.
+# stays as history. The dialect skips it used to own were removed on 2026-10-10 (035 Q-A); what
+# replaces that sub-check is `test_no_integration_test_skips_because_of_the_database_url_or_dialect`.
 def test_no_module_takes_itself_out_of_the_postgres_tier() -> None:
     modules = _parse_test_modules()
     candidates = {
         path.relative_to(_ROOT)
         for path in modules
         if path.name.endswith("_postgres.py")
-    }
-    dialect_skip_modules = {
-        path.relative_to(_ROOT)
-        for path, tree in modules.items()
-        if _has_postgres_only_dialect_skip(tree)
     }
     marked = sorted(
         str(path.relative_to(_ROOT))
@@ -153,9 +193,63 @@ def test_no_module_takes_itself_out_of_the_postgres_tier() -> None:
     assert len(candidates) >= 50, f"only {len(candidates)} *_postgres.py modules found"
     assert not marked, f"modules marked `postgres` again - there is no second tier to go to: {marked}"
     assert "\n    postgres:" not in config, "pytest.ini registers the `postgres` marker again"
-    misnamed_dialect_skips = sorted(str(path) for path in dialect_skip_modules - candidates)
-    assert not misnamed_dialect_skips, (
-        f"PostgreSQL dialect-skip modules without suffix: {misnamed_dialect_skips}"
+
+
+# 035 Q-A (2026-10-10): 24 skips behind "is this PostgreSQL?" were removed from `tests/integration`: the question has one
+# answer on every supported path, so a skip behind it is dead code that reads as a safety net. The replacement invariant:
+# an integration test is not skipped because of the database URL or dialect, and the only other skip is the one named live.
+_PLANTED_DATABASE_SKIPS = {
+    "a URL check": 'if "postgresql" not in TEST_DATABASE_URL:\n    pytest.skip("x")\n',
+    "an environment URL check": 'url = os.environ.get("TEST_DATABASE_URL", "")\nif "postgresql" not in url:\n    pytest.skip("x")\n',
+    "a dialect check": 'if db_session.get_bind().dialect.name not in {"postgresql"}:\n    pytest.skip("x")\n',
+    "a dialect variable (the try/except form)": (
+        'dialect = None\ntry:\n    dialect = db_session.get_bind().dialect.name\nexcept Exception:\n    dialect = None\n'
+        'if dialect not in {"postgresql", "postgres"}:\n    pytest.skip("x")\n'
+    ),
+    "a helper's check": 'def _require_postgres(s):\n    if s.get_bind().dialect.name != "postgresql":\n        pytest.skip("x")\n',
+    "a skipif mark": '@pytest.mark.skipif("postgresql" not in TEST_DATABASE_URL, reason="x")\ndef test_a(): pass\n',
+    "an else branch": 'if "postgresql" in url:\n    pass\nelse:\n    pytest.skip("x")\n',
+}
+_PLANTED_OTHER_SKIPS = {
+    "the live storage skip": 'if not simulator_storage.db_enabled():\n    pytest.skip("x")\n',
+    "an unrelated optional-tool skip": 'if shutil.which("bash") is None:\n    pytest.skip("x")\n',
+    "an unconditional skip": 'pytest.skip("x")\n',
+    "a skipif on the platform": '@pytest.mark.skipif(os.name == "nt", reason="x")\ndef test_a(): pass\n',
+}
+
+
+def test_the_database_skip_detector_sees_every_form_and_only_those() -> None:
+    """Anti-vacuum for the invariant below: planted positives are found, planted negatives are not flagged as database skips."""
+
+    for label, source in _PLANTED_DATABASE_SKIPS.items():
+        sites = _skip_sites(ast.parse(source))
+        assert sites and all(asks for _, _, asks in sites), f"{label}: not recognised as a database skip: {sites}"
+    for label, source in _PLANTED_OTHER_SKIPS.items():
+        sites = _skip_sites(ast.parse(source))
+        assert sites, f"{label}: the detector did not see the skip at all"
+        assert not any(asks for _, _, asks in sites), f"{label}: wrongly flagged as a database skip: {sites}"
+    assert _skip_sites(ast.parse('"""pytest.skip(x) in prose"""\n# pytest.skip(y)\nx = 1\n')) == []
+
+
+def test_no_integration_test_skips_because_of_the_database_url_or_dialect() -> None:
+    sources = _integration_sources()
+    assert len(sources) >= 100, f"only {len(sources)} modules under tests/integration were read"
+    database_skips: list[str] = []
+    other_skips: set[tuple[str, str]] = set()
+    for name, tree in sources.items():
+        for line, condition, asks_which_database in _skip_sites(tree):
+            if asks_which_database:
+                database_skips.append(f"{name}:{line}: {condition}")
+            else:
+                other_skips.add((name, condition))
+    assert database_skips == [], (
+        "an integration test is skipped by a question about the database URL or dialect; "
+        f"tests/conftest.py refuses a non-PostgreSQL URL before collection, so the skip is dead: {database_skips}"
+    )
+    assert other_skips == _LIVE_SKIPS, (
+        f"executable skips under tests/integration other than the named live one: {sorted(other_skips - _LIVE_SKIPS)}; "
+        f"named but gone: {sorted(_LIVE_SKIPS - other_skips)}. A new conditional skip needs its own line in _LIVE_SKIPS "
+        "with the reason it can really fire."
     )
 
 
