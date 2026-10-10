@@ -116,3 +116,79 @@ describe('the clearing result stays until it is closed', () => {
     expect(im.phase.value).not.toBe('idle')
   })
 })
+
+describe('what ends a held result: the user, or a deliberate replacement - never an empty click on the canvas', () => {
+  it('an empty click on the canvas does not remove a finished clearing result; Close does', async () => {
+    const im = mk(vi.fn(async () => twoCycles))
+    im.startClearingFlow()
+    await runAndWait(im)
+
+    im.cancelFromCanvas()
+    expect(im.phase.value, 'the held result stays').not.toBe('idle')
+    expect(im.state.lastClearing).toEqual(twoCycles)
+
+    im.cancel()
+    expect(im.phase.value).toBe('idle')
+  })
+
+  it('...nor a finished refusal', async () => {
+    const im = mk(vi.fn(async () => { throw new Error('boom') }))
+    im.startClearingFlow()
+    await runAndWait(im)
+    im.cancelFromCanvas()
+    expect(im.phase.value).not.toBe('idle')
+    expect(im.state.clearingFailure).toBeTruthy()
+  })
+
+  it('a click on the canvas still cancels what is NOT a held result (the confirm step, a payment being filled in)', () => {
+    const im = mk(vi.fn(async () => twoCycles))
+    im.startClearingFlow()
+    expect(im.phase.value).toBe('confirm-clearing')
+    im.cancelFromCanvas()
+    expect(im.phase.value).toBe('idle')
+
+    im.startPaymentFlow()
+    im.cancelFromCanvas()
+    expect(im.phase.value).toBe('idle')
+  })
+
+  it('a line clicked while a result is held does not replace it (the user closes it first)', async () => {
+    const im = mk(vi.fn(async () => twoCycles))
+    im.startClearingFlow()
+    await runAndWait(im)
+    expect(im.selectEdge('alice→bob')).toBe(false)
+    expect(im.phase.value).toBe('clearing-preview')
+  })
+})
+
+describe('a refusal is a state of the panel, not a passing message', () => {
+  it('the refusal text is kept in the state after the transient error is cleared (the toast went away)', async () => {
+    const im = mk(vi.fn(async () => { throw new Error('boom') }))
+    im.startClearingFlow()
+    await runAndWait(im)
+    expect(im.state.clearingFailure).toBeTruthy()
+
+    im.state.error = null // what the error toast does when it expires
+    expect(im.state.clearingFailure, 'survives the toast').toBeTruthy()
+    expect(im.busy.value).toBe(false)
+
+    im.cancel()
+    expect(im.state.clearingFailure, 'Close ends it').toBeNull()
+  })
+
+  it('the next clearing starts clean: no earlier refusal, no earlier success announcement', async () => {
+    const run = vi.fn<Actions['runClearing']>().mockResolvedValueOnce(twoCycles).mockResolvedValueOnce(none)
+    const im = mk(run)
+    im.startClearingFlow()
+    await runAndWait(im)
+    expect(im.successMessage.value).toBe('Clearing done: 2/2 cycles')
+    im.cancel()
+
+    // The same composable, before the old toast would have expired: the next clearing finds nothing.
+    im.startClearingFlow()
+    expect(im.successMessage.value, 'starting a clearing withdraws the earlier announcement').toBeNull()
+    await runAndWait(im)
+    expect(im.successMessage.value).toBeNull()
+    expect(im.state.lastClearing).toEqual(none)
+  })
+})

@@ -147,7 +147,6 @@ describe('the states that are not a success', () => {
     await settle()
 
     expect(text(host, 'clearing-error')).toContain('Clearing refused')
-    expect(q(host, 'clearing-preview-loading')).toBeNull()
     expect(q(host, 'clearing-cycle')).toBeNull()
     const close = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Close') as HTMLButtonElement
     expect(close.disabled).toBe(false)
@@ -163,5 +162,54 @@ describe('the states that are not a success', () => {
     expect(q(host, 'clearing-cycle')).toBeNull()
     const close = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Close') as HTMLButtonElement
     expect(close.disabled).toBe(true)
+  })
+})
+
+describe('037 C fix-delta: honest states that do not depend on a toast', () => {
+  it('a finished refusal keeps its text and a working Close after the transient error is gone', async () => {
+    const { host, state, calls } = mount({ last: null, error: null })
+    ;(state as unknown as { clearingFailure: string | null }).clearingFailure = 'Clearing refused: the step is too small. (request abc)'
+    await settle()
+    expect(text(host, 'clearing-error')).toContain('request abc')
+    expect(q(host, 'clearing-running')).toBeNull()
+
+    state.error = 'Clearing refused: the step is too small. (request abc)'
+    await settle()
+    state.error = null // the error toast expired and the application cleared it
+    await settle()
+    expect(text(host, 'clearing-error')).toContain('request abc')
+    const close = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Close') as HTMLButtonElement
+    expect(close.disabled).toBe(false)
+    close.click()
+    expect(calls.cancel).toHaveBeenCalled()
+  })
+
+  it('"running" is shown only while a request is really in flight', async () => {
+    const idle = mount({ last: null, busy: false })
+    await settle()
+    expect(q(idle.host, 'clearing-running')).toBeNull()
+    document.body.innerHTML = ''
+    const inFlight = mount({ last: null, busy: true })
+    await settle()
+    expect(q(inFlight.host, 'clearing-running')).not.toBeNull()
+  })
+
+  it('the equivalent of a held result is the equivalent of ITS answer, not the one selected now', async () => {
+    const { host } = mount({ equivalent: 'USD', last: result({ equivalent: 'UAH' }) })
+    await settle()
+    expect(text(host, 'clearing-equivalent')).toContain('UAH')
+    expect(text(host, 'clearing-equivalent')).not.toContain('USD')
+    document.body.innerHTML = ''
+    const confirm = mount({ phase: 'confirm-clearing', equivalent: 'USD', last: null })
+    await settle()
+    expect(text(confirm.host, 'clearing-equivalent'), 'before the run, the selected equivalent is what will be run').toContain('USD')
+  })
+
+  it('the total is the sum of the cycle amounts and says so: it is not the total of the debts written off', async () => {
+    const { host } = mount()
+    await settle()
+    expect(text(host, 'clearing-total')).toContain('Total over cycles')
+    expect(text(host, 'clearing-total')).not.toContain('Total cleared')
+    expect(text(host, 'clearing-total-note')).toBe('Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.')
   })
 })

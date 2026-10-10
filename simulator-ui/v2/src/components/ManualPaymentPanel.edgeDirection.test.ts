@@ -12,10 +12,10 @@ import { useInteractFSM } from '../composables/interact/useInteractFSM'
 afterEach(() => { document.body.innerHTML = '' })
 async function settle() { for (let i = 0; i < 5; i += 1) await nextTick() }
 
-const PEOPLE = [{ pid: 'alice', name: 'Alice' }, { pid: 'bob', name: 'Bob' }]
+const PEOPLE = [{ pid: 'alice', name: 'Alice' }, { pid: 'bob', name: 'Bob' }, { pid: 'carol', name: 'Carol' }]
 const q = (host: HTMLElement, id: string) => host.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const text = (host: HTMLElement, id: string) => (q(host, id)?.textContent ?? '').replace(/\s+/g, ' ').trim()
-const NOTE = 'The line runs from creditor to debtor, so a payment started from it goes the other way: the debtor pays the creditor.'
+const NOTE = 'The line runs from creditor to debtor, so a payment started from it goes the other way: the debtor pays the creditor. That adds to the debtor’s debt on this line (after offsetting any debt the creditor owes back); it does not repay it.'
 
 function mountPanel(start: (fsm: ReturnType<typeof useInteractFSM>) => void) {
   const host = document.createElement('div')
@@ -25,7 +25,7 @@ function mountPanel(start: (fsm: ReturnType<typeof useInteractFSM>) => void) {
   const app = createApp({
     render: () => h(ManualPaymentPanel as Component, {
       phase: fsm.state.phase, state: fsm.state, unit: 'UAH', availableCapacity: '10.00', trustlinesLoading: false, paymentTargetsLoading: false,
-      paymentTargetsLastError: null, paymentToTargetIds: new Set(['alice', 'bob']), trustlines: [], participants: PEOPLE, busy: false,
+      paymentTargetsLastError: null, paymentToTargetIds: new Set(['alice', 'bob', 'carol']), trustlines: [], participants: PEOPLE, busy: false,
       canSendPayment: true, confirmPayment: vi.fn(), cancel: vi.fn(), setFromPid: fsm.setPaymentFromPid, setToPid: fsm.setPaymentToPid,
     }),
   })
@@ -76,5 +76,26 @@ describe('the line popup', () => {
 
     expect(text(host, 'edge-payment-direction-note')).toBe(NOTE)
     app.unmount()
+  })
+})
+
+describe('the sentence follows the pair the panel was opened with, however the pair is edited', () => {
+  it('a recipient picked on the canvas ends it; going back to the same pair brings it back', async () => {
+    const { host, fsm } = mountPanel((f) => { f.startPaymentFlowWithFrom('alice'); f.setPaymentToPid('bob') })
+    await settle()
+    expect(q(host, 'mp-line-direction-note')).not.toBeNull()
+
+    fsm.selectNode('carol') // the canvas path: toPid changes inside the confirm step
+    await settle()
+    expect(fsm.state.toPid).toBe('carol')
+    expect(q(host, 'mp-line-direction-note'), 'the pair is no longer the line pair').toBeNull()
+
+    fsm.selectNode('bob')
+    await settle()
+    expect(q(host, 'mp-line-direction-note')).not.toBeNull()
+  })
+
+  it('the sentence says that paying does not repay the debt on this line', () => {
+    expect(NOTE).toContain('it does not repay it')
   })
 })

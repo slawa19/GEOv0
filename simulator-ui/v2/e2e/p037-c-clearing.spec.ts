@@ -77,7 +77,6 @@ test.describe('037 C - the clearing result in a real browser', () => {
     await runClearing(page)
 
     await expect(page.locator('[data-testid="clearing-error"]')).toBeVisible()
-    await expect(page.locator('[data-testid="clearing-preview-loading"]')).toHaveCount(0)
     await expect(page.locator('[data-testid="clearing-cycle"]')).toHaveCount(0)
     await page.locator('[data-testid="clearing-close"]').click()
     await expect(page.locator('[data-testid="clearing-panel"]')).toBeHidden()
