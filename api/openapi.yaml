@@ -3744,7 +3744,11 @@ components:
             key (`man:` + a digest), so the key is scoped to the run it is sent to. A repeat of the same run, key and
             body answers the stored payment and moves no money; the same key with another sender, receiver, equivalent
             or amount (the amount's SPELLING counts: `10` and `10.00` differ) is refused 409 `tx_id_reused`. Without a
-            key a repeat is a new payment.
+            key a repeat is a new payment. After a STORED refusal (`idempotency_key_spent: true` in the error) the key is
+            refused for good: every repeat answers that refusal, and a new payment of the same intent needs a new key.
+            A refusal BEFORE admission stores nothing and a commit that did not land leaves nothing
+            (`idempotency_key_spent: false`): the same key is executed again. A commit that landed leaves the payment:
+            the same key returns it.
 
     SimulatorActionPaymentRealResponse:
       type: object
@@ -3957,6 +3961,12 @@ components:
         details:
           type: object
           nullable: true
+          description: >-
+            Free object. For `payment-real` sent WITH an `idempotency_key` the error also carries
+            `idempotency_key_spent` (boolean): `true` - a refusal is stored under the key, every repeat with it answers
+            that refusal and a new payment of the same intent needs a new key; `false` - nothing is stored under the key
+            (a repeat is executed), or the payment IS committed and only its answer was lost (a repeat returns it);
+            absent - the state could not be read, keep the key. A request without a key never carries it.
 
     TxOnceRequestBody:
       type: object

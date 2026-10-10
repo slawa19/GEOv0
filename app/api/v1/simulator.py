@@ -36,6 +36,7 @@ from app.core.clearing.runner import (
 )
 from app.core.money_boundary import MoneyBoundary
 from app.core.payments.router import PaymentRouter
+from app.db import session as _db_session_module
 from app.core.payments.service import (
     PaymentService,
     public_error_of_stored,
@@ -1665,6 +1666,53 @@ def manual_payment_tx_id(run_id: str, client_key: str) -> str:
     return "man:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
 
+#: The bound of the one read that tells an error answer whether the key is spent (037 A1 fix-delta).
+_KEY_STATE_READ_TIMEOUT_SECONDS = 2.0
+
+
+async def _idempotency_key_spent(run_id: str, tx_id: str) -> bool | None:
+    """Is the key of a keyed manual payment spent for good, as far as the stored row says? (037 A1 fix-delta)
+
+    `True`: an `ABORTED` row stands under the derived `tx_id` - every repeat with the key is that refusal, a new payment of
+    the same intent needs a new key. `False`: no row (a refusal before admission stores none, and a commit that did not
+    land leaves none - a repeat is executed) or a `COMMITTED` one (the commit landed and the answer was lost - a repeat
+    returns the payment). `None`: the state could not be read - the client then keeps the key, which is always safe.
+
+    One short read on a session of its own, because the request's session has just been through the core's rollback and
+    may be in any state; bounded in time; its failure is logged by class and never reaches the error answer.
+    """
+
+    async def read():
+        async with _db_session_module.AsyncSessionLocal() as session:
+            return (await session.execute(select(Transaction.state).where(Transaction.tx_id == tx_id))).first()
+
+    try:
+        row = await asyncio.wait_for(read(), timeout=_KEY_STATE_READ_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning("event=simulator.payment_key_state_read_timeout run_id=%s tx_id=%s", run_id, tx_id)
+        return None
+    except Exception as exc:
+        logger.warning(
+            "event=simulator.payment_key_state_read_failed run_id=%s tx_id=%s error_type=%s",
+            run_id, tx_id, type(exc).__name__,
+        )
+        return None
+    return row is not None and str(row[0]) == "ABORTED"
+
+
+async def _payment_refusal(
+    *, run_id: str, tx_id: str | None, status_code: int, code: str, message: str, details: Optional[dict[str, Any]]
+) -> JSONResponse:
+    """An error answer of `payment-real`. For a request WITH a key it carries `details.idempotency_key_spent` (see
+    `_idempotency_key_spent`); without a key nothing is added and nothing is read."""
+
+    if tx_id is not None:
+        spent = await _idempotency_key_spent(run_id, tx_id)
+        if spent is not None:
+            details = {**(details or {}), "idempotency_key_spent": spent}
+    return _action_error(status_code=status_code, code=code, message=message, details=details)
+
+
 def _payment_routes_of(result: Any) -> list[SimulatorActionPaymentRoute]:
     """Every route the core recorded for `result`: adjacent pairs of each `path`, the route's amount on each step.
 
@@ -1721,8 +1769,11 @@ async def action_payment_real(
         return err
     assert parties is not None
     scoped_pids, from_p, to_p, eq = parties.scoped_pids, parties.from_p, parties.to_p, parties.eq
-    # Plain values from here on: a payment that lost an insert race is settled by a rollback of the request's session,
-    # which expires every ORM object loaded before it, and reading an attribute of one would be a lazy load (500).
+    # Plain values from here on. A payment whose COMMIT failed is settled by a rollback of the request's session
+    # (`_settle_failed_commit` -> `_rollback_attempt`), which expires every ORM object loaded before it; reading an
+    # attribute of one afterwards is a lazy load inside an async handler (`MissingGreenlet`, a 500) - it was, in the
+    # timeout branch below, with a key or without. (A payment that merely LOST an insert race does not roll the session
+    # back: `_end_failed_attempt` commits it, so its objects stay loaded.)
     eq_code, from_pid, to_pid = str(eq.code), str(from_p.pid), str(to_p.pid)
 
     # Amount validation per spec.
@@ -1766,7 +1817,9 @@ async def action_payment_real(
                 "The stored payment is not committed", code=ErrorCode.E010, status_code=500
             )
     except RetryablePaymentConflictException as exc:
-        return _action_error(
+        return await _payment_refusal(
+            run_id=run_id,
+            tx_id=tx_id_hint,
             status_code=exc.status_code,
             code="CONFLICT",
             message=exc.message,
@@ -1780,7 +1833,9 @@ async def action_payment_real(
         # with another reason answers by its own code (`E002` is capacity, `E001` is no route).
         code = _INTERACT_ROUTING_CODE.get(reason.get("reason")) or (
             "INSUFFICIENT_CAPACITY" if exc.code == ErrorCode.E002.value else "NO_ROUTE")
-        return _action_error(
+        return await _payment_refusal(
+            run_id=run_id,
+            tx_id=tx_id_hint,
             status_code=409,
             code=code,
             message=exc.message,
@@ -1793,7 +1848,9 @@ async def action_payment_real(
             },
         )
     except TimeoutException as exc:
-        return _action_error(
+        return await _payment_refusal(
+            run_id=run_id,
+            tx_id=tx_id_hint,
             status_code=503,
             code="ENGINE_TIMEOUT",
             message=str(getattr(exc, "message", None) or "Engine timeout"),
@@ -1801,7 +1858,9 @@ async def action_payment_real(
         )
     except GeoException as exc:
         # Best-effort mapping for unexpected business errors.
-        return _action_error(
+        return await _payment_refusal(
+            run_id=run_id,
+            tx_id=tx_id_hint,
             status_code=int(getattr(exc, "status_code", 409) or 409),
             code="PAYMENT_REJECTED",
             message=public_refusal_message(exc.code, exc.message),

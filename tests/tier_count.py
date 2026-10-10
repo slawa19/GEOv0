@@ -203,6 +203,7 @@ make the session green again:
 * 2026-10-10, 035 slice A11, the product change: 3619 -> 3620 (+1, no new test: the float scan of `tests/unit/test_p012_t1211_money_path_never_types_a_float.py` builds its list from the tree and now also sees `PaymentService._record_cancelled_between_attempts(deadline: float)`, a clock value). Measured by the guard's own refusal on the full tier (`selected 3620 case(s), expected exactly 3619`).
   Measured with `python -m pytest --collect-only -q -m "not slow"` (`3613/3633`).
 * 2026-10-10, 037 slice A1 (the manual payment's idempotency key and `routes[]`), on `origin/main` `ac7725e3` (3620): 3620 -> 3659 (+39). New: `tests/integration/test_p037_manual_payment_idempotency_postgres.py` (39 cases: the reproducers R1-R3, the key scoped by the run, the repeat, two simultaneous requests, five changed intents, a refusal after and before admission, a stopped run, a restart, ten invalid and four valid keys, a null key, the routes of a multi-route payment and of a payment with none, the OpenAPI fields). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3659/3679`).
+* 2026-10-10, 037 slice A1 fix-delta (the key's state in the error, the missing instruments), on `claude/p037-a1` `5dd8801c` (3659): 3659 -> 3674 (+15, all in `tests/integration/test_p037_manual_payment_idempotency_postgres.py`: a timeout after admission, a commit timeout that did not land (keyed and unkeyed), entry 1 against entry 2 on the wire, a commit that landed with a failed and with a working recovery, a repeat whose own commit times out, a real cancellation, an internal failure, a refusal before and after admission, an unkeyed error and a broken state read, a collision held inside the operation, two cookie owners with a foreign run, a real stop and restart; the stopped-run test was rewritten, the same count). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3674/3694`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -245,7 +246,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3659
+EXPECTED_SELECTED_ITEMS = 3674
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"

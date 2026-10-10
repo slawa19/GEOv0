@@ -129,7 +129,7 @@ async def _total_debt(db_session) -> Decimal:
 async def _payments(db_session) -> int:
     await db_session.commit()
     return (
-        await db_session.execute(select(func.count()).select_from(Transaction).where(Transaction.type == "PAYMENT"))
+        await db_session.execute(select(func.count()).select_from(Transaction).where(Transaction.type == "PAYMENT", Transaction.state == "COMMITTED"))
     ).scalar_one()
 
 
@@ -1076,7 +1076,8 @@ async def test_a_commit_that_landed_but_whose_answer_was_lost_is_not_spent_and_a
 @pytest.mark.asyncio
 @MODE_B
 async def test_a_commit_that_landed_and_is_recovered_answers_the_payment(client, db_session, stand, monkeypatch):
-    """The other half of the same schedule: the recovery read works, the core answers the committed payment - a 200."""
+    """The other half of the same schedule: the recovery read works, the core answers the committed payment - a 200, built
+    from plain values although the rollback expired the handler's ORM objects."""
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from app.core.payments.service import PaymentService
@@ -1095,6 +1096,9 @@ async def test_a_commit_that_landed_and_is_recovered_answers_the_payment(client,
         out = await real_commit(self, *a, **kw)
         if armed_commit.on:
             armed_commit.on = False
+            # A new transaction is already open when the timeout is raised, so the core's rollback has something to roll
+            # back - and expires every ORM object the handler loaded. The answer that follows is a SUCCESS built after it.
+            await self.execute(select(1))
             raise asyncio.TimeoutError()
         return out
 
@@ -1106,6 +1110,50 @@ async def test_a_commit_that_landed_and_is_recovered_answers_the_payment(client,
 
     assert answered.status_code == 200, answered.text
     assert answered.json()["payment_id"] == _tx_id_of(_RUN, key) and answered.json()["routes"]
+    assert await _payments(db_session) == 1
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_repeat_whose_own_commit_times_out_is_still_answered_from_plain_values(client, db_session, stand, monkeypatch):
+    """The only schedule where the SUCCESS response is built from expired ORM objects: a replay (so nothing is published -
+    the publication's own queries would have re-loaded them), whose COMMIT times out with a transaction open; the core's
+    rollback expires the handler's objects and the recovery read answers the stored payment."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    key = _key()
+    first = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    assert first.status_code == 200, first.text
+
+    real_execute, real_commit = PaymentService.execute, AsyncSession.commit
+    armed_commit = _Armed(False)
+
+    async def execute_then_arm(self, *a, **kw):
+        out = await real_execute(self, *a, **kw)
+        armed_commit.on = True
+        return out
+
+    async def commit_then_times_out_with_a_transaction_open(self, *a, **kw):
+        out = await real_commit(self, *a, **kw)
+        if armed_commit.on:
+            armed_commit.on = False
+            await self.execute(select(1))
+            raise asyncio.TimeoutError()
+        return out
+
+    monkeypatch.setattr(PaymentService, "execute", execute_then_arm)
+    monkeypatch.setattr(AsyncSession, "commit", commit_then_times_out_with_a_transaction_open)
+
+    again = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert again.status_code == 200, again.text
+    assert again.json()["payment_id"] == first.json()["payment_id"] and again.json()["routes"] == first.json()["routes"]
+    assert again.json()["from_pid"] == "a1" and again.json()["equivalent"] == _EQ
+    assert len(stand.published) == 1, "the repeat published nothing"
     assert await _payments(db_session) == 1
 
 
