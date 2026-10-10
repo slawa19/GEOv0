@@ -124,8 +124,13 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-09, 036 slice C (`T3630`): portable 252 -> 254. The new live fixture `community-story-10` is one more parametrised case of
 #: `test_every_live_fixture_validates_against_the_schema` (+1), and `test_the_validator_refuses_a_broken_community_story` shows the guard is
 #: not blind to it (+1); the live-set test only changed its list.
+#:
+#: 2026-10-10, 035 test-database cleanup command (`QD-TEST-DATABASES: BUILD-NARROW`): portable 254 -> 290. Thirty-six cases added,
+#: `portable/test_p035_cleanup_test_databases_selection.py`: names that only look like a test database (11 + 1), the selection rules (6),
+#: the apply order (1), nine kinds of changed evidence that stop an apply (9), a refused drop (1), import and `--help` without a
+#: connection (1), the command line's refusals (3 + 3).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 254,
+    "portable": 290,
     "powershell": 235,
 }
 
