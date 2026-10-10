@@ -224,6 +224,8 @@ is skipped (marker, skipif, runtime skip, xfail) is turned into a failure, and w
 prints one line with their setup+call+teardown seconds (printing only, no time limit); a collection-only run checks the
 membership and does not demand execution. Widening the list needs a separately recorded
 decision, not an edit of this constant alone.
+* 2026-10-10, merge of main (3688: the cleanup command and the A10 exception) with the taxonomy guard recorded in the next line (+2): 3690.
+* 2026-10-10, 035 follow-up of Q-A (the taxonomy guard), on the Q-A branch `49ef6c6c` (3674): 3674 -> 3676 (+2) in `tests/unit/test_postgres_test_taxonomy.py`: the database-skip detector seen on planted positives and negatives (1) and the invariant that no integration test is skipped by a URL or dialect question, with the one live storage skip named (1); the obsolete dialect-skip sub-check of `test_no_module_takes_itself_out_of_the_postgres_tier` was removed (same count). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3676/3696`).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -266,7 +268,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3688
+EXPECTED_SELECTED_ITEMS = 3690
 
 #: The registered marker (`pytest.ini`) of the five A10 cases that run in the required tier WITHOUT `slow`.
 A10_MARKER = "a10_real_pool_timeout"
