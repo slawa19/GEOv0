@@ -192,3 +192,26 @@ async def test_a_database_recreated_under_the_same_name_is_not_the_one_the_manif
         await cleanup.apply_manifest(own.maintenance, manifest, protected=[])
 
     assert "OID" in str(refused.value) and await own.state() == before, refused.value
+
+
+@pytest.mark.asyncio
+async def test_F3_the_fixtures_teardown_leaves_a_database_it_did_not_create() -> None:
+    """A name the fixture wants is already taken by somebody: creation fails, and the teardown that follows must
+    not touch that database - it was never this test's."""
+
+    maintenance = await maintenance_connection(os.environ["TEST_DATABASE_URL"])
+    databases = _OwnDatabases(maintenance)
+    neighbour = databases.other
+    await create_database(maintenance, neighbour)  # "somebody else's", standing where the fixture will create
+    oid = await maintenance.fetchval("select oid::bigint from pg_database where datname = $1", neighbour)
+    try:
+        with pytest.raises(Exception):
+            await databases.create()
+        await databases.destroy()
+
+        assert await maintenance.fetchval("select oid::bigint from pg_database where datname = $1", neighbour) == oid, (
+            "the teardown dropped a database the fixture had failed to create"
+        )
+    finally:
+        await drop_database(maintenance, neighbour)  # created by this test, above
+        await maintenance.close()

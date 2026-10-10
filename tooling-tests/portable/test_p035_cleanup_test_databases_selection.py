@@ -297,3 +297,64 @@ def test_a_remote_host_a_missing_url_and_a_path_outside_local_run_are_refused_be
     monkeypatch.setenv("TEST_DATABASE_URL", environment)
     assert cleanup.main(arguments) == 2
     assert message in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- reproducers of the review of ddcb97b6 (F1, F2, F4)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["geov0_test_x?archive", 'geov0_test_x?" WITH (FORCE)--', "geov0_test_x?", "geov0_test_x#y", "geov0_test_x/y",
+     'geov0_test_x"y', "geov0_test_x;drop", "geov0_test_x--y z", "geov0_test_x\n", "geov0_test_x\ny", "geov0_test_x y"],
+)
+def test_F1_the_whole_identifier_is_validated_not_the_part_a_url_parser_keeps(name: str) -> None:
+    assert cleanup.validated_name(name) is not None, f"{name!r} was accepted as a test database name"
+    (entry,) = cleanup.classify([_row(name, 10)], role=ROLE, protected=[])
+    assert entry.disposition == cleanup.KEEP, entry
+
+
+def test_F1_a_statement_can_only_name_the_database_that_was_checked() -> None:
+    """`geov0_test_x?" WITH (FORCE)--` with a matching OID: unescaped, its DROP statement is
+    `DROP DATABASE "geov0_test_x?" WITH (FORCE)--"` - another database, and with FORCE."""
+
+    evil, target = 'geov0_test_x?" WITH (FORCE)--', "geov0_test_x?"
+    catalog = [_row(evil, 1), _row(target, 2)]
+    manifest = _manifest_of(catalog)
+    for entry in manifest["databases"]:
+        if entry["name"] == evil:  # as a dry run that accepted the name would have written it
+            family, kind = cleanup.family_and_kind(evil, False)
+            entry.update(disposition=cleanup.DROP, family=family, kind=kind)
+    connection = _Recorder(catalog)
+
+    with pytest.raises(cleanup.CleanupRefused):
+        asyncio.run(cleanup.apply_manifest(connection, manifest, protected=[]))
+
+    assert connection.changes() == [], connection.changes()
+    assert sorted(row["name"] for row in catalog) == sorted([evil, target]), "a database outside the manifest was dropped"
+
+
+def test_F2_an_apply_without_a_declaration_of_what_is_protected_is_refused(monkeypatch, capsys) -> None:
+    import asyncpg
+
+    async def no_connection(*_a, **_k):
+        raise AssertionError("a connection was attempted")
+
+    monkeypatch.setattr(asyncpg, "connect", no_connection)
+    monkeypatch.setenv("TEST_DATABASE_URL", "postgresql://geo:geo@127.0.0.1:5432/x")
+    try:
+        code = cleanup.main(["--apply", ".local-run/db-cleanup/none.json", "--maintenance-window-confirmed"])
+    except SystemExit as stopped:
+        code = stopped.code
+    assert code == 2 and "protect" in capsys.readouterr().err.lower()
+
+
+def test_F4_a_malformed_manifest_is_refused_before_anything_is_dropped() -> None:
+    catalog = _family("done", 100)
+    manifest = _manifest_of(catalog)
+    next(e for e in manifest["databases"] if e["name"] == "geov0_test_done")["oid"] = "bad"
+    connection = _Recorder(catalog)
+
+    with pytest.raises(cleanup.CleanupRefused):
+        asyncio.run(cleanup.apply_manifest(connection, manifest, protected=[]))
+
+    assert connection.changes() == [] and len(catalog) == 3, "part of a malformed manifest was applied"
