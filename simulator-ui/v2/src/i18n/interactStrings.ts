@@ -27,6 +27,7 @@ export const interactStrings = {
   unknownFrozen: 'Unresolved payment: {amount} {unit}, {from} → {to}.',
   unknownOtherRun: 'This payment belongs to another run, so it cannot be checked from here. Go back to that run, or discard it.',
   unknownBlocksNew: 'A payment with an unknown result has to be checked or discarded before another payment is sent.',
+  noValidKey: 'The payment has no valid key, so nothing was sent.',
   unknownDiscard: 'Discard and start over',
   unknownDiscardWarning: 'The first payment may have been made; a new one could be a second. Discard only after checking.',
   unknownDiscardConfirm: 'Discard it',

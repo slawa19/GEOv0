@@ -1,3 +1,6 @@
+import { compareMoney } from '../../utils/money'
+import { parseAmountStringOrNull } from '../../utils/numberFormat'
+
 /**
  * The life of the idempotency key of a manual payment (037 slice A2). No Vue, no network: rules only.
  *
@@ -13,6 +16,13 @@
  * does not replace it and gets no key (`begin` is `blocked`), the page being left or reloaded does not lose it (it is kept in
  * `sessionStorage`), and only a person's explicit `discard` ends it without a verdict.
  */
+
+/** The grammar of the server for `idempotency_key` (`SimulatorActionPaymentRealRequest`): 1-128 of `[A-Za-z0-9._:-]`. */
+export const IDEMPOTENCY_KEY_GRAMMAR = /^[A-Za-z0-9._:-]{1,128}$/
+
+export function isValidIdempotencyKey(key: unknown): key is string {
+  return typeof key === 'string' && IDEMPOTENCY_KEY_GRAMMAR.test(key)
+}
 
 export type PaymentIntent = {
   runId: string
@@ -101,14 +111,26 @@ function defaultStorage(): IntentStorage | null {
   }
 }
 
+/**
+ * The SHAPE of a stored intent: non-empty strings, and an amount that is a positive plain decimal exactly as it would be sent
+ * (the grammar of the amount field, no normalisation: the spelling is part of the request).
+ */
 function isIntent(v: unknown): v is PaymentIntent {
   if (!v || typeof v !== 'object') return false
   const o = v as Record<string, unknown>
-  return ['runId', 'from', 'to', 'equivalent', 'amount'].every((k) => typeof o[k] === 'string' && (o[k] as string).length > 0)
+  if (!['runId', 'from', 'to', 'equivalent', 'amount'].every((k) => typeof o[k] === 'string' && (o[k] as string).length > 0)) return false
+  const amount = o.amount as string
+  return parseAmountStringOrNull(amount) === amount && compareMoney(amount, '0') === 1
 }
 
 /**
  * The keeper of the ONE payment intent of a screen.
+ *
+ * LIMITS OF THE CONSTRUCTION, named: the record lives in the `sessionStorage` of ONE tab. A second tab, another browser or
+ * another device knows nothing of an unresolved payment, and a new payment confirmed there gets a new key. A storage that
+ * cannot REMOVE an entry cannot forget it either: within this instance a closed record (a verdict, a discard) is
+ * remembered by its key and is not lifted from the storage again, but after a page reload the entry is found again - which
+ * is honest: "Check / repeat" then returns the stored result and closes it.
  *
  * Persistence (R3): only an UNRESOLVED record is stored - at the moment a request is about to leave (`markSent`: a page left
  * mid-flight has an unknown outcome too) and while it is unknown - under a key that includes the run, and removed on a verdict
@@ -123,6 +145,8 @@ export function createPaymentIntentKeeper(
   const runIdNow = o.runId ?? (() => '')
   let current: PaymentIntentRecord | null = null
   let loadedFor: string | null = null
+  /** Keys of records this instance has closed (a verdict or a discard): never restored from the storage again. */
+  const closedKeys = new Set<string>()
 
   const storageKey = (runId: string) => `${STORAGE_PREFIX}${runId}`
 
@@ -144,6 +168,15 @@ export function createPaymentIntentKeeper(
     }
   }
 
+  function dropEntry(runId: string): void {
+    if (!storage) return
+    try {
+      storage.removeItem(storageKey(runId))
+    } catch {
+      /* no storage: memory only */
+    }
+  }
+
   /** The unresolved record of the current run, once per run, when nothing is held in memory. */
   function restore(): void {
     if (current) return
@@ -155,10 +188,22 @@ export function createPaymentIntentKeeper(
       const raw = storage.getItem(storageKey(runId))
       if (!raw) return
       const parsed = JSON.parse(raw) as { v?: unknown; key?: unknown; intent?: unknown }
-      if (parsed.v !== 1 || typeof parsed.key !== 'string' || !isIntent(parsed.intent) || parsed.intent.runId !== runId) return
+      // A record is only as good as what a request needs: the key by the SERVER's grammar, the intent by shape. Anything
+      // else is damage, and a damaged record must never be sent as a payment (a missing key would be a NEW payment).
+      if (
+        parsed.v !== 1 ||
+        !isValidIdempotencyKey(parsed.key) ||
+        !isIntent(parsed.intent) ||
+        parsed.intent.runId !== runId ||
+        closedKeys.has(parsed.key)
+      ) {
+        dropEntry(runId)
+        return
+      }
       current = { fingerprint: intentFingerprint(parsed.intent), key: parsed.key, intent: parsed.intent, unknown: true }
     } catch {
       /* unreadable entry or no storage: nothing to restore */
+      dropEntry(runId)
     }
   }
 
@@ -190,13 +235,17 @@ export function createPaymentIntentKeeper(
     settle(record: PaymentIntentRecord): void {
       if (current !== record) return
       erase(record)
+      closedKeys.add(record.key)
       current = null
       loadedFor = null
     },
     /** A person's explicit decision to give the unresolved intent up (the first payment may have been made). */
     discard(): void {
       restore()
-      if (current) erase(current)
+      if (current) {
+        erase(current)
+        closedKeys.add(current.key)
+      }
       current = null
       loadedFor = null
     },

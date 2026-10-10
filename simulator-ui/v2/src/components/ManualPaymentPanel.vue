@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import type {
   InteractPhase,
@@ -255,6 +255,15 @@ const isPickTo = computed(() => props.phase === 'picking-payment-to')
 const isConfirm = computed(() => props.phase === 'confirm-payment')
 const open = computed(() => {
   return isPickFrom.value || isPickTo.value || isConfirm.value
+})
+
+// Giving up a payment always starts from the FIRST step: closing the panel (the instance may live on, hidden), opening it again
+// or removing it does not carry step two over.
+watch(open, () => {
+  confirmingDiscard.value = false
+})
+onBeforeUnmount(() => {
+  confirmingDiscard.value = false
 })
 
 const routesLoading = computed(() => props.trustlinesLoading || props.paymentTargetsLoading)

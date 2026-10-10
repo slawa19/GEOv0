@@ -11,7 +11,7 @@ import { useInteractDataCache } from './interact/useInteractDataCache'
 import type { TrustlinesFetchState } from './interact/trustlinesSourceState'
 import { useInteractFSM, type InteractPhase, type InteractState } from './interact/useInteractFSM'
 import { useInteractHistory, type InteractHistoryEntry as InteractHistoryEntryT } from './interact/useInteractHistory'
-import { createPaymentIntentKeeper, isKeySpent, type PaymentIntent } from './interact/paymentIntent'
+import { createPaymentIntentKeeper, isKeySpent, isValidIdempotencyKey, type PaymentIntent } from './interact/paymentIntent'
 
 export type { InteractPhase, InteractState }
 
@@ -698,6 +698,13 @@ export function useInteractMode(opts: {
       return
     }
     const record = begun.record
+    // Defence in depth: a payment - and above all the repeat of an unresolved one - never leaves without a valid key. A
+    // missing key would not be a check, it would be a NEW payment.
+    if (!isValidIdempotencyKey(record.key)) {
+      state.error = interactText('noValidKey')
+      touchIntents()
+      return
+    }
     const names = { from: participantName(from), to: participantName(to) }
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>

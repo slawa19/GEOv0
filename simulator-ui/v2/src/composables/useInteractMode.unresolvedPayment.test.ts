@@ -374,6 +374,8 @@ describe('a storage whose removal fails does not lock the run', () => {
     expect(im.paymentOutcome.value?.kind).toBe('success')
     im.dismissPaymentResult()
     expect(im.paymentOutcome.value, 'the closed record was lifted out of the storage again').toBeNull()
+    im.setPaymentToPid('bob') // the result screen was left for the recipient step
+    await settle()
     await im.confirmPayment('20.00')
 
     expect(send).toHaveBeenCalledTimes(3)
@@ -407,5 +409,22 @@ describe('a refusal of the repeat does not take the unresolved payment out of th
     await reloaded.im.retryPayment()
 
     expect(keyOf(send, 2)).toBe(keyOf(send, 0))
+  })
+})
+
+describe('defence in depth', () => {
+  it('a request whose key is not valid is not sent - it would not be a check, it would be a new payment', async () => {
+    vi.stubGlobal('crypto', { randomUUID: () => '' })
+    try {
+      const send = vi.fn().mockResolvedValue(COMMITTED)
+      const { im } = await atConfirm(send)
+
+      await im.confirmPayment('10.00')
+
+      expect(send).not.toHaveBeenCalled()
+      expect(im.state.error).toContain('no valid key')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
