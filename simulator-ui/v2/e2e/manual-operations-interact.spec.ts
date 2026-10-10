@@ -190,11 +190,13 @@ async function chooseOverlayOption(
   selectId: string,
   optionValue: string,
   selectMayDisappear = false,
+  /** 037 B2: the recipient list opens by itself after the sender is chosen; then it is not opened again. */
+  alreadyOpen = false,
 ) {
   const trigger = page.locator(`#${selectId}__trigger`)
   await expect(trigger).toBeVisible()
   await expect(trigger).toBeEnabled()
-  await trigger.click()
+  if (!alreadyOpen) await trigger.click()
 
   const option = page.locator(
     `#${selectId}__surface [role="option"][data-option-value="${optionValue}"]`,
@@ -576,7 +578,7 @@ test.describe('Manual operations UI — Playwright E2E (Interact, mocked backend
 
     await chooseOverlayOption(page, 'mp-from', 'alice')
     await expect.poll(async () => await getSelectValues(page, '#mp-to')).toEqual(['bob'])
-    await chooseOverlayOption(page, 'mp-to', 'bob')
+    await chooseOverlayOption(page, 'mp-to', 'bob', false, true)
 
     // Confirm step should be active.
     await expect(page.locator('[data-testid="mp-direct-capacity-help"]')).toBeVisible()

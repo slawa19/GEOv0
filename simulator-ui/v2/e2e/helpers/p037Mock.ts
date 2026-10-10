@@ -125,6 +125,11 @@ export class Counter {
     this.steps.push(label)
     await this.page.locator(css).fill(value)
   }
+  /** One action: choose in a list that is ALREADY open (the recipient list opens by itself after the sender). It is asserted, not assumed. */
+  async chooseOpen(label: string, selectId: string, value: string) {
+    await expect(this.page.locator(`#${selectId}__surface`), `${label}: the list is already open`).toBeVisible()
+    await this.press(`${label}: choose option`, `#${selectId}__surface [role="option"][data-option-value="${value}"]`)
+  }
   async pick(label: string, selectId: string, value: string) {
     await this.press(`${label}: open list`, `#${selectId}__trigger`)
     await this.press(`${label}: choose option`, `#${selectId}__surface [role="option"][data-option-value="${value}"]`)
