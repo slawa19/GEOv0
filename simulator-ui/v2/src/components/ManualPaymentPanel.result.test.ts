@@ -200,8 +200,9 @@ describe('the estimate of the server', () => {
     const { host } = mount({ targetEstimate: received('87.5', 3) })
     await nextTick()
     expect(text(host, 'mp-estimate-max')).toBe('87.50 UAH')
-    expect(text(host, 'mp-estimate-hops')).toBe('· 3 step(s)')
-    expect(q(host, 'mp-estimate')!.getAttribute('title')).toContain('Shortest path: 3 step(s)')
+    // 037 B2: the shortest path is its own VISIBLE row (it was a tooltip), separate from the estimated maximum.
+    expect(text(host, 'mp-shortest-value')).toBe('3 steps')
+    expect(q(host, 'mp-estimate')!.getAttribute('title')).toBeNull()
   })
 
   it('"the server did not estimate" (null) is not a measured zero', async () => {

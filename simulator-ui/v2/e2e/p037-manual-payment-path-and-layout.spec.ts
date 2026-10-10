@@ -13,7 +13,7 @@
  * `hasTouch` + `tap()` emulate touch events, not a phone's browser chrome).
  */
 import { expect, test, type Page } from '@playwright/test'
-import { Counter, PAYMENT_ID, mockApp, ready } from './helpers/p037Mock.js'
+import { Counter, PAYMENT_ID, mockApp, ready, settleShell } from './helpers/p037Mock.js'
 
 /** The ordinary path on the current panel: Send Payment, From, To, amount, Confirm. */
 async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>) {
@@ -160,6 +160,8 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
 
   /** Rects of the panel's container, its controls, and what covers the centre of each control. */
   async function measure(page: Page, phase: string) {
+    // The window manager re-clamps a shell that grew a few frames after the content appeared: measure the step, not the transition.
+    await settleShell(page)
     return await page.evaluate((phase) => {
       const W = window.innerWidth
       const H = window.innerHeight
@@ -241,6 +243,8 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await page.locator('#mp-amount').fill('1.00')
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+    // The application's own success toast covers a corner of a phone screen for a few seconds; the container is not its owner.
+    await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
     measurements.push(await measure(page, 'result'))
 
     const perPhase = measurements.map((m) => ({ phase: m.phase, scrollWidth: m.scrollWidth, container: m.container,

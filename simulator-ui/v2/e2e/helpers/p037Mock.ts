@@ -136,3 +136,25 @@ export class Counter {
   }
 }
 
+
+/**
+ * Wait until the window shell of the payment panel has stopped moving: the window manager measures a shell that grew (a taller
+ * step) and re-clamps it into the screen a few frames LATER, so a figure taken in the frame the content appeared is a figure
+ * of the transition, not of the step. Four identical samples, two animation frames apart; no click, no scroll. Not a sleep: it
+ * ends as soon as the shell is still, and it fails the measurement (by timing out) if the shell never settles.
+ */
+export async function settleShell(page: Page): Promise<void> {
+  let prev = ''
+  let same = 0
+  for (let i = 0; i < 60 && same < 4; i += 1) {
+    const cur = await page.evaluate(() => new Promise<string>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const shell = document.querySelector('[data-testid="manual-payment-panel"]')?.closest('.ws-shell')
+        resolve(shell ? JSON.stringify(shell.getBoundingClientRect()) : '')
+      }))
+    }))
+    if (cur === prev) same += 1
+    else { same = 0; prev = cur }
+  }
+  if (same < 4) throw new Error('the payment window never settled (still moving after 60 samples)')
+}

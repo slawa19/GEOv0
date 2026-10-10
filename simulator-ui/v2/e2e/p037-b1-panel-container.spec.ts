@@ -19,7 +19,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { Counter, PAYMENT_ID, mockApp, ready } from './helpers/p037Mock.js'
+import { Counter, PAYMENT_ID, mockApp, ready, settleShell } from './helpers/p037Mock.js'
 
 type Fit = {
   selector: string
@@ -44,6 +44,8 @@ type StepMeasure = {
 
 /** Measure without touching the page: no scroll, no click. */
 async function measure(page: Page, step: string, selectors: string[]): Promise<StepMeasure> {
+  // The window manager re-clamps a shell that grew a few frames after the content appeared: measure the step, not the transition.
+  await settleShell(page)
   return await page.evaluate(({ step, selectors }) => {
     const W = window.innerWidth
     const H = window.innerHeight

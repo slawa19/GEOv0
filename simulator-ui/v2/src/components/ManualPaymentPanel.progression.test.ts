@@ -265,7 +265,7 @@ describe('the two visible captions of the chosen recipient', () => {
 
   it('shows "Shortest path: N steps" and "Estimated maximum: X" as two rows, plainly visible (no tooltip needed)', async () => {
     const host = await confirmWith(received('87.5', 3))
-    expect(text(host, 'mp-shortest')).toBe('Shortest path 3 steps')
+    expect(text(host, 'mp-shortest-value')).toBe('3 steps')
     expect(text(host, 'mp-estimate')).toContain('Estimated maximum')
     expect(text(host, 'mp-estimate-max')).toBe('87.50 UAH')
     expect(text(host, 'mp-estimate-source')).toBe('server estimate')
@@ -274,7 +274,7 @@ describe('the two visible captions of the chosen recipient', () => {
 
   it('says "1 step" for one step', async () => {
     const host = await confirmWith(received('5', 1))
-    expect(text(host, 'mp-shortest')).toBe('Shortest path 1 step')
+    expect(text(host, 'mp-shortest-value')).toBe('1 step')
   })
 
   it('"not estimated" (null) is not a measured zero, and a measured zero is not "not estimated"', async () => {
@@ -290,11 +290,11 @@ describe('the two visible captions of the chosen recipient', () => {
   it('names the state of the answer while it is not received, for BOTH captions', async () => {
     const loading = await confirmWith({ state: 'loading' })
     expect(text(loading, 'mp-estimate-max')).toBe('waiting for the server')
-    expect(text(loading, 'mp-shortest')).toBe('Shortest path waiting for the server')
+    expect(text(loading, 'mp-shortest-value')).toBe('waiting for the server')
     document.body.innerHTML = ''
     const failed = await confirmWith({ state: 'failed' })
     expect(text(failed, 'mp-estimate-max')).toBe('not received')
-    expect(text(failed, 'mp-shortest')).toBe('Shortest path not received')
+    expect(text(failed, 'mp-shortest-value')).toBe('not received')
   })
 
   it('a recipient the answer does not list gets no captions at all', async () => {

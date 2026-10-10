@@ -96,6 +96,7 @@ const rootClass = computed(() => {
 })
 
 const amount = ref('')
+const amountEl = ref<HTMLInputElement | null>(null)
 
 const amountNormalized = computed(() => parseAmountStringOrNull(amount.value))
 
@@ -158,6 +159,14 @@ const estimateMax = computed(() => {
 const exceedsEstimate = computed(() => {
   if (estimateMax.value == null || amountNormalized.value == null) return false
   return compareMoney(amountNormalized.value, estimateMax.value) === 1
+})
+
+const shortestText = computed(() => {
+  const e = estimate.value
+  if (!e) return null
+  if (e.state === 'loading') return interactText('estimateLoading')
+  if (e.state === 'failed') return interactText('estimateFailed')
+  return e.hops === 1 ? interactText('shortestOneStep') : interactText('shortestSteps', { n: e.hops })
 })
 
 const estimateText = computed(() => {
@@ -303,12 +312,26 @@ async function onConfirm() {
   await props.confirmPayment(amountNormalized.value)
 }
 
+/** A participant by NAME; the id only when the list has no record of it (never a guess). */
+function nameOf(pid: string | null | undefined): string {
+  const id = String(pid ?? '').trim()
+  if (!id) return ''
+  const found = (props.participants ?? []).find((p) => p.pid === id)
+  return String(found?.name ?? '').trim() || id
+}
+
 function titleText() {
   const from = props.state.fromPid
   const to = props.state.toPid
-  if (from && to) return `Manual payment: ${from} → ${to}`
+  if (from && to) return `Manual payment: ${nameOf(from)} → ${nameOf(to)}`
   return 'Manual payment'
 }
+
+// Summary of the confirm step: who pays whom, then the sum, from the fields as they are now.
+const summaryParties = computed(() => interactText('summaryPays', { from: nameOf(props.state.fromPid), to: nameOf(props.state.toPid) }))
+const summaryAmount = computed(() =>
+  amountPositive.value && amountNormalized.value != null ? moneyText(amountNormalized.value, props.unit) : interactText('summaryNoAmount'),
+)
 
 const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
   participants: () => props.participants,
@@ -463,6 +486,29 @@ watch(
   },
 )
 
+// 037 B2 - the progression. The recipient list opens by itself ONLY as the continuation of an explicit choice of the sender
+// (`selected` of the sender list: the user chose; never a change that came from outside - a refresh, a restored payment, a panel
+// started from an edge or a node card), and only while there is still a recipient to choose. The focus goes INTO that list (its
+// own Escape and arrows work); choosing the recipient moves it to the amount and NEVER sends.
+const toSelect = ref<{ openWithFocus: () => void } | null>(null)
+const nextChoice = ref('')
+
+function onFromSelected(v: string | null) {
+  if (!v || unknownOutcome.value || props.busy) return
+  if (props.state.toPid) return // the recipient is already there (the sender was changed at the confirm step)
+  nextChoice.value = interactText('nextChoiceRecipient')
+  toSelect.value?.openWithFocus()
+}
+
+function onToSelected(v: string | null) {
+  if (!v || !isConfirm.value) return
+  amountEl.value?.focus()
+}
+
+function onToOpenChange(isOpen: boolean) {
+  if (!isOpen) nextChoice.value = ''
+}
+
 function onFromChange(v: string) {
   const pid = v ? v : null
   props.setFromPid?.(pid)
@@ -554,6 +600,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           labelledBy="mp-from-label"
           triggerLabel="From participant"
           @update:model-value="onFromChange($event ?? '')"
+          @selected="onFromSelected"
         />
       </div>
 
@@ -564,6 +611,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         </label>
         <OverlaySelect
           id="mp-to"
+          ref="toSelect"
           :model-value="state.toPid ?? null"
           :options="toOptions"
           :disabled="busy || !state.fromPid || toKnownEmpty"
@@ -572,6 +620,8 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           describedBy="mp-to-help"
           surfaceLabel="To participant options"
           @update:model-value="onToChange($event ?? '')"
+          @selected="onToSelected"
+          @update:open="onToOpenChange"
         />
       </div>
 
@@ -592,12 +642,24 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         {{ toAriaHelpText }}
       </div>
 
+      <!-- Announces the list the form opened for the user (a screen reader reads a live region, not a focus move alone). -->
+      <div class="mp-sr" role="status" aria-live="polite" data-testid="mp-next-choice">{{ nextChoice }}</div>
+
       <div v-if="isPickFrom" class="ds-help mp-pick-help">
         Pick From node (canvas) or choose from dropdown.
       </div>
       <div v-if="isPickTo" class="ds-help mp-pick-help">Pick To node (canvas) or choose from dropdown.</div>
 
       <template v-if="isConfirm">
+        <div class="ds-row ds-row--space mp-summary" data-testid="mp-summary">
+          <div class="ds-label">{{ interactText('summaryTitle') }}</div>
+          <div class="ds-value">
+            <span data-testid="mp-summary-parties">{{ summaryParties }}</span>
+            <span class="ds-muted">·</span>
+            <span class="ds-mono" data-testid="mp-summary-amount">{{ summaryAmount }}</span>
+          </div>
+        </div>
+
         <div class="ds-row ds-row--space">
           <div class="ds-label">Direct capacity</div>
           <div class="ds-value ds-mono">
@@ -606,20 +668,21 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           </div>
         </div>
 
-        <div
-          v-if="estimateText"
-          class="ds-row ds-row--space"
-          data-testid="mp-estimate"
-          :title="estimate && estimate.state === 'received' ? interactText('estimateShortestTitle', { n: estimate.hops }) : undefined"
-        >
-          <div class="ds-label">{{ interactText('estimateTitle') }}</div>
-          <div class="ds-value ds-mono">
-            <span data-testid="mp-estimate-max">{{ estimateText }}</span>
-            <span v-if="estimate && estimate.state === 'received'" class="ds-muted" data-testid="mp-estimate-hops">
-              · {{ interactText('estimateShortest', { n: estimate.hops }) }}
-            </span>
+        <!-- The two captions of the chosen recipient, from the server's `payment-targets` answer - NOT from the line figures above. -->
+        <template v-if="estimate">
+          <div class="ds-row ds-row--space" data-testid="mp-shortest">
+            <div class="ds-label">{{ interactText('shortestTitle') }}</div>
+            <div class="ds-value ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</div>
           </div>
-        </div>
+          <div class="ds-row ds-row--space" data-testid="mp-estimate">
+            <div class="ds-label">{{ interactText('estimateTitle') }}</div>
+            <div class="ds-value ds-mono">
+              <span data-testid="mp-estimate-max">{{ estimateText }}</span>
+              <span v-if="estimate.state === 'received' && estimate.maxAvailable != null" class="ds-muted mp-source" data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>
+            </div>
+          </div>
+          <div class="ds-help ds-muted" data-testid="mp-route-note">{{ interactText('routeNote') }}</div>
+        </template>
 
         <div class="ds-help ds-muted" data-testid="mp-direct-capacity-help">
           {{ interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel }) }}
@@ -630,6 +693,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           <div class="ds-controls__suffix mp-amount-row">
             <input
               id="mp-amount"
+              ref="amountEl"
               v-model="amount"
               class="ds-input ds-mono mp-amount-input"
               type="text"
@@ -756,6 +820,23 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
 .mp-actions {
   justify-content: flex-end;
+}
+
+.mp-source {
+  margin-left: 6px;
+}
+
+/* Visually hidden, still read by a screen reader: the live region that announces the list the form opened. */
+.mp-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .mp-confirm-help {
