@@ -13,7 +13,7 @@
  * `hasTouch` + `tap()` emulate touch events, not a phone's browser chrome).
  */
 import { expect, test, type Page } from '@playwright/test'
-import { Counter, PAYMENT_ID, mockApp, ready } from './helpers/p037Mock.js'
+import { Counter, PAYMENT_ID, mockApp, ready, settleShell } from './helpers/p037Mock.js'
 
 /** The ordinary path on the current panel: Send Payment, From, To, amount, Confirm. */
 async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>) {
@@ -30,7 +30,7 @@ async function payAliceToBob(page: Page, bodies: Array<Record<string, unknown>>)
   await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
 
   await c.pick('From', 'mp-from', 'alice')
-  await c.pick('To', 'mp-to', 'bob')
+  await c.chooseOpen('To', 'mp-to', 'bob')
   await c.type('Amount', '#mp-amount', '1.00')
   await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
 
@@ -85,7 +85,7 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     const c = new Counter(page, false)
     await page.locator('[data-testid="actionbar-payment"]').click()
     await c.pick('From', 'mp-from', 'alice')
-    await c.pick('To', 'mp-to', 'bob')
+    await c.chooseOpen('To', 'mp-to', 'bob')
     await c.type('Amount', '#mp-amount', '1.00')
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
 
@@ -109,11 +109,12 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     expect({ ...bodies[1]!, client_action_id: null }).toEqual({ ...bodies[0]!, client_action_id: null })
   })
 
-  // The budget is five actions after "Send Payment". Decision 037-B (PANEL-PLUS, 2026-10-10): the wizard is NOT built; the
-  // path is shortened on the existing panel (PR B2), which removes this marker and turns the test into a plain assertion.
-  test('BUDGET (expected to fail until PR B2): not more than 5 user actions after "Send Payment"', async ({ page }) => {
-    test.fail(true, 'PR B2 (037-B PANEL-PLUS): the From -> To progression is not shortened yet; the current panel needs six')
+  // The budget: not more than five user actions after "Send Payment" - the SAME budget and the SAME way of counting as before
+  // (one click, tap or fill = one action). What changed is the product: the recipient list opens by itself after the sender is
+  // chosen (PR B2, decision 037-B PANEL-PLUS), so "To" is one action - choosing - and the test asserts the list is already open.
+  test('BUDGET: not more than 5 user actions after "Send Payment"', async ({ page }) => {
     const { c } = await payAliceToBob(page, [])
+    expect(c.steps, 'the path, step by step').toEqual(['From: open list', 'From: choose option', 'To: choose option', 'Amount', 'Confirm'])
     expect(c.steps.length, `current path: ${c.steps.join(' -> ')}`).toBeLessThanOrEqual(5)
   })
 
@@ -159,6 +160,8 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
 
   /** Rects of the panel's container, its controls, and what covers the centre of each control. */
   async function measure(page: Page, phase: string) {
+    // The window manager re-clamps a shell that grew a few frames after the content appeared: measure the step, not the transition.
+    await settleShell(page)
     return await page.evaluate((phase) => {
       const W = window.innerWidth
       const H = window.innerHeight
@@ -224,7 +227,11 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     const surfaceFrom = await page.locator('#mp-from__surface').boundingBox()
     await c.press('From: choose', '#mp-from__surface [role="option"][data-option-value="alice"]')
 
-    await expect.poll(async () => (await page.locator('#mp-to__trigger').isEnabled())).toBe(true)
+    // 037 B2: the recipient list opens by itself after the sender is chosen. Close it (not a user step of the path) to measure
+    // the step with its controls uncovered; the list itself is measured by the B1 container spec.
+    await expect(page.locator('#mp-to__surface')).toBeVisible()
+    await page.locator('#mp-to__trigger').tap()
+    await expect(page.locator('#mp-to__surface')).toBeHidden()
     measurements.push(await measure(page, 'pick-to'))
     await c.press('To: open list', '#mp-to__trigger')
     await c.press('To: choose', '#mp-to__surface [role="option"][data-option-value="bob"]')
@@ -236,6 +243,8 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     await page.locator('#mp-amount').fill('1.00')
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-result"]')).toBeVisible()
+    // The application's own success toast covers a corner of a phone screen for a few seconds; the container is not its owner.
+    await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
     measurements.push(await measure(page, 'result'))
 
     const perPhase = measurements.map((m) => ({ phase: m.phase, scrollWidth: m.scrollWidth, container: m.container,
@@ -259,7 +268,7 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     const c = new Counter(page, true)
     await c.press('open payment', '[data-testid="actionbar-payment"]')
     await c.pick('From', 'mp-from', 'alice')
-    await c.pick('To', 'mp-to', 'bob')
+    await c.chooseOpen('To', 'mp-to', 'bob')
     await page.locator('#mp-amount').fill('1.00')
     await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
     await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
@@ -285,7 +294,7 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
     const c = new Counter(page, true)
     await c.press('open payment', '[data-testid="actionbar-payment"]')
     await c.pick('From', 'mp-from', 'alice')
-    await c.pick('To', 'mp-to', 'bob')
+    await c.chooseOpen('To', 'mp-to', 'bob')
     await expect(page.locator('#mp-amount')).toBeVisible()
     const source = await page.locator('[data-testid="mp-figures-source"]').getAttribute('data-figures-source')
     const m = await measure(page, 'confirm-snapshot-only')

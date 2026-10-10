@@ -37,6 +37,15 @@ export const interactStrings = {
   unknownRetry: 'Check / repeat',
   unknownRetryHint: 'A repeat uses the same key: the payment is made once.',
 
+  // The progression of the form: what the form announces when it opens the next list for the user.
+  nextChoiceRecipient: 'Choose the recipient.',
+
+  // The summary of the confirm step.
+  summaryTitle: 'Payment',
+  summaryPays: '{from} pays {to}',
+  summaryAmountTitle: 'Sum',
+  summaryNoAmount: 'amount not entered',
+
   // The hint under the direct capacity of the confirm step.
   directCapacityHelp: '1-hop hint; recipients are server-routed (max hops: {hops}).',
 
@@ -51,8 +60,11 @@ export const interactStrings = {
 
   // The server's estimate for the chosen recipient (`payment-targets`, `include_max_available`).
   estimateTitle: 'Estimated maximum',
-  estimateShortest: '{n} step(s)',
-  estimateShortestTitle: 'Shortest path: {n} step(s) (the estimated maximum is a separate computation)',
+  estimateSource: 'server estimate',
+  shortestTitle: 'Shortest path',
+  shortestSteps: '{n} steps',
+  shortestOneStep: '1 step',
+  routeNote: 'The route is chosen when the payment is executed.',
   estimateNotEstimated: 'not estimated',
   estimateLoading: 'waiting for the server',
   estimateFailed: 'not received',

@@ -38,7 +38,8 @@ export async function mockApp(
   page: Page,
   o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number; paymentRealNetworkFailures?: { left: number };
     /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number;
-    /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean },
+    /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean;
+    /** A second line, alice -> bob: Bob is a sender as well as Alice. */ bobCanPay?: boolean },
 ) {
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
@@ -77,7 +78,10 @@ export async function mockApp(
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/actions/trustlines-list`, 'i'), (r) =>
     o.trustlinesStatus && o.trustlinesStatus !== 200 ? json(r, { code: 'BOOM', message: 'down' }, o.trustlinesStatus) : json(r, {
       items: [{ from_pid: 'bob', from_name: 'Bob', to_pid: 'alice', to_name: 'Alice', equivalent: 'UAH',
-        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }],
+        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' },
+      // Bob can pay Alice too: both are senders (a correction of the sender has someone to correct to).
+      ...(o.bobCanPay ? [{ from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'UAH',
+        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }] : [])],
     }))
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/payment-targets`, 'i'), (r) => {
     const from = new URL(r.request().url()).searchParams.get('from_pid')
@@ -125,9 +129,36 @@ export class Counter {
     this.steps.push(label)
     await this.page.locator(css).fill(value)
   }
+  /** One action: choose in a list that is ALREADY open (the recipient list opens by itself after the sender). It is asserted, not assumed. */
+  async chooseOpen(label: string, selectId: string, value: string) {
+    await expect(this.page.locator(`#${selectId}__surface`), `${label}: the list is already open`).toBeVisible()
+    await this.press(`${label}: choose option`, `#${selectId}__surface [role="option"][data-option-value="${value}"]`)
+  }
   async pick(label: string, selectId: string, value: string) {
     await this.press(`${label}: open list`, `#${selectId}__trigger`)
     await this.press(`${label}: choose option`, `#${selectId}__surface [role="option"][data-option-value="${value}"]`)
   }
 }
 
+
+/**
+ * Wait until the window shell of the payment panel has stopped moving: the window manager measures a shell that grew (a taller
+ * step) and re-clamps it into the screen a few frames LATER, so a figure taken in the frame the content appeared is a figure
+ * of the transition, not of the step. Four identical samples, two animation frames apart; no click, no scroll. Not a sleep: it
+ * ends as soon as the shell is still, and it fails the measurement (by timing out) if the shell never settles.
+ */
+export async function settleShell(page: Page): Promise<void> {
+  let prev = ''
+  let same = 0
+  for (let i = 0; i < 60 && same < 4; i += 1) {
+    const cur = await page.evaluate(() => new Promise<string>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const shell = document.querySelector('[data-testid="manual-payment-panel"]')?.closest('.ws-shell')
+        resolve(shell ? JSON.stringify(shell.getBoundingClientRect()) : '')
+      }))
+    }))
+    if (cur === prev) same += 1
+    else { same = 0; prev = cur }
+  }
+  if (same < 4) throw new Error('the payment window never settled (still moving after 60 samples)')
+}

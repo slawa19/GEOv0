@@ -19,7 +19,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { Counter, PAYMENT_ID, mockApp, ready } from './helpers/p037Mock.js'
+import { Counter, PAYMENT_ID, mockApp, ready, settleShell } from './helpers/p037Mock.js'
 
 type Fit = {
   selector: string
@@ -44,6 +44,8 @@ type StepMeasure = {
 
 /** Measure without touching the page: no scroll, no click. */
 async function measure(page: Page, step: string, selectors: string[]): Promise<StepMeasure> {
+  // The window manager re-clamps a shell that grew a few frames after the content appeared: measure the step, not the transition.
+  await settleShell(page)
   return await page.evaluate(({ step, selectors }) => {
     const W = window.innerWidth
     const H = window.innerHeight
@@ -157,15 +159,14 @@ for (const vp of VIEWPORTS) {
       surfaces.push(await measureSurface(page, 'mp-from', 'pick-from list'))
       await c.press('From: choose', '#mp-from__surface [role="option"][data-option-value="alice"]')
 
-      await expect.poll(async () => (await page.locator('#mp-to__trigger').isEnabled())).toBe(true)
-      steps.push(await measure(page, 'pick-to', ['#mp-from__trigger', '#mp-to__trigger', '[data-testid="manual-payment-cancel"]']))
-
-      // The long list (31 recipients): opened by touch, measured; then by keyboard, walked with ArrowDown.
-      await c.press('To: open list', '#mp-to__trigger')
+      // 037 B2: the recipient list opens by itself after the sender is chosen - the long list (31 recipients) is measured as it
+      // opens (touch); it is then closed to measure the step with its controls uncovered, and walked with the keyboard.
       await expect(page.locator('#mp-to__surface')).toBeVisible()
-      surfaces.push(await measureSurface(page, 'mp-to', 'pick-to list (touch)'))
+      surfaces.push(await measureSurface(page, 'mp-to', 'pick-to list (opened by itself)'))
       await page.locator('#mp-to__trigger').tap()
       await expect(page.locator('#mp-to__surface')).toBeHidden()
+      await expect.poll(async () => (await page.locator('#mp-to__trigger').isEnabled())).toBe(true)
+      steps.push(await measure(page, 'pick-to', ['#mp-from__trigger', '#mp-to__trigger', '[data-testid="manual-payment-cancel"]']))
       await page.locator('#mp-to__trigger').focus()
       await page.keyboard.press('Enter')
       await expect(page.locator('#mp-to__surface')).toBeVisible()
@@ -238,7 +239,7 @@ for (const vp of VIEWPORTS) {
       const c = new Counter(page, true)
       await c.press('open payment', '[data-testid="actionbar-payment"]')
       await c.pick('From', 'mp-from', 'alice')
-      await c.pick('To', 'mp-to', 'bob')
+      await c.chooseOpen('To', 'mp-to', 'bob')
       await page.locator('#mp-amount').fill('1.00')
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-result-route-3"]')).toBeVisible()
@@ -316,7 +317,7 @@ for (const vp of VIEWPORTS) {
       const c = new Counter(page, true)
       await c.press('open payment', '[data-testid="actionbar-payment"]')
       await c.pick('From', 'mp-from', 'alice')
-      await c.pick('To', 'mp-to', 'bob')
+      await c.chooseOpen('To', 'mp-to', 'bob')
       await page.locator('#mp-amount').fill('1.00')
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
