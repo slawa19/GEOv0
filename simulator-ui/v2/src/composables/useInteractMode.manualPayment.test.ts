@@ -196,6 +196,13 @@ describe('the key of a manual payment', () => {
     expect(keyOf(send, 1)).toBe(keyOf(send, 0))
   })
 
+  it('a busy refusal advises a repeat - safe, because every manual payment is sent under a key', async () => {
+    const send = vi.fn().mockRejectedValueOnce(refusal(409, 'CONFLICT', { reason: 'busy' }))
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+    expect(im.state.error).toMatch(/send the same payment again/i)
+  })
+
   it('retryPayment does nothing when nothing is unknown', async () => {
     const send = vi.fn().mockResolvedValue(COMMITTED)
     const { im } = await atConfirm(send)

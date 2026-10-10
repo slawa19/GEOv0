@@ -224,6 +224,22 @@ describe('the estimate of the server', () => {
     expect(calls.confirm).toHaveBeenCalledWith('50.01')
   })
 
+  it('the estimate is compared exactly too: one atom above warns, the estimate itself and one atom below do not', async () => {
+    setEquivalentPrecisions([{ code: 'P8', precision: 8 }])
+    const warnsAt = async (amount: string) => {
+      const { host, unmount } = mount({ unit: 'P8', targetEstimate: received('999999999999.99999998') })
+      await nextTick()
+      await typeAmount(host, amount)
+      const warned = q(host, 'mp-confirm-warning') !== null
+      unmount()
+      document.body.innerHTML = ''
+      return warned
+    }
+    expect(await warnsAt('999999999999.99999999')).toBe(true)
+    expect(await warnsAt('999999999999.99999998')).toBe(false)
+    expect(await warnsAt('999999999999.99999997')).toBe(false)
+  })
+
   it('an amount equal to the estimate does not warn', async () => {
     const { host } = mount({ targetEstimate: received('50.00') })
     await nextTick()
