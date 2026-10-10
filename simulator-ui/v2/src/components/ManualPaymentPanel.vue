@@ -312,6 +312,17 @@ async function onConfirm() {
   await props.confirmPayment(amountNormalized.value)
 }
 
+// A key held down repeats keydown (`repeat: true`) without a new press: only a FRESH press confirms. Defence in depth for every
+// way a held key could reach a send - the amount field (Enter) and the Confirm button (Enter / Space activate a button).
+function onAmountEnter(event: KeyboardEvent) {
+  if (event.repeat) return
+  void onConfirm()
+}
+
+function onConfirmKeydown(event: KeyboardEvent) {
+  if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault()
+}
+
 /** A participant by NAME; the id only when the list has no record of it (never a guess). */
 function nameOf(pid: string | null | undefined): string {
   const id = String(pid ?? '').trim()
@@ -321,6 +332,9 @@ function nameOf(pid: string | null | undefined): string {
 }
 
 function titleText() {
+  // A payment of unknown result is FROZEN: the header describes it, not the live fields (an edge or a node card may have set others).
+  const frozen = unknownOutcome.value
+  if (frozen) return `Manual payment: ${frozen.fromName} → ${frozen.toName}`
   const from = props.state.fromPid
   const to = props.state.toPid
   if (from && to) return `Manual payment: ${nameOf(from)} → ${nameOf(to)}`
@@ -488,20 +502,30 @@ watch(
 
 // 037 B2 - the progression. The recipient list opens by itself ONLY as the continuation of an explicit choice of the sender
 // (`selected` of the sender list: the user chose; never a change that came from outside - a refresh, a restored payment, a panel
-// started from an edge or a node card), and only while there is still a recipient to choose. The focus goes INTO that list (its
-// own Escape and arrows work); choosing the recipient moves it to the amount and NEVER sends.
+// started from an edge or a node card). The focus goes INTO that list (its own Escape and arrows work); choosing the recipient
+// moves it to the amount and NEVER sends.
+//
+// Both moves are the FIRST PASS only, and "first pass" is decided by the state BEFORE the user's choice (was there a recipient?),
+// captured in `onFromChange` / `onToChange` - never by what the choice left behind: changing the sender to the very recipient
+// EMPTIES the recipient, and that is a correction, not a first pass. A correction keeps the focus where the restore put it (on the
+// control just used), because at the confirm step the amount already holds a sum and Enter in it confirms.
 const toSelect = ref<{ openWithFocus: () => void } | null>(null)
 const nextChoice = ref('')
+const firstPass = { from: false, to: false }
 
 function onFromSelected(v: string | null) {
-  if (!v || unknownOutcome.value || props.busy) return
-  if (props.state.toPid) return // the recipient is already there (the sender was changed at the confirm step)
+  const first = firstPass.from
+  firstPass.from = false
+  if (!v || !first || unknownOutcome.value || props.busy) return
   nextChoice.value = interactText('nextChoiceRecipient')
   toSelect.value?.openWithFocus()
 }
 
 function onToSelected(v: string | null) {
-  if (!v || !isConfirm.value) return
+  const first = firstPass.to
+  firstPass.to = false
+  if (!v || !first || !isConfirm.value) return
+  if (amount.value.trim() !== '') return // never take the focus into a field that already holds a sum
   amountEl.value?.focus()
 }
 
@@ -511,6 +535,7 @@ function onToOpenChange(isOpen: boolean) {
 
 function onFromChange(v: string) {
   const pid = v ? v : null
+  firstPass.from = pid != null && !props.state.toPid
   props.setFromPid?.(pid)
   // If To is now invalid, clear it.
   if (pid && pid === props.state.toPid) props.setToPid?.(null)
@@ -518,6 +543,7 @@ function onFromChange(v: string) {
 }
 
 function onToChange(v: string) {
+  firstPass.to = !!v && !props.state.toPid
   props.setToPid?.(v ? v : null)
   toSelectionInvalidWarning.value = null
 }
@@ -705,7 +731,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
               placeholder="0.00"
               :aria-invalid="amount.trim() && !amountValid ? 'true' : 'false'"
               aria-describedby="mp-amount-help"
-              @keydown.enter.prevent="onConfirm"
+              @keydown.enter.prevent="onAmountEnter"
             />
             <span class="ds-label ds-muted">{{ unit }}</span>
           </div>
@@ -785,6 +811,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           type="button"
           data-testid="manual-payment-confirm"
           :disabled="!canConfirm"
+          @keydown="onConfirmKeydown"
           @click="onConfirm"
         >
           {{ busy ? 'Sending…' : 'Confirm' }}
