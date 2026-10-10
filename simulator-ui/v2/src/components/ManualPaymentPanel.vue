@@ -397,6 +397,8 @@ const { participantsSorted, toParticipants } = useParticipantsList<ParticipantIn
 // MP-3 (Phase 2): filter From list by availability of outgoing direct-hop payments.
 // For payment A -> B, capacity is consumed on TL B -> A, therefore sender candidates are collected
 // from `tl.to_pid` where TL is active and has `available > 0`.
+// Capacity of S paying R is limit(R->S) - debt[S->R] + debt[R->S] (docs/ru/02-protocol-spec.md): the creditor S of an active
+// line S -> R also pays R by reducing R's debt to S, with no incoming line, so `tl.from_pid` is a candidate where `used > 0`.
 const fromParticipants = computed<ParticipantInfo[]>(() => {
   const items = Array.isArray(props.trustlines) ? props.trustlines : []
 
@@ -408,12 +410,16 @@ const fromParticipants = computed<ParticipantInfo[]>(() => {
     if (!isActiveStatus(tl.status)) continue
 
     const available = parseAmountNumber(tl.available)
-    if (!Number.isFinite(available)) continue
-    if (!(available > 0)) continue
+    if (Number.isFinite(available) && available > 0) {
+      const pid = (tl.to_pid ?? '').trim()
+      if (pid) pidsWithOutgoing.add(pid)
+    }
 
-    const pid = (tl.to_pid ?? '').trim()
-    if (!pid) continue
-    pidsWithOutgoing.add(pid)
+    const used = parseAmountNumber(tl.used)
+    if (Number.isFinite(used) && used > 0) {
+      const creditor = (tl.from_pid ?? '').trim()
+      if (creditor) pidsWithOutgoing.add(creditor)
+    }
   }
 
   // Spec fallback: no outgoing candidates found => no filtering.
