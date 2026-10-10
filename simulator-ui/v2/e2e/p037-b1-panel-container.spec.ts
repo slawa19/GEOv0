@@ -38,6 +38,8 @@ type StepMeasure = {
   pageScrollTop: number
   shell: { x: number; y: number; w: number; h: number; inside: boolean } | null
   fits: Fit[]
+  /** The scrolling body of the panel: where long content scrolls INSIDE the window. */
+  body: { scrollHeight: number; clientHeight: number } | null
 }
 
 /** Measure without touching the page: no scroll, no click. */
@@ -82,6 +84,7 @@ async function measure(page: Page, step: string, selectors: string[]): Promise<S
       shell: sr && { x: Math.round(sr.x), y: Math.round(sr.y), w: Math.round(sr.width), h: Math.round(sr.height),
         inside: sr.left >= -tol && sr.top >= -tol && sr.right <= W + tol && sr.bottom <= H + tol },
       fits,
+      body: (() => { const b = panel?.querySelector<HTMLElement>(':scope > .ds-panel__body'); return b ? { scrollHeight: b.scrollHeight, clientHeight: b.clientHeight } : null })(),
     }
   }, { step, selectors })
 }
@@ -197,7 +200,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
       steps.push(await measure(page, 'result', ['[data-testid="mp-result-another"]', '[data-testid="mp-result-close"]']))
 
-      const report = { viewport: vp, steps: steps.map((s) => ({ step: s.step, shell: s.shell, problems: problems(s) })), surfaces, keyboard }
+      const report = { viewport: vp, steps: steps.map((s) => ({ step: s.step, shell: s.shell, body: s.body, problems: problems(s) })), surfaces, keyboard }
       console.log(`P037 B1 CONTAINER ${JSON.stringify(report)}`)
       testInfo.annotations.push({ type: 'P037-B1', description: JSON.stringify(report.steps.map((s) => ({ step: s.step, problems: s.problems }))) })
 
@@ -212,6 +215,61 @@ for (const vp of VIEWPORTS) {
       expect.soft(keyboard.activeInsideSurface, `keyboard: the active option (${keyboard.activeLabel}) is whole inside the surface`).toBe(true)
       expect.soft(keyboard.activeInsideViewport, 'keyboard: the active option is inside the viewport').toBe(true)
       expect.soft(keyboard.pageScrollTop, 'keyboard: the page did not scroll').toBe(0)
+    })
+
+    test('a result longer than the screen scrolls INSIDE the window; its buttons stay whole in view', async ({ page }, testInfo) => {
+      await mockApp(page, { paymentRealBodies: [], extraTargets: 5, longRoutes: true })
+      await page.goto('/?mode=real&ui=interact&e2eReal=1')
+      await ready(page, true)
+
+      const c = new Counter(page, true)
+      await c.press('open payment', '[data-testid="actionbar-payment"]')
+      await c.pick('From', 'mp-from', 'alice')
+      await c.pick('To', 'mp-to', 'bob')
+      await page.locator('#mp-amount').fill('1.00')
+      await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
+      await expect(page.locator('[data-testid="mp-result-route-3"]')).toBeVisible()
+      await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
+
+      const m = await measure(page, 'long-result', ['[data-testid="mp-result-another"]', '[data-testid="mp-result-close"]'])
+      const scrolls = !!m.body && m.body.scrollHeight > m.body.clientHeight + 1
+      console.log(`P037 B1 CONTAINER-LONG-RESULT ${JSON.stringify({ viewport: vp, shell: m.shell, body: m.body, scrolls, problems: problems(m) })}`)
+      testInfo.annotations.push({ type: 'P037-B1-LONG-RESULT', description: JSON.stringify({ body: m.body, problems: problems(m) }) })
+
+      expect.soft(problems(m), `long result in ${vp.w}x${vp.h}`).toEqual([])
+      // Not vacuous: on a short screen this result really is longer than the window, so the inner scroll is what keeps the buttons reachable.
+      if (vp.h <= 667) expect.soft(scrolls, `on ${vp.w}x${vp.h} the long result must scroll inside the window`).toBe(true)
+    })
+
+    test('only the payment panel window is re-shaped: the clearing and the trustline windows keep the manager layout', async ({ page }) => {
+      await mockApp(page, { paymentRealBodies: [] })
+      await page.goto('/?mode=real&ui=interact&e2eReal=1')
+      await ready(page, true)
+
+      const shellStyle = (testid: string) => page.evaluate((testid) => {
+        const el = document.querySelector(`[data-testid="${testid}"]`)
+        const shell = el?.closest('.ws-shell') as HTMLElement | null
+        if (!shell) return null
+        const cs = getComputedStyle(shell)
+        return { display: cs.display, dropdownMax: cs.getPropertyValue('--ds-ov-dropdown-maxh').trim(), bodyDisplay: getComputedStyle(shell.querySelector(':scope > .ws-body')!).display }
+      }, testid)
+
+      // Positive control: in this very viewport the payment window IS re-shaped (otherwise "unchanged" below proves nothing).
+      await page.locator('[data-testid="actionbar-payment"]').tap()
+      await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
+      expect(await shellStyle('manual-payment-panel'), 'control: the payment window is re-shaped here').toMatchObject({ display: 'flex', dropdownMax: '240px', bodyDisplay: 'flex' })
+      await page.locator('[data-testid="manual-payment-cancel"]').tap()
+      await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeHidden()
+
+      await page.locator('[data-testid="actionbar-clearing"]').tap()
+      await expect(page.locator('[data-testid="clearing-panel"]')).toBeVisible()
+      expect(await shellStyle('clearing-panel'), 'the clearing window').toEqual({ display: 'block', dropdownMax: '', bodyDisplay: 'block' })
+      await page.keyboard.press('Escape')
+      await expect(page.locator('[data-testid="clearing-panel"]')).toBeHidden()
+
+      await page.locator('[data-testid="actionbar-trustline"]').tap()
+      await expect(page.locator('[data-testid="trustline-panel"]')).toBeVisible()
+      expect(await shellStyle('trustline-panel'), 'the trustline window').toEqual({ display: 'block', dropdownMax: '', bodyDisplay: 'block' })
     })
 
     test('an unresolved payment (no answer) and its two-step discard fit', async ({ page }, testInfo) => {

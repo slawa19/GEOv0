@@ -37,7 +37,8 @@ export function snapshot(more: Participant[] = []) {
 export async function mockApp(
   page: Page,
   o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number; paymentRealNetworkFailures?: { left: number };
-    /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number },
+    /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number;
+    /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean },
 ) {
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
@@ -93,7 +94,12 @@ export async function mockApp(
     await json(r, {
       ok: true, payment_id: PAYMENT_ID, from_pid: req.from_pid, to_pid: req.to_pid, equivalent: req.equivalent,
       amount: String(req.amount), status: 'COMMITTED', client_action_id: req.client_action_id ?? null,
-      routes: [{ hops: [{ from: req.from_pid, to: req.to_pid, amount: String(req.amount) }] }],
+      routes: o.longRoutes
+        ? [1, 2, 3].map(() => ({ hops: [
+            { from: req.from_pid, to: 'x01', amount: String(req.amount) }, { from: 'x01', to: 'x02', amount: String(req.amount) },
+            { from: 'x02', to: 'x03', amount: String(req.amount) }, { from: 'x03', to: req.to_pid, amount: String(req.amount) },
+          ] }))
+        : [{ hops: [{ from: req.from_pid, to: req.to_pid, amount: String(req.amount) }] }],
     })
   })
 }

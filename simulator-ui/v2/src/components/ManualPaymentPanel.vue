@@ -767,3 +767,69 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
 
 
+
+<!--
+  037 B1: the container of THIS panel on a phone-sized screen (narrow, or short - a phone held sideways is 390 px high and
+  wider than 520, so the width condition alone misses it).
+
+  Unscoped on purpose and aimed at one shell: the window shell (WindowShell.vue, owned by the window manager) positions
+  and sizes itself with inline styles and gives a frameless window `contain: layout style`; the panel's own root cannot
+  change that from inside (it sets `position: static` itself). So the rules below reach the shell from the panel's
+  stylesheet, through `:has()` on the one shell that holds this panel - the shells of the clearing and trustline panels
+  and of the inspectors are not matched (covered by `e2e/p037-b1-panel-container.spec.ts`, "other windows are unchanged").
+  The manager is not edited; it keeps measuring the shell and re-clamping it, now to a height the shell can honour.
+
+  What it does: bounds the window to the screen (the shell's own `max-height`), lets the body scroll INSIDE the window,
+  keeps the Confirm/Cancel row and the result buttons in view while it scrolls, and caps the teleported recipient list
+  (it lives inside the shell and inherits these variables) so it cannot grow past the screen.
+-->
+<style>
+@media (max-width: 520px), (max-height: 520px) {
+  .ws-shell:has(> .ws-body > [data-testid='manual-payment-panel']) {
+    --mp-sticky-bg: var(--ds-surface-1);
+    --ds-ov-dropdown-maxh-vh: 36vh;
+    --ds-ov-dropdown-maxh: 240px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  [data-theme='hud'] .ws-shell:has(> .ws-body > [data-testid='manual-payment-panel']) {
+    --mp-sticky-bg: var(--ds-surface-2);
+  }
+
+  .ws-shell:has(> .ws-body > [data-testid='manual-payment-panel']) > .ws-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .ws-shell > .ws-body > [data-testid='manual-payment-panel'] {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .ws-shell > .ws-body > [data-testid='manual-payment-panel'] > .ds-panel__header {
+    flex: 0 0 auto;
+  }
+
+  .ws-shell > .ws-body > [data-testid='manual-payment-panel'] > .ds-panel__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-padding-bottom: 56px;
+  }
+
+  /* The row that sends or closes stays in view while a long step scrolls. */
+  .ws-shell > .ws-body > [data-testid='manual-payment-panel'] .mp-actions,
+  .ws-shell > .ws-body > [data-testid='manual-payment-panel'] [data-testid='mp-result'] > .ds-row--actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--mp-sticky-bg, var(--ds-surface-1));
+  }
+}
+</style>
