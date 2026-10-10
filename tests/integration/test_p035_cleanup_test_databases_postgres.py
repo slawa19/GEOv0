@@ -301,13 +301,17 @@ async def test_the_fixtures_teardown_leaves_a_database_it_did_not_create() -> No
         with pytest.raises(Exception):
             await databases.create()
         assert sorted(databases.created) == sorted(databases.family), "premise: three were created, the fourth was not"
+        # And one the fixture DID create is replaced by somebody under the same name: another database, a new OID.
+        await maintenance.execute(f'DROP DATABASE "{databases.clone}"')
+        await neighbour.make(databases.clone)
 
         await databases.destroy()
 
-        assert await maintenance.fetchval(
-            "select oid::bigint from pg_database where datname = $1", databases.other
-        ) == neighbour.created[databases.other], "the teardown dropped a database the fixture had failed to create"
-        assert await databases.state() == {}, "the teardown left what the fixture did create"
+        assert await neighbour.state() == neighbour.created, (
+            "the teardown dropped a database the fixture had not created (a name it failed to create, or a name "
+            "that is no longer its database)"
+        )
+        assert sorted(await databases.state()) == [databases.clone], "the teardown left what the fixture did create"
     finally:
         try:
             await databases.destroy()
