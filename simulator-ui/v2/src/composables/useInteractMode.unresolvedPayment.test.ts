@@ -428,3 +428,102 @@ describe('defence in depth', () => {
     }
   })
 })
+
+/** A storage on a Map whose failures can be switched on and off by the test. */
+function flakyStorage() {
+  const map = new Map<string, string>()
+  const fail = { set: false, get: false, remove: false }
+  const storage = {
+    getItem: (k: string) => {
+      if (fail.get) throw new Error('read denied')
+      return map.get(k) ?? null
+    },
+    setItem: (k: string, v: string) => {
+      if (fail.set) throw new Error('quota exceeded')
+      map.set(k, v)
+    },
+    removeItem: (k: string) => {
+      if (fail.remove) throw new Error('removal denied')
+      map.delete(k)
+    },
+  }
+  return { map, fail, storage }
+}
+
+describe('a payment is not sent unless the record that lets a reload check it could be saved (class 1)', () => {
+  it('REPRODUCER: setItem throws; the first attempt ends unknown; the page is reloaded; the same intent goes under ANOTHER key', async () => {
+    const { storage, fail } = flakyStorage()
+    fail.set = true
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+
+    const before = await atConfirm(send, storage)
+    await before.im.confirmPayment('10.00')
+    const toldWhy = before.im.state.error
+
+    const reloaded = await atConfirm(send, storage) // the composable is created again, as after a reload
+    await reloaded.im.confirmPayment('10.00')
+
+    expectNoOtherPaymentThanTheFirst(send)
+    expect(toldWhy, 'the person must be told why the payment was not sent').toContain('was not sent')
+  })
+
+  it('getItem throws at the restore: whether a payment is unresolved is NOT known, so no new payment goes', async () => {
+    const { storage, fail } = flakyStorage()
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const before = await atConfirm(send, storage)
+    await before.im.confirmPayment('10.00') // an unresolved record is now stored
+
+    fail.get = true
+    const reloaded = await atConfirm(send, storage)
+    await reloaded.im.confirmPayment('20.00')
+
+    expect(send, 'a request left although the storage could not even be read').toHaveBeenCalledTimes(1)
+    expect(reloaded.im.state.error).toContain('could not be read')
+  })
+
+  it('the quota is exhausted for the record of a NEW payment: it is not sent; when the storage is back it goes, and survives a re-creation', async () => {
+    const { storage, fail } = flakyStorage()
+    const send = vi.fn().mockResolvedValueOnce(COMMITTED).mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send, storage)
+    await im.confirmPayment('10.00')
+
+    fail.set = true
+    await im.confirmPayment('20.00')
+    expect(send, 'a payment left without a stored record').toHaveBeenCalledTimes(1)
+
+    fail.set = false
+    await im.confirmPayment('20.00')
+    expect(send).toHaveBeenCalledTimes(2)
+    const reloaded = await atConfirm(send, storage)
+    expect(reloaded.im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '20.00' })
+  })
+
+  it('the record of another run under the same storage is never overwritten (the storage key includes the run)', async () => {
+    const { storage, map } = flakyStorage()
+    const send = vi.fn().mockRejectedValue(unknown())
+    const one = mode(send, ref('run_1'), storage)
+    one.im.startPaymentFlow(); one.im.selectNode('alice'); one.im.selectNode('bob')
+    await settle()
+    await one.im.confirmPayment('10.00')
+    const stored = map.get(ENTRY_KEY)
+
+    const two = mode(vi.fn().mockRejectedValue(unknown()), ref('run_2'), storage)
+    two.im.startPaymentFlow(); two.im.selectNode('alice'); two.im.selectNode('bob')
+    await settle()
+    await two.im.confirmPayment('30.00')
+
+    expect(map.get(ENTRY_KEY)).toBe(stored)
+    expect([...map.keys()].sort()).toEqual([ENTRY_KEY, 'geo.sim.v2.unresolvedPayment.run_2'])
+  })
+})
+
+describe('an unknown outcome carries the correlation id of the request (AGENTS section 12)', () => {
+  it('REPRODUCER: the error of an unknown outcome ends with (ref: <id>)', async () => {
+    const send = vi.fn().mockRejectedValueOnce({ ...unknown(), requestId: 'req-7f3a' })
+    const { im } = await atConfirm(send)
+
+    await im.confirmPayment('10.00')
+
+    expect(im.state.error).toContain('(ref: req-7f3a)')
+  })
+})
