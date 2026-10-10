@@ -208,6 +208,9 @@ _PLANTED_DATABASE_SKIPS = {
     ),
     "a helper's check": 'def _require_postgres(s):\n    if s.get_bind().dialect.name != "postgresql":\n        pytest.skip("x")\n',
     "a skipif mark": '@pytest.mark.skipif("postgresql" not in TEST_DATABASE_URL, reason="x")\ndef test_a(): pass\n',
+    "a skipif mark with the keyword condition=": (
+        '@pytest.mark.skipif(condition="postgresql" not in TEST_DATABASE_URL, reason="x")\ndef test_a(): pass\n'
+    ),
     "an else branch": 'if "postgresql" in url:\n    pass\nelse:\n    pytest.skip("x")\n',
 }
 _PLANTED_OTHER_SKIPS = {
@@ -215,6 +218,9 @@ _PLANTED_OTHER_SKIPS = {
     "an unrelated optional-tool skip": 'if shutil.which("bash") is None:\n    pytest.skip("x")\n',
     "an unconditional skip": 'pytest.skip("x")\n',
     "a skipif on the platform": '@pytest.mark.skipif(os.name == "nt", reason="x")\ndef test_a(): pass\n',
+    "a skipif on the platform with the keyword condition=": (
+        '@pytest.mark.skipif(condition=os.name == "nt", reason="x")\ndef test_a(): pass\n'
+    ),
 }
 
 
