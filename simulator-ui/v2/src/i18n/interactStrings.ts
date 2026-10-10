@@ -14,6 +14,7 @@ export const interactStrings = {
   resultStatus: 'Status',
   resultAmount: 'Amount',
   resultParties: 'From → To',
+  resultRoute: 'Route',
   resultRoutes: 'Route {n} of {total}',
   resultRouteStep: '{from} → {to}: {amount} {unit}',
   resultNoRoutes: 'The server did not report the route of this payment.',
@@ -23,9 +24,18 @@ export const interactStrings = {
   // An outcome that is not known, and what the user can do about it.
   unknownTitle: 'Result unknown',
   unknownNoAnswer: 'No usable answer arrived; the payment of {amount} {unit} ({from} → {to}) may have been made.',
-  unknownEarlier: 'An earlier attempt of the payment of {amount} {unit} ({from} → {to}) has an unknown result; this answer does not settle it.',
+  unknownFrozen: 'Unresolved payment: {amount} {unit}, {from} → {to}.',
+  unknownOtherRun: 'This payment belongs to another run, so it cannot be checked from here. Go back to that run, or discard it.',
+  unknownBlocksNew: 'A payment with an unknown result has to be checked or discarded before another payment is sent.',
+  unknownDiscard: 'Discard and start over',
+  unknownDiscardWarning: 'The first payment may have been made; a new one could be a second. Discard only after checking.',
+  unknownDiscardConfirm: 'Discard it',
+  unknownDiscardKeep: 'Keep checking',
   unknownRetry: 'Check / repeat',
-  unknownRetryHint: 'Repeating sends the same payment under the same key: it is made once, and the stored payment is shown if it was already made.',
+  unknownRetryHint: 'A repeat uses the same key: the payment is made once.',
+
+  // The hint under the direct capacity of the confirm step.
+  directCapacityHelp: '1-hop hint; recipients are server-routed (max hops: {hops}).',
 
   // A success-shaped answer that is not a committed payment.
   notCommitted: 'The server did not confirm the payment (status {status}).',

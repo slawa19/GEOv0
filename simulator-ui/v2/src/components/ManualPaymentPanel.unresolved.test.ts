@@ -15,7 +15,7 @@ afterEach(() => {
 
 const UNKNOWN = {
   kind: 'unknown', message: 'No usable answer arrived.', amount: '10.00', equivalent: 'UAH',
-  fromPid: 'alice', toPid: 'bob', fromName: 'Alice', toName: 'Bob',
+  fromPid: 'alice', toPid: 'bob', fromName: 'Alice', toName: 'Bob', runMismatch: false,
 } as ManualPaymentOutcome
 
 function mount(props: Record<string, unknown> = {}) {
@@ -63,5 +63,75 @@ describe('the panel next to an unresolved payment', () => {
     }
     await nextTick()
     expect(calls.confirm).not.toHaveBeenCalled()
+  })
+})
+
+const text = (host: HTMLElement, id: string) => (q(host, id)?.textContent ?? '').replace(/\s+/g, ' ').trim()
+
+describe('the banner of an unresolved payment', () => {
+  it('shows WHAT is unresolved (amount, equivalent, parties) and offers exactly Check / repeat and Discard', async () => {
+    const { host, calls } = mount()
+    await nextTick()
+
+    expect(text(host, 'mp-outcome-unknown-intent')).toBe('Unresolved payment: 10.00 UAH, Alice → Bob.')
+    expect(host.querySelector('#mp-from')).toBeNull()
+    expect(host.querySelector('#mp-amount')).toBeNull()
+    q(host, 'mp-retry')!.click()
+    expect(calls.retry).toHaveBeenCalledTimes(1)
+    expect(calls.discard).not.toHaveBeenCalled()
+  })
+
+  it('Discard is two steps: the first only shows the warning, the second discards, Keep goes back', async () => {
+    const { host, calls } = mount()
+    await nextTick()
+
+    q(host, 'mp-discard')!.click()
+    await nextTick()
+    expect(calls.discard).not.toHaveBeenCalled()
+    expect(text(host, 'mp-discard-warning')).toContain('may have been made')
+    expect(q(host, 'mp-retry')).toBeNull()
+
+    q(host, 'mp-discard-keep')!.click()
+    await nextTick()
+    expect(q(host, 'mp-retry')).not.toBeNull()
+    expect(calls.discard).not.toHaveBeenCalled()
+
+    q(host, 'mp-discard')!.click()
+    await nextTick()
+    q(host, 'mp-discard-confirm')!.click()
+    expect(calls.discard).toHaveBeenCalledTimes(1)
+  })
+
+  it('Cancel closes the panel and does not discard', async () => {
+    const { host, calls } = mount()
+    await nextTick()
+    q(host, 'manual-payment-cancel')!.click()
+    expect(calls.cancel).toHaveBeenCalledTimes(1)
+    expect(calls.discard).not.toHaveBeenCalled()
+  })
+
+  it('a payment of ANOTHER run: the repeat is disabled and the banner says why; discard stays available', async () => {
+    const { host, calls } = mount({ paymentOutcome: { ...UNKNOWN, runMismatch: true } })
+    await nextTick()
+
+    expect((q(host, 'mp-retry') as HTMLButtonElement).disabled).toBe(true)
+    expect(text(host, 'mp-outcome-other-run')).toContain('another run')
+    expect((q(host, 'mp-discard') as HTMLButtonElement).disabled).toBe(false)
+    q(host, 'mp-retry')!.click()
+    expect(calls.retry).not.toHaveBeenCalled()
+  })
+
+  it('while a request is in flight neither action can be fired', async () => {
+    const { host } = mount({ busy: true })
+    await nextTick()
+    expect((q(host, 'mp-retry') as HTMLButtonElement).disabled).toBe(true)
+    expect((q(host, 'mp-discard') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('no unresolved payment: the ordinary panel (anti-vacuum for the hidden fields)', async () => {
+    const { host } = mount({ paymentOutcome: null })
+    await nextTick()
+    expect(q(host, 'mp-outcome-unknown')).toBeNull()
+    expect(host.querySelector('#mp-amount')).not.toBeNull()
   })
 })

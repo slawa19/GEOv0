@@ -72,6 +72,8 @@ type Props = {
   retryPayment?: () => Promise<void> | void
   /** Leave the result screen for the recipient step. */
   dismissPaymentResult?: () => void
+  /** Give up the unresolved payment (explicit, two steps in this panel). */
+  discardUnresolvedPayment?: () => void
   /** The server's estimate for the chosen recipient (shortest path in steps, estimated maximum). */
   targetEstimate?: PaymentTargetEstimate | null
 }
@@ -180,6 +182,15 @@ watch(success, async (now) => {
 })
 const unknownOutcome = computed(() => (outcome.value && outcome.value.kind === 'unknown' ? outcome.value : null))
 
+// A route without a step has nothing to show.
+const routes = computed(() => (success.value ? success.value.routes.filter((r) => r.hops.length > 0) : []))
+
+// Giving up an unresolved payment is two deliberate steps; leaving it (Esc, Cancel, a closed panel) never does it.
+const confirmingDiscard = ref(false)
+watch(unknownOutcome, (now) => {
+  if (!now) confirmingDiscard.value = false
+})
+
 function moneyText(amount: string, unit: string): string {
   return `${formatMoney(amount, equivalentPrecision(unit))} ${unit}`
 }
@@ -234,6 +245,8 @@ const confirmDisabledReason = computed<string | null>(() => {
 
 const canConfirm = computed(() => {
   if (props.busy) return false
+  // An unresolved payment has to be checked or discarded first: no other payment is sent from here.
+  if (unknownOutcome.value) return false
   return confirmDisabledReason.value == null
 })
 
@@ -493,15 +506,15 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           <div class="ds-label">{{ interactText('resultParties') }}</div>
           <div class="ds-value" data-testid="mp-result-parties">{{ success.fromName }} → {{ success.toName }}</div>
         </div>
-        <template v-if="success.routes.length">
+        <template v-if="routes.length">
           <div
-            v-for="(route, index) in success.routes"
+            v-for="(route, index) in routes"
             :key="index"
             class="ds-stack"
             :data-testid="`mp-result-route-${index + 1}`"
           >
             <div class="ds-label">
-              {{ success.routes.length > 1 ? interactText('resultRoutes', { n: index + 1, total: success.routes.length }) : 'Route' }}:
+              {{ routes.length > 1 ? interactText('resultRoutes', { n: index + 1, total: routes.length }) : interactText('resultRoute') }}:
               <span class="ds-mono" data-testid="mp-result-route-chain">{{ routeChain(route.hops) }}</span>
             </div>
             <div v-for="(hop, hopIndex) in route.hops" :key="hopIndex" class="ds-help ds-mono" data-testid="mp-result-hop">
@@ -521,6 +534,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       </div>
 
       <template v-if="!success">
+      <template v-if="!unknownOutcome">
       <div v-if="participantsSorted.length" class="ds-controls__row ds-controls__row--compact">
         <label id="mp-from-label" class="ds-label" for="mp-from__trigger">From</label>
         <OverlaySelect
@@ -599,7 +613,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         </div>
 
         <div class="ds-help ds-muted" data-testid="mp-direct-capacity-help">
-          1-hop hint; recipients are server-routed (max hops: {{ paymentTargetsMaxHopsLabel }}).
+          {{ interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel }) }}
         </div>
 
         <div class="ds-controls__row ds-controls__row--compact">
@@ -635,26 +649,65 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         </div>
       </div>
 
-      <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
+      </template>
 
-      <div v-if="unknownOutcome" class="ds-alert ds-alert--warn" data-testid="mp-outcome-unknown">
+      <div v-if="state.error && !unknownOutcome" class="ds-alert ds-alert--err ds-mono" data-testid="manual-payment-error">{{ state.error }}</div>
+
+      <div v-if="unknownOutcome" class="ds-alert ds-alert--warn ds-stack" data-testid="mp-outcome-unknown">
         <div class="ds-label">{{ interactText('unknownTitle') }}</div>
-        <div class="ds-help">{{ unknownOutcome.message }}</div>
-        <div class="ds-help ds-muted">{{ interactText('unknownRetryHint') }}</div>
-        <button
-          class="ds-btn ds-btn--ghost"
-          type="button"
-          data-testid="mp-retry"
-          :disabled="busy"
-          @click="retryPayment?.()"
-        >
-          {{ interactText('unknownRetry') }}
-        </button>
+        <div class="ds-help ds-mono" data-testid="mp-outcome-unknown-intent">
+          {{ interactText('unknownFrozen', { amount: unknownOutcome.amount, unit: unknownOutcome.equivalent, from: unknownOutcome.fromName, to: unknownOutcome.toName }) }}
+        </div>
+        <!-- What the last attempt said (the error text) replaces the generic sentence, so the same thing is not shown twice. -->
+        <template v-if="!confirmingDiscard">
+          <div class="ds-help" data-testid="mp-outcome-unknown-message">{{ state.error || unknownOutcome.message }}</div>
+          <div v-if="unknownOutcome.runMismatch" class="ds-help" data-testid="mp-outcome-other-run">
+            {{ interactText('unknownOtherRun') }}
+          </div>
+          <div v-else class="ds-help ds-muted">{{ interactText('unknownRetryHint') }}</div>
+        </template>
+        <div v-if="!confirmingDiscard" class="ds-row ds-row--actions">
+          <button
+            class="ds-btn ds-btn--primary"
+            type="button"
+            data-testid="mp-retry"
+            :disabled="busy || unknownOutcome.runMismatch"
+            @click="retryPayment?.()"
+          >
+            {{ interactText('unknownRetry') }}
+          </button>
+          <button
+            class="ds-btn ds-btn--ghost"
+            type="button"
+            data-testid="mp-discard"
+            :disabled="busy"
+            @click="confirmingDiscard = true"
+          >
+            {{ interactText('unknownDiscard') }}
+          </button>
+        </div>
+        <template v-else>
+          <div class="ds-help" data-testid="mp-discard-warning">{{ interactText('unknownDiscardWarning') }}</div>
+          <div class="ds-row ds-row--actions">
+            <button
+              class="ds-btn ds-btn--ghost"
+              type="button"
+              data-testid="mp-discard-confirm"
+              :disabled="busy"
+              @click="discardUnresolvedPayment?.()"
+            >
+              {{ interactText('unknownDiscardConfirm') }}
+            </button>
+            <button class="ds-btn ds-btn--primary" type="button" data-testid="mp-discard-keep" @click="confirmingDiscard = false">
+              {{ interactText('unknownDiscardKeep') }}
+            </button>
+          </div>
+        </template>
       </div>
 
       <div class="ds-row ds-row--actions mp-actions">
         <button
-          v-if="isConfirm"
+          v-if="isConfirm && !unknownOutcome"
           class="ds-btn ds-btn--primary"
           type="button"
           data-testid="manual-payment-confirm"

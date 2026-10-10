@@ -636,6 +636,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
              confirmPayment: vi.fn(async () => undefined),
              retryPayment: vi.fn(async () => undefined),
              dismissPaymentResult: vi.fn(),
+             discardUnresolvedPayment: vi.fn(),
              paymentOutcome: computed(() => null),
              paymentTargetEstimate: computed(() => null),
              confirmTrustlineCreate,

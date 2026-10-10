@@ -1394,6 +1394,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :payment-outcome="interact.mode.paymentOutcome.value"
           :retry-payment="interact.mode.retryPayment"
           :dismiss-payment-result="interact.mode.dismissPaymentResult"
+          :discard-unresolved-payment="interact.mode.discardUnresolvedPayment"
           :target-estimate="interact.mode.paymentTargetEstimate.value"
         />
 

@@ -44,6 +44,8 @@ export type ManualPaymentOutcome =
       toPid: string
       fromName: string
       toName: string
+      /** The unresolved payment belongs to another run than the one open now: it cannot be checked from here. */
+      runMismatch: boolean
     }
 
 /** The server's estimate for the chosen recipient (`payment-targets` with `include_max_available`), with the state of the answer. */
@@ -59,6 +61,11 @@ export function useInteractMode(opts: {
   equivalent: Ref<string>
   snapshot: Ref<GraphSnapshot | null>
   onNodeClick?: (nodeId: string) => void
+  /**
+   * Where the one unresolved manual payment is kept across a page reload (`sessionStorage` by default; `null`: memory only,
+   * which is also what happens when the browser refuses the storage).
+   */
+  intentStorage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
   /** BUG-3: called after successful clearing to trigger FX animation (gold pulse on cycle edges). */
   onClearingDone?: (result: SimulatorActionClearingRealResponse) => void
 }): {
@@ -86,6 +93,11 @@ export function useInteractMode(opts: {
   retryPayment: () => Promise<void>
   /** Leave the result screen of a committed payment for the recipient step (same sender). */
   dismissPaymentResult: () => void
+  /**
+   * A person's explicit decision to give up the unresolved payment (its first attempt may have been made): the held key and
+   * frozen intent are dropped and another payment may be confirmed. Nothing else calls it - not Esc, not a closed panel.
+   */
+  discardUnresolvedPayment: () => void
   /** The committed payment / the unknown result the panel shows (null: nothing to show). */
   paymentOutcome: ComputedRef<ManualPaymentOutcome | null>
   /** The server's estimate for the chosen recipient, or null when no recipient / sender is chosen. */
@@ -274,9 +286,38 @@ export function useInteractMode(opts: {
   const isPickingPhase = fsm.isPickingPhase
     const isCanvasNodePickPhase = fsm.isCanvasNodePickPhase
   // 037 A2: the manual payment's result on screen, and the life of its idempotency key (see `paymentIntent.ts`).
+  // `paymentOutcomeRef` holds only the SUCCESS on screen. An unresolved payment is not in it: it is read from the keeper (below),
+  // so it survives a closed panel, `cancel()`, and - through the keeper's storage - a re-created composable or a reload.
   const paymentOutcomeRef = ref<ManualPaymentOutcome | null>(null)
-  const paymentOutcome = computed(() => paymentOutcomeRef.value)
-  const paymentIntents = createPaymentIntentKeeper()
+  const paymentIntents = createPaymentIntentKeeper({
+    runId: () => normalizeRunId(opts.runId.value),
+    ...(opts.intentStorage !== undefined ? { storage: opts.intentStorage } : {}),
+  })
+  const intentVersion = ref(0)
+  const touchIntents = () => {
+    intentVersion.value += 1
+  }
+  const paymentOutcome = computed<ManualPaymentOutcome | null>(() => {
+    void intentVersion.value
+    const record = paymentIntents.peek()
+    if (record && record.unknown) {
+      const { intent } = record
+      return {
+        kind: 'unknown',
+        message: interactText('unknownNoAnswer', {
+          amount: intent.amount, unit: intent.equivalent, from: participantName(intent.from), to: participantName(intent.to),
+        }),
+        amount: intent.amount,
+        equivalent: intent.equivalent,
+        fromPid: intent.from,
+        toPid: intent.to,
+        fromName: participantName(intent.from),
+        toName: participantName(intent.to),
+        runMismatch: intent.runId !== normalizeRunId(opts.runId.value),
+      }
+    }
+    return paymentOutcomeRef.value
+  })
   watch(
     () => [state.fromPid, state.toPid, state.phase],
     () => {
@@ -603,6 +644,8 @@ export function useInteractMode(opts: {
   }
 
   async function confirmPayment(amount: string): Promise<void> {
+    // A second Confirm while the first is in flight is ignored BEFORE it can touch the held intent (R5).
+    if (busyRef.value) return
     fsm.clearError()
     // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
     const eq = opts.equivalent.value
@@ -617,12 +660,21 @@ export function useInteractMode(opts: {
     await submitPayment({ runId: normalizeRunId(opts.runId.value), from, to, equivalent: eq, amount })
   }
 
-  /** The result of an attempt that has no verdict: the payment is repeated by this, under the same key. */
+  /** The result of an attempt that has no verdict: the payment is repeated by this, under the same key - in ITS run. */
   async function retryPayment(): Promise<void> {
+    if (busyRef.value) return
     const record = paymentIntents.peek()
-    if (!record || !record.unknown || busyRef.value) return
+    if (!record || !record.unknown) return
+    // R4: the frozen intent belongs to one run. Another run is not asked about it (the action would go to the current run).
+    if (record.intent.runId !== normalizeRunId(opts.runId.value)) return
     fsm.clearError()
     await submitPayment(record.intent)
+  }
+
+  function discardUnresolvedPayment(): void {
+    if (busyRef.value) return
+    paymentIntents.discard()
+    touchIntents()
   }
 
   function dismissPaymentResult(): void {
@@ -633,16 +685,24 @@ export function useInteractMode(opts: {
 
   /**
    * One attempt of a manual payment. The key belongs to the INTENT (`paymentIntent.ts`): the same frozen intent is sent
-   * under the same key until the server says the key is spent or the payment is known to be made; a change of the intent
-   * is a new payment with a new key.
+   * under the same key until the server says the key is spent or the payment is known to be made. A change of the intent is
+   * a new payment with a new key - except while an intent is UNRESOLVED: then nothing else is sent at all (`blocked`).
    */
   async function submitPayment(intent: PaymentIntent): Promise<void> {
+    if (busyRef.value) return
     const { from, to, equivalent: eq, amount } = intent
-    const record = paymentIntents.begin(intent)
+    const begun = paymentIntents.begin(intent)
+    if (begun.kind === 'blocked') {
+      state.error = interactText('unknownBlocksNew')
+      touchIntents()
+      return
+    }
+    const record = begun.record
     const names = { from: participantName(from), to: participantName(to) }
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
       try {
+        paymentIntents.markSent(record)
         res = await opts.actions.sendPayment(from, to, amount, eq, { signal, idempotencyKey: record.key })
       } catch (e: unknown) {
         const err = (e && typeof e === 'object' ? e : {}) as {
@@ -653,23 +713,19 @@ export function useInteractMode(opts: {
         }
         const spent = isKeySpent(err.details)
         const unknownNow = err.outcomeUnknown === true
+        // Recorded whether or not the panel is still open: a request closed in flight is an unresolved payment all the same (R2).
         if (spent) paymentIntents.settle(record)
         else if (unknownNow) paymentIntents.markUnknown(record)
-        // RUN_TERMINAL, 401, 403 and a retryable 409 after an unknown attempt say nothing about THAT payment.
-        const stillUnknown = !spent && (unknownNow || record.unknown)
-        const base = { amount, equivalent: eq, fromPid: from, toPid: to, fromName: names.from, toName: names.to }
-        const shown = { amount, unit: eq, from: names.from, to: names.to }
+        else paymentIntents.markRefused(record)
+        touchIntents()
+        // RUN_TERMINAL, 401, 403 and a retryable 409 after an unknown attempt say nothing about THAT payment: the record
+        // stays unresolved, and the banner is read from it.
         // 028 F-028-51: the refusal text is composed here from code + reason + details (owner В-6).
         const text = unknownNow
           ? err.code === 'TIMEOUT' && typeof err.message === 'string'
             ? err.message
-            : interactText('unknownNoAnswer', shown)
+            : interactText('unknownNoAnswer', { amount, unit: eq, from: names.from, to: names.to })
           : paymentRefusalText(e, eq, undefined, { keyed: true })
-        if (isCurrent()) {
-          paymentOutcomeRef.value = stillUnknown
-            ? { kind: 'unknown', message: unknownNow ? text : interactText('unknownEarlier', shown), ...base }
-            : null
-        }
         throw new Error(text)
       }
 
@@ -679,16 +735,12 @@ export function useInteractMode(opts: {
         const refused = status === 'ABORTED'
         if (refused) paymentIntents.settle(record)
         else paymentIntents.markUnknown(record)
-        const message = interactText('notCommitted', { status: String(res.status) })
-        if (isCurrent()) {
-          paymentOutcomeRef.value = refused
-            ? null
-            : { kind: 'unknown', message, amount, equivalent: eq, fromPid: from, toPid: to, fromName: names.from, toName: names.to }
-        }
-        throw new Error(message)
+        touchIntents()
+        throw new Error(interactText('notCommitted', { status: String(res.status) }))
       }
 
       paymentIntents.settle(record)
+      touchIntents()
       if (!isCurrent()) return
 
       paymentOutcomeRef.value = {
@@ -701,7 +753,8 @@ export function useInteractMode(opts: {
         toPid: to,
         fromName: names.from,
         toName: names.to,
-        routes: (res.routes ?? []).map((route) => ({
+        // A route without a step has nothing to show; it is not drawn as an empty line.
+        routes: (res.routes ?? []).filter((route) => route.hops.length > 0).map((route) => ({
           hops: route.hops.map((hop) => ({
             from: hop.from,
             to: hop.to,
@@ -903,6 +956,7 @@ export function useInteractMode(opts: {
     confirmPayment,
     retryPayment,
     dismissPaymentResult,
+    discardUnresolvedPayment,
     paymentOutcome,
     paymentTargetEstimate,
     confirmTrustlineCreate,

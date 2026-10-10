@@ -4,10 +4,15 @@
  * the request it receives (sender, receiver, amount spelling, key) and the state the panel reads.
  */
 import { computed, nextTick, ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GraphSnapshot } from '../types'
 import { useInteractMode } from './useInteractMode'
+
+// An unresolved payment is kept in `sessionStorage` across a re-created composable; each test starts from none.
+beforeEach(() => {
+  window.sessionStorage.clear()
+})
 
 type Actions = Parameters<typeof useInteractMode>[0]['actions']
 type SendArgs = Parameters<Actions['sendPayment']>
@@ -132,12 +137,28 @@ describe('the key of a manual payment', () => {
   })
 
   it.each([
-    ['the amount', async (im: ReturnType<typeof setup>['im']) => im.confirmPayment('11.00'), 'amount'],
-    ['the spelling of the amount', async (im: ReturnType<typeof setup>['im']) => im.confirmPayment('10'), 'spelling'],
-    ['the receiver', async (im: ReturnType<typeof setup>['im']) => { im.setPaymentToPid('carol'); await settle(); return im.confirmPayment('10.00') }, 'receiver'],
-    ['the sender', async (im: ReturnType<typeof setup>['im']) => { im.setPaymentFromPid('carol'); await settle(); im.setPaymentToPid('bob'); await settle(); return im.confirmPayment('10.00') }, 'sender'],
-  ])('a change of %s after an unknown outcome is a new intent with a new key', async (_what, change) => {
+    ['the amount', async (im: ReturnType<typeof setup>['im']) => im.confirmPayment('11.00')],
+    ['the spelling of the amount', async (im: ReturnType<typeof setup>['im']) => im.confirmPayment('10')],
+    ['the receiver', async (im: ReturnType<typeof setup>['im']) => { im.setPaymentToPid('carol'); await settle(); return im.confirmPayment('10.00') }],
+    ['the sender', async (im: ReturnType<typeof setup>['im']) => { im.setPaymentFromPid('carol'); await settle(); im.setPaymentToPid('bob'); await settle(); return im.confirmPayment('10.00') }],
+  ])('a change of %s while a payment is UNRESOLVED sends nothing (it is not a new intent with a new key)', async (_what, change) => {
     const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValueOnce(COMMITTED)
+    const { im } = await atConfirm(send)
+
+    await im.confirmPayment('10.00')
+    await change(im)
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00' })
+  })
+
+  it.each([
+    ['the amount', async (im: ReturnType<typeof setup>['im']) => im.confirmPayment('11.00')],
+    ['the spelling of the amount', async (im: ReturnType<typeof setup>['im']) => im.confirmPayment('10')],
+    ['the receiver', async (im: ReturnType<typeof setup>['im']) => { im.setPaymentToPid('carol'); await settle(); return im.confirmPayment('10.00') }],
+    ['the sender', async (im: ReturnType<typeof setup>['im']) => { im.setPaymentFromPid('carol'); await settle(); im.setPaymentToPid('bob'); await settle(); return im.confirmPayment('10.00') }],
+  ])('a change of %s after a REFUSAL that left nothing unresolved is a new intent with a new key (the block is only for unknown outcomes)', async (_what, change) => {
+    const send = vi.fn().mockRejectedValueOnce(refusal(409, 'NO_ROUTE', { reason: 'no_route' })).mockResolvedValueOnce(COMMITTED)
     const { im } = await atConfirm(send)
 
     await im.confirmPayment('10.00')

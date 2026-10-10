@@ -46,7 +46,10 @@ function snapshot() {
   }
 }
 
-async function mockApp(page: Page, o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number }) {
+async function mockApp(
+  page: Page,
+  o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number; paymentRealNetworkFailures?: { left: number } },
+) {
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
       localStorage.clear()
@@ -91,6 +94,11 @@ async function mockApp(page: Page, o: { paymentRealBodies: Array<Record<string, 
   await page.route(`**/simulator/runs/${RUN_ID}/actions/payment-real`, async (r) => {
     const req = JSON.parse((await r.request().postData()) ?? '{}') as Record<string, unknown>
     o.paymentRealBodies.push(req)
+    if (o.paymentRealNetworkFailures && o.paymentRealNetworkFailures.left > 0) {
+      o.paymentRealNetworkFailures.left -= 1
+      await r.abort('failed') // the request left; no answer came back
+      return
+    }
     await json(r, {
       ok: true, payment_id: PAYMENT_ID, from_pid: req.from_pid, to_pid: req.to_pid, equivalent: req.equivalent,
       amount: String(req.amount), status: 'COMMITTED', client_action_id: req.client_action_id ?? null,
@@ -185,6 +193,39 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     await page.locator('[data-testid="mp-result-another"]').click()
     await expect(page.locator('[data-testid="mp-result"]')).toBeHidden()
     await expect(page.locator('#mp-to__trigger')).toBeVisible()
+  })
+
+  test('UNRESOLVED: a request that got no answer leaves a banner; no other payment can be sent; the repeat is the same key and body; it survives a reload', async ({ page }) => {
+    const bodies: Array<Record<string, unknown>> = []
+    await mockApp(page, { paymentRealBodies: bodies, paymentRealNetworkFailures: { left: 1 } })
+    await page.goto('/?mode=real&ui=interact&e2eReal=1')
+    await ready(page, true)
+
+    const c = new Counter(page, false)
+    await page.locator('[data-testid="actionbar-payment"]').click()
+    await c.pick('From', 'mp-from', 'alice')
+    await c.pick('To', 'mp-to', 'bob')
+    await c.type('Amount', '#mp-amount', '1.00')
+    await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
+
+    const banner = page.locator('[data-testid="mp-outcome-unknown"]')
+    await expect(banner).toBeVisible()
+    await expect(page.locator('[data-testid="mp-outcome-unknown-intent"]')).toHaveText('Unresolved payment: 1.00 UAH, Alice → Bob.')
+    await expect(page.locator('[data-testid="manual-payment-confirm"]')).toHaveCount(0)
+    await expect(page.locator('#mp-amount')).toHaveCount(0)
+    expect(bodies, 'only the first request left').toHaveLength(1)
+
+    // The page is reloaded: the unresolved payment comes back with the panel.
+    await page.reload()
+    await ready(page, true)
+    await page.locator('[data-testid="actionbar-payment"]').click()
+    await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
+
+    await page.locator('[data-testid="mp-retry"]').click()
+    await expect(page.locator('[data-testid="mp-result-payment-id"]')).toHaveText(PAYMENT_ID)
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]!.idempotency_key).toBe(bodies[0]!.idempotency_key)
+    expect({ ...bodies[1]!, client_action_id: null }).toEqual({ ...bodies[0]!, client_action_id: null })
   })
 
   // SLICE B (the wizard), not A2: the budget is five actions and the entry does not reload. Marked as an EXPECTED failure so
@@ -323,6 +364,33 @@ test.describe('037 T3701 - 390x844 layout (current flow, mocked backend)', () =>
       expect.soft(p.violations, `phase ${p.phase}`).toEqual([])
     }
     expect.soft(surfaceInside, 'the dropdown surface of the From list fits the width').toBe(true)
+  })
+
+  test('LAYOUT: the banner of an unresolved payment, and its two-step discard, fit 390x844 and are reachable by touch', async ({ page }, testInfo) => {
+    const bodies: Array<Record<string, unknown>> = []
+    await mockApp(page, { paymentRealBodies: bodies, paymentRealNetworkFailures: { left: 1 } })
+    await page.goto('/?mode=real&ui=interact&e2eReal=1')
+    await ready(page, true)
+
+    const c = new Counter(page, true)
+    await c.press('open payment', '[data-testid="actionbar-payment"]')
+    await c.pick('From', 'mp-from', 'alice')
+    await c.pick('To', 'mp-to', 'bob')
+    await page.locator('#mp-amount').fill('1.00')
+    await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
+    await expect(page.locator('[data-testid="mp-outcome-unknown"]')).toBeVisible()
+    // The application's own error toast shows the same sentence for a few seconds, over the lower part of a phone screen.
+    await expect(page.getByLabel('Error notification')).toBeHidden({ timeout: 15_000 })
+
+    const banner = await measure(page, 'unresolved-banner')
+    await c.press('Discard', '[data-testid="mp-discard"]')
+    await expect(page.locator('[data-testid="mp-discard-warning"]')).toBeVisible()
+    const discard = await measure(page, 'unresolved-discard-step')
+    console.log(`P037 LAYOUT-UNRESOLVED ${JSON.stringify({ banner: { container: banner.container, violations: violations(banner) }, discard: { container: discard.container, violations: violations(discard) } })}`)
+    testInfo.annotations.push({ type: 'P037-LAYOUT-UNRESOLVED', description: JSON.stringify({ banner: violations(banner), discard: violations(discard) }) })
+
+    expect(violations(banner)).toEqual([])
+    expect(violations(discard)).toEqual([])
   })
 
   test('LAYOUT: with the figures from the snapshot only (the trustlines answer failed) the confirm step still fits and is reachable', async ({ page }, testInfo) => {

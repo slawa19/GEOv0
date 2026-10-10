@@ -101,6 +101,22 @@ describe('the result screen', () => {
     expect(host.querySelectorAll('[data-testid="mp-result-hop"]').length).toBe(3)
   })
 
+  it('a route without a step is not drawn as an empty line, and does not count in "Route i of n"', async () => {
+    const { host } = mount({
+      paymentOutcome: success({
+        routes: [
+          { hops: [{ from: 'alice', to: 'bob', fromName: 'Alice', toName: 'Bob', amount: '4.00' }] },
+          { hops: [] },
+        ],
+      }),
+    })
+    await nextTick()
+
+    expect(host.querySelectorAll('[data-testid^="mp-result-route-"]:not([data-testid="mp-result-route-chain"])').length).toBe(1)
+    expect(text(host, 'mp-result-route-1')).not.toContain('of 2')
+    expect(q(host, 'mp-result-route-2')).toBeNull()
+  })
+
   it('a payment whose answer carried no route shows no chain - and says so, instead of joining the endpoints', async () => {
     const { host } = mount({ paymentOutcome: success({ routes: [] }) })
     await nextTick()
@@ -131,7 +147,7 @@ describe('the result screen', () => {
 describe('the unknown-outcome banner', () => {
   const unknownOutcome: ManualPaymentOutcome = {
     kind: 'unknown', message: 'No usable answer arrived.', amount: '10.00', equivalent: 'UAH',
-    fromPid: 'alice', toPid: 'bob', fromName: 'Alice', toName: 'Bob',
+    fromPid: 'alice', toPid: 'bob', fromName: 'Alice', toName: 'Bob', runMismatch: false,
   }
 
   it('says "unknown" and offers Check / repeat, which fires the retry (the same key lives in the model)', async () => {

@@ -135,3 +135,188 @@ describe('an unknown outcome is never replaced by another payment', () => {
     expectNoOtherPaymentThanTheFirst(send)
   })
 })
+
+describe('the unresolved payment is held, shown and resolved only by a person (R1-R5)', () => {
+  it('blocked: another payment is not sent, says why, and leaves the unresolved one on screen', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(im.state.error).toContain('checked or discarded')
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00', fromName: 'Alice', toName: 'Bob', runMismatch: false })
+  })
+
+  it('Esc / cancel / a closed panel do not resolve it: the banner is there again when the panel is opened', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+
+    im.cancel()
+    expect(im.phase.value).toBe('idle')
+    expect(im.paymentOutcome.value?.kind).toBe('unknown')
+    im.startPaymentFlow()
+    expect(im.paymentOutcome.value?.kind).toBe('unknown')
+    im.setPaymentFromPid('alice'); im.setPaymentToPid('carol')
+    await settle()
+    await im.confirmPayment('10.00')
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('an explicit discard releases it - and only then another payment leaves, under a new key', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+    await im.confirmPayment('20.00')
+    expect(send).toHaveBeenCalledTimes(1)
+
+    im.discardUnresolvedPayment()
+    expect(im.paymentOutcome.value).toBeNull()
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(keyOf(send, 1)).not.toBe(keyOf(send, 0))
+    expect(amountOf(send, 1)).toBe('20.00')
+  })
+
+  it('the repeat that is answered COMMITTED unblocks: the next payment is free', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+
+    await im.retryPayment()
+    expect(im.paymentOutcome.value?.kind).toBe('success')
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(3)
+    expect(keyOf(send, 2)).not.toBe(keyOf(send, 0))
+  })
+
+  it('the repeat that is answered "the key is spent" unblocks too', async () => {
+    const send = vi.fn()
+      .mockRejectedValueOnce(unknown())
+      .mockRejectedValueOnce(refusal(503, 'ENGINE_TIMEOUT', { idempotency_key_spent: true }))
+      .mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+    await im.retryPayment()
+    expect(im.paymentOutcome.value).toBeNull()
+
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(3)
+  })
+
+  it('ANTI-VACUUM: a refusal with NOTHING unknown before it blocks nothing - another payment leaves at once', async () => {
+    const send = vi.fn().mockRejectedValueOnce(refusal(409, 'NO_ROUTE', { reason: 'no_route' })).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+
+    await im.confirmPayment('20.00')
+
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(keyOf(send, 1)).not.toBe(keyOf(send, 0))
+  })
+
+  it('R5: a second Confirm while the first is in flight sends nothing and does not replace the held intent', async () => {
+    let release!: () => void
+    const send = vi.fn()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { release = () => reject(unknown()) }))
+      .mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+
+    const first = im.confirmPayment('10.00')
+    await settle()
+    await im.confirmPayment('20.00')
+    release()
+    await first
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00' })
+    await im.retryPayment()
+    expect(keyOf(send, 1)).toBe(keyOf(send, 0))
+  })
+
+  it('R3: a re-created composable restores it through the storage; its repeat is the same key and body', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const first = await atConfirm(send)
+    await first.im.confirmPayment('10.00')
+
+    const again = mode(send)
+    expect(again.im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00', runMismatch: false })
+    await again.im.retryPayment()
+
+    expect(keyOf(send, 1)).toBe(keyOf(send, 0))
+    expect(send.mock.calls[1]!.slice(0, 4)).toEqual(send.mock.calls[0]!.slice(0, 4))
+    expect(window.sessionStorage.length, 'the stored record is removed by the verdict').toBe(0)
+  })
+
+  it('R3: a page reloaded while the request was in flight finds an unresolved payment', async () => {
+    let started!: () => void
+    const send = vi.fn().mockImplementationOnce(() => new Promise(() => { started() }))
+    const first = await atConfirm(send)
+    const sent = new Promise<void>((resolve) => { started = resolve })
+    void first.im.confirmPayment('10.00')
+    await sent
+
+    const after = mode(vi.fn().mockResolvedValue(COMMITTED))
+    expect(after.im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00' })
+  })
+
+  it('R3: without a usable storage it still works in memory (and a re-created composable then starts clean - named)', async () => {
+    const denied = {
+      getItem: () => { throw new Error('denied') },
+      setItem: () => { throw new Error('denied') },
+      removeItem: () => { throw new Error('denied') },
+    }
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    window.history.replaceState({}, '', '/?mode=real&ui=interact')
+    const actions = {
+      actionsDisabled: ref(false), sendPayment: send, createTrustline: vi.fn(), updateTrustline: vi.fn(), closeTrustline: vi.fn(), runClearing: vi.fn(),
+      fetchParticipants: vi.fn(async () => []), fetchTrustlines: vi.fn(async () => []), fetchPaymentTargets: vi.fn(async () => []),
+    } as unknown as Actions
+    const im = useInteractMode({
+      actions, runId: computed(() => 'run_1'), equivalent: computed(() => 'UAH'), snapshot: ref(snapshot()), intentStorage: denied,
+    })
+    im.startPaymentFlow(); im.selectNode('alice'); im.selectNode('bob')
+    await settle()
+
+    await im.confirmPayment('10.00')
+    await im.confirmPayment('10.0')
+    im.cancel()
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(im.paymentOutcome.value?.kind).toBe('unknown')
+  })
+
+  it('R4: another run - the banner says so, the repeat is NOT sent (it would go to the current run), only discard is possible', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im, runId } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+
+    runId.value = 'run_2'
+    await settle()
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'unknown', runMismatch: true })
+    await im.retryPayment()
+    await im.confirmPayment('10.00')
+    expect(send).toHaveBeenCalledTimes(1)
+
+    im.discardUnresolvedPayment()
+    await im.confirmPayment('10.00')
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('a COMMITTED payment confirmed after the discard is a normal one, and leaves nothing stored', async () => {
+    const send = vi.fn().mockRejectedValueOnce(unknown()).mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send)
+    await im.confirmPayment('10.00')
+    im.discardUnresolvedPayment()
+
+    await im.confirmPayment('10.00')
+
+    expect(im.paymentOutcome.value?.kind).toBe('success')
+    expect(window.sessionStorage.length).toBe(0)
+  })
+})

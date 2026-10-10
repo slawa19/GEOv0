@@ -332,7 +332,9 @@ describe('useInteractMode', () => {
     const equivalent = computed(() => 'UAH')
 
     // First instance: starts submit, then gets cancelled (should abort request).
-    const im1 = useInteractMode({ actions, runId, equivalent, snapshot })
+    // (`intentStorage: null`: the two instances of this test coexist in one page, which a reload or a re-creation never does -
+    // the unresolved-payment storage is not what is being exercised here.)
+    const im1 = useInteractMode({ actions, runId, equivalent, snapshot, intentStorage: null })
     im1.startPaymentFlow()
     im1.selectNode('alice')
     im1.selectNode('bob')
@@ -354,7 +356,7 @@ describe('useInteractMode', () => {
     expect(aborts).toBe(1)
 
     // Second instance: restart immediately; must not overlap with the previous in-flight submit.
-    const im2 = useInteractMode({ actions, runId, equivalent, snapshot })
+    const im2 = useInteractMode({ actions, runId, equivalent, snapshot, intentStorage: null })
     im2.startPaymentFlow()
     im2.selectNode('alice')
     im2.selectNode('bob')
