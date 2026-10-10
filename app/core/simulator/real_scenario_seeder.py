@@ -16,7 +16,7 @@ from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
 )
-from app.core.trustlines.service import TrustLineService
+from app.core.trustlines.service import CONCURRENT_TRUSTLINE_CREATE, TrustLineService
 from app.utils.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.utils.validation import (
     AMOUNT_PRECISION_EXCEEDED,
@@ -87,10 +87,20 @@ class ScenarioTrustLineRefused(ConflictException):
     stopped or held equivalent, a self-line. Seeding stops naming the line; it is never skipped (the policy decides
     who mediates) and never rounded (owner В-4)."""
 
-    def __init__(self, line: str, reason: str, message: str) -> None:
+    #: The named reasons that are NOT the scenario's fault and that a later seeding does not meet: another seeding of
+    #: the same scenario (two runs started together) committed the same line first, and the next attempt finds it
+    #: live and skips it (`held`, below). An explicit list; every other NAMED reason is a rule the line breaks.
+    CLEARS_BY_ITSELF = frozenset({CONCURRENT_TRUSTLINE_CREATE})
+
+    def __init__(self, line: str, reason: str, message: str, *, named: bool = True) -> None:
         super().__init__(f"{SCENARIO_TRUSTLINE_REFUSED}: trust line {line}: {message}",
                          details={"code": SCENARIO_TRUSTLINE_REFUSED, "reason": reason, "line": line})
         self.line = line
+        #: True when retrying cannot help: the refusal NAMES its reason and the reason is not one that clears by
+        #: itself. `named=False` is a refusal of the service that carries no `details.reason` (`reason` is then only
+        #: the exception's class name): nothing is known about it, so nothing is claimed - it is not "permanent".
+        #: One of those is the same lost race seen one statement earlier ("Active trustline already exists").
+        self.permanent = named and reason not in self.CLEARS_BY_ITSELF
 
 
 def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
@@ -343,8 +353,9 @@ class RealScenarioSeeder:
                         await service.execute_close(batch, created.id, p_from.id,
                                                     TrustLineCloseRequest(signature=_UNSIGNED), require_signature=False)
                 except (BadRequestException, ConflictException, ForbiddenException, NotFoundException) as exc:
-                    raise ScenarioTrustLineRefused(line, str((exc.details or {}).get("reason") or type(exc).__name__),
-                                                   exc.message) from exc
+                    named = (exc.details or {}).get("reason")
+                    raise ScenarioTrustLineRefused(line, str(named or type(exc).__name__), exc.message,
+                                                   named=bool(named)) from exc
             # `finish()` flushes and audits; the CALLER commits, and on any failure rolls back.
             await batch.finish()
 

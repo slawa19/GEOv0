@@ -161,6 +161,12 @@ CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
 INITIAL_STATUSES = frozenset({"active", "closed"})  # 028 `F-028-29`: no `frozen`
 
 
+#: `details.reason` of a creation that lost the race for a live `(from, to, equivalent)`: another transaction committed
+#: the same line first, and the INSERT (or the commit) met the partial unique index. Not a rule of the domain - the
+#: same request made again finds the line there.
+CONCURRENT_TRUSTLINE_CREATE = "CONCURRENT_TRUSTLINE_CREATE"
+
+
 class TrustLineWriteBatch:
     """The trust-line writes of ONE caller transaction: one audit row per operation, the batch owns them.
 
@@ -390,7 +396,7 @@ class TrustLineService:
                 raise
             raise ConflictException(
                 "Active trustline already exists",
-                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+                details={"reason": CONCURRENT_TRUSTLINE_CREATE},
             ) from exc
 
         # In-memory only; `expire_on_commit=False` (`app/db/session.py:78`) keeps the
@@ -595,7 +601,7 @@ class TrustLineService:
                 raise
             raise ConflictException(
                 "Active trustline already exists",
-                details={"reason": "CONCURRENT_TRUSTLINE_CREATE"},
+                details={"reason": CONCURRENT_TRUSTLINE_CREATE},
             ) from exc
 
         batch._record(

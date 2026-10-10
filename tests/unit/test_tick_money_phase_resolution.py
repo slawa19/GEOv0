@@ -45,8 +45,10 @@ from app.core.simulator.real_payments_executor import (
     DeferredRealPaymentEffects,
     _PaymentObservation,
 )
+from app.core.simulator.real_scenario_seeder import ScenarioTrustLineRefused
 from app.core.simulator.tick import RealTick, TickPaymentsPhase
-from app.utils.exceptions import RetryablePaymentConflictException
+from app.core.trustlines.service import CONCURRENT_TRUSTLINE_CREATE
+from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
 
 
 class TickFailure(RuntimeError):
@@ -620,3 +622,104 @@ async def test_double_cancellation_bounds_the_tail_rollback_and_resolves_once(
 
     session.release_rollback.set()
     await asyncio.sleep(0)
+
+
+# --- A scenario line the seeding refuses stops the run at once (D1, 2026-10-10) ---------------------------------------
+
+
+def _unseeded_runner(monkeypatch, *, run_id: str, seeding_raises: BaseException) -> tuple[RunRecord, _Runner, _Session]:
+    """A run whose first tick has to seed, over a seeder that fails with `seeding_raises`; three failures stop a run."""
+    logger = logging.getLogger(f"test.{run_id}")
+    run, phase, _emitter, _effect = _run_with_phase(logger=logger, run_id=run_id)
+    run._real_seeded = False
+    runner = _Runner(run=run, phase=phase, logger=logger)
+    runner._real_max_consec_tick_failures_limit = 3
+    runner.seeding_calls = 0
+
+    async def _seed_scenario_into_db(_session, _scenario) -> None:
+        runner.seeding_calls += 1
+        raise seeding_raises
+
+    runner._seed_scenario_into_db = _seed_scenario_into_db
+    session = _SuccessfulRollbackSession()
+    _bind_session(monkeypatch, session)
+    return run, runner, session
+
+
+@pytest.mark.asyncio
+async def test_a_refused_scenario_trust_line_stops_the_run_on_the_first_tick_with_its_own_code(monkeypatch) -> None:
+    """RED before the branch: the first tick recorded `REAL_MODE_TICK_FAILED` and the run went on - `failures == []`,
+    `errors_total == 1` - and only the third tick stopped it, with `REAL_MODE_TICK_FAILED_REPEATED` and no cause."""
+    refusal = ScenarioTrustLineRefused("PID_A->PID_B UAH", "participant_suspended", "Participant PID_B is not active")
+    run, runner, session = _unseeded_runner(monkeypatch, run_id="scenario-line-refused", seeding_raises=refusal)
+
+    await _tick(runner).tick(run.run_id)
+
+    assert runner.failures == [
+        (
+            "SCENARIO_TRUSTLINE_REFUSED",
+            "SCENARIO_TRUSTLINE_REFUSED: trust line PID_A->PID_B UAH: Participant PID_B is not active "
+            "(reason: participant_suspended)",
+        )
+    ]
+    # Stopped by the refusal, not by a budget: nothing of the tick's own failure accounting moved (the real
+    # `fail_run` counts the stop once; this runner's double only records the call).
+    assert runner.seeding_calls == 1
+    assert run.errors_total == 0
+    assert run._real_consec_tick_failures == 0
+    assert len(run._error_timestamps) == 0
+    # The owner of the seeding transaction rolled it back before the refusal left, and nothing was seeded.
+    assert session.rollback_calls == 1
+    assert session.commit_calls == 0
+    assert run._real_seeded is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ordinary",
+    [
+        TickFailure("seeding broke"),
+        ConflictException("another conflict", details={"reason": "participant_suspended"}),
+        ScenarioTrustLineRefused("PID_A->PID_B UAH", CONCURRENT_TRUSTLINE_CREATE, "Active trustline already exists"),
+        ScenarioTrustLineRefused("PID_A->PID_B UAH", "ConflictException", "Active trustline already exists", named=False),
+    ],
+    ids=[
+        "a programmatic failure",
+        "a conflict that is not a scenario refusal",
+        "a scenario line lost to a concurrent seeding",
+        "a scenario line refused without a named reason",
+    ],
+)
+async def test_an_ordinary_seeding_failure_still_takes_three_ticks_to_stop_the_run(monkeypatch, ordinary) -> None:
+    """Counter-check: the new branch takes the PERMANENT scenario refusal only. Everything else - a refusal that clears
+    by itself or names no reason included - is retried and budgeted as before. (The wrapping itself, by the real
+    seeder over a real lost race, is `tests/integration/test_p024_run_refuses_a_real_participant_postgres.py`.)"""
+    run, runner, _session = _unseeded_runner(monkeypatch, run_id="ordinary-seeding-failure", seeding_raises=ordinary)
+    tick = _tick(runner)
+
+    await tick.tick(run.run_id)
+    await tick.tick(run.run_id)
+
+    assert runner.failures == []
+    assert run.last_error is not None and run.last_error["code"] == "REAL_MODE_TICK_FAILED"
+    assert (run.errors_total, run._real_consec_tick_failures) == (2, 2)
+
+    await tick.tick(run.run_id)
+
+    assert [code for code, _ in runner.failures] == ["REAL_MODE_TICK_FAILED_REPEATED"]
+    assert runner.seeding_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_a_transient_conflict_at_seeding_is_still_a_conflict_tick_and_not_a_refusal(monkeypatch) -> None:
+    """Counter-check: a transient conflict is a `ConflictException` too, and keeps its own path - no stop, no budget."""
+    run, runner, _session = _unseeded_runner(
+        monkeypatch, run_id="conflict-at-seeding", seeding_raises=RetryablePaymentConflictException("serialization")
+    )
+
+    await _tick(runner).tick(run.run_id)
+
+    assert runner.failures == []
+    assert run.last_error is not None and run.last_error["code"] == "REAL_MODE_MONEY_CONFLICT_UNRESOLVED"
+    assert run.errors_total == 0
+    assert run._real_consec_tick_failures == 0
