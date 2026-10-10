@@ -9,6 +9,14 @@ adds on top of it*:
 * **Behaviour** — profiles, recipient weights, amount models, flow chains,
   warm-up, trust drift and seasonal stress — belongs to the scenario and lives
   in this file.
+* **Identity in a database** — a scenario's participant id is
+  ``<scenario_id>:<community pid>`` (``scenario_participant_id``). The community
+  ``pid`` is the description's own label and repeats between communities
+  (``PID_U0001_9e3779b1`` is a different person in each), while a real-mode run
+  stores its participants under the scenario id, and the seeder adopts a stored
+  simulated participant by id alone. Two scenarios run in one database must
+  therefore not share an id (D1, 2026-10-10: they did, and the second one ran
+  on the first one's people, lines and debts).
 
 The generator is deterministic: same description in, same bytes out. It writes
 nothing that is not derived from the description or from the behaviour block
@@ -114,6 +122,27 @@ def _validate_scenario_shape(scenario_path: Path) -> None:
                 raise RuntimeError(f"trustline.equivalent '{eq}' not in equivalents[] in {scenario_path}")
             if base_eq and eq != base_eq and not equivalents_set:
                 raise RuntimeError(f"trustline.equivalent '{eq}' does not match baseEquivalent in {scenario_path}")
+
+
+#: ``participants.pid`` is ``String(64)`` (``app/db/models/participant.py``). The
+#: scenario schema allows an id of 200 characters; the database does not.
+MAX_PARTICIPANT_ID_LENGTH = 64
+
+
+def scenario_participant_id(scenario_id: str, community_pid: str) -> str:
+    """The id a scenario gives a participant of its community. The one owner of the rule.
+
+    ``community_pid`` is kept whole and opaque: its ``_xxxxxxxx`` tail is a
+    historical label, not a checksum of anything, and the simulator's pseudo key
+    hashes the whole resulting id.
+    """
+    pid = f"{scenario_id}:{community_pid}"
+    if len(pid) > MAX_PARTICIPANT_ID_LENGTH:
+        raise RuntimeError(
+            f"{scenario_id}: participant id '{pid}' is {len(pid)} characters; "
+            f"participants.pid holds {MAX_PARTICIPANT_ID_LENGTH}"
+        )
+    return pid
 
 
 def _behavior_for_group(group_id: str, participant_index: int = 0) -> str:
@@ -423,13 +452,14 @@ def _scenario_from_community(
             f"'{community['community_id']}' (active: {sorted(active_codes)})"
         )
 
+    # One mapping, used for the participants and for both ends of every line.
     pid_by_ref: dict[str, str] = {}
     scenario_participants: list[dict[str, Any]] = []
     for p in community["participants"]:
-        pid_by_ref[p["ref"]] = p["pid"]
+        pid_by_ref[p["ref"]] = scenario_participant_id(scenario_id, p["pid"])
         scenario_participants.append(
             {
-                "id": p["pid"],
+                "id": pid_by_ref[p["ref"]],
                 "name": p["name"],
                 "type": p["type"],
                 "status": p["status"],

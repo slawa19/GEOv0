@@ -261,12 +261,53 @@ def test_the_scenario_keeps_no_second_roster(community_id: str, descriptions) ->
         (SCENARIOS_DIR / EXPECTED[community_id]["scenario_id"] / "scenario.json").read_text(encoding="utf-8")
     )
 
-    described = {(p["pid"], p["name"], p["type"], p["status"], p["group"]) for p in doc["participants"]}
+    # The scenario's id of a participant is the description's pid under the scenario's own namespace, spelled out
+    # here and not taken from the generator (D1, 2026-10-10): the community pid repeats between the two
+    # communities, and two scenarios run in one database must not name the same row. Everything else is equal.
+    scenario_id = EXPECTED[community_id]["scenario_id"]
+    assert scenario["scenario_id"] == scenario_id
+
+    def in_this_scenario(community_pid: str) -> str:
+        return f"{scenario_id}:{community_pid}"
+
+    described = {
+        (in_this_scenario(p["pid"]), p["name"], p["type"], p["status"], p["group"]) for p in doc["participants"]
+    }
     in_scenario = {(p["id"], p["name"], p["type"], p["status"], p["groupId"]) for p in scenario["participants"]}
     assert described == in_scenario
+    assert len(in_scenario) == EXPECTED[community_id]["participants"]
+
+    # The same mapping on both ends of every line: who trusts whom, in which equivalent, up to which limit and
+    # under which policy is the description's, for the equivalents the scenario selects.
+    pid_by_ref = {p["ref"]: in_this_scenario(p["pid"]) for p in doc["participants"]}
+    selected = set(scenario["equivalents"])
+    described_lines = {
+        (pid_by_ref[t["from"]], pid_by_ref[t["to"]], t["equivalent"]): (t["limit"], t["policy"])
+        for t in doc["trustlines"]
+        if t["equivalent"] in selected
+    }
+    scenario_lines = {(t["from"], t["to"], t["equivalent"]): (t["limit"], t["policy"]) for t in scenario["trustlines"]}
+    assert scenario_lines == described_lines
+    assert len(scenario["trustlines"]) == len(scenario_lines) == sum(
+        EXPECTED[community_id]["by_equivalent"][code] for code in selected
+    )
 
     declared_groups = {g["id"]: g["label"] for g in doc["groups"]}
     assert {g["id"]: g["label"] for g in scenario["groups"]} == declared_groups
+
+
+def test_the_scenario_generator_refuses_an_id_the_participants_table_cannot_hold(descriptions) -> None:
+    """`participants.pid` is 64 characters; the scenario schema would accept 200 (anti-vacuum for the bound)."""
+    generator = _scenario_generator()
+    doc = descriptions["riverside-town-50"]
+    longest = max(len(p["pid"]) for p in doc["participants"])
+
+    fits = "s" * (generator.MAX_PARTICIPANT_ID_LENGTH - 1 - longest)
+    scenario = generator._scenario_from_community(scenario_id=fits, community=doc, equivalents=["UAH"])
+    assert max(len(p["id"]) for p in scenario["participants"]) == 64
+
+    with pytest.raises(RuntimeError, match="participants.pid holds 64"):
+        generator._scenario_from_community(scenario_id=fits + "s", community=doc, equivalents=["UAH"])
 
 
 def test_the_scenario_generator_refuses_an_equivalent_the_community_does_not_have(tmp_path: Path) -> None:

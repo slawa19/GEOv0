@@ -226,6 +226,7 @@ membership and does not demand execution. Widening the list needs a separately r
 decision, not an edit of this constant alone.
 * 2026-10-10, merge of main (3688: the cleanup command and the A10 exception) with the taxonomy guard recorded in the next line (+2): 3690.
 * 2026-10-10, 035 follow-up of Q-A (the taxonomy guard), on the Q-A branch `49ef6c6c` (3674): 3674 -> 3676 (+2) in `tests/unit/test_postgres_test_taxonomy.py`: the database-skip detector seen on planted positives and negatives (1) and the invariant that no integration test is skipped by a URL or dialect question, with the one live storage skip named (1); the obsolete dialect-skip sub-check of `test_no_module_takes_itself_out_of_the_postgres_tier` was removed (same count). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3676/3696`).
+* 2026-10-10, D1 (two shipped scenarios shared participant ids), on `origin/main` `a1b525ce` (3690): 3690 -> 3696 (+6). `tests/integration/test_simulator_scenario_isolation_postgres.py` (new, 4): the second scenario runs on its own participants and leaves the first alone, in both orders (2); a second run of the same scenario keeps what the first left (1); a database seeded with the ids of before does not contaminate either scenario (1). `tests/unit/test_simulator_scenario_allowlist_and_archives.py` (+2): the scenarios of the default allowlist share no participant id (1) and the check finds a seeded and an injected collision (1).
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -268,7 +269,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3690
+EXPECTED_SELECTED_ITEMS = 3696
 
 #: The registered marker (`pytest.ini`) of the five A10 cases that run in the required tier WITHOUT `slow`.
 A10_MARKER = "a10_real_pool_timeout"

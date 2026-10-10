@@ -31,8 +31,13 @@ What a description does **not** hold: debts, balances, `used`/`available`,
 transactions or timestamps. Those are the *result* of operations and are
 produced by running the recipe, not written by hand.
 
-``pid`` is a fixture identity. It keys the committed simulator scenarios under
-``fixtures/simulator/`` and the Admin UI prototype fixtures. It is not the PID a
+``pid`` is a fixture identity: a participant's label inside its own community.
+It repeats between communities (both have a ``PID_U0001_9e3779b1``, and they
+are different people), so it is not an identity across them. The committed
+simulator scenarios under ``fixtures/simulator/`` derive their participant id
+from it as ``<scenario_id>:<pid>`` (since 2026-10-10;
+``scripts/generate_simulator_seed_scenarios.py``), which keeps two scenarios
+run in one database from naming the same row. It is not the PID a
 participant gets in a database: there ``PID = base58(sha256(public_key))`` of a
 key pair generated per run (`app/core/auth/crypto.py:37-50`), and the recipe
 resolves
