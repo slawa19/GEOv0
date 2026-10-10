@@ -66,7 +66,9 @@ _WIDE = ()
 _SUMMARY = re.compile(r"(?P<selected>\d+)(?:/(?P<total>\d+))? tests? collected(?: \((?P<deselected>\d+) deselected\))?")
 
 
-def _collect(*args: str, extra_pythonpath: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _collect(
+    *args: str, extra_pythonpath: Path | None = None, collect_only: bool = True
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     if extra_pythonpath is not None:
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(extra_pythonpath), env.get("PYTHONPATH")]))
@@ -76,7 +78,7 @@ def _collect(*args: str, extra_pythonpath: Path | None = None) -> subprocess.Com
     env.pop("GEO_TEST_USE_MIGRATED_SCHEMA", None)
     env.pop("PYTEST_ADDOPTS", None)
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *args],
+        [sys.executable, "-m", "pytest", *(["--collect-only"] if collect_only else ["-rs"]), "-q", "-p", "no:cacheprovider", *args],
         cwd=_ROOT,
         env=env,
         capture_output=True,
@@ -373,3 +375,109 @@ def test_the_real_collection_ends_with_exit_4_when_the_a10_exception_is_broken(
     output = result.stdout + result.stderr
     assert result.returncode == _USAGE_ERROR, f"exit {result.returncode}, not {_USAGE_ERROR}:\n{output[-1500:]}"
     assert "the A10 exception" in output and expected_text in output, output[-1500:]
+
+
+# --------------------------------------------------------------------- review of 5e9ba5fd: scope and execution (Q-C)
+# Two P2 findings of the 2026-10-10 review: (1) a SINGLE A10 node was refused as "members missing"; (2) a listed member that
+# is SKIPPED during execution left the run green. These cases are the reproducers (red on 5e9ba5fd) and stay as the guard.
+
+_A10_NODE = _A10_FILE + "::"
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        _A10_NODE + "test_no_connection_around_routing_is_the_timeout_refusal_and_leaves_nothing",
+        _A10_NODE + "test_a_cancellation_while_waiting_for_the_pool_leaves_nothing",
+        _A10_NODE + "test_a_refusal_that_cannot_be_recorded_is_the_retryable_conflict_and_claims_nothing[the pool timeout-mode_b]",
+    ],
+    ids=["a function with two listed members", "a function with none", "one listed node by its full id"],
+)
+def test_a_single_a10_node_selector_is_not_judged_as_the_whole_module(selector: str) -> None:
+    """A deliberate partial run (one function or one node) is complete for its scope: exit 0, the selection collected."""
+
+    result = _collect("--", selector)
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, f"a single-node selector was refused (exit {result.returncode}): {output[-900:]}"
+    assert _nodeids(result), "the selector collected nothing: the case would pass by judging an empty set"
+
+
+def test_the_whole_tier_with_the_a10_file_ignored_is_refused_by_the_membership_guard_itself() -> None:
+    """`--ignore` of the A10 file on the whole tier: the COUNT also catches it, but the membership guard must name it."""
+
+    result = _collect(*_CANONICAL, "--ignore", _A10_FILE)
+    output = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, output[-900:]
+    assert "the A10 exception" in output and "listed case is not collected" in output, output[-900:]
+
+
+_A10_SKIP_PLUGIN = '''
+import pytest
+
+TARGET = {target!r}
+
+
+def pytest_itemcollected(item):
+    if item.nodeid == TARGET:
+{collected}
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    if item.nodeid == TARGET:
+{setup}
+'''
+
+
+def _run_with_planted_skip(
+    tmp_path: Path, *, target: str, collected: str, setup: str, k: str, m: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Execute (not just collect) the A10 module narrowed by `-m`/`-k`, with a skip planted on `target` by a `-p` plugin.
+
+    Only the planted case is selected, and it is skipped before any fixture is set up, so nothing here opens a database.
+    """
+
+    (tmp_path / "p035_a10_skip_plugin.py").write_text(
+        _A10_SKIP_PLUGIN.format(
+            target=target, collected="        " + collected, setup="        " + setup
+        ),
+        encoding="utf-8",
+    )
+    marker = ["-m", m] if m else []
+    return _collect("-p", "p035_a10_skip_plugin", *marker, "-k", k, "--", _A10_FILE, extra_pythonpath=tmp_path, collect_only=False)
+
+
+@pytest.mark.parametrize(
+    ("collected", "setup"),
+    [
+        ("item.add_marker(pytest.mark.skip(reason='planted marker skip'))", "pass"),
+        ("item.add_marker(pytest.mark.skipif(True, reason='planted skipif'))", "pass"),
+        ("pass", "pytest.skip('planted runtime skip')"),
+    ],
+    ids=["pytest.mark.skip", "a true skipif", "pytest.skip() at runtime"],
+)
+def test_a_listed_member_skipped_during_execution_is_refused(tmp_path: Path, collected: str, setup: str) -> None:
+    """The count and the membership stay right when a member is skipped; the run must still not be green."""
+
+    target = _A10_NODE + "test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_nothing[the pool timeout-mode_b]"
+    assert target in _tier_count_module().A10_REAL_POOL_TIMEOUT_CASES
+    result = _run_with_planted_skip(
+        tmp_path, target=target, collected=collected, setup=setup, k="test_no_connection_for_the_attempt", m="a10_real_pool_timeout"
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, f"a listed member was skipped and the run exited {result.returncode}:\n{output[-900:]}"
+    assert "the A10 exception" in output and "skipped" in output, output[-900:]
+
+
+def test_a_skipped_non_member_is_an_ordinary_skip(tmp_path: Path) -> None:
+    """Counter-check: the refusal is about the five, not a blanket rule on skips."""
+
+    other = _A10_NODE + "test_a_cancellation_while_waiting_for_the_pool_leaves_nothing[mode_b]"
+    result = _run_with_planted_skip(
+        tmp_path,
+        target=other,
+        collected="item.add_marker(pytest.mark.skip(reason='planted'))",
+        setup="pass",
+        k="test_a_cancellation_while_waiting",
+    )
+    assert result.returncode == 0 and "1 skipped" in result.stdout, (result.stdout + result.stderr)[-900:]
