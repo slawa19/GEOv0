@@ -47,6 +47,7 @@ from app.core.simulator.real_payments_executor import (
 )
 from app.core.simulator.real_scenario_seeder import ScenarioTrustLineRefused
 from app.core.simulator.tick import RealTick, TickPaymentsPhase
+from app.core.trustlines.service import CONCURRENT_TRUSTLINE_CREATE
 from app.utils.exceptions import ConflictException, RetryablePaymentConflictException
 
 
@@ -676,11 +677,23 @@ async def test_a_refused_scenario_trust_line_stops_the_run_on_the_first_tick_wit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "ordinary",
-    [TickFailure("seeding broke"), ConflictException("another conflict", details={"reason": "participant_suspended"})],
-    ids=["a programmatic failure", "a conflict that is not a scenario refusal"],
+    [
+        TickFailure("seeding broke"),
+        ConflictException("another conflict", details={"reason": "participant_suspended"}),
+        ScenarioTrustLineRefused("PID_A->PID_B UAH", CONCURRENT_TRUSTLINE_CREATE, "Active trustline already exists"),
+        ScenarioTrustLineRefused("PID_A->PID_B UAH", "ConflictException", "Active trustline already exists", named=False),
+    ],
+    ids=[
+        "a programmatic failure",
+        "a conflict that is not a scenario refusal",
+        "a scenario line lost to a concurrent seeding",
+        "a scenario line refused without a named reason",
+    ],
 )
 async def test_an_ordinary_seeding_failure_still_takes_three_ticks_to_stop_the_run(monkeypatch, ordinary) -> None:
-    """Counter-check: the new branch takes the scenario refusal only. Everything else is retried and budgeted as before."""
+    """Counter-check: the new branch takes the PERMANENT scenario refusal only. Everything else - a refusal that clears
+    by itself or names no reason included - is retried and budgeted as before. (The wrapping itself, by the real
+    seeder over a real lost race, is `tests/integration/test_p024_run_refuses_a_real_participant_postgres.py`.)"""
     run, runner, _session = _unseeded_runner(monkeypatch, run_id="ordinary-seeding-failure", seeding_raises=ordinary)
     tick = _tick(runner)
 

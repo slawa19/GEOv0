@@ -258,6 +258,82 @@ async def test_a_scenario_line_to_a_participant_another_scenario_froze_fails_the
     assert await _trustlines_touching(factory, frozen) == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("winner_commits", ["before the existence check", "between the check and the insert"])
+async def test_a_scenario_line_lost_to_a_concurrent_seeding_does_not_stop_the_run_and_the_next_tick_seeds(
+    factory, monkeypatch, winner_commits: str
+) -> None:
+    """Counter-check of the fail-fast above (D1 review, 2026-10-10): not every refused scenario line is permanent.
+
+    Two runs of one scenario seed together; both saw the line absent, one commits it first. The loser's creation is
+    refused by the REAL service - "Active trustline already exists", with no reason when its existence check already
+    sees the winner's row, and as `CONCURRENT_TRUSTLINE_CREATE` when the INSERT meets the unique index - and the
+    REAL seeder wraps either as `ScenarioTrustLineRefused`. Neither may stop the run: the next tick finds the line
+    live, skips it and seeds. RED on `b6ead75f`: the first tick ended the run with `SCENARIO_TRUSTLINE_REFUSED`.
+
+    The race is placed, not timed: the winner (the real seeder, a session of its own, a real commit) runs at a chosen
+    point inside the loser's creation - on entry, or at the batch's `_touch`, which the service calls between its
+    existence check and its INSERT."""
+    from app.core.simulator.real_scenario_seeder import RealScenarioSeeder
+    from app.core.trustlines.service import TrustLineService, TrustLineWriteBatch
+
+    n = _tag()
+    eq_code = f"P24C{n}"
+    a, b = f"p024_a_{n}", f"p024_b_{n}"
+    scenario = _scenario(eq_code, [a, b], [(a, b)])
+    # The participants and the equivalent exist already (an earlier run): the two seedings meet on the line only.
+    async with factory() as s:
+        await RealScenarioSeeder().seed_scenario_into_db(session=s, scenario=_scenario(eq_code, [a, b], []))
+        await s.commit()
+    install_tick_stand(monkeypatch, factory)
+
+    won: list[str] = []
+
+    async def the_winner_seeds_and_commits() -> None:
+        if won:
+            return
+        won.append("started")  # before its own creation re-enters the hooks below
+        async with factory() as s:
+            await RealScenarioSeeder().seed_scenario_into_db(session=s, scenario=scenario)
+            await s.commit()
+
+    real_create, real_touch = TrustLineService.execute_create, TrustLineWriteBatch._touch
+
+    async def create(self, *args, **kwargs):
+        if winner_commits == "before the existence check":
+            await the_winner_seeds_and_commits()
+        return await real_create(self, *args, **kwargs)
+
+    async def touch(self, *args, **kwargs):
+        if winner_commits == "between the check and the insert":
+            await the_winner_seeds_and_commits()
+        return await real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(TrustLineService, "execute_create", create)
+    monkeypatch.setattr(TrustLineWriteBatch, "_touch", touch)
+
+    run = _fresh_run(f"p024-loser-{n}", f"p024-race-{n}", scenario)
+    runner = _runner(run, scenario)
+    await _tick(runner, run)
+
+    # The loser's tick failed on the refused line - and that is all: an ordinary failed tick, one of three.
+    assert won == ["started"]
+    assert run.last_error is not None and run.last_error["code"] == "REAL_MODE_TICK_FAILED", run.last_error
+    assert f"SCENARIO_TRUSTLINE_REFUSED: trust line {a}->{b} {eq_code}: Active trustline already exists" in (
+        run.last_error["message"]
+    ), run.last_error
+    assert run.state == "running", run.last_error
+    assert (run._real_consec_tick_failures, run._real_seeded) == (1, False)
+    assert await _trustlines_touching(factory, a) == 1  # the winner's
+
+    await _tick(runner, run)
+
+    assert run.state == "running", run.last_error
+    assert run._real_seeded is True
+    assert sorted(pid for _id, pid in run._real_participants) == sorted([a, b])
+    assert await _trustlines_touching(factory, a) == 1
+
+
 def _seeded_run_with_event(monkeypatch, factory, n: str, effect: dict) -> tuple[RunRecord, RealRunnerImpl]:
     """A fresh run of two simulated participants whose first tick seeds them and fires `effect`."""
     eq_code = f"P24I{n}"

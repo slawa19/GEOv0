@@ -423,24 +423,33 @@ class RealTick:
                 e.pid,
             )
             await rr.fail_run(run_id, code=SIMULATOR_PID_TAKEN, message=str(e))
-        except ScenarioTrustLineRefused as e:
-            # D1 (2026-10-10): the seeding refused a trust line of the scenario - a suspended end, a policy outside
-            # the grammar, a limit finer than the step. The seeding transaction is already rolled back by its owner
-            # (`_open_money_phase`), and the same scenario over the same database is refused the same way on every
-            # tick, so there is nothing to retry: the run stops now with the seeder's own code, the line and the
-            # reason. Until this branch it took the generic path below - three ticks, then
-            # `REAL_MODE_TICK_FAILED_REPEATED`, which names no cause. As for `SIMULATOR_PID_TAKEN`, the tick's own
-            # failure accounting (the consecutive-failure counter) is not touched; `fail_run` counts the stop once.
-            reason = str((e.details or {}).get("reason") or "")
-            rr._logger.warning(
-                "simulator.real.run_refused code=%s run_id=%s line=%s reason=%s",
-                SCENARIO_TRUSTLINE_REFUSED,
-                str(run.run_id),
-                e.line,
-                reason,
-            )
-            await rr.fail_run(run_id, code=SCENARIO_TRUSTLINE_REFUSED, message=f"{e.message} (reason: {reason})")
         except Exception as e:
+            if isinstance(e, ScenarioTrustLineRefused) and e.permanent:
+                # D1 (2026-10-10): the seeding refused a trust line of the scenario for a NAMED reason that does not
+                # clear by itself - a suspended end, a stopped or held equivalent, a policy outside the grammar, a
+                # limit finer than the step. The seeding transaction is already rolled back by its owner
+                # (`_open_money_phase`), and a retry one tick later meets the same refusal unless somebody acts in
+                # between, so the run stops now with the seeder's own code, the line and the reason; `resume` seeds
+                # again. Until this branch it took the path below - three ticks, then
+                # `REAL_MODE_TICK_FAILED_REPEATED`, which names no cause. As for `SIMULATOR_PID_TAKEN`, the tick's
+                # own failure accounting (the consecutive-failure counter) is not touched; `fail_run` counts the stop.
+                #
+                # NOT every refusal: one that is a lost race with another seeding of the same scenario
+                # (`ScenarioTrustLineRefused.CLEARS_BY_ITSELF`), or one the service gave no reason for, is not
+                # `permanent` and takes the path below unchanged - the next tick finds the winner's line and seeds.
+                reason = str((e.details or {}).get("reason") or "")
+                rr._logger.warning(
+                    "simulator.real.run_refused code=%s run_id=%s line=%s reason=%s",
+                    SCENARIO_TRUSTLINE_REFUSED,
+                    str(run.run_id),
+                    e.line,
+                    reason,
+                )
+                await rr.fail_run(
+                    run_id, code=SCENARIO_TRUSTLINE_REFUSED, message=f"{e.message} (reason: {reason})"
+                )
+                return
+
             conflict = money_conflict_name(e)
             rr._logger.warning(
                 "simulator.real.tick_failed run_id=%s tick=%s money_conflict=%s",
