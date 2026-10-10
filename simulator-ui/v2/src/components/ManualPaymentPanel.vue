@@ -774,16 +774,23 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
   Unscoped on purpose and aimed at one shell: the window shell (WindowShell.vue, owned by the window manager) positions
   and sizes itself with inline styles and gives a frameless window `contain: layout style`; the panel's own root cannot
-  change that from inside (it sets `position: static` itself). So the rules below reach the shell from the panel's
-  stylesheet, through `:has()` on the one shell that holds this panel - the shells of the clearing and trustline panels
-  and of the inspectors are not matched (covered by `e2e/p037-b1-panel-container.spec.ts`, "other windows are unchanged").
-  The manager is not edited; it keeps measuring the shell and re-clamping it, now to a height the shell can honour.
+  change that from inside (it sets `position: static` itself). Its `data-win-type` is the same ("interact-panel") for the
+  payment, trustline and clearing panels, so the only handle on THIS shell is its content: `:has()` on the shell that holds
+  this panel. The manager is not edited; it keeps measuring the shell and re-clamping it, now to a height the shell can honour.
+
+  The whole block sits in `@supports selector(:has(*))`: in a browser without `:has()` (before Chrome 105, Safari 15.4,
+  Firefox 121) NONE of it applies and the panel keeps the old layout - no half-applied state.
 
   What it does: bounds the window to the screen (the shell's own `max-height`), lets the body scroll INSIDE the window,
   keeps the Confirm/Cancel row and the result buttons in view while it scrolls, and caps the teleported recipient list
   (it lives inside the shell and inherits these variables) so it cannot grow past the screen.
+
+  Checked by `e2e/p037-b1-panel-container.spec.ts`: that the clearing and trustline windows keep the manager's layout (a
+  test, with a positive control). NOT checked by a test: the node card and the edge popup - they are not matched because
+  their shells do not contain this panel's `data-testid`; that is by the selector, not measured.
 -->
 <style>
+@supports selector(:has(*)) {
 @media (max-width: 520px), (max-height: 520px) {
   .ws-shell:has(> .ws-body > [data-testid='manual-payment-panel']) {
     --mp-sticky-bg: var(--ds-surface-1);
@@ -831,5 +838,6 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
     z-index: 1;
     background: var(--mp-sticky-bg, var(--ds-surface-1));
   }
+}
 }
 </style>

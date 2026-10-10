@@ -55,7 +55,9 @@ async function measure(page: Page, step: string, selectors: string[]): Promise<S
       const el = document.querySelector(selector) as HTMLElement | null
       if (!el) return { selector, found: false, rect: null, insideViewport: false, insideShell: false, uncoveredPoints: 0, of: 5 }
       const r = el.getBoundingClientRect()
-      // The HUD theme cuts two corners of buttons at 8px (clip-path): probe 10px in from the sides, 3px in from top/bottom.
+      // Five points per control: four corners and the centre. The HUD theme cuts two corners of buttons at 8px (clip-path), so
+      // the corner points sit 10px in from the sides and 3px in from top/bottom. LIMIT: the band closer than that to the edge and
+      // the gaps BETWEEN the five points are not probed - a sliver of cover there, or a hole in the middle of a wide control, passes.
       const ix = Math.min(10, r.width / 2 - 1)
       const iy = Math.min(3, r.height / 2 - 1)
       const pts: Array<[number, number]> = [
@@ -167,8 +169,17 @@ for (const vp of VIEWPORTS) {
       await page.locator('#mp-to__trigger').focus()
       await page.keyboard.press('Enter')
       await expect(page.locator('#mp-to__surface')).toBeVisible()
-      for (let i = 0; i < 12; i += 1) await page.keyboard.press('ArrowDown')
-      const keyboard = await page.evaluate(() => {
+      const list = await page.evaluate(() => {
+        const opts = Array.from(document.querySelectorAll<HTMLElement>('#mp-to__surface [role="option"]'))
+        const a = document.activeElement as HTMLElement | null
+        return { total: opts.length, recipients: opts.filter((o) => (o.getAttribute('data-option-value') ?? '') !== '').length,
+          activeIndex: a ? opts.indexOf(a) : -1, lastValue: opts[opts.length - 1]?.getAttribute('data-option-value') ?? null }
+      })
+      // The fixture must really be long: 31 recipients (bob + 30), not a list that shrank to fit.
+      expect(list.recipients, 'fixture: the recipient list under test has 31 recipients').toBe(31)
+      expect(list.activeIndex, 'the keyboard walk starts inside the list').toBeGreaterThanOrEqual(0)
+      for (let i = 0; i < list.total - 1 - list.activeIndex; i += 1) await page.keyboard.press('ArrowDown')
+      const keyboard = await page.evaluate((lastValue) => {
         const s = document.getElementById('mp-to__surface')!
         const a = document.activeElement as HTMLElement | null
         const sr = s.getBoundingClientRect()
@@ -178,9 +189,10 @@ for (const vp of VIEWPORTS) {
           activeInsideSurface: !!ar && ar.top >= sr.top - 0.5 && ar.bottom <= sr.bottom + 0.5,
           activeInsideViewport: !!ar && ar.top >= 0 && ar.bottom <= window.innerHeight,
           activeLabel: a?.textContent?.trim() ?? null,
+          activeIsLast: !!a && a.getAttribute('data-option-value') === lastValue,
           pageScrollTop: document.scrollingElement?.scrollTop ?? 0,
         }
-      })
+      }, list.lastValue)
       await page.keyboard.press('Escape')
       await expect(page.locator('#mp-to__surface')).toBeHidden()
 
@@ -212,6 +224,7 @@ for (const vp of VIEWPORTS) {
         expect.soft(s.pageScrollTop, `${s.step}: the page did not scroll`).toBe(0)
       }
       expect.soft(keyboard.activeIsOption, 'keyboard: the active element after ArrowDown is a list option').toBe(true)
+      expect.soft(keyboard.activeIsLast, `keyboard: ArrowDown reached the LAST recipient (${keyboard.activeLabel})`).toBe(true)
       expect.soft(keyboard.activeInsideSurface, `keyboard: the active option (${keyboard.activeLabel}) is whole inside the surface`).toBe(true)
       expect.soft(keyboard.activeInsideViewport, 'keyboard: the active option is inside the viewport').toBe(true)
       expect.soft(keyboard.pageScrollTop, 'keyboard: the page did not scroll').toBe(0)
@@ -230,6 +243,29 @@ for (const vp of VIEWPORTS) {
       await c.press('Confirm', '[data-testid="manual-payment-confirm"]')
       await expect(page.locator('[data-testid="mp-result-route-3"]')).toBeVisible()
       await expect(page.getByLabel('Success notification')).toBeHidden({ timeout: 15_000 })
+
+      // Scroll the body to its end and look at the LAST step of the LAST route: it must lie wholly above the sticky button row
+      // (not under it) and wholly inside the visible body. Measured before any click.
+      const tail = await page.evaluate(() => {
+        const body = document.querySelector<HTMLElement>('[data-testid="manual-payment-panel"] > .ds-panel__body')!
+        body.scrollTop = body.scrollHeight
+        const hops = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="mp-result-hop"]'))
+        const last = hops[hops.length - 1]
+        const row = document.querySelector<HTMLElement>('[data-testid="mp-result"] > .ds-row--actions')!
+        const lr = last.getBoundingClientRect()
+        const rr = row.getBoundingClientRect()
+        const br = body.getBoundingClientRect()
+        const mid = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2)
+        return { hops: hops.length, lastText: last.textContent?.trim() ?? '', lastBottom: Math.round(lr.bottom), rowTop: Math.round(rr.top),
+          lastAboveRow: lr.bottom <= rr.top + 0.5, lastInsideBody: lr.top >= br.top - 0.5 && lr.bottom <= br.bottom + 0.5,
+          lastReceivesPointer: !!mid && (mid === last || last.contains(mid)) }
+      })
+      console.log(`P037 B1 CONTAINER-LONG-RESULT-TAIL ${JSON.stringify({ viewport: vp, tail })}`)
+      expect.soft(tail.hops, 'fixture: three routes of four steps').toBe(12)
+      expect.soft(tail.lastAboveRow, `the last step of the last route (${tail.lastText}) lies above the sticky row: bottom ${tail.lastBottom}, row top ${tail.rowTop}`).toBe(true)
+      expect.soft(tail.lastInsideBody, 'the last step is whole inside the visible body').toBe(true)
+      expect.soft(tail.lastReceivesPointer, 'nothing covers the last step').toBe(true)
+      await page.evaluate(() => { document.querySelector<HTMLElement>('[data-testid="manual-payment-panel"] > .ds-panel__body')!.scrollTop = 0 })
 
       const m = await measure(page, 'long-result', ['[data-testid="mp-result-another"]', '[data-testid="mp-result-close"]'])
       const scrolls = !!m.body && m.body.scrollHeight > m.body.clientHeight + 1
