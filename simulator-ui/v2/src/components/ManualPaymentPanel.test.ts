@@ -1264,6 +1264,78 @@ describe('ManualPaymentPanel', () => {
     host.remove()
   })
 
+  it('AC-MP-11b: FROM lists a creditor whose capacity is only the debt others owe them (D2)', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const state = reactive({
+      phase: 'picking-payment-from',
+      fromPid: null as string | null,
+      toPid: null as string | null,
+      selectedEdgeKey: null as string | null,
+      edgeAnchor: null as { x: number; y: number } | null,
+      error: null as string | null,
+      lastClearing: null,
+    })
+
+    const app = createApp({
+      render: () =>
+        h(manualPaymentPanelComponent, {
+          phase: 'picking-payment-from',
+          state,
+
+          unit: 'UAH',
+          availableCapacity: null,
+
+          trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
+          paymentToTargetIds: new Set(),
+          trustlines: [
+            // Line `from -> to` is creditor -> debtor and `used` is the debtor's debt to the creditor. The creditor can pay the
+            // debtor by reducing that debt (capacity(S->R) = limit(R->S) - debt[S->R] + debt[R->S]), with no incoming line at all.
+            // 'erin' is the creditor of an active line with used > 0, and has no incoming line: must be listed.
+            { from_pid: 'erin', to_pid: 'bob', used: '248.17', available: '51.83', status: 'active' },
+            // Anti-vacuum: a creditor whose line carries no debt (used = 0) and who has no incoming line cannot pay: not listed.
+            { from_pid: 'frank', to_pid: 'bob', used: '0', available: '100', status: 'active' },
+            // A line that is not active does not count, whatever its figures.
+            { from_pid: 'gina', to_pid: 'bob', used: '5', available: '0', status: 'frozen' },
+            // The ordinary rule still lists the debtor of an active line with available > 0.
+            { from_pid: 'frank', to_pid: 'alice', used: '0', available: '100', status: 'active' },
+          ],
+
+          participants: [
+            { pid: 'alice', name: 'Alice' },
+            { pid: 'bob', name: 'Bob' },
+            { pid: 'erin', name: 'Erin' },
+            { pid: 'frank', name: 'Frank' },
+            { pid: 'gina', name: 'Gina' },
+          ],
+
+          setFromPid: vi.fn(),
+          setToPid: vi.fn(),
+
+          busy: false,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+
+          anchor: null,
+          hostEl: null,
+        }),
+    })
+
+    app.mount(host)
+    await nextTick()
+
+    const fromSel = host.querySelector('#mp-from') as HTMLSelectElement
+    const optionValues = Array.from(fromSel.querySelectorAll('option')).map((o) => (o as HTMLOptionElement).value)
+    expect(optionValues).toEqual(['', 'alice', 'bob', 'erin'])
+
+    app.unmount()
+    host.remove()
+  })
+
   it.each<{
     name: string
     trustlines: TrustlineInfo[] | undefined

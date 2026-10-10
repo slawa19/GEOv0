@@ -69,6 +69,12 @@ from typing import Any, Iterable, Literal
 
 ROOT = Path(__file__).resolve().parent.parent
 
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+
+# The one owner of a scenario's participant id (`<scenario_id>:<community pid>`).
+from generate_simulator_seed_scenarios import scenario_participant_id  # noqa: E402
+
 
 class ScenarioEventsGeneratorError(RuntimeError):
     pass
@@ -708,6 +714,42 @@ def _build_greenfield_legacy_timeline_events(*, allow_fake_pids: bool) -> list[d
     ]
 
 
+def _namespace_event_pids(events: list[dict[str, Any]], *, scenario_id: str) -> list[dict[str, Any]]:
+    """Give every participant the legacy timeline names the id its scenario stores it under.
+
+    The timelines below are written with the community pids (`PID_U...`) and the synthetic wave pids
+    (`PID_W...`), while the scenario's participants are `<scenario_id>:<pid>`
+    (`generate_simulator_seed_scenarios.scenario_participant_id`). Every place an inject effect names a participant is
+    mapped by that one rule - `add_participant.participant.id`, `initial_trustlines[].sponsor`,
+    `create_trustline.from`/`.to`, `freeze_participant.participant_id` - so an injected participant is as much the
+    scenario's own as a seeded one. A reference left unmapped would name nobody in the run, or somebody of another
+    scenario. An op this function does not know is refused rather than passed through unmapped.
+    """
+
+    def ns(pid: Any) -> str:
+        if not isinstance(pid, str) or not pid:
+            _die(f"Legacy timeline of {scenario_id} names a participant by {pid!r}")
+        return scenario_participant_id(scenario_id, pid)
+
+    out = json.loads(json.dumps(events))
+    for event in out:
+        if event.get("type") != "inject":
+            continue
+        for effect in event.get("effects") or []:
+            op = effect.get("op")
+            if op == "add_participant":
+                effect["participant"]["id"] = ns(effect["participant"]["id"])
+                for line in effect.get("initial_trustlines") or []:
+                    line["sponsor"] = ns(line["sponsor"])
+            elif op == "create_trustline":
+                effect["from"], effect["to"] = ns(effect["from"]), ns(effect["to"])
+            elif op == "freeze_participant":
+                effect["participant_id"] = ns(effect["participant_id"])
+            else:
+                _die(f"Legacy timeline of {scenario_id}: inject op {op!r} has no participant-id mapping")
+    return out
+
+
 def patch_scenario(path: Path, events: list[dict[str, Any]]) -> None:
     data = _load_json(path)
     if not isinstance(data, dict):
@@ -721,8 +763,14 @@ def _legacy_patch_fixtures(*, allow_fake_pids: bool = True) -> None:
     """Оставляем прежнее поведение: патчим два фиксированных scenario.json."""
 
     print("Generating scenario events...\n")
-    riverside_events = _build_riverside_legacy_timeline_events(allow_fake_pids=allow_fake_pids)
-    greenfield_events = _build_greenfield_legacy_timeline_events(allow_fake_pids=allow_fake_pids)
+    riverside_events = _namespace_event_pids(
+        _build_riverside_legacy_timeline_events(allow_fake_pids=allow_fake_pids),
+        scenario_id="riverside-town-50-realistic-v2",
+    )
+    greenfield_events = _namespace_event_pids(
+        _build_greenfield_legacy_timeline_events(allow_fake_pids=allow_fake_pids),
+        scenario_id="greenfield-village-100-realistic-v2",
+    )
 
     patch_scenario(
         ROOT / "fixtures" / "simulator" / "riverside-town-50-realistic-v2" / "scenario.json",

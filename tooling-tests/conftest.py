@@ -151,8 +151,12 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-10, 035 slice Q-C review fix: portable 266 -> 267. One case added: the summary line is printed only for five executed and passed members (the verdict-with-scope case was rewritten, the same count).
 #:
 #: 2026-10-10, 035 slice Q-C fix-delta (xfail members): portable 267 -> 270. Two member cases added to the skipped-member test (`pytest.xfail()` at runtime; an xfail marker on a member that fails), and one control (an xfailed non-member stays an expected failure).
+#:
+#: 2026-10-10, D1 (scenario participant ids are `<scenario_id>:<community pid>`): portable 412 -> 413. One case added to
+#: `portable/test_p017_t1712_community_descriptions.py`: the scenario generator refuses an id longer than `participants.pid` holds;
+#: the roster test of the same module now spells the namespace out and compares both ends of every line (the same count).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 412,
+    "portable": 413,
     "powershell": 235,
 }
 

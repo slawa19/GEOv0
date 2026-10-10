@@ -226,6 +226,8 @@ membership and does not demand execution. Widening the list needs a separately r
 decision, not an edit of this constant alone.
 * 2026-10-10, merge of main (3688: the cleanup command and the A10 exception) with the taxonomy guard recorded in the next line (+2): 3690.
 * 2026-10-10, 035 follow-up of Q-A (the taxonomy guard), on the Q-A branch `49ef6c6c` (3674): 3674 -> 3676 (+2) in `tests/unit/test_postgres_test_taxonomy.py`: the database-skip detector seen on planted positives and negatives (1) and the invariant that no integration test is skipped by a URL or dialect question, with the one live storage skip named (1); the obsolete dialect-skip sub-check of `test_no_module_takes_itself_out_of_the_postgres_tier` was removed (same count). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3676/3696`).
+* 2026-10-10, merge of main (3696: the D1 scenario namespaces, next line) with the D1 fail-fast and its fix-delta recorded in the two lines after it (+5, +4): 3705.
+* 2026-10-10, D1 (two shipped scenarios shared participant ids), on `origin/main` `a1b525ce` (3690): 3690 -> 3696 (+6). `tests/integration/test_simulator_scenario_isolation_postgres.py` (new, 4): the second scenario runs on its own participants and leaves the first alone, in both orders (2); a second run of the same scenario keeps what the first left (1); a database seeded with the ids of before does not contaminate either scenario (1). `tests/unit/test_simulator_scenario_allowlist_and_archives.py` (+2): the scenarios of the default allowlist share no participant id (1) and the check finds a seeded and an injected collision (1).
 * 2026-10-10, D1 fail-fast (a refused scenario trust line stops the run on the first tick), on `origin/main` `a1b525ce` (3690): 3690 -> 3695 (+5). `tests/unit/test_tick_money_phase_resolution.py` (+4): the refusal stops the run at once with `SCENARIO_TRUSTLINE_REFUSED` (1); an ordinary seeding failure and a conflict that is not a scenario refusal still take three ticks (2); a transient conflict at seeding keeps its own path (1). `tests/integration/test_p024_run_refuses_a_real_participant_postgres.py` (+1): the same stop on the real tick, seeder and trust-line service.
 * 2026-10-10, the same fail-fast, fix-delta of the review of `b6ead75f` (a refusal that is a lost race is not permanent): 3695 -> 3699 (+4). `tests/integration/test_p024_run_refuses_a_real_participant_postgres.py` (+2): a scenario line lost to a concurrent seeding does not stop the run and the next tick seeds, with the winner committing before the service's existence check and between the check and the insert. `tests/unit/test_tick_money_phase_resolution.py` (+2): the two non-permanent forms of the refusal join the three-ticks counter-check.
 
@@ -270,7 +272,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3699
+EXPECTED_SELECTED_ITEMS = 3705
 
 #: The registered marker (`pytest.ini`) of the five A10 cases that run in the required tier WITHOUT `slow`.
 A10_MARKER = "a10_real_pool_timeout"

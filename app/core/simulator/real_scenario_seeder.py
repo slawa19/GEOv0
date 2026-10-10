@@ -31,9 +31,12 @@ from app.utils.validation import (
 # Programme 024, F-024-4b (SIM-02). A run acts for its participants without signatures (the
 # seeder's trustlines, the tick's and Interact Mode's `create_payment_internal`), so it may take
 # over an EXISTING participant only if the simulator itself would have created that row: its
-# `public_key` is the simulator's pseudo key `sha256(pid)`. Such a row is left over from an earlier
-# run of the same scenario, and adopting it keeps "run the scenario again" working. Any other key
-# belongs to a real participant, and the run is refused instead of acting in its name.
+# `public_key` is the simulator's pseudo key `sha256(pid)`. Adopting such a row keeps "run the
+# scenario again" working. The key says the SIMULATOR made the row, not which scenario it belongs to:
+# a row left by another scenario that names the same pid is adopted just the same, with its name,
+# status, lines and debts (D1, 2026-10-10). Nothing here tells the two apart; shipped scenarios are
+# kept apart by their ids (`<scenario_id>:<community pid>`, `scripts/generate_simulator_seed_scenarios.py`).
+# Any other key belongs to a real participant, and the run is refused instead of acting in its name.
 SIMULATOR_PID_TAKEN = "SIMULATOR_PID_TAKEN"
 
 

@@ -56,12 +56,14 @@ TrustLine direction фиксирована:
 
 | Fixtures поле | Scenario поле | Правило |
 |---|---|---|
-| `pid` | `participants[].id` | Копировать 1:1 |
+| `pid` | `participants[].id` | `<scenario_id>:<pid>` — `pid` описания целиком, под пространством имён сценария (с 2026-10-10, см. ниже) |
 | `display_name` | `participants[].name` | Копировать 1:1 |
 | `type` | `participants[].type` | Копировать 1:1 (`person|business|hub`) |
 | `status` | `participants[].status` | Копировать 1:1 (`active|suspended|left|deleted|frozen`) |
 
 Примечание: в fixtures встречается `status="frozen"`, а в schema participant.status это допустимо.
+
+**Идентификатор участника в сценарии — `<scenario_id>:<pid>` (решение 2026-10-10, дефект D1).** `pid` описания — метка внутри сообщества: `PID_U0001_9e3779b1` есть в обоих сообществах, и это разные участники. Ран в режиме real хранит участников в базе под идентификатором из сценария, а сидер принимает уже существующего участника симулятора по одному идентификатору (`app/core/simulator/real_scenario_seeder.py`). Пока оба сценария `realistic-v2` несли `pid` дословно, второй сценарий в той же базе работал на участниках первого — с их именами, статусами, линиями доверия и долгами, — а его собственные линии к участнику, замороженному первым, получали отказ `SCENARIO_TRUSTLINE_REFUSED`. Правило одно и живёт в генераторе: `scenario_participant_id` в `scripts/generate_simulator_seed_scenarios.py`; оно же отказывает идентификатору длиннее 64 символов (`participants.pid`), хотя схема сценария допускает 200. Хвост `_9e3779b1` — историческая метка, не контрольная сумма: он переносится как есть. Строки, оставленные в базах прежними идентификаторами, новые сценарии не трогают и не исправляют. Попарную непересекаемость идентификаторов у сценариев списка по умолчанию держит `tests/unit/test_simulator_scenario_allowlist_and_archives.py`; сценарии вне этого списка (переопределённый `SIMULATOR_SCENARIO_ALLOWLIST`, загруженные) он не видит.
 
 ### 2.2 equivalents
 Источник (исторически): `admin-fixtures/v1/datasets/equivalents.json`; сегодня — `equivalents[]` описания
@@ -82,8 +84,8 @@ TrustLine direction фиксирована:
 
 | Fixtures поле | Scenario поле | Правило |
 |---|---|---|
-| `from` | `trustlines[].from` | Копировать 1:1 |
-| `to` | `trustlines[].to` | Копировать 1:1 |
+| `from` | `trustlines[].from` | Тот же идентификатор участника, что в `participants[].id` (`<scenario_id>:<pid>`) |
+| `to` | `trustlines[].to` | Тот же идентификатор участника, что в `participants[].id` (`<scenario_id>:<pid>`) |
 | `equivalent` | `trustlines[].equivalent` | Копировать 1:1 |
 | `limit` | `trustlines[].limit` | Копировать 1:1 (строкой) |
 | `policy` | `trustlines[].policy` | Копировать 1:1 (как JSON object) |
