@@ -124,8 +124,26 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-09, 036 slice C (`T3630`): portable 252 -> 254. The new live fixture `community-story-10` is one more parametrised case of
 #: `test_every_live_fixture_validates_against_the_schema` (+1), and `test_the_validator_refuses_a_broken_community_story` shows the guard is
 #: not blind to it (+1); the live-set test only changed its list.
+#:
+#: 2026-10-10, 035 test-database cleanup command (`QD-TEST-DATABASES: BUILD-NARROW`): portable 254 -> 290. Thirty-six cases added,
+#: `portable/test_p035_cleanup_test_databases_selection.py`: names that only look like a test database (11 + 1), the selection rules (6),
+#: the apply order (1), nine kinds of changed evidence that stop an apply (9), a refused drop (1), import and `--help` without a
+#: connection (1), the command line's refusals (3 + 3).
+#:
+#: 2026-10-10, the same command, fix-delta of the review of `ddcb97b6` (F1, F2, F4): portable 290 -> 370. The module was rewritten
+#: and is 116 cases: 26 misleading names of which 15 carry a character outside the grammar (`?`, a quote, a newline...), 4 accepted
+#: names, the layers on their own (2), 20 escaped identifiers, the selection rules (5) and 6 refused protected slugs, the dry run (1),
+#: the apply order (1), a statement that cannot name another database (1), 9 kinds of changed evidence, the last row before the first
+#: drop (1), a protected busy family (1), the reviewed count (1), manifest freshness (5), 14 malformed manifests, a refused and an
+#: unanswered drop (2), import and `--help` (1), the command line (7 + 5), unusable manifest files (3), an unreachable server (1), the
+#: result file (1). The recorder now PARSES the one statement it accepts instead of splitting it on a quote.
+#:
+#: 2026-10-10, the same command, second fix-delta (review of `e8ab6b96`, F5-F7): portable 370 -> 396. +27 and -1 in the same
+#: module: eleven kinds of "no answer" - the driver's own classes among them - each with and without the drop having happened (22),
+#: three answers of the server that are refusals (3), the run's own artifact directory (1), an unreadable server (1); the one test
+#: that used Python's `ConnectionResetError` for a lost connection is replaced by those (-1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 254,
+    "portable": 396,
     "powershell": 235,
 }
 
