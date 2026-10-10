@@ -295,3 +295,81 @@ def test_every_named_skip_is_still_declared_where_the_count_module_says_it_is() 
         assert relative in docstring, f"{relative} is not named in tests/tier_count.py"
         source = (_ROOT / relative).read_text(encoding="utf-8")
         assert declaration in source, f"{relative} no longer declares {declaration!r}; update the named list"
+
+
+# ------------------------------------------------------------------------------------------------ the A10 exception
+# 2026-10-10 (Q-C): exactly five real-pool-timeout cases of 035 A10 run in the required tier without `slow`. The list is
+# `A10_REAL_POOL_TIMEOUT_CASES` in `tests/tier_count.py`; `tests/conftest.py` judges it at collection. These cases hold the
+# list in place: the verdict function on planted collections (both outcomes), and the REAL collection, once as it is and
+# twice with a plugin that plants the two violations an edit could make (a listed case turned `slow`; a sixth case marked).
+
+_A10_FILE = "tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py"
+
+
+def test_the_a10_verdict_holds_for_the_list_and_names_every_way_it_can_break() -> None:
+    tier = _tier_count_module()
+    listed = sorted(tier.A10_REAL_POOL_TIMEOUT_CASES)
+    assert len(listed) == 5 and all(node_id.startswith(_A10_FILE + "::") for node_id in listed)
+    rest = [(f"tests/unit/test_x.py::t{i}", False, False) for i in range(3)]
+    whole = [(node_id, True, False) for node_id in listed] + rest
+    assert tier.a10_exception_problem(whole) is None
+    assert tier.a10_exception_problem(rest) is None  # the A10 module is not collected: nothing to judge but additions
+    # a listed case missing from a collection that holds the module (renamed, re-parametrized or deleted)
+    assert listed[0] in (tier.a10_exception_problem(whole[1:] + rest[:0]) or "")
+    # reclassified: marker lost, or `slow` put back (which `-m 'not slow'` skips)
+    lost = [(listed[0], False, False)] + [(n, True, False) for n in listed[1:]]
+    assert "lost the a10_real_pool_timeout marker" in (tier.a10_exception_problem(lost) or "")
+    slowed = [(listed[0], True, True)] + [(n, True, False) for n in listed[1:]]
+    assert "carries `slow`" in (tier.a10_exception_problem(slowed) or "")
+    # an addition: a sixth case with the marker, in this module or anywhere else
+    for extra in (_A10_FILE + "::test_something_else", "tests/unit/test_x.py::t0"):
+        added = whole + [(extra, True, False)]
+        assert "without being on the closed list" in (tier.a10_exception_problem(added) or "")
+        assert extra in (tier.a10_exception_problem(added) or "")
+
+
+def test_the_real_collection_of_the_a10_module_selects_the_listed_five_without_slow() -> None:
+    """The ids in the list are the ids pytest reports: marker selection finds exactly them, and `-m 'not slow'` keeps them."""
+
+    listed = set(_tier_count_module().A10_REAL_POOL_TIMEOUT_CASES)
+    by_marker = _collect("-m", "a10_real_pool_timeout", "--", _A10_FILE)
+    assert by_marker.returncode == 0, (by_marker.stdout + by_marker.stderr)[-1500:]
+    assert set(_nodeids(by_marker)) == listed
+    canonical = _collect(*_CANONICAL, "--", _A10_FILE)
+    assert canonical.returncode == 0, (canonical.stdout + canonical.stderr)[-1500:]
+    assert listed <= set(_nodeids(canonical)), "a listed case is not selected by `-m 'not slow'`"
+
+
+_A10_VIOLATION_PLUGIN = """
+import pytest
+
+
+def pytest_itemcollected(item):
+    if item.nodeid == "{target}":
+        item.add_marker({marker})
+"""
+
+
+@pytest.mark.parametrize(
+    ("marker", "on_listed", "expected_text"),
+    [
+        ("pytest.mark.slow", True, "carries `slow`"),
+        ("pytest.mark.a10_real_pool_timeout", False, "without being on the closed list"),
+    ],
+    ids=["a listed case turned slow", "a sixth case marked"],
+)
+def test_the_real_collection_ends_with_exit_4_when_the_a10_exception_is_broken(
+    tmp_path: Path, marker: str, on_listed: bool, expected_text: str
+) -> None:
+    tier = _tier_count_module()
+    target = sorted(tier.A10_REAL_POOL_TIMEOUT_CASES)[0]
+    if not on_listed:
+        baseline = _collect("--", _A10_FILE)
+        target = next(node_id for node_id in _nodeids(baseline) if node_id not in tier.A10_REAL_POOL_TIMEOUT_CASES)
+    (tmp_path / "p035_a10_violation_plugin.py").write_text(
+        _A10_VIOLATION_PLUGIN.format(target=target.replace('"', '\\"'), marker=marker), encoding="utf-8"
+    )
+    result = _collect(*_CANONICAL, "-p", "p035_a10_violation_plugin", "--", _A10_FILE, extra_pythonpath=tmp_path)
+    output = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, f"exit {result.returncode}, not {_USAGE_ERROR}:\n{output[-1500:]}"
+    assert "the A10 exception" in output and expected_text in output, output[-1500:]

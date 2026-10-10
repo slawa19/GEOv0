@@ -124,13 +124,29 @@ from tests import tier_count as _tier_count  # noqa: E402
 _openapi_conformance.HARNESS.install()
 
 
-def pytest_collection_modifyitems(session, config, items) -> None:
-    """Defer the aggregate conformance assertion to the very end of the session.
+_A10_COLLECTED = pytest.StashKey[list]()
 
-    It reads a registry that is only complete once everything else has run, and
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(session, config, items) -> None:
+    """Record the A10 exception's evidence before any deselection; defer the conformance aggregate to the end.
+
+    The record is every collected case with its marker facts, taken BEFORE `-m`, `-k` and `--deselect` remove anything,
+    so that "the case carries `slow`, which `-m 'not slow'` skips" is still visible
+    (`pytest_collection_finish` below, `tests/tier_count.py::a10_exception_problem`).
+
+    The aggregate reads a registry that is only complete once everything else has run, and
     `tests/contract` sorts before `tests/integration` and `tests/unit`.
     """
 
+    config.stash[_A10_COLLECTED] = [
+        (
+            item.nodeid,
+            item.get_closest_marker(_tier_count.A10_MARKER) is not None,
+            item.get_closest_marker("slow") is not None,
+        )
+        for item in items
+    ]
     _openapi_conformance.move_report_test_last(items)
 
 
@@ -156,6 +172,10 @@ def pytest_collection_finish(session) -> None:
     # module has no cases, so the count would blame a "lost" test for an import error; that is pytest's to report.
     if session.testsfailed or session.shouldstop or session.shouldfail:
         return
+    # The A10 exception is a property of the collection, not of a profile: judged on every run.
+    a10_problem = _tier_count.a10_exception_problem(config.stash.get(_A10_COLLECTED, []))
+    if a10_problem is not None:
+        pytest.exit(f"backend tier refused: {a10_problem}", returncode=pytest.ExitCode.USAGE_ERROR)
     if not _tier_count.is_canonical_profile(
         markexpr=getattr(config.option, "markexpr", ""),
         args=list(config.args),

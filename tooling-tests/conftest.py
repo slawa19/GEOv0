@@ -124,8 +124,10 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-09, 036 slice C (`T3630`): portable 252 -> 254. The new live fixture `community-story-10` is one more parametrised case of
 #: `test_every_live_fixture_validates_against_the_schema` (+1), and `test_the_validator_refuses_a_broken_community_story` shows the guard is
 #: not blind to it (+1); the live-set test only changed its list.
+#:
+#: 2026-10-10, 035 slice Q-C (the A10 exception): portable 254 -> 258. Four cases added to `portable/test_p035_c_backend_tier_counts_what_it_collects.py`: the verdict on planted collections (1), the real collection selects the listed five by marker and under `not slow` (1), and the real collection ends with exit 4 when a listed case is turned `slow` or a sixth case is marked (2).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 254,
+    "portable": 258,
     "powershell": 235,
 }
 

@@ -204,6 +204,18 @@ make the session green again:
   Measured with `python -m pytest --collect-only -q -m "not slow"` (`3613/3633`).
 * 2026-10-10, 037 slice A1 (the manual payment's idempotency key and `routes[]`), on `origin/main` `ac7725e3` (3620): 3620 -> 3659 (+39). New: `tests/integration/test_p037_manual_payment_idempotency_postgres.py` (39 cases: the reproducers R1-R3, the key scoped by the run, the repeat, two simultaneous requests, five changed intents, a refusal after and before admission, a stopped run, a restart, ten invalid and four valid keys, a null key, the routes of a multi-route payment and of a payment with none, the OpenAPI fields). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3659/3679`).
 * 2026-10-10, 037 slice A1 fix-delta (the key's state in the error, the missing instruments), on `claude/p037-a1` `5dd8801c` (3659): 3659 -> 3674 (+15, all in `tests/integration/test_p037_manual_payment_idempotency_postgres.py`: a timeout after admission, a commit timeout that did not land (keyed and unkeyed), entry 1 against entry 2 on the wire, a commit that landed with a failed and with a working recovery, a repeat whose own commit times out, a real cancellation, an internal failure, a refusal before and after admission, an unkeyed error and a broken state read, a collision held inside the operation, two cookie owners with a foreign run, a real stop and restart; the stopped-run test was rewritten, the same count). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3674/3694`).
+* 2026-10-10, 035 slice Q-C (the A10 exception), on `origin/main` `5947fc3a` (3674): 3674 -> 3679 (+5, no new test: the five real-pool-timeout cases of `tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py` lose `slow` and carry `a10_real_pool_timeout`, so `-m "not slow"` selects them; the closed list is `A10_REAL_POOL_TIMEOUT_CASES` below). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3679/3694`).
+
+THE A10 EXCEPTION TO "A REAL TIMER MEANS `slow`" (decision of 2026-10-10, AGENTS.md section 11). Exactly five cases of
+`tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py` wait for the product engine's REAL
+pool timeout (1 s) or the refusal recording's 500 ms grace, and they run in the required tier without `slow`: they verify
+the translation of that timeout and the bound of the refusal's recording, which nothing else in the required gate sees (no
+scheduled job selected them; `-IncludeExpensive` is used only by the simulator super-smoke). Their configured waits total
+5.5 s. The list is CLOSED and owned here: `A10_REAL_POOL_TIMEOUT_CASES`. They carry the registered marker
+`a10_real_pool_timeout` and no `slow`. `tests/conftest.py` evaluates `a10_exception_problem` on the collection BEFORE any
+deselection and ends the session with exit 4 when a listed case is missing, is not marked, carries `slow` (so the canonical
+`-m "not slow"` would skip it), or when any other case carries the marker. Widening the list needs a separately recorded
+decision, not an edit of this constant alone.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
 
@@ -246,7 +258,24 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3674
+EXPECTED_SELECTED_ITEMS = 3679
+
+#: The registered marker (`pytest.ini`) of the five A10 cases that run in the required tier WITHOUT `slow`.
+A10_MARKER = "a10_real_pool_timeout"
+
+_A10_MODULE = "tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py"
+
+#: THE CLOSED LIST of the A10 exception: exact node ids as pytest reports them (the `mode_b` suffix is the fixture mode).
+A10_REAL_POOL_TIMEOUT_CASES = frozenset(
+    f"{_A10_MODULE}::{case}"
+    for case in (
+        "test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_nothing[the pool timeout-mode_b]",
+        "test_no_connection_around_routing_is_the_timeout_refusal_and_leaves_nothing[the route reader's checkout-mode_b]",
+        "test_no_connection_around_routing_is_the_timeout_refusal_and_leaves_nothing[the re-acquisition after routing-mode_b]",
+        "test_a_refusal_that_cannot_be_recorded_is_the_retryable_conflict_and_claims_nothing[the recording's budget-mode_b]",
+        "test_a_refusal_that_cannot_be_recorded_is_the_retryable_conflict_and_claims_nothing[the pool timeout-mode_b]",
+    )
+)
 
 #: The marker expression `scripts/verify_local.ps1` passes without `-IncludeExpensive`.
 CANONICAL_MARKEXPR = "not slow"
@@ -300,4 +329,38 @@ def count_problem(*, selected: int, expected: int = EXPECTED_SELECTED_ITEMS) -> 
         "docstring of tests/tier_count.py). If the change is intended, set the constant in the same commit and add a "
         "dated line to that docstring saying which. To run a subset on purpose, give a path selector "
         "(scripts/verify_local.ps1 -BackendSelector <paths>) or run without -m (-IncludeExpensive); neither is counted."
+    )
+
+
+def a10_exception_problem(items: Sequence[tuple[str, bool, bool]]) -> str | None:
+    """None when the A10 exception holds in this collection; otherwise the refusal text.
+
+    `items` is every collected case BEFORE any deselection, as `(node id, carries a10_real_pool_timeout, carries
+    slow)`. A case carrying the marker that is not on the list is an ADDITION; when the A10 module is collected at all,
+    each listed case must be present, marked and not `slow` (a missing, unmarked or `slow` member is a loss, a
+    reclassification or a skip by `-m "not slow"`). A run that does not collect the module (a path selector elsewhere)
+    is judged only for additions. Whether the five really RUN is the count's and the tests' business.
+    """
+
+    by_id = {node_id: (marked, slow) for node_id, marked, slow in items}
+    problems: list[str] = []
+    added = sorted(node_id for node_id, (marked, _) in by_id.items() if marked and node_id not in A10_REAL_POOL_TIMEOUT_CASES)
+    if added:
+        problems.append(f"{len(added)} case(s) carry {A10_MARKER} without being on the closed list: {added}")
+    if any(node_id.startswith(_A10_MODULE + "::") for node_id in by_id):
+        for node_id in sorted(A10_REAL_POOL_TIMEOUT_CASES):
+            if node_id not in by_id:
+                problems.append(f"listed case is not collected (missing, renamed or re-parametrized): {node_id}")
+                continue
+            marked, slow = by_id[node_id]
+            if not marked:
+                problems.append(f"listed case lost the {A10_MARKER} marker (reclassified): {node_id}")
+            if slow:
+                problems.append(f"listed case carries `slow`, which `-m 'not slow'` skips: {node_id}")
+    if not problems:
+        return None
+    return (
+        "the A10 exception (exactly five real-pool-timeout cases run in the required tier without `slow`; list: "
+        "A10_REAL_POOL_TIMEOUT_CASES in tests/tier_count.py) does not hold: " + "; ".join(problems) + ". Widening, "
+        "narrowing or renaming the list needs a separately recorded decision (AGENTS.md section 11)."
     )
