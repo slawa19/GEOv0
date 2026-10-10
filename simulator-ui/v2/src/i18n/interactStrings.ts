@@ -37,6 +37,18 @@ export const interactStrings = {
   unknownRetry: 'Check / repeat',
   unknownRetryHint: 'A repeat uses the same key: the payment is made once.',
 
+  // The result of a clearing (the edges of the answer run creditor -> debtor: "{debtor}'s debt to {creditor}", never a payment).
+  clearingResultTitle: 'Clearing result',
+  clearingRunning: 'Running clearing…',
+  clearingCycles: 'Cycles cleared',
+  clearingTotal: 'Total cleared',
+  clearingCycle: 'Cycle {n} of {total}: {amount} {unit}',
+  clearingEdgeLine: '{debtor}’s debt to {creditor} reduced by {amount} {unit}',
+  clearingNothing: 'Nothing was cleared: no cycle of debts was found.',
+
+  // A payment started from a line goes against the line's arrow (F-037-4).
+  lineDirectionNote: 'The line runs from creditor to debtor, so a payment started from it goes the other way: the debtor pays the creditor.',
+
   // The progression of the form: what the form announces when it opens the next list for the user.
   nextChoiceRecipient: 'Choose the recipient.',
 

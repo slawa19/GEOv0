@@ -383,7 +383,8 @@ describe('useInteractMode', () => {
     expect(im1.successMessage.value).toBe(null)
   })
 
-  it('clearing flow: confirm -> preview (>=800ms) -> running -> idle', async () => {
+  // 037 C: the result of a clearing is left by the user, not by a timer (the old contract: preview >= 800 ms -> running -> idle).
+  it('clearing flow: confirm -> awaiting the answer -> the result stays until the user closes it', async () => {
     vi.useFakeTimers()
     try {
       const snapshot = ref<GraphSnapshot | null>(null)
@@ -402,26 +403,21 @@ describe('useInteractMode', () => {
       expect(im.phase.value).toBe('clearing-preview')
       expect(im.busy.value).toBe(true)
 
-      // Even after the API resolves, preview should dwell at least 800ms.
       await Promise.resolve()
       await Promise.resolve()
       expect(actions.runClearing).toHaveBeenCalledTimes(1)
-      expect(im.phase.value).toBe('clearing-preview')
 
-      await vi.advanceTimersByTimeAsync(799)
-      expect(im.phase.value).toBe('clearing-preview')
-
-      await vi.advanceTimersByTimeAsync(1)
-      expect(im.phase.value).toBe('clearing-running')
-
-      // Running state should not immediately disappear in the same tick.
-      await vi.advanceTimersByTimeAsync(199)
-      expect(im.phase.value).toBe('clearing-running')
-
-      await vi.advanceTimersByTimeAsync(1)
+      // The answer is stored at once; no dwell, no running phase, no reset to idle by a timer.
+      await vi.advanceTimersByTimeAsync(60_000)
       await p
-      expect(im.phase.value).toBe('idle')
+      expect(im.phase.value).toBe('clearing-preview')
+      expect(im.state.lastClearing).not.toBeNull()
       expect(im.busy.value).toBe(false)
+
+      // Only the user ends it.
+      im.cancel()
+      expect(im.phase.value).toBe('idle')
+      expect(im.state.lastClearing).not.toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -759,10 +755,11 @@ describe('useInteractMode', () => {
       im.startClearingFlow()
       const p = im.confirmClearing()
 
-      await vi.advanceTimersByTimeAsync(1100)
+      await vi.advanceTimersByTimeAsync(60_000)
       await p
 
-      expect(im.phase.value).toBe('idle')
+      // "No cycles" is a result on the panel (until Close), not a reset to idle.
+      expect(im.phase.value).toBe('clearing-preview')
       expect(clearingDoneCallback).toHaveBeenCalledWith(
         expect.objectContaining({ cleared_cycles: 0, cycles: [] }),
       )

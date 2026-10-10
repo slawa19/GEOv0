@@ -30,7 +30,8 @@ export type InteractState = {
   error: string | null
 
   /**
-   * Last clearing action response (populated in `clearing-preview`).
+   * Last clearing action response. In `clearing-preview` (037 C: "the answer is awaited, then the result is shown") it is `null`
+   * until the answer arrives and then the result the panel shows until Close; cleared when the NEXT clearing starts.
    *
    * `lastClearing` is intentionally preserved in idle state — it is used to
    * display the history of the last clearing cycle in BottomBar / HistoryLog.

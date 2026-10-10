@@ -266,6 +266,19 @@ const open = computed(() => {
   return isPickFrom.value || isPickTo.value || isConfirm.value
 })
 
+// F-037-4: a panel that OPENS already at the confirm step with both parties set was started from a line (the line popup sets the
+// debtor as the sender and the creditor as the recipient). Reaching the confirm step by choosing in the panel is not that. Decided
+// when the panel opens; a change of either party in the lists ends it (the note is about how the panel was filled, not about the
+// fields afterwards).
+const startedFromLine = ref(false)
+watch(
+  open,
+  (isOpen) => {
+    startedFromLine.value = isOpen && props.phase === 'confirm-payment' && !!props.state.fromPid && !!props.state.toPid
+  },
+  { immediate: true },
+)
+
 // Giving up a payment always starts from the FIRST step: closing the panel (the instance may live on, hidden), opening it again
 // or removing it does not carry step two over.
 watch(open, () => {
@@ -535,6 +548,7 @@ function onToOpenChange(isOpen: boolean) {
 
 function onFromChange(v: string) {
   const pid = v ? v : null
+  startedFromLine.value = false
   firstPass.from = pid != null && !props.state.toPid
   props.setFromPid?.(pid)
   // If To is now invalid, clear it.
@@ -543,6 +557,7 @@ function onFromChange(v: string) {
 }
 
 function onToChange(v: string) {
+  startedFromLine.value = false
   firstPass.to = !!v && !props.state.toPid
   props.setToPid?.(v ? v : null)
   toSelectionInvalidWarning.value = null
@@ -677,6 +692,8 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <div v-if="isPickTo" class="ds-help mp-pick-help">Pick To node (canvas) or choose from dropdown.</div>
 
       <template v-if="isConfirm">
+        <div v-if="startedFromLine" class="ds-help ds-muted" data-testid="mp-line-direction-note">{{ interactText('lineDirectionNote') }}</div>
+
         <div class="ds-row ds-row--space mp-summary" data-testid="mp-summary">
           <div class="ds-label">{{ interactText('summaryTitle') }}</div>
           <div class="ds-value">

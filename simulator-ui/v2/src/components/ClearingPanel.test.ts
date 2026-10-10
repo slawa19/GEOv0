@@ -120,7 +120,7 @@ describe('ClearingPanel', () => {
     host.remove()
   })
 
-  it('CL-2: in preview step shows loading state when lastClearing is not ready yet', async () => {
+  it('CL-2: in the step after confirm shows the running state while the answer is not here yet', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -152,9 +152,9 @@ describe('ClearingPanel', () => {
     app.mount(host)
     await nextTick()
 
-    const loading = host.querySelector('[data-testid="clearing-preview-loading"]') as HTMLElement | null
+    const loading = host.querySelector('[data-testid="clearing-running"]') as HTMLElement | null
     expect(loading).toBeTruthy()
-    expect(loading?.textContent ?? '').toContain('Preparing preview')
+    expect(loading?.textContent ?? '').toContain('Running clearing')
     expect(loading?.querySelector('.cp-spinner')).toBeTruthy()
     expect(loading?.getAttribute('role')).toBe('status')
     expect(loading?.getAttribute('aria-live')).toBe('polite')

@@ -158,10 +158,6 @@ export function useInteractMode(opts: {
   // BUG-5: history log
   history: InteractHistoryEntryT[]
 } {
-  // UX: keep the clearing preview visible long enough to be noticed/read.
-  const CLEARING_PREVIEW_DWELL_MS = 800
-  const CLEARING_RUNNING_DWELL_MS = 200
-
   // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
   // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
   // Backend remains the source of truth for amount feasibility.
@@ -573,6 +569,9 @@ export function useInteractMode(opts: {
     if (busyRef.value) return
     if (state.phase !== 'idle') return
     fsm.startClearingFlow()
+    // 037 C: the result names participants. Clearing may be the first thing done in a session, so the list is asked for now,
+    // while the user reads the confirm step (the graph snapshot's nodes are the fallback; an id is shown only when neither knows).
+    void refreshParticipants()
   }
 
   function selectNode(nodeId: string) {
@@ -901,8 +900,9 @@ export function useInteractMode(opts: {
     fsm.clearError()
     // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
     const eq = opts.equivalent.value
-    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
-      // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
+    await runBusy(async ({ isCurrent, signal }) => {
+      // 037 C: the phase after the confirm step is "the answer is awaited, then the result is shown" (its name, `clearing-preview`,
+      // is the old one). It is left only by the user (Close/Esc -> `cancel()`) or by the next clearing: no timer ends it.
       fsm.enterClearingPreview()
 
       // 031 item 17: the step refusal (409 CLEARING_REFUSED, 030 S2) is shown as the client's text, not the server hint.
@@ -927,29 +927,10 @@ export function useInteractMode(opts: {
         try { opts.onClearingDone(res) } catch { /* ignore */ }
       }
 
-      // Let Vue paint the preview at least once (even if very briefly).
-      await Promise.resolve()
-      if (!isCurrent()) return
-
-      // Ensure preview has a readable dwell time.
-      await new Promise((r) => setTimeout(r, CLEARING_PREVIEW_DWELL_MS))
-      if (!isCurrent()) return
-
-      fsm.enterClearingRunning()
-
-      // Let Vue paint the running state at least once.
-      await Promise.resolve()
-      if (!isCurrent()) return
-
-      // Minimal dwell for the running state (until proper SSE-driven wiring exists).
-      await new Promise((r) => setTimeout(r, CLEARING_RUNNING_DWELL_MS))
-      if (!isCurrent()) return
-
-      const settled = res.cleared_cycles
-      const total = res.cycles.length
-      successMessage.value = `Clearing done: ${settled}/${total} cycles`
-
-      resetToIdle()
+      // A success toast only when something was cleared: "no cycles" is a state of the panel, not a success.
+      if (res.cleared_cycles > 0) {
+        successMessage.value = `Clearing done: ${res.cleared_cycles}/${res.cycles.length} cycles`
+      }
     })
   }
 
