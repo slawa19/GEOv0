@@ -97,12 +97,14 @@ export type BeginResult =
   | { kind: 'record'; record: PaymentIntentRecord }
   /** An unresolved intent stands and `intent` is another one: no key is issued. */
   | { kind: 'blocked'; unresolved: PaymentIntentRecord }
+  /** The storage could not be READ: whether an unresolved payment exists for this run is unknown, so no intent may start. */
+  | { kind: 'unreadable' }
 
 type IntentStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 const STORAGE_PREFIX = 'geo.sim.v2.unresolvedPayment.'
 
-/** `sessionStorage` where the platform has it and lets us touch it; otherwise null (the page then works without it). */
+/** `sessionStorage` where the platform has it and lets us touch it; otherwise null (and then NO payment is sent, see `markSent`). */
 function defaultStorage(): IntentStorage | null {
   try {
     return typeof sessionStorage === 'undefined' ? null : sessionStorage
@@ -133,10 +135,17 @@ function isIntent(v: unknown): v is PaymentIntent {
  * is honest: "Check / repeat" then returns the stored result and closes it.
  *
  * Persistence (R3): only an UNRESOLVED record is stored - at the moment a request is about to leave (`markSent`: a page left
- * mid-flight has an unknown outcome too) and while it is unknown - under a key that includes the run, and removed on a verdict
- * (`settle`), on a definitive refusal of a request that was not unresolved before, and on `discard`. Every access to the
- * storage is in try/catch: without a usable storage the keeper still holds the record in memory (it then survives a closed
- * panel but not a reload). Not a log of payments: at most one record per run.
+ * mid-flight has an unknown outcome too) and while it is unknown - under a key that includes the run (a record of one run can
+ * never overwrite another's), and removed on a verdict (`settle`), on a definitive refusal of a request that was not
+ * unresolved before, and on `discard`. Not a log of payments: at most one record per run.
+ *
+ * A PAYMENT IS NOT SENT UNLESS ITS RECORD IS SAVED. `markSent` answers whether the record was written AND reads back as
+ * written; when it is not (no storage, the browser refuses the write, the quota is full) the caller sends nothing. A request
+ * that left without a record could not be checked after a reload: the same intent would get a NEW key and the server would
+ * execute it a second time. Likewise, when the storage cannot be READ at the restore, `begin` answers `unreadable` and no
+ * new intent starts - whether an unresolved payment exists is not known. (Narrowing, on purpose: with no usable storage the
+ * page does not send manual payments at all. `sessionStorage` survives a reload of the tab; closing the tab is not promised
+ * to keep it.) Reads and removals that fail elsewhere are swallowed.
  */
 export function createPaymentIntentKeeper(
   o: { runId?: () => string; storage?: IntentStorage | null } = {},
@@ -150,12 +159,20 @@ export function createPaymentIntentKeeper(
 
   const storageKey = (runId: string) => `${STORAGE_PREFIX}${runId}`
 
-  function write(record: PaymentIntentRecord): void {
-    if (!storage) return
+  /** Writes the record and reads it back; true only when the storage now holds exactly what was written. */
+  function write(record: PaymentIntentRecord): boolean {
+    if (!storage) return false
+    const name = storageKey(record.intent.runId)
+    const value = JSON.stringify({ v: 1, key: record.key, intent: record.intent })
     try {
-      storage.setItem(storageKey(record.intent.runId), JSON.stringify({ v: 1, key: record.key, intent: record.intent }))
+      storage.setItem(name, value)
     } catch {
-      /* no storage: memory only */
+      /* refused (quota, privacy mode): what the storage holds is checked below - an identical entry already there is fine */
+    }
+    try {
+      return storage.getItem(name) === value
+    } catch {
+      return false
     }
   }
 
@@ -177,16 +194,27 @@ export function createPaymentIntentKeeper(
     }
   }
 
-  /** The unresolved record of the current run, once per run, when nothing is held in memory. */
-  function restore(): void {
-    if (current) return
+  /**
+   * The unresolved record of the current run, once per run, when nothing is held in memory. `unreadable`: the storage threw on
+   * the read - nothing is known about this run, and the next call tries again (the storage may come back).
+   */
+  function restore(): 'ok' | 'unreadable' {
+    if (current) return 'ok'
     const runId = runIdNow()
-    if (loadedFor === runId) return
-    loadedFor = runId
-    if (!storage || !runId) return
+    if (loadedFor === runId) return 'ok'
+    if (!storage || !runId) {
+      loadedFor = runId
+      return 'ok'
+    }
+    let raw: string | null
     try {
-      const raw = storage.getItem(storageKey(runId))
-      if (!raw) return
+      raw = storage.getItem(storageKey(runId))
+    } catch {
+      return 'unreadable'
+    }
+    loadedFor = runId
+    try {
+      if (!raw) return 'ok'
       const parsed = JSON.parse(raw) as { v?: unknown; key?: unknown; intent?: unknown }
       // A record is only as good as what a request needs: the key by the SERVER's grammar, the intent by shape. Anything
       // else is damage, and a damaged record must never be sent as a payment (a missing key would be a NEW payment).
@@ -198,28 +226,32 @@ export function createPaymentIntentKeeper(
         closedKeys.has(parsed.key)
       ) {
         dropEntry(runId)
-        return
+        return 'ok'
       }
       current = { fingerprint: intentFingerprint(parsed.intent), key: parsed.key, intent: parsed.intent, unknown: true }
     } catch {
-      /* unreadable entry or no storage: nothing to restore */
+      /* a damaged entry (not JSON): nothing to restore */
       dropEntry(runId)
     }
+    return 'ok'
   }
 
   return {
     /** The record of `intent`: the held one when it is the same intent; a new one with a new key; or `blocked` by an unresolved one. */
     begin(intent: PaymentIntent): BeginResult {
-      restore()
+      if (restore() === 'unreadable' && !current) return { kind: 'unreadable' }
       const fingerprint = intentFingerprint(intent)
       if (current && current.fingerprint === fingerprint) return { kind: 'record', record: current }
       if (current && current.unknown) return { kind: 'blocked', unresolved: current }
       current = { fingerprint, key: newIdempotencyKey(), intent: { ...intent }, unknown: false }
       return { kind: 'record', record: current }
     },
-    /** A request of `record` is about to leave: from now on it is unresolved until a verdict. */
-    markSent(record: PaymentIntentRecord): void {
-      if (current === record) write(record)
+    /**
+     * A request of `record` is about to leave: from now on it is unresolved until a verdict. Returns whether the record is
+     * SAVED (written and read back); when it is not, the request must NOT leave.
+     */
+    markSent(record: PaymentIntentRecord): boolean {
+      return current === record && write(record)
     },
     /** The attempt had no verdict: the key stays, the intent stays unresolved (and stored). */
     markUnknown(record: PaymentIntentRecord): void {

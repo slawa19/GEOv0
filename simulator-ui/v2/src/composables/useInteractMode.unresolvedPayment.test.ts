@@ -270,7 +270,7 @@ describe('the unresolved payment is held, shown and resolved only by a person (R
     expect(after.im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '10.00' })
   })
 
-  it('R3: without a usable storage it still works in memory (and a re-created composable then starts clean - named)', async () => {
+  it('R3: without a usable storage NO payment is sent (a request without a saved record cannot be checked after a reload)', async () => {
     const denied = {
       getItem: () => { throw new Error('denied') },
       setItem: () => { throw new Error('denied') },
@@ -289,11 +289,20 @@ describe('the unresolved payment is held, shown and resolved only by a person (R
     await settle()
 
     await im.confirmPayment('10.00')
-    await im.confirmPayment('10.0')
-    im.cancel()
 
-    expect(send).toHaveBeenCalledTimes(1)
-    expect(im.paymentOutcome.value?.kind).toBe('unknown')
+    expect(send).not.toHaveBeenCalled()
+    expect(im.state.error).toContain('could not be read')
+    expect(im.paymentOutcome.value).toBeNull()
+  })
+
+  it('R3: a product page with no sessionStorage at all (storage: null) does not send either', async () => {
+    const send = vi.fn().mockResolvedValue(COMMITTED)
+    const { im } = await atConfirm(send, null)
+
+    await im.confirmPayment('10.00')
+
+    expect(send).not.toHaveBeenCalled()
+    expect(im.state.error).toContain('was not sent')
   })
 
   it('R4: another run - the banner says so, the repeat is NOT sent (it would go to the current run), only discard is possible', async () => {

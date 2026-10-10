@@ -217,15 +217,73 @@ describe('an unresolved intent is held (R1, R3)', () => {
     expect(createPaymentIntentKeeper({ storage, runId: () => 'run_1' }).peek()).not.toBeNull()
   })
 
-  it('works without a usable storage: every access that throws is swallowed, the record is held in memory', () => {
-    const broken = {
-      getItem: () => { throw new Error('denied') },
+  it('a storage that cannot be READ at the restore: nothing is known about the run, so no intent begins (and it retries when the storage is back)', () => {
+    let readable = false
+    const map = new Map<string, string>()
+    const storage = {
+      getItem: (k: string) => { if (!readable) throw new Error('denied'); return map.get(k) ?? null },
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+    }
+    const keeper = createPaymentIntentKeeper({ storage, runId: sameRun })
+
+    expect(keeper.begin(intent)).toEqual({ kind: 'unreadable' })
+    expect(keeper.begin(intent)).toEqual({ kind: 'unreadable' })
+    readable = true
+    expect(keeper.begin(intent).kind).toBe('record')
+  })
+
+  it('a record that could not be SAVED is not "sent": markSent says so, whatever the reason (no storage, a refused write, a full quota, a write that does not read back)', () => {
+    const map = new Map<string, string>()
+    type S = { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void; removeItem: (k: string) => void } | null
+    const cases: Array<[string, S]> = [
+      ['no storage', null],
+      ['a refused write', { getItem: (k) => map.get(k) ?? null, setItem: () => { throw new Error('quota') }, removeItem: () => undefined }],
+      ['a write that is silently dropped', { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }],
+      ['a write that cannot be read back', { getItem: () => { throw new Error('denied') }, setItem: (k, v) => void map.set(k, v), removeItem: () => undefined }],
+    ]
+    for (const [, storage] of cases) {
+      const keeper = createPaymentIntentKeeper({ storage, runId: () => 'run_1' })
+      const record = keeper.begin(intent)
+      if (record.kind !== 'record') continue // an unreadable storage is refused one step earlier
+      expect(keeper.markSent(record.record)).toBe(false)
+    }
+  })
+
+  it('a record that IS saved reads back as written: markSent is true', () => {
+    const map = new Map<string, string>()
+    const keeper = createPaymentIntentKeeper({
+      storage: { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => void map.set(k, v), removeItem: (k) => void map.delete(k) },
+      runId: () => 'run_1',
+    })
+    expect(keeper.markSent(begin(keeper, intent))).toBe(true)
+  })
+
+  it('an identical entry already stored counts as saved even when a new write is refused (the repeat of an unresolved payment)', () => {
+    const map = new Map<string, string>()
+    let refuse = false
+    const storage = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => { if (refuse) throw new Error('quota'); map.set(k, v) },
+      removeItem: (k: string) => void map.delete(k),
+    }
+    const keeper = createPaymentIntentKeeper({ storage, runId: () => 'run_1' })
+    const record = begin(keeper, intent)
+    expect(keeper.markSent(record)).toBe(true)
+    keeper.markUnknown(record)
+
+    refuse = true
+    expect(keeper.markSent(record)).toBe(true)
+  })
+
+  it('a storage that fails on every access: markUnknown / settle / discard do not throw; the record is held in memory for the session', () => {
+    const memoryOnly = {
+      getItem: () => null,
       setItem: () => { throw new Error('denied') },
       removeItem: () => { throw new Error('denied') },
     }
-    const keeper = createPaymentIntentKeeper({ storage: broken, runId: sameRun })
+    const keeper = createPaymentIntentKeeper({ storage: memoryOnly, runId: sameRun })
     const record = begin(keeper, intent)
-    keeper.markSent(record)
     keeper.markUnknown(record)
     expect(keeper.begin({ ...intent, amount: '11' }).kind).toBe('blocked')
     keeper.settle(record)

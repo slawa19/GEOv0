@@ -1,7 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
-import { extractErrorMessage } from '../utils/errorMessage'
+import { extractErrorMessage, withRequestRef } from '../utils/errorMessage'
 import { interactText } from '../i18n/interactStrings'
 import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
@@ -692,6 +692,11 @@ export function useInteractMode(opts: {
     if (busyRef.value) return
     const { from, to, equivalent: eq, amount } = intent
     const begun = paymentIntents.begin(intent)
+    if (begun.kind === 'unreadable') {
+      state.error = interactText('storageUnreadable')
+      touchIntents()
+      return
+    }
     if (begun.kind === 'blocked') {
       state.error = interactText('unknownBlocksNew')
       touchIntents()
@@ -708,8 +713,9 @@ export function useInteractMode(opts: {
     const names = { from: participantName(from), to: participantName(to) }
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
+      // The record that lets a reload check this payment is saved BEFORE the request leaves; if it cannot be, nothing is sent.
+      if (!paymentIntents.markSent(record)) throw new Error(interactText('storageRefused'))
       try {
-        paymentIntents.markSent(record)
         res = await opts.actions.sendPayment(from, to, amount, eq, { signal, idempotencyKey: record.key })
       } catch (e: unknown) {
         const err = (e && typeof e === 'object' ? e : {}) as {
@@ -733,7 +739,8 @@ export function useInteractMode(opts: {
             ? err.message
             : interactText('unknownNoAnswer', { amount, unit: eq, from: names.from, to: names.to })
           : paymentRefusalText(e, eq, undefined, { keyed: true })
-        throw new Error(text)
+        // The correlation id of the request goes with the text, like every user-facing error (AGENTS section 12).
+        throw new Error(withRequestRef(text, e))
       }
 
       // The answer is a verdict only if it says COMMITTED: a success-shaped answer for a stored refusal is not a payment.

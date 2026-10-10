@@ -28,6 +28,8 @@ export const interactStrings = {
   unknownOtherRun: 'This payment belongs to another run, so it cannot be checked from here. Go back to that run, or discard it.',
   unknownBlocksNew: 'A payment with an unknown result has to be checked or discarded before another payment is sent.',
   noValidKey: 'The payment has no valid key, so nothing was sent.',
+  storageRefused: 'The browser would not save a record of this payment, so it was not sent: after a reload it could not be checked safely. Free the storage or allow it, then repeat.',
+  storageUnreadable: 'The browser storage could not be read, so it is not known whether an earlier payment is unresolved; no payment was sent. Allow the storage, then repeat.',
   unknownDiscard: 'Discard and start over',
   unknownDiscardWarning: 'The first payment may have been made; a new one could be a second. Discard only after checking.',
   unknownDiscardConfirm: 'Discard it',

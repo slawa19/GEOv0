@@ -15,7 +15,7 @@
  * lifecycle is asserted at `useInteractMode.confirmPayment`, the only place a retry can happen today.
  */
 import { computed, ref } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useInteractMode } from './useInteractMode'
 import { useInteractActions } from './useInteractActions'
@@ -23,6 +23,11 @@ import { paymentRefusalText } from '../utils/paymentRefusalText'
 import type { GraphSnapshot } from '../types'
 
 type InteractActions = Parameters<typeof useInteractMode>[0]['actions']
+
+// An unresolved payment is stored in `sessionStorage`; each case starts with none.
+beforeEach(() => {
+  window.sessionStorage.clear()
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -72,10 +77,10 @@ const OK = {
 }
 
 describe('F-037-2 (UI): the key of a confirmed intent survives an unknown outcome', () => {
-  it('REPRODUCER (red now): after a timeout the retry of the SAME intent carries the SAME non-empty idempotency key', async () => {
+  it('after a timeout WITHOUT a verdict (outcome unknown) the retry of the SAME intent carries the SAME non-empty idempotency key', async () => {
     const send = vi
       .fn<InteractActions['sendPayment']>()
-      .mockRejectedValueOnce({ status: 503, code: 'ENGINE_TIMEOUT', message: 'Engine timeout', details: { reason: 'timeout' } })
+      .mockRejectedValueOnce({ status: 503, code: 'ENGINE_TIMEOUT', message: 'Engine timeout', details: { reason: 'timeout' }, outcomeUnknown: true })
       .mockResolvedValueOnce(OK)
     const im = mkMode(send)
     await settle()
@@ -91,10 +96,25 @@ describe('F-037-2 (UI): the key of a confirmed intent survives an unknown outcom
     expect(second, 'F-037-2: the retry has no idempotency key - a second payment would be created').toBe(first)
   })
 
-  it('REPRODUCER (red now): a changed intent (another amount) gets another key', async () => {
+  it('UNKNOWN outcome: a changed intent (another amount) is NOT sent - the unresolved payment holds the screen', async () => {
     const send = vi
       .fn<InteractActions['sendPayment']>()
-      .mockRejectedValueOnce({ status: 503, code: 'ENGINE_TIMEOUT', message: 'Engine timeout', details: { reason: 'timeout' } })
+      .mockRejectedValueOnce({ status: 503, code: 'ENGINE_TIMEOUT', message: 'Engine timeout', details: { reason: 'timeout' }, outcomeUnknown: true })
+      .mockResolvedValueOnce(OK)
+    const im = mkMode(send)
+    await settle()
+
+    await im.confirmPayment('5.00')
+    await im.confirmPayment('6.00')
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'unknown', amount: '5.00' })
+  })
+
+  it('a changed intent (another amount) after a DEFINITIVE refusal of the first attempt gets another key (nothing is unresolved)', async () => {
+    const send = vi
+      .fn<InteractActions['sendPayment']>()
+      .mockRejectedValueOnce({ status: 503, code: 'ENGINE_TIMEOUT', message: 'Engine timeout', details: { reason: 'timeout', idempotency_key_spent: true } })
       .mockResolvedValueOnce(OK)
     const im = mkMode(send)
     await settle()
