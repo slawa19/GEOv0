@@ -69,6 +69,7 @@ import { useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
 import { useInteractMode } from './useInteractMode'
+import { participantDisplayIdFor, shownScenarioIdOf } from './useParticipantDisplay'
 import { useSystemBalance } from './useSystemBalance'
 
 import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealClearingFx'
@@ -623,6 +624,12 @@ export function useSimulatorApp(opts?: {
     },
   })
 
+  /**
+   * The scenario of the scene on screen: the shown run's, else the selected one. It is read ONLY to remove the scenario
+   * namespace from participant ids that are printed to a person (`utils/participantDisplayId.ts`).
+   */
+  const shownScenarioId = computed(() => shownScenarioIdOf(real.runStatus, real.selectedScenarioId))
+
   function resetRunStats() {
     real.runStats.startedAtMs = Date.now()
     real.runStats.attempts = 0
@@ -858,6 +865,7 @@ export function useSimulatorApp(opts?: {
   let resetClearingFxDedupImpl: () => void = () => undefined
 
   const interactMode = useInteractMode({
+    showPid: participantDisplayIdFor(() => shownScenarioId.value),
     actions: interactActions,
     runId: interactRunId,
     equivalent: sceneEq,
@@ -1341,6 +1349,7 @@ export function useSimulatorApp(opts?: {
     sizeForNode: (n) => sizeForNode(n),
     fxColorForNode,
     hasNodeCardInspectorOpen: () => hasNodeCardInspectorOpen.value,
+    showPid: participantDisplayIdFor(() => shownScenarioId.value),
   }).labelNodes
 
   const pickingAndHover = useAppPickingAndHover({

@@ -26,6 +26,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { canActOnTrustlineFigures } from '../composables/interact/trustlinesSourceState'
 import { useSelectedTrustlineLine } from '../composables/useSelectedTrustlineLine'
 import { provideActivePanelState } from '../composables/useActivePanelState'
+import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } from '../composables/useParticipantDisplay'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
@@ -468,6 +469,11 @@ const edgeTooltipStyle = computed(() => calcEdgeTooltipStyle())
 
 const { activePanelType } = provideActivePanelState(interactPhase)
 
+// Components that PRINT a participant id remove the namespace of this scenario from it (`utils/participantDisplayId.ts`).
+const shownScenarioId = computed(() => shownScenarioIdOf(real.runStatus, real.selectedScenarioId))
+provideShownScenarioId(shownScenarioId)
+const showPid = participantDisplayIdFor(() => shownScenarioId.value)
+
 /**
  * Controls which UI to show in `editing-trustline` phase:
  * - `true`  → TrustlineManagementPanel (full editor)
@@ -496,6 +502,7 @@ const { wmEdgePopupAnchor, wmPanelOpenAnchor, uiCloseEdgeDetailWindow, onGlobalK
 function wmSurfaceDescriptorFor(win: WindowInstance) {
   return resolveWindowSurfaceDescriptor(win, {
     getNodeName: (nodeId) => getNodeById(nodeId)?.name ?? null,
+    showPid,
   })
 }
 

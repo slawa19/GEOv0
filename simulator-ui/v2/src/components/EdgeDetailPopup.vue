@@ -5,6 +5,7 @@ import { parseAmountNumber } from '../utils/numberFormat'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import {
   canActOnTrustlineFigures,
   trustlineFiguresNotice,
@@ -135,10 +136,13 @@ const popupStyle = computed(() =>
   }) as const,
 )
 
+// Ids are PRINTED here, so they go through the display rule; `state` keeps the full ids.
+const showPid = useParticipantDisplayId()
+
 const title = computed(() => {
   const from = props.state.fromPid
   const to = props.state.toPid
-  if (from && to) return `${from} → ${to}`
+  if (from && to) return `${showPid(from)} → ${showPid(to)}`
   return props.state.selectedEdgeKey ?? 'Edge'
 })
 
@@ -147,7 +151,7 @@ const title = computed(() => {
 // In this component we only have access to InteractState.{fromPid}, so use it as best-effort.
 const sendPaymentFromLabel = computed(() => {
   const pid = (props.state.fromPid ?? '').trim()
-  return pid || 'sender'
+  return pid ? showPid(pid) : 'sender'
 })
 
 // 026 (owner В1): a close with the supported debt (`used`) is a request; the reverse debt is the other line's.

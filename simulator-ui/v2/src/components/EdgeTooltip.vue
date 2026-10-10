@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
 
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 
@@ -26,6 +27,9 @@ type Props = {
 
 defineProps<Props>()
 
+// An id is PRINTED when the node has no name, so it goes through the display rule.
+const showPid = useParticipantDisplayId()
+
 const edgeTooltipSurface = getOverlaySurfaceDescriptor('edge-tooltip')
 </script>
 
@@ -38,7 +42,7 @@ const edgeTooltipSurface = getOverlaySurfaceDescriptor('edge-tooltip')
     :aria-label="edgeTooltipSurface.a11y?.ariaLabel"
   >
     <div class="ds-ov-tooltip__title">
-      {{ getNodeName(edge.fromId) ?? edge.fromId }} → {{ getNodeName(edge.toId) ?? edge.toId }}
+      {{ showPid(getNodeName(edge.fromId) ?? edge.fromId) }} → {{ showPid(getNodeName(edge.toId) ?? edge.toId) }}
     </div>
     <div class="ds-ov-tooltip__amount">{{ edge.amountText }}</div>
 
