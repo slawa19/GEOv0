@@ -17,6 +17,8 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return (error == null ? '' : extractErrorMessage(error).trim()) || fallback
 }
 
+export type PaymentTargetDetail = { hops: number; max_available: string | null }
+
 export function useInteractDataCache(opts: {
   actions: ReturnType<typeof useInteractActions>
   runId: Ref<string>
@@ -45,6 +47,12 @@ export function useInteractDataCache(opts: {
   refreshPaymentTargets: (o: { fromPid: string; maxHops: number; force?: boolean }) => Promise<void>
   /** Cache (by run+eq+from+maxHops) for To dropdown filtering. */
   paymentTargetsByKey: Ref<Map<string, Set<string>>>
+  /**
+   * 037 F-037-5: what the same answer says per target, under the same key as `paymentTargetsByKey`. `hops` is the
+   * shortest path (steps); `max_available` is the server's ESTIMATE of the maximum (max-flow), a different computation:
+   * a decimal string, or `null` = "the server did not estimate" - which is not the measured zero `"0.00"`.
+   */
+  paymentTargetDetailsByKey: Ref<Map<string, Map<string, PaymentTargetDetail>>>
   /** Loading flags per key. Key must match paymentTargetsByKey key. */
   paymentTargetsLoadingByKey: Ref<Map<string, boolean>>
   /** Error per cache key; stale failures cannot degrade a different active sender. */
@@ -287,6 +295,7 @@ export function useInteractDataCache(opts: {
 
   // NOTE: keep Maps in refs and replace on update so consumers can depend on ref identity.
   const paymentTargetsByKey = ref(new Map<string, Set<string>>())
+  const paymentTargetDetailsByKey = ref(new Map<string, Map<string, PaymentTargetDetail>>())
   const paymentTargetsLoadingByKey = ref(new Map<string, boolean>())
   const paymentTargetsLastErrorByKey = ref(new Map<string, string>())
   const paymentTargetsFetchEpochByKey = new Map<string, number>()
@@ -340,15 +349,20 @@ export function useInteractDataCache(opts: {
       if (paymentTargetsFetchEpochByKey.get(key) !== myEpoch) return
 
       const ids = new Set<string>()
+      const details = new Map<string, PaymentTargetDetail>()
       for (const it of items ?? []) {
         const pid = normalizePid(it.to_pid)
         if (!pid) continue
         ids.add(pid)
+        details.set(pid, { hops: it.hops, max_available: typeof it.max_available === 'string' ? it.max_available : null })
       }
 
       const next = new Map(paymentTargetsByKey.value)
       next.set(key, ids)
       paymentTargetsByKey.value = next
+      const nextDetails = new Map(paymentTargetDetailsByKey.value)
+      nextDetails.set(key, details)
+      paymentTargetDetailsByKey.value = nextDetails
       setPaymentTargetsError(key, null)
       paymentTargetsFetchedAtMsByKey.set(key, now)
     } catch (error) {
@@ -359,6 +373,9 @@ export function useInteractDataCache(opts: {
       const next = new Map(paymentTargetsByKey.value)
       next.set(key, new Set())
       paymentTargetsByKey.value = next
+      const nextDetails = new Map(paymentTargetDetailsByKey.value)
+      nextDetails.set(key, new Map())
+      paymentTargetDetailsByKey.value = nextDetails
       setPaymentTargetsError(key, getErrorMessage(error, 'Payment targets refresh failed'))
       // Treat error response as “known” for UI determinism, but still revalidate after TTL.
       paymentTargetsFetchedAtMsByKey.set(key, now)
@@ -375,6 +392,7 @@ export function useInteractDataCache(opts: {
     () => `${normalizeRunId(opts.runId.value)}::${normalizeEq(opts.equivalent.value)}`,
     () => {
       paymentTargetsByKey.value = new Map()
+      paymentTargetDetailsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
       paymentTargetsLastErrorByKey.value = new Map()
       paymentTargetsFetchEpochByKey.clear()
@@ -395,6 +413,7 @@ export function useInteractDataCache(opts: {
     () => `${String(opts.snapshot.value?.generated_at ?? '')}|${opts.snapshot.value?.data_revision ?? 0}`,
     () => {
       paymentTargetsByKey.value = new Map()
+      paymentTargetDetailsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
       paymentTargetsLastErrorByKey.value = new Map()
       paymentTargetsFetchEpochByKey.clear()
@@ -506,6 +525,7 @@ export function useInteractDataCache(opts: {
     refreshTrustlines,
     refreshPaymentTargets,
     paymentTargetsByKey,
+    paymentTargetDetailsByKey,
     paymentTargetsLoadingByKey,
     paymentTargetsLastErrorByKey,
     paymentTargetsKey,

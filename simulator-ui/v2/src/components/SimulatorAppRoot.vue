@@ -1390,6 +1390,12 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :set-from-pid="interact.mode.setPaymentFromPid"
           :set-to-pid="interact.mode.setPaymentToPid"
           :cancel="cancelInteractWindowFromUi"
+          :trustlines-state="interact.mode.trustlinesFetchState.value.kind"
+          :payment-outcome="interact.mode.paymentOutcome.value"
+          :retry-payment="interact.mode.retryPayment"
+          :dismiss-payment-result="interact.mode.dismissPaymentResult"
+          :discard-unresolved-payment="interact.mode.discardUnresolvedPayment"
+          :target-estimate="interact.mode.paymentTargetEstimate.value"
         />
 
         <TrustlineManagementPanel
