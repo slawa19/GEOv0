@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { BottleneckItem, BottleneckTarget } from '../api/simulatorTypes'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 
 const props = defineProps<{
   items: BottleneckItem[]
@@ -13,9 +14,12 @@ const emit = defineEmits<{
   (e: 'focus-bottleneck', target: BottleneckTarget): void
 }>()
 
+// An id is PRINTED when the node has no name, so it goes through the display rule; `targetKey` keeps the full id.
+const showPid = useParticipantDisplayId()
+
 function nameOf(id: string): string {
   const resolved = String(props.getNodeName?.(id) ?? '').trim()
-  return resolved || id
+  return showPid(resolved || id)
 }
 
 function targetLabel(target: BottleneckTarget): string {

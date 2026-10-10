@@ -13,6 +13,7 @@ import { amountStepHint, equivalentPrecision } from '../config/equivalentPrecisi
 import { interactText } from '../i18n/interactStrings'
 import { compareMoney, formatMoney } from '../utils/money'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import OverlaySelect from './common/OverlaySelect.vue'
@@ -364,12 +365,16 @@ function onConfirmKeydown(event: KeyboardEvent) {
   if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault()
 }
 
+// Ids are PRINTED in this panel, so they go through the display rule; values and state keep the full id.
+const showPid = useParticipantDisplayId()
+
 /** A participant by NAME; the id only when the list has no record of it (never a guess). */
 function nameOf(pid: string | null | undefined): string {
   const id = String(pid ?? '').trim()
   if (!id) return ''
   const found = (props.participants ?? []).find((p) => p.pid === id)
-  return String(found?.name ?? '').trim() || id
+  // A list entry whose name IS its id (the cache falls back to the id as the name) is an id as well.
+  return showPid(String(found?.name ?? '').trim() || id)
 }
 
 function titleText() {
@@ -505,13 +510,14 @@ const capacityByToPid = computed<Map<string, string>>(() => {
 function toOptionLabel(p: ParticipantInfo): string {
   const pid = (p?.pid ?? '').trim()
   const cap = pid ? capacityByToPid.value.get(pid) : undefined
-  if (cap == null) return `${participantLabel(p)} — …`
+  const label = participantLabel(p, showPid)
+  if (cap == null) return `${label} — …`
   // 026 `T2602`: a negative `available` is trust excess, not an amount this payment can carry; no amount is shown
   // and the recipient stays selectable (another route may exist).
-  if (String(cap).trim().startsWith('-')) return participantLabel(p)
+  if (String(cap).trim().startsWith('-')) return label
   // 037 F-037-1: a snapshot figure is not offered as a capacity; the Direct capacity row says what it is.
-  if (!figuresConfirmed.value) return participantLabel(p)
-  return `${participantLabel(p)} — ${cap} ${props.unit}`
+  if (!figuresConfirmed.value) return label
+  return `${label} — ${cap} ${props.unit}`
 }
 
 watch(
@@ -597,7 +603,7 @@ function onToChange(v: string) {
 
 const fromOptions = computed(() => fromParticipants.value.map((participant) => ({
   value: participant.pid,
-  label: participantLabel(participant),
+  label: participantLabel(participant, showPid),
 })))
 
 const toOptions = computed(() => toParticipants.value.map((participant) => ({

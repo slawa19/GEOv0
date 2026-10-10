@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 
 import type { GraphLink, GraphNode } from '../types'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { keyEdge } from '../utils/edgeKey'
 
 type Props = {
@@ -19,6 +20,9 @@ const emit = defineEmits<{
   inspectEdge: [link: GraphLink]
 }>()
 
+// Ids are PRINTED in the option labels, so they go through the display rule; option values keep the full id.
+const showPid = useParticipantDisplayId()
+
 const sortedNodes = computed(() =>
   [...props.nodes].sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b), undefined, { numeric: true })),
 )
@@ -32,11 +36,11 @@ const announcement = ref('')
 
 function nodeLabel(node: GraphNode): string {
   const name = node.name?.trim()
-  return name && name !== node.id ? `${name} (${node.id})` : node.id
+  return name && name !== node.id ? `${name} (${showPid(node.id)})` : showPid(node.id)
 }
 
 function edgeLabel(link: GraphLink): string {
-  return `${link.source} → ${link.target}`
+  return `${showPid(link.source)} → ${showPid(link.target)}`
 }
 
 watch(

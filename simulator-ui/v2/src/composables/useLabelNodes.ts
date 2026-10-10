@@ -21,6 +21,9 @@ type UseLabelNodesDeps = {
 
   /** When provided and returns true, the label of the selected node is hidden (node-card inspector window is open). */
   hasNodeCardInspectorOpen?: () => boolean
+
+  /** How an id is PRINTED as a label when the node has no name (the scene's scenario namespace is removed). */
+  showPid?: (pid: string) => string
 }
 
 type UseLabelNodesReturn = {
@@ -28,6 +31,7 @@ type UseLabelNodesReturn = {
 }
 
 export function useLabelNodes(deps: UseLabelNodesDeps): UseLabelNodesReturn {
+  const showPid = deps.showPid ?? ((pid: string) => pid)
   const labelNodes = computed<LabelNode[]>(() => {
     if (deps.isTestMode()) return []
     const labelsLod = deps.getLabelsLod()
@@ -72,7 +76,7 @@ export function useLabelNodes(deps: UseLabelNodesDeps): UseLabelNodesReturn {
         id,
         x: ln.__x,
         y: ln.__y + dyW,
-        text: gn?.name ? String(gn.name) : id,
+        text: showPid(gn?.name ? String(gn.name) : id),
         color: deps.fxColorForNode(id, '#e2e8f0'),
       })
     }

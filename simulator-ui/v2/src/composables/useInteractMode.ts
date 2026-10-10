@@ -69,6 +69,11 @@ export function useInteractMode(opts: {
   intentStorage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
   /** BUG-3: called after successful clearing to trigger FX animation (gold pulse on cycle edges). */
   onClearingDone?: (result: SimulatorActionClearingRealResponse) => void
+  /**
+   * How an id is PRINTED in a result, toast or history line (the scene's scenario namespace is removed, see
+   * `utils/participantDisplayId.ts`). The state and the actions keep the full id; without it ids are printed as they are.
+   */
+  showPid?: (pid: string) => string
 }): {
   state: Reactive<InteractState>
   phase: ComputedRef<InteractPhase>
@@ -328,10 +333,13 @@ export function useInteractMode(opts: {
     },
   )
 
+  const showPid = opts.showPid ?? ((pid: string) => pid)
+
   function participantName(pid: string): string {
     const found = participants.value.find((p) => p.pid === pid)
     const name = String(found?.name ?? '').trim()
-    return name || pid
+    // A list entry whose name IS its id (the cache falls back to the id as the name) is an id as well.
+    return showPid(name || pid)
   }
 
   const paymentTargetsActiveKey = computed(() => {
@@ -819,10 +827,10 @@ export function useInteractMode(opts: {
       await opts.actions.createTrustline(from, to, limit, eq, { signal })
       if (!isCurrent()) return
 
-      setSuccessToastMessage(`Trustline created: ${from} → ${to}`)
+      setSuccessToastMessage(`Trustline created: ${showPid(from)} → ${showPid(to)}`)
 
       // BUG-5: log to history
-      pushHistory('🔗', `Trustline created: ${from} → ${to} (${limit})`)
+      pushHistory('🔗', `Trustline created: ${showPid(from)} → ${showPid(to)} (${limit})`)
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
@@ -843,7 +851,7 @@ export function useInteractMode(opts: {
       setSuccessToastMessage(`Limit updated: ${newLimit} ${eq}`)
 
       // BUG-5: log to history
-      pushHistory('✏️', `Trustline updated: ${from} → ${to} → limit ${newLimit}`)
+      pushHistory('✏️', `Trustline updated: ${showPid(from)} → ${showPid(to)} → limit ${newLimit}`)
       const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
       // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
       patchTrustlineLimitLocal(from, to, newLimit, eq)
@@ -866,8 +874,8 @@ export function useInteractMode(opts: {
 
       // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
       const msg = res.status === 'closed'
-        ? `Trustline closed: ${from} → ${to}`
-        : `Close requested: ${from} → ${to} (closes when the debt is repaid)`
+        ? `Trustline closed: ${showPid(from)} → ${showPid(to)}`
+        : `Close requested: ${showPid(from)} → ${showPid(to)} (closes when the debt is repaid)`
       setSuccessToastMessage(msg)
 
       // BUG-5: log to history

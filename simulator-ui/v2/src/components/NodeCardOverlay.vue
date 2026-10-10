@@ -7,6 +7,7 @@ import { parseAmountNumber } from '../utils/numberFormat'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { atomsToMoney, formatMoney } from '../utils/money'
 import { renderAvailable } from '../utils/valueFormat'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 
 type NodeEdgeStats = {
   outLimitText: string
@@ -122,6 +123,10 @@ function rowMoney(tl: TrustlineInfo, value: unknown): string {
   return formatMoney(value, equivalentPrecision(tl.equivalent || props.equivalentText))
 }
 
+// Ids are PRINTED in this card (a name falls back to the id), so they go through the display rule; keys and events keep the full id.
+const showPid = useParticipantDisplayId()
+const nodeName = computed(() => showPid(String(props.node.name ?? props.node.id)))
+
 /** Trustlines that involve this node (outgoing or incoming). */
 const nodeTrustlines = computed<TrustlineInfo[]>(() => {
   if (!props.interactMode || !props.interactTrustlines?.length) return []
@@ -154,10 +159,10 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
         <!-- Identity + Balance (merged) ------------------------------------>
         <div class="ds-ov-node-card__identity">
           <div class="ds-node-card__avatar ds-ov-node-card__avatar">
-            {{ String(node.name ?? node.id).slice(0, 2).toUpperCase() }}
+            {{ nodeName.slice(0, 2).toUpperCase() }}
           </div>
           <div class="ds-ov-node-card__text">
-            <div class="ds-node-card__name">{{ node.name ?? node.id }}</div>
+            <div class="ds-node-card__name">{{ nodeName }}</div>
             <div class="ds-node-card__meta">{{ node.type ?? '—' }} · {{ node.status ?? '—' }}</div>
           </div>
           <div class="ds-ov-node-card__right">
@@ -245,7 +250,7 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               ]"
               :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
             >
-              <span class="nco-trustline-row__peer ds-mono">{{ tl.to_name }}</span>
+              <span class="nco-trustline-row__peer ds-mono">{{ showPid(tl.to_name) }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
               <span class="nco-trustline-row__avail ds-mono">avail: {{ renderAvailable(rowMoney(tl, tl.available)) }}</span>
               <button
@@ -269,15 +274,15 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
               ]"
               :title="`avail: ${renderAvailable(rowMoney(tl, tl.available))}`"
             >
-              <span class="nco-trustline-row__peer ds-mono">{{ tl.from_name }}</span>
+              <span class="nco-trustline-row__peer ds-mono">{{ showPid(tl.from_name) }}</span>
               <span class="nco-trustline-row__amounts ds-mono">{{ rowMoney(tl, tl.used) }}&thinsp;/&thinsp;{{ rowMoney(tl, tl.limit) }}</span>
               <span class="nco-trustline-row__avail ds-mono">avail: {{ renderAvailable(rowMoney(tl, tl.available)) }}</span>
               <button
                 class="ds-btn ds-btn--ghost ds-btn--icon nco-trustline-row__edit"
                 type="button"
                 :disabled="!!interactBusy"
-                :title="`Edit trustline (set by ${tl.from_name || tl.from_pid})`"
-                :aria-label="`Edit trustline (set by ${tl.from_name || tl.from_pid})`"
+                :title="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
+                :aria-label="`Edit trustline (set by ${showPid(tl.from_name || tl.from_pid)})`"
                 @click="onInteractEditTrustline?.(tl.from_pid, tl.to_pid)"
               >✏️</button>
             </div>

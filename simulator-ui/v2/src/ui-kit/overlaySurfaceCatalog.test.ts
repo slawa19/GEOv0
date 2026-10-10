@@ -150,6 +150,17 @@ describe('overlaySurfaceCatalog', () => {
     expect(resolved.ariaLabel).toBe('Trustline details: alice to bob')
   })
 
+  it('prints ids in aria labels through showPid, and leaves them alone without it', () => {
+    const show = (pid: string) => pid.replace(/^scn:/, '')
+    const edge = makeWindow({ type: 'edge-detail', data: { fromPid: 'scn:alice', toPid: 'scn:bob' } })
+    expect(resolveWindowSurfaceDescriptor(edge, { showPid: show }).ariaLabel).toBe('Trustline details: alice to bob')
+    expect(resolveWindowSurfaceDescriptor(edge).ariaLabel).toBe('Trustline details: scn:alice to scn:bob')
+
+    const card = makeWindow({ type: 'node-card', data: { nodeId: 'scn:bob' } })
+    expect(resolveWindowSurfaceDescriptor(card, { showPid: show }).ariaLabel).toBe('Node details: bob')
+    expect(resolveWindowSurfaceDescriptor(card, { getNodeName: () => 'Bob', showPid: show }).ariaLabel).toBe('Node details: Bob')
+  })
+
   it('resolves node-card inspector semantics from the shared descriptor layer', () => {
     const resolved = resolveWindowSurfaceDescriptor(
       makeWindow({

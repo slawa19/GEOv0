@@ -3,6 +3,7 @@ import { computed } from 'vue'
 
 import type { ParticipantInfo, SimulatorActionClearingCycle } from '../api/simulatorTypes'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { interactText } from '../i18n/interactStrings'
 
 type Props = {
@@ -65,9 +66,12 @@ const resultUnit = computed(() => String(last.value?.equivalent ?? props.equival
 /** Before the run: the equivalent that WILL be run. Once there is a result: the equivalent of that result, whatever is selected now. */
 const shownEquivalent = computed(() => (isConfirm.value || !last.value ? props.equivalent : resultUnit.value))
 
+// An id is PRINTED when the list has no name for it (or the name is the id), so it goes through the display rule.
+const showPid = useParticipantDisplayId()
+
 function nameOf(pid: string): string {
   const found = (props.participants ?? []).find((p) => p.pid === pid)
-  return String(found?.name ?? '').trim() || pid
+  return showPid(String(found?.name ?? '').trim() || pid)
 }
 
 /**

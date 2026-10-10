@@ -429,6 +429,8 @@ export function resolveWindowSurfaceDescriptor(
   win: WindowInstance,
   options: {
     getNodeName?: (nodeId: string) => string | null
+    /** How an id is PRINTED in an aria label (the scene's scenario namespace is removed); the window data keeps the full id. */
+    showPid?: (pid: string) => string
   } = {},
 ): ResolvedWindowSurfaceDescriptor {
   if (isInteractPanelWindow(win)) {
@@ -447,7 +449,8 @@ export function resolveWindowSurfaceDescriptor(
   if (isEdgeDetailWindow(win)) {
     const fromPid = String(win.data.fromPid ?? '').trim()
     const toPid = String(win.data.toPid ?? '').trim()
-    const label = fromPid && toPid ? `Trustline details: ${fromPid} to ${toPid}` : 'Trustline details'
+    const show = options.showPid ?? ((pid: string) => pid)
+    const label = fromPid && toPid ? `Trustline details: ${show(fromPid)} to ${show(toPid)}` : 'Trustline details'
     return {
       descriptor,
       title: '',
@@ -459,7 +462,7 @@ export function resolveWindowSurfaceDescriptor(
   if (isNodeCardWindow(win)) {
     const nodeId = String(win.data.nodeId ?? '').trim()
     const nodeName = nodeId ? String(options.getNodeName?.(nodeId) ?? '').trim() : ''
-    const label = nodeName || nodeId
+    const label = (options.showPid ?? ((pid: string) => pid))(nodeName || nodeId)
     return {
       descriptor,
       title: '',

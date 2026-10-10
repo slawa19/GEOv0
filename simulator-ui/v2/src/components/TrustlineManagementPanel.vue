@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 import { useDestructiveConfirmation } from '../composables/useDestructiveConfirmation'
+import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { amountStepHint } from '../config/equivalentPrecision'
@@ -218,10 +219,13 @@ const { armed: closeArmed, disarm: disarmClose, confirmOrArm: confirmCloseOrArm 
   ],
 })
 
+// Ids are PRINTED in this panel, so they go through the display rule; values, keys and state keep the full id.
+const showPid = useParticipantDisplayId()
+
 const title = computed(() => {
   const from = props.state.fromPid
   const to = props.state.toPid
-  if (from && to) return `Trustline: ${from} → ${to}`
+  if (from && to) return `Trustline: ${showPid(from)} → ${showPid(to)}`
   return 'Trustline'
 })
 
@@ -284,17 +288,17 @@ function onTrustlinePick(key: string) {
 
 const fromOptions = computed(() => participantsSorted.value.map((participant) => ({
   value: participant.pid,
-  label: participantLabel(participant),
+  label: participantLabel(participant, showPid),
 })))
 
 const toOptions = computed(() => toParticipants.value.map((participant) => ({
   value: participant.pid,
-  label: participantLabel(participant) + (isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim()) ? ' (exists)' : ''),
+  label: participantLabel(participant, showPid) + (isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim()) ? ' (exists)' : ''),
 })))
 
 const trustlineOptions = computed(() => trustlinesForFrom.value.map((trustline) => ({
   value: encodeTlKey(trustline),
-  label: `${trustline.from_name || trustline.from_pid} → ${trustline.to_name || trustline.to_pid}`,
+  label: `${trustline.from_name || showPid(trustline.from_pid)} → ${trustline.to_name || showPid(trustline.to_pid)}`,
 })))
 
 function onFromSelect(value: string | null) {
