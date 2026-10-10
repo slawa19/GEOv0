@@ -310,24 +310,57 @@ _A10_FILE = "tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_dea
 
 def test_the_a10_verdict_holds_for_the_list_and_names_every_way_it_can_break() -> None:
     tier = _tier_count_module()
+
+    def verdict(items, *args):
+        return tier.a10_exception_problem(items, args=list(args), invocation_dir=_ROOT, root=_ROOT)
+
     listed = sorted(tier.A10_REAL_POOL_TIMEOUT_CASES)
     assert len(listed) == 5 and all(node_id.startswith(_A10_FILE + "::") for node_id in listed)
     rest = [(f"tests/unit/test_x.py::t{i}", False, False) for i in range(3)]
     whole = [(node_id, True, False) for node_id in listed] + rest
-    assert tier.a10_exception_problem(whole) is None
-    assert tier.a10_exception_problem(rest) is None  # the A10 module is not collected: nothing to judge but additions
-    # a listed case missing from a collection that holds the module (renamed, re-parametrized or deleted)
-    assert listed[0] in (tier.a10_exception_problem(whole[1:] + rest[:0]) or "")
+    assert verdict(whole) is None  # no argument: the whole tier
+    assert verdict(whole, "tests") is None and verdict(whole, _A10_FILE) is None
+    # scope: a selector elsewhere obliges nothing, so the A10 module's absence is not a loss ...
+    assert verdict(rest, "tests/unit/test_x.py") is None
+    # ... but the whole tier (or the module, or its directory) without the five IS a loss (`--ignore` of the file)
+    for scope in ((), ("tests",), ("tests/integration",), (_A10_FILE,)):
+        assert "listed case is not collected" in (verdict(rest, *scope) or ""), scope
+    # a node selector obliges only the members it covers
+    one_function = _A10_FILE + "::test_no_connection_around_routing_is_the_timeout_refusal_and_leaves_nothing"
+    routing = [n for n in listed if "around_routing" in n]
+    assert len(routing) == 2
+    assert verdict([(n, True, False) for n in routing], one_function) is None
+    assert verdict([(routing[0], True, False)], one_function) is not None  # a covered member is still required
+    assert verdict(rest, _A10_FILE + "::test_a_cancellation_while_waiting_for_the_pool_leaves_nothing") is None  # covers none
+    assert verdict([(routing[0], True, False)], routing[0]) is None  # a full node id covers exactly itself
+    # a listed case missing from a collection of the whole module (renamed, re-parametrized or deleted)
+    assert listed[0] in (verdict(whole[1:]) or "")
     # reclassified: marker lost, or `slow` put back (which `-m 'not slow'` skips)
     lost = [(listed[0], False, False)] + [(n, True, False) for n in listed[1:]]
-    assert "lost the a10_real_pool_timeout marker" in (tier.a10_exception_problem(lost) or "")
+    assert "lost the a10_real_pool_timeout marker" in (verdict(lost) or "")
     slowed = [(listed[0], True, True)] + [(n, True, False) for n in listed[1:]]
-    assert "carries `slow`" in (tier.a10_exception_problem(slowed) or "")
-    # an addition: a sixth case with the marker, in this module or anywhere else
+    assert "carries `slow`" in (verdict(slowed) or "")
+    # an addition: a sixth case with the marker, in this module or anywhere else, under any scope
     for extra in (_A10_FILE + "::test_something_else", "tests/unit/test_x.py::t0"):
         added = whole + [(extra, True, False)]
-        assert "without being on the closed list" in (tier.a10_exception_problem(added) or "")
-        assert extra in (tier.a10_exception_problem(added) or "")
+        for scope in ((), ("tests/unit/test_x.py",)):
+            assert "without being on the closed list" in (verdict(added, *scope) or "")
+            assert extra in (verdict(added, *scope) or "")
+
+
+def test_the_a10_summary_line_is_printed_only_for_five_executed_and_passed_members() -> None:
+    tier = _tier_count_module()
+    listed = sorted(tier.A10_REAL_POOL_TIMEOUT_CASES)
+    records = {n: {"setup": ("passed", 0.5), "call": ("passed", 2.0), "teardown": ("passed", 0.1)} for n in listed}
+    assert tier.a10_summary_line(records) == (
+        "a10 real-pool-timeout exception: 5 passed, setup+call+teardown 13.00s (admission budget 60s)"
+    )
+    partial = dict(records)
+    del partial[listed[0]]
+    assert tier.a10_summary_line(partial) is None  # not all five executed: nothing is claimed
+    failed = {**records, listed[1]: {**records[listed[1]], "call": ("failed", 2.0)}}
+    assert tier.a10_summary_line(failed) is None
+    assert tier.a10_summary_line({}) is None
 
 
 def test_the_real_collection_of_the_a10_module_selects_the_listed_five_without_slow() -> None:

@@ -213,8 +213,13 @@ the translation of that timeout and the bound of the refusal's recording, which 
 scheduled job selected them; `-IncludeExpensive` is used only by the simulator super-smoke). Their configured waits total
 5.5 s. The list is CLOSED and owned here: `A10_REAL_POOL_TIMEOUT_CASES`. They carry the registered marker
 `a10_real_pool_timeout` and no `slow`. `tests/conftest.py` evaluates `a10_exception_problem` on the collection BEFORE any
-deselection and ends the session with exit 4 when a listed case is missing, is not marked, carries `slow` (so the canonical
-`-m "not slow"` would skip it), or when any other case carries the marker. Widening the list needs a separately recorded
+deselection and ends the session with exit 4 when a listed case the REQUESTED SCOPE obliges is missing, is not marked,
+carries `slow` (so the canonical `-m "not slow"` would skip it), or when any other case carries the marker. The scope is
+read from the positional arguments: the whole tier or the A10 module obliges all five (so `--ignore` of the file on the
+whole tier is a loss), a node selector `file.py::test_name` only the members it covers. At EXECUTION a listed member that
+is skipped (marker, skipif, runtime skip, xfail) is turned into a failure, and when all five ran and passed the summary
+prints one line with their setup+call+teardown seconds (printing only, no time limit); a collection-only run checks the
+membership and does not demand execution. Widening the list needs a separately recorded
 decision, not an edit of this constant alone.
 
 SKIPPED CASES OF THE CANONICAL RUN, NAMED (`-rs` shows them; compare the number in the CI log with this list):
@@ -332,14 +337,45 @@ def count_problem(*, selected: int, expected: int = EXPECTED_SELECTED_ITEMS) -> 
     )
 
 
-def a10_exception_problem(items: Sequence[tuple[str, bool, bool]]) -> str | None:
+def _a10_required_members(args: Sequence[str], invocation_dir: Path, root: Path) -> frozenset[str]:
+    """The listed members the REQUESTED SCOPE obliges this run to collect.
+
+    All five when the whole tier or the A10 module (or a directory holding it) is requested - an empty argument list is
+    `testpaths = tests`. For a node selector inside the module (`file.py::test_name`, or a full node id) only the members
+    that selector covers. None when every argument points elsewhere. A scope that includes the module but then loses its
+    items (`--ignore` of the file on the whole tier) is therefore a loss, not "an unrelated selector".
+    """
+
+    if not args:
+        return A10_REAL_POOL_TIMEOUT_CASES
+    module = (root / _A10_MODULE).resolve()
+    required: set[str] = set()
+    for argument in args:
+        path_part, _, node_part = argument.partition("::")
+        target = (invocation_dir / path_part).resolve()
+        if node_part:
+            if target == module:
+                prefix = f"{_A10_MODULE}::{node_part}"
+                required |= {
+                    member
+                    for member in A10_REAL_POOL_TIMEOUT_CASES
+                    if member == prefix or member.startswith((prefix + "[", prefix + "::"))
+                }
+        elif target == module or module.is_relative_to(target):
+            return A10_REAL_POOL_TIMEOUT_CASES
+    return frozenset(required)
+
+
+def a10_exception_problem(
+    items: Sequence[tuple[str, bool, bool]], *, args: Sequence[str], invocation_dir: Path, root: Path
+) -> str | None:
     """None when the A10 exception holds in this collection; otherwise the refusal text.
 
     `items` is every collected case BEFORE any deselection, as `(node id, carries a10_real_pool_timeout, carries
-    slow)`. A case carrying the marker that is not on the list is an ADDITION; when the A10 module is collected at all,
-    each listed case must be present, marked and not `slow` (a missing, unmarked or `slow` member is a loss, a
-    reclassification or a skip by `-m "not slow"`). A run that does not collect the module (a path selector elsewhere)
-    is judged only for additions. Whether the five really RUN is the count's and the tests' business.
+    slow)`. A case carrying the marker that is not on the list is an ADDITION, checked on every run. The listed cases
+    the requested scope obliges (`_a10_required_members`) must be present, marked and not `slow` (a missing, unmarked or
+    `slow` member is a loss, a reclassification or a skip by `-m "not slow"`). That the five really RUN and pass is
+    enforced at execution (`a10_skip_refusal` below), because a collection cannot know it.
     """
 
     by_id = {node_id: (marked, slow) for node_id, marked, slow in items}
@@ -347,20 +383,52 @@ def a10_exception_problem(items: Sequence[tuple[str, bool, bool]]) -> str | None
     added = sorted(node_id for node_id, (marked, _) in by_id.items() if marked and node_id not in A10_REAL_POOL_TIMEOUT_CASES)
     if added:
         problems.append(f"{len(added)} case(s) carry {A10_MARKER} without being on the closed list: {added}")
-    if any(node_id.startswith(_A10_MODULE + "::") for node_id in by_id):
-        for node_id in sorted(A10_REAL_POOL_TIMEOUT_CASES):
-            if node_id not in by_id:
-                problems.append(f"listed case is not collected (missing, renamed or re-parametrized): {node_id}")
-                continue
-            marked, slow = by_id[node_id]
-            if not marked:
-                problems.append(f"listed case lost the {A10_MARKER} marker (reclassified): {node_id}")
-            if slow:
-                problems.append(f"listed case carries `slow`, which `-m 'not slow'` skips: {node_id}")
+    for node_id in sorted(_a10_required_members(args, invocation_dir, root)):
+        if node_id not in by_id:
+            problems.append(f"listed case is not collected (missing, renamed or re-parametrized): {node_id}")
+            continue
+        marked, slow = by_id[node_id]
+        if not marked:
+            problems.append(f"listed case lost the {A10_MARKER} marker (reclassified): {node_id}")
+        if slow:
+            problems.append(f"listed case carries `slow`, which `-m 'not slow'` skips: {node_id}")
     if not problems:
         return None
     return (
         "the A10 exception (exactly five real-pool-timeout cases run in the required tier without `slow`; list: "
         "A10_REAL_POOL_TIMEOUT_CASES in tests/tier_count.py) does not hold: " + "; ".join(problems) + ". Widening, "
         "narrowing or renaming the list needs a separately recorded decision (AGENTS.md section 11)."
+    )
+
+
+def a10_skip_refusal(node_id: str, reason: object) -> str:
+    """The failure text for a listed member that was skipped (or expected to fail) instead of passing."""
+
+    return (
+        f"the A10 exception: the listed case {node_id} was skipped ({reason}), not executed. The five real-pool-timeout "
+        "cases are mandatory in the required tier; a skip, a true skipif, an xfail or a runtime pytest.skip() takes one "
+        "out of the gate while the count and the membership stay right (AGENTS.md section 11)."
+    )
+
+
+#: The admission budget (seconds) the five cases were accepted with: setup + call + teardown, all five, fixtures included.
+A10_ADMISSION_BUDGET_SECONDS = 60
+
+
+def a10_summary_line(records: dict[str, dict[str, tuple[str, float]]]) -> str | None:
+    """One line for the terminal summary when all five members EXECUTED (every phase) and passed; otherwise None.
+
+    Printing only: no time limit is enforced (a limit on a real-service test in the required tier is a source of flakes);
+    an excess is read from this line by a person. `records` maps node id -> phase -> (outcome, seconds).
+    """
+
+    total = 0.0
+    for node_id in A10_REAL_POOL_TIMEOUT_CASES:
+        phases = records.get(node_id, {})
+        if set(phases) != {"setup", "call", "teardown"} or any(outcome != "passed" for outcome, _ in phases.values()):
+            return None
+        total += sum(seconds for _, seconds in phases.values())
+    return (
+        f"a10 real-pool-timeout exception: {len(A10_REAL_POOL_TIMEOUT_CASES)} passed, setup+call+teardown "
+        f"{total:.2f}s (admission budget {A10_ADMISSION_BUDGET_SECONDS}s)"
     )

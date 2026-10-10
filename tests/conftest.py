@@ -158,6 +158,40 @@ def pytest_collection_modifyitems(session, config, items) -> None:
 # `tooling-tests/powershell/test_the_tier_refuses_a_database_that_is_not_postgres.py`.
 
 
+_A10_OUTCOMES = pytest.StashKey[dict]()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """A listed A10 member must EXECUTE: a skipped (or xfailed) outcome is turned into a failure (`tests/tier_count.py`).
+
+    Membership and count cannot see a `pytest.mark.skip`, a true `skipif`, an xfail or a `pytest.skip()` in the body or in
+    a fixture: the selection stays right and one of the five never passes. Collection-only runs reach no report and are not
+    judged here. Every phase's outcome and duration of the five is kept for the one summary line below.
+    """
+
+    outcome = yield
+    if item.nodeid not in _tier_count.A10_REAL_POOL_TIMEOUT_CASES:
+        return
+    report = outcome.get_result()
+    if report.skipped:
+        reason = report.longrepr[2] if isinstance(report.longrepr, tuple) and len(report.longrepr) == 3 else report.longrepr
+        report.outcome = "failed"
+        report.longrepr = _tier_count.a10_skip_refusal(item.nodeid, reason)
+    item.config.stash.setdefault(_A10_OUTCOMES, {}).setdefault(item.nodeid, {})[report.when] = (
+        report.outcome,
+        float(report.duration),
+    )
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
+    """One line when all five A10 members executed and passed: their setup+call+teardown seconds. Printing only."""
+
+    line = _tier_count.a10_summary_line(config.stash.get(_A10_OUTCOMES, {}))
+    if line is not None:
+        terminalreporter.write_line(line)
+
+
 def pytest_collection_finish(session) -> None:
     """The canonical profile selects exactly the recorded number of cases (035 F-035-14, `tests/tier_count.py`).
 
@@ -173,7 +207,12 @@ def pytest_collection_finish(session) -> None:
     if session.testsfailed or session.shouldstop or session.shouldfail:
         return
     # The A10 exception is a property of the collection, not of a profile: judged on every run.
-    a10_problem = _tier_count.a10_exception_problem(config.stash.get(_A10_COLLECTED, []))
+    a10_problem = _tier_count.a10_exception_problem(
+        config.stash.get(_A10_COLLECTED, []),
+        args=list(config.args),
+        invocation_dir=config.invocation_params.dir,
+        root=config.rootpath,
+    )
     if a10_problem is not None:
         pytest.exit(f"backend tier refused: {a10_problem}", returncode=pytest.ExitCode.USAGE_ERROR)
     if not _tier_count.is_canonical_profile(

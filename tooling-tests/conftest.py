@@ -128,8 +128,10 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-10, 035 slice Q-C (the A10 exception): portable 254 -> 258. Four cases added to `portable/test_p035_c_backend_tier_counts_what_it_collects.py`: the verdict on planted collections (1), the real collection selects the listed five by marker and under `not slow` (1), and the real collection ends with exit 4 when a listed case is turned `slow` or a sixth case is marked (2).
 #:
 #: 2026-10-10, 035 slice Q-C review (5e9ba5fd): portable 258 -> 266. Eight cases added to the same module: a single A10 node selector is not judged as the whole module (3), `--ignore` of the A10 file on the whole tier is named by the membership guard (1), a listed member skipped by marker, skipif or at runtime ends the run red (3), and a skipped non-member stays an ordinary skip (1).
+#:
+#: 2026-10-10, 035 slice Q-C review fix: portable 266 -> 267. One case added: the summary line is printed only for five executed and passed members (the verdict-with-scope case was rewritten, the same count).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 266,
+    "portable": 267,
     "powershell": 235,
 }
 
