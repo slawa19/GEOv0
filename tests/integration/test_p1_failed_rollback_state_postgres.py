@@ -37,10 +37,7 @@ from app.db.models.equivalent import Equivalent
 
 
 def _url() -> str:
-    url = os.environ.get("TEST_DATABASE_URL", "")
-    if "postgresql" not in url:
-        pytest.skip("a backend has to exist before it can be terminated")
-    return url
+    return os.environ.get("TEST_DATABASE_URL", "")
 
 
 @pytest_asyncio.fixture

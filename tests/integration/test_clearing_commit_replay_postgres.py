@@ -33,10 +33,6 @@ async def test_concurrent_same_cycle_serializable_resolves_one_durable_occurrenc
 ):
     """Equivalent ownership serializes one occurrence and its durable replay."""
 
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: SERIALIZABLE clearing reconciliation")
-
     from app.core.clearing.service import ClearingService
     from app.core.money_boundary import MoneyBoundary
     from app.db.models.audit_log import IntegrityAuditLog
@@ -492,10 +488,6 @@ async def test_a_serializable_conflict_retries_the_whole_clearing_on_a_fresh_sna
     envelope, journal and audit.
     """
 
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: SERIALIZABLE clearing retry")
-
     equivalent_id, equivalent_code, _participants, debt_ids = await _seed_conflict_cycle("CN")
     occurrence = occurrence_of(debt_ids, equivalent_id=equivalent_id, amount="30.00", plan_id=TEST_PLAN_ID, ordinal=0)
     execution_tx_id = occurrence.occurrence_id
@@ -543,10 +535,6 @@ async def test_a_persistent_conflict_exhausts_the_clearing_budget_with_a_retryab
     transaction row, no envelope, no journal, no audit, and the debts are exactly what the concurrent
     writer left.
     """
-
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: SERIALIZABLE clearing retry")
 
     from app.config import settings
 
@@ -601,10 +589,6 @@ async def test_post_commit_boundary_reconciles_and_new_cycle_still_executes_post
     monkeypatch,
     boundary_kind,
 ):
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: durable clearing commit confirmation")
-
     from app.core.clearing.service import (
         ClearingCommittedAfterCancellation,
         ClearingService,

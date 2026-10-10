@@ -35,14 +35,7 @@ async def test_concurrent_payments_shared_bottleneck_commit_once_postgres(
     db_session,
     monkeypatch,
 ):
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: validates the SERIALIZABLE resolution of a shared bottleneck")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     from sqlalchemy import text
 

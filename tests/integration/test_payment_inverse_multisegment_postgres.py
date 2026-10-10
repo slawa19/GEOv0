@@ -48,12 +48,6 @@ from tests.tier_on_a_clone import tier_sessions_on_a_clone  # noqa: E402,F401 - 
 
 
 
-def _require_postgres(db_session) -> None:
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: validates inverse multi-segment serialization")
-
-
 async def _seed_inverse_multisegment_world() -> dict:
     """An equivalent, A, B, C, and a line of 50.00 in each direction of A-B and B-C. No payment, no debt."""
 
@@ -128,8 +122,6 @@ async def test_inverse_multisegment_commits_serialize_and_preserve_invariants_po
     monkeypatch,
     holder_direction,
 ) -> None:
-    _require_postgres(db_session)
-
     from tests.conftest import TestingSessionLocal
 
     # The holder is parked inside its money phase (`COMMIT_TIMEOUT_SECONDS`) while the waiter runs; the

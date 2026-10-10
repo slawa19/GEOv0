@@ -88,13 +88,7 @@ async def _make_pair(db_session):
 
 @pytest.mark.asyncio
 async def test_recreating_a_closed_trustline_does_not_raise_a_raw_db_error(db_session):
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only gate: the applied unique constraint is the subject under test")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     eq, sender, sender_priv, receiver = await _make_pair(db_session)
     service = TrustLineService(db_session)
@@ -188,13 +182,7 @@ async def test_concurrent_create_of_the_same_triple_yields_one_line_and_a_declar
     out that the spec *claimed* the race was handled while nothing exercised it: deleting
     the `except IntegrityError` branch would not have broken a single test.
     """
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only gate: real concurrent transactions are the subject")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     from tests.conftest import TestingSessionLocal
 

@@ -64,17 +64,11 @@ _GUARD = "23000"
 
 
 def _postgres_url() -> str:
-    """The gate's PostgreSQL URL, or a refusal.
-
-    THE REFUSAL THAT MAKES THIS MODULE POSTGRESQL-ONLY (T1525): every SQLite-capable engine
-    construction in this repository must install the transaction control, and a construction that can
-    only ever be PostgreSQL is exempt only through a refusal that exists in the code. This is it.
-    """
+    """The gate's database URL. It is PostgreSQL by construction: `tests/conftest.py` refuses any other URL
+    before collection (017 stage 2c), so every engine this module builds is PostgreSQL without a check here."""
 
     from tests.conftest import TEST_DATABASE_URL
 
-    if "postgresql" not in TEST_DATABASE_URL:
-        pytest.skip(f"this module needs a PostgreSQL TEST_DATABASE_URL, got {TEST_DATABASE_URL!r}")
     return TEST_DATABASE_URL
 
 

@@ -54,12 +54,6 @@ def _occurrence_of_absent_debts():
     )
 
 
-def _require_postgres(db_session) -> None:
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: clearing/payment advisory interlock")
-
-
 async def _wait_for_advisory_waiter(
     observer,
     *,
@@ -133,8 +127,6 @@ _PROBE_TIMEOUT = 20.0
 async def test_no_advisory_lock_check_ignores_other_databases_postgres(db_session, caplog):
     """T1537: `pg_locks` is the whole server; a lock held on another database is not this one's."""
 
-    _require_postgres(db_session)
-
     from sqlalchemy.engine import make_url
     from sqlalchemy.pool import NullPool
     from tests.conftest import TEST_DATABASE_URL, TestingSessionLocal
@@ -188,8 +180,6 @@ async def test_clearing_interlock_completes_with_single_connection_pool_postgres
     committed_database,
 ):
     """The shared boundary must not require two simultaneous pool connections."""
-
-    _require_postgres(db_session)
 
     from app.core.clearing.service import ClearingService
 
