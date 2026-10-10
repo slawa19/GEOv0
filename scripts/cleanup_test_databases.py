@@ -390,8 +390,7 @@ def _connection_arguments(dsn: str | None) -> dict[str, Any]:
         url = make_url(source)
     except Exception:
         raise UsageRefused("the connection URL is not a valid database URL") from None
-    if url.get_backend_name() != "postgresql":
-        raise UsageRefused(f"the connection URL is for {url.get_backend_name()!r}, not PostgreSQL")
+    # Only the host, port and credentials are read from the URL; the connection itself is asyncpg's, to PostgreSQL.
     if (url.host or "") not in LOCAL_HOSTS:
         raise UsageRefused(f"refused: the host is {url.host!r}; this command works on the local server only (127.0.0.1)")
     return {"host": url.host, "port": url.port or 5432, "user": url.username, "password": url.password,
