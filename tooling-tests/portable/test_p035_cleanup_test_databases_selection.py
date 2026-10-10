@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
@@ -79,9 +80,14 @@ class _Recorder:
         self.statements: list[str] = []
         self.refuse_drop_of: set[str] = set()
         self.lose_connection_on: set[str] = set()
+        #: name -> (the exception to raise when its DROP is sent, whether the database is dropped FIRST)
+        self.fail_drop_with: dict[str, tuple[BaseException, bool]] = {}
+        self.unreadable: BaseException | None = None  # raised by the server-identity read
 
     async def fetchrow(self, sql: str):
         self.statements.append(sql)
+        if self.unreadable is not None:
+            raise self.unreadable
         return dict(self.server)
 
     async def fetch(self, sql: str):
@@ -93,6 +99,11 @@ class _Recorder:
         match = _DROP.fullmatch(sql)
         assert match is not None, f"a statement that is not exactly DROP DATABASE \"<identifier>\": {sql!r}"
         name = match.group(1).replace('""', '"')
+        if name in self.fail_drop_with:
+            error, dropped_first = self.fail_drop_with[name]
+            if dropped_first:
+                self.catalog[:] = [row for row in self.catalog if row["name"] != name]
+            raise error
         if name in self.lose_connection_on:
             raise ConnectionResetError("the connection was lost while the statement was in flight")
         if name in self.refuse_drop_of:
@@ -459,6 +470,73 @@ def test_a_drop_that_got_no_answer_is_uncertain_and_never_reported_as_dropped() 
     assert [o["name"] for o in refused.value.outcomes] == ["geov0_test_done__c1"]
 
 
+def _driver_errors() -> dict[str, BaseException]:
+    """What the installed driver really raises when a statement gets no usable answer - not Python's own
+    `ConnectionResetError`, which the first edition of these tests used and which hid F5: the driver's
+    connection errors INHERIT `asyncpg.PostgresError` and carry a SQLSTATE of their own making."""
+
+    import asyncpg
+
+    return {
+        "the connection is gone (08003)": asyncpg.ConnectionDoesNotExistError("connection was closed in the middle of operation"),
+        "the connection failed (08006)": asyncpg.ConnectionFailureError("connection failure"),
+        "the server was shut down (57P01)": asyncpg.AdminShutdownError("terminating connection due to administrator command"),
+        "the server crashed (57P02)": asyncpg.CrashShutdownError("terminating connection because of crash of another server process"),
+        "the statement was cancelled (57014)": asyncpg.QueryCanceledError("canceling statement due to user request"),
+        "an error with no SQLSTATE": asyncpg.PostgresError("something without a code"),
+        "the driver's interface error": asyncpg.InterfaceError("connection is closed"),
+        "the driver's internal error": asyncpg.InternalClientError("unexpected protocol state"),
+        "an OS error": ConnectionResetError("reset by peer"),
+        "a timeout": asyncio.TimeoutError(),
+        "a cancellation": asyncio.CancelledError(),
+    }
+
+
+@pytest.mark.parametrize("dropped_first", [False, True], ids=["nothing happened", "the drop had happened"])
+@pytest.mark.parametrize("what", list(_driver_errors()))
+def test_F5_a_drop_that_got_no_answer_from_the_server_is_uncertain_whatever_the_driver_calls_it(
+    what: str, dropped_first: bool
+) -> None:
+    """Review of `e8ab6b96`, F5. A lost connection arrives as a `PostgresError` subclass; filed under "the server
+    refused", the result said the database was NOT dropped - although the drop may have completed."""
+
+    catalog = _family("done", 100)
+    manifest = _manifest_of(catalog)
+    connection = _Recorder(catalog)
+    connection.fail_drop_with = {"geov0_test_done__modebtpl": (_driver_errors()[what], dropped_first)}
+
+    with pytest.raises(cleanup.CleanupRefused) as refused:
+        _apply(connection, manifest)
+
+    assert refused.value.uncertain == "geov0_test_done__modebtpl", (
+        f"{what}: reported as {str(refused.value)!r} with uncertain={refused.value.uncertain!r}"
+    )
+    assert "PostgreSQL refused" not in str(refused.value)
+    assert [o["name"] for o in refused.value.outcomes] == ["geov0_test_done__c1"], "an unanswered drop was counted as done"
+
+
+@pytest.mark.parametrize("what", ["in use (55006)", "not the owner (42501)", "no such database (3D000)"])
+def test_F5_an_error_the_server_answered_with_is_a_refusal_and_not_uncertain(what: str) -> None:
+    """The control of F5: a real answer of the server about THIS statement - the database was not dropped."""
+
+    import asyncpg
+
+    error = {
+        "in use (55006)": asyncpg.ObjectInUseError('database "x" is being accessed by other users'),
+        "not the owner (42501)": asyncpg.InsufficientPrivilegeError("must be owner of database"),
+        "no such database (3D000)": asyncpg.InvalidCatalogNameError('database "x" does not exist'),
+    }[what]
+    catalog = _family("done", 100)
+    manifest = _manifest_of(catalog)
+    connection = _Recorder(catalog)
+    connection.fail_drop_with = {"geov0_test_done__modebtpl": (error, False)}
+
+    with pytest.raises(cleanup.CleanupRefused) as refused:
+        _apply(connection, manifest)
+
+    assert refused.value.uncertain is None and "PostgreSQL refused the drop" in str(refused.value), refused.value
+
+
 # ------------------------------------------------------------------------------------------- the command line
 
 
@@ -531,6 +609,46 @@ def _manifest_file(tmp_name: str, manifest) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(manifest if isinstance(manifest, str) else json.dumps(manifest), encoding="utf-8")
     return str(target)
+
+
+def test_F6_the_files_of_a_run_are_not_at_a_path_another_run_writes_too() -> None:
+    """Review of `e8ab6b96`, F6: two tooling runs of one checkout (two task slugs) wrote the same
+    `.local-run/test-runs/p035dbclean-portable/uncertain.json`. A manifest of these tests lives in a directory no
+    other run has - and still under this checkout's `.local-run/`, where the command requires a manifest to be."""
+
+    first = Path(_manifest_file("probe.json", "{}"))
+    assert first.resolve().is_relative_to((REPO_ROOT / ".local-run").resolve())
+    assert first.parent.name != "p035dbclean-portable" and str(os.getpid()) in first.parent.name, (
+        f"{first.parent} is a fixed path shared by every run of this checkout"
+    )
+
+
+def test_F7_a_server_that_cannot_be_read_is_exit_2_and_nothing_is_written(monkeypatch, capsys) -> None:
+    """Review of `e8ab6b96`, F7: the connection opens, the first read (`pg_control_system()`) is refused for lack
+    of privilege. The apply never began: exit 2, as the documentation says, and no result file."""
+
+    import asyncpg
+
+    manifest = _manifest_of(_family("done", 100))
+    recorder = _Recorder(_family("done", 100))
+    recorder.unreadable = asyncpg.InsufficientPrivilegeError("permission denied for function pg_control_system")
+
+    async def close() -> None:
+        return None
+
+    recorder.close = close  # type: ignore[attr-defined]
+
+    async def connect(**_k):
+        return recorder
+
+    monkeypatch.setattr(asyncpg, "connect", connect)
+    monkeypatch.setenv("TEST_DATABASE_URL", "postgresql://geo:geo@127.0.0.1:5432/x")
+    path = _manifest_file("unreadable.json", manifest)
+
+    code = cleanup.main(["--apply", path, "--maintenance-window-confirmed", "--protect-none", "--expect-drop-count", "3"])
+
+    assert code == 2 and "cannot be read" in capsys.readouterr().err
+    assert recorder.changes() == [] and not Path(path).with_suffix(".result.json").exists()
 
 
 @pytest.mark.parametrize("what", ["not json", "an OID that is not a number", "stale"])
