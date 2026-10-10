@@ -498,7 +498,6 @@ async def test_a_sequential_repeat_answers_the_stored_payment_and_routes_without
 async def test_two_simultaneous_identical_requests_make_one_payment(client, db_session, stand, monkeypatch):
     """Both reach the service before either commits (a barrier, not a sleep). One money effect; the publication is a
     hint, so up to two `tx.updated` are accepted (arbiter's `ACCEPT-RESIDUAL-RACE`) - never more than the requests."""
-    import app.api.v1.simulator as simulator_module
     from app.api.deps import get_db
     from app.core.payments.service import PaymentService
     from app.main import app
@@ -536,7 +535,6 @@ async def test_two_simultaneous_identical_requests_make_one_payment(client, db_s
     assert await _payments(db_session) == 1
     assert await _total_debt(db_session) == Decimal("20"), "one money effect for two identical requests"
     assert 1 <= len(stand.published) <= 2, f"published {len(stand.published)} tx.updated for two requests"
-    assert simulator_module is not None
 
 
 @pytest.mark.asyncio
@@ -630,23 +628,64 @@ async def test_a_refusal_before_admission_leaves_no_row_and_the_same_key_pays_af
     assert len(stand.published) == 1
 
 
+def _statements_on_transactions(db_session):
+    """Record every SQL statement that touches the `transactions` table, from here until the returned stop() is called."""
+    from sqlalchemy import event as sa_event
+
+    seen: list[str] = []
+    engine = db_session.sync_session.get_bind().engine
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if "transactions" in statement.lower():
+            seen.append(statement)
+
+    sa_event.listen(engine, "before_cursor_execute", record)
+
+    def stop() -> None:
+        sa_event.remove(engine, "before_cursor_execute", record)
+
+    return seen, stop
+
+
 @pytest.mark.asyncio
-async def test_a_stopped_run_answers_run_terminal_before_anything_is_read_even_for_a_stored_key(client, db_session, stand, monkeypatch):
+async def test_a_stopped_run_answers_run_terminal_without_the_pre_read_even_for_a_stored_key(client, db_session, stand, monkeypatch):
+    """The run check comes first: on a stopped run the handler reads nothing of the payment (observed: no statement on
+    `transactions`, the service not called), whether the key is stored or not. A positive control proves the recorder
+    sees the pre-read of an ordinary keyed request."""
     import app.api.v1.simulator as simulator_module
+    from app.core.payments.service import PaymentService
 
     await _seed(db_session)
     key = _key()
-    paid = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
-    assert paid.status_code == 200, paid.text
+    seen, stop = _statements_on_transactions(db_session)
+    try:
+        paid = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+        assert paid.status_code == 200, paid.text
+        assert seen, "control: the recorder must see the statements on `transactions` of an ordinary keyed request"
+        seen.clear()
 
-    monkeypatch.setattr(
-        simulator_module.runtime,
-        "get_run",
-        lambda rid: SimpleNamespace(run_id=str(rid), state="stopped", owner_id="", _real_seeded=True, _real_seeding_lock=None),
-    )
-    stopped = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+        reached_the_service: list[int] = []
+        original = PaymentService.create_payment_internal
 
-    assert (stopped.status_code, stopped.json().get("code")) == (409, "RUN_TERMINAL"), stopped.text
+        async def counting(self, *a, **kw):
+            reached_the_service.append(1)
+            return await original(self, *a, **kw)
+
+        monkeypatch.setattr(PaymentService, "create_payment_internal", counting)
+        monkeypatch.setattr(
+            simulator_module.runtime,
+            "get_run",
+            lambda rid: SimpleNamespace(run_id=str(rid), state="stopped", owner_id="", _real_seeded=True, _real_seeding_lock=None),
+        )
+        stored = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+        unknown = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=_key()))
+    finally:
+        stop()
+
+    assert (stored.status_code, stored.json().get("code")) == (409, "RUN_TERMINAL"), stored.text
+    assert stored.content == unknown.content, "a known and an unknown key must be answered alike on a stopped run"
+    assert seen == [], f"the handler read `transactions` on a stopped run: {seen}"
+    assert reached_the_service == []
     assert await _payments(db_session) == 1
     assert len(stand.published) == 1
 
@@ -804,3 +843,566 @@ async def test_a_result_without_routes_answers_an_empty_list_and_invents_none(cl
 
     assert r.status_code == 200, r.text
     assert r.json()["routes"] == []
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 037 A1, fix-delta: the client must be able to tell "this key is spent for good" from "the outcome is unknown, a repeat
+# pays". The error of a keyed payment carries `details.idempotency_key_spent` (true: an `ABORTED` row stands under the
+# key and every repeat is that refusal; false: no row, or a committed one - a repeat is executed, or returns the
+# committed payment; absent: the state could not be read, the client keeps the key). No key - no field.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def _use_a_session_per_request(db_session) -> None:
+    """Every request gets its own session on the test's database, as production's `get_db` does (`expire_on_commit=False`)."""
+    from app.api.deps import get_db
+    from app.main import app
+    from tests.conftest import sessionmaker_of
+
+    maker = sessionmaker_of(db_session)
+
+    async def a_session_per_request():
+        async with maker(expire_on_commit=False) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = a_session_per_request
+
+
+async def _state_of(db_session, tx_id: str):
+    await db_session.commit()
+    return (await db_session.execute(select(Transaction.state).where(Transaction.tx_id == tx_id))).scalar_one_or_none()
+
+
+def _spent(response) -> object:
+    """`details.idempotency_key_spent` of an action error, or the string 'ABSENT'."""
+    return (response.json().get("details") or {}).get("idempotency_key_spent", "ABSENT")
+
+
+class _Armed:
+    """A one-shot switch the stands below flip from the test."""
+
+    def __init__(self, on: bool = True) -> None:
+        self.on = on
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_timeout_after_admission_spends_the_key_and_says_so(client, db_session, stand, monkeypatch):
+    """Entry 1: the payment is admitted, the operation times out, `ABORTED/E007` is stored under the key. Every repeat
+    is the same 503 - the key is gone - and the answer says so, on the first response and on the repeats alike."""
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real, armed = PaymentService._run_payment_operation, _Armed()
+
+    async def times_out(self, *a, **kw):
+        if armed.on:
+            raise asyncio.TimeoutError()
+        return await real(self, *a, **kw)
+
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", times_out)
+    key = _key()
+
+    first = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    stored = await _state_of(db_session, _tx_id_of(_RUN, key))
+    armed.on = False
+    again = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert (first.status_code, first.json().get("code")) == (503, "ENGINE_TIMEOUT"), first.text
+    assert stored == "ABORTED", f"premise: the refusal is stored under the derived identity, state={stored!r}"
+    assert (again.status_code, again.json().get("code")) == (503, "ENGINE_TIMEOUT"), "premise: every repeat is the same refusal"
+    assert (_spent(first), _spent(again)) == (True, True), (first.text, again.text)
+    assert await _payments(db_session) == 0
+    assert stand.published == []
+
+
+@pytest.mark.asyncio
+@MODE_B
+@pytest.mark.parametrize("keyed", [True, False], ids=["keyed", "unkeyed"])
+async def test_a_commit_timeout_that_did_not_land_is_a_flat_503_and_a_repeat_with_the_key_pays_once(
+    client, db_session, stand, monkeypatch, keyed
+):
+    """Entry 2: `TimeoutError` on the payment's COMMIT, the commit did not land, no row. The answer is byte-for-byte the
+    503 of entry 1 except for the flag; a repeat with the same key pays - once. The branch answers from plain values:
+    the rollback after a failed COMMIT expires every ORM object the handler loaded (`_settle_failed_commit` ->
+    `_rollback_attempt`), and reading `eq.code` there was a 500 (`MissingGreenlet`), with a key or without."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real_execute, real_commit = PaymentService.execute, AsyncSession.commit
+    armed_commit = _Armed(False)
+
+    async def execute_then_arm(self, *a, **kw):
+        out = await real_execute(self, *a, **kw)
+        armed_commit.on = True  # the next COMMIT is the payment's
+        return out
+
+    async def commit_that_times_out_and_does_not_land(self, *a, **kw):
+        if armed_commit.on:
+            armed_commit.on = False
+            await self.rollback()
+            raise asyncio.TimeoutError()
+        return await real_commit(self, *a, **kw)
+
+    monkeypatch.setattr(PaymentService, "execute", execute_then_arm)
+    monkeypatch.setattr(AsyncSession, "commit", commit_that_times_out_and_does_not_land)
+    key = _key()
+    body = _body(idempotency_key=key) if keyed else _body()
+
+    first = await client.post(_URL, headers=_HEADERS, json=body)
+    monkeypatch.setattr(AsyncSession, "commit", real_commit)
+    monkeypatch.setattr(PaymentService, "execute", real_execute)
+
+    assert (first.status_code, first.json().get("code")) == (503, "ENGINE_TIMEOUT"), first.text
+    assert first.json()["details"]["equivalent"] == _EQ, "the timeout branch answers from plain values"
+    assert await _payments(db_session) == 0, "premise: the commit did not land"
+    if not keyed:
+        assert _spent(first) == "ABSENT", "no key - no field"
+        return
+    assert await _state_of(db_session, _tx_id_of(_RUN, key)) is None, "premise: no row under the key"
+    assert _spent(first) is False, first.text
+    again = await client.post(_URL, headers=_HEADERS, json=body)
+    assert again.status_code == 200, again.text
+    assert again.json()["payment_id"] == _tx_id_of(_RUN, key)
+    assert await _payments(db_session) == 1
+    assert await _total_debt(db_session) == Decimal("20")
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_entry_1_and_entry_2_differ_on_the_wire_only_by_the_flag(client, db_session, stand, monkeypatch):
+    """The finding in one test: before the flag the two outcomes - a spent key and a free one - were indistinguishable."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real_operation, real_execute, real_commit = PaymentService._run_payment_operation, PaymentService.execute, AsyncSession.commit
+    mode = {"entry": 1}
+    armed_commit = _Armed(False)
+
+    async def operation(self, *a, **kw):
+        if mode["entry"] == 1:
+            raise asyncio.TimeoutError()
+        return await real_operation(self, *a, **kw)
+
+    async def execute_then_arm(self, *a, **kw):
+        out = await real_execute(self, *a, **kw)
+        if mode["entry"] == 2:
+            armed_commit.on = True
+        return out
+
+    async def commit(self, *a, **kw):
+        if armed_commit.on:
+            armed_commit.on = False
+            await self.rollback()
+            raise asyncio.TimeoutError()
+        return await real_commit(self, *a, **kw)
+
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", operation)
+    monkeypatch.setattr(PaymentService, "execute", execute_then_arm)
+    monkeypatch.setattr(AsyncSession, "commit", commit)
+
+    one = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=_key()))
+    mode["entry"] = 2
+    two = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=_key()))
+
+    def without_the_flag(response):
+        body = response.json()
+        body["details"] = {k: v for k, v in body["details"].items() if k != "idempotency_key_spent"}
+        return response.status_code, body
+
+    assert without_the_flag(one) == without_the_flag(two), "premise: the two outcomes are the same refusal but for the flag"
+    assert (_spent(one), _spent(two)) == (True, False), (one.text, two.text)
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_commit_that_landed_but_whose_answer_was_lost_is_not_spent_and_a_repeat_returns_the_payment(
+    client, db_session, stand, monkeypatch
+):
+    """The declared behaviour (not turned into a success in this change): the COMMIT lands, `TimeoutError` is raised, the
+    recovery read fails - the core raises. The row is `COMMITTED`: the key is NOT spent, and a repeat with the same key
+    returns the committed payment. (When the recovery read works the core itself answers the committed payment: 200.)"""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real_execute, real_commit, real_read = PaymentService.execute, AsyncSession.commit, PaymentService._read_existing_row
+    armed_commit = _Armed(False)
+
+    async def execute_then_arm(self, *a, **kw):
+        out = await real_execute(self, *a, **kw)
+        armed_commit.on = True
+        return out
+
+    async def commit_that_lands_then_times_out(self, *a, **kw):
+        out = await real_commit(self, *a, **kw)
+        if armed_commit.on:
+            armed_commit.on = False
+            raise asyncio.TimeoutError()
+        return out
+
+    async def the_recovery_read_fails(self, *a, **kw):
+        raise RuntimeError("the recovery read is down")
+
+    monkeypatch.setattr(PaymentService, "execute", execute_then_arm)
+    monkeypatch.setattr(AsyncSession, "commit", commit_that_lands_then_times_out)
+    monkeypatch.setattr(PaymentService, "_read_existing_row", the_recovery_read_fails)
+    key = _key()
+
+    first = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    monkeypatch.setattr(AsyncSession, "commit", real_commit)
+    monkeypatch.setattr(PaymentService, "execute", real_execute)
+    monkeypatch.setattr(PaymentService, "_read_existing_row", real_read)
+
+    assert first.status_code == 500 and first.json().get("code") == "PAYMENT_REJECTED", first.text
+    assert await _state_of(db_session, _tx_id_of(_RUN, key)) == "COMMITTED", "premise: the commit landed"
+    assert _spent(first) is False, first.text
+    again = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    assert again.status_code == 200, again.text
+    assert again.json()["payment_id"] == _tx_id_of(_RUN, key)
+    assert await _payments(db_session) == 1
+    assert await _total_debt(db_session) == Decimal("20")
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_commit_that_landed_and_is_recovered_answers_the_payment(client, db_session, stand, monkeypatch):
+    """The other half of the same schedule: the recovery read works, the core answers the committed payment - a 200."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real_execute, real_commit = PaymentService.execute, AsyncSession.commit
+    armed_commit = _Armed(False)
+
+    async def execute_then_arm(self, *a, **kw):
+        out = await real_execute(self, *a, **kw)
+        armed_commit.on = True
+        return out
+
+    async def commit_that_lands_then_times_out(self, *a, **kw):
+        out = await real_commit(self, *a, **kw)
+        if armed_commit.on:
+            armed_commit.on = False
+            raise asyncio.TimeoutError()
+        return out
+
+    monkeypatch.setattr(PaymentService, "execute", execute_then_arm)
+    monkeypatch.setattr(AsyncSession, "commit", commit_that_lands_then_times_out)
+    key = _key()
+
+    answered = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["payment_id"] == _tx_id_of(_RUN, key) and answered.json()["routes"]
+    assert await _payments(db_session) == 1
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_cancellation_after_admission_spends_the_key_and_the_repeat_says_so(client, db_session, stand, monkeypatch):
+    """A real cancellation: the request task is cancelled while the operation stands past admission. The core stores
+    `ABORTED/E007 'Payment cancelled'`; the client never got an answer, and the repeat is told the key is spent."""
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real = PaymentService._run_payment_operation
+    inside = asyncio.Event()
+
+    async def stands_inside_the_operation(self, *a, **kw):
+        inside.set()
+        await asyncio.Event().wait()  # until the task is cancelled
+
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", stands_inside_the_operation)
+    key = _key()
+
+    request = asyncio.create_task(client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key)))
+    await asyncio.wait_for(inside.wait(), timeout=20)
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", real)
+
+    stored = await _state_of(db_session, _tx_id_of(_RUN, key))
+    again = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert stored == "ABORTED", f"premise: the cancellation after admission is stored, state={stored!r}"
+    assert (again.status_code, again.json().get("code")) == (503, "ENGINE_TIMEOUT"), again.text
+    assert _spent(again) is True, again.text
+    assert await _payments(db_session) == 0
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_an_internal_failure_after_admission_spends_the_key(client, db_session, stand, monkeypatch):
+    """A non-business exception inside the operation after admission is stored as `ABORTED/E010` and re-raised by the
+    core: that FIRST attempt is answered by the application's general handler (not by this action's error chain, so it
+    carries no flag - the client cannot tell and keeps the key, as it must for an unknown outcome). The repeat is the
+    stored refusal, `500 PAYMENT_REJECTED`, and it says the key is spent."""
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real, armed = PaymentService._run_payment_operation, _Armed()
+
+    async def fails(self, *a, **kw):
+        if armed.on:
+            raise RuntimeError("the book is broken")
+        return await real(self, *a, **kw)
+
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", fails)
+    key = _key()
+
+    with pytest.raises(RuntimeError, match="the book is broken"):
+        await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    stored = await _state_of(db_session, _tx_id_of(_RUN, key))
+    armed.on = False
+    again = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    third = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert stored == "ABORTED", f"premise: the failure after admission is stored, state={stored!r}"
+    assert (again.status_code, again.json().get("code")) == (500, "PAYMENT_REJECTED"), again.text
+    assert _spent(again) is True and again.content == third.content, (again.text, third.text)
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_refusal_before_admission_does_not_spend_the_key(client, db_session, stand):
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    await _lower_the_second_line(db_session, "0")
+    key = _key()
+
+    refused = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert (refused.status_code, refused.json().get("code")) == (409, "NO_ROUTE"), refused.text
+    assert await _state_of(db_session, _tx_id_of(_RUN, key)) is None
+    assert _spent(refused) is False, refused.text
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_refusal_after_admission_at_the_book_spends_the_key(client, db_session, stand, monkeypatch):
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    await _lower_the_second_line(db_session, "0")
+    forced = _Armed()
+    real = PaymentRouter.find_flow_routes
+
+    def forced_past_the_router(self, *a, **kw):
+        if forced.on:
+            return [(["a1", "b1", "a2"], Decimal("10"))]
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(PaymentRouter, "find_flow_routes", forced_past_the_router)
+    key = _key()
+
+    first = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+    forced.on = False
+    again = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert (first.status_code, first.json().get("code")) == (409, "INSUFFICIENT_CAPACITY"), first.text
+    assert (again.status_code, again.json().get("code")) == (409, "INSUFFICIENT_CAPACITY"), again.text
+    assert (_spent(first), _spent(again)) == (True, True), (first.text, again.text)
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_an_unkeyed_error_carries_no_flag_and_the_state_read_cannot_break_an_error_answer(
+    client, db_session, stand, monkeypatch
+):
+    """No key - no field, and no read (the recorder sees none). With a key, a state read that FAILS leaves the field out
+    and the error answer intact (the client then keeps its key)."""
+    import app.db.session as app_db_session
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    await _lower_the_second_line(db_session, "0")
+
+    unkeyed = await client.post(_URL, headers=_HEADERS, json=_body())
+    assert (unkeyed.status_code, unkeyed.json().get("code")) == (409, "NO_ROUTE"), unkeyed.text
+    assert _spent(unkeyed) == "ABSENT"
+
+    class _Broken:
+        def __call__(self, *a, **kw):
+            raise RuntimeError("no connection for the state read")
+
+    monkeypatch.setattr(app_db_session, "AsyncSessionLocal", _Broken())
+    keyed = await client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=_key()))
+
+    assert (keyed.status_code, keyed.json().get("code")) == (409, "NO_ROUTE"), keyed.text
+    assert _spent(keyed) == "ABSENT", "an unknown state is not guessed"
+
+
+@pytest.mark.asyncio
+@MODE_B
+async def test_a_second_request_arriving_while_the_first_stands_inside_the_operation_collides_into_one_payment(
+    client, db_session, stand, monkeypatch
+):
+    """Deterministic collision: the first request stands INSIDE the core's operation past admission - its row inserted,
+    its transaction not committed - held by an event on `_run_payment_operation` (not a barrier at the handler's door).
+    The second request enters the same operation and blocks on the first's row (observed in `pg_stat_activity`); the
+    first is released, commits, and the second resolves to the stored payment: one payment, both answers 200 with the
+    same routes, at most two publications."""
+    from sqlalchemy import text
+
+    from app.core.payments.service import PaymentService
+
+    await _seed(db_session)
+    _use_a_session_per_request(db_session)
+    real = PaymentService._run_payment_operation
+    first_inside, second_entered, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls: list[int] = []
+
+    async def held_inside(self, *a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            out = await real(self, *a, **kw)  # the row is in, the transaction is open
+            first_inside.set()
+            await release.wait()
+            return out
+        second_entered.set()
+        return await real(self, *a, **kw)
+
+    monkeypatch.setattr(PaymentService, "_run_payment_operation", held_inside)
+    key = _key()
+
+    one = asyncio.create_task(client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key)))
+    await asyncio.wait_for(first_inside.wait(), timeout=20)
+    two = asyncio.create_task(client.post(_URL, headers=_HEADERS, json=_body(idempotency_key=key)))
+    await asyncio.wait_for(second_entered.wait(), timeout=20)
+
+    async def a_backend_waits_on_a_lock() -> bool:
+        await db_session.commit()
+        return bool((await db_session.execute(text(
+            "select count(*) from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'"
+        ))).scalar_one())
+
+    waited = False
+    for _ in range(200):
+        if await a_backend_waits_on_a_lock():
+            waited = True
+            break
+        await asyncio.sleep(0.05)  # polling a condition with a bound, not a synchronisation by time
+    release.set()
+    first, second = await asyncio.gather(one, two)
+
+    assert waited, "premise: the second request is blocked on the first one's uncommitted row"
+    assert (first.status_code, second.status_code) == (200, 200), (first.text, second.text)
+    assert first.json()["payment_id"] == second.json()["payment_id"] == _tx_id_of(_RUN, key)
+    assert first.json()["routes"] == second.json()["routes"] and first.json()["routes"]
+    assert await _payments(db_session) == 1
+    assert await _total_debt(db_session) == Decimal("20")
+    assert 1 <= len(stand.published) <= 2
+
+
+@pytest.fixture
+def real_runs(monkeypatch):
+    """No stub of `runtime.get_run`: the runs are real `RunRecord`s with owners, so the real `_check_run_access` decides."""
+    import app.api.v1.simulator as simulator_module
+
+    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
+    _CountingEmitter.published = []
+    monkeypatch.setattr(simulator_module, "SseEventEmitter", _CountingEmitter)
+    PaymentRouter.invalidate_cache()
+    return _CountingEmitter
+
+
+def _owner_run(monkeypatch, run_id: str, owner_id: str, pids=("a1", "b1", "a2")) -> RunRecord:
+    run = _register_run(monkeypatch, run_id, pids)
+    run.owner_id = owner_id
+    run._real_seeded = True
+    return run
+
+
+def _cookie_headers(cookie: str) -> dict:
+    from app.core.simulator.session import COOKIE_NAME
+
+    return {"Cookie": f"{COOKIE_NAME}={cookie}", "Origin": "http://localhost"}
+
+
+@pytest.mark.asyncio
+async def test_two_real_owners_pay_twice_and_a_foreign_run_answers_the_same_403_for_any_key(client, db_session, real_runs, monkeypatch):
+    """Not the admin: anonymous cookie owners, the real `_check_run_access`. The same key and body in the runs of A and B
+    are two payments with two derived ids. A on B's run is refused 403 `ACCESS_DENIED` before anything of the payment is
+    read - for B's existing key, for an unknown key and for another body, byte for byte alike (no oracle for keys)."""
+    from app.core.simulator.session import create_session
+
+    await _seed(db_session)
+    cookie_a, info_a = create_session(settings.SIMULATOR_SESSION_SECRET)
+    cookie_b, info_b = create_session(settings.SIMULATOR_SESSION_SECRET)
+    _owner_run(monkeypatch, "run-owner-a", info_a.owner_id)
+    _owner_run(monkeypatch, "run-owner-b", info_b.owner_id)
+    key = _key()
+
+    a = await client.post(_url("run-owner-a"), headers=_cookie_headers(cookie_a), json=_body(idempotency_key=key))
+    b = await client.post(_url("run-owner-b"), headers=_cookie_headers(cookie_b), json=_body(idempotency_key=key))
+    seen, stop = _statements_on_transactions(db_session)
+    try:
+        known = await client.post(_url("run-owner-b"), headers=_cookie_headers(cookie_a), json=_body(idempotency_key=key))
+        unknown = await client.post(_url("run-owner-b"), headers=_cookie_headers(cookie_a), json=_body(idempotency_key=_key()))
+        other_body = await client.post(_url("run-owner-b"), headers=_cookie_headers(cookie_a), json=_body(idempotency_key=key, amount="11"))
+    finally:
+        stop()
+
+    assert (a.status_code, b.status_code) == (200, 200), (a.text, b.text)
+    assert a.json()["payment_id"] == _tx_id_of("run-owner-a", key) and b.json()["payment_id"] == _tx_id_of("run-owner-b", key)
+    assert a.json()["payment_id"] != b.json()["payment_id"]
+    assert await _payments(db_session) == 2
+    assert await _total_debt(db_session) == Decimal("40")
+    assert (known.status_code, known.json().get("code")) == (403, "ACCESS_DENIED"), known.text
+    assert known.content == unknown.content == other_body.content, "a foreign run must not tell known keys from unknown ones"
+    assert seen == [], f"the foreign owner's requests read `transactions`: {seen}"
+
+
+@pytest.mark.asyncio
+async def test_a_real_stop_and_restart_of_the_run_keep_the_key(client, db_session, real_runs, monkeypatch):
+    """The lifecycle is the runtime facade's own: `runtime.stop`, then `runtime.restart` (its collaborators that would
+    start background work - the heartbeat, the artifacts writer, the storage upsert - are stand-ins). On the stopped run a
+    known and an unknown key are answered alike, `409 RUN_TERMINAL`; after the restart the same key returns the same
+    payment and routes - one payment, one publication."""
+    from unittest.mock import AsyncMock
+
+    import app.core.simulator.storage as simulator_storage
+    from app.core.simulator.runtime import runtime
+
+    await _seed(db_session)
+    run = _register_run(monkeypatch, "run-p037-lifecycle")
+    run._real_seeded = True
+    monkeypatch.setattr(simulator_storage, "upsert_run", AsyncMock())
+    monkeypatch.setattr(simulator_storage, "sync_artifacts", AsyncMock())
+    monkeypatch.setattr(runtime._run_lifecycle, "_ensure_heartbeat", AsyncMock())
+    for name in ("stop_events_writer", "finalize_run_artifacts"):
+        monkeypatch.setattr(runtime._artifacts, name, AsyncMock())
+    monkeypatch.setattr(runtime._artifacts, "start_events_writer", lambda _run_id: None)
+    url = _url("run-p037-lifecycle")
+    key = _key()
+
+    paid = await client.post(url, headers=_HEADERS, json=_body(idempotency_key=key))
+    await runtime.stop("run-p037-lifecycle")
+    known = await client.post(url, headers=_HEADERS, json=_body(idempotency_key=key))
+    unknown = await client.post(url, headers=_HEADERS, json=_body(idempotency_key=_key()))
+    status = await runtime.restart("run-p037-lifecycle")
+    again = await client.post(url, headers=_HEADERS, json=_body(idempotency_key=key))
+
+    assert paid.status_code == 200, paid.text
+    assert (known.status_code, known.json().get("code")) == (409, "RUN_TERMINAL"), known.text
+    assert known.content == unknown.content, "a stopped run must not tell known keys from unknown ones"
+    assert status.state == "running" and run._launch_epoch == 1, "premise: a real restart happened"
+    assert again.status_code == 200, again.text
+    assert again.json()["payment_id"] == paid.json()["payment_id"] == _tx_id_of("run-p037-lifecycle", key)
+    assert again.json()["routes"] == paid.json()["routes"] and paid.json()["routes"]
+    assert await _payments(db_session) == 1
+    assert len(real_runs.published) == 1
