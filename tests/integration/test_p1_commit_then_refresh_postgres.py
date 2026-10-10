@@ -54,10 +54,7 @@ from app.utils.exceptions import ConflictException
 
 
 def _url() -> str:
-    url = os.environ.get("TEST_DATABASE_URL", "")
-    if "postgresql" not in url:
-        pytest.skip("durability of the commit is the subject; SQLite cannot show it")
-    return url
+    return os.environ.get("TEST_DATABASE_URL", "")
 
 
 @pytest_asyncio.fixture

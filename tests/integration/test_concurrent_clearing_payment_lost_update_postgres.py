@@ -40,13 +40,7 @@ async def test_concurrent_payment_and_clearing_same_trustline_preserve_effects_p
     db_session,
     monkeypatch,
 ):
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: clearing/payment row-lock and retry semantics")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     from app.core.clearing.service import ClearingService
     from app.core.money_boundary import MoneyBoundary

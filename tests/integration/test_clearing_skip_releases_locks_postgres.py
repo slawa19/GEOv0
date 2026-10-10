@@ -39,10 +39,6 @@ async def test_skip_ends_service_owned_transaction_postgres(
 ):
     """Every None result must end the service-owned attempt."""
 
-    dialect = db_session.get_bind().dialect.name
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: clearing skip-path transaction ownership")
-
     from app.core.clearing.service import ClearingService
     from app.db.models.debt import Debt
     from app.db.models.equivalent import Equivalent
@@ -173,13 +169,7 @@ async def test_policy_skip_releases_debt_rows_before_concurrent_payment_postgres
     held on this database - a skip that kept it would make the payment's shared acquisition wait and time
     out, exactly like a retained row lock.
     """
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only: clearing skip-path row-lock ownership")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     from app.core.clearing.service import ClearingService
     from app.core.money_boundary import MoneyBoundary

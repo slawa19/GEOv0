@@ -2,6 +2,7 @@ import { isReadonly, ref, type Ref } from 'vue'
 
 import { ApiError, type HttpConfig } from '../api/http'
 import { actionOutcomeUnknownText } from '../utils/paymentRefusalText'
+import { paymentOutcomeUnknown } from './interact/paymentIntent'
 import {
   actionClearingReal,
   actionPaymentReal,
@@ -39,6 +40,11 @@ export type InteractActionError = {
    * `request_id`, so the header is the only source. Read by `extractErrorMessage` as `(ref: ...)`.
    */
   requestId?: string | null
+  /**
+   * Set on the error of a PAYMENT request that was sent: the request ended without a verdict on the payment (no answer,
+   * an unusable 2xx, 408/5xx) and the server did not say the key is spent. The payment may have been made.
+   */
+  outcomeUnknown?: boolean
 }
 
 export function isInteractActionError(e: unknown): e is InteractActionError {
@@ -132,7 +138,7 @@ export function useInteractActions(opts: {
     to: string,
     amount: string,
     eq: string,
-    opts?: { clientActionId?: string; signal?: AbortSignal },
+    opts?: { clientActionId?: string; idempotencyKey?: string; signal?: AbortSignal },
   ) => Promise<SimulatorActionPaymentRealResponse>
   createTrustline: (
     from: string,
@@ -229,16 +235,27 @@ export function useInteractActions(opts: {
 
   return {
     actionsDisabled,
-    sendPayment: (from, to, amount, eq, o) =>
-      wrapAction(() =>
-        actionPaymentReal(opts.httpConfig.value, requireRunId(), {
-          from_pid: from,
-          to_pid: to,
-          equivalent: eq,
-          amount,
-          client_action_id: o?.clientActionId ?? genClientActionId(),
-        }, o?.signal ? { signal: o.signal } : undefined),
-      ),
+    sendPayment: async (from, to, amount, eq, o) => {
+      // `sent` is what separates "never left" (no run id: a plain refusal) from "left and ended without a verdict".
+      let sent = false
+      try {
+        return await wrapAction(() => {
+          const runId = requireRunId()
+          sent = true
+          return actionPaymentReal(opts.httpConfig.value, runId, {
+            from_pid: from,
+            to_pid: to,
+            equivalent: eq,
+            amount,
+            client_action_id: o?.clientActionId ?? genClientActionId(),
+            ...(o?.idempotencyKey ? { idempotency_key: o.idempotencyKey } : {}),
+          }, o?.signal ? { signal: o.signal } : undefined)
+        })
+      } catch (e) {
+        if (isInteractActionError(e)) e.outcomeUnknown = paymentOutcomeUnknown(e, sent)
+        throw e
+      }
+    },
 
     createTrustline: (from, to, limit, eq, o) =>
       wrapAction(() =>
@@ -302,9 +319,12 @@ export function useInteractActions(opts: {
 
     fetchPaymentTargets: async (eq, fromPid, maxHops) => {
       try {
+        // 037 F-037-5: the server's estimate of the maximum per target comes with the list (one request; the server
+        // computes a max-flow per target, measured cheap on the 50- and 100-participant scenarios).
         const res = await wrap(() =>
           getPaymentTargets(opts.httpConfig.value, requireRunId(), eq, fromPid, {
             ...(maxHops != null ? { maxHops } : {}),
+            includeMaxAvailable: true,
           }),
         )
         return res.items

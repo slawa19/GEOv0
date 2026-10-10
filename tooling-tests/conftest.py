@@ -125,6 +125,25 @@ _HERE = Path(__file__).resolve().parent
 #: `test_every_live_fixture_validates_against_the_schema` (+1), and `test_the_validator_refuses_a_broken_community_story` shows the guard is
 #: not blind to it (+1); the live-set test only changed its list.
 #:
+#: 2026-10-10, 035 test-database cleanup command (`QD-TEST-DATABASES: BUILD-NARROW`): portable 254 -> 290. Thirty-six cases added,
+#: `portable/test_p035_cleanup_test_databases_selection.py`: names that only look like a test database (11 + 1), the selection rules (6),
+#: the apply order (1), nine kinds of changed evidence that stop an apply (9), a refused drop (1), import and `--help` without a
+#: connection (1), the command line's refusals (3 + 3).
+#:
+#: 2026-10-10, the same command, fix-delta of the review of `ddcb97b6` (F1, F2, F4): portable 290 -> 370. The module was rewritten
+#: and is 116 cases: 26 misleading names of which 15 carry a character outside the grammar (`?`, a quote, a newline...), 4 accepted
+#: names, the layers on their own (2), 20 escaped identifiers, the selection rules (5) and 6 refused protected slugs, the dry run (1),
+#: the apply order (1), a statement that cannot name another database (1), 9 kinds of changed evidence, the last row before the first
+#: drop (1), a protected busy family (1), the reviewed count (1), manifest freshness (5), 14 malformed manifests, a refused and an
+#: unanswered drop (2), import and `--help` (1), the command line (7 + 5), unusable manifest files (3), an unreachable server (1), the
+#: result file (1). The recorder now PARSES the one statement it accepts instead of splitting it on a quote.
+#:
+#: 2026-10-10, the same command, second fix-delta (review of `e8ab6b96`, F5-F7): portable 370 -> 396. +27 and -1 in the same
+#: module: eleven kinds of "no answer" - the driver's own classes among them - each with and without the drop having happened (22),
+#: three answers of the server that are refusals (3), the run's own artifact directory (1), an unreadable server (1); the one test
+#: that used Python's `ConnectionResetError` for a lost connection is replaced by those (-1).
+#: 2026-10-10, merge of main (the cleanup command, portable 396) with the A10 exception guard cases recorded below (+16): portable 412.
+#:
 #: 2026-10-10, 035 slice Q-C (the A10 exception): portable 254 -> 258. Four cases added to `portable/test_p035_c_backend_tier_counts_what_it_collects.py`: the verdict on planted collections (1), the real collection selects the listed five by marker and under `not slow` (1), and the real collection ends with exit 4 when a listed case is turned `slow` or a sixth case is marked (2).
 #:
 #: 2026-10-10, 035 slice Q-C review (5e9ba5fd): portable 258 -> 266. Eight cases added to the same module: a single A10 node selector is not judged as the whole module (3), `--ignore` of the A10 file on the whole tier is named by the membership guard (1), a listed member skipped by marker, skipif or at runtime ends the run red (3), and a skipped non-member stays an ordinary skip (1).
@@ -133,7 +152,7 @@ _HERE = Path(__file__).resolve().parent
 #:
 #: 2026-10-10, 035 slice Q-C fix-delta (xfail members): portable 267 -> 270. Two member cases added to the skipped-member test (`pytest.xfail()` at runtime; an xfail marker on a member that fails), and one control (an xfailed non-member stays an expected failure).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 270,
+    "portable": 412,
     "powershell": 235,
 }
 

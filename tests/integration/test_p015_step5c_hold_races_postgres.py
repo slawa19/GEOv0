@@ -731,9 +731,6 @@ async def test_step5c_p_both_construction_paths_build_the_same_hold_column_and_t
     """
     from tests.conftest import TEST_DATABASE_URL
 
-    if "postgresql" not in TEST_DATABASE_URL:
-        pytest.skip(f"this module needs a PostgreSQL TEST_DATABASE_URL, got {TEST_DATABASE_URL!r}")
-
     # NOT a skip when the role cannot create databases (T1701): `scratch_databases` raises. Until
     # 2026-09-21 this said "an ABSENT measurement, not a pass" and then reported a pass anyway.
     async with scratch_databases(TEST_DATABASE_URL, "s5cmig", "s5cmeta") as (

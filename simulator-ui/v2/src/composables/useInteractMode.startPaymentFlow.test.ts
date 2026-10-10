@@ -23,6 +23,7 @@ vi.mock('./interact/useInteractDataCache', () => ({
     trustlinesLastError: ref(null),
     paymentTargetsLastErrorByKey: ref(new Map()),
     paymentTargetsByKey: ref(new Map()),
+    paymentTargetDetailsByKey: ref(new Map()),
     paymentTargetsLoadingByKey: ref(new Map()),
     paymentTargetsKey: (o: { runId: string; eq: string; fromPid: string; maxHops: number }) =>
       `${o.runId}:${o.eq}:${o.fromPid}:${o.maxHops}`,

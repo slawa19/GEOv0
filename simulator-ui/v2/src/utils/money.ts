@@ -141,6 +141,22 @@ export function subMoney(a: unknown, b: unknown): string | null {
 }
 
 /**
+ * Exact order of two amounts: -1 / 0 / 1, or null when either is not an amount. No `Number`: two amounts a double
+ * cannot tell apart (`999999999999.99999999` and `...98`) are different here (037 F-037-3).
+ */
+export function compareMoney(a: unknown, b: unknown): -1 | 0 | 1 | null {
+  const ta = moneyText(a)
+  const tb = moneyText(b)
+  const da = ta === null ? null : parseUnscaled(ta)
+  const db = tb === null ? null : parseUnscaled(tb)
+  if (da === null || db === null) return null
+  const scale = Math.max(da.scale, db.scale)
+  const x = da.value * pow10(scale - da.scale)
+  const y = db.value * pow10(scale - db.scale)
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+/**
  * Signed atoms -> major units, exactly, at `precision` fraction digits.
  *
  * Atoms are an integer count of 10^-precision units, so the conversion is a decimal-point

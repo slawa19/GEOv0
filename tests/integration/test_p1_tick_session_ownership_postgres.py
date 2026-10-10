@@ -34,13 +34,7 @@ from app.db.models.participant import Participant
 
 @pytest.mark.asyncio
 async def test_failed_bottlenecks_write_does_not_discard_the_callers_transaction(db_session):
-    dialect = None
-    try:
-        dialect = db_session.get_bind().dialect.name
-    except Exception:
-        dialect = None
-    if dialect not in {"postgresql", "postgres"}:
-        pytest.skip("Postgres-only gate for the transaction-ownership family")
+    assert db_session.get_bind().dialect.name == "postgresql"
 
     if not simulator_storage.db_enabled():
         pytest.skip("simulator storage is disabled in this environment")

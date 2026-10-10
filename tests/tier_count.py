@@ -204,6 +204,9 @@ make the session green again:
   Measured with `python -m pytest --collect-only -q -m "not slow"` (`3613/3633`).
 * 2026-10-10, 037 slice A1 (the manual payment's idempotency key and `routes[]`), on `origin/main` `ac7725e3` (3620): 3620 -> 3659 (+39). New: `tests/integration/test_p037_manual_payment_idempotency_postgres.py` (39 cases: the reproducers R1-R3, the key scoped by the run, the repeat, two simultaneous requests, five changed intents, a refusal after and before admission, a stopped run, a restart, ten invalid and four valid keys, a null key, the routes of a multi-route payment and of a payment with none, the OpenAPI fields). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3659/3679`).
 * 2026-10-10, 037 slice A1 fix-delta (the key's state in the error, the missing instruments), on `claude/p037-a1` `5dd8801c` (3659): 3659 -> 3674 (+15, all in `tests/integration/test_p037_manual_payment_idempotency_postgres.py`: a timeout after admission, a commit timeout that did not land (keyed and unkeyed), entry 1 against entry 2 on the wire, a commit that landed with a failed and with a working recovery, a repeat whose own commit times out, a real cancellation, an internal failure, a refusal before and after admission, an unkeyed error and a broken state read, a collision held inside the operation, two cookie owners with a foreign run, a real stop and restart; the stopped-run test was rewritten, the same count). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3674/3694`).
+* 2026-10-10, 035 test-database cleanup command (`QD-TEST-DATABASES: BUILD-NARROW`), on `5947fc3a` (3674): 3674 -> 3680 (+6, `tests/integration/test_p035_cleanup_test_databases_postgres.py`: the dry run changes nothing; an apply drops clone, template and tier in order and nothing outside the manifest; a session that arrived after the manifest stops the apply and is not ended (2); one that arrives between the re-check and the drop is refused by the server; a database recreated under the same name). Measured by the count guard's own refusal in the tooling tier (`selected 3680 case(s), expected exactly 3674`).
+* 2026-10-10, the same command, fix-delta of the review of `ddcb97b6` (F1-F4): 3680 -> 3683 (+3, the same module, now 9 cases: a session in another unprotected family that no row names stops the apply and protecting that family lets it run; a name with a quote and a `?` cannot redirect a statement (F1 on a real server); the fixture's teardown leaves a database it did not create (F3)). The module now gives the command a view of the catalog narrowed to its own names.
+* 2026-10-10, merge of main (the cleanup command, 3683) with the A10 exception recorded in the next line (+5): 3688.
 * 2026-10-10, 035 slice Q-C (the A10 exception), on `origin/main` `5947fc3a` (3674): 3674 -> 3679 (+5, no new test: the five real-pool-timeout cases of `tests/integration/test_p035_a10_pool_wait_is_inside_the_payment_deadline_postgres.py` lose `slow` and carry `a10_real_pool_timeout`, so `-m "not slow"` selects them; the closed list is `A10_REAL_POOL_TIMEOUT_CASES` below). Measured with `python -m pytest --collect-only -q -m "not slow"` (`3679/3694`).
 
 THE A10 EXCEPTION TO "A REAL TIMER MEANS `slow`" (decision of 2026-10-10, AGENTS.md section 11). Exactly five cases of
@@ -263,7 +266,7 @@ from pathlib import Path
 
 #: THE EXPECTED NUMBER OF SELECTED CASES OF THE CANONICAL PROFILE (parametrised cases count one each).
 #: Moves only by the dated lines in the module docstring.
-EXPECTED_SELECTED_ITEMS = 3679
+EXPECTED_SELECTED_ITEMS = 3688
 
 #: The registered marker (`pytest.ini`) of the five A10 cases that run in the required tier WITHOUT `slow`.
 A10_MARKER = "a10_real_pool_timeout"

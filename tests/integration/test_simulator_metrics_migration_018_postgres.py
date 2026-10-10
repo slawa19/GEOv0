@@ -167,8 +167,6 @@ async def probe_engine():
     """Engine bound to a throwaway schema, created and dropped per test."""
 
     url = os.environ.get("TEST_DATABASE_URL", "")
-    if "postgresql" not in url:
-        pytest.skip("PostgreSQL TEST_DATABASE_URL required")
 
     async def _reset_schema(create: bool) -> None:
         admin = create_async_engine(url)
