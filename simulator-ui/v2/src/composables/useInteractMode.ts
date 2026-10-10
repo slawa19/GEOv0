@@ -87,6 +87,11 @@ export function useInteractMode(opts: {
   selectNode: (nodeId: string) => void
   selectEdge: (edgeKey: string, anchor?: { x: number; y: number } | null) => boolean
   cancel: () => void
+  /**
+   * 037 C: the user clicked EMPTY canvas. Cancels what is only being filled in, but NOT a held result (a finished clearing or its
+   * refusal, a committed payment): those end by Close/Esc (`cancel`) or by a deliberate replacement, never by a stray click.
+   */
+  cancelFromCanvas: () => void
 
   // Actions
   confirmPayment: (amount: string) => Promise<void>
@@ -158,10 +163,6 @@ export function useInteractMode(opts: {
   // BUG-5: history log
   history: InteractHistoryEntryT[]
 } {
-  // UX: keep the clearing preview visible long enough to be noticed/read.
-  const CLEARING_PREVIEW_DWELL_MS = 800
-  const CLEARING_RUNNING_DWELL_MS = 200
-
   // NOTE: payment targets are backend-first (Phase 2.5) and include multi-hop reachability.
   // IMPORTANT: capacity shown in the UI is best-effort only (direct-hop hint).
   // Backend remains the source of truth for amount feasibility.
@@ -500,6 +501,17 @@ export function useInteractMode(opts: {
     return undefined
   })
 
+  /** A result the user has not closed yet: it must survive a click that was not aimed at it. */
+  const resultHeld = computed(() =>
+    (state.phase === 'clearing-preview' && (!!state.lastClearing || !!state.clearingFailure))
+    || paymentOutcome.value?.kind === 'success',
+  )
+
+  function cancelFromCanvas() {
+    if (resultHeld.value) return
+    cancel()
+  }
+
   function cancel() {
     // Invalidate any in-flight result (success/error) so it can't update state after cancel.
     // IMPORTANT: bump epoch BEFORE abort so an AbortError can't leak into state.error.
@@ -573,6 +585,10 @@ export function useInteractMode(opts: {
     if (busyRef.value) return
     if (state.phase !== 'idle') return
     fsm.startClearingFlow()
+    successMessage.value = null // an earlier clearing's announcement is not this one's
+    // 037 C: the result names participants. Clearing may be the first thing done in a session, so the list is asked for now,
+    // while the user reads the confirm step (the graph snapshot's nodes are the fallback; an id is shown only when neither knows).
+    void refreshParticipants()
   }
 
   function selectNode(nodeId: string) {
@@ -585,6 +601,8 @@ export function useInteractMode(opts: {
 
   function selectEdge(edgeKey: string, anchor?: { x: number; y: number } | null) {
     if (busyRef.value) return false
+    // A line clicked while a result is held does not replace it: the user closes the result first (037 C, decided).
+    if (resultHeld.value) return false
     fsm.selectEdge(edgeKey, anchor)
 
     // Opening edit UI: try to have trustlines list ready for dropdown + accurate details.
@@ -712,6 +730,7 @@ export function useInteractMode(opts: {
       return
     }
     const names = { from: participantName(from), to: participantName(to) }
+    successMessage.value = null
     await runBusy(async ({ isCurrent, signal }) => {
       let res: Awaited<ReturnType<typeof opts.actions.sendPayment>>
       // The record that lets a reload check this payment is saved BEFORE the request leaves; if it cannot be, nothing is sent.
@@ -901,13 +920,17 @@ export function useInteractMode(opts: {
     fsm.clearError()
     // 028 F-028-47 (B1): the equivalent of the action, not the one selected when it returns.
     const eq = opts.equivalent.value
-    await runBusy(async ({ isCurrent, resetToIdle, signal }) => {
-      // Two-phase: preview (store cycles) -> running (FX animation) -> idle.
+    await runBusy(async ({ isCurrent, signal }) => {
+      // 037 C: the phase after the confirm step is "the answer is awaited, then the result is shown" (its name, `clearing-preview`,
+      // is the old one). It is left only by the user (Close/Esc -> `cancel()`) or by the next clearing: no timer ends it.
       fsm.enterClearingPreview()
 
       // 031 item 17: the step refusal (409 CLEARING_REFUSED, 030 S2) is shown as the client's text, not the server hint.
       const res = await opts.actions.runClearing(eq, { signal }).catch((e: unknown) => {
-        throw new Error(clearingRefusalText(e, eq))
+        const message = clearingRefusalText(e, eq)
+        // The text stays as a state of the panel when the error toast is gone (the toast clears `state.error`).
+        if (isCurrent()) fsm.setClearingFailure(message)
+        throw new Error(message)
       })
       if (!isCurrent()) return
       fsm.setLastClearing(res)
@@ -927,29 +950,10 @@ export function useInteractMode(opts: {
         try { opts.onClearingDone(res) } catch { /* ignore */ }
       }
 
-      // Let Vue paint the preview at least once (even if very briefly).
-      await Promise.resolve()
-      if (!isCurrent()) return
-
-      // Ensure preview has a readable dwell time.
-      await new Promise((r) => setTimeout(r, CLEARING_PREVIEW_DWELL_MS))
-      if (!isCurrent()) return
-
-      fsm.enterClearingRunning()
-
-      // Let Vue paint the running state at least once.
-      await Promise.resolve()
-      if (!isCurrent()) return
-
-      // Minimal dwell for the running state (until proper SSE-driven wiring exists).
-      await new Promise((r) => setTimeout(r, CLEARING_RUNNING_DWELL_MS))
-      if (!isCurrent()) return
-
-      const settled = res.cleared_cycles
-      const total = res.cycles.length
-      successMessage.value = `Clearing done: ${settled}/${total} cycles`
-
-      resetToIdle()
+      // A success toast only when something was cleared: "no cycles" is a state of the panel, not a success.
+      if (res.cleared_cycles > 0) {
+        successMessage.value = `Clearing done: ${res.cleared_cycles}/${res.cycles.length} cycles`
+      }
     })
   }
 
@@ -967,6 +971,7 @@ export function useInteractMode(opts: {
     selectNode,
     selectEdge,
     cancel,
+    cancelFromCanvas,
 
     confirmPayment,
     retryPayment,

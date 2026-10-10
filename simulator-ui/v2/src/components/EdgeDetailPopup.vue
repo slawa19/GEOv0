@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { interactText } from '../i18n/interactStrings'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 
@@ -286,6 +287,7 @@ function onCloseLine() {
       >
         💸 Pay {{ sendPaymentFromLabel }}
       </button>
+      <div class="ds-label ds-mono" data-testid="edge-payment-direction-note">{{ interactText('lineDirectionNote') }}</div>
       <button class="ds-btn ds-btn--secondary ds-btn--sm" type="button" :disabled="!!busy" @click="emit('changeLimit')">
         Change limit
       </button>

@@ -266,6 +266,47 @@ const open = computed(() => {
   return isPickFrom.value || isPickTo.value || isConfirm.value
 })
 
+// F-037-4: a panel that OPENS already at the confirm step with both parties set was started from a line (the line popup sets the
+// debtor as the sender and the creditor as the recipient). Reaching the confirm step by choosing in the panel is not that. Decided
+// when the panel opens; a change of either party in the lists ends it (the note is about how the panel was filled, not about the
+// fields afterwards).
+// The sentence belongs to the PAIR the panel opened with: it is shown while both parties are still that pair, however they were
+// changed (a list, or a click on the canvas) - compared with the pair, not tied to the events that change it.
+const openedPair = ref<{ from: string; to: string } | null>(null)
+watch(
+  open,
+  (isOpen) => {
+    const from = props.state.fromPid
+    const to = props.state.toPid
+    openedPair.value = isOpen && props.phase === 'confirm-payment' && from && to ? { from, to } : null
+    if (openedPair.value) void focusAmountOfLineEntry()
+  },
+  { immediate: true },
+)
+// A panel that opens already at the confirm step (from a line) has an EMPTY amount and nothing else to ask first: the focus goes to the
+// amount, which also brings it into view on a short screen. Not a send: the amount is empty, `canConfirm` is false, a held key is ignored.
+// (Not at the first pass - that moves the focus in `onToSelected` - and never into a field that already holds a sum.)
+async function focusAmountOfLineEntry() {
+  await nextTick()
+  await nextTick() // after the window shell's own first focus
+  if (!openedPair.value || amount.value.trim() !== '') return
+  const input = amountEl.value
+  if (!input) return
+  // `preventScroll`: the window may not have been clamped into the screen yet, and a focus that scrolls would scroll the APP ROOT
+  // (overflow hidden, taller than a phone screen) and carry the whole window layer off the top. The panel's own body scrolls instead.
+  input.focus({ preventScroll: true })
+  const body = input.closest('.ds-panel__body') as HTMLElement | null
+  if (body) {
+    const room = 56 // the sticky row of buttons
+    const over = input.getBoundingClientRect().bottom - (body.getBoundingClientRect().bottom - room)
+    if (over > 0) body.scrollTop += over
+  }
+}
+const startedFromLine = computed(() => {
+  const pair = openedPair.value
+  return !!pair && props.state.fromPid === pair.from && props.state.toPid === pair.to
+})
+
 // Giving up a payment always starts from the FIRST step: closing the panel (the instance may live on, hidden), opening it again
 // or removing it does not carry step two over.
 watch(open, () => {
@@ -677,6 +718,12 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <div v-if="isPickTo" class="ds-help mp-pick-help">Pick To node (canvas) or choose from dropdown.</div>
 
       <template v-if="isConfirm">
+        <!-- Closed by default: the full sentence is long and the confirm step is already the tallest one on a phone. Always in the DOM. -->
+        <details v-if="startedFromLine" class="ds-help ds-muted mp-line-direction" data-testid="mp-line-direction">
+          <summary>{{ interactText('lineDirectionTitle') }}</summary>
+          <div data-testid="mp-line-direction-note">{{ interactText('lineDirectionNote') }}</div>
+        </details>
+
         <div class="ds-row ds-row--space mp-summary" data-testid="mp-summary">
           <div class="ds-label">{{ interactText('summaryTitle') }}</div>
           <div class="ds-value">
@@ -847,6 +894,10 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
 .mp-actions {
   justify-content: flex-end;
+}
+
+.mp-line-direction > summary {
+  cursor: pointer;
 }
 
 .mp-source {

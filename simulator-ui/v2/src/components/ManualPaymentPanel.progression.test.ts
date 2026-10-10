@@ -125,13 +125,14 @@ describe('From -> To: the recipient list opens by itself, only after an EXPLICIT
     expect(document.activeElement).toBe(trigger)
   })
 
-  it('a panel that starts with both parties set (from an edge or a node card) opens no list and does not take the focus', async () => {
+  it('a panel that starts with both parties set (from a line) opens no list; its focus is on the EMPTY amount (037 C: it brings the amount into view on a short screen)', async () => {
     const { host } = mountFlow({ phase: 'confirm-payment', fromPid: 'bob', toPid: 'alice' })
     await settle()
 
     expect(surface('mp-to')).toBeNull()
     expect(surface('mp-from')).toBeNull()
-    expect(document.activeElement).not.toBe(host.querySelector('#mp-amount'))
+    expect(document.activeElement).toBe(host.querySelector('#mp-amount'))
+    expect((host.querySelector('#mp-amount') as HTMLInputElement).value).toBe('')
   })
 
   it('an unresolved payment (the banner replaces the selectors) opens no list', async () => {

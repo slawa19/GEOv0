@@ -1426,6 +1426,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :state="interact.mode.state"
           :busy="interact.mode.busy.value"
           :equivalent="sceneEq"
+          :participants="interact.mode.participants.value"
           :confirm-clearing="interact.mode.confirmClearing"
           :cancel="cancelInteractWindowFromUi"
         />

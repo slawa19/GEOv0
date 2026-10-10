@@ -612,9 +612,13 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
 
     await activateButton(page, 'Run Clearing')
     await activateButton(page, 'Confirm')
-    await expect(page.getByTestId('clearing-panel')).toContainText('Clearing preview')
+    // 037 C: the result stays until the user closes it (it used to be a "preview" that left on a timer).
+    await expect(page.getByTestId('clearing-panel')).toContainText('Clearing result')
+    await expect(page.getByTestId('clearing-panel')).toContainText('debt to')
     await expect(page.getByLabel('Success notification')).toContainText('Clearing done: 1/1 cycles')
     expect(mock.clearingRequests).toHaveLength(1)
+    await activateButton(page, 'Close')
+    await expect(page.getByTestId('clearing-panel')).toBeHidden()
 
     const navigator = page.getByRole('region', { name: 'Graph navigator' })
     await expect(navigator).toBeVisible()
