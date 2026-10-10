@@ -219,6 +219,45 @@ async def test_a_second_run_of_the_same_scenario_adopts_its_simulated_participan
     assert await _trustlines_touching(factory, a) == 1
 
 
+@pytest.mark.asyncio
+async def test_a_scenario_line_to_a_participant_another_scenario_froze_fails_the_run_on_its_first_tick(
+    factory, monkeypatch
+) -> None:
+    """The sibling refusal of the seeding, on the same path (D1, 2026-10-10): `SCENARIO_TRUSTLINE_REFUSED`.
+
+    The adopted participant is simulated, so the perimeter above lets it in; it is the trust-line service that refuses
+    the new line to its suspended end. The same scenario over the same database is refused on every tick, so the run
+    stops on the FIRST one with the seeder's code, line and reason - not after three with
+    `REAL_MODE_TICK_FAILED_REPEATED`. `_runner` allows three consecutive failures, so one tick ending in `error` is
+    the fail-fast and not the budget."""
+    n = _tag()
+    eq_code = f"P24F{n}"
+    a, frozen, c = f"p024_a_{n}", f"p024_frozen_{n}", f"p024_c_{n}"
+    first_scenario = _scenario(eq_code, [a, frozen], [(a, frozen)])
+    first_scenario["participants"][1]["status"] = "frozen"
+    second_scenario = _scenario(eq_code, [c, frozen], [(c, frozen)])
+    install_tick_stand(monkeypatch, factory)
+
+    first = _fresh_run(f"p024-froze-{n}", f"p024-froze-{n}", first_scenario)
+    await _tick(_runner(first, first_scenario), first)
+    assert first.state == "running", first.last_error
+
+    second = _fresh_run(f"p024-refused-{n}", f"p024-refused-{n}", second_scenario)
+    await _tick(_runner(second, second_scenario), second)
+
+    assert second.state == "error", (second.state, second.last_error)
+    assert second.last_error["code"] == "SCENARIO_TRUSTLINE_REFUSED", second.last_error
+    assert f"{c}->{frozen} {eq_code}" in second.last_error["message"], second.last_error
+    assert "(reason: participant_suspended)" in second.last_error["message"], second.last_error
+    assert set(second.last_error) == {"code", "message", "at"}  # the existing shape of `last_error`
+    # One error - the stop itself (`fail_run`) - and no failed tick counted towards the three.
+    assert (second.errors_total, second._real_consec_tick_failures) == (1, 0)
+    assert second._real_seeded is False
+    # Rolled back whole: nothing of the refused scenario stays.
+    assert not await _participant_exists(factory, c)
+    assert await _trustlines_touching(factory, frozen) == 1
+
+
 def _seeded_run_with_event(monkeypatch, factory, n: str, effect: dict) -> tuple[RunRecord, RealRunnerImpl]:
     """A fresh run of two simulated participants whose first tick seeds them and fires `effect`."""
     eq_code = f"P24I{n}"
