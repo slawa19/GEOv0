@@ -459,11 +459,18 @@ def pytest_itemcollected(item):
 def pytest_runtest_setup(item):
     if item.nodeid == TARGET:
 {setup}
+
+
+@pytest.fixture(autouse=True)
+def _planted(request):
+    # an AUTOUSE fixture: set up after pytest has evaluated the xfail marks, before any explicit fixture (no database)
+    if request.node.nodeid == TARGET:
+{fixture}
 '''
 
 
 def _run_with_planted_skip(
-    tmp_path: Path, *, target: str, collected: str, setup: str, k: str, m: str | None = None
+    tmp_path: Path, *, target: str, collected: str, setup: str, k: str, m: str | None = None, fixture: str = "pass"
 ) -> subprocess.CompletedProcess[str]:
     """Execute (not just collect) the A10 module narrowed by `-m`/`-k`, with a skip planted on `target` by a `-p` plugin.
 
@@ -472,7 +479,7 @@ def _run_with_planted_skip(
 
     (tmp_path / "p035_a10_skip_plugin.py").write_text(
         _A10_SKIP_PLUGIN.format(
-            target=target, collected="        " + collected, setup="        " + setup
+            target=target, collected="        " + collected, setup="        " + setup, fixture="        " + fixture
         ),
         encoding="utf-8",
     )
@@ -481,21 +488,30 @@ def _run_with_planted_skip(
 
 
 @pytest.mark.parametrize(
-    ("collected", "setup"),
+    ("collected", "setup", "fixture"),
     [
-        ("item.add_marker(pytest.mark.skip(reason='planted marker skip'))", "pass"),
-        ("item.add_marker(pytest.mark.skipif(True, reason='planted skipif'))", "pass"),
-        ("pass", "pytest.skip('planted runtime skip')"),
+        ("item.add_marker(pytest.mark.skip(reason='planted marker skip'))", "pass", "pass"),
+        ("item.add_marker(pytest.mark.skipif(True, reason='planted skipif'))", "pass", "pass"),
+        ("pass", "pytest.skip('planted runtime skip')", "pass"),
+        ("pass", "pytest.xfail('planted runtime xfail')", "pass"),
+        ("item.add_marker(pytest.mark.xfail(reason='planted xfail marker'))", "pass", "raise RuntimeError('planted failure')"),
     ],
-    ids=["pytest.mark.skip", "a true skipif", "pytest.skip() at runtime"],
+    ids=[
+        "pytest.mark.skip",
+        "a true skipif",
+        "pytest.skip() at runtime",
+        "pytest.xfail() at runtime",
+        "an xfail marker on a member that fails",
+    ],
 )
-def test_a_listed_member_skipped_during_execution_is_refused(tmp_path: Path, collected: str, setup: str) -> None:
+def test_a_listed_member_skipped_during_execution_is_refused(tmp_path: Path, collected: str, setup: str, fixture: str) -> None:
     """The count and the membership stay right when a member is skipped; the run must still not be green."""
 
     target = _A10_NODE + "test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_nothing[the pool timeout-mode_b]"
     assert target in _tier_count_module().A10_REAL_POOL_TIMEOUT_CASES
     result = _run_with_planted_skip(
-        tmp_path, target=target, collected=collected, setup=setup, k="test_no_connection_for_the_attempt", m="a10_real_pool_timeout"
+        tmp_path, target=target, collected=collected, setup=setup, fixture=fixture,
+        k="test_no_connection_for_the_attempt", m="a10_real_pool_timeout",
     )
     output = result.stdout + result.stderr
     assert result.returncode != 0, f"a listed member was skipped and the run exited {result.returncode}:\n{output[-900:]}"
@@ -514,3 +530,18 @@ def test_a_skipped_non_member_is_an_ordinary_skip(tmp_path: Path) -> None:
         k="test_a_cancellation_while_waiting",
     )
     assert result.returncode == 0 and "1 skipped" in result.stdout, (result.stdout + result.stderr)[-900:]
+
+
+def test_an_xfailed_non_member_stays_an_expected_failure(tmp_path: Path) -> None:
+    """Counter-check for the xfail cases above: the same planted xfail on a case outside the five is an ordinary xfail."""
+
+    other = _A10_NODE + "test_a_cancellation_while_waiting_for_the_pool_leaves_nothing[mode_b]"
+    result = _run_with_planted_skip(
+        tmp_path,
+        target=other,
+        collected="item.add_marker(pytest.mark.xfail(reason='planted'))",
+        setup="pass",
+        fixture="raise RuntimeError('planted failure')",
+        k="test_a_cancellation_while_waiting",
+    )
+    assert result.returncode == 0 and "1 xfailed" in result.stdout, (result.stdout + result.stderr)[-900:]

@@ -130,8 +130,10 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-10, 035 slice Q-C review (5e9ba5fd): portable 258 -> 266. Eight cases added to the same module: a single A10 node selector is not judged as the whole module (3), `--ignore` of the A10 file on the whole tier is named by the membership guard (1), a listed member skipped by marker, skipif or at runtime ends the run red (3), and a skipped non-member stays an ordinary skip (1).
 #:
 #: 2026-10-10, 035 slice Q-C review fix: portable 266 -> 267. One case added: the summary line is printed only for five executed and passed members (the verdict-with-scope case was rewritten, the same count).
+#:
+#: 2026-10-10, 035 slice Q-C fix-delta (xfail members): portable 267 -> 270. Two member cases added to the skipped-member test (`pytest.xfail()` at runtime; an xfail marker on a member that fails), and one control (an xfailed non-member stays an expected failure).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 267,
+    "portable": 270,
     "powershell": 235,
 }
 
