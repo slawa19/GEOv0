@@ -498,6 +498,26 @@ async def apply_manifest(connection, manifest: dict[str, Any], *, protected: Seq
     return outcomes
 
 
+#: SQLSTATE CLASSES that are the server's answer "this DROP DATABASE did not run" (review of `e8ab6b96`, F5):
+#:   55 object not in prerequisite state (55006 `ObjectInUseError` - somebody is connected),
+#:   42 syntax error or access rule violation (42501 `InsufficientPrivilegeError`),
+#:   3D invalid catalog name (3D000 - the database does not exist),
+#:   25 invalid transaction state (25001 - DROP DATABASE inside a transaction block),
+#:   0A feature not supported.
+#: EVERYTHING ELSE IS "NOT KNOWN", and being a `PostgresError` does not make it an answer. In asyncpg 0.29.0 these
+#: inherit `PostgresError`, carry a SQLSTATE, and arrive when the statement got NO verdict:
+#:   class 08 - `ConnectionDoesNotExistError` 08003 (raised BY THE DRIVER when the connection is lost in the middle of
+#:     an operation), `ConnectionFailureError` 08006, `PostgresConnectionError` 08000, `ClientCannotConnectError`
+#:     08001, `ConnectionRejectionError` 08004;
+#:   class 57 - `AdminShutdownError` 57P01, `CrashShutdownError` 57P02, `CannotConnectNowError` 57P03 (the session
+#:     was ended), `QueryCanceledError` 57014 (a cancel can race with completion);
+#:   classes 53, 58, XX (resources, system, internal) and a `PostgresError` with no SQLSTATE at all
+#:     (`UnknownPostgresError`, `FatalPostgresError`).
+#: Not `PostgresError` at all, and equally not an answer: `asyncpg.InterfaceError`, `asyncpg.InternalClientError`,
+#: `OSError`/`ConnectionError`, `asyncio.TimeoutError`, `asyncio.CancelledError`.
+_ANSWERED_NOT_DROPPED = frozenset({"55", "42", "3D", "25", "0A"})
+
+
 async def _drop(connection, name: str, outcomes: list[dict[str, str]]) -> None:
     import asyncpg
 
@@ -505,12 +525,12 @@ async def _drop(connection, name: str, outcomes: list[dict[str, str]]) -> None:
     try:
         # An ordinary DROP DATABASE: PostgreSQL refuses it while any session is connected. No FORCE, ever.
         await connection.execute(statement)
-    except asyncpg.PostgresError as exc:
-        # The server ANSWERED with an error: the database was not dropped.
-        raise CleanupRefused(f"{name}: PostgreSQL refused the drop ({type(exc).__name__}: {exc})",
-                             outcomes=outcomes) from exc
     except BaseException as exc:
-        # No answer - a lost connection, a cancellation. Whether it was dropped is NOT known.
+        if isinstance(exc, asyncpg.PostgresError) and str(getattr(exc, "sqlstate", None) or "")[:2] in _ANSWERED_NOT_DROPPED:
+            # The server ANSWERED this statement with an error of a class that means it did not run.
+            raise CleanupRefused(f"{name}: PostgreSQL refused the drop ({type(exc).__name__}: {exc})",
+                                 outcomes=outcomes) from exc
+        # Anything else is NOT an answer about this statement. Whether the database was dropped is NOT known.
         raise CleanupRefused(f"{name}: the drop was sent and its outcome is not known ({type(exc).__name__})",
                              outcomes=outcomes, uncertain=name) from exc
 
@@ -629,8 +649,8 @@ async def _run(arguments: argparse.Namespace) -> int:
         if manifest is None:
             try:
                 manifest = await build_manifest(connection, protected=protected)
-            except asyncpg.PostgresError as exc:
-                raise UsageRefused(f"the catalog cannot be read: {type(exc).__name__}: {exc}") from exc
+            except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, asyncio.TimeoutError) as exc:
+                raise UsageRefused(f"the server cannot be read: {type(exc).__name__}: {exc}") from exc
             _write(path, manifest)
             print(summary(manifest))
             print(f"DRY RUN: nothing was changed. Manifest: {path}")
@@ -646,9 +666,11 @@ async def _run(arguments: argparse.Namespace) -> int:
         except CleanupRefused as refusal:
             # Every failure from the first drop on arrives as this, carrying what completed and what is uncertain.
             outcomes, stopped, uncertain = refusal.outcomes, str(refusal), refusal.uncertain
-        except asyncpg.PostgresError as exc:
-            # Only the reads before the first drop can raise this: nothing was dropped.
-            stopped = f"the catalog could not be read before anything was dropped: {type(exc).__name__}: {exc}"
+        except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, asyncio.TimeoutError) as exc:
+            # Only the reads BEFORE the first drop can raise these (from the first drop on, every failure is a
+            # `CleanupRefused`): the apply never began. A server that cannot be read is exit 2, and there is no
+            # result to write (review of `e8ab6b96`, F7).
+            raise UsageRefused(f"the server cannot be read: {type(exc).__name__}: {exc}") from exc
         _write(result, {"manifest": str(path), "dropped": outcomes, "uncertain": uncertain, "stopped_on": stopped})
         print(f"dropped {len(outcomes)} database(s). Result: {result}")
         if uncertain is not None:

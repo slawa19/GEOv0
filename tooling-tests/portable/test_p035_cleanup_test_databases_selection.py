@@ -33,8 +33,10 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -79,7 +81,6 @@ class _Recorder:
         self.catalog, self.server = catalog, dict(server or SERVER)
         self.statements: list[str] = []
         self.refuse_drop_of: set[str] = set()
-        self.lose_connection_on: set[str] = set()
         #: name -> (the exception to raise when its DROP is sent, whether the database is dropped FIRST)
         self.fail_drop_with: dict[str, tuple[BaseException, bool]] = {}
         self.unreadable: BaseException | None = None  # raised by the server-identity read
@@ -104,8 +105,6 @@ class _Recorder:
             if dropped_first:
                 self.catalog[:] = [row for row in self.catalog if row["name"] != name]
             raise error
-        if name in self.lose_connection_on:
-            raise ConnectionResetError("the connection was lost while the statement was in flight")
         if name in self.refuse_drop_of:
             import asyncpg
 
@@ -457,19 +456,6 @@ def test_a_refused_drop_stops_the_run_and_reports_what_completed() -> None:
     assert sorted(row["name"] for row in catalog) == ["geov0_test_done", "geov0_test_done__modebtpl"]
 
 
-def test_a_drop_that_got_no_answer_is_uncertain_and_never_reported_as_dropped() -> None:
-    catalog = _family("done", 100)
-    manifest = _manifest_of(catalog)
-    connection = _Recorder(catalog)
-    connection.lose_connection_on = {"geov0_test_done__modebtpl"}
-
-    with pytest.raises(cleanup.CleanupRefused) as refused:
-        _apply(connection, manifest)
-
-    assert refused.value.uncertain == "geov0_test_done__modebtpl"
-    assert [o["name"] for o in refused.value.outcomes] == ["geov0_test_done__c1"]
-
-
 def _driver_errors() -> dict[str, BaseException]:
     """What the installed driver really raises when a statement gets no usable answer - not Python's own
     `ConnectionResetError`, which the first edition of these tests used and which hid F5: the driver's
@@ -604,8 +590,28 @@ def test_what_can_be_refused_without_the_server_is_refused_before_connecting(
     assert message in capsys.readouterr().err
 
 
+def _directory_of_this_run() -> Path:
+    """Where this run's manifests go: under the runner's artifact root for THIS task slug when it is set and lies
+    under the checkout's `.local-run/` (the command accepts a manifest nowhere else), else under
+    `.local-run/test-runs/_portable/`; always in a directory named after this process and a random suffix."""
+
+    local_run = (REPO_ROOT / ".local-run").resolve()
+    root = os.environ.get("GEO_TEST_ARTIFACT_ROOT")
+    base = Path(root).resolve() if root and Path(root).resolve().is_relative_to(local_run) else local_run / "test-runs" / "_portable"
+    return base / f"p035-cleanup-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+_RUN_DIRECTORY = _directory_of_this_run()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _the_run_directory_is_removed_afterwards():
+    yield
+    shutil.rmtree(_RUN_DIRECTORY, ignore_errors=True)
+
+
 def _manifest_file(tmp_name: str, manifest) -> str:
-    target = REPO_ROOT / ".local-run" / "test-runs" / "p035dbclean-portable" / tmp_name
+    target = _RUN_DIRECTORY / tmp_name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(manifest if isinstance(manifest, str) else json.dumps(manifest), encoding="utf-8")
     return str(target)
@@ -678,7 +684,7 @@ def test_a_server_that_cannot_be_reached_is_exit_2(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(asyncpg, "connect", unreachable)
     monkeypatch.setenv("TEST_DATABASE_URL", "postgresql://geo:geo@127.0.0.1:5432/x")
-    assert cleanup.main(["--manifest", ".local-run/test-runs/p035dbclean-portable/never.json"]) == 2
+    assert cleanup.main(["--manifest", str(_RUN_DIRECTORY / "never.json")]) == 2
     assert "cannot be reached" in capsys.readouterr().err
 
 
@@ -690,7 +696,9 @@ def test_the_command_writes_a_result_that_names_an_uncertain_drop(monkeypatch, c
     catalog = _family("done", 100)
     manifest = _manifest_of(catalog)
     recorder = _Recorder(catalog)
-    recorder.lose_connection_on = {"geov0_test_done__modebtpl"}
+    # The driver's own class for a connection lost mid-statement - and the drop HAD happened on the server.
+    recorder.fail_drop_with = {"geov0_test_done__modebtpl": (
+        asyncpg.ConnectionDoesNotExistError("connection was closed in the middle of operation"), True)}
 
     async def close() -> None:
         return None

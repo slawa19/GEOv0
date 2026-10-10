@@ -137,8 +137,13 @@ _HERE = Path(__file__).resolve().parent
 #: drop (1), a protected busy family (1), the reviewed count (1), manifest freshness (5), 14 malformed manifests, a refused and an
 #: unanswered drop (2), import and `--help` (1), the command line (7 + 5), unusable manifest files (3), an unreachable server (1), the
 #: result file (1). The recorder now PARSES the one statement it accepts instead of splitting it on a quote.
+#:
+#: 2026-10-10, the same command, second fix-delta (review of `e8ab6b96`, F5-F7): portable 370 -> 396. +27 and -1 in the same
+#: module: eleven kinds of "no answer" - the driver's own classes among them - each with and without the drop having happened (22),
+#: three answers of the server that are refusals (3), the run's own artifact directory (1), an unreadable server (1); the one test
+#: that used Python's `ConnectionResetError` for a lost connection is replaced by those (-1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 370,
+    "portable": 396,
     "powershell": 235,
 }
 
