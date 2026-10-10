@@ -62,7 +62,7 @@ describe('F-028-47: a snapshot of one equivalent never feeds another', () => {
   })
   it('B1: an action finished after an equivalent switch is recorded in its own equivalent', async () => {
     let release!: () => void
-    const sendPayment = vi.fn(() => new Promise<never>((r) => { release = () => r({ ok: true } as never) }))
+    const sendPayment = vi.fn(() => new Promise<never>((r) => { release = () => r({ ok: true, status: 'COMMITTED', payment_id: 'p', routes: [] } as never) }))
     const eq = ref('UAH')
     const im = useInteractMode({ actions: actions({ sendPayment }), runId: computed(() => 'run_1'),
       equivalent: eq, snapshot: ref(snap('UAH')) })

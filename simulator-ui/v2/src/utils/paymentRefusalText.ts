@@ -9,7 +9,7 @@ import { formatMoney, moneyText } from './money'
  * `app/core/payments/service.py` `PAYMENT_REFUSAL_REASONS` (openapi `PaymentRefusalDetails.reason`).
  */
 export type UiLocale = 'en' | 'ru'
-type Vars = { eq: string; max: string | null; precision: string }
+type Vars = { eq: string; max: string | null; precision: string; keyed: boolean }
 type Text = (v: Vars) => string
 
 const REASONS: Record<string, Record<UiLocale, Text>> = {
@@ -32,7 +32,12 @@ const REASONS: Record<string, Record<UiLocale, Text>> = {
     ru: (v) => `Платежи в ${v.eq} приостановлены проверкой целостности.`,
   },
   equivalent_inactive: { en: (v) => `${v.eq} is not active.`, ru: (v) => `Эквивалент ${v.eq} не активен.` },
-  busy: { en: () => 'The system is busy; send the same payment again.', ru: () => 'Система занята; отправьте тот же платёж ещё раз.' },
+  // 037 A2 (F-037-2): "send the same payment again" is advice that is safe ONLY under an idempotency key - without one a
+  // repeat is a second payment. The request of a manual payment always has one; a caller that cannot say so gets no advice.
+  busy: {
+    en: (v) => (v.keyed ? 'The system is busy; send the same payment again.' : 'The system is busy.'),
+    ru: (v) => (v.keyed ? 'Система занята; отправьте тот же платёж ещё раз.' : 'Система занята.'),
+  },
   timeout: { en: () => 'The payment timed out.', ru: () => 'Время ожидания платежа истекло.' },
   tx_id_reused: { en: () => 'This payment id was already used.', ru: () => 'Этот идентификатор платежа уже использован.' },
   unverifiable_legacy_identity: {
@@ -74,14 +79,19 @@ export function uiLocale(): UiLocale {
   return lang.toLowerCase().startsWith('ru') ? 'ru' : 'en'
 }
 
-export function paymentRefusalText(error: unknown, equivalent: string, locale: UiLocale = uiLocale()): string {
+export function paymentRefusalText(
+  error: unknown,
+  equivalent: string,
+  locale: UiLocale = uiLocale(),
+  o: { keyed?: boolean } = {},
+): string {
   const e = (error && typeof error === 'object' ? error : {}) as { code?: unknown; details?: unknown }
   const details = (e.details && typeof e.details === 'object' ? e.details : {}) as Record<string, unknown>
   const code = typeof e.code === 'string' ? e.code : ''
   const eq = String(details.equivalent ?? equivalent).toUpperCase()
   const max = moneyText(details.max_available)
   const vars: Vars = { eq, max: max === null ? null : formatMoney(max, equivalentPrecision(eq)),
-    precision: String(details.precision ?? equivalentPrecision(eq)) }
+    precision: String(details.precision ?? equivalentPrecision(eq)), keyed: o.keyed === true }
   const reason = typeof details.reason === 'string' ? details.reason : ''
   const text = REASONS[reason] ?? REASONS[CODES[code] ?? '']
   if (text) return withRequestRef(text[locale](vars), error)

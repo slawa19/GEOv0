@@ -31,6 +31,13 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | null]
+  /**
+   * An option was chosen BY THE USER (never for a change of `modelValue` from outside), emitted after the list is closed and the
+   * focus is back on the trigger - so a parent that moves the focus on its own does it last and is not overruled.
+   */
+  selected: [value: string | null]
+  /** The list opened or closed. */
+  'update:open': [open: boolean]
 }>()
 
 const open = ref(false)
@@ -56,7 +63,7 @@ const teleportTarget = computed<HTMLElement | null>(() => {
   return document.body
 })
 
-const { onTriggerKeydown, onSurfaceKeydown, closeAndRestoreFocus } = useOverlayDropdownFocus(
+const { onTriggerKeydown, onSurfaceKeydown, closeAndRestoreFocus, openFromKeyboard } = useOverlayDropdownFocus(
   open,
   triggerRef,
   surfaceRef,
@@ -95,7 +102,20 @@ function readPositiveCssPx(el: Element | null, name: `--${string}`, fallback: nu
 function onOptionSelect(value: string | null): void {
   emitValue(value)
   closeAndRestoreFocus()
+  // Registered AFTER the focus restore of `closeAndRestoreFocus` (same microtask queue, in order): the parent's own focus move wins.
+  void nextTick(() => emit('selected', value))
 }
+
+/**
+ * 037 B2: a parent that continues a flow opens the list for the user as the predictable next choice, with the focus INSIDE it
+ * (a list opened without the focus would leave the keyboard and Escape on the previous control). Not for a disabled list.
+ */
+function openWithFocus(): void {
+  if (props.disabled) return
+  openFromKeyboard()
+}
+
+defineExpose({ openWithFocus })
 
 function updateSurfacePosition(): void {
   const trigger = triggerRef.value
@@ -164,6 +184,7 @@ watch(() => props.options, () => {
 }, { deep: true })
 
 watch(open, (isOpen) => {
+  emit('update:open', isOpen)
   if (!isOpen) return
   void nextTick(() => {
     updateSurfacePosition()

@@ -89,5 +89,7 @@ export function useOverlayDropdownFocus(
     onTriggerKeydown,
     onSurfaceKeydown,
     closeAndRestoreFocus,
+    /** Open the list AND move the focus into it - the same as opening it from the keyboard, whatever opened it. */
+    openFromKeyboard,
   }
 }

@@ -120,7 +120,7 @@ describe('ClearingPanel', () => {
     host.remove()
   })
 
-  it('CL-2: in preview step shows loading state when lastClearing is not ready yet', async () => {
+  it('CL-2: in the step after confirm shows the running state while the answer is not here yet', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -140,7 +140,7 @@ describe('ClearingPanel', () => {
         h(ClearingPanel, {
           phase: 'clearing-preview',
           state,
-          busy: false,
+          busy: true,
           equivalent: 'EQ',
           confirmClearing: vi.fn(),
           cancel: vi.fn(),
@@ -152,9 +152,9 @@ describe('ClearingPanel', () => {
     app.mount(host)
     await nextTick()
 
-    const loading = host.querySelector('[data-testid="clearing-preview-loading"]') as HTMLElement | null
+    const loading = host.querySelector('[data-testid="clearing-running"]') as HTMLElement | null
     expect(loading).toBeTruthy()
-    expect(loading?.textContent ?? '').toContain('Preparing preview')
+    expect(loading?.textContent ?? '').toContain('Running clearing')
     expect(loading?.querySelector('.cp-spinner')).toBeTruthy()
     expect(loading?.getAttribute('role')).toBe('status')
     expect(loading?.getAttribute('aria-live')).toBe('polite')
@@ -199,7 +199,7 @@ describe('ClearingPanel', () => {
     const result = host.querySelector('.cp-preview-stack')
     expect(result?.getAttribute('role')).toBe('status')
     expect(result?.getAttribute('aria-live')).toBe('polite')
-    expect(result?.textContent).toContain('Total cleared')
+    expect(result?.textContent).toContain('Total over cycles')
     expect(result?.querySelector('[role="alert"]')).toBeNull()
 
     app.unmount()

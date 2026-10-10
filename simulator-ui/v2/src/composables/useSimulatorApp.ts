@@ -1415,7 +1415,8 @@ export function useSimulatorApp(opts?: {
       closeTopmostOverlayOnOutsideClick: () => {
         void closeTopmostOverlayOnOutsideClick()
       },
-      cancelInteract: () => interactMode.cancel(),
+      // 037 C: an empty click cancels what is being filled in, not a held result (see `cancelFromCanvas`).
+      cancelInteract: () => interactMode.cancelFromCanvas(),
       selectNode,
     })
   }

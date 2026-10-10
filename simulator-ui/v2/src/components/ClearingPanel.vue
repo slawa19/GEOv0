@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import type { ParticipantInfo, SimulatorActionClearingCycle } from '../api/simulatorTypes'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
+import { interactText } from '../i18n/interactStrings'
 
 type Props = {
   phase: InteractPhase
@@ -9,6 +11,9 @@ type Props = {
   busy: boolean
 
   equivalent: string
+
+  /** For the NAMES in the result (an id is shown only for a participant this list does not know). */
+  participants?: ParticipantInfo[]
 
   confirmClearing: () => Promise<void> | void
   cancel: () => void
@@ -44,14 +49,44 @@ async function onConfirm() {
 }
 
 const isRunning = computed(() => props.phase === 'clearing-running')
+// 037 C: `clearing-preview` is the phase after the confirm step. Until the answer comes it waits; then it SHOWS THE RESULT until the
+// user closes it; an error (a refusal) leaves it open with the message. No timer ends it.
 const isPreview = computed(() => props.phase === 'clearing-preview')
 const isConfirm = computed(() => props.phase === 'confirm-clearing')
+// The refusal is a state of its own (`state.clearingFailure`), not the transient error toast: the application clears `state.error`
+// when the toast expires, and the explanation (with its request reference) must outlive that. "Running" is shown only while a
+// request is really in flight (`busy`) - never inferred from the absence of an answer.
+const errorText = computed(() => (isPreview.value ? (props.state.clearingFailure ?? props.state.error) : props.state.error))
+const waiting = computed(() => isRunning.value || (isPreview.value && !last.value && !errorText.value && props.busy))
+const nothingCleared = computed(() => !!last.value && cyclesCount.value === 0 && cycles.value.length === 0)
+
+/** The equivalent of the ANSWER: the one the clearing was run for, not the one selected when it came back. */
+const resultUnit = computed(() => String(last.value?.equivalent ?? props.equivalent))
+/** Before the run: the equivalent that WILL be run. Once there is a result: the equivalent of that result, whatever is selected now. */
+const shownEquivalent = computed(() => (isConfirm.value || !last.value ? props.equivalent : resultUnit.value))
+
+function nameOf(pid: string): string {
+  const found = (props.participants ?? []).find((p) => p.pid === pid)
+  return String(found?.name ?? '').trim() || pid
+}
+
+/**
+ * An edge of the answer runs CREDITOR -> DEBTOR ("from" is whom the debt is owed to, "to" is who owes). So {from: Alice, to: Bob}
+ * is "Bob's debt to Alice reduced": the wire arrow is NOT a payment from Alice to Bob.
+ */
+function edgeLine(edge: { from: string; to: string }, cycle: SimulatorActionClearingCycle): string {
+  return interactText('clearingEdgeLine', {
+    debtor: nameOf(edge.to), creditor: nameOf(edge.from), amount: cycle.cleared_amount, unit: resultUnit.value,
+  })
+}
 
 const open = computed(() => {
   return isRunning.value || isPreview.value || isConfirm.value
 })
 
 const busyUi = computed(() => props.busy || isRunning.value)
+// Close waits only while the answer is awaited; a finished result (or a refusal) can always be closed.
+const closeDisabled = computed(() => waiting.value)
 </script>
 
 <template>
@@ -61,13 +96,12 @@ const busyUi = computed(() => props.busy || isRunning.value)
     :style="rootStyle"
     data-testid="clearing-panel"
     aria-label="Clearing panel"
-    :aria-busy="busyUi ? 'true' : 'false'"
+    :aria-busy="waiting || busyUi ? 'true' : 'false'"
   >
     <div class="ds-panel__header">
       <div class="ds-h2">
         <span v-if="isConfirm">Run clearing</span>
-        <span v-else-if="isPreview">Clearing preview</span>
-        <span v-else>Clearing running</span>
+        <span v-else>{{ interactText('clearingResultTitle') }}</span>
         <span class="ds-muted ds-mono"> (ESC to close)</span>
       </div>
     </div>
@@ -75,10 +109,10 @@ const busyUi = computed(() => props.busy || isRunning.value)
     <div class="ds-panel__body ds-stack">
       <div class="ds-label cp-equivalent-row">
         <span>Equivalent:</span>
-        <span class="ds-mono">{{ equivalent }}</span>
+        <span class="ds-mono" data-testid="clearing-equivalent">{{ shownEquivalent }}</span>
       </div>
 
-      <div v-if="state.error" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ state.error }}</div>
+      <div v-if="errorText" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ errorText }}</div>
 
       <template v-if="isConfirm">
         <div
@@ -95,46 +129,51 @@ const busyUi = computed(() => props.busy || isRunning.value)
         </div>
 
         <div class="ds-row ds-row--actions cp-actions">
-          <button class="ds-btn ds-btn--primary" type="button" :disabled="busyUi" @click="onConfirm">
+          <button class="ds-btn ds-btn--primary" type="button" data-testid="clearing-confirm" :disabled="busyUi" @click="onConfirm">
             {{ busyUi ? 'Running…' : 'Confirm' }}
           </button>
-          <button class="ds-btn ds-btn--ghost" type="button" :disabled="busyUi" @click="cancel">Cancel</button>
-        </div>
-      </template>
-
-      <template v-else-if="isPreview">
-        <div
-          v-if="!last"
-          class="ds-help"
-          data-testid="clearing-preview-loading"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          Preparing preview… <span class="cp-spinner" aria-hidden="true" />
-        </div>
-        <div v-else class="ds-stack cp-preview-stack" role="status" aria-live="polite" aria-atomic="true">
-          <div class="ds-label">
-            Cycles: <span class="ds-mono">{{ cyclesCount }}</span>
-          </div>
-          <div class="ds-label">
-            Total cleared: <span class="ds-mono">{{ last.total_cleared_amount }} {{ equivalent }}</span>
-          </div>
-
-          <ol v-if="cycles.length" class="ds-mono cp-cycles">
-            <li v-for="(c, i) in cycles" :key="i">
-              {{ c.cleared_amount }} {{ equivalent }} · edges: {{ c.edges.length }}
-            </li>
-          </ol>
+          <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-cancel" :disabled="busyUi" @click="cancel">Cancel</button>
         </div>
       </template>
 
       <template v-else>
-        <div class="ds-help" role="status" aria-live="polite" aria-atomic="true">Running…</div>
+        <div
+          v-if="waiting"
+          class="ds-help"
+          data-testid="clearing-running"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {{ interactText('clearingRunning') }} <span class="cp-spinner" aria-hidden="true" />
+        </div>
+
+        <div v-else-if="nothingCleared" class="ds-help" data-testid="clearing-nothing" role="status" aria-live="polite" aria-atomic="true">
+          {{ interactText('clearingNothing') }}
+        </div>
+
+        <div v-else-if="last" class="ds-stack cp-preview-stack" data-testid="clearing-result" role="status" aria-live="polite" aria-atomic="true">
+          <div class="ds-label">
+            {{ interactText('clearingCycles') }}: <span class="ds-mono" data-testid="clearing-cycles">{{ cyclesCount }}</span>
+          </div>
+          <div class="ds-label" data-testid="clearing-total">
+            {{ interactText('clearingTotal') }}: <span class="ds-mono">{{ last.total_cleared_amount }} {{ resultUnit }}</span>
+          </div>
+          <div class="ds-help ds-muted" data-testid="clearing-total-note">{{ interactText('clearingTotalNote') }}</div>
+
+          <div v-for="(c, i) in cycles" :key="i" class="ds-stack cp-cycle" data-testid="clearing-cycle">
+            <div class="ds-label" data-testid="clearing-cycle-title">
+              {{ interactText('clearingCycle', { n: i + 1, total: cycles.length, amount: c.cleared_amount, unit: resultUnit }) }}
+            </div>
+            <ul class="cp-edges">
+              <li v-for="(e, k) in c.edges" :key="k" class="ds-help ds-mono" data-testid="clearing-edge-line">{{ edgeLine(e, c) }}</li>
+            </ul>
+          </div>
+        </div>
       </template>
 
       <div v-if="!isConfirm" class="ds-row ds-row--actions cp-actions">
-        <button class="ds-btn ds-btn--ghost" type="button" :disabled="busyUi" @click="cancel">Close</button>
+        <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-close" :disabled="closeDisabled" @click="cancel">Close</button>
       </div>
     </div>
   </div>
@@ -156,6 +195,15 @@ const busyUi = computed(() => props.busy || isRunning.value)
 
 .cp-preview-stack {
   gap: 6px;
+}
+
+.cp-cycle {
+  gap: 2px;
+}
+
+.cp-edges {
+  margin: 0;
+  padding-left: 18px;
 }
 
 .cp-spinner {
@@ -190,10 +238,62 @@ const busyUi = computed(() => props.busy || isRunning.value)
   }
 }
 
-.cp-cycles {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  max-height: var(--ds-cp-cycles-max-h);
-  overflow: auto;
+</style>
+
+<!--
+  037 C: the container of THIS panel on a phone-sized screen, by the same means as the payment panel (ManualPaymentPanel.vue, B1):
+  the window shell is owned by the window manager (inline position and width, `contain: layout style`), and its `data-win-type` is
+  shared by three panels, so the one handle on THIS shell is its content, through `:has()`. The manager is not edited.
+  A long result (many cycles, many edges) must not push Close off the screen: the window is bounded by the shell's own `max-height`,
+  the body scrolls INSIDE it, and the Close row stays in view. The whole block is in `@supports selector(:has(*))`: without
+  `:has()` none of it applies and the panel keeps the old layout. Narrow OR short screens (a phone held sideways is wider than 520).
+-->
+<style>
+@supports selector(:has(*)) {
+@media (max-width: 520px), (max-height: 520px) {
+  .ws-shell:has(> .ws-body > [data-testid='clearing-panel']) {
+    --cp-sticky-bg: var(--ds-surface-1);
+    display: flex;
+    flex-direction: column;
+  }
+
+  [data-theme='hud'] .ws-shell:has(> .ws-body > [data-testid='clearing-panel']) {
+    --cp-sticky-bg: var(--ds-surface-2);
+  }
+
+  .ws-shell:has(> .ws-body > [data-testid='clearing-panel']) > .ws-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .ws-shell > .ws-body > [data-testid='clearing-panel'] {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .ws-shell > .ws-body > [data-testid='clearing-panel'] > .ds-panel__header {
+    flex: 0 0 auto;
+  }
+
+  .ws-shell > .ws-body > [data-testid='clearing-panel'] > .ds-panel__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-padding-bottom: 56px;
+  }
+
+  /* The row with Confirm/Cancel/Close stays in view while a long result scrolls. */
+  .ws-shell > .ws-body > [data-testid='clearing-panel'] .cp-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--cp-sticky-bg, var(--ds-surface-1));
+  }
+}
 }
 </style>

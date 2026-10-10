@@ -46,7 +46,7 @@ describe('useInteractMode', () => {
       to_pid: 'bob',
       equivalent: 'UAH',
       amount: '1.00',
-      status: 'accepted',
+      status: 'COMMITTED',
       routes: [],
     }
   }
@@ -113,7 +113,7 @@ describe('useInteractMode', () => {
     }
   }
 
-  it('payment flow: idle -> picking -> confirm -> idle', async () => {
+  it('payment flow: idle -> picking -> confirm -> result (stays) -> idle on close', async () => {
     const snapshot = ref<GraphSnapshot | null>({
       equivalent: 'UAH',
       generated_at: '2026-01-01T00:00:00Z',
@@ -146,8 +146,13 @@ describe('useInteractMode', () => {
     await im.confirmPayment('1.00')
     expect(actions.sendPayment).toHaveBeenCalledWith('alice', 'bob', '1.00', 'UAH', expect.anything())
     expect(im.successMessage.value).toBe('Payment sent: 1.00 UAH')
-    expect(im.phase.value).toBe('idle')
+    // 037 A2: a committed payment is not closed silently - the result stays until it is dismissed.
+    expect(im.phase.value).toBe('confirm-payment')
+    expect(im.paymentOutcome.value).toMatchObject({ kind: 'success', paymentId: 'payment-1', fromName: 'Alice', toName: 'Bob' })
     expect(im.busy.value).toBe(false)
+    im.cancel()
+    expect(im.phase.value).toBe('idle')
+    expect(im.paymentOutcome.value).toBeNull()
   })
 
   it('trustline flow: goes to editing-trustline when link exists', () => {
@@ -327,7 +332,13 @@ describe('useInteractMode', () => {
     const equivalent = computed(() => 'UAH')
 
     // First instance: starts submit, then gets cancelled (should abort request).
-    const im1 = useInteractMode({ actions, runId, equivalent, snapshot })
+    // (Each instance has a storage of its own: the two coexist in one page, which a reload or a re-creation never does - the
+    // unresolved-payment storage is not what is being exercised here. `null` would mean "no storage" and NOT send.)
+    const memory = () => {
+      const m = new Map<string, string>()
+      return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) }
+    }
+    const im1 = useInteractMode({ actions, runId, equivalent, snapshot, intentStorage: memory() })
     im1.startPaymentFlow()
     im1.selectNode('alice')
     im1.selectNode('bob')
@@ -349,7 +360,7 @@ describe('useInteractMode', () => {
     expect(aborts).toBe(1)
 
     // Second instance: restart immediately; must not overlap with the previous in-flight submit.
-    const im2 = useInteractMode({ actions, runId, equivalent, snapshot })
+    const im2 = useInteractMode({ actions, runId, equivalent, snapshot, intentStorage: memory() })
     im2.startPaymentFlow()
     im2.selectNode('alice')
     im2.selectNode('bob')
@@ -372,7 +383,8 @@ describe('useInteractMode', () => {
     expect(im1.successMessage.value).toBe(null)
   })
 
-  it('clearing flow: confirm -> preview (>=800ms) -> running -> idle', async () => {
+  // 037 C: the result of a clearing is left by the user, not by a timer (the old contract: preview >= 800 ms -> running -> idle).
+  it('clearing flow: confirm -> awaiting the answer -> the result stays until the user closes it', async () => {
     vi.useFakeTimers()
     try {
       const snapshot = ref<GraphSnapshot | null>(null)
@@ -391,26 +403,21 @@ describe('useInteractMode', () => {
       expect(im.phase.value).toBe('clearing-preview')
       expect(im.busy.value).toBe(true)
 
-      // Even after the API resolves, preview should dwell at least 800ms.
       await Promise.resolve()
       await Promise.resolve()
       expect(actions.runClearing).toHaveBeenCalledTimes(1)
-      expect(im.phase.value).toBe('clearing-preview')
 
-      await vi.advanceTimersByTimeAsync(799)
-      expect(im.phase.value).toBe('clearing-preview')
-
-      await vi.advanceTimersByTimeAsync(1)
-      expect(im.phase.value).toBe('clearing-running')
-
-      // Running state should not immediately disappear in the same tick.
-      await vi.advanceTimersByTimeAsync(199)
-      expect(im.phase.value).toBe('clearing-running')
-
-      await vi.advanceTimersByTimeAsync(1)
+      // The answer is stored at once; no dwell, no running phase, no reset to idle by a timer.
+      await vi.advanceTimersByTimeAsync(60_000)
       await p
-      expect(im.phase.value).toBe('idle')
+      expect(im.phase.value).toBe('clearing-preview')
+      expect(im.state.lastClearing).not.toBeNull()
       expect(im.busy.value).toBe(false)
+
+      // Only the user ends it.
+      im.cancel()
+      expect(im.phase.value).toBe('idle')
+      expect(im.state.lastClearing).not.toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -748,10 +755,11 @@ describe('useInteractMode', () => {
       im.startClearingFlow()
       const p = im.confirmClearing()
 
-      await vi.advanceTimersByTimeAsync(1100)
+      await vi.advanceTimersByTimeAsync(60_000)
       await p
 
-      expect(im.phase.value).toBe('idle')
+      // "No cycles" is a result on the panel (until Close), not a reset to idle.
+      expect(im.phase.value).toBe('clearing-preview')
       expect(clearingDoneCallback).toHaveBeenCalledWith(
         expect.objectContaining({ cleared_cycles: 0, cycles: [] }),
       )
@@ -760,7 +768,7 @@ describe('useInteractMode', () => {
     }
   })
 
-  it('confirmPayment uses resetToIdle (not cancel) on success — epoch not double-incremented', async () => {
+  it('after a success the result stays; closing it and starting again works — epoch not corrupted', async () => {
     const snapshot = ref<GraphSnapshot | null>(null)
     const actions = mkActions()
     const runId = computed(() => 'run_test')
@@ -772,12 +780,14 @@ describe('useInteractMode', () => {
 
     await im.confirmPayment('10.00')
 
-    // After success: phase=idle, busy=false, no error
-    expect(im.phase.value).toBe('idle')
+    // After success: the result is on screen (037 A2), busy=false, no error
+    expect(im.phase.value).toBe('confirm-payment')
+    expect(im.paymentOutcome.value?.kind).toBe('success')
     expect(im.busy.value).toBe(false)
     expect(im.state.error).toBeNull()
 
-    // Subsequent action should work immediately (epoch not corrupted)
+    // Closing the result and starting again should work immediately (epoch not corrupted)
+    im.cancel()
     im.startPaymentFlow()
     expect(im.phase.value).toBe('picking-payment-from')
   })
