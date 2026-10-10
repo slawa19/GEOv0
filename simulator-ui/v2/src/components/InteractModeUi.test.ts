@@ -26,6 +26,7 @@ function paymentSuccess(): PaymentResult {
     equivalent: 'UAH',
     amount: '1.00',
     status: 'COMMITTED',
+    routes: [],
   }
 }
 
