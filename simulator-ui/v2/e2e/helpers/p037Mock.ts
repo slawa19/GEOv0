@@ -38,7 +38,8 @@ export async function mockApp(
   page: Page,
   o: { paymentRealBodies: Array<Record<string, unknown>>; trustlinesStatus?: number; paymentRealNetworkFailures?: { left: number };
     /** N more participants (`x01`..) that Alice can pay: a recipient list longer than the screen. */ extraTargets?: number;
-    /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean },
+    /** Three routes of four steps through `x01`..`x03` (needs `extraTargets` >= 3): a result longer than a phone screen. */ longRoutes?: boolean;
+    /** A second line, alice -> bob: Bob is a sender as well as Alice. */ bobCanPay?: boolean },
 ) {
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
@@ -77,7 +78,10 @@ export async function mockApp(
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/actions/trustlines-list`, 'i'), (r) =>
     o.trustlinesStatus && o.trustlinesStatus !== 200 ? json(r, { code: 'BOOM', message: 'down' }, o.trustlinesStatus) : json(r, {
       items: [{ from_pid: 'bob', from_name: 'Bob', to_pid: 'alice', to_name: 'Alice', equivalent: 'UAH',
-        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }],
+        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' },
+      // Bob can pay Alice too: both are senders (a correction of the sender has someone to correct to).
+      ...(o.bobCanPay ? [{ from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'UAH',
+        limit: '100.00', used: '0.00', reverse_used: '0.00', available: '100.00', status: 'active' }] : [])],
     }))
   await page.route(new RegExp(`/simulator/runs/${RUN_ID}/payment-targets`, 'i'), (r) => {
     const from = new URL(r.request().url()).searchParams.get('from_pid')

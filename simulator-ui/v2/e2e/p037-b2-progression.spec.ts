@@ -148,4 +148,73 @@ test.describe('037 B2 - progression in a real browser', () => {
     await expect(page.locator('#mp-from__surface')).toHaveCount(0)
     await expect(page.locator('#mp-to__surface')).toHaveCount(0)
   })
+
+  // A key HELD down sends keydown with repeat:true again and again. Playwright's keyboard.down() on a key that is already down does
+  // exactly that (the browser's own auto-repeat, without keyup). The gesture that CHOSE something must never reach a send.
+  const twoFrames = (page: Page) => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
+  async function holdEnter(page: Page, times: number) {
+    for (let i = 0; i < times; i += 1) {
+      await page.keyboard.down('Enter')
+      await twoFrames(page)
+    }
+  }
+
+  test('HELD ENTER: re-choosing the recipient at the confirm step (the amount holds a sum) and holding Enter sends nothing', async ({ page }) => {
+    const bodies: Array<Record<string, unknown>> = []
+    await openPanel(page, bodies, { extraTargets: 2 })
+    await page.locator('#mp-from__trigger').click()
+    await page.locator('#mp-from__surface [data-option-value="alice"]').click()
+    await page.locator('#mp-to__surface [data-option-value="bob"]').click()
+    await page.locator('#mp-amount').fill('1.00')
+
+    // Reopen the recipient list and choose a recipient with Enter, keeping the key down.
+    await page.locator('#mp-to__trigger').click()
+    await expect(page.locator('#mp-to__surface')).toBeVisible()
+    await page.locator('#mp-to__surface [data-option-value="x01"]').focus()
+    await holdEnter(page, 6)
+    await page.keyboard.up('Enter')
+    await twoFrames(page)
+
+    expect(bodies.length, 'requests sent to payment-real by a held Enter').toBe(0)
+    await expect(page.locator('[data-testid="mp-result"]')).toHaveCount(0)
+  })
+
+  test('HELD ENTER: through the first pass (the sender chosen, then the recipient, the amount still empty) sends nothing', async ({ page }) => {
+    const bodies: Array<Record<string, unknown>> = []
+    await openPanel(page, bodies)
+    await page.locator('#mp-from__trigger').focus()
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.down('Enter') // chooses the sender and keeps the key down
+    await twoFrames(page)
+    await holdEnter(page, 4)
+    await page.keyboard.up('Enter')
+    expect(bodies.length).toBe(0)
+
+    // Recipient by keyboard, Enter held after choosing it: the amount is empty, nothing is sent.
+    if (!(await page.locator('#mp-to__surface').isVisible())) { await page.locator('#mp-to__trigger').focus(); await page.keyboard.press('Enter') }
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.down('Enter')
+    await twoFrames(page)
+    await holdEnter(page, 4)
+    await page.keyboard.up('Enter')
+    await twoFrames(page)
+    expect(bodies.length, 'requests sent to payment-real by a held Enter').toBe(0)
+  })
+
+  test('CORRECTION: changing the sender at the confirm step opens no recipient list', async ({ page }) => {
+    const bodies: Array<Record<string, unknown>> = []
+    await openPanel(page, bodies, { bobCanPay: true })
+    await page.locator('#mp-from__trigger').click()
+    await page.locator('#mp-from__surface [data-option-value="alice"]').click()
+    await page.locator('#mp-to__surface [data-option-value="bob"]').click()
+    await page.locator('#mp-amount').fill('1.00')
+
+    await page.locator('#mp-from__trigger').click()
+    await page.locator('#mp-from__surface [data-option-value="bob"]').click()
+    await twoFrames(page)
+    await expect(page.locator('#mp-to__surface')).toHaveCount(0)
+    expect(await activeId(page), 'the focus stays on the sender trigger').toBe('mp-from__trigger')
+    expect(bodies).toHaveLength(0)
+  })
 })
