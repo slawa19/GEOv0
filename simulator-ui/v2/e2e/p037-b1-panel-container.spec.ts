@@ -192,7 +192,7 @@ for (const vp of VIEWPORTS) {
       if (vp.h <= 667) expect.soft(scrolls, `on ${vp.w}x${vp.h} the long result must scroll inside the window`).toBe(true)
     })
 
-    test('only the payment panel window is re-shaped: the clearing and the trustline windows keep the manager layout', async ({ page }) => {
+    test('each panel re-shapes only ITS OWN window: the payment rules do not reach the clearing window, the trustline window keeps the manager layout', async ({ page }) => {
       await mockApp(page, { paymentRealBodies: [] })
       await page.goto('/?mode=real&ui=interact&e2eReal=1')
       await ready(page, true)
@@ -214,7 +214,9 @@ for (const vp of VIEWPORTS) {
 
       await page.locator('[data-testid="actionbar-clearing"]').tap()
       await expect(page.locator('[data-testid="clearing-panel"]')).toBeVisible()
-      expect(await shellStyle('clearing-panel'), 'the clearing window').toEqual({ display: 'block', dropdownMax: '', bodyDisplay: 'block' })
+      // 037 C: the clearing panel has its OWN override (its own selector, its own file); what it must NOT have is the payment panel's
+      // (the dropdown cap): the payment selector does not match this window.
+      expect(await shellStyle('clearing-panel'), 'the clearing window: its own re-shape, not the payment one').toEqual({ display: 'flex', dropdownMax: '', bodyDisplay: 'flex' })
       await page.keyboard.press('Escape')
       await expect(page.locator('[data-testid="clearing-panel"]')).toBeHidden()
 
