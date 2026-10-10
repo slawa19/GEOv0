@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
 import { useInteractFSM } from '../composables/interact/useInteractFSM'
+import { interactText } from '../i18n/interactStrings'
 
 afterEach(() => { document.body.innerHTML = '' })
 async function settle() { for (let i = 0; i < 5; i += 1) await nextTick() }
@@ -15,7 +16,7 @@ async function settle() { for (let i = 0; i < 5; i += 1) await nextTick() }
 const PEOPLE = [{ pid: 'alice', name: 'Alice' }, { pid: 'bob', name: 'Bob' }, { pid: 'carol', name: 'Carol' }]
 const q = (host: HTMLElement, id: string) => host.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const text = (host: HTMLElement, id: string) => (q(host, id)?.textContent ?? '').replace(/\s+/g, ' ').trim()
-const NOTE = 'The line runs from creditor to debtor, so a payment started from it goes the other way: the debtor pays the creditor. That adds to the debtor’s debt on this line (after offsetting any debt the creditor owes back); it does not repay it.'
+const NOTE = interactText('lineDirectionNote')
 
 function mountPanel(start: (fsm: ReturnType<typeof useInteractFSM>) => void) {
   const host = document.createElement('div')
@@ -95,7 +96,9 @@ describe('the sentence follows the pair the panel was opened with, however the p
     expect(q(host, 'mp-line-direction-note')).not.toBeNull()
   })
 
-  it('the sentence says that paying does not repay the debt on this line', () => {
-    expect(NOTE).toContain('it does not repay it')
+  it('the sentence does not promise that the payment goes through this line, nor that it repays the debt', () => {
+    expect(NOTE).toContain('The server may route some or all of the payment through other participants.')
+    expect(NOTE).toContain('it does not repay that debt')
+    expect(NOTE).not.toMatch(/adds to the debtor.s debt on this line/)
   })
 })
