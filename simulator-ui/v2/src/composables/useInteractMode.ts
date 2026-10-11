@@ -140,8 +140,8 @@ export function useInteractMode(opts: {
   paymentToTargetIds: ComputedRef<Set<string> | undefined>
 
   /**
-   * BACKLOG 037-5 (c): the last answer the server gave for the current sender (run, eq, fromPid, maxHops), possibly one
-   * revision behind; `undefined` until there is one. For the list shown while the routes are updating - not a gate.
+   * BACKLOG 037-5 (c): the last answer the server gave for the current sender (run, eq, fromPid, maxHops), of any
+   * age (it lives until the run or the equivalent changes); `undefined` until there is one. For the list shown while the routes are updating - not a gate.
    */
   paymentToLastKnownTargetIds: ComputedRef<Set<string> | undefined>
 

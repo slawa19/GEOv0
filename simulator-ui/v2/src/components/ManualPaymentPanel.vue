@@ -44,7 +44,8 @@ type Props = {
    */
   paymentToTargetIds: Set<string> | undefined
   /**
-   * BACKLOG 037-5 (c): the server's last answer for this sender, possibly one revision behind; `undefined` until there is
+   * BACKLOG 037-5 (c): the server's last answer for this sender, of ANY age (one revision behind under a stream of
+   * events; arbitrarily old for a sender not chosen for a while, until the run or the equivalent changes); `undefined` until there is
    * one. Read ONLY while the routes are loading, to have a list to choose from; it never counts as known.
    */
   paymentToLastKnownTargetIds?: Set<string>
@@ -473,6 +474,10 @@ const toListUpdating = computed(() => {
   return routesLoading.value
 })
 
+function noRoutesFromSenderText(): string {
+  return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).${notActiveNote(props.state.fromPid, 'sender')}`
+}
+
 const toInlineHelpText = computed<string | null>(() => {
   if (props.phase === 'confirm-payment') return null
   if (!props.state.fromPid) return null
@@ -480,18 +485,18 @@ const toInlineHelpText = computed<string | null>(() => {
   const targets = dropdownToTargetIds.value
   if (targets === undefined) {
     if (routesLoading.value) {
-      return toListWhileUpdating.value
-        ? 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.'
-        : 'Routes are updating; a recipient can be chosen once the server answers.'
+      const last = toListWhileUpdating.value
+      if (!last) return 'Routes are updating; a recipient can be chosen once the server answers.'
+      // An EMPTY last answer is the server's "no routes", not a list: the same text as for the known-empty list, marked as updating.
+      if (last.size === 0) return `${noRoutesFromSenderText()} Routes are updating.`
+      return 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.'
     }
     if (props.paymentTargetsLastError || props.trustlinesLastError) {
       return 'Routes update failed; showing fallback data. Some recipients may be unreachable.'
     }
     return null
   }
-  if (targets.size === 0) {
-    return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).${notActiveNote(props.state.fromPid, 'sender')}`
-  }
+  if (targets.size === 0) return noRoutesFromSenderText()
 
   if (props.trustlinesLastError) {
     return 'Routes update failed; showing fallback data. Some recipients may be missing.'

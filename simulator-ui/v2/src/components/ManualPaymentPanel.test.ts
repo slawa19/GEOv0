@@ -1962,6 +1962,26 @@ describe('BACKLOG 037-5: what the recipient step says and lets the user choose',
       { pid: 'bob', name: 'Bob', type: 'person', status: 'active' },
     ]
 
+    it('while the routes are updating, an EMPTY last answer says "no payment routes" and the status of the sender, marked as updating', async () => {
+      const updating = { paymentTargetsLoading: true, paymentToTargetIds: undefined, paymentToLastKnownTargetIds: new Set<string>() }
+      const frozen = await mountPanel({ participants: withAlice('frozen'), ...updating })
+      expect(frozen.helpText()).toContain('Backend reports no payment routes from selected sender')
+      expect(frozen.helpText()).toContain('Selected sender is not active (status: frozen)')
+      expect(frozen.helpText()).toContain('Routes are updating')
+      expect(frozen.helpText()).not.toContain('may include unreachable recipients')
+      frozen.done()
+
+      // anti-vacuum: the emptiness alone says nothing about the sender; a non-empty last answer keeps its own text
+      const active = await mountPanel({ participants: withAlice('active'), ...updating })
+      expect(active.helpText()).toContain('Backend reports no payment routes from selected sender')
+      expect(active.helpText()).not.toContain('not active')
+      active.done()
+      const listed = await mountPanel({ participants: withAlice('frozen'), ...updating, paymentToLastKnownTargetIds: new Set(['bob']) })
+      expect(listed.helpText()).toContain('the list is the last answer of the server')
+      expect(listed.helpText()).not.toContain('no payment routes')
+      listed.done()
+    })
+
     it('an empty recipient list names the status of the sender, as the server sent it', async () => {
       for (const status of ['frozen', 'suspended']) {
         const p = await mountPanel({ participants: withAlice(status), canSendPayment: false })
