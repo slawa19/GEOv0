@@ -56,7 +56,7 @@ describe('F-028-47: a snapshot of one equivalent never feeds another', () => {
     const event = { event_id: 'e', ts: 'x', type: 'tx.updated', equivalent: 'HOUR', ttl_ms: 1, edges: [],
       edge_patch: [{ source: 'alice', target: 'bob', used: '5' }] } as TxUpdatedEvent
     const intents = applyAcceptedRealEvent(event, 'run_1', draft, { patchApplier: { applyNodePatches: vi.fn(),
-      applyEdgePatches }, isUserFacingRunError: () => false, inc: vi.fn() })
+      applyEdgePatches, applyNodeStatus: vi.fn(), applyEdgeStatus: vi.fn() }, isUserFacingRunError: () => false, inc: vi.fn() })
     expect(applyEdgePatches).not.toHaveBeenCalled()
     expect(intents.map((i) => i.type)).not.toContain('tx-fx')
   })

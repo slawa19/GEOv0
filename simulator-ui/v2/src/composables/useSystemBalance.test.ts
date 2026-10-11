@@ -147,7 +147,10 @@ describe('useSystemBalance', () => {
     scope.stop()
   })
 
-  it('ignores closed/inactive links in totals', () => {
+  // 034 S8 (F-034-D1), changed on purpose: this case used to pin that the debt of a line that is not active
+  // (`used: '999'` here) is dropped from Total Debt - the defect itself. A line that is not active gives no
+  // capacity and is not counted; a debt the snapshot reports on it is still a debt.
+  it('a closed/inactive link gives no capacity and is not counted; its debt stays in the total', () => {
     const links = [
       makeLink('alice', 'shop', { used: '500', available: '500', status: 'active' }),
       makeLink('shop', 'alice', { used: '999', available: '1', status: 'closed' }),
@@ -164,7 +167,7 @@ describe('useSystemBalance', () => {
 
     const b = balance!.value
     expect(b.activeTrustlines).toBe(1)
-    expect(Number(b.totalUsed)).toBeCloseTo(500, 5)
+    expect(Number(b.totalUsed)).toBeCloseTo(1499, 5)
     expect(Number(b.totalAvailable)).toBeCloseTo(500, 5)
 
     scope.stop()

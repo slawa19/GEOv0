@@ -121,7 +121,7 @@ function createHarness() {
 
       loadScene: async () => undefined,
       loadRecoveryScene: async () => true,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 1200,
 

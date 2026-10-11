@@ -38,6 +38,8 @@ type UseSceneStateDeps = {
   state: SceneState
 
   loadSnapshot: LoadSnapshotFn
+  /** The `sourcePath` the latest `loadSnapshot` call asked for, known before it answers (null: unknown). */
+  requestedSceneSource?: () => string | null
   loadRecoverySnapshot?: LoadRecoverySnapshotFn
 
   clearScheduledTimeouts: (opts?: { keepCritical?: boolean }) => void
@@ -80,10 +82,6 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   // When node IDs are the same, we can skip costly resets (camera, overlays, layout animation).
   let lastSnapshotNodeIds: Set<string> | null = null
   let hasLoadedOnce = false
-
-  function getErrorMessage(error: unknown): string {
-    return extractErrorMessage(error)
-  }
 
   function parseSceneContext(sourcePath: string | null | undefined): { kind: 'scenario' | 'run' | 'other'; id: string } {
     const s = String(sourcePath ?? '').trim()
@@ -134,6 +132,16 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       if (!oldIds.has(n.id)) return false
     }
     return true
+  }
+
+  function clearScene() {
+    deps.clearScheduledTimeouts()
+    deps.resetCamera()
+    deps.state.sourcePath = ''
+    deps.state.snapshot = null
+    deps.resetLayoutKeyCache()
+    deps.state.selectedNodeId = null
+    deps.resetOverlays()
   }
 
   async function applySceneLoad(input: {
@@ -190,16 +198,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // want to keep camera + node positions stable to avoid a visible "graph jump".
       const isStructuralChange = !isIncrementalUpdate || deps.state.snapshot?.nodes.length !== snapshot.nodes.length
 
-      if (!isIncrementalUpdate) {
-        // Full reload: clear everything (including critical timers) because we're changing scene context.
-        deps.clearScheduledTimeouts()
-        deps.resetCamera()
-        deps.state.sourcePath = ''
-        deps.state.snapshot = null
-        deps.resetLayoutKeyCache()
-        deps.state.selectedNodeId = null
-        deps.resetOverlays()
-      }
+      // Full reload: clear everything (including critical timers) because we're changing scene context.
+      if (!isIncrementalUpdate) clearScene()
 
       deps.state.snapshot = snapshot
       deps.state.sourcePath = sourcePath
@@ -222,7 +222,21 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       return true
     } catch (error) {
       if (!isCurrent()) return false
-      deps.state.error = getErrorMessage(error)
+      // 034 S8 (review C1): the scene on screen is kept under the error only when the failed load asked for the
+      // SAME source. A load for another run, scenario or equivalent that fails clears the scene MODEL
+      // (`snapshot = null`): events of the new context are no longer applied to the old graph. (Not applied to
+      // replay recovery.)
+      // BOUNDARY - what this does NOT do: the canvases are not repainted. With no snapshot the render loop returns
+      // before its `clearRect` (`useRenderLoop.ts`) and may be asleep, so the PIXELS of the old graph can stay on
+      // screen under the error, and event-driven floating labels (`realEventPipeline.ts` -> `useOverlayState.ts`,
+      // drawn by `SimulatorAppRoot.vue`) can still appear at positions of the old layout. Open; receiver:
+      // programme 038, slice S1 (BACKLOG, the S8 entry of 2026-10-11).
+      const requested = input.recoveryContext ? null : (deps.requestedSceneSource?.() ?? null)
+      if (requested !== null && deps.state.snapshot && deps.state.sourcePath !== requested) {
+        clearScene()
+        lastSnapshotNodeIds = null
+      }
+      deps.state.error = extractErrorMessage(error)
       if (input.rethrow) throw error
       return false
     } finally {

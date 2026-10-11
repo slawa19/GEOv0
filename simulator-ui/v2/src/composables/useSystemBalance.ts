@@ -61,12 +61,16 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
 
     let totalUsed = '0'
     let totalAvailable = '0'
+    let usableUsed = '0'
     let activeTrustlines = 0
 
     for (const l of snap.links ?? []) {
+      // 034 S8 (F-034-D1): a debt exists whatever the state of its line - freezing is not repayment. Only the
+      // capacity and the count below belong to usable lines.
+      totalUsed = addMoney(totalUsed, l.used)
       if (!isActiveStatus(l.status)) continue
       activeTrustlines += 1
-      totalUsed = addMoney(totalUsed, l.used)
+      usableUsed = addMoney(usableUsed, l.used)
       // 026 `T2602`: a negative `available` is the debt's excess over a lowered limit, not negative capacity;
       // it adds nothing here (its debt is already in `totalUsed`).
       const available = moneyText(l.available)
@@ -78,9 +82,10 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
       if (isActiveStatus(n.status)) activeParticipants += 1
     }
 
-    // A share, not money: the exact totals are only converted for the ratio.
-    const denom = Number(addMoney(totalUsed, totalAvailable))
-    const utilization = denom > 0 ? Number(totalUsed) / denom : 0
+    // A share, not money: the exact totals are only converted for the ratio. One base for both parts - the usable
+    // lines: the debt of a frozen line is in Total Debt, but not over a capacity that line is not part of.
+    const denom = Number(addMoney(usableUsed, totalAvailable))
+    const utilization = denom > 0 ? Number(usableUsed) / denom : 0
 
     return {
       totalUsed,

@@ -1,23 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { FX_CONFIG, intensityScale } from './fxConfig'
 
-describe('FX_CONFIG structure', () => {
-  it('clearing is canonical (mode-agnostic) and contains expected keys', () => {
-    const clearing = FX_CONFIG.clearing
-
-    expect(clearing).toHaveProperty('microGapMs')
-    expect(clearing).toHaveProperty('labelLifeMs')
-    expect(clearing).toHaveProperty('sourceBurstMs')
-    expect(clearing).toHaveProperty('targetBurstMs')
-    expect(clearing).toHaveProperty('cleanupPadMs')
-    expect(clearing).toHaveProperty('labelThrottleMs')
-    expect(clearing).toHaveProperty('highlightPulseMs')
-    expect(clearing).toHaveProperty('microTtlMs')
-    expect(clearing).toHaveProperty('highlightThickness')
-    expect(clearing).toHaveProperty('microThickness')
-    expect(clearing).toHaveProperty('nodeBurstMs')
-  })
-})
+// 034 S8 (F-034-D15): the case `FX_CONFIG structure` was removed together with its subject - it asserted that the
+// `clearing` group had eleven keys, and nothing in the runtime read that group. What must hold now is the
+// opposite statement, kept by `fxConfig.deadSettings.p034.test.ts`: the config has no group that nobody reads.
 
 describe('intensityScale', () => {
   it('returns 1 for empty/undefined input', () => {

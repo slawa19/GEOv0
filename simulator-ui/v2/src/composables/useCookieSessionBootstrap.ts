@@ -17,10 +17,6 @@ export function useCookieSessionBootstrap(deps: {
   const ownerId = ref<string | null>(null)
   const bootstrapping = ref(false)
 
-  function getErrorMessage(error: unknown): string {
-    return extractErrorMessage(error)
-  }
-
   async function tryEnsure(): Promise<void> {
     if (!deps.isRealMode.value) return
     if (String(deps.accessToken.value ?? '').trim()) return
@@ -33,7 +29,7 @@ export function useCookieSessionBootstrap(deps: {
       actorKind.value = res.actor_kind
       ownerId.value = res.owner_id
     } catch (error: unknown) {
-      console.warn('[GEO] Cookie session bootstrap failed:', getErrorMessage(error))
+      console.warn('[GEO] Cookie session bootstrap failed:', extractErrorMessage(error))
     } finally {
       bootstrapping.value = false
     }

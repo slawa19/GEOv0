@@ -206,7 +206,7 @@ function createSseCharacterizationHarness(opts?: {
 
     loadScene,
     loadRecoveryScene,
-    realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+    realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
     pushTxAmountLabel,
     clampRealTxTtlMs: () => 1200,
 
@@ -273,7 +273,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       loadScene,
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -345,7 +345,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       loadScene,
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -420,7 +420,7 @@ describe('useSimulatorRealMode - admin helpers', () => {
       inc: () => undefined,
 
       loadScene,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -468,7 +468,7 @@ describe('useSimulatorRealMode - admin helpers', () => {
       inc: () => undefined,
 
       loadScene: async () => undefined,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -527,7 +527,7 @@ describe('useSimulatorRealMode - startRun conflict attach', () => {
       inc: () => undefined,
 
       loadScene,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout: () => undefined,
@@ -585,7 +585,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isUserFacingRunError: () => false,
       inc: () => undefined,
       loadScene: vi.fn(async () => undefined),
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
@@ -643,7 +643,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isUserFacingRunError: () => false,
       inc: () => undefined,
       loadScene: vi.fn(async () => undefined),
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
@@ -705,7 +705,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isUserFacingRunError: () => false,
       inc: () => undefined,
       loadScene: vi.fn(async () => undefined),
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
@@ -765,7 +765,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       loadScene: vi.fn(async () => undefined),
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
 
@@ -886,7 +886,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       loadScene: vi.fn(async () => undefined),
 
-      realPatchApplier: { applyNodePatches, applyEdgePatches },
+      realPatchApplier: { applyNodePatches, applyEdgePatches, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
 
@@ -994,7 +994,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       loadScene: vi.fn(async () => undefined),
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
 
@@ -1084,7 +1084,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
         ttl_ms: 1200,
         edges: [{ from: 'A', to: 'B' }],
       })
-      throw new Error('SSE HTTP 404 Not Found')
+      throw new ApiError('SSE HTTP 404 Not Found', { status: 404 })
     })
 
     const harness = createSseCharacterizationHarness({ lastEventId: 'evt_previous' })
@@ -1241,7 +1241,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     let statusCalls = 0
 
     connectSseMock.mockResolvedValue(undefined)
-    connectSseMock.mockRejectedValueOnce(new Error('SSE HTTP 410 Gone'))
+    connectSseMock.mockRejectedValueOnce(new ApiError('SSE HTTP 410 Gone', { status: 410 }))
     getRunMock.mockImplementation(async (...args) => {
       statusCalls += 1
       if (statusCalls === 1) return await prevGetRunImpl(...args)
@@ -1287,7 +1287,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       if (connectionCount === 1) {
         firstConnection.resolve()
         await rejectFirstConnection.promise
-        throw new Error('SSE HTTP 410 Gone')
+        throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       }
       emitRunStatusBootstrap(opts, 'evt_r1_000100')
       secondConnection.resolve()
@@ -1343,7 +1343,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, 'evt_r1_000200')
       secondConnection.resolve()
       await waitForAbort(opts.signal)
@@ -1405,7 +1405,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, `evt_r1_00030${seenCursors.length}`)
       if (seenCursors.length === 2) {
         await waitForAbort(opts.signal)
@@ -1461,7 +1461,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (seenCursors.length === 2) throw new Error('SSE HTTP 503 recovery unavailable')
       emitRunStatusBootstrap(opts, 'evt_r1_000400')
       recoveredConnection.resolve()
@@ -1503,7 +1503,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, 'evt_r1_000450')
       await waitForAbort(opts.signal)
     })
@@ -1553,7 +1553,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       })
     connectSseMock.mockImplementation(async () => {
       connectionCalls += 1
-      throw new Error('SSE HTTP 410 Gone')
+      throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
     })
 
     const harness = createSseCharacterizationHarness({ lastEventId: 'evt_expired' })
@@ -1586,7 +1586,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
       connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
         connectionCalls += 1
-        if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+        if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
         emitRunStatusBootstrap(opts, 'evt_r1_000460', 'r1', 'stopped')
         if (order === 'snapshot-first') await releaseConnection.promise
       })
@@ -1637,7 +1637,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (connectionCalls === 2) {
         emitRunStatusBootstrap(opts, 'evt_r1_000500')
         emitSsePayload(opts, {
@@ -1714,7 +1714,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (connectionCalls === 2) {
         emitRunStatusBootstrap(opts, 'evt_r1_000510')
         await waitForAbort(opts.signal)
@@ -1810,7 +1810,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     let staleSnapshotApplied = 0
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
-      if (opts.lastEventId !== null) throw new Error('SSE HTTP 410 Gone')
+      if (opts.lastEventId !== null) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       recoverySignal = opts.signal
       emitRunStatusBootstrap(opts, 'evt_r1_000520')
       return
@@ -1859,7 +1859,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (connectionCalls === 2) {
         opts.onMessage({
           id: 'evt_r1_wrong',
@@ -1955,7 +1955,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, 'evt_r1_000600')
       for (let index = 0; index < 600; index += 1) {
         emitSsePayload(opts, {
@@ -2025,7 +2025,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       if (seenCursors.length === 1) {
         firstConnection.resolve()
         await rejectFirstConnection.promise
-        throw new Error('SSE HTTP 410 Gone')
+        throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       }
       emitRunStatusBootstrap(opts, 'evt_r1_000998')
       await recoverySnapshotStarted.promise
@@ -2187,7 +2187,7 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
         isUserFacingRunError: isUserFacingRunErrorCode,
         inc: () => undefined,
         loadScene: async () => undefined,
-        realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+        realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
         pushTxAmountLabel: () => undefined,
         clampRealTxTtlMs: () => 0,
         scheduleTimeout: () => undefined,
@@ -2228,6 +2228,405 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
       expect(real.lastError).toBe('')
     } finally {
       getRunMock.mockImplementation(prevGetRunImpl)
+    }
+  })
+})
+
+/**
+ * 034 S8, F-034-D14 (reproducers of T3404): a failure is classified by its HTTP status, not by words in its message.
+ *
+ * The message of a transport error carries the answer's body (`api/sse.ts`, `api/http.ts`), so a search for
+ * `HTTP 404`, ` 410 ` or `Not Found` in it reads the server's prose. Two ways to be wrong: a 5xx whose body mentions
+ * such words drops a live run; a 404/410 worded differently is not recognised.
+ *
+ * `connectSse` is mocked here; that the real transport puts the status on its error is `api/sse.test.ts`.
+ */
+describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-034-D14)', () => {
+  async function untilReconnecting(harness: ReturnType<typeof createSseCharacterizationHarness>) {
+    for (let i = 0; i < 50 && harness.real.sseState !== 'reconnecting' && harness.real.runId; i += 1) {
+      await Promise.resolve()
+      await nextTick()
+    }
+  }
+
+  it('an SSE 500 whose body mentions "HTTP 404" does not drop the live run', async () => {
+    vi.useFakeTimers()
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async () => {
+      throw new ApiError('SSE HTTP 500 Internal Server Error: upstream said HTTP 404', { status: 500 })
+    })
+
+    const harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await untilReconnecting(harness)
+
+      expect(harness.real.runId, 'a server error was read as "the run is gone"').toBe('r1')
+      expect(harness.real.lastError).toContain('SSE HTTP 500')
+      expect(harness.real.sseState).toBe('reconnecting')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+      vi.useRealTimers()
+    }
+  })
+
+  it('an SSE 404 resets the stale run whatever its message says', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    const staleReset = deferred()
+    connectSseMock.mockImplementation(async () => {
+      throw new ApiError('the run does not exist', { status: 404 })
+    })
+
+    const harness = createSseCharacterizationHarness()
+    harness.cleanupRealRunFxAndTimers.mockImplementation(() => staleReset.resolve())
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await Promise.race([staleReset.promise, untilReconnecting(harness)])
+
+      expect(harness.real.runId, 'a 404 was not recognised as a stale run').toBeNull()
+      expect(harness.real.lastError).toBe('')
+      expect(harness.real.sseState).toBe('idle')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+    }
+  })
+
+  it('an SSE 410 drops the replay cursor whatever its message says', async () => {
+    vi.useFakeTimers()
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    const seenCursors: Array<string | null | undefined> = []
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      seenCursors.push(opts.lastEventId)
+      if (seenCursors.length === 1) throw new ApiError('the cursor is too old', { status: 410 })
+      await waitForAbort(opts.signal)
+    })
+
+    const harness = createSseCharacterizationHarness({ lastEventId: 'evt_r1_1' })
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(2000)
+
+      expect(harness.real.lastEventId, 'a 410 was not recognised: the dead cursor is kept').toBeNull()
+      expect(seenCursors).toEqual(['evt_r1_1', null])
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+      vi.useRealTimers()
+    }
+  })
+
+  it('an SSE 500 whose body mentions "410" keeps the replay cursor', async () => {
+    vi.useFakeTimers()
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    connectSseMock.mockImplementation(async () => {
+      throw new ApiError('SSE HTTP 500 Internal Server Error: limit 410 reached', { status: 500 })
+    })
+
+    const harness = createSseCharacterizationHarness({ lastEventId: 'evt_r1_1' })
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await untilReconnecting(harness)
+
+      expect(harness.real.lastEventId, 'a server error was read as "the cursor is gone"').toBe('evt_r1_1')
+      expect(harness.loadRecoveryScene).not.toHaveBeenCalled()
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+      vi.useRealTimers()
+    }
+  })
+
+  it('Stop that fails with a 500 whose text says "Not Found" keeps the run and shows the error', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const stopRunMock = vi.mocked(stopRun)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const prevStopImpl = stopRunMock.getMockImplementation()
+    if (!prevStopImpl) throw new Error('expected stopRun mock implementation')
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      await waitForAbort(opts.signal)
+    })
+    stopRunMock.mockRejectedValueOnce(
+      new ApiError('HTTP 500 Internal Server Error for /simulator/runs/r1/stop: equivalent Not Found', { status: 500 }),
+    )
+
+    const harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+
+      await harness.h.stop()
+
+      expect(harness.real.runId, 'a failed stop was read as "the run is gone"').toBe('r1')
+      expect(harness.real.lastError).toContain('HTTP 500')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      stopRunMock.mockImplementation(prevStopImpl)
+    }
+  })
+
+  it('CONTRACT: Stop answered with a 404 is idempotent - the run is reset without an error', async () => {
+    const connectSseMock = vi.mocked(connectSse)
+    const stopRunMock = vi.mocked(stopRun)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const prevStopImpl = stopRunMock.getMockImplementation()
+    if (!prevStopImpl) throw new Error('expected stopRun mock implementation')
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      await waitForAbort(opts.signal)
+    })
+    stopRunMock.mockRejectedValueOnce(new ApiError('HTTP 404 Not Found for /simulator/runs/r1/stop', { status: 404 }))
+
+    const harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+
+      await harness.h.stop()
+
+      expect(harness.real.runId).toBeNull()
+      expect(harness.real.lastError).toBe('')
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevConnectImpl)
+      stopRunMock.mockImplementation(prevStopImpl)
+    }
+  })
+})
+
+/**
+ * 034 S8 (narrowed after the adversarial pass, finding F1): the reconnect back-off counts attempts that failed in a
+ * row, and a connection resets it only when it has PROVED itself by its lifetime: it delivered a frame and stayed
+ * open for at least the top step of the ladder. The first frame alone resets nothing - an answered connection
+ * delivers one at once (the bootstrap `run_status`, or replayed data events before it), so "a frame arrived" is
+ * true also of a connection that a proxy or the server (slow subscriber) closes straight away.
+ *
+ * `Math.random` is pinned to 0.5: the jitter is zero and the steps are exactly 1, 2, 5, 10, 20, 20 s. The clock is
+ * the fake one (`Date.now` moves with the timers).
+ */
+describe('useSimulatorRealMode - 034 S8: the reconnect back-off and a connection that worked', () => {
+  /** `plan(n)` says how long the n-th connection lives (ms) after its bootstrap frame; undefined - until aborted. */
+  async function stand(plan: (connection: number) => number | undefined, dropWithError = false, silentFrom = Infinity) {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    const openedAt: number[] = []
+    const t0 = Date.now()
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      openedAt.push(Date.now() - t0)
+      const n = openedAt.length
+      if (n < silentFrom) emitRunStatusBootstrap(opts, `evt_r1_${n}`)
+      const lifeMs = plan(n)
+      if (lifeMs === undefined) return waitForAbort(opts.signal)
+      if (lifeMs > 0) await new Promise((resolve) => setTimeout(resolve, lifeMs))
+      if (dropWithError && lifeMs > 0) throw new TypeError('network error')
+    })
+    const harness = createSseCharacterizationHarness()
+    harness.isRealModeRef.value = true
+    await nextTick()
+    return {
+      openedAt,
+      cleanup: () => {
+        harness.h.stopSse()
+        restoreConnectSseImplementation(prevImpl)
+        randomSpy.mockRestore()
+        vi.useRealTimers()
+      },
+    }
+  }
+
+  it('a server that sends the bootstrap frame and closes: 60 s give the connections of the plain ladder, not one a second', async () => {
+    const s = await stand(() => 0)
+    try {
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(s.openedAt, 'the first frame reset the back-off').toEqual([0, 1000, 3000, 8000, 18_000, 38_000, 58_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a connection that lived for the top step of the ladder and then dropped: the next reconnect comes after the FIRST step', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 20_000 : undefined))
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
+
+      expect(s.openedAt, 'a connection that had worked for 20 s did not reset the back-off').toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('the same when the proven connection ends with a network error instead of a clean close', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 20_000 : undefined), true)
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
+
+      expect(s.openedAt).toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a connection that hung for the top step WITHOUT delivering a frame and then failed proved nothing: the ladder keeps growing', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 20_000 : undefined), true, 2)
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
+      expect(s.openedAt, 'time alone, with no frame, reset the back-off').toEqual([0, 1000])
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(s.openedAt).toEqual([0, 1000, 23_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a connection that lived less than the top step: the ladder keeps growing', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 19_000 : undefined))
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 19_000 + 1000)
+      expect(s.openedAt, 'a short-lived connection reset the back-off').toEqual([0, 1000])
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(s.openedAt).toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('CONTRACT: connections that fail in a row keep backing off (1 s, then 2 s)', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    let connections = 0
+    connectSseMock.mockImplementation(async () => {
+      connections += 1
+      throw new ApiError('SSE HTTP 503 Service Unavailable: ', { status: 503 })
+    })
+
+    const harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(connections).toBe(2)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(connections, 'the second retry came after 1 s instead of 2 s').toBe(2)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(connections).toBe(3)
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('CONTRACT: a connection that ended without delivering anything is still backed off', async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevImpl = connectSseMock.getMockImplementation()
+    let connections = 0
+    connectSseMock.mockImplementation(async () => {
+      connections += 1
+    })
+
+    const harness = createSseCharacterizationHarness()
+    try {
+      harness.isRealModeRef.value = true
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(connections).toBe(2)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(connections, 'an empty connection reset the back-off').toBe(2)
+    } finally {
+      harness.h.stopSse()
+      restoreConnectSseImplementation(prevImpl)
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * 034 S8 (adversarial F5b): the replay-recovery snapshot is classified by status too (`startSnapshotRefresh`, the
+ * catch around the load). The mutation "read the text again" survived the other cases, which reach the SSE loop
+ * and `stop()` only.
+ */
+describe('useSimulatorRealMode - 034 S8: a failed replay-recovery snapshot is classified by status', () => {
+  async function recoverWith(failure: unknown) {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const recoveryAttempted = deferred()
+    let connections = 0
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      connections += 1
+      if (connections === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
+      emitRunStatusBootstrap(opts, 'evt_r1_000450')
+      await waitForAbort(opts.signal)
+    })
+    const harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadRecoveryScene: async () => {
+        recoveryAttempted.resolve()
+        throw failure
+      },
+    })
+    harness.isRealModeRef.value = true
+    await nextTick()
+    await recoveryAttempted.promise
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve()
+      await nextTick()
+    }
+    return {
+      harness,
+      cleanup: () => {
+        harness.h.stopSse()
+        restoreConnectSseImplementation(prevConnectImpl)
+        randomSpy.mockRestore()
+        vi.useRealTimers()
+      },
+    }
+  }
+
+  it('a 404 whose message does not say "HTTP 404": the run is gone and is reset', async () => {
+    const s = await recoverWith(new ApiError('the run does not exist', { status: 404 }))
+    try {
+      expect(s.harness.real.runId, 'a 404 of the recovery snapshot was not recognised as a stale run').toBeNull()
+      expect(s.harness.real.lastError).toBe('')
+      expect(s.harness.real.sseState).toBe('idle')
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a 503 whose message mentions "HTTP 404": the run is kept and the error is shown', async () => {
+    const s = await recoverWith(
+      new ApiError('HTTP 503 Service Unavailable for /simulator/runs/r1/graph/snapshot: upstream said HTTP 404', { status: 503 }),
+    )
+    try {
+      expect(s.harness.real.runId, 'a server error was read as "the run is gone"').toBe('r1')
+      expect(s.harness.real.lastError).toContain('HTTP 503')
+    } finally {
+      s.cleanup()
     }
   })
 })

@@ -24,6 +24,8 @@ import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage } from '../utils/errorMessage'
+import { demoToolsAllowed } from '../utils/demoToolsAllowed'
+import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
@@ -55,7 +57,7 @@ import { useAppViewWiring } from './useAppViewWiring'
 import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode'
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
-import { FX_CONFIG, intensityScale } from '../config/fxConfig'
+import { intensityScale } from '../config/fxConfig'
 import { EQUIVALENT_CODE_RE, equivalentOptions as listEquivalentOptions } from '../config/equivalents'
 import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
@@ -77,8 +79,9 @@ import { useRealTxFx } from './realFx/useRealTxFx'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
 
-function getErrorMessage(err: unknown): string {
-  return extractErrorMessage(err)
+/** The `sourcePath` of a run's snapshot: the identity of that scene source, also for a load that has not answered. */
+function runSnapshotSourcePath(apiBase: string, runId: string, equivalent: string): string {
+  return `GET ${apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`
 }
 
 export async function loadStrictRunRecoverySnapshot(input: {
@@ -103,14 +106,19 @@ export async function loadStrictRunRecoverySnapshot(input: {
   }
   return {
     snapshot,
-    sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`,
+    sourcePath: runSnapshotSourcePath(input.apiBase, runId, equivalent),
   }
 }
 
 /**
  * The snapshot of an ACTIVE run for the scene, or `null` when the caller should fall back to the scenario preview.
  * A timeout is THROWN instead (034 S5a, review round 1, item 4); every other failure falls back, and a 404 first
- * resets the stale run - the contract the inline code had before it was extracted.
+ * resets the stale run.
+ *
+ * KNOWN DEBT (034 S8, F-034-D2, second half - open): the fallback on a 5xx or a network error shows the scenario
+ * preview in place of a live run, unmarked. Throwing it (as the preview's own failure now is) was tried and taken
+ * back: nothing re-reads the snapshot of a live run, so one transient failure left the error over a working run
+ * for good. Fixing this needs a retry with its own clock, not an edit here.
  */
 export async function loadActiveRunSnapshot(input: {
   apiBase: string
@@ -126,7 +134,7 @@ export async function loadActiveRunSnapshot(input: {
     if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
     return {
       snapshot,
-      sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(input.runId)}/graph/snapshot?equivalent=${encodeURIComponent(input.equivalent)}`,
+      sourcePath: runSnapshotSourcePath(input.apiBase, input.runId, input.equivalent),
     }
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
@@ -136,9 +144,8 @@ export async function loadActiveRunSnapshot(input: {
     }
     // A timeout is not "unreachable": the run is alive and its scene is on screen. Swapping that scene for the
     // scenario preview would show a different graph as if it were the run; let the caller report the error and
-    // keep what is shown. Every other failure keeps falling back (existing contract).
+    // keep what is shown. Every other failure keeps falling back (see KNOWN DEBT above).
     if (isTimeoutError(e)) throw e
-    // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
     console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
     return null
   }
@@ -420,7 +427,7 @@ export function __autoBootstrapMaybeFillUiError(opts: {
   const hasStateError = !!String(opts.state.error ?? '').trim()
   if (hasRealError || hasStateError) return
 
-  opts.state.error = `Auto-start failed: ${getErrorMessage(opts.err)}`
+  opts.state.error = `Auto-start failed: ${extractErrorMessage(opts.err)}`
 }
 
 export function useSimulatorApp(opts?: {
@@ -1520,13 +1527,19 @@ export function useSimulatorApp(opts?: {
     runSceneLoads.set(sourcePath, { runId, scenarioId: requestedUnderScenarioId })
   }
 
+  const previewSourcePath = (scenarioId: string, eq: string) =>
+    `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`
+  // The source the LATEST scene load asked for, as the `sourcePath` its snapshot would carry. Written when the load
+  // is requested (before its first await); the scene owner reads it only for the latest load, when that load failed.
+  let requestedSceneSource: string | null = null
+
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
+    requestedSceneSource = null
     if (!isRealMode.value) return loadSnapshotFixtures(eq)
 
     const runId = real.runId
     const scenarioId = real.selectedScenarioId
 
-    const runState = toLower(real.runStatus?.state)
     // An UNKNOWN status (null: not read yet, or its read failed - a timeout included) is not "no active run" for a
     // run whose scene is on screen: that scene is not demoted to the preview, the run snapshot is read instead
     // (034 S5b). Only a REFRESH of that scene: choosing another scenario is an explicit request for its preview
@@ -1539,9 +1552,10 @@ export function useSimulatorApp(opts?: {
       !!runId &&
       // Otherwise treat as active only when we have a known status.
       // This avoids getting stuck on an unreachable/stale runId (scenario switching should still show previews).
-      ((!!real.runStatus &&
-        (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')) ||
-        statusUnknownForShownRun)
+      ((!!real.runStatus && isLiveRunState(real.runStatus.state)) || statusUnknownForShownRun)
+
+    if (isActiveRun) requestedSceneSource = runSnapshotSourcePath(real.apiBase, runId, eq)
+    else if (scenarioId) requestedSceneSource = previewSourcePath(scenarioId, eq)
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
@@ -1560,23 +1574,20 @@ export function useSimulatorApp(opts?: {
 
     // Real mode: no run, but have scenario selected - show preview
     // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
+    // A preview that fails is THROWN (034 S8, F-034-D2): an empty network with no debts is data, and a failed
+    // read is not. The scene owner keeps what is shown and puts the error into `state.error`.
     if (scenarioId) {
-      try {
-        const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
-          mode: real.desiredMode,
-        })
-        if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
-        return {
-          snapshot,
-          sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`,
-        }
-      } catch (e) {
-        // Fallback to empty if preview fails
-        console.warn('Failed to load scenario preview:', e)
+      const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
+        mode: real.desiredMode,
+      })
+      if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
+      return {
+        snapshot,
+        sourcePath: previewSourcePath(scenarioId, eq),
       }
     }
 
-    // Fallback: empty snapshot
+    // Nothing is selected to read (no run, no scenario): an empty scene, not a failure.
     return {
       snapshot: {
         equivalent: eq,
@@ -1598,6 +1609,7 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isEqAllowed: (v) => EQUIVALENT_CODE_RE.test(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
+    requestedSceneSource: () => requestedSceneSource,
     loadRecoverySnapshot: async ({ runId, equivalent }) => {
       const requestedUnderScenarioId = real.selectedScenarioId
       const loaded = await loadStrictRunRecoverySnapshot({
@@ -1722,9 +1734,16 @@ export function useSimulatorApp(opts?: {
   // from racing and creating duplicate runs.
   const ensureRunForFxDebugSerialized = fxDebugControls.ensureRunSerialized
 
-  if (isDemoUi.value && isRealMode.value) {
+  // Gated by the same rule as the demo buttons: a page that has no demo tools starts no run for its visitor.
+  const demoToolsExist = demoToolsAllowed({
+    isWebDriver,
+    isTestMode: isTestMode.value,
+    isE2eScreenshots: isE2eScreenshots.value,
+  })
+  if (isDemoUi.value && isRealMode.value && demoToolsExist) {
     const stopAutoBootstrap = watch(
-      () => !state.loading && !!real.accessToken && !!real.selectedScenarioId && !real.runId,
+      // No access-token condition (034 S8, F-034-D7): a cookie-session visitor has none and never would get the run.
+      () => !state.loading && !!real.selectedScenarioId && !real.runId,
       async (ready) => {
         if (!ready) return
         stopAutoBootstrap()
@@ -1920,7 +1939,7 @@ export function useSimulatorApp(opts?: {
           await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
           await adminRunsPanel.getRuns()
         } catch (e: unknown) {
-          adminRunsPanel.lastError.value = getErrorMessage(e)
+          adminRunsPanel.lastError.value = extractErrorMessage(e)
         }
       },
     },
