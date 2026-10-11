@@ -6,57 +6,14 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { expectBeamOnRoute, pickRingRoute, probeFrame, rememberBaseline, watchFlight } from './oracle.js'
-import {
-  boot, distToSegment, frames, fxCounts, loopCounters, pointsAlong, pushEvent, ringSnapshot, sampleCanvas, screenNodes,
-  txUpdated, type Pt,
-} from './stand.js'
+import { boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, sampleCanvas, txUpdated } from './stand.js'
 
 const RING = ['a', 'b', 'c', 'd', 'e', 'f']
 
-type Bands = { ab: Pt[]; bc: Pt[]; cd: Pt[]; chord: Pt[] }
-type Route = { ids: [string, string, string, string]; bands: Bands }
-
-/**
- * Four consecutive nodes of the ring (a real path over trust lines) with bands along each of its three edges and along
- * the chord first -> last. The force layout does not promise a convex ring, so the route is the one whose chord has
- * the most points clear of every route edge; the test refuses to run on a layout that leaves it nothing to look at.
- */
-async function pickRoute(page: Page): Promise<Route> {
-  const n = await screenNodes(page)
-  let best: Route | null = null
-  for (let i = 0; i < RING.length; i += 1) {
-    const ids = [0, 1, 2, 3].map((k) => RING[(i + k) % RING.length]!) as Route['ids']
-    const [a, b, c, d] = ids.map((id) => n.get(id)!) as [Pt, Pt, Pt, Pt]
-    const clear = (p: Pt) => [[a, b], [b, c], [c, d]].every(([s, e]) => distToSegment(p, s!, e!) > 24)
-    const bands = { ab: pointsAlong(a, b), bc: pointsAlong(b, c), cd: pointsAlong(c, d), chord: pointsAlong(a, d, { endMarginPx: 40 }).filter(clear) }
-    // The middle edge must be clear of the chord too, or a straightened beam would light it by accident.
-    bands.bc = bands.bc.filter((p) => distToSegment(p, a, d) > 24)
-    if (!best || Math.min(bands.chord.length, bands.bc.length) > Math.min(best.bands.chord.length, best.bands.bc.length)) best = { ids, bands }
-  }
-  expect(Math.min(best!.bands.chord.length, best!.bands.bc.length), 'the layout leaves a chord and a middle edge clear of each other').toBeGreaterThan(10)
-  return best!
-}
-
 async function sparks(page: Page) {
   return page.evaluate(() =>
-    (window as unknown as { __geoSim: { fxState: { sparks: Array<{ source: string; target: string; startedAtMs: number; ttlMs: number; kind: string }> } } })
-      .__geoSim.fxState.sparks.map((s) => ({ source: s.source, target: s.target, startedAtMs: s.startedAtMs, ttlMs: s.ttlMs, kind: s.kind })))
-}
-
-/** Step the clock frame by frame and collect, per band, the largest number of lit points and the first frame it lit. */
-async function watch(page: Page, bands: Bands, nFrames: number) {
-  const acc: Record<string, { points: number; maxLit: number; firstLitFrame: number | null }> = {}
-  for (const [k, pts] of Object.entries(bands)) acc[k] = { points: pts.length, maxLit: 0, firstLitFrame: null }
-  for (let f = 1; f <= nFrames; f += 1) {
-    await frames(page, 1)
-    const s = await sampleCanvas(page, bands)
-    for (const k of Object.keys(bands)) {
-      const r = s[k]!
-      if (r.lit > acc[k]!.maxLit) acc[k]!.maxLit = r.lit
-      if (r.lit > 0 && acc[k]!.firstLitFrame === null) acc[k]!.firstLitFrame = f
-    }
-  }
-  return acc
+    (window as unknown as { __geoSim: { fxState: { sparks: Array<{ source: string; target: string; startedAtMs: number; ttlMs: number }> } } })
+      .__geoSim.fxState.sparks.map((s) => ({ source: s.source, target: s.target, startedAtMs: s.startedAtMs, ttlMs: s.ttlMs })))
 }
 
 /**
@@ -64,7 +21,7 @@ async function watch(page: Page, bands: Bands, nFrames: number) {
  * five properties. The amount labels are switched off in the event (`amount_flyout: false`): a label is DOM over the
  * scene, it would change the screenshot by itself and make "the page changed here" true without a beam.
  */
-async function flyAndJudge(page: Page, hops: number) {
+async function flyAndJudge(page: Page, hops: number, o: { compositionMinimums?: boolean } = {}) {
   const g = await pickRingRoute(page, RING, hops)
   await rememberBaseline(page, g)
   const idle = await probeFrame(page, g, 0, true)
@@ -75,10 +32,10 @@ async function flyAndJudge(page: Page, hops: number) {
 
   await pushEvent(page, txUpdated(g.ids, '10.00', { amount_flyout: false }))
   const probes = await watchFlight(page, g, 76, 1) // 1216 ms: the whole beam and one frame more
-  const sum = expectBeamOnRoute(g, probes, { order: hops > 1 })
+  const sum = expectBeamOnRoute(g, probes, { order: hops > 1, compositionMinimums: o.compositionMinimums })
   const row = sum.map((e) => ({
-    edge: e.name, lit: [e.firstLit, e.lastLit], head: [e.headFirst?.toFixed(3), e.headLast?.toFixed(3)],
-    buffer: [e.framesStrong, e.strongPx], page: [e.framesShown, e.shownPx],
+    edge: e.name, lit: [e.firstLit, e.lastLit], paintedFrames: e.litFrames.length, head: [e.headFirst?.toFixed(3), e.headLast?.toFixed(3)],
+    buffer: [e.framesStrong, e.strongPx], page: [e.framesShown, e.shownPx], seenSpan: e.seenSpan?.toFixed(3),
   }))
   console.log(`[038 oracle] ${hops} edge(s) ${g.ids.join('>')}`, JSON.stringify(row), 'offRoute max', Math.max(...probes.map((p) => p.offRoute)))
   test.info().annotations.push({ type: `038-oracle-${hops}`, description: JSON.stringify(row) })
@@ -99,20 +56,18 @@ test.beforeEach(async ({ page }) => {
 // panel over the path hides the spark and R1 stays green. Movement, direction, route, order and visibility along the
 // whole path are judged by the motion oracle below, not here.
 test('R1 - the stand sees the spark of a payment: FX state and pixels of the FX canvas (F-038-1)', async ({ page }) => {
-  const { ids, bands } = await pickRoute(page)
-
   // Counter-checks first: the sampler reads "nothing" before the event, and the loop draws nothing while asleep.
-  const idle = await sampleCanvas(page, bands)
+  const idle = await sampleCanvas(page, {})
   expect(idle.__canvas.lit, 'no painted pixel on the FX canvas before the event').toBe(0)
   expect((await fxCounts(page)).sparks).toBe(0)
   const d0 = await loopCounters(page)
 
-  await pushEvent(page, txUpdated(ids))
+  await pushEvent(page, txUpdated(['a', 'b']))
   await frames(page, 31) // 496 ms of the clock, 31 frames
 
   const d1 = await loopCounters(page)
   const fx = await fxCounts(page)
-  const lit = await sampleCanvas(page, bands)
+  const lit = await sampleCanvas(page, {})
   console.log('[038 R1]', JSON.stringify({ fx, canvas: lit.__canvas, draws: d1.draws - d0.draws, rafCalls: d1.calls - d0.calls }))
   expect(fx.sparks, 'fxState.sparks.length > 0').toBeGreaterThan(0)
   expect(lit.__canvas.lit, 'painted pixels on the FX canvas').toBeGreaterThan(0)
@@ -120,55 +75,66 @@ test('R1 - the stand sees the spark of a payment: FX state and pixels of the FX 
 })
 
 // THE MOTION ORACLE ON ONE EDGE. Four of the five properties (`oracle.ts`): displacement, direction, route,
-// composition. Order (property 4) needs two edges and is NOT judged here; it is judged by the two tests after R3's
-// characterization. Each property has a mutation of the product that must turn it red; the mutations and their red
-// output are recorded in the changelog of spec 038 (S1), they are not committed.
+// composition. Order (property 4) needs two edges and is NOT judged here; it is judged by the R3 tests after this
+// measurement. Each property has a mutation of the product that must turn it red; the mutations and their red output
+// are recorded in the changelog of spec 038 (S1), they are not committed.
 test('oracle - a payment over one edge: the beam moves, from sender to receiver, on its edge only, and is seen on the page', async ({ page }) => {
   await flyAndJudge(page, 1)
 })
 
-test('R3 - characterization: a 3-edge route is one beam on the chord sender -> receiver; a 2-edge route is two beams started together', async ({ page }) => {
-  const { ids, bands } = await pickRoute(page)
-  await pushEvent(page, txUpdated(ids))
-  await frames(page, 1)
-  const three = await sparks(page)
-  const seen3 = await watch(page, bands, 74) // the whole 1200 ms beam
-  console.log('[038 R3] 3 edges', JSON.stringify({ sparks: three, seen: seen3 }))
-  expect(three.map((s) => `${s.source}>${s.target}`)).toEqual([`${ids[0]}>${ids[3]}`])
-  expect(seen3.chord!.maxLit, 'the chord, which is no edge of the route, lights up').toBeGreaterThan(0)
-  expect(seen3.bc!.maxLit, 'the middle edge of the route never lights up').toBe(0)
-
-  await frames(page, 40) // past the minimum gap between two animated payments and the end of the first beam
-  expect((await fxCounts(page)).sparks).toBe(0)
-  await pushEvent(page, txUpdated(ids.slice(0, 3)))
-  await frames(page, 1)
-  const two = await sparks(page)
-  const seen2 = await watch(page, bands, 20)
-  console.log('[038 R3] 2 edges', JSON.stringify({ sparks: two, seen: seen2 }))
-  expect(two.map((s) => `${s.source}>${s.target}`)).toEqual([`${ids[0]}>${ids[1]}`, `${ids[1]}>${ids[2]}`])
-  expect(two[0]!.startedAtMs, 'both edges start at the same instant, not one after another').toBe(two[1]!.startedAtMs)
-  expect(seen2.ab!.firstLitFrame, 'the first edge lights up').not.toBeNull()
-  expect(seen2.bc!.firstLitFrame, 'the second edge lights up in the same frame as the first').toBe(seen2.ab!.firstLitFrame)
-})
-
-// WHEN THE `test.fail` BELOW COMES OFF (spec 038, Verification plan, the single condition):
-// not when these tests go green. Both annotations are removed only when ALL FIVE properties of the oracle are green on
-// the fixed product AND the mutation of each of the five has been run against the fixed product and is red, with the
-// output recorded: phase frozen (P1), edge reversed in the renderer (P2), sparks on every edge of the graph (P3), all
-// edges of the route started at once (P4), and for P5 all three - FX canvas under the base canvas, FX canvas with
-// opacity 0, a DOM panel over the path. A green run alone proves nothing: a wrong fix can be green.
+// R3 (F-038-3 = F-034-D4), FIXED IN S1. Until 2026-10-11 the product drew a route of more than two edges as ONE
+// straight beam sender -> receiver (a chord that is no edge of the route) and started the edges of a two-edge route
+// at the same instant; both were recorded here as the current behaviour, the second and third test below stood under
+// `test.fail`. The annotation was taken off by the single condition of spec 038 (Verification plan), not because the
+// tests went green: all five properties are green on the fixed product AND the mutation of each was run against the
+// fixed product and is red - phase frozen (P1), edge reversed in the renderer (P2), sparks on every edge of the graph
+// (P3), all edges of the route started at once (P4), and for P5 all three: FX canvas under the base canvas, FX canvas
+// with opacity 0, a DOM panel over the path. The red output of each is in the changelog of spec 038.
+// DO NOT put `test.fail` back to make a red run green: a red test here is the beam leaving its route.
 test('R3 - a payment over two edges: the second edge lights up only after the first has gone dark (F-038-3, property 4)', async ({ page }) => {
-  // Red today because of the product: `spawnSparks` (render/fxRenderer/spawn.ts) gives every edge of the event the same
-  // `startedAtMs` - the simultaneous start S0 measured.
-  test.fail(true, 'F-038-3: the edges of a route start together, not one after another')
   await flyAndJudge(page, 2)
 })
 
 test('R3 - the beam of a 3-edge payment follows the edges of its route, one after another (F-038-3 = F-034-D4)', async ({ page }) => {
-  // Red today because of the product: `__pickSparkEdges` (useRealTxFx.ts) replaces a route longer than
-  // `maxEdgesPerEvent` (2) with the single pair sender -> receiver, a chord that is no edge of the route.
-  test.fail(true, 'F-038-3: a route of more than 2 edges is drawn as one straight beam sender -> receiver')
   await flyAndJudge(page, 3)
+})
+
+test('R3 - FX state of a 3-edge payment: one spark alive at a time, in route order, 400 ms each; the receiver label comes at 1200 ms', async ({ page }) => {
+  const g = await pickRingRoute(page, RING, 3)
+  await pushEvent(page, txUpdated(g.ids, '10.00'))
+  const seen: string[] = []
+  let maxAlive = 0
+  let receiverLabelAtFrame: number | null = null
+  for (let f = 1; f <= 80; f += 1) {
+    await frames(page, 1)
+    // Alive = not yet past its TTL. A spark whose time is over stays in the array until the next frame drops it
+    // (`renderFrame.ts`), and the timer of the next edge may fire before that frame; it is never drawn again.
+    const all = await sparks(page)
+    const now = await page.evaluate(() => performance.now())
+    const alive = all.filter((s) => now - s.startedAtMs < s.ttlMs)
+    maxAlive = Math.max(maxAlive, alive.length)
+    for (const s of alive) {
+      const k = `${s.source}>${s.target}+${s.ttlMs}`
+      if (seen[seen.length - 1] !== k) seen.push(k)
+    }
+    const plus = await page.evaluate(() => [...document.querySelectorAll('.floating-label-inner')].some((el) => (el.textContent ?? '').trim().startsWith('+')))
+    if (plus && receiverLabelAtFrame === null) receiverLabelAtFrame = f
+  }
+  console.log('[038 R3] fx state', JSON.stringify({ seen, maxAlive, receiverLabelAtFrame }))
+  expect(seen).toEqual(g.edges.map((e) => `${e.name}+400`))
+  expect(maxAlive, 'never two sparks of one payment at once').toBe(1)
+  // 1200 ms is frame 75; the label is pushed by a timer at 1200 ms and mounted by the frame after it.
+  expect(receiverLabelAtFrame, 'the receiver label appears when the beam arrives: at the total route time, as before the fix').toBeGreaterThanOrEqual(75)
+  expect(receiverLabelAtFrame).toBeLessThanOrEqual(77)
+})
+
+// MEASUREMENT, not a verdict (spec 038, S1: "if an edge at k = 6 passes too fast to be read, S1 returns the number").
+// Six edges is the cap (`REAL_TX_MAX_ROUTE_EDGES`): the whole ring, 200 ms = 12.5 frames an edge. Displacement,
+// direction, route and order are judged here as everywhere. Composition is judged without its minimums ("3 frames,
+// 0.15 of the edge"): at 200 ms an edge is strongly painted in 2-4 frames only. Every strong buffer pixel must still
+// be on the page. What goes to the spec is the printed row: frames painted per edge and how far the head is seen.
+test('R3 - measurement at the cap: a 6-edge route, 200 ms an edge - frames painted per edge and head travel', async ({ page }) => {
+  await flyAndJudge(page, 6, { compositionMinimums: false })
 })
 
 test('R7 - characterization: the same event_id delivered twice animates once; a new event_id animates again', async ({ page }) => {

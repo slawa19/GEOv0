@@ -10,7 +10,7 @@
  *   5. composition  - where the FX buffer is painted, the screenshot of the page shows it, on every sampled frame.
  *
  * What it does NOT see: colour, shape and easing of the beam; anything within `NODE_CLEAR_PX` of a route node (the
- * node bursts live there); a beam fainter than `ALPHA_MIN`; an occluder on the named list below (it is excluded, so
+ * node bursts live there); the spot where two edges of the route cross; a beam fainter than `ALPHA_MIN`; an occluder on the named list below (it is excluded, so
  * what happens under it is unknown); a frame between two sampled screenshots.
  */
 import { expect, type Page } from '@playwright/test'
@@ -53,6 +53,11 @@ export async function namedOccluders(page: Page): Promise<Rect[]> {
   }, { sel: [...NAMED_OCCLUDERS], m: OCCLUDER_MARGIN_PX })
 }
 
+function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const side = (p: Pt, q: Pt, r: Pt) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x))
+  return side(a, b, c) !== side(a, b, d) && side(c, d, a) !== side(c, d, b)
+}
+
 const inRect = (p: Pt, r: Rect) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h
 
 /** Share of the inner part of a segment (away from its nodes) that no named occluder covers. */
@@ -69,9 +74,9 @@ function clearShare(a: Pt, b: Pt, occ: Rect[]): number {
 }
 
 /**
- * A route of `hops` edges over consecutive nodes of the ring whose edges are not under the named HUD, whose chord
- * sender -> receiver runs away from its edges, and whose edges are long enough to watch. The test refuses to run on a
- * layout that leaves it nothing to look at.
+ * A route of `hops` edges over consecutive nodes of the ring: the one whose edges are least under the named HUD and
+ * cross each other least, whose chord sender -> receiver runs away from its edges, and whose edges are long enough to
+ * watch. The test refuses to run on a layout that leaves it nothing to look at.
  */
 export async function pickRingRoute(page: Page, ring: string[], hops: number): Promise<RouteGeom> {
   const n = await screenNodes(page)
@@ -86,7 +91,9 @@ export async function pickRingRoute(page: Page, ring: string[], hops: number): P
       // How far the middle of the chord is from every route edge: a straightened beam must be told from the route.
       const mid = { x: (pts[0]!.x + pts[hops]!.x) / 2, y: (pts[0]!.y + pts[hops]!.y) / 2 }
       const chordClear = Math.min(...pts.slice(0, -1).map((p, k) => distToSegment(mid, p, pts[k + 1]!)))
-      const score = Math.min(...shares) * 1000 + Math.min(chordClear, 200) + Math.min(...lens) / 10
+      let crossings = 0
+      for (let p = 0; p < hops; p += 1) for (let q = p + 2; q < hops; q += 1) if (segmentsCross(pts[p]!, pts[p + 1]!, pts[q]!, pts[q + 1]!)) crossings += 1
+      const score = Math.min(...shares) * 1000 - crossings * 300 + Math.min(chordClear, 200) + Math.min(...lens) / 10
       if (!best || score > best.score) best = { score, ids }
     }
   }
@@ -95,7 +102,9 @@ export async function pickRingRoute(page: Page, ring: string[], hops: number): P
   const edges = nodes.slice(0, -1).map((a, k) => ({ name: `${ids[k]}>${ids[k + 1]}`, from: ids[k]!, to: ids[k + 1]!, a, b: nodes[k + 1]! }))
   for (const e of edges) {
     expect(Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y), `route edge ${e.name} is long enough to watch a beam move on it`).toBeGreaterThan(2 * NODE_CLEAR_PX + 60)
-    expect(clearShare(e.a, e.b, occluders), `route edge ${e.name} is not under the named HUD (${NAMED_OCCLUDERS.join(', ')})`).toBeGreaterThan(0.9)
+    // The part of an edge under a named occluder is excluded from property 5 pixel by pixel (`probeFrame`); what is
+    // required here is that most of the edge is left to judge.
+    expect(clearShare(e.a, e.b, occluders), `most of route edge ${e.name} is clear of the named HUD (${NAMED_OCCLUDERS.join(', ')})`).toBeGreaterThan(0.6)
   }
   const xs = nodes.map((p) => p.x)
   const ys = nodes.map((p) => p.y)
@@ -121,6 +130,8 @@ export type FrameProbe = {
   offRoute: number
   offRouteAt: Pt | null
   nearNode: number
+  /** Painted pixels where two route edges cross: on the route, attributed to neither edge. */
+  crossing: number
   shot: boolean
 }
 
@@ -171,6 +182,7 @@ export async function probeFrame(page: Page, g: RouteGeom, frame: number, shot: 
     let offRoute = 0
     let offRouteAt: { x: number; y: number } | null = null
     let nearNode = 0
+    let crossing = 0
     for (let py = 0; py < c.height; py += 1) {
       for (let px = 0; px < c.width; px += 1) {
         const a = img.data[(py * c.width + px) * 4 + 3]!
@@ -181,19 +193,23 @@ export async function probeFrame(page: Page, g: RouteGeom, frame: number, shot: 
         if (o.nodes.some((n) => Math.hypot(n.x - x, n.y - y) <= o.nodeClear)) { nearNode += 1; continue }
         let bestI = -1
         let bestD = Infinity
+        let secondD = Infinity
         let bestT = 0
         o.edges.forEach((e, i) => {
           const dx = e.b.x - e.a.x
           const dy = e.b.y - e.a.y
           const t = Math.max(0, Math.min(1, ((x - e.a.x) * dx + (y - e.a.y) * dy) / (dx * dx + dy * dy)))
           const d = Math.hypot(x - (e.a.x + t * dx), y - (e.a.y + t * dy))
-          if (d < bestD) { bestD = d; bestI = i; bestT = t }
+          if (d < bestD) { secondD = bestD; bestD = d; bestI = i; bestT = t } else if (d < secondD) secondD = d
         })
         if (bestI < 0 || bestD > o.corridor) {
           offRoute += 1
           if (!offRouteAt) offRouteAt = { x: Math.round(x), y: Math.round(y) }
           continue
         }
+        // Two route edges cross here (the force layout does not promise a planar ring): the pixel is on the route,
+        // but whose it is cannot be told, so it is given to neither.
+        if (secondD <= o.corridor + 4) { crossing += 1; continue }
         const e = edges[bestI]!
         e.px += 1
         if (a > e.maxAlpha) { e.maxAlpha = a; e.headSum = bestT; e.headN = 1 } else if (a === e.maxAlpha) { e.headSum += bestT; e.headN += 1 }
@@ -214,7 +230,7 @@ export async function probeFrame(page: Page, g: RouteGeom, frame: number, shot: 
       const s = edges[i]!
       out[e.name] = { px: s.px, head: s.headN ? s.headSum / s.headN : null, maxAlpha: s.maxAlpha, strong: s.strong, shown: s.shown }
     })
-    return { edges: out, offRoute, offRouteAt, nearNode }
+    return { edges: out, offRoute, offRouteAt, nearNode, crossing }
   }, args)
   return { frame, shot, ...r }
 }
@@ -243,6 +259,8 @@ export type EdgeSummary = {
   framesShown: number
   strongPx: number
   shownPx: number
+  /** Share of the edge between the first and the last head position that the page showed (set by `expectBeamOnRoute`). */
+  seenSpan?: number
 }
 
 export function summarize(g: RouteGeom, probes: FrameProbe[]): EdgeSummary[] {
@@ -273,8 +291,11 @@ const pct = (v: number | null) => (v === null ? 'none' : v.toFixed(3))
 /**
  * The five properties, each as its own soft assertion, so that one run names every property that fails.
  * `order: false` is for a route of one edge, where property 4 has nothing to compare; the caller says so in its title.
+ * `compositionMinimums: false` is for the measurement at the cap of six edges only: an edge then lasts 200 ms and is
+ * strongly painted in 2-4 frames, fewer than the minimums ask for. "The page shows every strong buffer pixel" is still
+ * asserted there; "in at least 3 frames, over at least 0.15 of the edge" is reported as a number instead.
  */
-export function expectBeamOnRoute(g: RouteGeom, probes: FrameProbe[], o: { order: boolean }): EdgeSummary[] {
+export function expectBeamOnRoute(g: RouteGeom, probes: FrameProbe[], o: { order: boolean; compositionMinimums?: boolean }): EdgeSummary[] {
   const sum = summarize(g, probes)
 
   for (const e of sum) {
@@ -315,12 +336,16 @@ export function expectBeamOnRoute(g: RouteGeom, probes: FrameProbe[], o: { order
   for (const e of sum) {
     const shownHeads = probes.filter((p) => p.shot && p.edges[e.name]!.strong > 0 && p.edges[e.name]!.shown * 2 >= p.edges[e.name]!.strong).map((p) => p.edges[e.name]!.head!)
     const span = shownHeads.length ? Math.max(...shownHeads) - Math.min(...shownHeads) : 0
-    expect.soft(e.framesStrong, `P5 composition: counter-check - edge ${e.name} has strongly painted buffer pixels in at least 3 screenshot frames (has ${e.framesStrong})`).toBeGreaterThanOrEqual(3)
+    const minFrames = o.compositionMinimums === false ? 1 : 3
+    expect.soft(e.framesStrong, `P5 composition: counter-check - edge ${e.name} has strongly painted buffer pixels in at least ${minFrames} screenshot frame(s) (has ${e.framesStrong})`).toBeGreaterThanOrEqual(minFrames)
     expect.soft(
       { framesShown: e.framesShown, shownPx: e.shownPx },
       `P5 composition: the page shows the beam on edge ${e.name} wherever the FX buffer holds it (buffer: ${e.framesStrong} frames, ${e.strongPx} px; page: ${e.framesShown} frames, ${e.shownPx} px)`,
     ).toEqual({ framesShown: e.framesStrong, shownPx: e.strongPx })
-    expect.soft(span, `P5 composition: the beam is seen on the page along edge ${e.name}, not at one spot (seen over ${span.toFixed(3)} of the edge)`).toBeGreaterThanOrEqual(0.15)
+    e.seenSpan = span
+    if (o.compositionMinimums !== false) {
+      expect.soft(span, `P5 composition: the beam is seen on the page along edge ${e.name}, not at one spot (seen over ${span.toFixed(3)} of the edge)`).toBeGreaterThanOrEqual(0.15)
+    }
   }
   return sum
 }
