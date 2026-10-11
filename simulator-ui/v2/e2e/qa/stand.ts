@@ -353,6 +353,18 @@ export function pausedClockTime(t: number): number {
   return base >= t ? base : base + FRAME_MS
 }
 
+/**
+ * Step the paused clock to the next frame boundary (`Date.now() % FRAME_MS === 0`; a whole frame when it already stands
+ * on one). The fake clock fires animation frames on that grid, and `performance.now()` shares it (the clock is installed
+ * at a time divisible by 16), so after this call the next frame is exactly one step away whatever the phase was. For
+ * counts that must not depend on the phase at all - the discrete budgets of S3. The ONE place where the stand does
+ * phase arithmetic besides `pausedClockTime`.
+ */
+export async function stepToFrameBoundary(page: Page): Promise<void> {
+  const now = await page.evaluate(() => Date.now())
+  await page.clock.runFor(FRAME_MS - (now % FRAME_MS))
+}
+
 /** Seed the run the way a returning user has it, load the app in real mode, wait for the scene and the SSE stream. */
 export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: string[] }> {
   const mock = await mockBackend(page, o.snapshot)
@@ -377,7 +389,8 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   // The stand is about a machine without a GPU, and the flags that make the browser one live in a config nobody
   // executes a check of. The product's own verdict is on its root (`data-gpu`, from `useQualityAutoguards`).
   const gpu = await page.locator('.root').getAttribute('data-gpu')
-  if (gpu !== '0' && !o.allowWebdriver) { // the WebDriver probe starts a browser of its own, on purpose not the stand's
+  const pretended = await page.evaluate(() => (window as unknown as { __qaPretendGpu?: boolean }).__qaPretendGpu === true)
+  if (gpu !== '0' && !o.allowWebdriver && !pretended) { // the WebDriver probe starts a browser of its own, on purpose not the stand's
     throw new Error(`038 QA stand refuses to run: the product says a GPU is likely (data-gpu = ${String(gpu)}, expected "0"). `
       + 'The stand measures a software-only browser; run through e2e/playwright.qa.config.ts, which starts Chromium with --disable-gpu.')
   }
@@ -610,6 +623,7 @@ export async function installCssClockSync(page: Page): Promise<void> {
  */
 export async function pretendGpu(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    ;(window as unknown as { __qaPretendGpu: boolean }).__qaPretendGpu = true // `boot()` refuses data-gpu='1' unless it was asked for
     const real = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
       if (type === 'webgl' || type === 'experimental-webgl') return { getExtension: () => null, getParameter: () => null } as unknown as RenderingContext

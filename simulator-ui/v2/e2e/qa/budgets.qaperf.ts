@@ -16,7 +16,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { BUDGETS, type Budget } from './budgets.js'
 import { buildPerfLoad } from './perf-load.js'
-import { EQ, RUN_ID, boot, fixtureSnapshot100, loopCounters, pretendGpu, type QaSnapshot } from './stand.js'
+import { EQ, RUN_ID, boot, fixtureSnapshot100, loopCounters, pausedClockTime, pretendGpu, stepToFrameBoundary, type QaSnapshot } from './stand.js'
 
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
 const NEEDS_HOOK = 'reads FX state through window.__geoSim, which exists on the dev server only: on a production build this budget is NOT measured'
@@ -34,10 +34,9 @@ function hold(actual: number, b: Budget) {
 /** Boot on the fake clock, paused, with the next animation frame a whole 16 ms away: draw counts do not depend on when the boot ended. */
 async function bootClocked(page: Page, snap: QaSnapshot, beforeLoad?: (page: Page) => Promise<void>) {
   await boot(page, { snapshot: snap, clock: true, devHook, beforeLoad })
-  if (!devHook) await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000)
+  if (!devHook) await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 1000))
   await page.clock.runFor(3600) // IDLE_DELAY_MS 3000 + hold + one idle period: the loop is in deep sleep
-  const p = Math.round(await page.evaluate(() => performance.now()))
-  await page.clock.runFor(16 - (p % 16))
+  await stepToFrameBoundary(page) // the one phase mechanism of the stand (`stand.ts`); these counts hold at any `CLOCK_PHASE_MS`
 }
 
 const push = (page: Page, frames: string[]) =>
