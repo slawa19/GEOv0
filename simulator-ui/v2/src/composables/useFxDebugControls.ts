@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import { onUnmounted, ref, watch } from 'vue'
 
-import { actionClearingOnce, actionTxOnce, getActiveRun } from '../api/simulatorApi'
+import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
 import { toLower } from '../utils/stringHelpers'
 
 export function useFxDebugControls(deps: {
@@ -108,34 +108,8 @@ export function useFxDebugControls(deps: {
 
     await deps.realMode.startRun({ mode: 'real', pauseImmediately: true })
 
-    if (!deps.real.runId) {
-      const msg = String(deps.real.lastError ?? '')
-      const looksLikeConflict = msg.includes('HTTP 409') || msg.includes(' 409 ') || msg.toLowerCase().includes('conflict')
-      if (looksLikeConflict) {
-        try {
-          const active = await getActiveRun({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken })
-          const activeRunId = String(active.run_id ?? '').trim()
-          if (activeRunId) {
-            deps.real.runId = activeRunId
-            await deps.realMode.refreshRunStatus()
-            try {
-              const st = toLower(deps.real.runStatus?.state)
-              const shouldPause = !!st && st !== 'paused' && st !== 'stopped' && st !== 'error'
-              if (shouldPause) {
-                await deps.realMode.pause()
-              }
-            } catch {
-              // ignore
-            }
-            await deps.realMode.refreshSnapshot()
-            return deps.real.runId
-          }
-        } catch {
-          // fall through to error
-        }
-      }
-    }
-
+    // A 409 is `startRun`'s to handle: it reads the status of the error and attaches to the active run itself.
+    // What is left here is only `lastError`, a text - never a reason to pick a run (034 S8, F-034-D14).
     if (!deps.real.runId) {
       const detail = String(deps.real.lastError ?? '').trim()
       throw new Error(detail ? `Failed to start run for FX debug: ${detail}` : 'Failed to start run for FX debug')

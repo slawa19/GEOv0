@@ -62,8 +62,7 @@ describe('connectSse: a refused connection', () => {
     vi.unstubAllGlobals()
   })
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails.each([
+  it.each([
     [404, 'Not Found'],
     [410, 'Gone'],
     [500, 'Internal Server Error'],

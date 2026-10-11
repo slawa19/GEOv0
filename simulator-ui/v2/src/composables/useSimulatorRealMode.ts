@@ -114,6 +114,15 @@ function getErrorMessage(e: unknown): string {
   return extractErrorMessage(e)
 }
 
+/**
+ * The HTTP status of a failed request, or null when the failure carries none (network error, abort, timeout -
+ * whose status is 0). Failures are classified by this, never by words in the message: the message carries the
+ * answer's body (034 S8, F-034-D14).
+ */
+function httpStatusOf(e: unknown): number | null {
+  return e instanceof ApiError && e.status > 0 ? e.status : null
+}
+
 function extractRunId(v: ActiveRunResponse | null | undefined): string {
   return String(v?.run_id ?? '').trim()
 }
@@ -473,12 +482,11 @@ export function useSimulatorRealMode(opts: {
           if (applied === false) return 'superseded'
         } catch (e: unknown) {
           if (!isContextStillValid()) return 'superseded'
-          const message = getErrorMessage(e)
-          if (message.includes('HTTP 404')) {
+          if (httpStatusOf(e) === 404) {
             resetStaleRun({ clearError: true })
             return 'stale'
           }
-          real.lastError = message
+          real.lastError = getErrorMessage(e)
           return 'transient'
         }
 
@@ -489,11 +497,9 @@ export function useSimulatorRealMode(opts: {
         wakeUp?.()
 
         // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+        // A text is never read as "the run is gone" (034 S8, F-034-D14): the run's own 404 is handled by its status
+        // where the error object still exists - in the scene's run-snapshot read and in the catch above.
         if (isRealMode.value && state.error) {
-          if (state.error.includes('HTTP 404')) {
-            resetStaleRun({ clearError: true })
-            return 'stale'
-          }
           real.lastError = state.error
           return 'transient'
         }
@@ -568,12 +574,6 @@ export function useSimulatorRealMode(opts: {
     (e) => {
       if (!isRealMode.value) return
       if (!e) return
-
-      if (e.includes('HTTP 404')) {
-        resetStaleRun({ clearError: true })
-        return
-      }
-
       real.lastError = e
     },
     { flush: 'post' },
@@ -976,16 +976,16 @@ export function useSimulatorRealMode(opts: {
         if (ctrl.signal.aborted) return
         if (mySeq !== sseSeq || real.runId !== runId) return
 
-        const msg = getErrorMessage(e)
-        if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
+        const status = httpStatusOf(e)
+        if (status === 404) {
           resetStaleRun({ clearError: true })
           return
         }
 
-        real.lastError = msg
+        real.lastError = getErrorMessage(e)
 
         // Unrecoverable replay cursor: clear it and rebuild authoritative state.
-        if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
+        if (status === 410) {
           real.lastEventId = null
           replayGapRecoveryRunId = runId
           real.sseState = 'reconnecting'
@@ -1210,16 +1210,14 @@ export function useSimulatorRealMode(opts: {
       })
       await refreshRunStatus()
     } catch (e: unknown) {
-      const msg = getErrorMessage(e)
-
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
       // treat stop as idempotent and reset local state instead of surfacing a hard error.
-      if (msg.includes('HTTP 404') || msg.includes(' 404 ') || msg.includes('Not Found')) {
+      if (httpStatusOf(e) === 404) {
         resetStaleRun({ clearError: true })
         return
       }
 
-      real.lastError = msg
+      real.lastError = getErrorMessage(e)
       // The stop request was not confirmed. The backend run may still be live,
       // so restore observation instead of leaving the UI permanently detached.
       if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })

@@ -1084,7 +1084,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
         ttl_ms: 1200,
         edges: [{ from: 'A', to: 'B' }],
       })
-      throw new Error('SSE HTTP 404 Not Found')
+      throw new ApiError('SSE HTTP 404 Not Found', { status: 404 })
     })
 
     const harness = createSseCharacterizationHarness({ lastEventId: 'evt_previous' })
@@ -1241,7 +1241,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     let statusCalls = 0
 
     connectSseMock.mockResolvedValue(undefined)
-    connectSseMock.mockRejectedValueOnce(new Error('SSE HTTP 410 Gone'))
+    connectSseMock.mockRejectedValueOnce(new ApiError('SSE HTTP 410 Gone', { status: 410 }))
     getRunMock.mockImplementation(async (...args) => {
       statusCalls += 1
       if (statusCalls === 1) return await prevGetRunImpl(...args)
@@ -1287,7 +1287,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       if (connectionCount === 1) {
         firstConnection.resolve()
         await rejectFirstConnection.promise
-        throw new Error('SSE HTTP 410 Gone')
+        throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       }
       emitRunStatusBootstrap(opts, 'evt_r1_000100')
       secondConnection.resolve()
@@ -1343,7 +1343,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, 'evt_r1_000200')
       secondConnection.resolve()
       await waitForAbort(opts.signal)
@@ -1405,7 +1405,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, `evt_r1_00030${seenCursors.length}`)
       if (seenCursors.length === 2) {
         await waitForAbort(opts.signal)
@@ -1461,7 +1461,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (seenCursors.length === 2) throw new Error('SSE HTTP 503 recovery unavailable')
       emitRunStatusBootstrap(opts, 'evt_r1_000400')
       recoveredConnection.resolve()
@@ -1503,7 +1503,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       seenCursors.push(opts.lastEventId)
-      if (seenCursors.length === 1) throw new Error('SSE HTTP 410 Gone')
+      if (seenCursors.length === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, 'evt_r1_000450')
       await waitForAbort(opts.signal)
     })
@@ -1553,7 +1553,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       })
     connectSseMock.mockImplementation(async () => {
       connectionCalls += 1
-      throw new Error('SSE HTTP 410 Gone')
+      throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
     })
 
     const harness = createSseCharacterizationHarness({ lastEventId: 'evt_expired' })
@@ -1586,7 +1586,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
       connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
         connectionCalls += 1
-        if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+        if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
         emitRunStatusBootstrap(opts, 'evt_r1_000460', 'r1', 'stopped')
         if (order === 'snapshot-first') await releaseConnection.promise
       })
@@ -1637,7 +1637,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (connectionCalls === 2) {
         emitRunStatusBootstrap(opts, 'evt_r1_000500')
         emitSsePayload(opts, {
@@ -1714,7 +1714,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (connectionCalls === 2) {
         emitRunStatusBootstrap(opts, 'evt_r1_000510')
         await waitForAbort(opts.signal)
@@ -1810,7 +1810,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
     let staleSnapshotApplied = 0
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
-      if (opts.lastEventId !== null) throw new Error('SSE HTTP 410 Gone')
+      if (opts.lastEventId !== null) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       recoverySignal = opts.signal
       emitRunStatusBootstrap(opts, 'evt_r1_000520')
       return
@@ -1859,7 +1859,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       if (connectionCalls === 2) {
         opts.onMessage({
           id: 'evt_r1_wrong',
@@ -1955,7 +1955,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
 
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       connectionCalls += 1
-      if (connectionCalls === 1) throw new Error('SSE HTTP 410 Gone')
+      if (connectionCalls === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       emitRunStatusBootstrap(opts, 'evt_r1_000600')
       for (let index = 0; index < 600; index += 1) {
         emitSsePayload(opts, {
@@ -2025,7 +2025,7 @@ describe('useSimulatorRealMode - SSE reconnect characterization', () => {
       if (seenCursors.length === 1) {
         firstConnection.resolve()
         await rejectFirstConnection.promise
-        throw new Error('SSE HTTP 410 Gone')
+        throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
       }
       emitRunStatusBootstrap(opts, 'evt_r1_000998')
       await recoverySnapshotStarted.promise
@@ -2249,8 +2249,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
     }
   }
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('an SSE 500 whose body mentions "HTTP 404" does not drop the live run', async () => {
+  it('an SSE 500 whose body mentions "HTTP 404" does not drop the live run', async () => {
     vi.useFakeTimers()
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
@@ -2274,8 +2273,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
     }
   })
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('an SSE 404 resets the stale run whatever its message says', async () => {
+  it('an SSE 404 resets the stale run whatever its message says', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
     const staleReset = deferred()
@@ -2299,8 +2297,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
     }
   })
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('an SSE 410 drops the replay cursor whatever its message says', async () => {
+  it('an SSE 410 drops the replay cursor whatever its message says', async () => {
     vi.useFakeTimers()
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
@@ -2326,8 +2323,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
     }
   })
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('an SSE 500 whose body mentions "410" keeps the replay cursor', async () => {
+  it('an SSE 500 whose body mentions "410" keeps the replay cursor', async () => {
     vi.useFakeTimers()
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
@@ -2350,8 +2346,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
     }
   })
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('Stop that fails with a 500 whose text says "Not Found" keeps the run and shows the error', async () => {
+  it('Stop that fails with a 500 whose text says "Not Found" keeps the run and shows the error', async () => {
     const connectSseMock = vi.mocked(connectSse)
     const stopRunMock = vi.mocked(stopRun)
     const prevConnectImpl = connectSseMock.getMockImplementation()

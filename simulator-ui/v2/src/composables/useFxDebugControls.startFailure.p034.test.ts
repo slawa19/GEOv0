@@ -62,8 +62,7 @@ afterEach(() => {
 })
 
 describe('F-034-D14: a demo run that did not start', () => {
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('a 500 whose text says "conflict" is a failure, not a reason to act on the active run', async () => {
+  it('a 500 whose text says "conflict" is a failure, not a reason to act on the active run', async () => {
     const s = stand({
       runId: null,
       lastError: 'HTTP 500 Internal Server Error for /simulator/runs: serialization conflict, retry later',
@@ -83,8 +82,7 @@ describe('F-034-D14: a demo run that did not start', () => {
     expect(vi.mocked(actionTxOnce).mock.calls[0]?.[1]).toBe('ACTIVE')
   })
 
-  // T3404: red on origin/main because of F-034-D14; S8 removes `.fails` together with the fix.
-  it.fails('a 409 that startRun itself could not resolve is reported too - the click can be repeated', async () => {
+  it('a 409 that startRun itself could not resolve is reported too - the click can be repeated', async () => {
     const s = stand({ runId: null, lastError: 'HTTP 409 Conflict for /simulator/runs' })
 
     await expect(s.controls.runTxOnce()).rejects.toThrow('Failed to start run for FX debug: HTTP 409 Conflict')
