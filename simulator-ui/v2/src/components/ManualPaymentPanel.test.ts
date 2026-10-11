@@ -1911,8 +1911,82 @@ describe('ManualPaymentPanel', () => {
   })
 })
 
+describe('BACKLOG 037-5: what the recipient step says and lets the user choose', () => {
+  async function mountPanel(over: Record<string, unknown> & { fromPid?: string | null; toPid?: string | null; phase?: string }) {
+    const { fromPid = 'alice', toPid = null, phase = 'picking-payment-to', ...props } = over
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const state = reactive<ManualPaymentPanelState>({
+      phase, fromPid, toPid, selectedEdgeKey: null, edgeAnchor: null, error: null, lastClearing: null,
+    })
+    const setToPid = vi.fn((pid: string | null) => { state.toPid = pid })
+    const app = createApp({
+      render: () =>
+        h(manualPaymentPanelComponent, {
+          phase,
+          state,
+          unit: 'UAH',
+          availableCapacity: null,
+          trustlinesLoading: false,
+          paymentTargetsLoading: false,
+          paymentTargetsLastError: null,
+          paymentToTargetIds: new Set<string>(),
+          trustlines: [],
+          participants: [
+            { pid: 'alice', name: 'Alice', type: 'person', status: 'active' },
+            { pid: 'bob', name: 'Bob', type: 'person', status: 'active' },
+          ],
+          setFromPid: vi.fn(),
+          setToPid,
+          busy: false,
+          canSendPayment: true,
+          confirmPayment: vi.fn(),
+          cancel: vi.fn(),
+          ...props,
+        }),
+    })
+    app.mount(host)
+    await nextTick()
+    const helpText = () => (host.querySelector('[data-testid="manual-payment-to-help"]')?.textContent ?? '').trim()
+    return { host, setToPid, helpText, done: () => { app.unmount(); host.remove() } }
+  }
 
+  describe('(b) a sender the participants list reports as not active', () => {
+    const withAlice = (status: string): ParticipantInfo[] => [
+      { pid: 'alice', name: 'Alice', type: 'person', status },
+      { pid: 'bob', name: 'Bob', type: 'person', status: 'active' },
+    ]
 
+    it('an empty recipient list names the status of the sender, as the server sent it', async () => {
+      for (const status of ['frozen', 'suspended']) {
+        const p = await mountPanel({ participants: withAlice(status), canSendPayment: false })
+        expect(p.helpText()).toContain('Backend reports no payment routes from selected sender')
+        expect(p.helpText()).toContain(`Selected sender is not active (status: ${status})`)
+        p.done()
+      }
+    })
 
+    it('anti-vacuum: an active sender with no routes gets no such statement; a non-active one with routes neither', async () => {
+      const active = await mountPanel({ participants: withAlice('active'), canSendPayment: false })
+      expect(active.helpText()).toContain('Backend reports no payment routes from selected sender')
+      expect(active.helpText()).not.toContain('not active')
+      active.done()
 
+      const reachable = await mountPanel({ participants: withAlice('suspended'), paymentToTargetIds: new Set(['bob']) })
+      expect(reachable.helpText()).not.toContain('not active')
+      reachable.done()
+    })
 
+    it('the confirm step (entered from a line or a node card) says the same next to "no payment routes"', async () => {
+      const p = await mountPanel({ phase: 'confirm-payment', toPid: 'bob', participants: withAlice('suspended'), canSendPayment: false })
+      const input = p.host.querySelector('#mp-amount') as HTMLInputElement
+      input.value = '1'
+      input.dispatchEvent(new Event('input'))
+      await nextTick()
+      const reason = (p.host.querySelector('[data-testid="mp-confirm-reason"]')?.textContent ?? '').trim()
+      expect(reason).toContain('Backend reports no payment routes between selected participants.')
+      expect(reason).toContain('Selected sender is not active (status: suspended)')
+      p.done()
+    })
+  })
+})

@@ -227,6 +227,19 @@ const confirmInlineWarning = computed<string | null>(() => {
   return `Amount may exceed direct trustline capacity (${props.availableCapacity ?? '—'} ${props.unit}). Multi-hop may still succeed; backend will validate.`
 })
 
+/**
+ * BACKLOG 037-5 (b): what the participants list says about a party that is not active (a scenario's `frozen`, the stored
+ * `suspended`, `left`, `deleted`), in the server's own word. Said only NEXT TO the server's "no routes" answer and as a fact
+ * of its own: the list and the routes are two answers, and this panel does not derive one from the other. A party the list
+ * has no record of, or without a status, gets no statement.
+ */
+function notActiveNote(pid: string | null | undefined, role: 'sender' | 'recipient'): string {
+  const id = String(pid ?? '').trim()
+  const status = String((props.participants ?? []).find((p) => p.pid === id)?.status ?? '').trim()
+  if (!id || !status || isActiveStatus(status)) return ''
+  return ` Selected ${role} is not active (status: ${status}); a participant that is not active takes no part in payments.`
+}
+
 const confirmDisabledReason = computed<string | null>(() => {
   // Spec: do not show reason while busy.
   if (props.busy) return null
@@ -247,7 +260,7 @@ const confirmDisabledReason = computed<string | null>(() => {
     return 'You cannot send a payment to yourself.'
   }
   if (from && to && props.canSendPayment === false) {
-    return 'Backend reports no payment routes between selected participants.'
+    return `Backend reports no payment routes between selected participants.${notActiveNote(from, 'sender')}${notActiveNote(to, 'recipient')}`
   }
 
   return null
@@ -465,7 +478,7 @@ const toInlineHelpText = computed<string | null>(() => {
     return null
   }
   if (targets.size === 0) {
-    return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).`
+    return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).${notActiveNote(props.state.fromPid, 'sender')}`
   }
 
   if (props.trustlinesLastError) {
