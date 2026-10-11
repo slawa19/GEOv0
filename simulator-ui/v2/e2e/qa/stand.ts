@@ -479,6 +479,30 @@ export async function pretendGpu(page: Page): Promise<void> {
   })
 }
 
+/**
+ * Select the node with the most trust lines by clicking the canvas: points of a 16 px grid that the base canvas owns
+ * (not the HUD) are clicked until 28 node labels are mounted - the cap of `useLabelNodes.ts`, reached only by a hub.
+ * Needs no dev hook, so it works on a production build too. Returns the number of node labels.
+ */
+export async function selectHub(page: Page): Promise<number> {
+  const count = () => page.evaluate(() => document.querySelectorAll('.node-label-inner').length)
+  for (let y = 100; y < 700; y += 16) {
+    const xs = await page.evaluate((y) => {
+      const out: number[] = []
+      for (let x = 20; x < 1260; x += 16) {
+        const el = document.elementFromPoint(x, y)
+        if (el instanceof HTMLCanvasElement && el.classList.contains('canvas') && !el.classList.contains('canvas-fx')) out.push(x)
+      }
+      return out
+    }, y)
+    for (const x of xs) {
+      await page.mouse.click(x, y)
+      if ((await count()) >= 28) return 28
+    }
+  }
+  return count()
+}
+
 export type LabelSample = { text: string; cls: string; ageMs: number; opacity: number; durationMs: number; animations: number }
 
 /** Set every label's CSS animation to its JS age and read the computed opacity. */

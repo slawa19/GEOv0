@@ -230,10 +230,12 @@
 }
 
 /*
- * No GPU: no CSS filter on amount labels (038 S3; the same class of effect as the backdrop blurs above).
+ * No GPU: no CSS filter on amount labels and node labels (038 S3; the same class of effect as the backdrop blurs above).
  * On software compositing every label with a drop-shadow is filtered again on every frame. The text-shadow glow stays.
- * The first selector also covers the clearing label (`.clearing-premium` sets its filter with a lower specificity).
+ * The `.floating-label-inner` selector also covers the clearing label (`.clearing-premium` sets its filter with a
+ * lower specificity).
  */
+.root[data-gpu='0'] .node-label-inner,
 .root[data-gpu='0'] .floating-label-inner,
 .root[data-gpu='0'] .floating-label-inner.is-glow {
   filter: none;

@@ -21,8 +21,8 @@ import { join } from 'node:path'
 import { expect, test, type Browser, type Page } from '@playwright/test'
 
 import { buildPerfLoad } from './perf-load.js'
-import { measureWindow, r1, summarizeWindow, type WindowSummary } from './perf-measure.js'
-import { boot, fixtureSnapshot100, waitLoopAsleep } from './stand.js'
+import { measureWindow, med, r1, summarizeWindow, type WindowSummary } from './perf-measure.js'
+import { boot, fixtureSnapshot100, selectHub, waitLoopAsleep } from './stand.js'
 
 const WINDOW_MS = 6_000
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
@@ -234,6 +234,26 @@ test(`frame breakdown: the same load on a deviceScaleFactor 2 screen (${build})`
   } finally {
     await ctx.close()
   }
+})
+
+// Node labels (`.node-label-inner`) are DOM too. By default one is shown (the selected node); with Labels = Neighbors
+// and a hub selected there are 28 - the state in which their CSS filter, if any, is paid for on every frame.
+test(`frame diagnostics: Labels = Neighbors with the hub selected, three windows at CPU x1 and x4 (${build})`, async ({ page }) => {
+  await boot(page, {
+    snapshot, clock: false, devHook,
+    beforeLoad: (p) => p.addInitScript(() => { try { localStorage.setItem('geo.sim.labelsLod', 'neighbors') } catch { /* ignore */ } }),
+  })
+  expect(await selectHub(page), 'the hub is selected: 28 node labels').toBe(28)
+  const withFilter = await page.evaluate(() => [...document.querySelectorAll('.node-label-inner')].filter((el) => getComputedStyle(el).filter !== 'none').length)
+  const rows: Record<string, unknown> = { nodeLabels: 28, nodeLabelsWithCssFilter: withFilter }
+  for (const rate of [1, 4]) {
+    const ws: WindowSummary[] = []
+    for (let i = 0; i < 3; i += 1) ws.push(await windowAt(page, rate, `neighbors x${rate}`))
+    expect(await page.locator('.node-label-inner').count(), 'the node labels stayed on screen through the windows').toBe(28)
+    rows[`x${rate}`] = { fps: med(ws.map((w) => w.fps)), frameP95Ms: med(ws.map((w) => w.frameMs.p95)), frameMeanMs: med(ws.map((w) => w.frameMs.mean)) }
+  }
+  console.log('[038 breakdown] neighbors', JSON.stringify(rows))
+  out['Labels = Neighbors, hub selected'] = rows
 })
 
 test.afterAll(async ({}, testInfo) => {

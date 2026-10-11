@@ -88,7 +88,25 @@ export const BUDGETS = {
     'most amount labels (payments and clearing) mounted at once with a computed CSS filter (drop-shadow) during one period of the load, no GPU (policy 5: on software compositing every such label is filtered again on every frame). With a GPU the filter stays - held by the counter-test in budgets.qaperf.ts',
     '2026-10-11: 24 - first record (038 S3), a recorded debt: every label carried the filter, and it took the scene from 60 to about 16 fps. '
     + '2026-10-11: 24 -> 0 - the filter is gated by data-gpu=0 in src/App.css (orchestrator decision of the same day: the same class of effect the policy already turns off without a GPU)'),
+  NODE_LABELS_WITH_CSS_FILTER_NO_GPU: b('NODE_LABELS_WITH_CSS_FILTER_NO_GPU', 0, 'higher',
+    'node labels with a computed CSS filter (drop-shadow) when Labels = Neighbors and the hub is selected (28 labels, the cap of useLabelNodes.ts), no GPU. With a GPU the filter stays - held by the counter-test in no-gpu-effects.qaperf.ts',
+    '2026-10-11: 0 - first record (038 S3) together with the gate by data-gpu=0 in src/App.css; before the gate the same test read 28'),
   ELEMENTS_WITH_BACKDROP_FILTER_NO_GPU: b('ELEMENTS_WITH_BACKDROP_FILTER_NO_GPU', 0, 'higher',
     'elements with a computed backdrop-filter under load, no window open, quality low, no GPU (policy 5: CSS gating)',
     '2026-10-11: 0 - first record (038 S3)'),
 } as const satisfies Record<string, Budget>
+
+/**
+ * Elements with a computed CSS `filter` or `backdrop-filter` without a GPU, by state of the page
+ * (`no-gpu-effects.qaperf.ts`). The whole list is the budget: expected empty in every state.
+ * An entry here is a recorded debt and needs a dated line with its measured cost.
+ * 2026-10-11: first record (038 S3).
+ */
+export const CSS_EFFECTS_NO_GPU: Record<string, string[]> = {
+  'the named load': [],
+  'Labels = Neighbors, hub selected': [],
+  'node card': [],
+  'edge tooltip': [],
+  'payment panel': [],
+  'node being dragged': [],
+}
