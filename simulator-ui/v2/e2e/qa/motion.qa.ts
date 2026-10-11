@@ -151,7 +151,10 @@ for (const quality of ['med', 'high'] as const) {
 
 test('prefers-reduced-motion: a payment draws no beam and schedules none, and its amount labels still appear', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await frames(page, 2)
+  // The product learns of the preference from a `change` event of the media query (`useReducedMotionPreference.ts`),
+  // which the browser delivers on one of ITS frames, not on the JS clock this test steps. Wait for the product to
+  // have taken it (`data-motion` on the root), not for frames: pushing the event earlier animated it 2 times in 100.
+  await expect(page.locator('.root')).toHaveAttribute('data-motion', 'reduced')
   const g = await pickRingRoute(page, RING, 3)
   await pushEvent(page, txUpdated(g.ids, '10.00'))
   let maxSparks = 0
