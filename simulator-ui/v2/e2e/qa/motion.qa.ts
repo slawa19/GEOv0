@@ -35,9 +35,10 @@ async function flyAndJudge(page: Page, hops: number, o: { compositionMinimums?: 
   const sum = expectBeamOnRoute(g, probes, { order: hops > 1, compositionMinimums: o.compositionMinimums })
   const row = sum.map((e) => ({
     edge: e.name, lit: [e.firstLit, e.lastLit], paintedFrames: e.litFrames.length, head: [e.headFirst?.toFixed(3), e.headLast?.toFixed(3)],
+    places: e.distinctHeads, maxStep: e.maxStepPerFrame.toFixed(3), covered: e.headCovered.toFixed(3),
     buffer: [e.framesStrong, e.strongPx], page: [e.framesShown, e.shownPx], seenSpan: e.seenSpan?.toFixed(3),
   }))
-  console.log(`[038 oracle] ${hops} edge(s) ${g.ids.join('>')}`, JSON.stringify(row), 'offRoute max', Math.max(...probes.map((p) => p.offRoute)))
+  console.log(`[038 oracle] ${hops} edge(s) ${g.ids.join('>')}`, JSON.stringify(row), 'offRoute max', Math.max(...probes.map((p) => p.offRoute)), 'halfWidthPx', Math.max(...probes.map((p) => p.maxOffAxis)).toFixed(1))
   test.info().annotations.push({ type: `038-oracle-${hops}`, description: JSON.stringify(row) })
 
   const last = probes[probes.length - 1]!

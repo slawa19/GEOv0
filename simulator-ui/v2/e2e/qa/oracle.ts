@@ -6,11 +6,13 @@
  *   1. displacement - the painted head moves along the edge between frames;
  *   2. direction    - it moves from the source of the edge to its target;
  *   3. route        - nothing is painted away from the route (other edges of the graph, the chord);
- *   4. order        - edge k lights up strictly after edge k-1, and not before edge k-1 has gone dark;
+ *   4. order        - edge k lights up strictly after edge k-1, and not before edge k-1 has gone dark. WEAK BY PIXELS:
+ *                     a beam is painted for only about half of its leg, so legs that overlap by half still pass on 3
+ *                     and 6 edges. What holds order strictly is the FX-state test in `motion.qa.ts` (one spark alive);
  *   5. composition  - where the FX buffer is painted, the screenshot of the page shows it, on every sampled frame.
  *
  * What it does NOT see: colour, shape and easing of the beam; anything within `NODE_CLEAR_PX` of a route node (the
- * node bursts live there); the spot where two edges of the route cross; a beam fainter than `ALPHA_MIN`; an occluder on the named list below (it is excluded, so
+ * node bursts live there - so a receiver burst that never comes is NOT seen here, only by a unit test); the spot where two edges of the route cross; a beam fainter than `ALPHA_MIN`; an occluder on the named list below (it is excluded, so
  * what happens under it is unknown); a frame between two sampled screenshots.
  */
 import { expect, type Page } from '@playwright/test'
@@ -19,10 +21,21 @@ import { distToSegment, frames, screenNodes, type Pt } from './stand.js'
 
 /** Painted = alpha at or above this. The FX canvas is cleared to transparent every frame, the graph is on another canvas. */
 export const ALPHA_MIN = 12
-/** A painted pixel this close to the axis of a route edge belongs to that edge. */
-export const CORRIDOR_PX = 12
-/** Pixels this close to the centre of a route node are not judged: the bursts of sender and receiver are painted there. */
-export const NODE_CLEAR_PX = 40
+/**
+ * A painted pixel this close to the axis of a route edge belongs to that edge; farther off it is "off the route".
+ * Measured 2026-10-11 (`halfWidthPx` in the printed row): the farthest pixel a beam paints at ALPHA_MIN is 2.8-3.0 px
+ * from the axis, at low, med and high quality alike. 5 leaves 2 px for rounding of the layout; it was 12, at which a
+ * beam drawn 6 px beside its edge was caught 1 time in 10.
+ */
+export const CORRIDOR_PX = 5
+/**
+ * Pixels this close to the centre of a route node are not judged: the bursts of sender and receiver are painted there.
+ * Also there, at med and high quality: at the start of a leg the bright "packet" behind the head (up to 54 px,
+ * `BEAM_SEG_MAX_SPX`) sticks out BEHIND the source node, to about 42 px from its centre. At 40 that gave one pixel
+ * "off the route" in one frame of some runs; 46 covers it. It is a property of the product's drawing, named here and
+ * in the spec, not judged.
+ */
+export const NODE_CLEAR_PX = 46
 /** A buffer pixel this opaque must be visible on the composed page (see `SHOT_DIFF_MIN`). */
 export const STRONG_ALPHA = 64
 /** Sum of |dR| + |dG| + |dB| against the screenshot taken before the event that counts as "the page changed here". */
@@ -32,6 +45,8 @@ export const SHOT_DIFF_MIN = 24
  * DOM that is known to lie over the scene at 1280x720, BY NAME. A band point under one of these is not judged for
  * visibility. The list is closed on purpose: an occluder that is not named here hides the beam and turns property 5
  * red, which is the point of the property. Do not replace it with `elementsFromPoint`.
+ * LIMIT: the names are wide classes. A NEW panel inside one of these containers is excluded silently too, as long as
+ * it covers less than 40 % of an edge (`pickRingRoute` refuses a route that is more covered).
  */
 export const NAMED_OCCLUDERS = ['.graph-navigator', '.ds-ov-top .ds-panel', '.ds-ov-bottom .ds-panel'] as const
 const OCCLUDER_MARGIN_PX = 10
@@ -132,6 +147,8 @@ export type FrameProbe = {
   nearNode: number
   /** Painted pixels where two route edges cross: on the route, attributed to neither edge. */
   crossing: number
+  /** The farthest painted pixel of the route from the axis of its edge, px: the half-width of what was drawn. */
+  maxOffAxis: number
   shot: boolean
 }
 
@@ -183,6 +200,7 @@ export async function probeFrame(page: Page, g: RouteGeom, frame: number, shot: 
     let offRouteAt: { x: number; y: number } | null = null
     let nearNode = 0
     let crossing = 0
+    let maxOffAxis = 0
     for (let py = 0; py < c.height; py += 1) {
       for (let px = 0; px < c.width; px += 1) {
         const a = img.data[(py * c.width + px) * 4 + 3]!
@@ -212,6 +230,7 @@ export async function probeFrame(page: Page, g: RouteGeom, frame: number, shot: 
         if (secondD <= o.corridor + 4) { crossing += 1; continue }
         const e = edges[bestI]!
         e.px += 1
+        if (bestD > maxOffAxis) maxOffAxis = bestD
         if (a > e.maxAlpha) { e.maxAlpha = a; e.headSum = bestT; e.headN = 1 } else if (a === e.maxAlpha) { e.headSum += bestT; e.headN += 1 }
         if (shotPx && base && o.clip && a >= o.strong && !o.occluders.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)) {
           const sx = Math.floor(x - o.clip.x)
@@ -230,7 +249,7 @@ export async function probeFrame(page: Page, g: RouteGeom, frame: number, shot: 
       const s = edges[i]!
       out[e.name] = { px: s.px, head: s.headN ? s.headSum / s.headN : null, maxAlpha: s.maxAlpha, strong: s.strong, shown: s.shown }
     })
-    return { edges: out, offRoute, offRouteAt, nearNode, crossing }
+    return { edges: out, offRoute, offRouteAt, nearNode, crossing, maxOffAxis }
   }, args)
   return { frame, shot, ...r }
 }
@@ -254,6 +273,11 @@ export type EdgeSummary = {
   headFirst: number | null
   headLast: number | null
   maxStepBack: number
+  /** Largest advance of the head per frame between two painted frames next to each other (a gap of n frames counts as n). */
+  maxStepPerFrame: number
+  /** How many different places (to 0.01 of the edge) the head was painted at, and the share of the edge between its extremes. */
+  distinctHeads: number
+  headCovered: number
   /** Frames with a screenshot in which the buffer had strong pixels, and those of them where the page showed at least half. */
   framesStrong: number
   framesShown: number
@@ -268,7 +292,11 @@ export function summarize(g: RouteGeom, probes: FrameProbe[]): EdgeSummary[] {
     const lit = probes.filter((p) => p.edges[e.name]!.px > 0)
     const heads = lit.map((p) => p.edges[e.name]!.head!).filter((h) => h !== null)
     let maxStepBack = 0
-    for (let i = 1; i < heads.length; i += 1) maxStepBack = Math.max(maxStepBack, heads[i - 1]! - heads[i]!)
+    let maxStepPerFrame = 0
+    for (let i = 1; i < heads.length; i += 1) {
+      maxStepBack = Math.max(maxStepBack, heads[i - 1]! - heads[i]!)
+      maxStepPerFrame = Math.max(maxStepPerFrame, Math.abs(heads[i]! - heads[i - 1]!) / Math.max(1, lit[i]!.frame - lit[i - 1]!.frame))
+    }
     const strong = probes.filter((p) => p.shot && p.edges[e.name]!.strong > 0)
     return {
       name: e.name,
@@ -278,6 +306,9 @@ export function summarize(g: RouteGeom, probes: FrameProbe[]): EdgeSummary[] {
       headFirst: heads.length ? heads[0]! : null,
       headLast: heads.length ? heads[heads.length - 1]! : null,
       maxStepBack,
+      maxStepPerFrame,
+      distinctHeads: new Set(heads.map((h) => Math.round(h * 100))).size,
+      headCovered: heads.length ? Math.max(...heads) - Math.min(...heads) : 0,
       framesStrong: strong.length,
       framesShown: strong.filter((p) => p.edges[e.name]!.shown * 2 >= p.edges[e.name]!.strong).length,
       strongPx: strong.reduce((s, p) => s + p.edges[e.name]!.strong, 0),
@@ -285,6 +316,15 @@ export function summarize(g: RouteGeom, probes: FrameProbe[]): EdgeSummary[] {
     }
   })
 }
+
+/**
+ * How the head must advance (property 1). Measured on the product at 2026-10-11 with easeOutCubic and legs of 1200,
+ * 600 and 400 ms, at low, med and high quality: 13-40 different places, largest step 0.03-0.10 of the edge per
+ * frame, 0.69-0.79 of the edge covered (the 40 px next to each node are not judged). At the cap a leg is 200 ms =
+ * 12.5 frames: 5-7 places, a largest step of 0.16-0.19, 0.47-0.70 covered - hence its own, weaker limits.
+ */
+export const MOTION_LIMITS = { minDistinctHeads: 6, maxStepPerFrame: 0.15, minCovered: 0.6 } as const
+export const MOTION_LIMITS_AT_CAP = { minDistinctHeads: 4, maxStepPerFrame: 0.3, minCovered: 0.4 } as const
 
 const pct = (v: number | null) => (v === null ? 'none' : v.toFixed(3))
 
@@ -297,12 +337,20 @@ const pct = (v: number | null) => (v === null ? 'none' : v.toFixed(3))
  */
 export function expectBeamOnRoute(g: RouteGeom, probes: FrameProbe[], o: { order: boolean; compositionMinimums?: boolean }): EdgeSummary[] {
   const sum = summarize(g, probes)
+  const lim = o.compositionMinimums === false ? MOTION_LIMITS_AT_CAP : MOTION_LIMITS
 
   for (const e of sum) {
     // 1. Displacement. Mutation: phase frozen (render/fxRenderer/renderFrame.ts, `t0`).
     expect.soft(e.litFrames.length, `P1 displacement: edge ${e.name} is painted in at least 4 frames (painted in ${e.litFrames.length})`).toBeGreaterThanOrEqual(4)
     const moved = e.headFirst === null || e.headLast === null ? 0 : Math.abs(e.headLast - e.headFirst)
     expect.soft(moved, `P1 displacement: the head on edge ${e.name} moves along it between its first and last painted frame (from ${pct(e.headFirst)} to ${pct(e.headLast)} of the edge)`).toBeGreaterThanOrEqual(0.3)
+    // ... and it MOVES there, frame by frame: through several different places, by a bounded step, over most of the
+    // edge. Mutations: the head jumps from 0.25 to 0.75 at constant brightness (two places, one step of 0.5); the
+    // beam is drawn only between 0.30 and 0.65 of the edge.
+    expect.soft(
+      { severalPlaces: e.distinctHeads >= lim.minDistinctHeads, boundedStep: e.maxStepPerFrame <= lim.maxStepPerFrame, mostOfTheEdge: e.headCovered >= lim.minCovered },
+      `P1 displacement: the head on edge ${e.name} advances frame by frame (${e.distinctHeads} different places, need ${lim.minDistinctHeads}; largest step ${e.maxStepPerFrame.toFixed(3)} of the edge per frame, allowed ${lim.maxStepPerFrame}; covers ${e.headCovered.toFixed(3)} of the edge, need ${lim.minCovered})`,
+    ).toEqual({ severalPlaces: true, boundedStep: true, mostOfTheEdge: true })
 
     // 2. Direction: 0 is the source of the edge, 1 is its target. Mutation: the edge reversed in the renderer.
     expect.soft(
