@@ -105,8 +105,8 @@ test('R5 - a mouse drag moves the node by delta / zoom under a zoomed and panned
   expect(row.windows[1], 'the release after a drag opens no node card').toBe(windowsBefore)
 
   // Counter-check of "moved": a press and release without movement moves nothing and pins nothing more.
-  const bareNow = new Set((await draggableNodes(page, { x: 0, y: 0 })).map(([k]) => k)) // a press on the HUD would move nothing by itself
-  const other = [...(await screenNodes(page)).entries()].find(([k, p]) => k !== id && bareNow.has(k) && p.x > VIEW.x0 && p.x < VIEW.x1 && p.y > VIEW.y0 && p.y < VIEW.y1)
+  // Any other node on the bare canvas (a press on the HUD would move nothing by itself, and the check would be empty).
+  const other = (await draggableNodes(page, { x: 0, y: 0 })).find(([k]) => k !== id)
   expect(other, 'a second node is on screen for the counter-check').toBeTruthy()
   const b = (await layoutNodes(page)).find((n) => n.id === other![0])!
   await mouseDrag(page, other![1], { x: 0, y: 0 }, 1)
