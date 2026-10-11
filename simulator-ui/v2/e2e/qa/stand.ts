@@ -162,9 +162,9 @@ export async function installSseShim(page: Page): Promise<void> {
 export async function installRafCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as {
-      __qaRaf: { calls: number; frames: number; draws: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
+      __qaRaf: { calls: number; frames: number; draws: number; cmds: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
     }
-    w.__qaRaf = { calls: 0, frames: 0, draws: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
+    w.__qaRaf = { calls: 0, frames: 0, draws: 0, cmds: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
     // exactly once per `renderFrame`, whether the frame came from rAF or `renderOnce`. One more clear is counted
     // here and is not a frame: the one-off blanking when the scene model becomes empty (038 S1, `blankCanvases`).
@@ -176,6 +176,18 @@ export async function installRafCounter(page: Page): Promise<void> {
         if (w.__qaRaf.record) w.__qaRaf.drawAt.push(performance.now())
       }
       return clearRect.apply(this, a)
+    }
+    // The VOLUME of drawing, which a count of passes does not see (038 S3, B2): every call of a drawing method on
+    // a context of an on-screen canvas (base or FX). A frame that draws the base graph twice clears once.
+    // Not counted: path building (moveTo, lineTo, arc), state changes, off-screen canvases (sprite baking), and the
+    // cost of a call - one `stroke()` of a long path counts as one.
+    const proto = CanvasRenderingContext2D.prototype as unknown as Record<string, (...a: unknown[]) => unknown>
+    for (const m of ['stroke', 'fill', 'fillRect', 'strokeRect', 'fillText', 'strokeText', 'drawImage', 'putImageData']) {
+      const real = proto[m]!
+      proto[m] = function (this: CanvasRenderingContext2D, ...a: unknown[]) {
+        if ((this.canvas as HTMLCanvasElement).classList?.contains('canvas')) w.__qaRaf.cmds += 1
+        return real.apply(this, a)
+      }
     }
     const inner = window.requestAnimationFrame.bind(window)
     window.requestAnimationFrame = (cb: FrameRequestCallback) => {
@@ -194,11 +206,14 @@ export async function installRafCounter(page: Page): Promise<void> {
   })
 }
 
-/** `calls`: registrations of a callback (weak: any caller). `draws`: completed passes of the render loop (see above). */
-export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number }> {
+/**
+ * `calls`: registrations of a callback (weak: any caller). `draws`: completed PASSES of the render loop (one clear of
+ * the base canvas each) - not how much a pass draws. `cmds`: calls of drawing methods on the on-screen canvases.
+ */
+export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number; cmds: number }> {
   return page.evaluate(() => {
-    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number } }).__qaRaf
-    return { calls: q.calls, frames: q.frames, draws: q.draws }
+    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number; cmds: number } }).__qaRaf
+    return { calls: q.calls, frames: q.frames, draws: q.draws, cmds: q.cmds }
   })
 }
 
@@ -210,9 +225,11 @@ export type BootOptions = {
   /** The segment of the top bar the app opens in. `auto` (Auto-Run) shows the scenario selector; default `interact`. */
   ui?: 'interact' | 'auto'
   /**
-   * `false`: the CSS animations of labels are left to run by themselves. Only for the wall-clock videos for a human
-   * (`*.qavideo.ts`); every deterministic check needs them on the JS clock. (The perf project still boots with the
-   * pause - BACKLOG 034-6 (k), slice S3.)
+   * `false`: the CSS animations of labels are left to run by themselves even under `clock: true`.
+   * The pause is installed only together with the fake clock (038 S3, BACKLOG 034-6 (k)): a deterministic check
+   * needs the animations on the JS clock, and a wall-clock run (`clock: false` - perf, videos) must see them run as
+   * they do for a user. Until S3 the pause was installed on every boot, and the perf numbers were taken with labels
+   * that did not animate.
    */
   cssClock?: false
   /** `false` on a production build: there is no `window.__geoSim`, so layout and FX state cannot be read. */
@@ -260,7 +277,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.clock) await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
   if (o.sseShim !== false) await installSseShim(page)
   await installRafCounter(page)
-  if (o.cssClock !== false) await installCssClockSync(page)
+  if (o.clock && o.cssClock !== false) await installCssClockSync(page)
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
       localStorage.clear()
@@ -460,6 +477,45 @@ export async function installCssClockSync(page: Page): Promise<void> {
     if (document.documentElement) start()
     else document.addEventListener('DOMContentLoaded', start)
   })
+}
+
+/**
+ * The page is told that WebGL exists: `detectGpuAccelerationLikelyAvailable` (`useQualityAutoguards.ts`) gets a context
+ * without `WEBGL_debug_renderer_info` and reads "GPU likely available", so the root carries `data-gpu='1'` as on a
+ * machine with a GPU. Rendering stays software: this changes what the product BELIEVES, not how the page is drawn.
+ */
+export async function pretendGpu(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const real = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+      if (type === 'webgl' || type === 'experimental-webgl') return { getExtension: () => null, getParameter: () => null } as unknown as RenderingContext
+      return (real as (this: HTMLCanvasElement, t: string, ...r: unknown[]) => RenderingContext | null).call(this, type, ...rest)
+    } as typeof HTMLCanvasElement.prototype.getContext
+  })
+}
+
+/**
+ * Select the node with the most trust lines by clicking the canvas: points of a 16 px grid that the base canvas owns
+ * (not the HUD) are clicked until 28 node labels are mounted - the cap of `useLabelNodes.ts`, reached only by a hub.
+ * Needs no dev hook, so it works on a production build too. Returns the number of node labels.
+ */
+export async function selectHub(page: Page): Promise<number> {
+  const count = () => page.evaluate(() => document.querySelectorAll('.node-label-inner').length)
+  for (let y = 100; y < 700; y += 16) {
+    const xs = await page.evaluate((y) => {
+      const out: number[] = []
+      for (let x = 20; x < 1260; x += 16) {
+        const el = document.elementFromPoint(x, y)
+        if (el instanceof HTMLCanvasElement && el.classList.contains('canvas') && !el.classList.contains('canvas-fx')) out.push(x)
+      }
+      return out
+    }, y)
+    for (const x of xs) {
+      await page.mouse.click(x, y)
+      if ((await count()) >= 28) return 28
+    }
+  }
+  return count()
 }
 
 export type LabelSample = { text: string; cls: string; ageMs: number; opacity: number; durationMs: number; animations: number }
