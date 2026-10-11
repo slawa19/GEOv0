@@ -210,9 +210,11 @@ export type BootOptions = {
   /** The segment of the top bar the app opens in. `auto` (Auto-Run) shows the scenario selector; default `interact`. */
   ui?: 'interact' | 'auto'
   /**
-   * `false`: the CSS animations of labels are left to run by themselves. Only for the wall-clock videos for a human
-   * (`*.qavideo.ts`); every deterministic check needs them on the JS clock. (The perf project still boots with the
-   * pause - BACKLOG 034-6 (k), slice S3.)
+   * `false`: the CSS animations of labels are left to run by themselves even under `clock: true`.
+   * The pause is installed only together with the fake clock (038 S3, BACKLOG 034-6 (k)): a deterministic check
+   * needs the animations on the JS clock, and a wall-clock run (`clock: false` - perf, videos) must see them run as
+   * they do for a user. Until S3 the pause was installed on every boot, and the perf numbers were taken with labels
+   * that did not animate.
    */
   cssClock?: false
   /** `false` on a production build: there is no `window.__geoSim`, so layout and FX state cannot be read. */
@@ -260,7 +262,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.clock) await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
   if (o.sseShim !== false) await installSseShim(page)
   await installRafCounter(page)
-  if (o.cssClock !== false) await installCssClockSync(page)
+  if (o.clock && o.cssClock !== false) await installCssClockSync(page)
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
       localStorage.clear()
