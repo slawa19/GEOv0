@@ -84,6 +84,8 @@ for (const vp of VIEWPORTS) {
       await page.locator('#mp-to__trigger').focus()
       await page.keyboard.press('Enter')
       await expect(page.locator('#mp-to__surface')).toBeVisible()
+      // BACKLOG 037-5 (c): the recipients can be walked and taken once the server has answered for the sender.
+      await expect(page.locator('#mp-to__surface [data-option-value="bob"]')).toBeEnabled()
       const list = await page.evaluate(() => {
         const opts = Array.from(document.querySelectorAll<HTMLElement>('#mp-to__surface [role="option"]'))
         const a = document.activeElement as HTMLElement | null

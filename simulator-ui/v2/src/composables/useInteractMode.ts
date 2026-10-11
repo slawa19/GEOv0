@@ -139,6 +139,12 @@ export function useInteractMode(opts: {
   /** Payment-specific targets for filtering the To dropdown (may be used outside picking phases, e.g. confirm). */
   paymentToTargetIds: ComputedRef<Set<string> | undefined>
 
+  /**
+   * BACKLOG 037-5 (c): the last answer the server gave for the current sender (run, eq, fromPid, maxHops), of any
+   * age (it lives until the run or the equivalent changes); `undefined` until there is one. For the list shown while the routes are updating - not a gate.
+   */
+  paymentToLastKnownTargetIds: ComputedRef<Set<string> | undefined>
+
   /** True while backend payment-targets query is in-flight for current (run, eq, fromPid, maxHops). */
   paymentTargetsLoading: ComputedRef<boolean>
 
@@ -367,6 +373,11 @@ export function useInteractMode(opts: {
 
     // Not fetched yet => still unknown.
     return !dataCache.paymentTargetsByKey.value.has(key)
+  })
+
+  const paymentToLastKnownTargetIds = computed(() => {
+    const key = paymentTargetsActiveKey.value
+    return key ? dataCache.paymentTargetsLastAnswerByKey.value.get(key) : undefined
   })
 
   function prefetchPaymentTargetsForCurrentFrom(o?: { force?: boolean }) {
@@ -1001,6 +1012,7 @@ export function useInteractMode(opts: {
     availableCapacity,
     availableTargetIds,
     paymentToTargetIds,
+    paymentToLastKnownTargetIds,
     paymentTargetsLoading,
     paymentTargetsLastError,
 

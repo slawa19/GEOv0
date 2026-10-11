@@ -600,7 +600,7 @@ function onApplyIntensity() {
       >
         <span class="ds-alert__icon">✕</span>
         <span class="ds-label">Error</span>
-        <span class="ds-value ds-mono tb-fade-92">{{ short(String(ctx.lastError.value), 160) }}</span>
+        <span class="ds-value ds-mono tb-fade-92" :title="String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
       </div>
 
       <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">

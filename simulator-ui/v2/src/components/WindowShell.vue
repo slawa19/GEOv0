@@ -212,6 +212,10 @@ function onCloseClick(ev: MouseEvent) {
 function onShellKeydown(event: KeyboardEvent) {
   if (!focusContainmentEnabled.value) return
   if (event.key !== 'Tab') return
+  // A list inside the window that has already handled this Tab (its own containment, default prevented) keeps it: when that
+  // list has one focusable entry, the entry is also the LAST focusable of the window, and wrapping here would take the focus
+  // out of the open list (BACKLOG 037-5 (c): a recipient list before its first answer).
+  if (event.defaultPrevented) return
 
   const shell = shellRef.value
   if (!shell) return

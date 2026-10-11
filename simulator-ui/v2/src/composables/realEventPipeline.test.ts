@@ -456,8 +456,11 @@ describe('realEventPipeline state-before-effect ordering', () => {
 })
 
 describe('031 item 17: the tick step refusal reaches the run error line', () => {
-  const statusWith = (last_error: { code: string; message: string; at: string } | null): AcceptedSimulatorEvent => ({
-    event_id: 'evt_run_1_3', ts: TS, type: 'run_status', run_id: 'run_1', scenario_id: 'scenario_1', state: 'running',
+  const statusWith = (
+    last_error: { code: string; message: string; at: string } | null,
+    state = 'running',
+  ): AcceptedSimulatorEvent => ({
+    event_id: 'evt_run_1_3', ts: TS, type: 'run_status', run_id: 'run_1', scenario_id: 'scenario_1', state,
     attempts_total: 1, last_error,
   })
   const apply = (event: AcceptedSimulatorEvent) => {
@@ -474,5 +477,14 @@ describe('031 item 17: the tick step refusal reaches the run error line', () => 
       .toBe('Clearing refused: the database holds debts finer than the accounting step of the equivalent. Reseed the database.')
     expect(apply(statusWith({ code: 'CLEARING_ERROR', message: 'Internal error', at: TS }))).toBe('')
     expect(apply(statusWith({ code: 'INTERNAL_ERROR', message: 'boom', at: TS }))).toBe('INTERNAL_ERROR: boom')
+  })
+
+  it('BACKLOG 037-5 (a): the error a run STOPPED with is shown whatever its code; the same code on a live run is not', () => {
+    const stoppedBy = { code: 'SCENARIO_TRUSTLINE_REFUSED', message: 'trust line a->b UAH: refused (reason: trust_line_status_frozen)', at: TS }
+    expect(apply(statusWith(stoppedBy, 'error'))).toBe(`SCENARIO_TRUSTLINE_REFUSED: ${stoppedBy.message}`)
+    // anti-vacuum: the list of user-facing codes still decides for a run that goes on
+    expect(apply(statusWith(stoppedBy))).toBe('')
+    // a stopped run without an error has nothing to show
+    expect(apply(statusWith(null, 'error'))).toBe('')
   })
 })

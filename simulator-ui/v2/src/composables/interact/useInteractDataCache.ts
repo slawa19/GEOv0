@@ -53,6 +53,12 @@ export function useInteractDataCache(opts: {
    * a decimal string, or `null` = "the server did not estimate" - which is not the measured zero `"0.00"`.
    */
   paymentTargetDetailsByKey: Ref<Map<string, Map<string, PaymentTargetDetail>>>
+  /**
+   * BACKLOG 037-5 (c): the LAST answer the server gave under a key, kept across the invalidation by snapshot revision
+   * (which empties `paymentTargetsByKey` on every applied patch). Only for showing a list while the fresh answer is on
+   * its way: it gates nothing and is not "known" - `paymentTargetsByKey` alone is. Dropped with the run or the equivalent.
+   */
+  paymentTargetsLastAnswerByKey: Ref<Map<string, Set<string>>>
   /** Loading flags per key. Key must match paymentTargetsByKey key. */
   paymentTargetsLoadingByKey: Ref<Map<string, boolean>>
   /** Error per cache key; stale failures cannot degrade a different active sender. */
@@ -301,6 +307,10 @@ export function useInteractDataCache(opts: {
   const paymentTargetsFetchEpochByKey = new Map<string, number>()
   const paymentTargetsFetchedAtMsByKey = new Map<string, number>()
   let paymentTargetsRequestSerial = 0
+  const paymentTargetsLastAnswerByKey = ref(new Map<string, Set<string>>())
+  const paymentTargetsLastAnswerSerialByKey = new Map<string, number>()
+  /** Moves with the run or the equivalent: an answer asked for before the move belongs to nobody after it. */
+  let paymentTargetsContext = 0
 
   // Prevent “forever stale” targets when the underlying graph changes over time.
   // Must be aligned with other dropdown caches in this file (participants=30s, trustlines=15s).
@@ -342,11 +352,11 @@ export function useInteractDataCache(opts: {
     // per-key ownership map, but it must never make an old same-key request current again.
     const myEpoch = ++paymentTargetsRequestSerial
     paymentTargetsFetchEpochByKey.set(key, myEpoch)
+    const myContext = paymentTargetsContext
 
     try {
       const items = await opts.actions.fetchPaymentTargets(eq, fromPid, maxHops)
-      // Ignore stale result for the same key.
-      if (paymentTargetsFetchEpochByKey.get(key) !== myEpoch) return
+      const superseded = paymentTargetsFetchEpochByKey.get(key) !== myEpoch
 
       const ids = new Set<string>()
       const details = new Map<string, PaymentTargetDetail>()
@@ -356,6 +366,15 @@ export function useInteractDataCache(opts: {
         ids.add(pid)
         details.set(pid, { hops: it.hops, max_available: typeof it.max_available === 'string' ? it.max_available : null })
       }
+
+      // An answer that is no longer the newest request is still what the server last said for this key - unless the
+      // run or the equivalent moved, or a later request has already answered.
+      if (myContext === paymentTargetsContext && !((paymentTargetsLastAnswerSerialByKey.get(key) ?? 0) > myEpoch)) {
+        paymentTargetsLastAnswerSerialByKey.set(key, myEpoch)
+        paymentTargetsLastAnswerByKey.value = new Map(paymentTargetsLastAnswerByKey.value).set(key, ids)
+      }
+      // Ignore stale result for the same key.
+      if (superseded) return
 
       const next = new Map(paymentTargetsByKey.value)
       next.set(key, ids)
@@ -391,6 +410,9 @@ export function useInteractDataCache(opts: {
   watch(
     () => `${normalizeRunId(opts.runId.value)}::${normalizeEq(opts.equivalent.value)}`,
     () => {
+      paymentTargetsContext += 1
+      paymentTargetsLastAnswerByKey.value = new Map()
+      paymentTargetsLastAnswerSerialByKey.clear()
       paymentTargetsByKey.value = new Map()
       paymentTargetDetailsByKey.value = new Map()
       paymentTargetsLoadingByKey.value = new Map()
@@ -526,6 +548,7 @@ export function useInteractDataCache(opts: {
     refreshPaymentTargets,
     paymentTargetsByKey,
     paymentTargetDetailsByKey,
+    paymentTargetsLastAnswerByKey,
     paymentTargetsLoadingByKey,
     paymentTargetsLastErrorByKey,
     paymentTargetsKey,

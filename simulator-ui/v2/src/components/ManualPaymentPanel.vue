@@ -43,6 +43,12 @@ type Props = {
    * (`trustlinesLoading=true` OR `paymentTargetsLoading=true`).
    */
   paymentToTargetIds: Set<string> | undefined
+  /**
+   * BACKLOG 037-5 (c): the server's last answer for this sender, of ANY age (one revision behind under a stream of
+   * events; arbitrarily old for a sender not chosen for a while, until the run or the equivalent changes); `undefined` until there is
+   * one. Read ONLY while the routes are loading, to have a list to choose from; it never counts as known.
+   */
+  paymentToLastKnownTargetIds?: Set<string>
   trustlines?: TrustlineInfo[]
 
   /** Best-effort error signal: last trustlines refresh failure (if any). */
@@ -227,6 +233,19 @@ const confirmInlineWarning = computed<string | null>(() => {
   return `Amount may exceed direct trustline capacity (${props.availableCapacity ?? '—'} ${props.unit}). Multi-hop may still succeed; backend will validate.`
 })
 
+/**
+ * BACKLOG 037-5 (b): what the participants list says about a party that is not active (a scenario's `frozen`, the stored
+ * `suspended`, `left`, `deleted`), in the server's own word. Said only NEXT TO the server's "no routes" answer and as a fact
+ * of its own: the list and the routes are two answers, and this panel does not derive one from the other. A party the list
+ * has no record of, or without a status, gets no statement.
+ */
+function notActiveNote(pid: string | null | undefined, role: 'sender' | 'recipient'): string {
+  const id = String(pid ?? '').trim()
+  const status = String((props.participants ?? []).find((p) => p.pid === id)?.status ?? '').trim()
+  if (!id || !status || isActiveStatus(status)) return ''
+  return ` Selected ${role} is not active (status: ${status}); a participant that is not active takes no part in payments.`
+}
+
 const confirmDisabledReason = computed<string | null>(() => {
   // Spec: do not show reason while busy.
   if (props.busy) return null
@@ -247,7 +266,7 @@ const confirmDisabledReason = computed<string | null>(() => {
     return 'You cannot send a payment to yourself.'
   }
   if (from && to && props.canSendPayment === false) {
-    return 'Backend reports no payment routes between selected participants.'
+    return `Backend reports no payment routes between selected participants.${notActiveNote(from, 'sender')}${notActiveNote(to, 'recipient')}`
   }
 
   return null
@@ -346,6 +365,9 @@ const dropdownToTargetIds = computed<Set<string> | undefined>(() => {
   return props.paymentToTargetIds ?? new Set<string>()
 })
 
+/** The list shown while the routes are being asked for: the server's last answer for this sender, when it has given one. */
+const toListWhileUpdating = computed(() => (routesLoading.value ? props.paymentToLastKnownTargetIds : undefined))
+
 async function onConfirm() {
   if (!canConfirm.value) return
 
@@ -396,7 +418,7 @@ const summaryAmount = computed(() =>
 const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
   participants: () => props.participants,
   fromParticipantId: () => props.state.fromPid,
-  availableTargetIds: () => dropdownToTargetIds.value,
+  availableTargetIds: () => dropdownToTargetIds.value ?? toListWhileUpdating.value,
 })
 
 // MP-3 (Phase 2): filter From list by availability of outgoing direct-hop payments.
@@ -452,21 +474,29 @@ const toListUpdating = computed(() => {
   return routesLoading.value
 })
 
+function noRoutesFromSenderText(): string {
+  return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).${notActiveNote(props.state.fromPid, 'sender')}`
+}
+
 const toInlineHelpText = computed<string | null>(() => {
   if (props.phase === 'confirm-payment') return null
   if (!props.state.fromPid) return null
 
   const targets = dropdownToTargetIds.value
   if (targets === undefined) {
-    if (routesLoading.value) return 'Routes are updating; the list may include unreachable recipients.'
+    if (routesLoading.value) {
+      const last = toListWhileUpdating.value
+      if (!last) return 'Routes are updating; a recipient can be chosen once the server answers.'
+      // An EMPTY last answer is the server's "no routes", not a list: the same text as for the known-empty list, marked as updating.
+      if (last.size === 0) return `${noRoutesFromSenderText()} Routes are updating.`
+      return 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.'
+    }
     if (props.paymentTargetsLastError || props.trustlinesLastError) {
       return 'Routes update failed; showing fallback data. Some recipients may be unreachable.'
     }
     return null
   }
-  if (targets.size === 0) {
-    return `Backend reports no payment routes from selected sender (max hops: ${paymentTargetsMaxHopsLabel.value}).`
-  }
+  if (targets.size === 0) return noRoutesFromSenderText()
 
   if (props.trustlinesLastError) {
     return 'Routes update failed; showing fallback data. Some recipients may be missing.'
@@ -606,9 +636,16 @@ const fromOptions = computed(() => fromParticipants.value.map((participant) => (
   label: participantLabel(participant, showPid),
 })))
 
+// BACKLOG 037-5 (c): until the server has answered for this sender AT ALL, the list is the unfiltered fallback - it names who MAY
+// come, and none of them can be taken (the list still opens: the form opens it after the sender is chosen). Once there is an
+// answer, an update shows that last answer and stays choosable: under a stream of run events every patch asks again and no
+// answer is the newest for long, so waiting for the fresh one would mean never choosing.
+// A FAILED request is not this state: its fallback list stays choosable and says so (`toInlineHelpText`).
+// Not covered here: a recipient picked on the canvas goes around the list; the watcher above drops it when the answer excludes it.
 const toOptions = computed(() => toParticipants.value.map((participant) => ({
   value: participant.pid,
   label: toOptionLabel(participant),
+  disabled: routesLoading.value && !toListWhileUpdating.value,
 })))
 </script>
 
