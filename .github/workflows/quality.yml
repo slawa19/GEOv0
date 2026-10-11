@@ -797,9 +797,10 @@ jobs:
         run: cat "$RUNNER_TEMP/admin-e2e-backend.log" || true
 
   # 038 S2 (2026-10-11): the WHOLE functional QA stand - the required subset above plus what is tagged
-  # `@extended`: frames and axe of the other three themes (`shadcn`, `saas`, `library`), the surfaces
-  # placed by CSS at 1920x1080 and 1024x640, and the measurement of what the HUD covers. Its HTML
-  # report is the artifact a human tester starts from, so it is uploaded on every run, green or red.
+  # `@extended`: the gallery - a frame and axe of every window in all four themes (`hud`, `shadcn`,
+  # `saas`, `library`) - the windows and CSS-placed surfaces at 1920x1080 and 1024x640, the measurement
+  # of what the HUD covers, and the reproducer of a recorded Interact defect. Its HTML report is the
+  # artifact a human tester starts from, so it is uploaded on every run, green or red.
   # NOT here: the perf project (`qa-perf`: wall clock, production build). Its scheduled job belongs to
   # slice S3 of programme 038 and goes right below this one.
   simulator-qa-stand:

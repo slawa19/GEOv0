@@ -24,10 +24,10 @@ import { fileURLToPath } from 'node:url'
 
 /**
  * Tests that run, by scope. Every movement is a dated line:
- * - 2026-10-11 (038 S2): gate 63, full 180. Of the gate, 31 are the tests of S0/S1 and 32 are `surfaces.qa.ts` (it held 7
- *   measurements before); 117 more of that file run under `@extended`.
+ * - 2026-10-11 (038 S2): gate 62, full 185. Of the gate, 31 are the tests of S0/S1 and 31 are `surfaces.qa.ts` (it held 7
+ *   measurements before); 123 more of that file run under `@extended`.
  */
-export const EXPECTED = { gate: 63, full: 180 }
+export const EXPECTED = { gate: 62, full: 185 }
 
 const scope = process.argv[2]
 const extra = process.argv.slice(3)

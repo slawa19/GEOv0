@@ -223,12 +223,14 @@ async function checkPolicies(page: Page, e: Entry): Promise<Record<string, unkno
 }
 
 /**
- * Where a surface is put by SCRIPT - the window manager's clamp, the list of OverlaySelect, the shift of a HUD menu -
- * its place is decided at the moment it opens and again on a resize, so it is opened anew at 1920x1080 and resized to
- * 1024x640 in the required test. A surface placed by CSS alone gets the same two viewports in a test of its own,
- * tagged `@extended` (the required gate has a time budget; a stylesheet does not decide anything at open).
+ * The other two viewports - opened anew at 1920x1080, resized down to 1024x640 - are part of the REQUIRED test only for
+ * the menus of the bars and the lists of OverlaySelect: their place is computed by script at the moment they open, and
+ * the check costs them about a second. For a window of the window manager it costs several seconds (after every resize
+ * the graph is laid out again, and the recipes click the canvas), and the required gate has a time budget; its clamp
+ * also has unit tests (`useWindowManager.test.ts`). Windows and everything placed by CSS alone get the two viewports
+ * in a test of their own, tagged `@extended`.
  */
-const placedByScript = (e: Entry) => e.policies.inside === 'wm-pad' || e.catalogue === 'hud-dropdown' || e.catalogue === 'interact-select-dropdown'
+const tourInGate = (e: Entry) => e.catalogue === 'hud-dropdown' || e.catalogue === 'interact-select-dropdown'
 const OTHER_VIEWPORT = /@(1920x1080|1024x640)$/
 
 /** Opened anew on the large viewport, then resized down with the surface on screen. The surface is closed or absent on entry. */
@@ -253,7 +255,7 @@ function expectFindings(e: Entry, findings: string[], scope: (finding: string) =
 }
 
 for (const e of MATRIX) {
-  const all = placedByScript(e)
+  const all = tourInGate(e)
   test(`matrix [hud] ${e.id}: ${e.gesture} - catalogue, viewport${all ? 's' : ''}, targets, frame, axe, declared policies`, async ({ page }, info) => {
     const keys = await catalogueKeys()
     await bootEntry(page, e, 'hud', VIEWPORT_MAIN)
@@ -290,7 +292,7 @@ for (const e of MATRIX) {
   })
 
   if (!all && e.policies.inside !== null) {
-    test(`matrix [hud] ${e.id}: placed by CSS - opened at 1920x1080 and resized to 1024x640 @extended`, async ({ page }, info) => {
+    test(`matrix [hud] ${e.id}: opened at 1920x1080 and resized to 1024x640 @extended`, async ({ page }, info) => {
       await bootEntry(page, e, 'hud', VIEWPORT_LARGE)
       const other = await otherViewports(page, e, info)
       note(info, { entry: e.id, theme: 'hud', box: { large: other.large, resized: other.resized }, findings: other.findings })
@@ -404,7 +406,7 @@ test('matrix [hud] menu-admin: when its focused control is disabled under the fo
 
 // --- a defect outside the owner surface of 038: recorded as a reproducer, not fixed ---------------------------------
 
-test('reproducer (BACKLOG 037-4, Interact): Escape on the trust line popup releases the flow, and the same line opens the popup again', async ({ page }) => {
+test('reproducer (BACKLOG 037-4, Interact): Escape on the trust line popup releases the flow, and the same line opens the popup again @extended', async ({ page }) => {
   test.fail(true, 'Product defect found by 038 S2 on 2026-10-11, not fixed here: the flow and its popup are owned by Interact '
     + '(useWmEdgeDetail.ts, useInteractMode.ts, useWindowController.ts), outside the owner surface of 038. Recipient: the maintainer of the '
     + 'Interact panels, BACKLOG 037-4. When it is fixed this test passes, the annotation fails the run - remove the annotation then.')
