@@ -13,6 +13,7 @@ export function useAppSceneState(opts: {
   effectiveEq: ComputedRef<string>
   state: SimulatorAppState
   loadSnapshot: (eq: string) => Promise<{ snapshot: import('../types').GraphSnapshot; sourcePath: string }>
+  requestedSceneSource?: () => string | null
   loadRecoverySnapshot?: (context: { runId: string; equivalent: string }) => Promise<{
     snapshot: import('../types').GraphSnapshot
     sourcePath: string
@@ -39,6 +40,7 @@ export function useAppSceneState(opts: {
     effectiveEq: opts.effectiveEq,
     state: opts.state,
     loadSnapshot: opts.loadSnapshot,
+    requestedSceneSource: opts.requestedSceneSource,
     loadRecoverySnapshot: opts.loadRecoverySnapshot,
     clearScheduledTimeouts: opts.clearScheduledTimeouts,
     resetCamera: opts.resetCamera,

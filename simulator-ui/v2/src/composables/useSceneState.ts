@@ -38,6 +38,8 @@ type UseSceneStateDeps = {
   state: SceneState
 
   loadSnapshot: LoadSnapshotFn
+  /** The `sourcePath` the latest `loadSnapshot` call asked for, known before it answers (null: unknown). */
+  requestedSceneSource?: () => string | null
   loadRecoverySnapshot?: LoadRecoverySnapshotFn
 
   clearScheduledTimeouts: (opts?: { keepCritical?: boolean }) => void
@@ -132,6 +134,16 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
     return true
   }
 
+  function clearScene() {
+    deps.clearScheduledTimeouts()
+    deps.resetCamera()
+    deps.state.sourcePath = ''
+    deps.state.snapshot = null
+    deps.resetLayoutKeyCache()
+    deps.state.selectedNodeId = null
+    deps.resetOverlays()
+  }
+
   async function applySceneLoad(input: {
     loadSnapshot: () => Promise<{ snapshot: GraphSnapshot; sourcePath: string }>
     isContextCurrent?: () => boolean
@@ -186,16 +198,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // want to keep camera + node positions stable to avoid a visible "graph jump".
       const isStructuralChange = !isIncrementalUpdate || deps.state.snapshot?.nodes.length !== snapshot.nodes.length
 
-      if (!isIncrementalUpdate) {
-        // Full reload: clear everything (including critical timers) because we're changing scene context.
-        deps.clearScheduledTimeouts()
-        deps.resetCamera()
-        deps.state.sourcePath = ''
-        deps.state.snapshot = null
-        deps.resetLayoutKeyCache()
-        deps.state.selectedNodeId = null
-        deps.resetOverlays()
-      }
+      // Full reload: clear everything (including critical timers) because we're changing scene context.
+      if (!isIncrementalUpdate) clearScene()
 
       deps.state.snapshot = snapshot
       deps.state.sourcePath = sourcePath
@@ -218,6 +222,14 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       return true
     } catch (error) {
       if (!isCurrent()) return false
+      // 034 S8 (review C1): the scene on screen is kept under the error only when the failed load asked for the
+      // SAME source. A load for another run, scenario or equivalent that fails leaves no scene: the old graph must
+      // not stay under the new selector, nor take the events of the new context. (Not applied to replay recovery.)
+      const requested = input.recoveryContext ? null : (deps.requestedSceneSource?.() ?? null)
+      if (requested !== null && deps.state.snapshot && deps.state.sourcePath !== requested) {
+        clearScene()
+        lastSnapshotNodeIds = null
+      }
       deps.state.error = extractErrorMessage(error)
       if (input.rethrow) throw error
       return false

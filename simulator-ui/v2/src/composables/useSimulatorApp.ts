@@ -79,6 +79,11 @@ import { useRealTxFx } from './realFx/useRealTxFx'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
 
+/** The `sourcePath` of a run's snapshot: the identity of that scene source, also for a load that has not answered. */
+function runSnapshotSourcePath(apiBase: string, runId: string, equivalent: string): string {
+  return `GET ${apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`
+}
+
 export async function loadStrictRunRecoverySnapshot(input: {
   apiBase: string
   accessToken: string
@@ -101,7 +106,7 @@ export async function loadStrictRunRecoverySnapshot(input: {
   }
   return {
     snapshot,
-    sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(runId)}/graph/snapshot?equivalent=${encodeURIComponent(equivalent)}`,
+    sourcePath: runSnapshotSourcePath(input.apiBase, runId, equivalent),
   }
 }
 
@@ -129,7 +134,7 @@ export async function loadActiveRunSnapshot(input: {
     if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
     return {
       snapshot,
-      sourcePath: `GET ${input.apiBase}/simulator/runs/${encodeURIComponent(input.runId)}/graph/snapshot?equivalent=${encodeURIComponent(input.equivalent)}`,
+      sourcePath: runSnapshotSourcePath(input.apiBase, input.runId, input.equivalent),
     }
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
@@ -1522,7 +1527,14 @@ export function useSimulatorApp(opts?: {
     runSceneLoads.set(sourcePath, { runId, scenarioId: requestedUnderScenarioId })
   }
 
+  const previewSourcePath = (scenarioId: string, eq: string) =>
+    `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`
+  // The source the LATEST scene load asked for, as the `sourcePath` its snapshot would carry. Written when the load
+  // is requested (before its first await); the scene owner reads it only for the latest load, when that load failed.
+  let requestedSceneSource: string | null = null
+
   async function loadSnapshotForUi(eq: string): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
+    requestedSceneSource = null
     if (!isRealMode.value) return loadSnapshotFixtures(eq)
 
     const runId = real.runId
@@ -1541,6 +1553,9 @@ export function useSimulatorApp(opts?: {
       // Otherwise treat as active only when we have a known status.
       // This avoids getting stuck on an unreachable/stale runId (scenario switching should still show previews).
       ((!!real.runStatus && isLiveRunState(real.runStatus.state)) || statusUnknownForShownRun)
+
+    if (isActiveRun) requestedSceneSource = runSnapshotSourcePath(real.apiBase, runId, eq)
+    else if (scenarioId) requestedSceneSource = previewSourcePath(scenarioId, eq)
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
@@ -1568,7 +1583,7 @@ export function useSimulatorApp(opts?: {
       if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
       return {
         snapshot,
-        sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`,
+        sourcePath: previewSourcePath(scenarioId, eq),
       }
     }
 
@@ -1594,6 +1609,7 @@ export function useSimulatorApp(opts?: {
     isTestMode: () => isTestMode.value,
     isEqAllowed: (v) => EQUIVALENT_CODE_RE.test(String(v ?? '').toUpperCase()),
     loadSnapshot: loadSnapshotForUi,
+    requestedSceneSource: () => requestedSceneSource,
     loadRecoverySnapshot: async ({ runId, equivalent }) => {
       const requestedUnderScenarioId = real.selectedScenarioId
       const loaded = await loadStrictRunRecoverySnapshot({

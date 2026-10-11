@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
 import { getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios } from '../api/simulatorApi'
+import { connectSse } from '../api/sse'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
 
@@ -36,7 +37,7 @@ vi.mock('../api/simulatorApi', async (importOriginal) => {
 vi.mock('../api/equivalentsApi', () => ({ fetchEquivalentPrecisions: vi.fn(async () => []) }))
 vi.mock('../api/sse', () => ({
   connectSse: vi.fn(
-    (opts: { signal?: AbortSignal }) =>
+    (opts: { url: string; signal?: AbortSignal; onMessage: (msg: { id?: string; data?: string }) => void }) =>
       new Promise<void>((_resolve, reject) => {
         const abort = () => reject(new DOMException('The operation was aborted.', 'AbortError'))
         if (opts.signal?.aborted) return abort()
@@ -245,6 +246,130 @@ describe('F-034-D2, narrowed: a failed snapshot of a live run (behaviour from be
     expect(app.real.runId).toBeNull()
     expect(ids(app)).toEqual(['PREVIEW_NODE'])
     expect(app.state.error).toBe('')
+  })
+})
+
+/**
+ * External review of 034 S8, C1: the shown scene is kept under an error only when the load that failed asked for
+ * the SAME source as the scene on screen (its `sourcePath`). A load for another run, scenario or equivalent that
+ * fails leaves no scene: keeping the old one would let the events of the new context patch a graph they do not
+ * belong to, and would show the old graph under the new selector.
+ */
+describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep the old scene', () => {
+  function bothFail(runId: string) {
+    vi.mocked(getSnapshot).mockImplementation((async (_cfg: unknown, id: string, eq: string) => {
+      if (id === runId) throw HTTP(503, `/simulator/runs/${id}/graph/snapshot`)
+      return snap('SHARED', eq)
+    }) as never)
+    vi.mocked(getScenarioPreview).mockRejectedValue(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
+  }
+
+  it('Attach to run B whose snapshot and preview both fail: the scene of run A is gone, and an event of B changes nothing of A', async () => {
+    vi.mocked(getSnapshot).mockImplementation((async (_cfg: unknown, _id: string, eq: string) => snap('SHARED', eq)) as never)
+    const app = boot()
+    await settle()
+    expect(ids(app), 'precondition: the scene of run R is shown').toEqual(['SHARED'])
+    const sceneOfA = app.state.snapshot!
+
+    bothFail('B')
+    await app.admin.attachRun('B')
+    await settle()
+    expect(app.real.runId, 'precondition: the page follows run B').toBe('B')
+
+    const stream = vi.mocked(connectSse).mock.calls.at(-1)![0]
+    expect(stream.url, 'precondition: the open stream is the stream of run B').toContain('/runs/B/events')
+    stream.onMessage({
+      id: 'evt_B_1',
+      data: JSON.stringify({
+        event_id: 'evt_B_1',
+        ts: '2026-10-11T00:00:01Z',
+        type: 'tx.updated',
+        equivalent: 'UAH',
+        from: 'SHARED',
+        to: 'OTHER',
+        amount: '5.00',
+        ttl_ms: 1200,
+        edges: [{ from: 'SHARED', to: 'OTHER' }],
+        node_patch: [{ id: 'SHARED', net_balance: '-5.00' }],
+      }),
+    })
+    await settle()
+
+    expect(sceneOfA.nodes[0]?.net_balance, 'an event of run B patched the graph of run A').toBeUndefined()
+    expect(app.state.snapshot, 'the scene of run A stayed on screen while the page follows run B').toBeNull()
+    expect(app.state.error).toContain('HTTP 503')
+  })
+
+  it('a switch of the equivalent whose load fails: the graph of the old equivalent is not left under the new selector', async () => {
+    withoutRun()
+    const app = boot()
+    await settle()
+    expect(app.state.snapshot?.equivalent).toBe('UAH')
+
+    vi.mocked(getScenarioPreview).mockRejectedValue(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
+    app.eq.value = 'EUR'
+    await settle()
+
+    expect(app.state.snapshot, 'the UAH graph is shown while EUR is selected').toBeNull()
+    expect(app.state.error).toContain('HTTP 503')
+  })
+
+  it('a choice of another scenario whose preview fails: the graph of the old scenario is not left on screen', async () => {
+    withoutRun()
+    const app = boot()
+    await settle()
+    expect(ids(app)).toEqual(['PREVIEW_NODE'])
+
+    vi.mocked(getScenarioPreview).mockRejectedValue(HTTP(503, '/simulator/scenarios/sc2/graph/preview'))
+    app.realActions.setSelectedScenarioId('sc2')
+    await settle()
+
+    expect(app.state.snapshot).toBeNull()
+    expect(app.state.error).toContain('HTTP 503')
+  })
+})
+
+/**
+ * External review of 034 S8, C2: the error the top HUD shows for a failed scene load (`real.lastError`, a copy of
+ * `state.error`) goes away when that load recovers - and only that error: what the HUD showed before it (a run's
+ * own `last_error`) comes back.
+ */
+describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
+  it.fails('without a run: the preview fails, then loads - the HUD error is gone too', async () => {
+    withoutRun()
+    const app = boot()
+    await settle()
+    vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
+    await app.realActions.refreshSnapshot()
+    await settle()
+    expect(app.real.lastError, 'precondition: the HUD shows the scene error').toContain('HTTP 503')
+
+    await app.realActions.refreshSnapshot()
+    await settle()
+
+    expect(app.state.error).toBe('')
+    expect(app.real.lastError, 'the scene recovered, the HUD still shows its error').toBe('')
+  })
+
+  it.fails('a run stopped with an error: its own error is back in the HUD after the scene error is gone', async () => {
+    vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => ({
+      ...RUN_STATUS(runId),
+      state: 'error',
+      last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-11T00:00:00Z' },
+    })) as never)
+    const app = boot()
+    await settle()
+    expect(app.real.lastError, 'precondition: the HUD shows why the run stopped').toBe('REAL_MODE_TICK_FAILED: tick failed')
+
+    vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
+    await app.realActions.refreshSnapshot()
+    await settle()
+    expect(app.real.lastError).toContain('HTTP 503')
+
+    await app.realActions.refreshSnapshot()
+    await settle()
+
+    expect(app.real.lastError, 'the error of the run was lost with the scene error').toBe('REAL_MODE_TICK_FAILED: tick failed')
   })
 })
 
