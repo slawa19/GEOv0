@@ -41,8 +41,7 @@ function balanceOf(snapshot: GraphSnapshot | null) {
 }
 
 describe('F-034-D1: the debt of a line that is not active', () => {
-  // T3404: red on origin/main because of F-034-D1; S8 removes `.fails` together with the fix.
-  it.fails('a snapshot whose only line is frozen with used = 10 shows a debt of 10, not a clean system', () => {
+  it('a snapshot whose only line is frozen with used = 10 shows a debt of 10, not a clean system', () => {
     const b = balanceOf(
       snapshotOf([{ source: 'A', target: 'B', trust_limit: '100', used: '10', available: '90', status: 'frozen' }]),
     )
@@ -51,8 +50,7 @@ describe('F-034-D1: the debt of a line that is not active', () => {
     expect(b.isClean, 'a system with a frozen debt is reported as clean').toBe(false)
   })
 
-  // T3404: red on origin/main because of F-034-D1; S8 removes `.fails` together with the fix.
-  it.fails('freezing a line by a topology event (no patch, as the backend sends it) does not change Total Debt', () => {
+  it('freezing a line by a topology event (no patch, as the backend sends it) does not change Total Debt', () => {
     const snapshot = ref<GraphSnapshot | null>(
       snapshotOf([{ source: 'A', target: 'B', trust_limit: '100', used: '10', available: '90', status: 'active' }]),
     )

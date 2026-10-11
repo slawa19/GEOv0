@@ -64,9 +64,11 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
     let activeTrustlines = 0
 
     for (const l of snap.links ?? []) {
+      // 034 S8 (F-034-D1): a debt exists whatever the state of its line - freezing is not repayment. Only the
+      // capacity and the count below belong to usable lines.
+      totalUsed = addMoney(totalUsed, l.used)
       if (!isActiveStatus(l.status)) continue
       activeTrustlines += 1
-      totalUsed = addMoney(totalUsed, l.used)
       // 026 `T2602`: a negative `available` is the debt's excess over a lowered limit, not negative capacity;
       // it adds nothing here (its debt is already in `totalUsed`).
       const available = moneyText(l.available)
