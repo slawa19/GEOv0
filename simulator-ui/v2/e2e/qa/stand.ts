@@ -164,7 +164,8 @@ export async function installRafCounter(page: Page): Promise<void> {
     }
     w.__qaRaf = { calls: 0, frames: 0, draws: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
-    // exactly once per `renderFrame` (and nothing else clears it), whether the frame came from rAF or `renderOnce`.
+    // exactly once per `renderFrame`, whether the frame came from rAF or `renderOnce`. One more clear is counted
+    // here and is not a frame: the one-off blanking when the scene model becomes empty (038 S1, `blankCanvases`).
     const clearRect = CanvasRenderingContext2D.prototype.clearRect
     CanvasRenderingContext2D.prototype.clearRect = function (this: CanvasRenderingContext2D, ...a: [number, number, number, number]) {
       const c = this.canvas as HTMLCanvasElement
@@ -204,6 +205,8 @@ export type BootOptions = {
   /** `true`: fake clock installed before load and paused after the layout settled. */
   clock: boolean
   query?: string
+  /** The segment of the top bar the app opens in. `auto` (Auto-Run) shows the scenario selector; default `interact`. */
+  ui?: 'interact' | 'auto'
   /** `false` on a production build: there is no `window.__geoSim`, so layout and FX state cannot be read. */
   devHook?: boolean
   /** `false`: the caller routes the SSE endpoint itself (`page.route`), the in-page stream is not installed. */
@@ -260,7 +263,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   }, { scenarioId: SCENARIO_ID, runId: RUN_ID })
 
   if (o.beforeLoad) await o.beforeLoad(page)
-  await page.goto(`/?mode=real&ui=interact${o.query ?? ''}`)
+  await page.goto(`/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
   await assertUserMode(page, o)
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   if (o.sseShim !== false) {

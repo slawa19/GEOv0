@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { watch, type Ref } from 'vue'
 
 import type { FxState } from '../render/fxRenderer'
 import type { GraphNode, GraphSnapshot } from '../types'
@@ -366,6 +366,27 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
     fxBudgetScale = fxBudgetScale * FX_BUDGET_SMOOTHING + targetScale * (1 - FX_BUDGET_SMOOTHING)
     fxBudgetScale = Math.max(0.3, Math.min(1, fxBudgetScale))
   }
+
+  // An empty snapshot is an empty screen (034 S8 -> 038 S1, BACKLOG 034-6 (a)). When the scene model is cleared
+  // (`snapshot = null`: the load of ANOTHER source failed, `useSceneState.ts`), `renderFrame` returns before its
+  // `clearRect`, and the loop may be in deep sleep with no frame coming at all - so the pixels of the old graph would
+  // stay under the error. Both canvases are therefore blanked ONCE, at the transition, by this watcher and not by a
+  // frame. It watches a boolean and is flushed asynchronously: a full reload sets `null` and the new snapshot in the
+  // same tick (`applySceneLoad`), which is no transition here and blanks nothing.
+  function blankCanvases() {
+    for (const canvas of [deps.canvasEl.value, deps.fxCanvasEl.value]) {
+      const ctx = canvas?.getContext('2d')
+      if (!canvas || !ctx) continue
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+  }
+  watch(
+    () => deps.getSnapshot() === null,
+    (isEmpty) => {
+      if (isEmpty) blankCanvases()
+    },
+  )
 
   function renderFrame(nowMs: number) {
     // DOM overlays own their own TTL and must expire even when canvas/snapshot

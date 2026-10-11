@@ -1525,7 +1525,11 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       </div>
     </div>
 
+    <!-- No scene, no event labels (034 S8 -> 038 S1, BACKLOG 034-6 (a)): after a failed load of another source the
+         snapshot is null, and an amount label of an event that still arrives would be drawn at a position of the
+         old layout. Node labels are already empty without a snapshot (`useLabelNodes`). -->
     <LabelsOverlayLayers
+      v-if="state.snapshot"
       :label-nodes="labelNodes"
       :floating-labels="floatingLabelsViewFx"
       :world-to-css-translate-no-scale="worldToCssTranslateNoScale"
