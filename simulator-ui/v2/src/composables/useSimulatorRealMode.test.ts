@@ -2406,9 +2406,9 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
 /**
  * 034 S8 (narrowed after the adversarial pass, finding F1): the reconnect back-off counts attempts that failed in a
  * row, and a connection resets it only when it has PROVED itself by its lifetime: it delivered a frame and stayed
- * open for at least the top step of the ladder. The first frame alone resets nothing - the server always opens the
- * stream with a `run_status` frame, so "a frame arrived" is true of every answered connection, including one that
- * a proxy or the server (slow subscriber) closes at once.
+ * open for at least the top step of the ladder. The first frame alone resets nothing - an answered connection
+ * delivers one at once (the bootstrap `run_status`, or replayed data events before it), so "a frame arrived" is
+ * true also of a connection that a proxy or the server (slow subscriber) closes straight away.
  *
  * `Math.random` is pinned to 0.5: the jitter is zero and the steps are exactly 1, 2, 5, 10, 20, 20 s. The clock is
  * the fake one (`Date.now` moves with the timers).

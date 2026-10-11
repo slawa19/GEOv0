@@ -957,8 +957,9 @@ export function useSimulatorRealMode(opts: {
           real.sseState = 'open'
           // The back-off counts attempts that failed in a row, and only a connection that PROVED itself resets it
           // (034 S8): it delivered a frame and stayed open for the top step of the ladder, however it then ended.
-          // A frame alone proves nothing - every answered connection starts with the server's `run_status` frame,
-          // also one that is closed at once; resetting on it reconnected once a second under overload.
+          // A frame alone proves nothing: every answered connection delivers one at once (the bootstrap `run_status`,
+          // or replayed data events before it), also a connection that is then closed straight away; resetting on
+          // it reconnected once a second under overload.
           const openedAtMs = Date.now()
           let deliveredFrame = false
           try {
