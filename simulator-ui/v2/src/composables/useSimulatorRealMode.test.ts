@@ -2404,40 +2404,90 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
 })
 
 /**
- * 034 S8 (reproducer of T3404): the reconnect back-off counts FAILED attempts in a row. A connection that
- * delivered events and then ended is not a failed attempt, so the next reconnect starts from the first step again -
- * otherwise four healthy reconnects in a session leave every later one waiting about 20 s.
+ * 034 S8 (narrowed after the adversarial pass, finding F1): the reconnect back-off counts attempts that failed in a
+ * row, and a connection resets it only when it has PROVED itself by its lifetime: it delivered a frame and stayed
+ * open for at least the top step of the ladder. The first frame alone resets nothing - the server always opens the
+ * stream with a `run_status` frame, so "a frame arrived" is true of every answered connection, including one that
+ * a proxy or the server (slow subscriber) closes at once.
  *
- * `Math.random` is pinned to 0.5: the jitter is zero and the steps are exactly 1000, 2000, 5000, ...
+ * `Math.random` is pinned to 0.5: the jitter is zero and the steps are exactly 1, 2, 5, 10, 20, 20 s. The clock is
+ * the fake one (`Date.now` moves with the timers).
  */
-describe('useSimulatorRealMode - 034 S8: the reconnect back-off after a connection that worked', () => {
-  it('two connections that each delivered an event: the third starts after the FIRST step again', async () => {
+describe('useSimulatorRealMode - 034 S8: the reconnect back-off and a connection that worked', () => {
+  /** `plan(n)` says how long the n-th connection lives (ms) after its bootstrap frame; undefined - until aborted. */
+  async function stand(plan: (connection: number) => number | undefined, dropWithError = false) {
     vi.useFakeTimers()
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
     const connectSseMock = vi.mocked(connectSse)
     const prevImpl = connectSseMock.getMockImplementation()
-    let connections = 0
+    const openedAt: number[] = []
+    const t0 = Date.now()
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
-      connections += 1
-      if (connections > 2) return waitForAbort(opts.signal)
-      emitRunStatusBootstrap(opts, `evt_r1_${connections}`)
+      openedAt.push(Date.now() - t0)
+      const n = openedAt.length
+      emitRunStatusBootstrap(opts, `evt_r1_${n}`)
+      const lifeMs = plan(n)
+      if (lifeMs === undefined) return waitForAbort(opts.signal)
+      if (lifeMs > 0) await new Promise((resolve) => setTimeout(resolve, lifeMs))
+      if (dropWithError && lifeMs > 0) throw new TypeError('network error')
     })
-
     const harness = createSseCharacterizationHarness()
+    harness.isRealModeRef.value = true
+    await nextTick()
+    return {
+      openedAt,
+      cleanup: () => {
+        harness.h.stopSse()
+        restoreConnectSseImplementation(prevImpl)
+        randomSpy.mockRestore()
+        vi.useRealTimers()
+      },
+    }
+  }
+
+  it('a server that sends the bootstrap frame and closes: 60 s give the connections of the plain ladder, not one a second', async () => {
+    const s = await stand(() => 0)
     try {
-      harness.isRealModeRef.value = true
-      await nextTick()
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(connections, 'precondition: the first reconnect comes after the first step').toBe(2)
+      await vi.advanceTimersByTimeAsync(60_000)
 
-      await vi.advanceTimersByTimeAsync(1000)
-
-      expect(connections, 'the back-off grew although the connection had worked').toBe(3)
+      expect(s.openedAt, 'the first frame reset the back-off').toEqual([0, 1000, 3000, 8000, 18_000, 38_000, 58_000])
     } finally {
-      harness.h.stopSse()
-      restoreConnectSseImplementation(prevImpl)
-      randomSpy.mockRestore()
-      vi.useRealTimers()
+      s.cleanup()
+    }
+  })
+
+  it('a connection that lived for the top step of the ladder and then dropped: the next reconnect comes after the FIRST step', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 20_000 : undefined))
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
+
+      expect(s.openedAt, 'a connection that had worked for 20 s did not reset the back-off').toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('the same when the proven connection ends with a network error instead of a clean close', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 20_000 : undefined), true)
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
+
+      expect(s.openedAt).toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a connection that lived less than the top step: the ladder keeps growing', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 19_000 : undefined))
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 19_000 + 1000)
+      expect(s.openedAt, 'a short-lived connection reset the back-off').toEqual([0, 1000])
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(s.openedAt).toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
     }
   })
 

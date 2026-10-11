@@ -101,6 +101,10 @@ const DIAGNOSTIC_EVENT_TYPE_BUCKETS = new Set([
 
 const REPLAY_GAP_BUFFER_MAX_MESSAGES = 512
 
+/** The reconnect ladder. Its top step is also how long a connection must have worked to reset the ladder. */
+const SSE_BACKOFF_STEPS_MS = [1000, 2000, 5000, 10000, 20000] as const
+const SSE_PROVEN_CONNECTION_MS = SSE_BACKOFF_STEPS_MS[SSE_BACKOFF_STEPS_MS.length - 1]!
+
 function diagnosticEventTypeBucket(eventType: string | undefined): string {
   if (!eventType) return 'untyped'
   return DIAGNOSTIC_EVENT_TYPE_BUCKETS.has(eventType) ? eventType : 'other'
@@ -572,7 +576,7 @@ export function useSimulatorRealMode(opts: {
   )
 
   function nextBackoff(attempt: number): number {
-    const steps = [1000, 2000, 5000, 10000, 20000]
+    const steps = SSE_BACKOFF_STEPS_MS
     const base = steps[Math.min(steps.length - 1, attempt)]!
     const jitter = 0.2 * base * (Math.random() - 0.5)
     return Math.max(250, Math.round(base + jitter))
@@ -942,18 +946,26 @@ export function useSimulatorRealMode(opts: {
           }
         } else {
           real.sseState = 'open'
-          await connectSse({
-            url,
-            headers: authHeaders(real.accessToken),
-            lastEventId: real.lastEventId,
-            signal: ctrl.signal,
-            onMessage: (msg) => {
-              // The back-off counts attempts that failed in a row. A connection that delivered a frame worked, so
-              // the reconnect after it starts from the first step again (034 S8); one that ended empty does not.
-              attempt = 0
-              handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow })
-            },
-          })
+          // The back-off counts attempts that failed in a row, and only a connection that PROVED itself resets it
+          // (034 S8): it delivered a frame and stayed open for the top step of the ladder, however it then ended.
+          // A frame alone proves nothing - every answered connection starts with the server's `run_status` frame,
+          // also one that is closed at once; resetting on it reconnected once a second under overload.
+          const openedAtMs = Date.now()
+          let deliveredFrame = false
+          try {
+            await connectSse({
+              url,
+              headers: authHeaders(real.accessToken),
+              lastEventId: real.lastEventId,
+              signal: ctrl.signal,
+              onMessage: (msg) => {
+                deliveredFrame = true
+                handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow })
+              },
+            })
+          } finally {
+            if (deliveredFrame && Date.now() - openedAtMs >= SSE_PROVEN_CONNECTION_MS) attempt = 0
+          }
         }
 
         await refreshRunStatus()
