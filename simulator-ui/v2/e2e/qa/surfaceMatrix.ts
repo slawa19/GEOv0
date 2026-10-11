@@ -15,7 +15,7 @@
  */
 import { expect, type Page, type Route } from '@playwright/test'
 
-import { boot, distToSegment, EQ, frames, layoutNodes, pushEvent, ringSnapshot, RUN_ID, screenNodes, syncCssToClock, txUpdated, type Pt } from './stand.js'
+import { boot, distToSegment, EQ, frames, layoutNodes, pausedClockTime, pushEvent, ringSnapshot, RUN_ID, screenNodes, syncCssToClock, txUpdated, type Pt } from './stand.js'
 
 export const THEMES = ['hud', 'shadcn', 'saas', 'library'] as const
 export type Theme = (typeof THEMES)[number]
@@ -192,7 +192,7 @@ async function runClearing(page: Page, toast: string): Promise<void> {
   await expect(page.locator(toast)).toBeVisible()
   await expect.poll(() => page.locator(toast).evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
   // `pauseAt` cannot go back, and the clock is running: a quarter of a second ahead of the read, far from the toast's 2.5 s.
-  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 250)
+  await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 250))
 }
 
 const HUD_DROPDOWN: Policies = {

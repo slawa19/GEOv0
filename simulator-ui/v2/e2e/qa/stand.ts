@@ -110,8 +110,8 @@ export async function mockBackend(page: Page, snapshot: QaSnapshot): Promise<{ u
  * parser, normalizer and event pipeline.
  *
  * `push` answers WHEN THE PRODUCT HAS TAKEN THE FRAME (038 S2). The stream is read in real time and the tests step a
- * fake clock: a test that stepped right after writing could step before the product had read the frame (run
- * 38152711087 on the CI runner: the first frame of a route without a spark). The signal is the product's own read
+ * fake clock: a test that stepped right after writing could step before the product had read the frame (shown by
+ * `delivery.qa.ts` with a frame held in transport; it has not been seen to happen by itself). The signal is the product's own read
  * loop: it handles every message of a chunk synchronously and only then asks the stream for the next chunk, so the
  * `read()` call that FOLLOWS the one that returned our chunk means the handler has run - for a duplicate and for a
  * rejected event as well (the frame reached the handler; whether it animated is the test's question). No timer is
@@ -311,6 +311,31 @@ async function assertUserMode(page: Page, o: BootOptions): Promise<void> {
   }
 }
 
+/** One frame of the stand: `frames()` steps the paused clock by this much. */
+export const FRAME_MS = 16
+/**
+ * The phase of the paused clock on the frame grid: `Date.now() % FRAME_MS` at the moment the clock is paused, and so
+ * at every event a test writes afterwards. It used to be whatever the wall clock gave, and a test whose last frame
+ * falls exactly on the end of a lifetime (75 frames x 16 ms = the 1200 ms of a route) saw that frame with the spark
+ * at fifteen phases and without it at phase 0 - a required step red by lottery (038 S2, adversarial pass on a7f7e1a6;
+ * CI run 38152711087). Fixed at 0: the phase at which a frame boundary and a lifetime boundary COINCIDE, the hard
+ * case, so a test that leans on a lucky phase is red every time and not one time in sixteen.
+ * `QA_STAND_CLOCK_PHASE_MS` overrides it (0..15) - a diagnostic, to run the stand at another phase.
+ */
+export const CLOCK_PHASE_MS = ((): number => {
+  const raw = process.env.QA_STAND_CLOCK_PHASE_MS
+  if (raw === undefined || raw === '') return 0
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0 || n >= FRAME_MS) throw new Error(`QA_STAND_CLOCK_PHASE_MS must be an integer 0..${FRAME_MS - 1}, got "${raw}"`)
+  return n
+})()
+
+/** The first moment not earlier than `t` whose phase on the frame grid is `CLOCK_PHASE_MS`. */
+export function pausedClockTime(t: number): number {
+  const base = t - (t % FRAME_MS) + CLOCK_PHASE_MS
+  return base >= t ? base : base + FRAME_MS
+}
+
 /** Seed the run the way a returning user has it, load the app in real mode, wait for the scene and the SSE stream. */
 export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: string[] }> {
   const mock = await mockBackend(page, o.snapshot)
@@ -345,7 +370,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.awaitLayout !== false || o.clock) await waitLayoutStill(page)
   if (o.clock) {
     const now = await page.evaluate(() => Date.now())
-    await page.clock.pauseAt(now + 1000)
+    await page.clock.pauseAt(pausedClockTime(now + 1000))
   }
   return mock
 }
