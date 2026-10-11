@@ -1,11 +1,8 @@
 /**
  * 034 S5a: a run SNAPSHOT read that fails while the run is active, through the REAL entrance - `useSimulatorApp` ->
  * `admin.attachRun` -> `attachToRun` -> `refreshSnapshot` -> `loadSnapshotForUi` - and not through an extracted
- * helper. A timeout keeps the run scene that is shown and reports the error in `state.error`; a 404 (stale run)
- * leads to the scenario preview.
- *
- * 034 S8 (F-034-D2), changed on purpose: the 503 and network-error cases used to pin "the scenario preview is
- * shown" - another graph presented in place of a live run, the finding itself. They now behave like the timeout.
+ * helper. A timeout keeps the run scene that is shown and reports the error in `state.error`; 503, a network error
+ * and a 404 keep the existing contract (the scenario preview).
  *
  * NOT covered, by decision (AGENTS section 19.5, recorded in the spec): an UNKNOWN run status (a timed-out status
  * read) is still treated as "no active run" on every entrance and selects the preview.
@@ -120,23 +117,8 @@ describe('a run SNAPSHOT read that fails while the run is active (through the re
   })
 
   it.each([
-    ['a 503', () => new ApiError('HTTP 503  for /x', { status: 503 }), 'HTTP 503'],
-    ['a network error', () => new TypeError('Failed to fetch'), 'Failed to fetch'],
-  ])('%s keeps the run scene and reports the error in state.error (034 S8, F-034-D2)', async (_label, failure, text) => {
-    scope = effectScope()
-    const app = scope.run(() => useSimulatorApp())!
-    await settle()
-    expect(app.state.snapshot?.nodes.map((n) => n.id)).toEqual(['RUN_NODE'])
-
-    vi.mocked(getSnapshot).mockRejectedValue(failure())
-    await app.admin.attachRun('R')
-    await settle()
-
-    expect(app.state.snapshot?.nodes.map((n) => n.id), 'the run scene was replaced by the scenario preview').toEqual(['RUN_NODE'])
-    expect(app.state.error).toContain(text)
-  })
-
-  it.each([
+    ['a 503', () => new ApiError('HTTP 503  for /x', { status: 503 })],
+    ['a network error', () => new TypeError('Failed to fetch')],
     ['a 404 (stale run)', () => new ApiError('HTTP 404  for /x', { status: 404 })],
   ])('%s keeps the existing contract: the scenario preview is shown', async (_label, failure) => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)

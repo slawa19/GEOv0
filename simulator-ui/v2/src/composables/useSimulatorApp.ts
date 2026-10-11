@@ -32,7 +32,7 @@ import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
-import { ApiError } from '../api/http'
+import { ApiError, isTimeoutError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 import type { LayoutLink, LayoutNode, Point } from '../types/layout'
@@ -105,10 +105,14 @@ export async function loadStrictRunRecoverySnapshot(input: {
 }
 
 /**
- * The snapshot of an ACTIVE run for the scene, or `null` when the run is gone (404): the stale run is reset first
- * and the caller shows the scenario preview. Every other failure is THROWN (034 S8, F-034-D2; a timeout since 034
- * S5a): the run is alive, and showing the scenario preview in its place would present another graph as the run.
- * The scene owner keeps what is shown and reports the error.
+ * The snapshot of an ACTIVE run for the scene, or `null` when the caller should fall back to the scenario preview.
+ * A timeout is THROWN instead (034 S5a, review round 1, item 4); every other failure falls back, and a 404 first
+ * resets the stale run.
+ *
+ * KNOWN DEBT (034 S8, F-034-D2, second half - open): the fallback on a 5xx or a network error shows the scenario
+ * preview in place of a live run, unmarked. Throwing it (as the preview's own failure now is) was tried and taken
+ * back: nothing re-reads the snapshot of a live run, so one transient failure left the error over a working run
+ * for good. Fixing this needs a retry with its own clock, not an edit here.
  */
 export async function loadActiveRunSnapshot(input: {
   apiBase: string
@@ -131,9 +135,13 @@ export async function loadActiveRunSnapshot(input: {
       // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
       // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
       input.onStaleRun()
-      return null
     }
-    throw e
+    // A timeout is not "unreachable": the run is alive and its scene is on screen. Swapping that scene for the
+    // scenario preview would show a different graph as if it were the run; let the caller report the error and
+    // keep what is shown. Every other failure keeps falling back (see KNOWN DEBT above).
+    if (isTimeoutError(e)) throw e
+    console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
+    return null
   }
 }
 

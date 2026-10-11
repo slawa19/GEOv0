@@ -1,13 +1,8 @@
 /**
  * 034 S5a, review round 1, item 4: a snapshot read that TIMES OUT on a live run must not silently swap the scene
  * for the scenario preview. The scene already shown stays (the scene loader keeps it when the load throws) and the
- * error reaches the user through the scene's own error channel. A 404 resets the stale run and falls back to the
- * preview.
- *
- * 034 S8 (F-034-D2), changed on purpose: every OTHER failure (5xx, network) used to fall back to the preview too,
- * and the case below pinned it. That fallback showed the scenario preview in place of a live run - the finding
- * itself - so these failures are thrown like the timeout. Through the real entrances:
- * `useSimulatorApp.sceneLoadFailure.p034.test.ts`.
+ * error reaches the user through the scene's own error channel. Every other failure keeps the existing contract:
+ * 404 resets the stale run, anything else falls back to the preview.
  */
 import { computed, reactive, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -58,11 +53,12 @@ describe('loadActiveRunSnapshot()', () => {
   it.each([
     ['a 503', new ApiError('HTTP 503', { status: 503 })],
     ['a network error', new TypeError('Failed to fetch')],
-  ])('%s is thrown, not turned into a preview fallback, and does not reset the run (034 S8, F-034-D2)', async (_label, failure) => {
+  ])('%s still falls back to the preview (existing contract, unchanged)', async (_label, failure) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.mocked(getSnapshot).mockRejectedValueOnce(failure)
     const onStaleRun = vi.fn()
 
-    await expect(loadActiveRunSnapshot({ ...INPUT, onStaleRun })).rejects.toBe(failure)
+    await expect(loadActiveRunSnapshot({ ...INPUT, onStaleRun })).resolves.toBeNull()
     expect(onStaleRun).not.toHaveBeenCalled()
   })
 

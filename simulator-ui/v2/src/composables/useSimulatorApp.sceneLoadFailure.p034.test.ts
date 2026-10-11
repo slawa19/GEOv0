@@ -1,10 +1,11 @@
 /**
  * 034 S8, F-034-D2 (reproducer of T3404): a failed scene load is not a successful empty network.
  *
- * `loadSnapshotForUi` used to turn a failed scenario preview into `nodes: [], links: []` with an empty error, and a
- * failed snapshot of a live run into the scenario preview. Both look like data: an empty network with no debts, or
- * another graph shown as the run. The scene owner (`useSceneState`) already keeps the shown scene and fills
- * `state.error` when its loader throws - the loader simply never threw.
+ * `loadSnapshotForUi` used to turn a failed scenario preview into `nodes: [], links: []` with an empty error - an
+ * empty network with no debts, which looks like data. The scene owner (`useSceneState`) already keeps the shown
+ * scene and fills `state.error` when its loader throws - the loader simply never threw. Fixed for the PREVIEW.
+ * The second half of the finding (a failed snapshot of a live run becomes the scenario preview) is NOT fixed: see
+ * the note at the narrowed cases below.
  *
  * Every case goes through the real entrances of `useSimulatorApp` (boot, scenario choice, manual refresh), as in
  * `useSimulatorApp.unknownRunStatus.test.ts`. Cases marked CONTRACT pin what stays by design.
@@ -172,22 +173,62 @@ describe('F-034-D2: a failed scenario preview', () => {
   })
 })
 
-describe('F-034-D2: a failed snapshot of a live run', () => {
+/**
+ * NARROWED after the adversarial pass (finding F2). The first version of the D2 fix also threw a failed snapshot of
+ * a LIVE run. Nothing re-reads that snapshot while the run lives (no periodic refresh; the SSE loop re-reads only
+ * the status, and a paused run sends no events), so one transient 5xx at Start or at boot left the error overlay
+ * and `data-ready="0"` for good over a working run. A retry needs a new mechanism with its own clock, which S8
+ * does not build. So, for the snapshot of a live run, the behaviour from before S8 is back: a failure other than a
+ * timeout or a 404 shows the scenario preview. KNOWN DEBT (F-034-D2, second half, open): that preview is another
+ * graph in place of the run, with no mark on it.
+ */
+describe('F-034-D2, narrowed: a failed snapshot of a live run (behaviour from before S8, kept on purpose)', () => {
   it.each([
     ['a 503', () => HTTP(503, '/simulator/runs/R/graph/snapshot')],
     ['a network error', () => new TypeError('Failed to fetch')],
-  ])('%s: the run scene is not replaced by the scenario preview, and the error is shown', async (_label, failure) => {
+  ])('boot with a live run whose first snapshot read fails with %s: no error is stuck over the working run', async (_label, failure) => {
+    vi.mocked(getSnapshot).mockRejectedValueOnce(failure())
+
+    const app = boot()
+    await settle()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(app.real.runId, 'a failed read is not a stale run').toBe('R')
+    expect(app.state.error, 'a transient failure left a permanent error over a live run').toBe('')
+    expect(ids(app), 'nothing is on screen').toEqual(['PREVIEW_NODE'])
+  })
+
+  it('a refresh that fails with a 503 while the run scene is shown: the preview is shown, without an error', async () => {
     const app = boot()
     await settle()
     expect(ids(app), 'precondition: the run scene is shown').toEqual(['R_NODE'])
 
-    vi.mocked(getSnapshot).mockRejectedValue(failure())
+    vi.mocked(getSnapshot).mockRejectedValueOnce(HTTP(503, '/simulator/runs/R/graph/snapshot'))
     await app.realActions.refreshSnapshot()
     await settle()
 
-    expect(ids(app), 'the run scene was replaced by the scenario preview').toEqual(['R_NODE'])
-    expect(app.state.error).not.toBe('')
-    expect(app.real.runId, 'a failed read is not a stale run').toBe('R')
+    expect(app.state.error).toBe('')
+    expect(ids(app)).toEqual(['PREVIEW_NODE'])
+    expect(app.real.runId).toBe('R')
+
+    // The next refresh that succeeds shows the run again.
+    await app.realActions.refreshSnapshot()
+    await settle()
+    expect(ids(app)).toEqual(['R_NODE'])
+  })
+
+  it('when the preview fails as well, that IS an error on screen (the preview part of D2)', async () => {
+    const app = boot()
+    await settle()
+    expect(ids(app)).toEqual(['R_NODE'])
+
+    vi.mocked(getSnapshot).mockRejectedValue(HTTP(503, '/simulator/runs/R/graph/snapshot'))
+    vi.mocked(getScenarioPreview).mockRejectedValue(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
+    await app.realActions.refreshSnapshot()
+    await settle()
+
+    expect(ids(app), 'the shown scene was replaced by an empty network').toEqual(['R_NODE'])
+    expect(app.state.error).toContain('/graph/preview')
   })
 
   it('CONTRACT: a 404 means the run is gone - it is reset and the preview of the scenario is the scene', async () => {
