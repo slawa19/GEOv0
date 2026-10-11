@@ -30,7 +30,14 @@ test.describe('Simulator demo scenes (fixtures, test-mode)', () => {
     await expect(page).toHaveScreenshot('scene-C.png', SCREENSHOT_OPTS)
   })
 
-  test('Scene D — Tx burst (single tx)', async ({ page }) => {
+  // 034 S8 (F-034-D5): the two cases below are RENDER checks of the active-edge / active-node highlight on the
+  // base canvas, driven by the e2e-only stubs `e2eTxOnce` / `e2eClearingOnce` (`useSimulatorApp.ts`) behind the
+  // e2e-only buttons. They used to be named "Tx burst" and "Clearing", which they are not.
+  // What they do NOT check: a payment, its route, a clearing, any FX (sparks, pulses, bursts), any change of debts
+  // or balances - no event playlist is read. `?scene=D` and `?scene=E` are not scenes: the loader accepts A, B, C
+  // only, so both show scene A. Movement of a payment and of a clearing is checked by the 038 stand (`e2e/qa/`).
+  // The snapshot file names are kept (`scene-D-tx.png`, `scene-E-clearing.png`): the pictures did not change.
+  test('Render of the active-edge highlight (e2e stub: first link and its two nodes; not a payment)', async ({ page }) => {
     await page.goto('/?scene=D')
     await waitReady(page)
 
@@ -41,7 +48,7 @@ test.describe('Simulator demo scenes (fixtures, test-mode)', () => {
     await expect(page).toHaveScreenshot('scene-D-tx.png', SCREENSHOT_OPTS)
   })
 
-  test('Scene E — Clearing (first deterministic step)', async ({ page }) => {
+  test('Render of the active-node highlight (e2e stub: first four nodes; not a clearing)', async ({ page }) => {
     await page.goto('/?scene=E')
     await waitReady(page)
 
