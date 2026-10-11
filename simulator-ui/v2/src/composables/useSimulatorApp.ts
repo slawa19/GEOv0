@@ -31,7 +31,7 @@ import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
-import { ApiError, isTimeoutError } from '../api/http'
+import { ApiError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 import type { LayoutLink, LayoutNode, Point } from '../types/layout'
@@ -108,9 +108,10 @@ export async function loadStrictRunRecoverySnapshot(input: {
 }
 
 /**
- * The snapshot of an ACTIVE run for the scene, or `null` when the caller should fall back to the scenario preview.
- * A timeout is THROWN instead (034 S5a, review round 1, item 4); every other failure falls back, and a 404 first
- * resets the stale run - the contract the inline code had before it was extracted.
+ * The snapshot of an ACTIVE run for the scene, or `null` when the run is gone (404): the stale run is reset first
+ * and the caller shows the scenario preview. Every other failure is THROWN (034 S8, F-034-D2; a timeout since 034
+ * S5a): the run is alive, and showing the scenario preview in its place would present another graph as the run.
+ * The scene owner keeps what is shown and reports the error.
  */
 export async function loadActiveRunSnapshot(input: {
   apiBase: string
@@ -133,14 +134,9 @@ export async function loadActiveRunSnapshot(input: {
       // Stale runId (e.g. deleted/expired). Clear it so we don't keep calling
       // run-scoped endpoints like /runs/:id/actions/* and /runs/:id.
       input.onStaleRun()
+      return null
     }
-    // A timeout is not "unreachable": the run is alive and its scene is on screen. Swapping that scene for the
-    // scenario preview would show a different graph as if it were the run; let the caller report the error and
-    // keep what is shown. Every other failure keeps falling back (existing contract).
-    if (isTimeoutError(e)) throw e
-    // Non-fatal: if run snapshot is unreachable (401/404/stale), fall back to scenario preview.
-    console.warn('Failed to load run snapshot; falling back to scenario preview:', e)
-    return null
+    throw e
   }
 }
 
@@ -1560,23 +1556,20 @@ export function useSimulatorApp(opts?: {
 
     // Real mode: no run, but have scenario selected - show preview
     // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
+    // A preview that fails is THROWN (034 S8, F-034-D2): an empty network with no debts is data, and a failed
+    // read is not. The scene owner keeps what is shown and puts the error into `state.error`.
     if (scenarioId) {
-      try {
-        const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
-          mode: real.desiredMode,
-        })
-        if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
-        return {
-          snapshot,
-          sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`,
-        }
-      } catch (e) {
-        // Fallback to empty if preview fails
-        console.warn('Failed to load scenario preview:', e)
+      const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
+        mode: real.desiredMode,
+      })
+      if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
+      return {
+        snapshot,
+        sourcePath: `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`,
       }
     }
 
-    // Fallback: empty snapshot
+    // Nothing is selected to read (no run, no scenario): an empty scene, not a failure.
     return {
       snapshot: {
         equivalent: eq,

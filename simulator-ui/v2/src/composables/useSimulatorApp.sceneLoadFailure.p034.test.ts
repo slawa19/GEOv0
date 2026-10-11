@@ -131,8 +131,7 @@ afterEach(() => {
 })
 
 describe('F-034-D2: a failed scenario preview', () => {
-  // T3404: red on origin/main because of F-034-D2; S8 removes `.fails` together with the fix.
-  it.fails('on the first load: no empty network is shown as loaded, and the error is', async () => {
+  it('on the first load: no empty network is shown as loaded, and the error is', async () => {
     withoutRun()
     vi.mocked(getScenarioPreview).mockRejectedValue(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
 
@@ -143,8 +142,7 @@ describe('F-034-D2: a failed scenario preview', () => {
     expect(app.state.error).toContain('HTTP 503')
   })
 
-  // T3404: red on origin/main because of F-034-D2; S8 removes `.fails` together with the fix.
-  it.fails('on a refresh of the shown preview: the shown scene stays and the error is shown', async () => {
+  it('on a refresh of the shown preview: the shown scene stays and the error is shown', async () => {
     withoutRun()
     const app = boot()
     await settle()
@@ -158,8 +156,7 @@ describe('F-034-D2: a failed scenario preview', () => {
     expect(app.state.error).toContain('Failed to fetch')
   })
 
-  // T3404: red on origin/main because of F-034-D2; S8 removes `.fails` together with the fix.
-  it.fails('a preview that answers 404 (the scenario is gone) is an error on screen too, and it is not cleared', async () => {
+  it('a preview that answers 404 (the scenario is gone) is an error on screen too, and it is not cleared', async () => {
     withoutRun()
     const app = boot()
     await settle()
@@ -176,8 +173,7 @@ describe('F-034-D2: a failed scenario preview', () => {
 })
 
 describe('F-034-D2: a failed snapshot of a live run', () => {
-  // T3404: red on origin/main because of F-034-D2; S8 removes `.fails` together with the fix.
-  it.fails.each([
+  it.each([
     ['a 503', () => HTTP(503, '/simulator/runs/R/graph/snapshot')],
     ['a network error', () => new TypeError('Failed to fetch')],
   ])('%s: the run scene is not replaced by the scenario preview, and the error is shown', async (_label, failure) => {
