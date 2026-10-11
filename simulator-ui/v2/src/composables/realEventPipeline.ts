@@ -137,6 +137,9 @@ export type RealEventStateDeps = {
   patchApplier: {
     applyNodePatches: (patches: NodePatch[] | undefined) => void
     applyEdgePatches: (patches: EdgePatch[] | undefined) => void
+    /** A status change sent without a patch (a freeze): snapshot object and layout copy together (034 S8, F-034-D6). */
+    applyNodeStatus: (id: string, status: string, vizColorKey: string) => void
+    applyEdgeStatus: (source: string, target: string, status: string, vizAlphaKey: string) => void
   }
   isUserFacingRunError: (code: string) => boolean
   inc: (map: Record<string, number>, key: string) => void
@@ -255,8 +258,7 @@ function applyTopologyEvent(
   for (const id of frozenNodes) {
     const node = nodesById.get(id)
     if (!node) continue
-    node.status = 'suspended'
-    node.viz_color_key = nodeColorKey(node.type, node.status)
+    deps.patchApplier.applyNodeStatus(id, 'suspended', nodeColorKey(node.type, 'suspended'))
   }
   if (removedNodes.size) {
     snapshot.nodes = snapshot.nodes.filter((node) => !removedNodes.has(node.id))
@@ -290,8 +292,7 @@ function applyTopologyEvent(
   for (const ref of payload.frozen_edges ?? []) {
     const link = linksByKey.get(edgeKey(String(ref.from_pid).trim(), String(ref.to_pid).trim()))
     if (!link) continue
-    link.status = 'frozen'
-    link.viz_alpha_key = 'muted'
+    deps.patchApplier.applyEdgeStatus(String(link.source), String(link.target), 'frozen', 'muted')
   }
   const removedEdgeKeys = new Set(
     payload.removed_edges.map((ref) => edgeKey(String(ref.from_pid).trim(), String(ref.to_pid).trim())),

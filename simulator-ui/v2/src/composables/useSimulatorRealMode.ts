@@ -29,8 +29,8 @@ import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/eq
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
-import { extractErrorMessage } from '../utils/errorMessage'
-import { toLower } from '../utils/stringHelpers'
+import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
+import { isLiveRunState } from '../utils/status'
 import { runStatusErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
@@ -69,6 +69,8 @@ export type RealModeState = {
 export type PatchApplier = {
   applyNodePatches: (patches: NodePatch[] | undefined) => void
   applyEdgePatches: (patches: EdgePatch[] | undefined) => void
+  applyNodeStatus: (id: string, status: string, vizColorKey: string) => void
+  applyEdgeStatus: (source: string, target: string, status: string, vizAlphaKey: string) => void
 }
 
 type RealModeDiag = {
@@ -99,17 +101,22 @@ const DIAGNOSTIC_EVENT_TYPE_BUCKETS = new Set([
 
 const REPLAY_GAP_BUFFER_MAX_MESSAGES = 512
 
+/** The reconnect ladder. Its top step is also how long a connection must have worked to reset the ladder. */
+const SSE_BACKOFF_STEPS_MS = [1000, 2000, 5000, 10000, 20000] as const
+const SSE_PROVEN_CONNECTION_MS = SSE_BACKOFF_STEPS_MS[SSE_BACKOFF_STEPS_MS.length - 1]!
+
 function diagnosticEventTypeBucket(eventType: string | undefined): string {
   if (!eventType) return 'untyped'
   return DIAGNOSTIC_EVENT_TYPE_BUCKETS.has(eventType) ? eventType : 'other'
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function getErrorMessage(e: unknown): string {
-  return extractErrorMessage(e)
+/**
+ * The HTTP status of a failed request, or null when the failure carries none (network error, abort, timeout -
+ * whose status is 0). Failures are classified by this, never by words in the message: the message carries the
+ * answer's body (034 S8, F-034-D14).
+ */
+function httpStatusOf(e: unknown): number | null {
+  return e instanceof ApiError && e.status > 0 ? e.status : null
 }
 
 function extractRunId(v: ActiveRunResponse | null | undefined): string {
@@ -471,12 +478,11 @@ export function useSimulatorRealMode(opts: {
           if (applied === false) return 'superseded'
         } catch (e: unknown) {
           if (!isContextStillValid()) return 'superseded'
-          const message = getErrorMessage(e)
-          if (message.includes('HTTP 404')) {
+          if (httpStatusOf(e) === 404) {
             resetStaleRun({ clearError: true })
             return 'stale'
           }
-          real.lastError = message
+          real.lastError = getErrorMessage(e)
           return 'transient'
         }
 
@@ -487,12 +493,10 @@ export function useSimulatorRealMode(opts: {
         wakeUp?.()
 
         // Scene loader stores errors in state.error; in real mode surface them in the HUD.
+        // A text is never read as "the run is gone" (034 S8, F-034-D14): the run's own 404 is handled by its status
+        // where the error object still exists - in the scene's run-snapshot read and in the catch above.
         if (isRealMode.value && state.error) {
-          if (state.error.includes('HTTP 404')) {
-            resetStaleRun({ clearError: true })
-            return 'stale'
-          }
-          real.lastError = state.error
+          showSceneError(state.error)
           return 'transient'
         }
         return 'current'
@@ -560,25 +564,30 @@ export function useSimulatorRealMode(opts: {
     })
   }
 
+  // The HUD copy of a scene-load error (034 S8, review C2): only this copy is removed, what the HUD showed before
+  // (a run's own `last_error`) comes back, and an error written over the copy is left alone.
+  // WHEN, precisely: not on recovery but when the NEXT load STARTS - `state.error` is emptied before the request is
+  // answered - and the copy returns if that load fails. So while the request is in flight there is no warning.
+  let sceneErrorInHud: { text: string; displaced: string } | null = null
+  function showSceneError(text: string) {
+    sceneErrorInHud = { text, displaced: sceneErrorInHud?.text === real.lastError ? sceneErrorInHud.displaced : real.lastError }
+    real.lastError = text
+  }
+
   // Also surface initial scene-load errors (e.g., "No run started") that happen on mount.
   watch(
     () => state.error,
     (e) => {
       if (!isRealMode.value) return
-      if (!e) return
-
-      if (e.includes('HTTP 404')) {
-        resetStaleRun({ clearError: true })
-        return
-      }
-
-      real.lastError = e
+      if (e) return showSceneError(e)
+      if (sceneErrorInHud?.text === real.lastError) real.lastError = sceneErrorInHud.displaced
+      sceneErrorInHud = null
     },
     { flush: 'post' },
   )
 
   function nextBackoff(attempt: number): number {
-    const steps = [1000, 2000, 5000, 10000, 20000]
+    const steps = SSE_BACKOFF_STEPS_MS
     const base = steps[Math.min(steps.length - 1, attempt)]!
     const jitter = 0.2 * base * (Math.random() - 0.5)
     return Math.max(250, Math.round(base + jitter))
@@ -948,13 +957,27 @@ export function useSimulatorRealMode(opts: {
           }
         } else {
           real.sseState = 'open'
-          await connectSse({
-            url,
-            headers: authHeaders(real.accessToken),
-            lastEventId: real.lastEventId,
-            signal: ctrl.signal,
-            onMessage: (msg) => handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow }),
-          })
+          // The back-off counts attempts that failed in a row, and only a connection that PROVED itself resets it
+          // (034 S8): it delivered a frame and stayed open for the top step of the ladder, however it then ended.
+          // A frame alone proves nothing: every answered connection delivers one at once (the bootstrap `run_status`,
+          // or replayed data events before it), also a connection that is then closed straight away; resetting on
+          // it reconnected once a second under overload.
+          const openedAtMs = Date.now()
+          let deliveredFrame = false
+          try {
+            await connectSse({
+              url,
+              headers: authHeaders(real.accessToken),
+              lastEventId: real.lastEventId,
+              signal: ctrl.signal,
+              onMessage: (msg) => {
+                deliveredFrame = true
+                handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow })
+              },
+            })
+          } finally {
+            if (deliveredFrame && Date.now() - openedAtMs >= SSE_PROVEN_CONNECTION_MS) attempt = 0
+          }
         }
 
         await refreshRunStatus()
@@ -974,16 +997,16 @@ export function useSimulatorRealMode(opts: {
         if (ctrl.signal.aborted) return
         if (mySeq !== sseSeq || real.runId !== runId) return
 
-        const msg = getErrorMessage(e)
-        if (msg.includes('SSE HTTP 404') || msg.includes('HTTP 404')) {
+        const status = httpStatusOf(e)
+        if (status === 404) {
           resetStaleRun({ clearError: true })
           return
         }
 
-        real.lastError = msg
+        real.lastError = getErrorMessage(e)
 
         // Unrecoverable replay cursor: clear it and rebuild authoritative state.
-        if (msg.includes(' 410 ') || msg.includes('HTTP 410') || msg.includes('status 410')) {
+        if (status === 410) {
           real.lastEventId = null
           replayGapRecoveryRunId = runId
           real.sseState = 'reconnecting'
@@ -1098,9 +1121,7 @@ export function useSimulatorRealMode(opts: {
 
     await ensureAnonSessionOnce()
 
-    const st = toLower(real.runStatus?.state)
-    const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
-    if (real.runId && !isActive) {
+    if (real.runId && !isLiveRunState(real.runStatus?.state)) {
       resetStaleRun({ clearError: true })
     }
 
@@ -1208,16 +1229,14 @@ export function useSimulatorRealMode(opts: {
       })
       await refreshRunStatus()
     } catch (e: unknown) {
-      const msg = getErrorMessage(e)
-
       // If the run is already gone server-side (e.g. TTL cleanup, double-stop, or restart),
       // treat stop as idempotent and reset local state instead of surfacing a hard error.
-      if (msg.includes('HTTP 404') || msg.includes(' 404 ') || msg.includes('Not Found')) {
+      if (httpStatusOf(e) === 404) {
         resetStaleRun({ clearError: true })
         return
       }
 
-      real.lastError = msg
+      real.lastError = getErrorMessage(e)
       // The stop request was not confirmed. The backend run may still be live,
       // so restore observation instead of leaving the UI permanently detached.
       if (isRealMode.value && real.runId) void runSseLoop({ preserveLastError: true })
@@ -1432,13 +1451,12 @@ export function useSimulatorRealMode(opts: {
       // refreshSnapshot() after refreshScenarios() — this watcher would duplicate it.
       if (initialBootInProgress) return
 
-      const st = toLower(real.runStatus?.state)
       const isActive =
         !!real.runId &&
         // Consider a run active only when we have a known status.
         // This allows scenario preview switching even when a stale runId exists but status cannot be fetched.
         !!real.runStatus &&
-        (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
+        isLiveRunState(real.runStatus.state)
       if (isActive) return
 
       await refreshSnapshot()

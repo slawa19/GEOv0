@@ -6,11 +6,8 @@ import type {
   TopologyChangedNodeRef,
   TxFailedEvent,
 } from './simulatorTypes'
+import { isRecord } from '../utils/isRecord'
 import { isCanonicalIsoDateTime } from './simulatorContracts'
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function asString(v: unknown): string | null {
   return typeof v === 'string' ? v : null

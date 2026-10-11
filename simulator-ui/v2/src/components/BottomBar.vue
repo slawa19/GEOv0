@@ -4,6 +4,7 @@ import type { ArtifactIndexItem } from '../api/simulatorTypes'
 import { SCENE_IDS, SCENES, type SceneId } from '../scenes'
 import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'
 import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
+import { demoToolsAllowed } from '../utils/demoToolsAllowed'
 import HudBar from './common/HudBar.vue'
 
 type Props = {
@@ -56,9 +57,7 @@ const quality = defineModel<string>('quality', { required: true })
 const labelsLod = defineModel<string>('labelsLod', { required: true })
 const scene = defineModel<SceneId>('scene', { required: true })
 
-const isDevToolsVisible = computed(
-  () => import.meta.env.DEV && !props.isWebDriver && !props.isTestMode && !props.isE2eScreenshots
-)
+const isDevToolsVisible = computed(() => demoToolsAllowed(props))
 
 const simulatorStorage = useSimulatorStorage()
 
@@ -119,8 +118,6 @@ watch(
 function onDevToolsToggle(ev: Event) {
   onDevToolsDropdownToggle(ev)
 }
-
-const allowDemoUi = import.meta.env.VITE_ALLOW_DEMO_UI === 'true'
 
 async function onRunTxOnce() {
   if (props.fxBusy) return
@@ -264,7 +261,7 @@ async function onRunClearingOnce() {
         </details>
 
         <details
-          v-if="isDevToolsVisible || allowDemoUi"
+          v-if="isDevToolsVisible"
           ref="devToolsDetailsRef"
           :open="devToolsOpen"
           @keydown.capture="onDevToolsDetailsKeydown"

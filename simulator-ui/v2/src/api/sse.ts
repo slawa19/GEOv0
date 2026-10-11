@@ -1,3 +1,5 @@
+import { ApiError } from './http'
+
 export type SseParsedMessage = {
   id?: string
   event?: string
@@ -75,7 +77,9 @@ export async function connectSse(opts: SseConnectOpts): Promise<void> {
   const res = await fetch(opts.url, { headers, signal: opts.signal, credentials: 'include' })
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '')
-    throw new Error(`SSE HTTP ${res.status} ${res.statusText}: ${bodyText}`)
+    // The status travels on the error (034 S8, F-034-D14): the message carries the answer's body, so a caller
+    // that looked for "404" or "410" in it would be reading the server's prose.
+    throw new ApiError(`SSE HTTP ${res.status} ${res.statusText}: ${bodyText}`, { status: res.status, bodyText })
   }
 
   if (!res.body) throw new Error('SSE response has no body')

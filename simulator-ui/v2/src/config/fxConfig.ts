@@ -1,68 +1,28 @@
 /**
- * Unified FX Configuration
- * ========================
- * Single source of truth for all visual effects parameters.
+ * FX configuration shared by the FX code
+ * ======================================
+ * What is here is what the runtime reads: the intensity scale and the colour of clearing labels.
  *
- * NOTE:
- * Previously this module had a split between `demo` and `real` configs.
- * They were identical, which added false complexity and risk of drift.
- * The config is now canonical and mode-agnostic.
+ * The timings of the payment and clearing animations are NOT here: they are literals of the code that owns the
+ * behaviour (`composables/realFx/useRealTxFx.ts`, `useRealClearingFx.ts`). The `tx` and `clearing` groups this
+ * object used to carry were read by nothing and were removed (034 S8, F-034-D15); the guard
+ * `fxConfig.deadSettings.p034.test.ts` keeps an unread group from coming back.
  *
  * Responsibility split:
  * - `vizMapping.ts`: colors, semantic keys, and visual styles
- * - this module: FX timings, thresholds, and multipliers
+ * - this module: the shared intensity multipliers
  */
 
 import { toLowerTrim } from '../utils/stringHelpers'
 
 export const FX_CONFIG = {
-  /**
-   * Clearing/Tx FX parameters (canonical, mode-agnostic).
-   */
-  clearing: {
-    /** Gap between consecutive spark spawns (ms) */
-    microGapMs: 110,
-    /** Duration of floating debt label (ms) */
-    labelLifeMs: 2200,
-    /** Duration of source node burst effect (ms) */
-    sourceBurstMs: 360,
-    /** Duration of target node burst effect (ms) */
-    targetBurstMs: 520,
-    /** Cleanup padding after animation completes (ms) */
-    cleanupPadMs: 220,
-    /** Throttle interval for label spawning (ms) */
-    labelThrottleMs: 80,
-
-    /** Duration of edge highlight glow (ms) */
-    highlightPulseMs: 5200,
-    /** Time-to-live for beam spark particles (ms) */
-    microTtlMs: 860,
-
-    /** Edge highlight thickness multiplier */
-    highlightThickness: 2.9,
-    /** Beam spark thickness multiplier */
-    microThickness: 1.25,
-    /** Node burst duration (ms) */
-    nodeBurstMs: 1100,
-  },
-
   /** Intensity scaling factors (shared) */
   intensity: {
     muted: 0.75,
     active: 1.0,
     hi: 1.35,
   },
-
-  /** Single transaction animation (shared) */
-  tx: {
-    /** Default spark time-to-live (ms) */
-    sparkTtlMs: 1200,
-    /** Default spark trail length multiplier */
-    trailLengthK: 1.0,
-  },
 } as const
-
-export type FxClearingConfig = typeof FX_CONFIG.clearing
 
 /**
  * Equivalent currency/unit codes shown in the EQ selector (BottomBar).
