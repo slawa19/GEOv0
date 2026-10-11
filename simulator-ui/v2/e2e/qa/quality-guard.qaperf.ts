@@ -10,6 +10,9 @@
  *
  * Real time, but the outcome is discrete (`low` or `med`) and far from the 12 fps edge on both sides; the measured
  * rate is asserted, so a machine too slow to hold 12 fps ungoverned fails the control instead of passing by accident.
+ * NOT FOR A MANDATORY GATE: the tests run on real time and the control needs more than 24 fps at start-up from the
+ * machine it runs on; on a loaded or slow runner it fails for a reason that is not the product's. Scheduled or manual
+ * runs only.
  * Not judged: the 12 fps and 1800 ms constants themselves (unit-level), and whether `low` is enough on a slow machine.
  */
 import { chromium, expect, test, type Page } from '@playwright/test'

@@ -93,7 +93,12 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   await page.clock.runFor(48)
   const c = await loopCounters(page)
   // The whole life of the effect and the way back to sleep: flight 1200, receiver burst 420, hold 250, idle 3000, slack.
-  await page.clock.runFor(1200 + 420 + 250 + 3000 + 1000)
+  await page.clock.runFor(1200 + 420 + 250 + 500)
+  // Idle cadence now (4 fps, nothing but the base graph on screen): the next 250 ms hold exactly one pass.
+  const i0 = await loopCounters(page)
+  await page.clock.runFor(250)
+  const i1 = await loopCounters(page)
+  await page.clock.runFor(2500 + 1000 - 250)
   const d = await loopCounters(page)
   await page.clock.runFor(2000)
   const e = await loopCounters(page)
@@ -101,6 +106,7 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   const row = {
     drawsAsleep: b.draws - a.draws, rafAsleep: b.calls - a.calls, drawsIn48msAfterEvent: c.draws - b.draws,
     drawsForOnePayment: d.draws - b.draws, drawsAsleepAgain: e.draws - d.draws, rafAsleepAgain: e.calls - d.calls,
+    idlePasses: i1.draws - i0.draws, commandsInAStaticFrame: i1.cmds - i0.cmds, commandsForOnePayment: d.cmds - b.cmds, commandsAsleep: b.cmds - a.cmds,
   }
   console.log('[038 budget] sleep', JSON.stringify(row))
   hold(row.drawsAsleep, BUDGETS.DRAWS_IN_2S_DEEP_SLEEP)
@@ -109,9 +115,46 @@ test('budget: in deep sleep nothing is drawn and no frame is requested; an event
   hold(row.drawsForOnePayment, BUDGETS.DRAWS_FOR_ONE_PAYMENT_FROM_SLEEP)
   hold(row.drawsAsleepAgain, BUDGETS.DRAWS_IN_2S_DEEP_SLEEP)
   hold(row.rafAsleepAgain, BUDGETS.RAF_CALLS_IN_2S_DEEP_SLEEP)
+  // The volume of drawing: a count of passes does not see a pass that draws twice as much.
+  expect(row.commandsAsleep, 'nothing is drawn on the canvases in deep sleep').toBe(0)
+  expect(row.idlePasses, 'precondition: exactly one pass of the loop in the measured idle period').toBe(1)
+  hold(row.commandsInAStaticFrame, BUDGETS.DRAW_COMMANDS_IN_A_STATIC_FRAME)
+  hold(row.commandsForOnePayment, BUDGETS.DRAW_COMMANDS_FOR_ONE_PAYMENT_FROM_SLEEP)
 })
 
-test('budget: one period of the named load is drawn once per frame, reaches the recorded peaks, and leaves nothing alive', async ({ page }) => {
+/** One period of S3-MIXED-V1 (24 slots, 3.6 s: 23 payments over 1, 3, 6 edges and one clearing), sampled after every slot. */
+async function onePeriod(page: Page, tag: string) {
+  const before = await loopCounters(page)
+  const peak = { sparks: 0, edgePulses: 0, nodeBursts: 0, labels: 0, labelsWithFilter: 0, clearingLabels: 0, glowLabels: 0 }
+  for (const f of load.frames(0, 24, tag)) {
+    await push(page, [f])
+    await page.clock.runFor(load.everyMs)
+    const r = await readFx(page)
+    for (const k of ['sparks', 'edgePulses', 'nodeBursts', 'labels'] as const) peak[k] = Math.max(peak[k], r[k])
+    const css = await labelFilters(page)
+    peak.labelsWithFilter = Math.max(peak.labelsWithFilter, css.withFilter)
+    peak.clearingLabels = Math.max(peak.clearingLabels, css.clearing)
+    peak.glowLabels = Math.max(peak.glowLabels, css.glow)
+  }
+  return { before, after: await loopCounters(page), peak }
+}
+
+// The budgets read from FX state are a test of their own, so that on a production build (no dev hook) they are
+// reported as SKIPPED with the reason by the runner, not passed over inside a green test.
+test('budget: one period of the named load reaches the recorded peaks of sparks, edge pulses and node bursts, and leaves no FX object alive', async ({ page }) => {
+  test.skip(!devHook, NEEDS_HOOK)
+  await bootClocked(page, snapshot)
+  const { peak } = await onePeriod(page, 'budget-fx')
+  await page.clock.runFor(12_000)
+  const drained = await readFx(page)
+  console.log('[038 budget] FX state over one period', JSON.stringify({ peak, drained }))
+  hold(peak.sparks, BUDGETS.PEAK_SPARKS_IN_ONE_PERIOD)
+  hold(peak.edgePulses, BUDGETS.PEAK_EDGE_PULSES_IN_ONE_PERIOD)
+  hold(peak.nodeBursts, BUDGETS.PEAK_NODE_BURSTS_IN_ONE_PERIOD)
+  hold(drained.live, BUDGETS.LIVE_FX_AFTER_THE_STREAM)
+})
+
+test('budget: one period of the named load is one pass per frame of a recorded drawing volume, with the recorded peak of labels, no blur effects, and nothing left', async ({ page }) => {
   // On-screen `shadowBlur` and `backdrop-filter` are the two effects the no-GPU policy turns off; both are counted.
   await bootClocked(page, snapshot, (p) => p.addInitScript(() => {
     const w = window as unknown as { __qaShadow: { onScreen: number; offScreen: number } }
@@ -134,21 +177,7 @@ test('budget: one period of the named load is drawn once per frame, reaches the 
   })
   expect(quality, 'precondition: the no-GPU profile (the autoguard put software rendering on low)').toEqual({ quality: 'low', gpu: '0' })
 
-  const SLOTS = 24 // one period of S3-MIXED-V1: 23 payments over 1, 3, 6 edges and one clearing, 3.6 s
-  const frames = load.frames(0, SLOTS, 'budget')
-  const before = await loopCounters(page)
-  const peak = { sparks: 0, edgePulses: 0, nodeBursts: 0, labels: 0, labelsWithFilter: 0, clearingLabels: 0, glowLabels: 0 }
-  for (const f of frames) {
-    await push(page, [f])
-    await page.clock.runFor(load.everyMs)
-    const r = await readFx(page)
-    for (const k of ['sparks', 'edgePulses', 'nodeBursts', 'labels'] as const) peak[k] = Math.max(peak[k], r[k])
-    const css = await labelFilters(page)
-    peak.labelsWithFilter = Math.max(peak.labelsWithFilter, css.withFilter)
-    peak.clearingLabels = Math.max(peak.clearingLabels, css.clearing)
-    peak.glowLabels = Math.max(peak.glowLabels, css.glow)
-  }
-  const after = await loopCounters(page)
+  const { before, after, peak } = await onePeriod(page, 'budget')
   const backdrop = () => page.evaluate(() => [...document.querySelectorAll('*')].filter((el) => getComputedStyle(el).backdropFilter !== 'none').length)
   const backdropUnderLoad = await backdrop()
   const shadow = await page.evaluate(() => ({ ...(window as unknown as { __qaShadow: { onScreen: number; offScreen: number } }).__qaShadow }))
@@ -159,17 +188,24 @@ test('budget: one period of the named load is drawn once per frame, reaches the 
   await page.clock.runFor(2000)
   const d1 = await loopCounters(page)
 
-  const row = { drawsInOnePeriod: after.draws - before.draws, peak, backdropUnderLoad, shadow, drained, drawsAsleepAfter: d1.draws - d0.draws }
+  // The same period again on a warm page: glow sprites are baked off screen with shadowBlur once and cached
+  // (`render/glowSprites.ts`); a cache that misses bakes them again on every frame, which the first period cannot show.
+  await page.evaluate(() => { (window as unknown as { __qaShadow: { offScreen: number } }).__qaShadow.offScreen = 0 })
+  const warm = await onePeriod(page, 'budget-warm')
+  const offScreenWarm = await page.evaluate(() => (window as unknown as { __qaShadow: { offScreen: number } }).__qaShadow.offScreen)
+
+  const row = {
+    drawsInOnePeriod: after.draws - before.draws, commandsInOnePeriod: after.cmds - before.cmds, peak, backdropUnderLoad, shadow, drained,
+    drawsAsleepAfter: d1.draws - d0.draws, warm: { draws: warm.after.draws - warm.before.draws, commands: warm.after.cmds - warm.before.cmds, offScreenShadowBlurSets: offScreenWarm },
+  }
   console.log('[038 budget] one period of the load', JSON.stringify(row))
+  hold(row.commandsInOnePeriod, BUDGETS.DRAW_COMMANDS_IN_ONE_PERIOD_OF_LOAD)
+  expect(row.warm.commands, 'the same period on a warm page draws the same volume').toBe(row.commandsInOnePeriod)
+  expect(shadow.offScreen, 'counter-check: the cold period did bake sprites off screen - the counter sees them').toBeGreaterThan(0)
+  hold(offScreenWarm, BUDGETS.OFFSCREEN_SHADOW_BLUR_SETS_IN_A_WARM_PERIOD)
 
   hold(row.drawsInOnePeriod, BUDGETS.DRAWS_IN_ONE_PERIOD_OF_LOAD)
   hold(peak.labels, BUDGETS.PEAK_LABELS_IN_ONE_PERIOD)
-  if (devHook) {
-    hold(peak.sparks, BUDGETS.PEAK_SPARKS_IN_ONE_PERIOD)
-    hold(peak.edgePulses, BUDGETS.PEAK_EDGE_PULSES_IN_ONE_PERIOD)
-    hold(peak.nodeBursts, BUDGETS.PEAK_NODE_BURSTS_IN_ONE_PERIOD)
-    hold(drained.live, BUDGETS.LIVE_FX_AFTER_THE_STREAM)
-  } else console.log(`[038 budget] NOT MEASURED on this build: sparks, edge pulses, node bursts - ${NEEDS_HOOK}`)
   hold(drained.labels, BUDGETS.LIVE_LABELS_AFTER_THE_STREAM)
   hold(row.drawsAsleepAfter, BUDGETS.DRAWS_IN_2S_DEEP_SLEEP)
   expect(peak.clearingLabels, 'the clearing amount label was among the labels counted').toBeGreaterThanOrEqual(1)

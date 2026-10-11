@@ -162,9 +162,9 @@ export async function installSseShim(page: Page): Promise<void> {
 export async function installRafCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as {
-      __qaRaf: { calls: number; frames: number; draws: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
+      __qaRaf: { calls: number; frames: number; draws: number; cmds: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
     }
-    w.__qaRaf = { calls: 0, frames: 0, draws: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
+    w.__qaRaf = { calls: 0, frames: 0, draws: 0, cmds: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
     // exactly once per `renderFrame`, whether the frame came from rAF or `renderOnce`. One more clear is counted
     // here and is not a frame: the one-off blanking when the scene model becomes empty (038 S1, `blankCanvases`).
@@ -176,6 +176,18 @@ export async function installRafCounter(page: Page): Promise<void> {
         if (w.__qaRaf.record) w.__qaRaf.drawAt.push(performance.now())
       }
       return clearRect.apply(this, a)
+    }
+    // The VOLUME of drawing, which a count of passes does not see (038 S3, B2): every call of a drawing method on
+    // a context of an on-screen canvas (base or FX). A frame that draws the base graph twice clears once.
+    // Not counted: path building (moveTo, lineTo, arc), state changes, off-screen canvases (sprite baking), and the
+    // cost of a call - one `stroke()` of a long path counts as one.
+    const proto = CanvasRenderingContext2D.prototype as unknown as Record<string, (...a: unknown[]) => unknown>
+    for (const m of ['stroke', 'fill', 'fillRect', 'strokeRect', 'fillText', 'strokeText', 'drawImage', 'putImageData']) {
+      const real = proto[m]!
+      proto[m] = function (this: CanvasRenderingContext2D, ...a: unknown[]) {
+        if ((this.canvas as HTMLCanvasElement).classList?.contains('canvas')) w.__qaRaf.cmds += 1
+        return real.apply(this, a)
+      }
     }
     const inner = window.requestAnimationFrame.bind(window)
     window.requestAnimationFrame = (cb: FrameRequestCallback) => {
@@ -194,11 +206,14 @@ export async function installRafCounter(page: Page): Promise<void> {
   })
 }
 
-/** `calls`: registrations of a callback (weak: any caller). `draws`: completed passes of the render loop (see above). */
-export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number }> {
+/**
+ * `calls`: registrations of a callback (weak: any caller). `draws`: completed PASSES of the render loop (one clear of
+ * the base canvas each) - not how much a pass draws. `cmds`: calls of drawing methods on the on-screen canvases.
+ */
+export async function loopCounters(page: Page): Promise<{ calls: number; frames: number; draws: number; cmds: number }> {
   return page.evaluate(() => {
-    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number } }).__qaRaf
-    return { calls: q.calls, frames: q.frames, draws: q.draws }
+    const q = (window as unknown as { __qaRaf: { calls: number; frames: number; draws: number; cmds: number } }).__qaRaf
+    return { calls: q.calls, frames: q.frames, draws: q.draws, cmds: q.cmds }
   })
 }
 

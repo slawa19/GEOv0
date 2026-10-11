@@ -6,6 +6,12 @@
  * is what the numbers must show. JS work of a frame: the callbacks of one frame share the rAF timestamp, so their
  * durations are summed by it.
  *
+ * `pushed` counts what the stand wrote into the SSE stream, NOT what the product read from it: a dead stream would
+ * still count (adversarial pass, B3). What does show that events reached the product: every window starts from a
+ * sleeping render loop, so `draws > 0` means an event woke it, and `frame.qaperf.ts` requires amount labels on screen.
+ * A count of frames read by the product belongs with the counting reader of slice S2 (`stand.ts` there) and is left
+ * to the merge with it, so that the two branches do not grow two implementations of the same reader.
+ *
  * It does not read pixels, and it does not see: time spent outside `requestAnimationFrame` callbacks (style, paint,
  * raster, compositing - `frame-breakdown.qaperf.ts` traces those), input latency, the first load of the page.
  */
@@ -14,7 +20,7 @@ import { expect, type Page } from '@playwright/test'
 export type Live = { sparks: number | null; edgePulses: number | null; nodeBursts: number | null; labels: number }
 export type RawWindow = {
   drawAt: number[]; frameT: number[]; callbackMs: number[]; draws: number; heapUsed: number | null
-  delivered: number; maxLive: Live; labelAnims: { running: number; paused: number }
+  pushed: number; maxLive: Live; labelAnims: { running: number; paused: number }
   telemetry: { lastFps?: number; fxBudgetScale?: number; maxParticles?: number; renderQuality?: string } | null
   minBudgetScale: number | null
 }
@@ -42,12 +48,12 @@ export async function measureWindow(page: Page, frames: string[], windowMs: numb
     const maxLive = { sparks: 0, edgePulses: 0, nodeBursts: 0, labels: 0 }
     const labelAnims = { running: 0, paused: 0 }
     let minBudgetScale = 1
-    let delivered = 0
+    let pushed = 0
     let tick = 0
     const t0 = performance.now()
     const pump = setInterval(() => {
       const due = Math.min(frames.length, Math.floor((performance.now() - t0) / everyMs) + 1)
-      while (delivered < due) w.__qaSse.push(frames[delivered++]!)
+      while (pushed < due) w.__qaSse.push(frames[pushed++]!)
       tick += 1
       maxLive.labels = Math.max(maxLive.labels, document.querySelectorAll('.floating-label').length)
       if (tick % 5 === 0) {
@@ -75,7 +81,7 @@ export async function measureWindow(page: Page, frames: string[], windowMs: numb
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory
     return {
       drawAt: q.drawAt, frameT: q.frameT, callbackMs: q.callbackMs, draws: q.draws - draws0,
-      heapUsed: mem && w.gc ? mem.usedJSHeapSize : null, delivered, labelAnims,
+      heapUsed: mem && w.gc ? mem.usedJSHeapSize : null, pushed, labelAnims,
       maxLive: fx ? maxLive : { labels: maxLive.labels, sparks: null, edgePulses: null, nodeBursts: null },
       telemetry: fx ? { lastFps: fx.__lastFps, fxBudgetScale: fx.__fxBudgetScale, maxParticles: fx.__maxParticles, renderQuality: fx.__renderQuality } : null,
       minBudgetScale: fx ? minBudgetScale : null,
@@ -91,21 +97,21 @@ export const pct = (xs: number[], p: number) => {
 export const r1 = (x: number) => Math.round(x * 10) / 10
 
 /**
- * A window with no product draws, with too few to take a percentile of, or with part of the load undelivered is
+ * A window with no product draws, with too few to take a percentile of, or with part of the load not pushed into the stream is
  * REFUSED instead of summarized: a void measurement must not look like a good one.
  */
 export function summarizeWindow(w: RawWindow, name: string, expectedEvents: number) {
   expect(w.draws, `${name}: the product's render loop drew during the window (0 = it slept under load, or the draw counter is blind)`).toBeGreaterThan(0)
   expect(w.drawAt.length, `${name}: at least 20 product frames to take a percentile of`).toBeGreaterThanOrEqual(20)
   expect(w.callbackMs.length, `${name}: rAF callbacks were timed`).toBeGreaterThan(0)
-  expect(w.delivered, `${name}: every event of the load was delivered (a void load makes any frame time look good)`).toBe(expectedEvents)
+  expect(w.pushed, `${name}: every event of the load was pushed into the SSE stream on schedule (a void load makes any frame time look good)`).toBe(expectedEvents)
   const frameDeltaMs = w.drawAt.slice(1).map((t, i) => t - w.drawAt[i]!)
   const work = new Map<number, number>()
   w.frameT.forEach((t, i) => work.set(t, (work.get(t) ?? 0) + w.callbackMs[i]!))
   const perFrame = [...work.values()]
   const mean = frameDeltaMs.reduce((a, b) => a + b, 0) / frameDeltaMs.length
   return {
-    frames: frameDeltaMs.length, draws: w.draws, delivered: w.delivered, fps: r1(1000 / mean),
+    frames: frameDeltaMs.length, draws: w.draws, pushed: w.pushed, fps: r1(1000 / mean),
     frameMs: { mean: r1(mean), p50: r1(pct(frameDeltaMs, 50)), p95: r1(pct(frameDeltaMs, 95)), max: r1(Math.max(...frameDeltaMs)) },
     workMs: { mean: r1(perFrame.reduce((a, b) => a + b, 0) / perFrame.length), p50: r1(pct(perFrame, 50)), p95: r1(pct(perFrame, 95)), max: r1(Math.max(...perFrame)) },
     maxLive: w.maxLive, labelAnims: w.labelAnims, telemetry: w.telemetry, minBudgetScale: w.minBudgetScale,

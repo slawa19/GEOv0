@@ -8,7 +8,7 @@
  *      viewport) - what each thing costs in frames per second. The product is not changed and none of these variants
  *      is a proposal by itself: they only say where the time is.
  *
- * Nothing here is a threshold. The tests fail only when a measurement is void (no frames, load not delivered, the
+ * Nothing here is a threshold. The tests fail only when a measurement is void (no frames, load not pushed, the
  * trace has no renderer main thread). Output: `qa-perf-frame-breakdown-<dev|preview>.json` in the output folder.
  *
  * Limits: CDP CPU throttling slows the renderer's MAIN thread only - compositor, raster workers and the display

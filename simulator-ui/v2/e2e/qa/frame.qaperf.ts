@@ -3,7 +3,7 @@
  * A dev server (unminified modules, Vue dev build) unless QA_STAND_SERVER=preview (production build).
  *
  * Nothing here is a threshold on time: a frame time is a property of the machine the run happened on. The tests fail
- * only when the measurement itself is void - no product frames, the named load not delivered in full, labels not
+ * only when the measurement itself is void - no product frames, the named load not pushed in full, labels not
  * animating (BACKLOG 034-6 (k): until S3 the stand paused them and the numbers described a lighter page).
  * The discrete, machine-independent budgets are in `budgets.qaperf.ts`.
  *
@@ -112,7 +112,7 @@ for (let run = 1; run <= RUNS; run += 1) {
     const long = await measure(page, load.frames(0, n, `h${run}`), HEAP_WINDOW_MS)
     const mb = (b: number) => Math.round((b / 1048576) * 100) / 100
     expect(long.draws, 'heap window: the product drew while the heap was watched').toBeGreaterThan(0)
-    expect(long.delivered, 'heap window: the whole load was delivered').toBe(n)
+    expect(long.pushed, 'heap window: the whole load was pushed into the stream').toBe(n)
     const row: Run = {
       x1, x4, x8,
       heapStartMb: heap0 === null ? null : mb(heap0),
