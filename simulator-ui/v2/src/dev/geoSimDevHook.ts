@@ -42,6 +42,10 @@ type InstallGeoSimDevHookDeps = {
   isWebDriver: () => boolean
   getState: () => GeoSimDevHookState
   getCamera?: () => GeoSimCameraSnapshot
+  /** 038 QA stand: read-only layout geometry in world coordinates (screen = world * zoom + pan). */
+  getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number }>
+  /** 038 QA stand: read-only ids of the nodes pinned by the user. */
+  getPinnedNodeIds?: () => string[]
   fxState: FxState
   runTxOnce: () => Promise<void> | void
   runClearingOnce: () => Promise<void> | void
@@ -104,6 +108,12 @@ export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps): (() => voi
     },
     get camera() {
       return deps.getCamera?.() ?? { panX: 0, panY: 0, zoom: 1 }
+    },
+    get layoutNodes() {
+      return (deps.getLayoutNodes?.() ?? []).map((n) => ({ id: String(n.id), x: n.__x, y: n.__y }))
+    },
+    get pinnedNodeIds() {
+      return deps.getPinnedNodeIds?.() ?? []
     },
     fxState: deps.fxState,
     runTxOnce: deps.runTxOnce,

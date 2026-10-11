@@ -1768,6 +1768,8 @@ export function useSimulatorApp(opts?: {
     isWebDriver: () => isWebDriver,
     getState: () => state,
     getCamera: () => ({ panX: camera.panX, panY: camera.panY, zoom: camera.zoom }),
+    getLayoutNodes: () => layout.nodes,
+    getPinnedNodeIds: () => [...pinnedPos.keys()],
     fxState,
     runTxOnce: fxDebugTxOnce,
     runClearingOnce: fxDebugClearingOnce,
