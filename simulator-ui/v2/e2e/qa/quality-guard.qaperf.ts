@@ -14,19 +14,12 @@
  */
 import { chromium, expect, test, type Page } from '@playwright/test'
 
-import { boot, ringSnapshot } from './stand.js'
+import { boot, pretendGpu, ringSnapshot } from './stand.js'
 
 const NO_GPU_ARGS = ['--disable-gpu', '--disable-accelerated-2d-canvas', '--disable-gpu-compositing']
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
 
-/** WebGL "exists": `detectGpuAccelerationLikelyAvailable` gets a context without `WEBGL_debug_renderer_info`. */
-const fakeWebGl = (page: Page) => page.addInitScript(() => {
-  const real = HTMLCanvasElement.prototype.getContext
-  HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
-    if (type === 'webgl' || type === 'experimental-webgl') return { getExtension: () => null, getParameter: () => null } as unknown as RenderingContext
-    return (real as (this: HTMLCanvasElement, t: string, ...r: unknown[]) => RenderingContext | null).call(this, type, ...rest)
-  } as typeof HTMLCanvasElement.prototype.getContext
-})
+const fakeWebGl = pretendGpu
 
 /** `requestAnimationFrame` callbacks run only on every `late + 1`-th display frame; the measured rate is kept for the test. */
 const governor = (late: number) => (page: Page) => page.addInitScript((late) => {

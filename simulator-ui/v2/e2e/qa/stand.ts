@@ -464,6 +464,21 @@ export async function installCssClockSync(page: Page): Promise<void> {
   })
 }
 
+/**
+ * The page is told that WebGL exists: `detectGpuAccelerationLikelyAvailable` (`useQualityAutoguards.ts`) gets a context
+ * without `WEBGL_debug_renderer_info` and reads "GPU likely available", so the root carries `data-gpu='1'` as on a
+ * machine with a GPU. Rendering stays software: this changes what the product BELIEVES, not how the page is drawn.
+ */
+export async function pretendGpu(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const real = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+      if (type === 'webgl' || type === 'experimental-webgl') return { getExtension: () => null, getParameter: () => null } as unknown as RenderingContext
+      return (real as (this: HTMLCanvasElement, t: string, ...r: unknown[]) => RenderingContext | null).call(this, type, ...rest)
+    } as typeof HTMLCanvasElement.prototype.getContext
+  })
+}
+
 export type LabelSample = { text: string; cls: string; ageMs: number; opacity: number; durationMs: number; animations: number }
 
 /** Set every label's CSS animation to its JS age and read the computed opacity. */

@@ -84,9 +84,10 @@ export const BUDGETS = {
   ONSCREEN_SHADOW_BLUR_SETS_NO_GPU: b('ONSCREEN_SHADOW_BLUR_SETS_NO_GPU', 0, 'higher',
     'assignments of a non-zero shadowBlur to a context of an on-screen canvas during one period of the load, quality low, no GPU (policy 4.1: no per-frame blur; glow comes from pre-baked sprites)',
     '2026-10-11: 0 - first record (038 S3)'),
-  PEAK_LABELS_WITH_CSS_FILTER_NO_GPU: b('PEAK_LABELS_WITH_CSS_FILTER_NO_GPU', 24, 'higher',
-    'RECORDED DEBT, target 0: most amount labels mounted at once with a computed CSS filter (drop-shadow) during one period of the load, quality low, no GPU. The no-GPU policy gates backdrop-filter and canvas shadowBlur but not this filter; on software compositing every such label is filtered again on every frame (frame-breakdown.qaperf.ts: it is what takes the scene from 60 to about 16 fps). Not fixed by 038: it changes how labels look without a GPU - an owner decision',
-    '2026-10-11: 24 - first record (038 S3), equal to the peak of labels: every label carries the filter'),
+  PEAK_LABELS_WITH_CSS_FILTER_NO_GPU: b('PEAK_LABELS_WITH_CSS_FILTER_NO_GPU', 0, 'higher',
+    'most amount labels (payments and clearing) mounted at once with a computed CSS filter (drop-shadow) during one period of the load, no GPU (policy 5: on software compositing every such label is filtered again on every frame). With a GPU the filter stays - held by the counter-test in budgets.qaperf.ts',
+    '2026-10-11: 24 - first record (038 S3), a recorded debt: every label carried the filter, and it took the scene from 60 to about 16 fps. '
+    + '2026-10-11: 24 -> 0 - the filter is gated by data-gpu=0 in src/App.css (orchestrator decision of the same day: the same class of effect the policy already turns off without a GPU)'),
   ELEMENTS_WITH_BACKDROP_FILTER_NO_GPU: b('ELEMENTS_WITH_BACKDROP_FILTER_NO_GPU', 0, 'higher',
     'elements with a computed backdrop-filter under load, no window open, quality low, no GPU (policy 5: CSS gating)',
     '2026-10-11: 0 - first record (038 S3)'),

@@ -179,6 +179,7 @@ const LABEL = '.floating-label-inner'
 const VARIANTS: Variant[] = [
   { name: 'baseline: the load as it is' },
   { name: 'no amount labels of payments (amount_flyout: false); the clearing label stays', mapFrames: noLabels },
+  { name: 'no amount labels of payments, and the clearing label without filter', mapFrames: noLabels, css: `${LABEL}.clearing-premium { filter: none !important; }` },
   { name: 'labels without their CSS animation (static, full opacity)', css: `${LABEL} { animation: none !important; }` },
   { name: 'labels without filter: drop-shadow', css: `${LABEL} { filter: none !important; }` },
   { name: 'labels without text-shadow', css: `${LABEL} { text-shadow: none !important; }` },

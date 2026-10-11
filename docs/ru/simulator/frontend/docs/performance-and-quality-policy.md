@@ -72,7 +72,7 @@ Per-object `shadowBlur` на Canvas 2D — один из самых дороги
 
 **Критерий (2026-10-11).** Число элементов с вычисленным `backdrop-filter` под нагрузкой без открытых окон — бюджет `ELEMENTS_WITH_BACKDROP_FILTER_NO_GPU`.
 
-**Известный пробел (2026-10-11, измерен; не исправлен).** Gating не покрывает `filter: drop-shadow(...)` у плавающих меток сумм (`.floating-label-inner`, `simulator-ui/v2/src/App.css`): фильтр снят только под WebDriver. На software-композитинге каждая такая метка фильтруется заново на каждом кадре. Текущее состояние записано бюджетом-долгом `PEAK_LABELS_WITH_CSS_FILTER_NO_GPU` (цель — 0); измеренная цена — в разделе 7.3. Правка меняет вид меток без GPU и требует решения владельца.
+**CSS-фильтр плавающих меток (2026-10-11, программа 038, срез S3).** `filter: drop-shadow(...)` у меток сумм платежей и подписи клиринга (`.floating-label-inner`, `simulator-ui/v2/src/App.css`) отнесён к эффектам, отключаемым без GPU: он снимается по признаку `data-gpu='0'` (его ставит GPU-эвристика раздела 2), а не по качеству — на машине с GPU при `quality=low` тень остаётся. Свечение `text-shadow` не меняется. До этой правки gating фильтр меток не покрывал (он снимался только под WebDriver), и на software-композитинге каждая метка фильтровалась заново на каждом кадре; измеренная цена — в разделе 7.3. Держит бюджет `PEAK_LABELS_WITH_CSS_FILTER_NO_GPU` и контрпроверка «с GPU фильтр есть» в `e2e/qa/budgets.qaperf.ts`.
 
 ## 6) Где реализовано (код)
 
@@ -100,7 +100,7 @@ Per-object `shadowBlur` на Canvas 2D — один из самых дороги
 | После потока событий ничего не остаётся жить | `LIVE_FX_AFTER_THE_STREAM`, `LIVE_LABELS_AFTER_THE_STREAM` |
 | Названная нагрузка действительно показана (меньше рисовать — не улучшение) | `PEAK_SPARKS_IN_ONE_PERIOD`, `PEAK_EDGE_PULSES_IN_ONE_PERIOD`, `PEAK_NODE_BURSTS_IN_ONE_PERIOD`, `PEAK_LABELS_IN_ONE_PERIOD` |
 | Без GPU нет per-frame blur на канве и `backdrop-filter` в DOM | `ONSCREEN_SHADOW_BLUR_SETS_NO_GPU`, `ELEMENTS_WITH_BACKDROP_FILTER_NO_GPU` |
-| Долг: CSS-фильтр меток без GPU | `PEAK_LABELS_WITH_CSS_FILTER_NO_GPU` |
+| Без GPU у меток сумм нет CSS-фильтра; с GPU он есть | `PEAK_LABELS_WITH_CSS_FILTER_NO_GPU` и контрпроверка в `budgets.qaperf.ts` |
 
 Команда (PowerShell, из корня репозитория; порт — свой):
 
