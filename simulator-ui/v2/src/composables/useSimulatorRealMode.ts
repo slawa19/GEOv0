@@ -31,7 +31,7 @@ import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage } from '../utils/errorMessage'
 import { toLower } from '../utils/stringHelpers'
-import { runErrorText } from '../utils/runErrorClassification'
+import { runStatusErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -404,8 +404,7 @@ export function useSimulatorRealMode(opts: {
       const st = await getRun({ apiBase: real.apiBase, accessToken: real.accessToken }, runId)
       if (!isCurrent()) return 'superseded'
       real.runStatus = st
-      const le = st.last_error
-      real.lastError = le && isUserFacingRunError(le.code) ? runErrorText(le) : ''
+      real.lastError = runStatusErrorText(st, isUserFacingRunError)
       return 'current'
     } catch (e: unknown) {
       if (!isCurrent()) return 'superseded'
