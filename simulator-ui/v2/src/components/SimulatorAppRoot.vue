@@ -1277,7 +1277,9 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     >
       <!-- HUD elements stacked below TopBar rows (inside ds-ov-top-stack via slot) -->
       <template v-if="dataReady && (isInteractUi || isAutoRunUi)">
+        <!-- No snapshot - no balance (034 S8, review C3): unknown debts are not zero debts. -->
         <SystemBalanceBar
+          v-if="state.snapshot"
           :balance="interact.systemBalance"
           :equivalent="sceneEq"
           :compact="isAutoRunUi"

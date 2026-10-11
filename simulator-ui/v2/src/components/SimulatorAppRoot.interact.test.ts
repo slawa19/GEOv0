@@ -1987,6 +1987,42 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     vi.unstubAllGlobals()
   })
 
+  // 034 S8, review C3 (the half F-034-D2 is named after): with no snapshot the debts are UNKNOWN, not zero. The
+  // balance bar computes zeros and "clean" for a null snapshot, so it is not shown until a snapshot exists - the
+  // same as while loading. Not judged here: the wording of the error (the existing error surface shows it).
+  it('a failed first load shows no balance bar (no "clean", no zero Total Debt); a loaded snapshot shows it', async () => {
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    setGeoTestGlobal('__GEO_TEST_STATE_ERROR', 'HTTP 503 Service Unavailable for /simulator/scenarios/sc1/graph/preview')
+
+    const failedHost = document.createElement('div')
+    document.body.appendChild(failedHost)
+    const failedApp = mountSimulatorAppRoot(failedHost)
+    await nextTick()
+    expect(failedHost.querySelector('.ds-ov-inset[role="alert"]')?.textContent).toContain('HTTP 503')
+    expect(failedHost.querySelector('.system-balance-bar'), 'a balance is shown for data that was never read').toBeNull()
+    expect(failedHost.textContent).not.toContain('System is clean')
+    failedApp.unmount()
+    failedHost.remove()
+    clearGeoTestGlobals('__GEO_TEST_STATE_ERROR')
+
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', {
+      equivalent: 'UAH',
+      generated_at: '2026-10-11T00:00:00Z',
+      nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+      links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '25', available: '75' }],
+    })
+    const loadedHost = document.createElement('div')
+    document.body.appendChild(loadedHost)
+    const loadedApp = mountSimulatorAppRoot(loadedHost)
+    await nextTick()
+    expect(loadedHost.querySelector('.system-balance-bar'), 'anti-vacuum: with a snapshot the bar is shown').not.toBeNull()
+    loadedApp.unmount()
+    loadedHost.remove()
+    clearGeoTestGlobals('__GEO_TEST_SNAPSHOT')
+    vi.unstubAllGlobals()
+  })
+
   it('renders EdgeDetailPopup through WindowLayer (WindowShell)', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
     setUrl('/?mode=real&ui=interact')
