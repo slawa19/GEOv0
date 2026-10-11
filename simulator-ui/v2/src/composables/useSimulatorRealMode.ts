@@ -29,8 +29,8 @@ import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/eq
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
-import { extractErrorMessage } from '../utils/errorMessage'
-import { toLower } from '../utils/stringHelpers'
+import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
+import { isLiveRunState } from '../utils/status'
 import { runStatusErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
@@ -104,14 +104,6 @@ const REPLAY_GAP_BUFFER_MAX_MESSAGES = 512
 function diagnosticEventTypeBucket(eventType: string | undefined): string {
   if (!eventType) return 'untyped'
   return DIAGNOSTIC_EVENT_TYPE_BUCKETS.has(eventType) ? eventType : 'other'
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function getErrorMessage(e: unknown): string {
-  return extractErrorMessage(e)
 }
 
 /**
@@ -1105,9 +1097,7 @@ export function useSimulatorRealMode(opts: {
 
     await ensureAnonSessionOnce()
 
-    const st = toLower(real.runStatus?.state)
-    const isActive = !!real.runId && (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
-    if (real.runId && !isActive) {
+    if (real.runId && !isLiveRunState(real.runStatus?.state)) {
       resetStaleRun({ clearError: true })
     }
 
@@ -1437,13 +1427,12 @@ export function useSimulatorRealMode(opts: {
       // refreshSnapshot() after refreshScenarios() — this watcher would duplicate it.
       if (initialBootInProgress) return
 
-      const st = toLower(real.runStatus?.state)
       const isActive =
         !!real.runId &&
         // Consider a run active only when we have a known status.
         // This allows scenario preview switching even when a stale runId exists but status cannot be fetched.
         !!real.runStatus &&
-        (st === 'running' || st === 'paused' || st === 'created' || st === 'stopping')
+        isLiveRunState(real.runStatus.state)
       if (isActive) return
 
       await refreshSnapshot()

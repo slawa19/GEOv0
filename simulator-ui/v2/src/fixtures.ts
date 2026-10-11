@@ -1,9 +1,6 @@
 import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePatch } from './types'
+import { isRecord } from './utils/isRecord'
 import { VIZ_MAPPING } from './vizMapping'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function asString(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`${label} must be string`)

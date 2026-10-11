@@ -24,6 +24,7 @@ import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage } from '../utils/errorMessage'
+import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
@@ -76,10 +77,6 @@ import { useRealClearingFx, type ClearingFxParams } from './realFx/useRealCleari
 import { useRealTxFx } from './realFx/useRealTxFx'
 
 export type OutsideClickOverlayKey = 'edge-detail' | 'node-card'
-
-function getErrorMessage(err: unknown): string {
-  return extractErrorMessage(err)
-}
 
 export async function loadStrictRunRecoverySnapshot(input: {
   apiBase: string
@@ -416,7 +413,7 @@ export function __autoBootstrapMaybeFillUiError(opts: {
   const hasStateError = !!String(opts.state.error ?? '').trim()
   if (hasRealError || hasStateError) return
 
-  opts.state.error = `Auto-start failed: ${getErrorMessage(opts.err)}`
+  opts.state.error = `Auto-start failed: ${extractErrorMessage(opts.err)}`
 }
 
 export function useSimulatorApp(opts?: {
@@ -1522,7 +1519,6 @@ export function useSimulatorApp(opts?: {
     const runId = real.runId
     const scenarioId = real.selectedScenarioId
 
-    const runState = toLower(real.runStatus?.state)
     // An UNKNOWN status (null: not read yet, or its read failed - a timeout included) is not "no active run" for a
     // run whose scene is on screen: that scene is not demoted to the preview, the run snapshot is read instead
     // (034 S5b). Only a REFRESH of that scene: choosing another scenario is an explicit request for its preview
@@ -1535,9 +1531,7 @@ export function useSimulatorApp(opts?: {
       !!runId &&
       // Otherwise treat as active only when we have a known status.
       // This avoids getting stuck on an unreachable/stale runId (scenario switching should still show previews).
-      ((!!real.runStatus &&
-        (runState === 'running' || runState === 'paused' || runState === 'created' || runState === 'stopping')) ||
-        statusUnknownForShownRun)
+      ((!!real.runStatus && isLiveRunState(real.runStatus.state)) || statusUnknownForShownRun)
 
     // Real mode: if we have a run, use run snapshot
     if (isActiveRun) {
@@ -1912,7 +1906,7 @@ export function useSimulatorApp(opts?: {
           await realMode.stopRunById(runId, { source: 'ui', reason: 'admin_stop' })
           await adminRunsPanel.getRuns()
         } catch (e: unknown) {
-          adminRunsPanel.lastError.value = getErrorMessage(e)
+          adminRunsPanel.lastError.value = extractErrorMessage(e)
         }
       },
     },

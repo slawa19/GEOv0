@@ -81,10 +81,6 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   let lastSnapshotNodeIds: Set<string> | null = null
   let hasLoadedOnce = false
 
-  function getErrorMessage(error: unknown): string {
-    return extractErrorMessage(error)
-  }
-
   function parseSceneContext(sourcePath: string | null | undefined): { kind: 'scenario' | 'run' | 'other'; id: string } {
     const s = String(sourcePath ?? '').trim()
     if (!s) return { kind: 'other', id: '' }
@@ -222,7 +218,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       return true
     } catch (error) {
       if (!isCurrent()) return false
-      deps.state.error = getErrorMessage(error)
+      deps.state.error = extractErrorMessage(error)
       if (input.rethrow) throw error
       return false
     } finally {
