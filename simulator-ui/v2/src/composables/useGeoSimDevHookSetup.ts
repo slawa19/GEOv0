@@ -8,6 +8,8 @@ export function useGeoSimDevHookSetup(opts: {
   isWebDriver: () => boolean
   getState: () => SimulatorAppState
   getCamera?: () => { panX: number; panY: number; zoom: number }
+  getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number }>
+  getPinnedNodeIds?: () => string[]
   fxState: FxState
   runTxOnce: () => void
   runClearingOnce: () => void
@@ -40,6 +42,8 @@ export function useGeoSimDevHookSetup(opts: {
       isWebDriver: opts.isWebDriver,
       getState: opts.getState,
       getCamera: opts.getCamera,
+      getLayoutNodes: opts.getLayoutNodes,
+      getPinnedNodeIds: opts.getPinnedNodeIds,
       fxState: opts.fxState,
       runTxOnce: opts.runTxOnce,
       runClearingOnce: opts.runClearingOnce,

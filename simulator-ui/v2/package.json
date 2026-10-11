@@ -15,6 +15,8 @@
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test console-guard --reporter=list",
     "test:e2e:phase5": "playwright test --config=e2e/playwright.phase5.config.ts --browser=chromium",
+    "test:e2e:qa": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-stand",
+    "test:e2e:qa:perf": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-perf",
     "test:e2e:update": "playwright test --update-snapshots"
   },
   "dependencies": {
@@ -23,6 +25,7 @@
     "vue": "^3.5.26"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@typescript-eslint/parser": "^8.71.0",
     "@types/d3-quadtree": "^3.0.6",
     "@types/d3-force": "^3.0.10",
