@@ -100,6 +100,57 @@ describe('OverlaySelect', () => {
     host.remove()
   })
 
+  it('a list opened with the mouse: an open key on the trigger moves the focus inside, Escape closes the list and does not go further (038 S2)', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const escapesSeenAbove: KeyboardEvent[] = []
+    const above = (e: KeyboardEvent) => { if (e.key === 'Escape') escapesSeenAbove.push(e) }
+    window.addEventListener('keydown', above)
+
+    const app = createApp({
+      render: () => h('div', [
+        h(OverlaySelect, {
+          id: 'overlay-select-mouse',
+          modelValue: 'alice',
+          options: [{ value: 'alice', label: 'Alice' }, { value: 'bob', label: 'Bob' }],
+          triggerLabel: 'Participant mouse',
+        }),
+      ]),
+    })
+    app.mount(host)
+    await settle()
+
+    try {
+      const trigger = host.querySelector('#overlay-select-mouse__trigger') as HTMLButtonElement
+      trigger.focus()
+      trigger.click() // the mouse: the list opens, the focus stays on the trigger
+      await settle()
+      expect(document.body.querySelector('#overlay-select-mouse__surface')).toBeTruthy()
+      expect(document.activeElement).toBe(trigger)
+
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+      await settle()
+      expect(document.activeElement).toBe(document.body.querySelector('[data-dropdown-selected="1"]'))
+
+      trigger.focus()
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      await settle()
+      expect(document.body.querySelector('#overlay-select-mouse__surface')).toBeNull()
+      expect(document.activeElement).toBe(trigger)
+      // The window manager listens on `window`: an Escape that reaches it closes the panel around the list.
+      expect(escapesSeenAbove).toHaveLength(0)
+
+      // Counter-check: with the list closed, Escape on the trigger is not swallowed - it belongs to the window.
+      trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      expect(escapesSeenAbove).toHaveLength(1)
+      expect(escapesSeenAbove[0]!.defaultPrevented).toBe(false)
+    } finally {
+      window.removeEventListener('keydown', above)
+      app.unmount()
+      host.remove()
+    }
+  })
+
   it('uses labelledBy on the visible trigger and closes on outside pointerdown', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

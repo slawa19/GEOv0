@@ -18,7 +18,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { BUDGETS, CSS_EFFECTS_NO_GPU, type Budget } from './budgets.js'
 import { buildPerfLoad } from './perf-load.js'
-import { boot, fixtureSnapshot100, pretendGpu, screenNodes, selectHub, type QaSnapshot } from './stand.js'
+import { boot, fixtureSnapshot100, pausedClockTime, pretendGpu, screenNodes, selectHub, type QaSnapshot } from './stand.js'
 
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
 const snapshot = fixtureSnapshot100()
@@ -54,7 +54,7 @@ async function bootNeighbors(page: Page, snap: QaSnapshot, gpu: boolean) {
       await p.addInitScript(() => { try { localStorage.setItem('geo.sim.labelsLod', 'neighbors') } catch { /* ignore */ } })
     },
   })
-  if (!devHook) await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1000)
+  if (!devHook) await page.clock.pauseAt(pausedClockTime((await page.evaluate(() => Date.now())) + 1000))
 }
 
 const nodeLabels = (page: Page) => page.evaluate(() => {

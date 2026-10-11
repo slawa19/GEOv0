@@ -108,22 +108,52 @@ export async function mockBackend(page: Page, snapshot: QaSnapshot): Promise<{ u
  * `route.fulfill` body ends at once, which the product answers with a reconnect: an event would be delivered on
  * every reconnect. The shim keeps one open stream per connection; every byte still goes through the product's own
  * parser, normalizer and event pipeline.
+ *
+ * `push` answers WHEN THE PRODUCT HAS TAKEN THE FRAME (038 S2). The stream is read in real time and the tests step a
+ * fake clock: a test that stepped right after writing could step before the product had read the frame (shown by
+ * `delivery.qa.ts` with a frame held in transport; it has not been seen to happen by itself). The signal is the product's own read
+ * loop: it handles every message of a chunk synchronously and only then asks the stream for the next chunk, so the
+ * `read()` call that FOLLOWS the one that returned our chunk means the handler has run - for a duplicate and for a
+ * rejected event as well (the frame reached the handler; whether it animated is the test's question). No timer is
+ * involved. A connection that is dropped answers for its frames too: they can no longer be taken.
+ * `hold()` / `release()` keep written frames out of the stream: a delay in transport, for the probe of the above.
  */
 export async function installSseShim(page: Page): Promise<void> {
   await page.addInitScript(() => {
     type Ctl = ReadableStreamDefaultController<Uint8Array>
+    type Done = (() => void) | null
+    /** `queued`: chunks in the stream, not yet read. `handed`: chunks the last read returned, not yet followed by a read. */
+    type Conn = { queued: Done[]; handed: Done[] }
     const realFetch = window.fetch.bind(window)
     const enc = new TextEncoder()
-    const state = { controllers: [] as Ctl[], opened: 0, pushed: 0 }
+    const state = { controllers: [] as Ctl[], opened: 0, pushed: 0, held: null as Array<() => void> | null }
+    const conns = new Map<Ctl, Conn>()
     const drop = (c: Ctl) => {
       const i = state.controllers.indexOf(c)
       if (i >= 0) state.controllers.splice(i, 1)
+      const conn = conns.get(c)
+      conns.delete(c)
+      for (const done of [...(conn?.queued ?? []), ...(conn?.handed ?? [])]) done?.()
     }
+    const send = (text: string): Promise<number> =>
+      Promise.all(state.controllers.map((c) => new Promise<void>((done) => {
+        conns.get(c)!.queued.push(done)
+        c.enqueue(enc.encode(text))
+      }))).then((all) => all.length)
     ;(window as unknown as { __qaSse: unknown }).__qaSse = {
       state,
-      push(text: string) {
+      /** Resolves with the number of connections that took the frame (0: nobody was listening, the frame is lost). */
+      push(text: string): Promise<number> {
         state.pushed += 1
-        for (const c of state.controllers) c.enqueue(enc.encode(text))
+        const held = state.held
+        if (held) return new Promise((taken) => { held.push(() => taken(send(text))) })
+        return send(text)
+      },
+      hold() { state.held = state.held ?? [] },
+      release() {
+        const held = state.held ?? []
+        state.held = null
+        for (const go of held) go()
       },
     }
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
@@ -131,10 +161,12 @@ export async function installSseShim(page: Page): Promise<void> {
       if (!/\/simulator\/runs\/[^/]+\/events(\?|$)/.test(url)) return realFetch(input, init)
       state.opened += 1
       let ctl: Ctl | null = null
+      const conn: Conn = { queued: [null], handed: [] } // the first chunk is the `:ok` comment below
       const body = new ReadableStream<Uint8Array>({
         start(c) {
           ctl = c
           state.controllers.push(c)
+          conns.set(c, conn)
           c.enqueue(enc.encode(':ok\n\n'))
         },
         cancel() {
@@ -148,7 +180,22 @@ export async function installSseShim(page: Page): Promise<void> {
           ctl.error(new DOMException('Aborted', 'AbortError'))
         } catch { /* already closed */ }
       })
-      return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+      const res = new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+      const reader = body.getReader()
+      const counting = {
+        read() {
+          for (const done of conn.handed.splice(0)) done?.()
+          return reader.read().then((r) => {
+            if (!r.done) conn.handed.push(conn.queued.shift() ?? null)
+            return r
+          })
+        },
+        cancel: (reason?: unknown) => reader.cancel(reason),
+        releaseLock: () => reader.releaseLock(),
+        get closed() { return reader.closed },
+      }
+      Object.defineProperty(res, 'body', { value: { getReader: () => counting } })
+      return Promise.resolve(res)
     }
   })
 }
@@ -240,6 +287,16 @@ export type BootOptions = {
   beforeLoad?: (page: Page) => Promise<void>
   /** Only for the probe that deliberately opens a WebDriver browser to show what it hides. Everything else must run as a user. */
   allowWebdriver?: true
+  /**
+   * `false` (038 S2): return as soon as the page runs in the user's mode, without waiting for a scene. For the two
+   * surfaces that exist only while there is no scene (the loading and the error message). The clock is not paused.
+   */
+  awaitScene?: false
+  /**
+   * `false` (038 S2): do not wait for physics to stop moving nodes. Only for checks of DOM surfaces that do not read
+   * positions at load; whatever then clicks the canvas waits for a still layout itself. Not with `clock: true`.
+   */
+  awaitLayout?: false
 }
 
 /**
@@ -271,6 +328,43 @@ async function assertUserMode(page: Page, o: BootOptions): Promise<void> {
   }
 }
 
+/** One frame of the stand: `frames()` steps the paused clock by this much. */
+export const FRAME_MS = 16
+/**
+ * The phase of the paused clock on the frame grid: `Date.now() % FRAME_MS` at the moment the clock is paused, and so
+ * at every event a test writes afterwards. It used to be whatever the wall clock gave, and a test whose last frame
+ * falls exactly on the end of a lifetime (75 frames x 16 ms = the 1200 ms of a route) saw that frame with the spark
+ * at fifteen phases and without it at phase 0 - a required step red by lottery (038 S2, adversarial pass on a7f7e1a6;
+ * CI run 38152711087). Fixed at 0: the phase at which a frame boundary and a lifetime boundary COINCIDE, the hard
+ * case, so a test that leans on a lucky phase is red every time and not one time in sixteen.
+ * `QA_STAND_CLOCK_PHASE_MS` overrides it (0..15) - a diagnostic, to run the stand at another phase.
+ */
+export const CLOCK_PHASE_MS = ((): number => {
+  const raw = process.env.QA_STAND_CLOCK_PHASE_MS
+  if (raw === undefined || raw === '') return 0
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0 || n >= FRAME_MS) throw new Error(`QA_STAND_CLOCK_PHASE_MS must be an integer 0..${FRAME_MS - 1}, got "${raw}"`)
+  return n
+})()
+
+/** The first moment not earlier than `t` whose phase on the frame grid is `CLOCK_PHASE_MS`. */
+export function pausedClockTime(t: number): number {
+  const base = t - (t % FRAME_MS) + CLOCK_PHASE_MS
+  return base >= t ? base : base + FRAME_MS
+}
+
+/**
+ * Step the paused clock to the next frame boundary (`Date.now() % FRAME_MS === 0`; a whole frame when it already stands
+ * on one). The fake clock fires animation frames on that grid, and `performance.now()` shares it (the clock is installed
+ * at a time divisible by 16), so after this call the next frame is exactly one step away whatever the phase was. For
+ * counts that must not depend on the phase at all - the discrete budgets of S3. The ONE place where the stand does
+ * phase arithmetic besides `pausedClockTime`.
+ */
+export async function stepToFrameBoundary(page: Page): Promise<void> {
+  const now = await page.evaluate(() => Date.now())
+  await page.clock.runFor(FRAME_MS - (now % FRAME_MS))
+}
+
 /** Seed the run the way a returning user has it, load the app in real mode, wait for the scene and the SSE stream. */
 export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: string[] }> {
   const mock = await mockBackend(page, o.snapshot)
@@ -290,7 +384,16 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.beforeLoad) await o.beforeLoad(page)
   await page.goto(`/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
   await assertUserMode(page, o)
+  if (o.awaitScene === false) return mock
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
+  // The stand is about a machine without a GPU, and the flags that make the browser one live in a config nobody
+  // executes a check of. The product's own verdict is on its root (`data-gpu`, from `useQualityAutoguards`).
+  const gpu = await page.locator('.root').getAttribute('data-gpu')
+  const pretended = await page.evaluate(() => (window as unknown as { __qaPretendGpu?: boolean }).__qaPretendGpu === true)
+  if (gpu !== '0' && !o.allowWebdriver && !pretended) { // the WebDriver probe starts a browser of its own, on purpose not the stand's
+    throw new Error(`038 QA stand refuses to run: the product says a GPU is likely (data-gpu = ${String(gpu)}, expected "0"). `
+      + 'The stand measures a software-only browser; run through e2e/playwright.qa.config.ts, which starts Chromium with --disable-gpu.')
+  }
   if (o.sseShim !== false) {
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __qaSse: { state: { controllers: unknown[] } } }).__qaSse.state.controllers.length), { timeout: 20_000 })
@@ -301,10 +404,10 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
     return mock
   }
   await expect.poll(() => layoutNodes(page).then((n) => n.length), { timeout: 20_000 }).toBe(o.snapshot.nodes.length)
-  await waitLayoutStill(page)
+  if (o.awaitLayout !== false || o.clock) await waitLayoutStill(page)
   if (o.clock) {
     const now = await page.evaluate(() => Date.now())
-    await page.clock.pauseAt(now + 1000)
+    await page.clock.pauseAt(pausedClockTime(now + 1000))
   }
   return mock
 }
@@ -348,14 +451,48 @@ export async function waitLayoutStill(page: Page): Promise<void> {
 let eventSeq = 0
 
 /** One SSE frame in the wire shape of the backend: `id` equals `event_id`, ids are of the run and grow. */
-export async function pushEvent(page: Page, evt: Record<string, unknown> & { type: string }, opts?: { eventId?: string }): Promise<string> {
+export async function pushEvent(
+  page: Page, evt: Record<string, unknown> & { type: string },
+  opts?: {
+    eventId?: string
+    /** `false`: return as soon as the frame is written - only for the probe that shows what that costs. */
+    awaitTaken?: false
+    /** `true`: the test MEANS to write into nothing (no connection is listening). Otherwise a frame nobody took is an error. */
+    expectLost?: true
+  },
+): Promise<string> {
   eventSeq += 1
   const eventId = opts?.eventId ?? `evt_${RUN_ID}_${String(eventSeq).padStart(6, '0')}`
   const body = { event_id: eventId, ts: '2026-02-01T00:00:01.000Z', equivalent: EQ, ...evt }
   const frame = `id: ${eventId}\nevent: ${evt.type}\ndata: ${JSON.stringify(body)}\n\n`
-  await page.evaluate((f) => (window as unknown as { __qaSse: { push: (t: string) => void } }).__qaSse.push(f), frame)
+  type Sse = { __qaSse: { push: (t: string) => Promise<number> } }
+  if (opts?.awaitTaken === false) {
+    await page.evaluate((f) => { void (window as unknown as Sse).__qaSse.push(f) }, frame)
+    return eventId
+  }
+  // The answer comes from the product's read loop (see `installSseShim`), in real time and not on the fake clock.
+  // The limit is not a wait for anything: it only turns a product that never reads into an error instead of a hang.
+  let limit: ReturnType<typeof setTimeout> | undefined
+  const never = new Promise<never>((_, fail) => {
+    limit = setTimeout(() => fail(new Error(`038 QA stand: the product did not take the SSE frame ${eventId} (${evt.type}) in 15 s`)), 15_000)
+  })
+  let takenBy = 0
+  try {
+    takenBy = await Promise.race([page.evaluate((f) => (window as unknown as Sse).__qaSse.push(f), frame), never])
+  } finally {
+    clearTimeout(limit)
+  }
+  if (takenBy === 0 && !opts?.expectLost) {
+    throw new Error(`038 QA stand: the SSE frame ${eventId} (${evt.type}) was written into nothing - no connection of the product is listening, so the event is lost. `
+      + 'If the test means that, say so with { expectLost: true }.')
+  }
+  if (takenBy > 0 && opts?.expectLost) throw new Error(`038 QA stand: the SSE frame ${eventId} was expected to be lost, and ${takenBy} connection(s) took it`)
   return eventId
 }
+
+/** Keep written SSE frames out of the stream until `releaseSse`: a delay in transport. */
+export const holdSse = (page: Page) => page.evaluate(() => (window as unknown as { __qaSse: { hold: () => void } }).__qaSse.hold())
+export const releaseSse = (page: Page) => page.evaluate(() => (window as unknown as { __qaSse: { release: () => void } }).__qaSse.release())
 
 export function txUpdated(route: string[], amount = '10.00', extra: Record<string, unknown> = {}) {
   const edges = route.slice(0, -1).map((from, i) => ({ from, to: route[i + 1]! }))
@@ -486,6 +623,7 @@ export async function installCssClockSync(page: Page): Promise<void> {
  */
 export async function pretendGpu(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    ;(window as unknown as { __qaPretendGpu: boolean }).__qaPretendGpu = true // `boot()` refuses data-gpu='1' unless it was asked for
     const real = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
       if (type === 'webgl' || type === 'experimental-webgl') return { getExtension: () => null, getParameter: () => null } as unknown as RenderingContext

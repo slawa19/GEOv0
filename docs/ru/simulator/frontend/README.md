@@ -19,6 +19,7 @@
 - [FX playbook](docs/fx-playbook.md)
 - [Graph rendering rules](docs/graph-rendering-rules.md)
 - [Performance and quality policy](docs/performance-and-quality-policy.md)
+- [QA stand: what it sees and what it does not](docs/qa-stand.md)
 - [Overlay/window development rules](docs/overlay-window-development-rules.md)
 
 ## Design and acceptance documents

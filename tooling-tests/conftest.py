@@ -155,8 +155,20 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-10, D1 (scenario participant ids are `<scenario_id>:<community pid>`): portable 412 -> 413. One case added to
 #: `portable/test_p017_t1712_community_descriptions.py`: the scenario generator refuses an id longer than `participants.pid` holds;
 #: the roster test of the same module now spells the namespace out and compares both ends of every line (the same count).
+#:
+#: 2026-10-11, 038 slice S2 (the Simulator UI QA stand joins the required gate): portable 413 -> 427. Fourteen cases, new module
+#: `portable/test_p038_qa_stand_gate.py`: the wiring of the stand's scripts, config, gate entry and the two workflow jobs (1),
+#: twelve mutations of that wiring, each of which the finder must notice (12), and the two prohibitions of spec 038 - no
+#: `waitForTimeout` in the stand, no product branch on the stand (1).
+#:
+#: 2026-10-11, 038 slice S2, adversarial pass (D4): portable 427 -> 433. Six cases added to `portable/test_p038_qa_stand_gate.py`:
+#: five more mutations of the wiring (a flaky test tolerated, an expected failure let into the gate, the verdict ignored by the
+#: entry, retries allowed in the config and in the entry) and the verdict of the gate entry run on made-up runs through node (1).
+#:
+#: 2026-10-11, 038 S2 + S3 merged (I3): portable 433 -> 436. Three more mutations in the same module: the perf job put on every pull
+#: request, the required step made to run the perf project, the perf job without its production build.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 413,
+    "portable": 436,
     "powershell": 235,
 }
 

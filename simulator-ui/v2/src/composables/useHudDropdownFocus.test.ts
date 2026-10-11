@@ -74,6 +74,68 @@ describe('useHudDropdownFocus', () => {
     }
   })
 
+  it('keeps Escape and Tab when the focus has fallen out of the open menu to body, and leaves them alone when the focus is elsewhere (038 S2)', async () => {
+    const { open, api, details, summary, surface, firstButton } = setupHarness()
+    const elsewhere = document.createElement('button')
+    document.body.append(elsewhere)
+    // A browser announces every move of the focus with a bubbling `focusin`; the test DOM may not, so it is said here.
+    const focus = (el: HTMLElement) => {
+      el.focus()
+      el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    }
+    const key = (k: string) => {
+      const event = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })
+      ;(document.activeElement ?? document.body).dispatchEvent(event)
+      return event
+    }
+
+    try {
+      details.open = true
+      api.onToggle(makeToggle(details))
+      await nextTick()
+      expect(open.value).toBe(true)
+
+      // A focus that sits on a real element outside the menu: the keys are not the menu's.
+      focus(elsewhere)
+      expect(key('Escape').defaultPrevented).toBe(false)
+      expect(open.value).toBe(true)
+
+      // The user went elsewhere and the focus ended on body there (a node card opened from the canvas): still not the
+      // menu's keys, although the menu is open and the focus is on body (038 S2, D2).
+      elsewhere.blur()
+      expect(document.activeElement).toBe(document.body)
+      expect(key('Escape').defaultPrevented).toBe(false)
+      expect(key('Tab').defaultPrevented).toBe(false)
+      expect(open.value).toBe(true)
+
+      // A press outside the menu forgets a focus that was inside it.
+      focus(firstButton)
+      document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+      firstButton.blur()
+      expect(key('Escape').defaultPrevented).toBe(false)
+
+      // The focused control of the menu was disabled under the focus: the browser leaves the focus on body.
+      focus(firstButton)
+      firstButton.blur()
+      expect(document.activeElement).toBe(document.body)
+      expect(key('Tab').defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(firstButton)
+
+      firstButton.blur()
+      expect(key('Escape').defaultPrevented).toBe(true)
+      await nextTick()
+      expect(open.value).toBe(false)
+      expect(document.activeElement).toBe(summary)
+
+      // Closed: the document listener is gone, Escape on body is nobody's.
+      api.onToggle(makeToggle(details))
+      summary.blur()
+      expect(key('Escape').defaultPrevented).toBe(false)
+    } finally {
+      cleanupHarness([details, summary, surface, elsewhere])
+    }
+  })
+
   it('moves keyboard-opened focus inside on ArrowDown and traps Tab within the dropdown surface', async () => {
     const { open, api, details, summary, firstButton, secondButton } = setupHarness()
 

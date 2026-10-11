@@ -768,9 +768,139 @@ jobs:
           PW_E2E_PORT: "41732"
         run: npm --prefix simulator-ui/v2 run test:e2e:smoke
 
+      # 038 S2 (2026-10-11): the deterministic part of the Simulator UI QA stand - the product as a user
+      # runs it (no test mode, `navigator.webdriver` false), Chromium without a GPU by the stand's own
+      # flags, fake clock, pixels of the FX canvas, the window matrix in the `hud` theme, axe. No
+      # wall-clock threshold decides anything here. The backend is mocked on `page.route`; the service
+      # container and the uvicorn above are not used by this step. The command refuses when the number
+      # of tests that ran is not the recorded one, in either direction, or when a test was skipped
+      # (`simulator-ui/v2/e2e/qa/run-stand.mjs`, `EXPECTED.gate`): a filter that selected nothing does
+      # not pass. Its form is pinned by `tooling-tests/portable/test_p038_qa_stand_gate.py`.
+      - name: Run the Simulator UI QA stand, required subset
+        env:
+          PW_E2E_PORT: "41733"
+          GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/simulator-qa-stand
+        run: npm --prefix simulator-ui/v2 run test:e2e:qa:gate
+
+      # The standard Playwright HTML report: the frames of the window matrix are its attachments.
+      - name: Upload the QA stand report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-qa-stand-report
+          path: ${{ runner.temp }}/simulator-qa-stand-report
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Backend log
         if: failure()
         run: cat "$RUNNER_TEMP/admin-e2e-backend.log" || true
+
+  # 038 S2 (2026-10-11): the WHOLE functional QA stand - the required subset above plus what is tagged
+  # `@extended`: the gallery - a frame and axe of every window in all four themes (`hud`, `shadcn`,
+  # `saas`, `library`) - the windows and CSS-placed surfaces at 1920x1080 and 1024x640, the measurement
+  # of what the HUD covers, and the reproducer of a recorded Interact defect. Its HTML report is the
+  # artifact a human tester starts from, so it is uploaded on every run, green or red.
+  # NOT here: the perf project (`qa-perf`: wall clock, production build) - job `simulator-qa-perf` below.
+  simulator-qa-stand:
+    name: Simulator UI QA stand, all themes (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.1"
+          cache: npm
+          cache-dependency-path: simulator-ui/v2/package-lock.json
+
+      - name: Install Simulator UI v2 dependencies
+        run: npm --prefix simulator-ui/v2 ci
+
+      - name: Install Simulator UI v2 pinned Chromium and OS dependencies
+        run: npm --prefix simulator-ui/v2 exec -- playwright install --with-deps chromium
+
+      - name: Run the Simulator UI QA stand, all themes
+        env:
+          PW_E2E_PORT: "41734"
+          GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/simulator-qa-stand
+        run: npm --prefix simulator-ui/v2 run test:e2e:qa:report
+
+      - name: Upload the QA stand report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-qa-stand-report-all-themes
+          path: ${{ runner.temp }}/simulator-qa-stand-report
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 038 S3 (job added 2026-10-11 with the merge of S2 and S3): the perf project of the QA stand - the
+  # discrete budgets of `e2e/qa/budgets.ts` (counts on a fake clock, a two-sided ratchet) and the
+  # frame-time diagnostics (wall clock, no thresholds), on the dev server and on a production build.
+  # NEVER part of the required gate: `quality-guard.qaperf.ts` runs in real time with a threshold of
+  # 24 fps, and a wall-clock number of a shared runner must not block a pull request. The budgets were
+  # recorded on Windows; if this runner gives other counts, that is a decision about the platform of
+  # the ratchet, not a reason to move a constant here. Form pinned by
+  # `tooling-tests/portable/test_p038_qa_stand_gate.py`.
+  simulator-qa-perf:
+    name: Simulator UI QA stand, performance without GPU (scheduled/manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.1"
+          cache: npm
+          cache-dependency-path: simulator-ui/v2/package-lock.json
+
+      - name: Install Simulator UI v2 dependencies
+        run: npm --prefix simulator-ui/v2 ci
+
+      - name: Install Simulator UI v2 pinned Chromium and OS dependencies
+        run: npm --prefix simulator-ui/v2 exec -- playwright install --with-deps chromium
+
+      - name: Run the perf project on the dev server
+        env:
+          PW_E2E_PORT: "41735"
+          GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ github.workspace }}/.local-run/playwright/simulator/qa-perf-dev
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/.local-run/playwright/simulator/qa-perf-dev-report
+          PLAYWRIGHT_HTML_OPEN: never
+        run: npm --prefix simulator-ui/v2 run test:e2e:qa:perf -- --reporter=list,html
+
+      - name: Run the perf project on a production build
+        if: always()
+        env:
+          PW_E2E_PORT: "41736"
+          QA_STAND_SERVER: preview
+          GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ github.workspace }}/.local-run/playwright/simulator/qa-perf-preview
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/.local-run/playwright/simulator/qa-perf-preview-report
+          PLAYWRIGHT_HTML_OPEN: never
+        run: npm --prefix simulator-ui/v2 run test:e2e:qa:perf -- --reporter=list,html
+
+      - name: Upload the perf reports and summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-qa-perf
+          path: |
+            .local-run/playwright/simulator/qa-perf-dev-report
+            .local-run/playwright/simulator/qa-perf-preview-report
+            .local-run/playwright/simulator/qa-perf-*/qa-perf-*.json
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true
 
   # ON POSTGRESQL SINCE 2026-10-04 (programme 028, F-028-8). Until then this job ran on
   # `windows-latest`, which has no service containers, and pytest exited `4` on arrival (run
