@@ -200,6 +200,50 @@ test('empty snapshot, loop in deep sleep: the canvases are blanked although not 
   expect.soft(after.onPage.visible, 'no node of the old graph is on the composed page').toBe(0)
 })
 
+// A BEAM IN FLIGHT AT THE MOMENT OF THE FAILURE (adversarial pass on fdd890c5, A1). The three tests above find the FX
+// canvas empty before the failure as well, so "0 after" says nothing about it: blanking the base canvas only passed
+// them all, and left a frozen beam under the error. Here the FX canvas is painted when the load fails.
+// Mutation that must turn both red: `blankCanvases` (useRenderLoop.ts) clears the base canvas only.
+async function beamInFlight(page: Page): Promise<number> {
+  await runReportsStopped(page)
+  await pushEvent(page, txUpdated(['b', 'c'], '10.00', { amount_flyout: false }))
+  await frames(page, 8)
+  const fx = (await canvasPixels(page)).fx.painted
+  expect(fx, 'counter-check: a beam is painted on the FX canvas when the load fails').toBeGreaterThan(100)
+  return fx
+}
+
+test('empty snapshot with a beam in flight, loop awake: the FX canvas is blanked too, and the beam is not painted again', async ({ page }) => {
+  await bootTwoScenarios(page, { other: true, all: false })
+  const fxBefore = await beamInFlight(page)
+  await chooseUnloadableScenario(page)
+  const at = await canvasPixels(page)
+  let fxMaxLater = 0
+  for (let f = 0; f < 20; f += 1) { // the loop is awake: the rest of the beam's life must not bring it back
+    await frames(page, 1)
+    fxMaxLater = Math.max(fxMaxLater, (await canvasPixels(page)).fx.painted)
+  }
+  console.log('[038 empty/beam-awake]', JSON.stringify({ fxBefore, fxAfter: at.fx.painted, baseAfter: at.base.painted, fxMaxOver20Frames: fxMaxLater }))
+  expect.soft(at.fx.painted, 'no painted pixel is left on the FX canvas').toBe(0)
+  expect.soft(at.base.painted, 'nor on the base canvas').toBe(0)
+  expect.soft(fxMaxLater, 'and no later frame paints the beam again').toBe(0)
+})
+
+test('empty snapshot with a beam in flight, not one frame after the failure: the FX canvas is blanked by the transition itself', async ({ page }) => {
+  await bootTwoScenarios(page, { other: true, all: false })
+  const fxBefore = await beamInFlight(page)
+  const c0 = await loopCounters(page)
+  // The clock stands from here on (see the deep-sleep test above): no frame of the loop can clear anything.
+  await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER_SCENARIO)
+  await expect.poll(async () => !(await hasSnapshot(page)) && (await errorShown(page)) > 0, { message: 'the failed load clears the scene model while the clock stands', timeout: 15_000 }).toBe(true)
+  const c1 = await loopCounters(page)
+  const at = await canvasPixels(page)
+  console.log('[038 empty/beam-standing]', JSON.stringify({ fxBefore, fxAfter: at.fx.painted, baseAfter: at.base.painted, framesSinceFailure: c1.frames - c0.frames }))
+  expect(c1.frames - c0.frames, 'precondition: not one animation frame ran after the beam was painted').toBe(0)
+  expect.soft(at.fx.painted, 'no painted pixel is left on the FX canvas').toBe(0)
+  expect.soft(at.base.painted, 'nor on the base canvas').toBe(0)
+})
+
 test('empty snapshot: a payment event that arrives after the scene was cleared puts no amount label on the screen', async ({ page }) => {
   await bootTwoScenarios(page, { other: true, all: false })
   // Counter-check: on a loaded scene the same event does put labels on the screen.
