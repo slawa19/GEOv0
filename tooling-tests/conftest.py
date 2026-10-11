@@ -155,8 +155,13 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-10, D1 (scenario participant ids are `<scenario_id>:<community pid>`): portable 412 -> 413. One case added to
 #: `portable/test_p017_t1712_community_descriptions.py`: the scenario generator refuses an id longer than `participants.pid` holds;
 #: the roster test of the same module now spells the namespace out and compares both ends of every line (the same count).
+#:
+#: 2026-10-11, 038 slice S2 (the Simulator UI QA stand joins the required gate): portable 413 -> 427. Fourteen cases, new module
+#: `portable/test_p038_qa_stand_gate.py`: the wiring of the stand's scripts, config, gate entry and the two workflow jobs (1),
+#: twelve mutations of that wiring, each of which the finder must notice (12), and the two prohibitions of spec 038 - no
+#: `waitForTimeout` in the stand, no product branch on the stand (1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 413,
+    "portable": 427,
     "powershell": 235,
 }
 
