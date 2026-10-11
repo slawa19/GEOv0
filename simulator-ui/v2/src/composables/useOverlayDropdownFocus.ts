@@ -40,10 +40,21 @@ export function useOverlayDropdownFocus(
 
   function onTriggerKeydown(event: KeyboardEvent): void {
     const key = event.key
+    // A list opened with the mouse keeps the focus on its trigger, so the keys of the open list arrive here and not at
+    // the surface (038 S2). Escape must close the LIST: unhandled, it reached the window manager and closed the whole
+    // panel around it. An open key must take the keyboard into the list: `open` is already true, the watcher below
+    // does not fire, and the options stayed unreachable.
+    if (open.value && key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      closeAndRestoreFocus()
+      return
+    }
     if (isDropdownOpenKey(key)) {
       event.preventDefault()
       event.stopPropagation()
-      openFromKeyboard()
+      if (open.value) focusInside()
+      else openFromKeyboard()
     }
   }
 
