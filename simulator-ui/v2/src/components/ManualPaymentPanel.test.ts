@@ -1991,6 +1991,23 @@ describe('BACKLOG 037-5: what the recipient step says and lets the user choose',
       const reason = (p.host.querySelector('[data-testid="mp-confirm-reason"]')?.textContent ?? '').trim()
       expect(reason).toContain('Backend reports no payment routes between selected participants.')
       expect(reason).toContain('Selected sender is not active (status: suspended)')
+      expect(reason).not.toContain('Selected recipient')
+      p.done()
+    })
+
+    it('the confirm step names a RECIPIENT that is not active too (a line or a node card can open the panel on one)', async () => {
+      const participants: ParticipantInfo[] = [
+        { pid: 'alice', name: 'Alice', type: 'person', status: 'active' },
+        { pid: 'bob', name: 'Bob', type: 'person', status: 'frozen' },
+      ]
+      const p = await mountPanel({ phase: 'confirm-payment', toPid: 'bob', participants, canSendPayment: false })
+      const input = p.host.querySelector('#mp-amount') as HTMLInputElement
+      input.value = '1'
+      input.dispatchEvent(new Event('input'))
+      await nextTick()
+      const reason = (p.host.querySelector('[data-testid="mp-confirm-reason"]')?.textContent ?? '').trim()
+      expect(reason).toContain('Selected recipient is not active (status: frozen)')
+      expect(reason).not.toContain('Selected sender')
       p.done()
     })
   })
@@ -2056,6 +2073,156 @@ describe('BACKLOG 037-5: what the recipient step says and lets the user choose',
       await nextTick()
       expect(p.setToPid).toHaveBeenCalledWith('dave')
       p.done()
+    })
+
+    describe('under a stream of run events (every applied patch asks for the routes again)', () => {
+      const people: ParticipantInfo[] = ['alice', 'bob', 'carol', 'dave'].map((pid) => ({
+        pid, name: pid, type: 'person', status: 'active',
+      }))
+      const LATENCY_MS = 500
+      const PATCH_EVERY_MS = 300
+
+      function setup() {
+        vi.useFakeTimers()
+        setUrl('/?mode=real&ui=interact')
+        // what the server would answer NOW, per sender; an answer is fixed when its request is made and lands LATENCY_MS later
+        const reachable: Record<string, string[]> = { alice: ['bob', 'dave'], carol: ['dave'] }
+        const actions: InteractActions = {
+          ...makeInteractActions({ participants: people, paymentTargetsImpl: async () => [] }),
+          fetchPaymentTargets: vi.fn<InteractActions['fetchPaymentTargets']>((_eq: string, fromPid: string) => {
+            const items = (reachable[fromPid] ?? []).map((to_pid) => ({ to_pid, hops: 1 }))
+            return new Promise((resolve) => setTimeout(() => resolve(items), LATENCY_MS))
+          }),
+        }
+        let revision = 0
+        const snapshot = ref<GraphSnapshot | null>({ equivalent: 'UAH', generated_at: 't0', nodes: [], links: [], data_revision: 0 } as GraphSnapshot)
+        const runId = ref('run_test')
+        const im = useInteractMode({ actions, runId: computed(() => runId.value), equivalent: computed(() => 'UAH'), snapshot })
+        im.startPaymentFlow()
+        im.setPaymentFromPid('alice')
+
+        const host = document.createElement('div')
+        document.body.appendChild(host)
+        const app = createApp({
+          render: () => {
+            // the wiring of SimulatorAppRoot: unknown strictly while the routes are loading
+            const loading = im.trustlinesLoading.value || im.paymentTargetsLoading.value
+            return h(manualPaymentPanelComponent, {
+              phase: im.phase.value,
+              state: im.state,
+              unit: 'UAH',
+              availableCapacity: im.availableCapacity.value,
+              trustlinesLoading: im.trustlinesLoading.value,
+              paymentTargetsLoading: im.paymentTargetsLoading.value,
+              paymentTargetsMaxHops: im.paymentTargetsMaxHops,
+              paymentTargetsLastError: im.paymentTargetsLastError.value,
+              paymentToTargetIds: loading ? undefined : im.paymentToTargetIds.value,
+              paymentToLastKnownTargetIds: im.paymentToLastKnownTargetIds.value,
+              trustlines: im.trustlines.value,
+              trustlinesLastError: im.trustlinesLastError.value,
+              participants: im.participants.value,
+              busy: im.busy.value,
+              canSendPayment: im.canSendPayment.value,
+              confirmPayment: im.confirmPayment,
+              cancel: im.cancel,
+              setFromPid: im.setPaymentFromPid,
+              setToPid: im.setPaymentToPid,
+            })
+          },
+        })
+        app.mount(host)
+
+        /** One applied patch (`tx.updated`, `clearing.done`): the revision moves, nothing else. */
+        const patch = () => {
+          revision += 1
+          snapshot.value = { ...snapshot.value!, data_revision: revision }
+        }
+        /** `ms` of a run whose events arrive more often than the routes answer. */
+        const stream = async (ms: number) => {
+          for (let t = 0; t < ms; t += PATCH_EVERY_MS) {
+            patch()
+            await vi.advanceTimersByTimeAsync(PATCH_EVERY_MS)
+          }
+        }
+        const quiet = (ms: number) => vi.advanceTimersByTimeAsync(ms)
+        const open = async () => {
+          if (!document.querySelector('#mp-to__surface')) (host.querySelector('#mp-to__trigger') as HTMLButtonElement).click()
+          await nextTick()
+          await nextTick()
+        }
+        const helpText = () => (host.querySelector('[data-testid="manual-payment-to-help"]')?.textContent ?? '').trim()
+        const done = () => { app.unmount(); host.remove(); vi.useRealTimers() }
+        return { im, reachable, runId, host, stream, quiet, open, helpText, done }
+      }
+
+      it('a recipient CAN be chosen from the list within a bounded time, though no answer is ever the newest one', async () => {
+        const t = setup()
+        try {
+          await t.stream(6000)
+          // the mechanism of the stream is what this test is about: no request ever stayed the newest one
+          expect(t.im.paymentTargetsLoading.value).toBe(true)
+          await t.open()
+          const bob = surfaceOption('bob')
+          expect(bob, 'bob is listed').toBeTruthy()
+          expect(bob!.disabled, 'bob can be chosen').toBe(false)
+          // the list is the last answer the server gave for this sender, and says it is being updated
+          expect(surfaceOption('carol')).toBeNull()
+          expect(t.helpText()).toContain('Routes are updating')
+          bob!.click()
+          await nextTick()
+          expect(t.im.state.toPid).toBe('bob')
+        } finally {
+          t.done()
+        }
+      })
+
+      it('the last answer never stays as the fresh one: a quiet moment brings the fresh answer and drops who is unreachable', async () => {
+        const t = setup()
+        try {
+          await t.stream(3000)
+          t.reachable.alice = ['bob'] // dave is no longer reachable; the stream goes on, so no fresh answer can land yet
+          await t.stream(300)
+          await t.open()
+          expect(surfaceOption('dave'), 'the last answer still lists dave').toBeTruthy()
+          expect(t.helpText()).toContain('Routes are updating')
+
+          await t.quiet(LATENCY_MS + 50)
+          await nextTick()
+          expect(t.im.paymentTargetsLoading.value).toBe(false)
+          expect(surfaceOption('dave')).toBeNull()
+          expect(surfaceOption('bob')!.disabled).toBe(false)
+          expect(t.helpText()).not.toContain('Routes are updating')
+        } finally {
+          t.done()
+        }
+      })
+
+      it("another sender's or another run's answer is never the list: nothing can be chosen until THEIR first answer", async () => {
+        const t = setup()
+        try {
+          await t.stream(1500)
+          await t.open()
+          expect(surfaceOption('bob')!.disabled).toBe(false)
+
+          // another sender: alice's answer (bob, dave) is not carol's
+          t.im.setPaymentFromPid('carol')
+          await nextTick()
+          await t.open()
+          for (const pid of ['alice', 'bob', 'dave']) expect(surfaceOption(pid)!.disabled, `carol, before her answer: ${pid}`).toBe(true)
+          await t.stream(900)
+          expect(surfaceOption('bob'), "carol's answer has no bob").toBeNull()
+          expect(surfaceOption('dave')!.disabled).toBe(false)
+
+          // another run: carol's answer belonged to the run before
+          t.runId.value = 'run_other'
+          await nextTick()
+          await nextTick()
+          await t.open()
+          for (const pid of ['alice', 'bob', 'dave']) expect(surfaceOption(pid)!.disabled, `the other run, before its answer: ${pid}`).toBe(true)
+        } finally {
+          t.done()
+        }
+      })
     })
   })
 })

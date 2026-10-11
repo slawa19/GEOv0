@@ -43,6 +43,11 @@ type Props = {
    * (`trustlinesLoading=true` OR `paymentTargetsLoading=true`).
    */
   paymentToTargetIds: Set<string> | undefined
+  /**
+   * BACKLOG 037-5 (c): the server's last answer for this sender, possibly one revision behind; `undefined` until there is
+   * one. Read ONLY while the routes are loading, to have a list to choose from; it never counts as known.
+   */
+  paymentToLastKnownTargetIds?: Set<string>
   trustlines?: TrustlineInfo[]
 
   /** Best-effort error signal: last trustlines refresh failure (if any). */
@@ -359,6 +364,9 @@ const dropdownToTargetIds = computed<Set<string> | undefined>(() => {
   return props.paymentToTargetIds ?? new Set<string>()
 })
 
+/** The list shown while the routes are being asked for: the server's last answer for this sender, when it has given one. */
+const toListWhileUpdating = computed(() => (routesLoading.value ? props.paymentToLastKnownTargetIds : undefined))
+
 async function onConfirm() {
   if (!canConfirm.value) return
 
@@ -409,7 +417,7 @@ const summaryAmount = computed(() =>
 const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
   participants: () => props.participants,
   fromParticipantId: () => props.state.fromPid,
-  availableTargetIds: () => dropdownToTargetIds.value,
+  availableTargetIds: () => dropdownToTargetIds.value ?? toListWhileUpdating.value,
 })
 
 // MP-3 (Phase 2): filter From list by availability of outgoing direct-hop payments.
@@ -471,7 +479,11 @@ const toInlineHelpText = computed<string | null>(() => {
 
   const targets = dropdownToTargetIds.value
   if (targets === undefined) {
-    if (routesLoading.value) return 'Routes are updating; a recipient can be chosen once the server answers.'
+    if (routesLoading.value) {
+      return toListWhileUpdating.value
+        ? 'Routes are updating; the list is the last answer of the server and may include unreachable recipients.'
+        : 'Routes are updating; a recipient can be chosen once the server answers.'
+    }
     if (props.paymentTargetsLastError || props.trustlinesLastError) {
       return 'Routes update failed; showing fallback data. Some recipients may be unreachable.'
     }
@@ -619,14 +631,16 @@ const fromOptions = computed(() => fromParticipants.value.map((participant) => (
   label: participantLabel(participant, showPid),
 })))
 
-// BACKLOG 037-5 (c): while the routes are being asked for, the list is the unfiltered fallback - it names who MAY come, and
-// none of them can be taken until the server has answered (the list still opens: the form opens it after the sender is chosen).
+// BACKLOG 037-5 (c): until the server has answered for this sender AT ALL, the list is the unfiltered fallback - it names who MAY
+// come, and none of them can be taken (the list still opens: the form opens it after the sender is chosen). Once there is an
+// answer, an update shows that last answer and stays choosable: under a stream of run events every patch asks again and no
+// answer is the newest for long, so waiting for the fresh one would mean never choosing.
 // A FAILED request is not this state: its fallback list stays choosable and says so (`toInlineHelpText`).
 // Not covered here: a recipient picked on the canvas goes around the list; the watcher above drops it when the answer excludes it.
 const toOptions = computed(() => toParticipants.value.map((participant) => ({
   value: participant.pid,
   label: toOptionLabel(participant),
-  disabled: routesLoading.value,
+  disabled: routesLoading.value && !toListWhileUpdating.value,
 })))
 </script>
 
