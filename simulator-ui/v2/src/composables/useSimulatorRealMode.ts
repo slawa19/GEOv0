@@ -955,7 +955,12 @@ export function useSimulatorRealMode(opts: {
             headers: authHeaders(real.accessToken),
             lastEventId: real.lastEventId,
             signal: ctrl.signal,
-            onMessage: (msg) => handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow }),
+            onMessage: (msg) => {
+              // The back-off counts attempts that failed in a row. A connection that delivered a frame worked, so
+              // the reconnect after it starts from the first step again (034 S8); one that ended empty does not.
+              attempt = 0
+              handleSseMessage({ msg, signal: ctrl.signal, runId, equivalent: eqNow })
+            },
           })
         }
 

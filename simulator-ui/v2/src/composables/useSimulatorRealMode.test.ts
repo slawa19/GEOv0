@@ -2411,8 +2411,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
  * `Math.random` is pinned to 0.5: the jitter is zero and the steps are exactly 1000, 2000, 5000, ...
  */
 describe('useSimulatorRealMode - 034 S8: the reconnect back-off after a connection that worked', () => {
-  // T3404: red on origin/main because of the SSE back-off (034 S8); S8 removes `.fails` together with the fix.
-  it.fails('two connections that each delivered an event: the third starts after the FIRST step again', async () => {
+  it('two connections that each delivered an event: the third starts after the FIRST step again', async () => {
     vi.useFakeTimers()
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
     const connectSseMock = vi.mocked(connectSse)
