@@ -17,7 +17,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { boot, ringSnapshot, screenNodes } from './stand.js'
 import { AXE_BASELINE, AXE_WHY, KNOWN_FINDINGS } from './surfaceBaseline.js'
 import {
-  bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, freeNode, MATRIX, settled, SURFACE_DOM, THEMES,
+  bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, freeNode, MATRIX, settled, SURFACE_DOM, THEMES, unmatchedInstances,
   VIEWPORT_LARGE, VIEWPORT_MAIN, VIEWPORT_RESIZED, type Box, type Entry, type Theme, type Viewport,
 } from './surfaceMatrix.js'
 
@@ -64,6 +64,8 @@ async function assertClaimed(page: Page, e: Entry, keys: string[]): Promise<void
     + 'Add it to overlaySurfaceCatalog.ts and to the matrix, or name it in SURFACE_DOM as not a surface').toEqual([])
   expect(all.filter((c) => typeof c.key === 'string' && !keys.includes(c.key)).map((c) => `${c.el} -> ${String(c.key)}`),
     'a surface on screen is of a type that overlaySurfaceCatalog.ts no longer has').toEqual([])
+  expect(await unmatchedInstances(page), 'a menu of the bars, a window or an OverlaySelect list is in the DOM and no entry of MATRIX opens it. '
+    + 'Add an entry to surfaceMatrix.ts (a list of the same component may be named in SELECTS_WITHOUT_ENTRY instead)').toEqual([])
   const own = await page.locator(e.root).first().evaluate((el, dom) => {
     for (let cur: Element | null = el; cur; cur = cur.parentElement) {
       const hit = dom.find((d) => d.key !== null && cur!.matches(d.selector))
@@ -351,6 +353,36 @@ test('counter-check: the instruments of the matrix see a shrunk control, a windo
     document.querySelector('.root')!.append(el)
   })
   expect((await claims(page)).filter((c) => c.key === undefined).map((c) => c.el), 'an element laid over the scene that no catalogue type claims is reported').toEqual(['div.qa-uncatalogued'])
+})
+
+// The four injections of the adversarial pass on a7f7e1a6 (038 S2, D3), each with what the scan answers. Three are
+// seen since then; the fourth is the named limit of the scan, kept here so that the limit is a fact and not a hope.
+test('counter-check: injected surfaces - a stray child of the window layer, a 0x0 portal with a fixed child and a fifth menu are reported; a popover inside the top bar is NOT (the named limit)', async ({ page }) => {
+  const e = MATRIX.find((x) => x.id === 'bottom-bar')!
+  await bootEntry(page, e, 'hud', VIEWPORT_MAIN)
+  const unclaimed = async () => (await claims(page)).filter((c) => c.key === undefined).map((c) => c.el)
+  expect(await unclaimed(), 'the page as the product draws it').toEqual([])
+  expect(await unmatchedInstances(page), 'the page as the product draws it').toEqual([])
+  const inject = (parent: string, html: string) => page.evaluate(({ parent, html }) => { document.querySelector(parent)!.insertAdjacentHTML('beforeend', html) }, { parent, html })
+  const remove = (sel: string) => page.evaluate((s) => { document.querySelector(s)!.remove() }, sel)
+  const box = 'position:absolute;left:40px;top:300px;width:80px;height:40px'
+
+  await inject('.wm-layer', `<div class="qa-in-wm" style="${box}">x</div>`)
+  expect(await unclaimed(), 'a visible child of the window layer that is not a window shell').toEqual(['div.qa-in-wm'])
+  await remove('.qa-in-wm')
+
+  await inject('body', '<div class="qa-portal" style="width:0;height:0"><div style="position:fixed;left:40px;top:300px;width:80px;height:40px">x</div></div>')
+  expect(await unclaimed(), 'a 0x0 portal in body whose fixed child is on screen').toEqual(['div.qa-portal'])
+  await remove('.qa-portal')
+
+  await inject('.ds-ov-bottom .hud-bar__right', '<details class="ds-ov-details qa-fifth" aria-label="Fifth"><summary>Fifth</summary><div class="ds-panel ds-ov-surface ds-ov-dropdown">x</div></details>')
+  expect(await unclaimed(), 'a fifth menu is a hud-dropdown by its type: the scan of types does not object').toEqual([])
+  expect(await unmatchedInstances(page), 'the scan of instances does: no entry of the matrix opens it').toEqual(['menu: details[aria-label="Fifth"]'])
+  await remove('.qa-fifth')
+
+  await inject('.ds-ov-top', `<div class="qa-popover" style="${box}">x</div>`)
+  expect(await unclaimed(), 'NOT SEEN: an arbitrary descendant of a claimed container (qa-stand.md, section 5)').toEqual([])
+  expect(await unmatchedInstances(page)).toEqual([])
 })
 
 // --- one declared policy the matrix recipe cannot show: the focus goes back to a keyboard-reachable opener -----------

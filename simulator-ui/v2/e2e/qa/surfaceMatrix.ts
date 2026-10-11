@@ -382,25 +382,68 @@ export type Claim = { el: string; key: string | null | undefined }
 /**
  * Every element that can be an overlay surface, and the key `SURFACE_DOM` gives it (`undefined`: nobody claims it).
  * Candidates are structural, not a list of names: the children of `.root` (the scene is two canvases, everything else
- * there is laid over it), whatever was teleported to `body`, every window shell and every dropdown surface.
+ * there is laid over it), the children of the window layer, whatever was teleported to `body`, every window shell,
+ * dropdown surface and toast. An element counts as on screen when it OR ANY DESCENDANT has a box - a 0x0 portal with
+ * a `position: fixed` child is on screen.
+ *
+ * WHAT THIS DOES NOT SEE (038 S2, D3; injected and confirmed): an arbitrary descendant of a container that is itself
+ * claimed - a popover put inside `.ds-ov-top` or inside the bottom bar is part of a named surface for this scan. A
+ * new surface mounted INSIDE the bars therefore needs its own catalogue entry and matrix entry by review, not by this
+ * check; the tour and legend surfaces of 034 S9 are the known coming case. `unmatchedInstances` below narrows the gap
+ * for the three kinds that come in several instances.
  */
 export async function claims(page: Page): Promise<Claim[]> {
   return page.evaluate((dom) => {
     const root = document.querySelector('.root')
     const set = new Set<Element>()
     for (const el of root?.children ?? []) set.add(el)
+    for (const el of document.querySelectorAll('.wm-layer > *')) set.add(el)
     for (const el of document.body.children) if (!el.contains(root) && !['SCRIPT', 'STYLE', 'LINK'].includes(el.tagName)) set.add(el)
     for (const el of document.querySelectorAll('.ws-shell, .ds-ov-dropdown, .ds-ov-toast')) set.add(el)
-    const shown = (el: Element) => {
+    const boxed = (el: Element) => {
       const r = el.getBoundingClientRect()
       const s = getComputedStyle(el)
       return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'
     }
+    const shown = (el: Element) => getComputedStyle(el).display !== 'none' && (boxed(el) || [...el.querySelectorAll('*')].some(boxed))
     return [...set].filter(shown).map((el) => ({
       el: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}.${[...el.classList].join('.')}`,
       key: dom.find((d) => el.matches(d.selector))?.key,
     }))
   }, SURFACE_DOM)
+}
+
+/**
+ * Lists of OverlaySelect that exist in the panels and have no entry of their own: the same component and code path as
+ * the two "From" lists of the matrix. Named so that a NEW list is noticed (2026-10-11).
+ */
+export const SELECTS_WITHOUT_ENTRY: Record<string, string> = {
+  'mp-to': 'payment panel, "To": disabled until a sender is chosen; the same OverlaySelect as "From"',
+  'tl-to': 'trust line panel, "To": appears on the next step of the flow; the same OverlaySelect as "From"',
+  'tl-pick': 'trust line panel, "Existing": appears on the edit step; the same OverlaySelect as "From"',
+}
+
+/**
+ * INSTANCES in the DOM of the three kinds that come in several - menus of the bars (`<details>`, open or not), windows
+ * of the window manager, lists of OverlaySelect (by their triggers) - that no entry of the matrix opens. A type being
+ * in the catalogue is not enough for them: a fifth menu is a `hud-dropdown` like the four, and would pass `claims`.
+ */
+export async function unmatchedInstances(page: Page): Promise<string[]> {
+  return page.evaluate(({ roots, selects }) => {
+    const out: string[] = []
+    const entryOpens = (el: Element) => roots.some((sel) => el.matches(sel))
+    for (const el of document.querySelectorAll('details.ds-ov-details > .ds-ov-dropdown')) {
+      if (!entryOpens(el)) out.push(`menu: details[aria-label="${el.parentElement?.getAttribute('aria-label') ?? ''}"]`)
+    }
+    for (const el of document.querySelectorAll('.ws-shell')) {
+      if (!entryOpens(el)) out.push(`window: .ws-shell[data-win-type="${el.getAttribute('data-win-type') ?? ''}"][aria-label="${el.getAttribute('aria-label') ?? ''}"]`)
+    }
+    for (const el of document.querySelectorAll('.overlay-select__trigger')) {
+      const id = el.id.replace(/__trigger$/, '')
+      if (!roots.includes(`#${id}__surface`) && !(id in selects)) out.push(`list: #${id}`)
+    }
+    return out
+  }, { roots: MATRIX.map((e) => e.root), selects: SELECTS_WITHOUT_ENTRY })
 }
 
 /** The product's catalogue, loaded at run time (the source tree does not type-check inside the e2e program). */
