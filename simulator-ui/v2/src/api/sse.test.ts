@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from './http'
 import { connectSse, parseSseChunk, type SseParserState } from './sse'
 
 describe('parseSseChunk', () => {
@@ -74,7 +75,8 @@ describe('connectSse: a refused connection', () => {
       (e: unknown) => e,
     )
 
-    expect(error).toBeInstanceOf(Error)
+    // The class, not only a `status` field: the callers classify with `instanceof ApiError` (adversarial F5c).
+    expect(error).toBeInstanceOf(ApiError)
     expect((error as { status?: unknown }).status, 'the status is only inside the message text').toBe(status)
   })
 

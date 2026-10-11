@@ -2415,7 +2415,7 @@ describe('useSimulatorRealMode - 034 S8: failures are classified by status (F-03
  */
 describe('useSimulatorRealMode - 034 S8: the reconnect back-off and a connection that worked', () => {
   /** `plan(n)` says how long the n-th connection lives (ms) after its bootstrap frame; undefined - until aborted. */
-  async function stand(plan: (connection: number) => number | undefined, dropWithError = false) {
+  async function stand(plan: (connection: number) => number | undefined, dropWithError = false, silentFrom = Infinity) {
     vi.useFakeTimers()
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
     const connectSseMock = vi.mocked(connectSse)
@@ -2425,7 +2425,7 @@ describe('useSimulatorRealMode - 034 S8: the reconnect back-off and a connection
     connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
       openedAt.push(Date.now() - t0)
       const n = openedAt.length
-      emitRunStatusBootstrap(opts, `evt_r1_${n}`)
+      if (n < silentFrom) emitRunStatusBootstrap(opts, `evt_r1_${n}`)
       const lifeMs = plan(n)
       if (lifeMs === undefined) return waitForAbort(opts.signal)
       if (lifeMs > 0) await new Promise((resolve) => setTimeout(resolve, lifeMs))
@@ -2473,6 +2473,19 @@ describe('useSimulatorRealMode - 034 S8: the reconnect back-off and a connection
       await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
 
       expect(s.openedAt).toEqual([0, 1000, 22_000])
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a connection that hung for the top step WITHOUT delivering a frame and then failed proved nothing: the ladder keeps growing', async () => {
+    const s = await stand((n) => (n === 1 ? 0 : n === 2 ? 20_000 : undefined), true, 2)
+    try {
+      await vi.advanceTimersByTimeAsync(1000 + 20_000 + 1000)
+      expect(s.openedAt, 'time alone, with no frame, reset the back-off').toEqual([0, 1000])
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(s.openedAt).toEqual([0, 1000, 23_000])
     } finally {
       s.cleanup()
     }
@@ -2546,6 +2559,74 @@ describe('useSimulatorRealMode - 034 S8: the reconnect back-off and a connection
       restoreConnectSseImplementation(prevImpl)
       randomSpy.mockRestore()
       vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * 034 S8 (adversarial F5b): the replay-recovery snapshot is classified by status too (`startSnapshotRefresh`, the
+ * catch around the load). The mutation "read the text again" survived the other cases, which reach the SSE loop
+ * and `stop()` only.
+ */
+describe('useSimulatorRealMode - 034 S8: a failed replay-recovery snapshot is classified by status', () => {
+  async function recoverWith(failure: unknown) {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const connectSseMock = vi.mocked(connectSse)
+    const prevConnectImpl = connectSseMock.getMockImplementation()
+    const recoveryAttempted = deferred()
+    let connections = 0
+    connectSseMock.mockImplementation(async (opts: SseConnectOpts) => {
+      connections += 1
+      if (connections === 1) throw new ApiError('SSE HTTP 410 Gone', { status: 410 })
+      emitRunStatusBootstrap(opts, 'evt_r1_000450')
+      await waitForAbort(opts.signal)
+    })
+    const harness = createSseCharacterizationHarness({
+      lastEventId: 'evt_expired',
+      loadRecoveryScene: async () => {
+        recoveryAttempted.resolve()
+        throw failure
+      },
+    })
+    harness.isRealModeRef.value = true
+    await nextTick()
+    await recoveryAttempted.promise
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve()
+      await nextTick()
+    }
+    return {
+      harness,
+      cleanup: () => {
+        harness.h.stopSse()
+        restoreConnectSseImplementation(prevConnectImpl)
+        randomSpy.mockRestore()
+        vi.useRealTimers()
+      },
+    }
+  }
+
+  it('a 404 whose message does not say "HTTP 404": the run is gone and is reset', async () => {
+    const s = await recoverWith(new ApiError('the run does not exist', { status: 404 }))
+    try {
+      expect(s.harness.real.runId, 'a 404 of the recovery snapshot was not recognised as a stale run').toBeNull()
+      expect(s.harness.real.lastError).toBe('')
+      expect(s.harness.real.sseState).toBe('idle')
+    } finally {
+      s.cleanup()
+    }
+  })
+
+  it('a 503 whose message mentions "HTTP 404": the run is kept and the error is shown', async () => {
+    const s = await recoverWith(
+      new ApiError('HTTP 503 Service Unavailable for /simulator/runs/r1/graph/snapshot: upstream said HTTP 404', { status: 503 }),
+    )
+    try {
+      expect(s.harness.real.runId, 'a server error was read as "the run is gone"').toBe('r1')
+      expect(s.harness.real.lastError).toContain('HTTP 503')
+    } finally {
+      s.cleanup()
     }
   })
 })

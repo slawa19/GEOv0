@@ -91,6 +91,9 @@ describe('F-034-D6: a freeze sent without patches', () => {
     expect(s.layoutLinks[0]?.status).toBe('frozen')
   })
 
+  // Equivalent TODAY for the caches that also watch `generated_at`: the same event moves it
+  // (`realEventPipeline.ts`, end of the structural branch). The revision is bumped for uniformity with patches,
+  // not because a stale cache was shown to exist (adversarial pass: the mutation "no bump" changed nothing on screen).
   it('a freeze counts as a data change for whoever caches by the snapshot revision', () => {
     const s = stand()
     const before = s.snapshot.data_revision ?? 0
