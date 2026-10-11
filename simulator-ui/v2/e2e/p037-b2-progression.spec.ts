@@ -77,7 +77,9 @@ test.describe('037 B2 - progression in a real browser', () => {
       expect(await focusIn(page, '#mp-to__surface'), `Shift+Tab #${i + 1}`).toBe(true)
     }
 
-    // ArrowDown to Bob (the entries are: the empty one, Bob), Enter.
+    // ArrowDown to Bob (the entries are: the empty one, Bob), Enter. A recipient can be taken once the server has answered
+    // for the sender (BACKLOG 037-5 (c)); the keys before this line worked on the list as it was.
+    await expect(page.locator('#mp-to__surface [data-option-value="bob"]')).toBeEnabled()
     await page.locator('#mp-to__surface [role="option"]').first().focus()
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -193,6 +195,7 @@ test.describe('037 B2 - progression in a real browser', () => {
 
     // Recipient by keyboard, Enter held after choosing it: the amount is empty, nothing is sent.
     if (!(await page.locator('#mp-to__surface').isVisible())) { await page.locator('#mp-to__trigger').focus(); await page.keyboard.press('Enter') }
+    await expect(page.locator('#mp-to__surface [data-option-value="bob"]')).toBeEnabled() // 037-5 (c): choosable once the server answered
     await page.keyboard.press('ArrowDown')
     await page.keyboard.down('Enter')
     await twoFrames(page)
