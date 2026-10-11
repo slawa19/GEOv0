@@ -564,8 +564,10 @@ export function useSimulatorRealMode(opts: {
     })
   }
 
-  // The HUD copy of a scene-load error (034 S8, review C2): it goes away when the scene load recovers - and only it.
-  // What the HUD showed before (a run's own `last_error`) comes back; an error written over the copy is left alone.
+  // The HUD copy of a scene-load error (034 S8, review C2): only this copy is removed, what the HUD showed before
+  // (a run's own `last_error`) comes back, and an error written over the copy is left alone.
+  // WHEN, precisely: not on recovery but when the NEXT load STARTS - `state.error` is emptied before the request is
+  // answered - and the copy returns if that load fails. So while the request is in flight there is no warning.
   let sceneErrorInHud: { text: string; displaced: string } | null = null
   function showSceneError(text: string) {
     sceneErrorInHud = { text, displaced: sceneErrorInHud?.text === real.lastError ? sceneErrorInHud.displaced : real.lastError }

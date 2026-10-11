@@ -223,8 +223,14 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
     } catch (error) {
       if (!isCurrent()) return false
       // 034 S8 (review C1): the scene on screen is kept under the error only when the failed load asked for the
-      // SAME source. A load for another run, scenario or equivalent that fails leaves no scene: the old graph must
-      // not stay under the new selector, nor take the events of the new context. (Not applied to replay recovery.)
+      // SAME source. A load for another run, scenario or equivalent that fails clears the scene MODEL
+      // (`snapshot = null`): events of the new context are no longer applied to the old graph. (Not applied to
+      // replay recovery.)
+      // BOUNDARY - what this does NOT do: the canvases are not repainted. With no snapshot the render loop returns
+      // before its `clearRect` (`useRenderLoop.ts`) and may be asleep, so the PIXELS of the old graph can stay on
+      // screen under the error, and event-driven floating labels (`realEventPipeline.ts` -> `useOverlayState.ts`,
+      // drawn by `SimulatorAppRoot.vue`) can still appear at positions of the old layout. Open; receiver:
+      // programme 038, slice S1 (BACKLOG, the S8 entry of 2026-10-11).
       const requested = input.recoveryContext ? null : (deps.requestedSceneSource?.() ?? null)
       if (requested !== null && deps.state.snapshot && deps.state.sourcePath !== requested) {
         clearScene()
