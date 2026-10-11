@@ -496,7 +496,7 @@ export function useSimulatorRealMode(opts: {
         // A text is never read as "the run is gone" (034 S8, F-034-D14): the run's own 404 is handled by its status
         // where the error object still exists - in the scene's run-snapshot read and in the catch above.
         if (isRealMode.value && state.error) {
-          real.lastError = state.error
+          showSceneError(state.error)
           return 'transient'
         }
         return 'current'
@@ -564,13 +564,22 @@ export function useSimulatorRealMode(opts: {
     })
   }
 
+  // The HUD copy of a scene-load error (034 S8, review C2): it goes away when the scene load recovers - and only it.
+  // What the HUD showed before (a run's own `last_error`) comes back; an error written over the copy is left alone.
+  let sceneErrorInHud: { text: string; displaced: string } | null = null
+  function showSceneError(text: string) {
+    sceneErrorInHud = { text, displaced: sceneErrorInHud?.text === real.lastError ? sceneErrorInHud.displaced : real.lastError }
+    real.lastError = text
+  }
+
   // Also surface initial scene-load errors (e.g., "No run started") that happen on mount.
   watch(
     () => state.error,
     (e) => {
       if (!isRealMode.value) return
-      if (!e) return
-      real.lastError = e
+      if (e) return showSceneError(e)
+      if (sceneErrorInHud?.text === real.lastError) real.lastError = sceneErrorInHud.displaced
+      sceneErrorInHud = null
     },
     { flush: 'post' },
   )

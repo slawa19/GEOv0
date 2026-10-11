@@ -335,7 +335,7 @@ describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep th
  * own `last_error`) comes back.
  */
 describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
-  it.fails('without a run: the preview fails, then loads - the HUD error is gone too', async () => {
+  it('without a run: the preview fails, then loads - the HUD error is gone too', async () => {
     withoutRun()
     const app = boot()
     await settle()
@@ -351,7 +351,7 @@ describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
     expect(app.real.lastError, 'the scene recovered, the HUD still shows its error').toBe('')
   })
 
-  it.fails('a run stopped with an error: its own error is back in the HUD after the scene error is gone', async () => {
+  it('a run stopped with an error: its own error is back in the HUD after the scene error is gone', async () => {
     vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => ({
       ...RUN_STATUS(runId),
       state: 'error',
