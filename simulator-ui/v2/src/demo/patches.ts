@@ -124,5 +124,40 @@ export function createPatchApplier(opts: {
     bumpDataRevision(snapshot)
   }
 
-  return { applyNodePatches, applyEdgePatches }
+  /**
+   * 034 S8 (F-034-D6): a status change that arrives WITHOUT a patch - `topology.changed` with `frozen_nodes` /
+   * `frozen_edges`. The canvas draws the layout copies, so the status and the viz key that shows it go to the
+   * snapshot object and to its layout copy together, exactly like a patch. An unknown id changes nothing.
+   */
+  function applyNodeStatus(id: string, status: string, vizColorKey: string) {
+    const snapshot = getSnapshot()
+    if (!snapshot) return
+    const layoutNodes = getLayoutNodes()
+    const targets = [snapshot.nodes[indexById(snapshot.nodes).get(id) ?? -1], layoutNodes[indexById(layoutNodes).get(id) ?? -1]]
+    for (const target of targets) {
+      if (!target) continue
+      target.status = status
+      target.viz_color_key = vizColorKey
+    }
+    if (targets.some(Boolean)) bumpDataRevision(snapshot)
+  }
+
+  function applyEdgeStatus(source: string, target: string, status: string, vizAlphaKey: string) {
+    const snapshot = getSnapshot()
+    if (!snapshot) return
+    const layoutLinks = getLayoutLinks()
+    const k = keyEdge(source, target)
+    const targets = [
+      snapshot.links[indexByEdgeKey(snapshot.links, keyEdge).get(k) ?? -1],
+      layoutLinks[indexByEdgeKey(layoutLinks, keyEdge).get(k) ?? -1],
+    ]
+    for (const link of targets) {
+      if (!link) continue
+      link.status = status
+      link.viz_alpha_key = vizAlphaKey
+    }
+    if (targets.some(Boolean)) bumpDataRevision(snapshot)
+  }
+
+  return { applyNodePatches, applyEdgePatches, applyNodeStatus, applyEdgeStatus }
 }

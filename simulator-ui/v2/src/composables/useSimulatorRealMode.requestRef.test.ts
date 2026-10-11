@@ -66,7 +66,7 @@ function lifecycle(real: RealModeState) {
     isUserFacingRunError: () => false,
     inc: () => undefined,
     loadScene: async () => undefined,
-    realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+    realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
     pushTxAmountLabel: () => undefined,
     clampRealTxTtlMs: () => 0,
     scheduleTimeout: () => undefined,

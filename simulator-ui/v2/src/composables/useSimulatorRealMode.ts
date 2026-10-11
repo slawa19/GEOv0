@@ -69,6 +69,8 @@ export type RealModeState = {
 export type PatchApplier = {
   applyNodePatches: (patches: NodePatch[] | undefined) => void
   applyEdgePatches: (patches: EdgePatch[] | undefined) => void
+  applyNodeStatus: (id: string, status: string, vizColorKey: string) => void
+  applyEdgeStatus: (source: string, target: string, status: string, vizAlphaKey: string) => void
 }
 
 type RealModeDiag = {

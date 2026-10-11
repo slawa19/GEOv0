@@ -206,7 +206,7 @@ function createSseCharacterizationHarness(opts?: {
 
     loadScene,
     loadRecoveryScene,
-    realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+    realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
     pushTxAmountLabel,
     clampRealTxTtlMs: () => 1200,
 
@@ -273,7 +273,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       loadScene,
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -345,7 +345,7 @@ describe('useSimulatorRealMode - refreshSnapshot debounce regression', () => {
 
       loadScene,
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -420,7 +420,7 @@ describe('useSimulatorRealMode - admin helpers', () => {
       inc: () => undefined,
 
       loadScene,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -468,7 +468,7 @@ describe('useSimulatorRealMode - admin helpers', () => {
       inc: () => undefined,
 
       loadScene: async () => undefined,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 0,
 
@@ -527,7 +527,7 @@ describe('useSimulatorRealMode - startRun conflict attach', () => {
       inc: () => undefined,
 
       loadScene,
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel: () => undefined,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout: () => undefined,
@@ -585,7 +585,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isUserFacingRunError: () => false,
       inc: () => undefined,
       loadScene: vi.fn(async () => undefined),
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
@@ -643,7 +643,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isUserFacingRunError: () => false,
       inc: () => undefined,
       loadScene: vi.fn(async () => undefined),
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
@@ -705,7 +705,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       isUserFacingRunError: () => false,
       inc: () => undefined,
       loadScene: vi.fn(async () => undefined),
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
       scheduleTimeout,
@@ -765,7 +765,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       loadScene: vi.fn(async () => undefined),
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
 
@@ -886,7 +886,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       loadScene: vi.fn(async () => undefined),
 
-      realPatchApplier: { applyNodePatches, applyEdgePatches },
+      realPatchApplier: { applyNodePatches, applyEdgePatches, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
 
@@ -994,7 +994,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
 
       loadScene: vi.fn(async () => undefined),
 
-      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+      realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
       pushTxAmountLabel,
       clampRealTxTtlMs: () => 1200,
 
@@ -2187,7 +2187,7 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
         isUserFacingRunError: isUserFacingRunErrorCode,
         inc: () => undefined,
         loadScene: async () => undefined,
-        realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined },
+        realPatchApplier: { applyNodePatches: () => undefined, applyEdgePatches: () => undefined, applyNodeStatus: () => undefined, applyEdgeStatus: () => undefined },
         pushTxAmountLabel: () => undefined,
         clampRealTxTtlMs: () => 0,
         scheduleTimeout: () => undefined,

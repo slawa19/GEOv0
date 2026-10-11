@@ -71,8 +71,7 @@ function stand() {
 }
 
 describe('F-034-D6: a freeze sent without patches', () => {
-  // T3404: red on origin/main because of F-034-D6; S8 removes `.fails` together with the fix.
-  it.fails('a frozen node is recoloured on the layout copy the canvas draws', () => {
+  it('a frozen node is recoloured on the layout copy the canvas draws', () => {
     const s = stand()
 
     s.apply({ frozen_nodes: ['A'] })
@@ -82,8 +81,7 @@ describe('F-034-D6: a freeze sent without patches', () => {
     expect(s.layoutNodes[0]?.status).toBe('suspended')
   })
 
-  // T3404: red on origin/main because of F-034-D6; S8 removes `.fails` together with the fix.
-  it.fails('a frozen line is muted on the layout copy the canvas draws', () => {
+  it('a frozen line is muted on the layout copy the canvas draws', () => {
     const s = stand()
 
     s.apply({ frozen_edges: [{ from_pid: 'A', to_pid: 'B', equivalent_code: 'UAH' }] })
@@ -93,8 +91,7 @@ describe('F-034-D6: a freeze sent without patches', () => {
     expect(s.layoutLinks[0]?.status).toBe('frozen')
   })
 
-  // T3404: red on origin/main because of F-034-D6; S8 removes `.fails` together with the fix.
-  it.fails('a freeze counts as a data change for whoever caches by the snapshot revision', () => {
+  it('a freeze counts as a data change for whoever caches by the snapshot revision', () => {
     const s = stand()
     const before = s.snapshot.data_revision ?? 0
 

@@ -54,6 +54,10 @@ function createStateDeps(trace: string[], draft: RealEventDraft): RealEventState
         if (!patches?.length) return
         trace.push('state:edge-patch')
       },
+      // 034 S8 (F-034-D6): a freeze goes through the applier; with the production applier it is covered by
+      // `realEventPipeline.freezeReachesLayout.p034.test.ts`.
+      applyNodeStatus: () => trace.push('state:node-status'),
+      applyEdgeStatus: () => trace.push('state:edge-status'),
     },
     isUserFacingRunError: (code) => code === 'INTERNAL_ERROR',
     inc: (map, key) => {
