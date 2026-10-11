@@ -24,6 +24,7 @@ import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage } from '../utils/errorMessage'
+import { demoToolsAllowed } from '../utils/demoToolsAllowed'
 import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
@@ -1717,7 +1718,13 @@ export function useSimulatorApp(opts?: {
   // from racing and creating duplicate runs.
   const ensureRunForFxDebugSerialized = fxDebugControls.ensureRunSerialized
 
-  if (isDemoUi.value && isRealMode.value) {
+  // Gated by the same rule as the demo buttons: a page that has no demo tools starts no run for its visitor.
+  const demoToolsExist = demoToolsAllowed({
+    isWebDriver,
+    isTestMode: isTestMode.value,
+    isE2eScreenshots: isE2eScreenshots.value,
+  })
+  if (isDemoUi.value && isRealMode.value && demoToolsExist) {
     const stopAutoBootstrap = watch(
       // No access-token condition (034 S8, F-034-D7): a cookie-session visitor has none and never would get the run.
       () => !state.loading && !!real.selectedScenarioId && !real.runId,

@@ -111,8 +111,9 @@ afterEach(() => {
 })
 
 describe('F-034-D7: the eager bootstrap of the demo page', () => {
-  it('a cookie-session visitor (no token) gets the paused demo run prepared', async () => {
+  it('a cookie-session visitor (no token) gets the paused demo run prepared - where the demo tools are allowed', async () => {
     vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_ALLOW_DEMO_UI', 'true')
     window.history.replaceState({}, '', '/?mode=real&ui=demo')
 
     const app = boot()
@@ -123,7 +124,9 @@ describe('F-034-D7: the eager bootstrap of the demo page', () => {
     expect(app.real.runId).toBe('R_DEMO')
   })
 
-  it('CONTRACT: with a token the paused demo run is prepared', async () => {
+  it('CONTRACT: a dev build in an ordinary browser (the dev token is filled in) gets the paused demo run prepared', async () => {
+    // happy-dom reports `navigator.webdriver === true`; a person's browser does not.
+    vi.spyOn(navigator, 'webdriver', 'get').mockReturnValue(false)
     window.history.replaceState({}, '', '/?mode=real&ui=demo')
 
     const app = boot()
@@ -132,6 +135,22 @@ describe('F-034-D7: the eager bootstrap of the demo page', () => {
     expect(app.real.accessToken, 'precondition: a dev build has the dev token').not.toBe('')
     expect(createRun).toHaveBeenCalledTimes(1)
     expect(app.real.runId).toBe('R_DEMO')
+  })
+
+  // Adversarial F3: `ui=demo` is dev-only (owner's decision 2026-10-08). The buttons are shown only in a dev build or
+  // with VITE_ALLOW_DEMO_UI; the bootstrap behind them obeys the same gate - a URL parameter alone creates no run.
+  it('a build without DEV and without VITE_ALLOW_DEMO_UI: `?ui=demo` creates no run and pauses nothing', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_ALLOW_DEMO_UI', 'false')
+    window.history.replaceState({}, '', '/?mode=real&ui=demo')
+
+    const app = boot()
+    await settle()
+
+    expect(createRun, 'a run was created for a visitor who has no demo tools').not.toHaveBeenCalled()
+    expect(pauseRun).not.toHaveBeenCalled()
+    expect(app.real.runId).toBeNull()
+    expect(app.state.snapshot?.nodes.map((n) => n.id), 'anti-vacuum: the page itself loaded').toEqual(['PREVIEW_NODE'])
   })
 
   it('CONTRACT: outside the demo page nothing is started for the visitor', async () => {
