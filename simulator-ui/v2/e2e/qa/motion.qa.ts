@@ -137,6 +137,39 @@ test('R3 - measurement at the cap: a 6-edge route, 200 ms an edge - frames paint
   await flyAndJudge(page, 6, { compositionMinimums: false })
 })
 
+// The stand's browser has no GPU and the quality autoguard puts it on `low`, where a beam is its head dot only
+// (`renderFrame.ts`). `med` and `high` draw a trail and a bright segment behind the head; the same five properties
+// must hold there. The quality is chosen as a user chooses it, in the bottom bar.
+for (const quality of ['med', 'high'] as const) {
+  test(`R3 - the five properties hold at quality "${quality}" too (a 2-edge payment)`, async ({ page }) => {
+    await page.getByRole('combobox', { name: 'Quality' }).selectOption(quality)
+    await frames(page, 10)
+    expect(await page.evaluate(() => document.querySelector<HTMLElement>('.root')?.dataset.quality)).toBe(quality)
+    await flyAndJudge(page, 2)
+  })
+}
+
+test('prefers-reduced-motion: a payment draws no beam and schedules none, and its amount labels still appear', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await frames(page, 2)
+  const g = await pickRingRoute(page, RING, 3)
+  await pushEvent(page, txUpdated(g.ids, '10.00'))
+  let maxSparks = 0
+  let maxLabels = 0
+  let painted = 0
+  for (let f = 0; f < 80; f += 1) { // the whole route time: a leg scheduled on a timer would show up here
+    await frames(page, 1)
+    const c = await fxCounts(page)
+    maxSparks = Math.max(maxSparks, c.sparks)
+    maxLabels = Math.max(maxLabels, c.labels)
+    painted = Math.max(painted, (await sampleCanvas(page, {})).__canvas.lit)
+  }
+  console.log('[038 reduced-motion]', JSON.stringify({ maxSparks, maxLabels, painted }))
+  expect(maxSparks, 'no spark at any moment of the route time').toBe(0)
+  expect(painted, 'nothing is painted on the FX canvas').toBe(0)
+  expect(maxLabels, 'counter-check: the event did arrive - its amount labels are shown').toBeGreaterThan(0)
+})
+
 test('R7 - characterization: the same event_id delivered twice animates once; a new event_id animates again', async ({ page }) => {
   const id = await pushEvent(page, txUpdated(['a', 'b']))
   await frames(page, 20) // 320 ms: past the 120 ms minimum gap, so only the admission by event_id can drop a repeat

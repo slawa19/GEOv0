@@ -17,6 +17,7 @@
     "test:e2e:phase5": "playwright test --config=e2e/playwright.phase5.config.ts --browser=chromium",
     "test:e2e:qa": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-stand",
     "test:e2e:qa:perf": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-perf",
+    "test:e2e:qa:video": "playwright test --config=e2e/qa/playwright.video.config.ts",
     "test:e2e:update": "playwright test --update-snapshots"
   },
   "dependencies": {

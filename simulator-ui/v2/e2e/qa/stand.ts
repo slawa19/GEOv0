@@ -31,7 +31,9 @@ function node(id: string, name: string) {
 function link(source: string, target: string) {
   return {
     source, target, trust_limit: '100', used: '0', available: '100', status: 'active',
-    viz_color_key: 'default', viz_width_key: 'default', viz_alpha_key: 'default',
+    // Keys the backend really emits (`vizMapping.ts`: width thin|mid|thick, alpha bg|muted|active|hi). With unknown
+    // keys the trust lines were drawn too faint to see, and a beam in a video flew along nothing.
+    viz_color_key: 'default', viz_width_key: 'mid', viz_alpha_key: 'hi',
   }
 }
 
@@ -207,6 +209,12 @@ export type BootOptions = {
   query?: string
   /** The segment of the top bar the app opens in. `auto` (Auto-Run) shows the scenario selector; default `interact`. */
   ui?: 'interact' | 'auto'
+  /**
+   * `false`: the CSS animations of labels are left to run by themselves. Only for the wall-clock videos for a human
+   * (`*.qavideo.ts`); every deterministic check needs them on the JS clock. (The perf project still boots with the
+   * pause - BACKLOG 034-6 (k), slice S3.)
+   */
+  cssClock?: false
   /** `false` on a production build: there is no `window.__geoSim`, so layout and FX state cannot be read. */
   devHook?: boolean
   /** `false`: the caller routes the SSE endpoint itself (`page.route`), the in-page stream is not installed. */
@@ -252,7 +260,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.clock) await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
   if (o.sseShim !== false) await installSseShim(page)
   await installRafCounter(page)
-  await installCssClockSync(page)
+  if (o.cssClock !== false) await installCssClockSync(page)
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
       localStorage.clear()
