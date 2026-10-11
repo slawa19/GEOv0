@@ -8,7 +8,7 @@ export function useGeoSimDevHookSetup(opts: {
   isWebDriver: () => boolean
   getState: () => SimulatorAppState
   getCamera?: () => { panX: number; panY: number; zoom: number }
-  getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number }>
+  getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number; fx?: number | null; fy?: number | null }>
   getPinnedNodeIds?: () => string[]
   fxState: FxState
   runTxOnce: () => void

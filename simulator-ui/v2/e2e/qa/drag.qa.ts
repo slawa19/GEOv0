@@ -2,14 +2,32 @@
  * 038 S0 - R5 (F-038-1, the interaction part): a node dragged with the mouse under a zoomed and panned camera moves
  * by the mouse delta divided by the zoom, and is pinned. Zoom and pan are set the way a user sets them (wheel, drag
  * of the empty canvas), so the expected world delta is computed from the camera the product reports.
- * Not checked here (S1): position after a relayout, and the canvas picture against the DOM drag preview.
- * Known to pass on a broken product (adversarial pass 2026-10-11): "pinned" is read from the pinned-position map, so a
- * drag that never calls `pinNodeLive` (fx/fy not set on the physics node) passes; and "opens no card" is true today
- * whether or not the click after a drag is suppressed. Both mutations must turn red in S1 before R5 is relied on.
+ *
+ * S1 adds the two properties the first test does not hold (adversarial pass 2026-10-11, mutations M9c2 and M9e):
+ *  - the dropped node is fixed IN THE PHYSICS (`fx`/`fy`), not only listed in the pinned-position map, and keeps its
+ *    place through a relayout. Mutation M9c2: the drag never calls `pinNodeLive`.
+ *  - the click the browser fires at the end of a drag is not taken as a click. "Opens no card" could not see that (a
+ *    card opens on a double click); what the suppression protects is an open Interact flow, where a click on a node
+ *    is a CHOICE of a participant. Mutation M9e: the suppression after a drag is removed.
+ * The delta at three zooms is a unit test (`useDragToPinInteraction.test.ts`).
+ * Not checked: the canvas picture against the DOM drag preview (the node is hidden on the canvas while dragged, there
+ * are never two pictures to compare); touch; a drag that ends outside the window.
  */
 import { expect, test, type Page } from '@playwright/test'
 
 import { boot, camera, frames, layoutNodes, ringSnapshot, screenNodes, type Pt } from './stand.js'
+
+type PhysNode = { id: string; x: number; y: number; fx: number | null; fy: number | null }
+const physNodes = (page: Page) => page.evaluate(() => (window as unknown as { __geoSim: { layoutNodes: PhysNode[] } }).__geoSim.layoutNodes)
+const physNode = async (page: Page, id: string) => (await physNodes(page)).find((n) => n.id === id)!
+
+/** Nodes whose centre, and the point `delta` away from it, are on the bare canvas: nothing of the HUD or a window is above. */
+async function draggableNodes(page: Page, delta: Pt): Promise<Array<[string, Pt]>> {
+  const all = [...(await screenNodes(page)).entries()]
+  const onCanvas = await page.evaluate((pts) => pts.map(([x, y]) => document.elementFromPoint(x!, y!)?.matches('canvas.canvas:not(.canvas-fx)') ?? false),
+    all.flatMap(([, p]) => [[p.x, p.y], [p.x + delta.x, p.y + delta.y]]))
+  return all.filter((_, i) => onCanvas[2 * i] && onCanvas[2 * i + 1])
+}
 
 const VIEW = { x0: 140, x1: 1140, y0: 150, y1: 560 }
 
@@ -91,4 +109,62 @@ test('R5 - a mouse drag moves the node by delta / zoom under a zoomed and panned
   console.log('[038 R5] click without movement', JSON.stringify({ node: other![0], moved: { x: a.x - b.x, y: a.y - b.y }, pinned: await pinned(page), windows: await windows(page) }))
   expect({ x: a.x - b.x, y: a.y - b.y }, 'a click without movement moves nothing').toEqual({ x: 0, y: 0 })
   expect(await pinned(page), 'a click does not pin').not.toContain(other![0])
+})
+
+test('R5 - the dropped node is fixed in the physics (fx/fy) and keeps its place through a relayout (M9c2)', async ({ page }) => {
+  await boot(page, { snapshot: ringSnapshot(), clock: true })
+  const delta = { x: 90, y: -45 }
+  const candidates = await draggableNodes(page, delta)
+  expect(candidates.length, 'a node with room to be dragged on the bare canvas').toBeGreaterThan(0)
+  const [id, at] = candidates[0]!
+  const before = await physNode(page, id)
+  expect({ fx: before.fx, fy: before.fy }, 'counter-check: before the drag the physics is free to move the node').toEqual({ fx: null, fy: null })
+
+  await mouseDrag(page, at, delta)
+  const dropped = await physNode(page, id)
+  expect(Math.hypot(dropped.x - before.x, dropped.y - before.y), 'the node was dragged').toBeGreaterThan(50)
+  expect({ fx: dropped.fx, fy: dropped.fy }, 'the physics holds the node where it was dropped (fx/fy = its position)').toEqual({ fx: dropped.x, fy: dropped.y })
+
+  // A relayout as a user causes it: the browser window gets smaller. The layout arrays and the physics are rebuilt.
+  const othersBefore = (await physNodes(page)).filter((n) => n.id !== id)
+  await page.setViewportSize({ width: 1100, height: 640 })
+  await frames(page, 300)
+  const after = await physNode(page, id)
+  const othersAfter = (await physNodes(page)).filter((n) => n.id !== id)
+  const othersMoved = Math.max(...othersBefore.map((b) => { const a = othersAfter.find((n) => n.id === b.id)!; return Math.hypot(a.x - b.x, a.y - b.y) }))
+  const row = { node: id, before, dropped, after, othersMovedMaxPx: Number(othersMoved.toFixed(1)) }
+  console.log('[038 R5 pin]', JSON.stringify(row))
+  test.info().annotations.push({ type: '038-R5-pin', description: JSON.stringify(row) })
+  expect(othersMoved, 'counter-check: the relayout did happen (free nodes moved)').toBeGreaterThan(5)
+  expect(Math.hypot(after.x - dropped.x, after.y - dropped.y), 'the dropped node kept its world position through the relayout, within 0.5').toBeLessThanOrEqual(0.5)
+  expect({ fx: after.fx, fy: after.fy }, 'and is still fixed in the rebuilt physics').toEqual({ fx: after.x, fy: after.y })
+})
+
+test('R5 - the click that ends a drag is not a choice: an open payment flow does not take the dragged node as sender (M9e)', async ({ page }) => {
+  await boot(page, { snapshot: ringSnapshot(), clock: true })
+  await page.locator('[data-testid="actionbar-payment"]').click()
+  await frames(page, 30)
+  const panel = page.locator('[data-testid="manual-payment-panel"]')
+  await expect(panel).toBeVisible()
+  const sender = () => panel.locator('select').first().inputValue()
+  expect(await sender(), 'the flow waits for a sender').toBe('')
+
+  const delta = { x: 70, y: 40 }
+  const candidates = await draggableNodes(page, delta)
+  expect(candidates.length, 'two nodes on the bare canvas: one to drag, one to click').toBeGreaterThanOrEqual(2)
+  const [dragId, dragAt] = candidates[0]!
+  const [clickId, clickAt] = candidates[1]!
+
+  await mouseDrag(page, dragAt, delta)
+  await frames(page, 30) // past the 300 ms window in which a late click would still be suppressed
+  const afterDrag = { sender: await sender(), pinned: await pinned(page) }
+  expect(afterDrag.pinned, 'counter-check: the gesture was a drag').toContain(dragId)
+  expect(afterDrag.sender, 'the drag did not choose a sender').toBe('')
+
+  // Counter-check: a press and release WITHOUT movement on a node is a choice, so the reading above is alive.
+  await mouseDrag(page, clickAt, { x: 0, y: 0 }, 1)
+  await frames(page, 30)
+  const afterClick = await sender()
+  console.log('[038 R5 click]', JSON.stringify({ dragged: dragId, afterDrag, clicked: clickId, afterClick }))
+  expect(afterClick, 'a plain click on a node chooses it as the sender').toBe(clickId)
 })

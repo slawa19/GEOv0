@@ -1,57 +1,14 @@
 /**
- * 038 S0 - probes of the stand itself: what `page.clock` drives and what it does not, whether the FX canvas can be
- * read on software-only Chromium, and what a WebDriver browser shows on screen against what its FX buffer holds.
+ * 038 S0 - probes of the stand itself: what `page.clock` drives and what it does not, and what a WebDriver browser
+ * shows on the page against what its FX buffer holds (S1: through the motion oracle, every frame along an edge).
  * Characterizations of the product on `e2dc3b2a`; none of them is a defect reproducer.
  */
-import { chromium, expect, test, type Page } from '@playwright/test'
+import { chromium, expect, test } from '@playwright/test'
 
-import {
-  EQ, RUN_ID, boot, frames, fxCounts, loopCounters, pointsAlong, pushEvent, ringSnapshot, sampleCanvas, screenNodes, syncCssToClock,
-  txUpdated, type Pt,
-} from './stand.js'
+import { pickRingRoute, rememberBaseline, summarize, watchFlight } from './oracle.js'
+import { EQ, RUN_ID, boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, syncCssToClock, txUpdated } from './stand.js'
 
 const NO_GPU_ARGS = ['--disable-gpu', '--disable-accelerated-2d-canvas', '--disable-gpu-compositing']
-
-/** Pixels of a screenshot clip that differ from the same clip taken earlier. A screenshot is the composed page, as a user sees it. */
-async function screenshotDiff(page: Page, before: Buffer, after: Buffer): Promise<{ changed: number; total: number }> {
-  return page.evaluate(async ([a, b]) => {
-    const px = async (b64: string) => {
-      const bmp = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob())
-      const c = new OffscreenCanvas(bmp.width, bmp.height)
-      const ctx = c.getContext('2d')!
-      ctx.drawImage(bmp, 0, 0)
-      return ctx.getImageData(0, 0, bmp.width, bmp.height).data
-    }
-    const [pa, pb] = [await px(a!), await px(b!)]
-    let changed = 0
-    for (let i = 0; i < pa.length; i += 4) {
-      if (Math.abs(pa[i]! - pb[i]!) + Math.abs(pa[i + 1]! - pb[i + 1]!) + Math.abs(pa[i + 2]! - pb[i + 2]!) > 24) changed += 1
-    }
-    return { changed, total: pa.length / 4 }
-  }, [before.toString('base64'), after.toString('base64')])
-}
-
-function clipAround(points: Pt[]) {
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  const x = Math.floor(Math.min(...xs)) - 6
-  const y = Math.floor(Math.min(...ys)) - 6
-  return { x, y, width: Math.ceil(Math.max(...xs)) + 6 - x, height: Math.ceil(Math.max(...ys)) + 6 - y }
-}
-
-/** The beam of a 3-edge payment is drawn on the chord a -> d (F-038-3); the probe only needs "some FX at a known place". */
-async function sparkOnChord(page: Page) {
-  const nodes = await screenNodes(page)
-  const chord = pointsAlong(nodes.get('a')!, nodes.get('d')!, { endMarginPx: 40 })
-  const clip = clipAround(chord)
-  const shotBefore = await page.screenshot({ clip })
-  const bufferBefore = await sampleCanvas(page, { chord })
-  await pushEvent(page, txUpdated(['a', 'b', 'c', 'd']))
-  await frames(page, 25) // 400 ms of a 1200 ms beam
-  const bufferAfter = await sampleCanvas(page, { chord })
-  const shotAfter = await page.screenshot({ clip })
-  return { bufferBefore, bufferAfter, screen: await screenshotDiff(page, shotBefore, shotAfter), fx: await fxCounts(page) }
-}
 
 test('the stand runs the user branches: no test mode, navigator.webdriver is false, the quality autoguard has put a no-GPU browser on low', async ({ page }) => {
   const mock = await boot(page, { snapshot: ringSnapshot(), clock: false })
@@ -114,17 +71,12 @@ test('page.clock drives the render loop and the JS TTL, and does NOT drive the C
   expect([before, after], 'the sender label is removed by the JS TTL on the fake clock').toEqual([1, 0])
 })
 
-test('the FX canvas is readable on software-only Chromium, and the spark is on the composed screen for a user', async ({ page }) => {
-  await boot(page, { snapshot: ringSnapshot(), clock: true })
-  const r = await sparkOnChord(page)
-  console.log('[038 probe] user browser', JSON.stringify(r))
-  expect(r.bufferBefore.__canvas.lit, 'counter-check: nothing is painted on the FX canvas before the event').toBe(0)
-  expect(r.fx.sparks).toBe(1)
-  expect(r.bufferAfter.chord.lit, 'the FX buffer holds the beam').toBeGreaterThan(0)
-  expect(r.screen.changed, 'the composed screenshot shows the beam').toBeGreaterThan(0)
-})
-
-test('under WebDriver without test mode the FX buffer holds the spark and the composed screen does not show it', async ({ baseURL }) => {
+// The S0 probe "the spark is on the composed screen for a user" looked at one frame and held on 7 pixels (adversarial
+// pass, F3). It is replaced by property 5 of the motion oracle (`motion.qa.ts`, "oracle - a payment over one edge"),
+// which compares buffer and screenshot on every frame along the edge. What stays here is the other side of that
+// property: a browser in which the buffer is full and the page shows nothing. If this test goes green on a visible
+// beam, the oracle has stopped telling visible from invisible.
+test('under WebDriver without test mode the FX buffer holds the beam and the composed page does not show it', async ({ baseURL }) => {
   // The default Playwright browser: navigator.webdriver === true. Test mode is off, as everywhere on this stand.
   const browser = await chromium.launch({ args: NO_GPU_ARGS })
   try {
@@ -138,12 +90,17 @@ test('under WebDriver without test mode the FX buffer holds the spark and the co
         baseZ: getComputedStyle(document.querySelector('canvas.canvas:not(.canvas-fx)')!).zIndex,
       }
     })
-    const r = await sparkOnChord(page)
-    console.log('[038 probe] webdriver browser', JSON.stringify({ flags, ...r }))
+    const g = await pickRingRoute(page, ['a', 'b', 'c', 'd', 'e', 'f'], 1)
+    await rememberBaseline(page, g)
+    await pushEvent(page, txUpdated(g.ids, '10.00', { amount_flyout: false }))
+    const [edge] = summarize(g, await watchFlight(page, g, 30, 1))
+    const fx = await fxCounts(page)
+    console.log('[038 probe] webdriver browser', JSON.stringify({ flags, edge: { ...edge, litFrames: edge!.litFrames.length }, fx }))
     expect(flags).toMatchObject({ navigatorWebdriver: true, dataWebdriver: '1' })
-    expect(r.fx.sparks, 'the spark is spawned: spawning depends on test mode, not on WebDriver').toBe(1)
-    expect(r.bufferAfter.chord.lit, 'the FX buffer holds the beam').toBeGreaterThan(0)
-    expect(r.screen.changed, 'App.css:49-51 puts the FX canvas under the opaque base canvas: nothing on screen').toBe(0)
+    expect(fx.sparks, 'the spark is spawned: spawning depends on test mode, not on WebDriver').toBe(1)
+    expect(edge!.framesStrong, 'the FX buffer holds the beam in many frames').toBeGreaterThanOrEqual(3)
+    expect(edge!.strongPx, 'and in many pixels').toBeGreaterThan(20)
+    expect({ framesShown: edge!.framesShown, shownPx: edge!.shownPx }, 'App.css:49-51 puts the FX canvas under the opaque base canvas: nothing on the page').toEqual({ framesShown: 0, shownPx: 0 })
   } finally {
     await browser.close()
   }

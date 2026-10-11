@@ -31,7 +31,9 @@ function node(id: string, name: string) {
 function link(source: string, target: string) {
   return {
     source, target, trust_limit: '100', used: '0', available: '100', status: 'active',
-    viz_color_key: 'default', viz_width_key: 'default', viz_alpha_key: 'default',
+    // Keys the backend really emits (`vizMapping.ts`: width thin|mid|thick, alpha bg|muted|active|hi). With unknown
+    // keys the trust lines were drawn too faint to see, and a beam in a video flew along nothing.
+    viz_color_key: 'default', viz_width_key: 'mid', viz_alpha_key: 'hi',
   }
 }
 
@@ -164,7 +166,8 @@ export async function installRafCounter(page: Page): Promise<void> {
     }
     w.__qaRaf = { calls: 0, frames: 0, draws: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
-    // exactly once per `renderFrame` (and nothing else clears it), whether the frame came from rAF or `renderOnce`.
+    // exactly once per `renderFrame`, whether the frame came from rAF or `renderOnce`. One more clear is counted
+    // here and is not a frame: the one-off blanking when the scene model becomes empty (038 S1, `blankCanvases`).
     const clearRect = CanvasRenderingContext2D.prototype.clearRect
     CanvasRenderingContext2D.prototype.clearRect = function (this: CanvasRenderingContext2D, ...a: [number, number, number, number]) {
       const c = this.canvas as HTMLCanvasElement
@@ -204,6 +207,14 @@ export type BootOptions = {
   /** `true`: fake clock installed before load and paused after the layout settled. */
   clock: boolean
   query?: string
+  /** The segment of the top bar the app opens in. `auto` (Auto-Run) shows the scenario selector; default `interact`. */
+  ui?: 'interact' | 'auto'
+  /**
+   * `false`: the CSS animations of labels are left to run by themselves. Only for the wall-clock videos for a human
+   * (`*.qavideo.ts`); every deterministic check needs them on the JS clock. (The perf project still boots with the
+   * pause - BACKLOG 034-6 (k), slice S3.)
+   */
+  cssClock?: false
   /** `false` on a production build: there is no `window.__geoSim`, so layout and FX state cannot be read. */
   devHook?: boolean
   /** `false`: the caller routes the SSE endpoint itself (`page.route`), the in-page stream is not installed. */
@@ -249,7 +260,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.clock) await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
   if (o.sseShim !== false) await installSseShim(page)
   await installRafCounter(page)
-  await installCssClockSync(page)
+  if (o.cssClock !== false) await installCssClockSync(page)
   await page.addInitScript(({ scenarioId, runId }) => {
     try {
       localStorage.clear()
@@ -260,7 +271,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   }, { scenarioId: SCENARIO_ID, runId: RUN_ID })
 
   if (o.beforeLoad) await o.beforeLoad(page)
-  await page.goto(`/?mode=real&ui=interact${o.query ?? ''}`)
+  await page.goto(`/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
   await assertUserMode(page, o)
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   if (o.sseShim !== false) {
@@ -470,4 +481,43 @@ export async function syncCssToClock(page: Page): Promise<LabelSample[]> {
         durationMs, animations: anims.length,
       }
     }))
+}
+
+// --- A second scenario next to the stand's own: for a change of scene and for a scene that cannot be loaded. ---
+
+export const OTHER_SCENARIO = 'p038-qa-unloadable'
+/** `other`: the preview of the other scenario answers 500. `all`: every scene read answers 500. */
+export type SceneFail = { other: boolean; all: boolean; /** Scene reads seen so far (snapshot and preview), counted by the mock. */ reads?: number }
+
+/** The stand's backend with a second scenario; its scene (or every scene) cannot be loaded while `fail` says so. */
+export async function bootTwoScenarios(page: Page, fail: SceneFail) {
+  const item = (scenario_id: string, name: string) => ({ api_version: 'simulator-api/1', scenario_id, name, participants_count: 6, trustlines_count: 6, equivalents: [EQ] })
+  await boot(page, {
+    snapshot: ringSnapshot(),
+    clock: true,
+    ui: 'auto', // the Auto-Run segment: the scenario selector lives there
+    beforeLoad: async (p) => {
+      await p.route(/\/simulator\/scenarios$/i, (r) => r.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ api_version: 'simulator-api/1', items: [item(SCENARIO_ID, 'QA stand'), item(OTHER_SCENARIO, 'QA stand, unloadable')] }),
+      }))
+      await p.route(/\/graph\/(snapshot|preview)/i, (r) => {
+        const other = new URL(r.request().url()).pathname.includes(`/scenarios/${OTHER_SCENARIO}/`)
+        fail.reads = (fail.reads ?? 0) + 1
+        if (fail.all || (other && fail.other)) {
+          return r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'QA_STAND_NO_SCENE', message: 'qa stand: this scene cannot be loaded' }) })
+        }
+        // Loadable: other participants, so that choosing it is a full reload of the scene and not an increment.
+        if (other) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(otherRing()) })
+        return r.fallback()
+      })
+    },
+  })
+}
+
+/** The ring with other participant ids. */
+export function otherRing() {
+  const s = ringSnapshot()
+  const rename = (id: string) => `x${id}`
+  return { ...s, nodes: s.nodes.map((n) => ({ ...n, id: rename(n.id), name: `X${String(n.name)}` })), links: s.links.map((l) => ({ ...l, source: rename(l.source), target: rename(l.target) })) }
 }

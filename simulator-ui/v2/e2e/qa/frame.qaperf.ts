@@ -4,7 +4,8 @@
  * become ratchet constants in S3. A dev server (unminified modules, Vue dev build) unless QA_STAND_SERVER=preview.
  *
  * Load is the mocked backend's SSE stream only. The product's own limiter decides how many sparks live at once
- * (token bucket 3/s, burst 2, 120 ms gap, at most 2 edges per event: `useRealTxFx.ts:19-33`); the count actually
+ * (token bucket 3/s, burst 2, 120 ms gap; since 038 S1 a route of up to 6 edges is flown edge by edge with one
+ * spark alive at a time, `useRealTxFx.ts`, `REAL_TX_FX_DEFAULT`); the count actually
  * reached is recorded, "20 sparks at once" is not reachable by events and is not faked by writing into FX state.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'

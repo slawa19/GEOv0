@@ -16,14 +16,22 @@ export type RealTxFxConfig = {
   minGapMs: number
 }
 
+/**
+ * The longest route whose beam follows its edges. Equal to the cap of payment routing, `ROUTING_MAX_HOPS`
+ * (`app/config.py:187`), so every route the backend can execute is shown as it ran. A longer `edges` list is not
+ * a payment route the backend produces today; it is drawn as one straight beam sender -> receiver, a recorded
+ * degradation (spec 038, slice S1).
+ */
+export const REAL_TX_MAX_ROUTE_EDGES = 6
+
 export const REAL_TX_FX_DEFAULT: RealTxFxConfig = {
   // Token bucket: how many tx events per second can spawn sparks.
   ratePerSec: 3.0,
   burst: 2.0,
   // Hard caps for perf.
   maxConcurrentSparks: 28,
-  // Avoid animating long routes as a wall of particles.
-  maxEdgesPerEvent: 2,
+  // Up to this many edges the beam walks the route edge by edge (one spark alive at a time, see `runRealTxFx`).
+  maxEdgesPerEvent: REAL_TX_MAX_ROUTE_EDGES,
   // Clamp TTL to keep the scene from accumulating particles.
   ttlMinMs: 340,
   ttlMaxMs: 1200,
@@ -51,9 +59,8 @@ export function __pickSparkEdges(
   if (!edges || edges.length === 0) return []
   if (edges.length <= cfg.maxEdgesPerEvent) return edges
 
-  // UX: for long multi-hop routes, a couple of disjoint edge sparks can look like
-  // the amount labels belong to "different" nodes. Prefer a single clear spark
-  // in the sender->receiver direction.
+  // Degradation for a route longer than the cap: one spark in the sender->receiver direction.
+  // It is NOT an edge of the route; the route itself is not shown in this case.
   const src = String(endpoints?.from ?? edges[0]?.from ?? '').trim()
   const dst = String(endpoints?.to ?? edges[edges.length - 1]?.to ?? '').trim()
   if (!src || !dst) return []
@@ -86,7 +93,14 @@ export function useRealTxFx(deps: {
 
   fxColorForNode: (nodeId: string, fallback: string) => string
 
-  scheduleTimeout: (fn: () => void, delayMs: number) => void
+  /**
+   * Managed timer (`demo/timerRegistry.ts`). The legs of a beam and the receiver's burst are scheduled `critical`,
+   * the class of the receiver's amount label they accompany: a snapshot REFRESH of the scene on screen keeps them
+   * (`useSceneState.ts` clears only non-critical timers when a load starts), a change of scene and an unmount clear
+   * them (`clearScene`, `timers.clearAll`). The cleanup of a run (`cleanupRealRunFxAndTimers`) does not clear
+   * critical timers, so they guard themselves: see `fxGeneration` for which ways of ending a run that covers.
+   */
+  scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
   pushFloatingLabelWhenReady: (opts: {
     nodeId: string
     text: string
@@ -122,6 +136,12 @@ export function useRealTxFx(deps: {
   let txFxTokens = cfg.burst
   let txFxLastRefillAtMs = nowMs()
   let txFxLastSpawnAtMs = 0
+  // Bumped by `resetRateLimiter`, which `cleanupRealRunFxAndTimers` calls: on the user's own Stop, on start/restart,
+  // on attach and on a stale-run reset. A pending leg or burst of an earlier generation does nothing.
+  // NOT bumped by an administrative Stop / Stop-all or by a run that ends on the server: those paths do not run that
+  // cleanup, and the effect of the last payment lives on, on the same scene, until the next start/attach
+  // (BACKLOG 038-1 (c)).
+  let fxGeneration = 0
 
   function refillTxFxTokens(tNowMs: number) {
     const dt = Math.max(0, tNowMs - txFxLastRefillAtMs)
@@ -137,6 +157,7 @@ export function useRealTxFx(deps: {
     txFxTokens = cfg.burst
     txFxLastRefillAtMs = nowMs()
     txFxLastSpawnAtMs = 0
+    fxGeneration += 1
   }
 
   function getFxState(): FxState {
@@ -166,22 +187,39 @@ export function useRealTxFx(deps: {
     const ttlMs = clampRealTxTtlMs(evt.ttl_ms)
     const k = deps.intensityScale(evt.intensity_key ?? undefined)
 
-    spawnSparks(fxState, {
-      edges: sparkEdges,
-      nowMs: tNowMs,
-      ttlMs,
-      colorCore: deps.txSparkColorCore,
-      colorTrail: deps.txSparkColorTrail,
-      thickness: 0.95 * k,
-      kind: 'beam',
-      seedPrefix: `real-tx:${evt.equivalent}`,
-      countPerEdge: 1,
-      keyEdge: deps.keyEdge,
-      seedFn: deps.seedFn,
-      isTestMode: deps.isTestMode.value && deps.isWebDriver,
+    // The beam walks the route one edge after another, from the sender to the receiver (spec 034, target 3;
+    // F-038-3). The whole route takes `ttlMs` whatever its length: the receiver's burst below and the receiver's
+    // amount label (`realEventPipeline.ts`, `tx-label-delayed`) are timed on the same total, so each edge gets an
+    // equal share of it. One spark is alive at a time, so a long route costs no more particles than a short one.
+    // A leg that finds the particle budget spent (`getFxParticleBudget`) is skipped: degradation, not a failure.
+    const fxOff = deps.isTestMode.value && deps.isWebDriver
+    const gen = fxGeneration
+    const legMs = ttlMs / sparkEdges.length
+    sparkEdges.forEach((edge, i) => {
+      // The planned start, not the moment the timer fired: a late timer shortens its own leg and the total holds.
+      const startAtMs = tNowMs + i * legMs
+      const spawnLeg = () => {
+        if (gen !== fxGeneration) return
+        spawnSparks(fxState, {
+          edges: [edge],
+          nowMs: startAtMs,
+          ttlMs: legMs,
+          colorCore: deps.txSparkColorCore,
+          colorTrail: deps.txSparkColorTrail,
+          thickness: 0.95 * k,
+          kind: 'beam',
+          seedPrefix: `real-tx:${evt.equivalent}`,
+          countPerEdge: 1,
+          keyEdge: deps.keyEdge,
+          seedFn: deps.seedFn,
+          isTestMode: fxOff,
+        })
+      }
+      if (i === 0) spawnLeg()
+      else if (!fxOff) deps.scheduleTimeout(spawnLeg, i * legMs, { critical: true })
     })
 
-    if (!(deps.isTestMode.value && deps.isWebDriver)) {
+    if (!fxOff) {
       const src = resolved.from || sparkEdges[0]!.from
       const dst = resolved.to || sparkEdges[sparkEdges.length - 1]!.to
       spawnNodeBursts(fxState, {
@@ -195,6 +233,7 @@ export function useRealTxFx(deps: {
         isTestMode: false,
       })
       deps.scheduleTimeout(() => {
+        if (gen !== fxGeneration) return
         spawnNodeBursts(fxState, {
           nodeIds: [dst],
           nowMs: nowMs(),
@@ -205,7 +244,7 @@ export function useRealTxFx(deps: {
           seedFn: deps.seedFn,
           isTestMode: false,
         })
-      }, ttlMs)
+      }, ttlMs, { critical: true })
     }
   }
 
