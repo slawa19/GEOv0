@@ -94,10 +94,13 @@ export function useRealTxFx(deps: {
   fxColorForNode: (nodeId: string, fallback: string) => string
 
   /**
-   * Managed, non-critical timer: a scene change or a snapshot refresh of the same run cancels it
-   * (`useSceneState.ts`, `clearScheduledTimeouts`). A beam in flight then stops after its current edge.
+   * Managed timer (`demo/timerRegistry.ts`). The legs of a beam and the receiver's burst are scheduled `critical`,
+   * the class of the receiver's amount label they accompany: a snapshot REFRESH of the scene on screen keeps them
+   * (`useSceneState.ts` clears only non-critical timers when a load starts), a change of scene and an unmount clear
+   * them (`clearScene`, `timers.clearAll`). A stopped, restarted or stale run does not clear critical timers
+   * (`cleanupRealRunFxAndTimers`), so they guard themselves: see `fxGeneration`.
    */
-  scheduleTimeout: (fn: () => void, delayMs: number) => void
+  scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
   pushFloatingLabelWhenReady: (opts: {
     nodeId: string
     text: string
@@ -133,6 +136,9 @@ export function useRealTxFx(deps: {
   let txFxTokens = cfg.burst
   let txFxLastRefillAtMs = nowMs()
   let txFxLastSpawnAtMs = 0
+  // Bumped by `resetRateLimiter`, which the app calls when a run is stopped, restarted or found stale
+  // (`cleanupRealRunFxAndTimers`). A pending leg or burst of an earlier generation does nothing.
+  let fxGeneration = 0
 
   function refillTxFxTokens(tNowMs: number) {
     const dt = Math.max(0, tNowMs - txFxLastRefillAtMs)
@@ -148,6 +154,7 @@ export function useRealTxFx(deps: {
     txFxTokens = cfg.burst
     txFxLastRefillAtMs = nowMs()
     txFxLastSpawnAtMs = 0
+    fxGeneration += 1
   }
 
   function getFxState(): FxState {
@@ -183,11 +190,13 @@ export function useRealTxFx(deps: {
     // equal share of it. One spark is alive at a time, so a long route costs no more particles than a short one.
     // A leg that finds the particle budget spent (`getFxParticleBudget`) is skipped: degradation, not a failure.
     const fxOff = deps.isTestMode.value && deps.isWebDriver
+    const gen = fxGeneration
     const legMs = ttlMs / sparkEdges.length
     sparkEdges.forEach((edge, i) => {
       // The planned start, not the moment the timer fired: a late timer shortens its own leg and the total holds.
       const startAtMs = tNowMs + i * legMs
-      const spawnLeg = () =>
+      const spawnLeg = () => {
+        if (gen !== fxGeneration) return
         spawnSparks(fxState, {
           edges: [edge],
           nowMs: startAtMs,
@@ -202,8 +211,9 @@ export function useRealTxFx(deps: {
           seedFn: deps.seedFn,
           isTestMode: fxOff,
         })
+      }
       if (i === 0) spawnLeg()
-      else if (!fxOff) deps.scheduleTimeout(spawnLeg, i * legMs)
+      else if (!fxOff) deps.scheduleTimeout(spawnLeg, i * legMs, { critical: true })
     })
 
     if (!fxOff) {
@@ -220,6 +230,7 @@ export function useRealTxFx(deps: {
         isTestMode: false,
       })
       deps.scheduleTimeout(() => {
+        if (gen !== fxGeneration) return
         spawnNodeBursts(fxState, {
           nodeIds: [dst],
           nowMs: nowMs(),
@@ -230,7 +241,7 @@ export function useRealTxFx(deps: {
           seedFn: deps.seedFn,
           isTestMode: false,
         })
-      }, ttlMs)
+      }, ttlMs, { critical: true })
     }
   }
 

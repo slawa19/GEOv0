@@ -23,7 +23,7 @@ function harness(opts: { fxState?: FxState; isTestMode?: boolean; isWebDriver?: 
   const fxState = opts.fxState ?? createFxState()
   let now = 1000
   let seq = 0
-  let timers: Array<{ at: number; seq: number; fn: () => void }> = []
+  let timers: Array<{ at: number; seq: number; fn: () => void; critical: boolean }> = []
   const fx = useRealTxFx({
     fxState,
     isTestMode: ref(opts.isTestMode ?? false),
@@ -36,7 +36,7 @@ function harness(opts: { fxState?: FxState; isTestMode?: boolean; isWebDriver?: 
     txSparkColorTrail: '#0ff',
     clearingDebtColor: '#f00',
     fxColorForNode: (_id, fallback) => fallback,
-    scheduleTimeout: (fn, delayMs) => { timers.push({ at: now + delayMs, seq: seq += 1, fn }) },
+    scheduleTimeout: (fn, delayMs, o) => { timers.push({ at: now + delayMs, seq: seq += 1, fn, critical: !!o?.critical }) },
     pushFloatingLabelWhenReady: () => undefined,
     nowMs: () => now,
   })
@@ -54,7 +54,9 @@ function harness(opts: { fxState?: FxState; isTestMode?: boolean; isWebDriver?: 
   /** What the renderer does every frame: drop the sparks whose life is over (`renderFrame.ts`, `age >= ttlMs`). */
   const expire = () => { fxState.sparks = fxState.sparks.filter((s) => now - s.startedAtMs < s.ttlMs) }
   const legs = () => fxState.sparks.map((s) => `${s.source}>${s.target}@${s.startedAtMs - 1000}+${s.ttlMs}`)
-  return { fx, fxState, advance, expire, legs, clearTimers: () => { timers = [] }, pending: () => timers.length, now: () => now }
+  /** What the timer registry does: a load that starts clears the non-critical timers, a change of scene clears all. */
+  const clearTimers = (o?: { keepCritical?: boolean }) => { timers = o?.keepCritical ? timers.filter((t) => t.critical) : [] }
+  return { fx, fxState, advance, expire, legs, clearTimers, pending: () => timers.length, now: () => now }
 }
 
 describe('useRealTxFx helpers', () => {
@@ -157,13 +159,43 @@ describe('runRealTxFx: the beam walks the route edge by edge (038 S1, F-038-3)',
     expect(h.legs()).toEqual(['A>B@0+400'])
   })
 
-  it('cancelled timers (scene change, snapshot refresh) stop the beam after its current edge and add nothing later', () => {
+  // A4 (adversarial pass on fdd890c5): a refresh of the scene on screen cut the beam after its current edge while the
+  // receiver's amount label, a critical timer, still came. The legs and the receiver's burst are now of that class.
+  it('a snapshot refresh of the same scene (non-critical timers cleared) does not cut the beam: all legs and the receiver burst come', () => {
+    const h = harness()
+    h.fx.runRealTxFx(tx(route(3)))
+    h.advance(100)
+    h.clearTimers({ keepCritical: true })
+    h.advance(2000)
+    expect(h.legs()).toEqual(['A>B@0+400', 'B>C@400+400', 'C>D@800+400'])
+    expect(h.fxState.nodeBursts.map((b) => `${b.nodeId}@${b.startedAtMs - 1000}`)).toEqual(['A@0', 'D@1200'])
+  })
+
+  it('a change of scene (all timers cleared) stops the beam after its current edge and adds nothing later', () => {
     const h = harness()
     h.fx.runRealTxFx(tx(route(3)))
     h.advance(100)
     h.clearTimers()
     h.advance(2000)
     expect(h.legs()).toEqual(['A>B@0+400'])
+    expect(h.fxState.nodeBursts.map((b) => b.nodeId)).toEqual(['A'])
+  })
+
+  it('a stopped or restarted run (resetRateLimiter; its cleanup keeps critical timers) stops the beam: pending legs and the burst do nothing', () => {
+    const h = harness()
+    h.fx.runRealTxFx(tx(route(3)))
+    h.advance(100)
+    h.clearTimers({ keepCritical: true }) // what `cleanupRealRunFxAndTimers` does to the timers ...
+    h.fxState.sparks.length = 0 // ... and to the FX state (`resetOverlays`),
+    h.fxState.nodeBursts.length = 0
+    h.fx.resetRateLimiter() // ... and to this composable
+    h.advance(2000)
+    expect(h.legs(), 'no leg of the old run is drawn on the scene of the new one').toEqual([])
+    expect(h.fxState.nodeBursts).toHaveLength(0)
+    // The next payment is animated in full.
+    h.fx.runRealTxFx(tx(route(2)))
+    h.advance(1200)
+    expect(h.legs()).toEqual([`A>B@${h.now() - 1200 - 1000}+600`, `B>C@${h.now() - 600 - 1000}+600`])
   })
 
   it('snapshot stand (test mode under WebDriver): nothing is spawned and no timer is scheduled', () => {

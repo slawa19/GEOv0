@@ -14,46 +14,12 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { NAMED_OCCLUDERS } from './oracle.js'
-import { EQ, RUN_ID, SCENARIO_ID, boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, screenNodes, txUpdated, type Pt } from './stand.js'
+import {
+  OTHER_SCENARIO, RUN_ID, SCENARIO_ID, bootTwoScenarios, frames, fxCounts, loopCounters, pushEvent, screenNodes, txUpdated, type Pt, type SceneFail,
+} from './stand.js'
 
-const OTHER_SCENARIO = 'p038-qa-unloadable'
 /** The colour `useRenderLoop` fills the base canvas with before it draws the graph. */
 const BASE_FILL = [2, 6, 23] as const
-
-/** `other`: the preview of the other scenario answers 500. `all`: every scene read answers 500. */
-type Fail = { other: boolean; all: boolean }
-
-/** The stand's backend with a second scenario; its scene (or every scene) cannot be loaded while `fail` says so. */
-async function bootTwoScenarios(page: Page, fail: Fail) {
-  const item = (scenario_id: string, name: string) => ({ api_version: 'simulator-api/1', scenario_id, name, participants_count: 6, trustlines_count: 6, equivalents: [EQ] })
-  await boot(page, {
-    snapshot: ringSnapshot(),
-    clock: true,
-    ui: 'auto', // the Auto-Run segment: the scenario selector lives there
-    beforeLoad: async (p) => {
-      await p.route(/\/simulator\/scenarios$/i, (r) => r.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ api_version: 'simulator-api/1', items: [item(SCENARIO_ID, 'QA stand'), item(OTHER_SCENARIO, 'QA stand, unloadable')] }),
-      }))
-      await p.route(/\/graph\/(snapshot|preview)/i, (r) => {
-        const other = new URL(r.request().url()).pathname.includes(`/scenarios/${OTHER_SCENARIO}/`)
-        if (fail.all || (other && fail.other)) {
-          return r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'QA_STAND_NO_SCENE', message: 'qa stand: this scene cannot be loaded' }) })
-        }
-        // Loadable: other participants, so that choosing it is a full reload of the scene and not an increment.
-        if (other) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(otherRing()) })
-        return r.fallback()
-      })
-    },
-  })
-}
-
-/** The ring with other participant ids. */
-function otherRing() {
-  const s = ringSnapshot()
-  const rename = (id: string) => `x${id}`
-  return { ...s, nodes: s.nodes.map((n) => ({ ...n, id: rename(n.id), name: `X${String(n.name)}` })), links: s.links.map((l) => ({ ...l, source: rename(l.source), target: rename(l.target) })) }
-}
 
 type Pixels = { base: { painted: number; graph: number }; fx: { painted: number } }
 
@@ -266,7 +232,7 @@ test('empty snapshot: a payment event that arrives after the scene was cleared p
 })
 
 test('counter-check: a failed load of the SAME source keeps the graph on the canvas and on the page', async ({ page }) => {
-  const fail: Fail = { other: true, all: false }
+  const fail: SceneFail = { other: true, all: false }
   await bootTwoScenarios(page, fail)
   const before = await sceneBefore(page)
   // The run is live and its scene is on screen. Every scene read now fails, and an event asks for a refresh of the

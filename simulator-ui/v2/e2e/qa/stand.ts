@@ -482,3 +482,42 @@ export async function syncCssToClock(page: Page): Promise<LabelSample[]> {
       }
     }))
 }
+
+// --- A second scenario next to the stand's own: for a change of scene and for a scene that cannot be loaded. ---
+
+export const OTHER_SCENARIO = 'p038-qa-unloadable'
+/** `other`: the preview of the other scenario answers 500. `all`: every scene read answers 500. */
+export type SceneFail = { other: boolean; all: boolean; /** Scene reads seen so far (snapshot and preview), counted by the mock. */ reads?: number }
+
+/** The stand's backend with a second scenario; its scene (or every scene) cannot be loaded while `fail` says so. */
+export async function bootTwoScenarios(page: Page, fail: SceneFail) {
+  const item = (scenario_id: string, name: string) => ({ api_version: 'simulator-api/1', scenario_id, name, participants_count: 6, trustlines_count: 6, equivalents: [EQ] })
+  await boot(page, {
+    snapshot: ringSnapshot(),
+    clock: true,
+    ui: 'auto', // the Auto-Run segment: the scenario selector lives there
+    beforeLoad: async (p) => {
+      await p.route(/\/simulator\/scenarios$/i, (r) => r.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ api_version: 'simulator-api/1', items: [item(SCENARIO_ID, 'QA stand'), item(OTHER_SCENARIO, 'QA stand, unloadable')] }),
+      }))
+      await p.route(/\/graph\/(snapshot|preview)/i, (r) => {
+        const other = new URL(r.request().url()).pathname.includes(`/scenarios/${OTHER_SCENARIO}/`)
+        fail.reads = (fail.reads ?? 0) + 1
+        if (fail.all || (other && fail.other)) {
+          return r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 'QA_STAND_NO_SCENE', message: 'qa stand: this scene cannot be loaded' }) })
+        }
+        // Loadable: other participants, so that choosing it is a full reload of the scene and not an increment.
+        if (other) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(otherRing()) })
+        return r.fallback()
+      })
+    },
+  })
+}
+
+/** The ring with other participant ids. */
+export function otherRing() {
+  const s = ringSnapshot()
+  const rename = (id: string) => `x${id}`
+  return { ...s, nodes: s.nodes.map((n) => ({ ...n, id: rename(n.id), name: `X${String(n.name)}` })), links: s.links.map((l) => ({ ...l, source: rename(l.source), target: rename(l.target) })) }
+}
