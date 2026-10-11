@@ -8,14 +8,17 @@
  * collects them. Run: `npm run test:e2e:qa:video`. Videos land in the Playwright output directory, one folder a test;
  * the HTML report next to it embeds them.
  */
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { defineConfig } from '@playwright/test'
 
 const port = Number.parseInt(process.env.PW_E2E_PORT ?? '', 10) || 5197
 const baseURL = `http://127.0.0.1:${port}`
-const outputDir = process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR
-  ?? fileURLToPath(new URL('../../../../.local-run/playwright/simulator/qa-video/', import.meta.url))
+// `resolve` drops a trailing separator of either kind, so that the report folder is a sibling of the output folder
+// and never inside it (Playwright refuses a report folder that clashes with the output folder).
+const outputDir = resolve(process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR
+  ?? fileURLToPath(new URL('../../../../.local-run/playwright/simulator/qa-video/', import.meta.url)))
 
 export default defineConfig({
   testDir: '.',
@@ -23,7 +26,7 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 20_000 },
   workers: 1,
-  reporter: [['list'], ['html', { outputFolder: `${outputDir.replace(/[\/]+$/, '')}-report`, open: 'never' }]],
+  reporter: [['list'], ['html', { outputFolder: `${outputDir}-report`, open: 'never' }]],
   outputDir,
   use: {
     baseURL,
