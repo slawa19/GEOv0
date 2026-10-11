@@ -152,6 +152,22 @@ def violations(inputs: dict[str, Any]) -> list[str]:
     uploads = [s for s in full.get("steps", []) if isinstance(s, dict) and str(s.get("uses", "")).startswith("actions/upload-artifact@")]
     if not any(s.get("if") == "always()" for s in uploads):
         found.append("job simulator-qa-stand does not upload the HTML report on every run")
+    # 6. The perf project (wall clock, a real-time fps threshold) never blocks a pull request.
+    perf = jobs.get("simulator-qa-perf", {})
+    if perf.get("if") != _SCHEDULE_ONLY_IF:
+        found.append("job simulator-qa-perf is not the scheduled/manual job")
+    perf_runs = [s for s in perf.get("steps", []) if isinstance(s, dict) and "test:e2e:qa:perf" in str(s.get("run", ""))]
+    if len(perf_runs) != 2 or sum(1 for s in perf_runs if s.get("env", {}).get("QA_STAND_SERVER") == "preview") != 1:
+        found.append("job simulator-qa-perf does not run the perf project once on the dev server and once on a production build")
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict) or job.get("if") == _SCHEDULE_ONLY_IF:
+            continue
+        for step in job.get("steps", []):
+            run = str(step.get("run", "")) if isinstance(step, dict) else ""
+            if re.search(r"qa:perf|qa-perf|qaperf", run):
+                found.append(f"job {job_id}, which runs on pull requests, runs the perf project: {' '.join(run.split())}")
+    if "--project=qa-perf" in runner or ".qaperf" in runner:
+        found.append("run-stand.mjs, the entry of the required step, selects the perf project")
     return found
 
 
@@ -191,6 +207,11 @@ _MUTATIONS = {
     "the entry ignores the verdict": (lambda i: i.update(runner=i["runner"].replace("process.exit(v.code)", "process.exit(0)")), "lost its refusal"),
     "the config allows retries": (lambda i: i.update(config=i["config"].replace("retries: 0", "retries: 2")), "retries"),
     "the entry allows retries": (lambda i: i.update(runner=i["runner"].replace("--retries=0", "--retries=2")), "lost its refusal"),
+    "the perf job runs on every pull request": (lambda i: i["workflow"]["jobs"]["simulator-qa-perf"].pop("if"), "runs the perf project"),
+    "the required step also runs the perf project": (
+        lambda i: _gate_step(i).update({"run": _GATE_COMMAND + " && npm --prefix simulator-ui/v2 run test:e2e:qa:perf"}), "runs the perf project"),
+    "the perf job loses its production build": (
+        lambda i: [s.get("env", {}).pop("QA_STAND_SERVER", None) for s in i["workflow"]["jobs"]["simulator-qa-perf"]["steps"]], "once on a production build"),
     "the scheduled job runs on every pull request": (lambda i: i["workflow"]["jobs"]["simulator-qa-stand"].pop("if"), "not the scheduled/manual job"),
 }
 

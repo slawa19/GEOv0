@@ -164,8 +164,11 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-11, 038 slice S2, adversarial pass (D4): portable 427 -> 433. Six cases added to `portable/test_p038_qa_stand_gate.py`:
 #: five more mutations of the wiring (a flaky test tolerated, an expected failure let into the gate, the verdict ignored by the
 #: entry, retries allowed in the config and in the entry) and the verdict of the gate entry run on made-up runs through node (1).
+#:
+#: 2026-10-11, 038 S2 + S3 merged (I3): portable 433 -> 436. Three more mutations in the same module: the perf job put on every pull
+#: request, the required step made to run the perf project, the perf job without its production build.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 433,
+    "portable": 436,
     "powershell": 235,
 }
 
