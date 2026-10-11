@@ -231,6 +231,32 @@ test('empty snapshot: a payment event that arrives after the scene was cleared p
   expect(maxLabels, 'no amount label is on the screen while there is no scene').toBe(0)
 })
 
+// A5 (adversarial pass on fdd890c5): with no scene the loop did not fall asleep after an event. The event puts
+// sparks into the FX state, their life is ended only by a frame that draws (`renderFrame.ts`), and without a snapshot
+// no frame draws - so "something is animating" stayed true for ever: 125 frames requested in 2 s, 8 s after the event.
+test('empty snapshot: after a payment and a clearing event the render loop falls asleep again (no draw and no frame requested in 2 s)', async ({ page }) => {
+  await bootTwoScenarios(page, { other: true, all: false })
+  await switchToUnloadableScenario(page)
+  await pushEvent(page, txUpdated(['a', 'b', 'c'], '10.00'))
+  await frames(page, 30)
+  await pushEvent(page, {
+    type: 'clearing.done', plan_id: 'plan-p038-empty', cleared_cycles: 1, cleared_amount: '7.00',
+    cycle_edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'a' }],
+  })
+  const pushed = await loopCounters(page)
+  await frames(page, 3)
+  const woken = await loopCounters(page)
+  await page.clock.runFor(8000) // every label TTL (3800 ms), the hold and the 3 s idle delay
+  const rested = await loopCounters(page)
+  await page.clock.runFor(2000)
+  const asleep = await loopCounters(page)
+  const row = { rafOnEvent: woken.calls - pushed.calls, rafIn2sAfter8s: asleep.calls - rested.calls, clearsIn2sAfter8s: asleep.draws - rested.draws, hasSnapshot: await hasSnapshot(page) }
+  console.log('[038 sleep/empty]', JSON.stringify(row))
+  expect(row.hasSnapshot).toBe(false)
+  expect(row.rafOnEvent, 'counter-check: the events do wake the loop').toBeGreaterThan(0)
+  expect({ raf: row.rafIn2sAfter8s, clears: row.clearsIn2sAfter8s }, 'deep sleep: nothing requested and nothing drawn').toEqual({ raf: 0, clears: 0 })
+})
+
 test('counter-check: a failed load of the SAME source keeps the graph on the canvas and on the page', async ({ page }) => {
   const fail: SceneFail = { other: true, all: false }
   await bootTwoScenarios(page, fail)

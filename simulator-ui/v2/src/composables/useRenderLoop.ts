@@ -578,10 +578,13 @@ export function useRenderLoop(deps: UseRenderLoopDeps): UseRenderLoopReturn {
   }
 
   function hasActiveFxOrOverlays() {
+    // Labels expire in `renderFrame` even without a snapshot. Everything below is drawn and aged only by a frame
+    // that has a snapshot, so with none of it there is nothing to animate - and the loop may sleep (038 S1, A5).
+    if (deps.hasFloatingLabels?.()) return true
+    if (!deps.getSnapshot()) return false
     if (deps.getFlash() > 0) return true
     if (deps.activeEdges && deps.activeEdges.size > 0) return true
     if (deps.activeNodes && deps.activeNodes.size > 0) return true
-    if (deps.hasFloatingLabels?.()) return true
 
     const fxState = deps.fxState
     const sparks = Array.isArray(fxState?.sparks) ? fxState.sparks.length : 0
