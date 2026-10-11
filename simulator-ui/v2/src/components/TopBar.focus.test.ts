@@ -101,6 +101,24 @@ describe('TopBar dropdown focus contract', () => {
     host.remove()
   })
 
+  it('BACKLOG 037-5 (a): an error line longer than the bar shows keeps its full text reachable (the reason is at the end)', async () => {
+    const full = `SCENARIO_TRUSTLINE_REFUSED: trust line ${'a'.repeat(90)}->${'b'.repeat(90)} UAH: refused (reason: trust_line_status_frozen)`
+    const { app, host } = await mountTopBar({
+      runStatus: ref<RunStatus | null>({ run_id: 'run-1', scenario_id: 'scenario-1', state: 'error' }),
+      lastError: ref<string | null>(full),
+    })
+
+    const error = host.querySelector('[aria-label="Error"]')
+    expect(error?.textContent).toContain('SCENARIO_TRUSTLINE_REFUSED')
+    // the visible line is shortened, so the end of the text is not in it...
+    expect(error?.textContent).not.toContain('trust_line_status_frozen')
+    // ...and the full text is on the element a pointer rests on
+    expect(error?.querySelector('[title]')?.getAttribute('title')).toBe(full)
+
+    app.unmount()
+    host.remove()
+  })
+
   it('moves keyboard-opened focus inside Advanced and traps Tab until Escape closes it', async () => {
     const { app, host } = await mountTopBar()
 

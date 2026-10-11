@@ -2209,6 +2209,23 @@ describe('useSimulatorRealMode - REST run status error text (031 T3191 finding 1
       }))
       await h.refreshRunStatus()
       expect(real.lastError).toBe('INTERNAL_ERROR: boom')
+
+      // BACKLOG 037-5 (a): a run in `error` shows the error it stopped with, whatever its code (page reload / attach path)
+      getRunMock.mockImplementation(async () => ({
+        ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
+        state: 'error',
+        last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' },
+      }))
+      await h.refreshRunStatus()
+      expect(real.lastError).toBe('REAL_MODE_TICK_FAILED: tick failed')
+      // anti-vacuum: the same code on a run that is not stopped stays hidden
+      getRunMock.mockImplementation(async () => ({
+        ...(await prevGetRunImpl({ apiBase: 'http://x', accessToken: '' }, 'r1')),
+        state: 'running',
+        last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: 't' },
+      }))
+      await h.refreshRunStatus()
+      expect(real.lastError).toBe('')
     } finally {
       getRunMock.mockImplementation(prevGetRunImpl)
     }

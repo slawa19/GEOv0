@@ -12,6 +12,21 @@ export function isUserFacingRunErrorCode(code: string): boolean {
   return false
 }
 
+/**
+ * The error line of a run status (BACKLOG 037-5 (a)). A run in `error` was stopped by `last_error`: it is shown whatever
+ * its code, because it is the only answer to "why did the run stop". For a run that goes on, the list of user-facing
+ * codes decides as before. Not judged here: whether the server's message is fit for a person - it is printed as sent.
+ */
+export function runStatusErrorText(
+  status: { state?: string | null; last_error?: RunError | null },
+  isUserFacing: (code: string) => boolean,
+): string {
+  const error = status.last_error
+  if (!error) return ''
+  const stopped = String(status.state ?? '').trim().toLowerCase() === 'error'
+  return stopped || isUserFacing(error.code) ? runErrorText(error) : ''
+}
+
 /** The run-level error line: the step refusal is a human text in the interface language, the rest is `CODE: message`. */
 export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): string {
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return clearingStepRefusalText(null, locale)

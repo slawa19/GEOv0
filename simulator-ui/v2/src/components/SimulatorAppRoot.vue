@@ -1387,6 +1387,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :payment-targets-loading="paymentTargetsLoading"
           :payment-targets-max-hops="paymentTargetsMaxHops"
           :payment-to-target-ids="paymentToTargetIds"
+          :payment-to-last-known-target-ids="interact.mode.paymentToLastKnownTargetIds?.value"
           :trustlines="trustlines"
           :trustlines-last-error="trustlinesLastError"
           :payment-targets-last-error="paymentTargetsLastError"

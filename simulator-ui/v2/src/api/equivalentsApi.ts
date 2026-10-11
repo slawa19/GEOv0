@@ -1,3 +1,4 @@
+import { isJwtLike } from '../utils/isJwtLike'
 import { ApiError, httpJson, type HttpConfig } from './http'
 
 /**
@@ -35,8 +36,17 @@ function rowsOf(res: EquivalentsListResponse | null | undefined): EquivalentPrec
  * — so an auth refusal on the first is retried on the second rather than reported as
  * "no catalogue". A visitor with neither credential gets neither, which the caller must
  * treat as "keep the defaults", not as an error worth showing.
+ *
+ * BACKLOG 037-5 (d): the participant endpoint is asked only with the credential it can accept. A token that is not a
+ * JWT travels as `X-Admin-Token` (`applyAuthHeaders`), and no token travels as nothing: `GET /equivalents` answers both
+ * 401 by construction, on every page load. Those two go straight to the admin catalogue - the one request that can pass
+ * (with the token, or without one on a dev backend that trusts the address). Still refused without either: a visitor
+ * of a non-dev backend with no token gets one 403 here, and no published endpoint serves him the catalogue.
  */
 export async function fetchEquivalentPrecisions(cfg: HttpConfig): Promise<EquivalentPrecisionRow[]> {
+  if (!isJwtLike(String(cfg.accessToken ?? ''))) {
+    return rowsOf(await httpJson<EquivalentsListResponse>(cfg, '/admin/equivalents'))
+  }
   try {
     return rowsOf(await httpJson<EquivalentsListResponse>(cfg, '/equivalents'))
   } catch (e: unknown) {
