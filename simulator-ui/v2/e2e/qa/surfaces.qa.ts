@@ -17,7 +17,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { boot, ringSnapshot, screenNodes } from './stand.js'
 import { AXE_BASELINE, AXE_WHY, KNOWN_FINDINGS } from './surfaceBaseline.js'
 import {
-  bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, MATRIX, settled, SURFACE_DOM, THEMES,
+  bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, freeNode, MATRIX, settled, SURFACE_DOM, THEMES,
   VIEWPORT_LARGE, VIEWPORT_MAIN, VIEWPORT_RESIZED, type Box, type Entry, type Theme, type Viewport,
 } from './surfaceMatrix.js'
 
@@ -403,6 +403,31 @@ test('matrix [hud] menu-admin: when its focused control is disabled under the fo
   await expect(page.locator('summary[aria-label="Admin"]'), 'and the focus is back on its summary').toBeFocused()
   release()
 })
+
+for (const id of ['menu-admin', 'menu-dev-tools']) {
+  test(`matrix [hud] ${id} left open, then a node card opened from the canvas: Escape and Tab belong to the card, not to the menu`, async ({ page }) => {
+    // The other side of the rule above (038 S2, D2): the focus is on `body` here too, but because the user went
+    // elsewhere - a card opened from the canvas has its focus on `body` by declaration - not because it fell out.
+    const e = MATRIX.find((x) => x.id === id)!
+    await bootEntry(page, e, 'hud', VIEWPORT_MAIN)
+    await e.open(page)
+    const menu = page.locator(e.root)
+    await expect(menu).toBeVisible()
+
+    const node = await freeNode(page)
+    await page.mouse.dblclick(node.at.x, node.at.y)
+    const card = page.locator('.ws-shell[data-win-type="node-card"]')
+    await expect(card).toBeVisible()
+    await expect(menu, 'counter-check: the menu has no outside-click rule and is still open').toBeVisible()
+
+    await page.keyboard.press('Tab')
+    expect.soft(await activeInside(page, e.root), `Tab is not pulled into the menu the user has left; the focus is on ${await activeName(page)}`).toBe(false)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('Escape')
+    await expect.soft(card, 'Escape closes the card (useWindowManager.ts getPolicy: escBehavior close)').toBeHidden({ timeout: 2000 })
+    await expect.soft(menu, 'and leaves the menu as it was').toBeVisible()
+  })
+}
 
 // --- a defect outside the owner surface of 038: recorded as a reproducer, not fixed ---------------------------------
 

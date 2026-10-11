@@ -57,19 +57,37 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
    * The focus can fall out of an open menu without the user moving it: a control that becomes disabled while it is
    * focused (the Admin menu's "Refresh" while runs load) is dropped to `body` by the browser. `body` is outside the
    * `<details>` whose key handler holds the policy, so Escape closed nothing and Tab walked off into the page behind
-   * the open menu (038 S2). While the menu is open and the focus is NOWHERE, those two keys are the menu's. A focus
-   * that sits on any real element is left alone: that element's owner decides.
+   * the open menu (038 S2). While the menu is open and the focus FELL OUT of it, those two keys are the menu's.
+   *
+   * "Fell out" is not "is on `body`": a user who leaves the open menu and opens a node card from the canvas has the
+   * focus on `body` too, and there Escape belongs to the card (038 S2, D2 - the first version took it). So the menu
+   * remembers whether the focus was last seen inside it, and forgets on any focus or press outside it.
    */
+  let focusHeld = false
+  const isInside = (target: EventTarget | null) =>
+    target instanceof Node && [detailsRef.value, summaryRef.value, surfaceRef.value].some((el) => el?.contains(target))
+
+  function onDocumentFocusIn(event: FocusEvent): void {
+    focusHeld = isInside(event.target)
+  }
+
+  function onDocumentPointerDown(event: Event): void {
+    if (!isInside(event.target)) focusHeld = false
+  }
+
   function onDocumentKeydown(event: KeyboardEvent): void {
-    if (!open.value || (event.key !== 'Escape' && event.key !== 'Tab')) return
+    if (!open.value || !focusHeld || (event.key !== 'Escape' && event.key !== 'Tab')) return
     const active = document.activeElement
     if (active && active !== document.body) return
     onDetailsKeydown(event)
   }
 
   function unbindWhileOpen(): void {
+    focusHeld = false
     window.removeEventListener('resize', clampSurfaceIntoViewport)
     document.removeEventListener('keydown', onDocumentKeydown, true)
+    document.removeEventListener('focusin', onDocumentFocusIn, true)
+    document.removeEventListener('pointerdown', onDocumentPointerDown, true)
   }
 
   if (getCurrentScope()) onScopeDispose(unbindWhileOpen)
@@ -84,7 +102,10 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
     if (details.open) {
       clampSurfaceIntoViewport()
       window.addEventListener('resize', clampSurfaceIntoViewport)
+      focusHeld = isInside(document.activeElement)
       document.addEventListener('keydown', onDocumentKeydown, true)
+      document.addEventListener('focusin', onDocumentFocusIn, true)
+      document.addEventListener('pointerdown', onDocumentPointerDown, true)
     }
 
     if (details.open) {
