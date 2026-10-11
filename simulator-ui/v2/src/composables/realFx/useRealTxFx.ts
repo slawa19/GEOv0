@@ -97,8 +97,8 @@ export function useRealTxFx(deps: {
    * Managed timer (`demo/timerRegistry.ts`). The legs of a beam and the receiver's burst are scheduled `critical`,
    * the class of the receiver's amount label they accompany: a snapshot REFRESH of the scene on screen keeps them
    * (`useSceneState.ts` clears only non-critical timers when a load starts), a change of scene and an unmount clear
-   * them (`clearScene`, `timers.clearAll`). A stopped, restarted or stale run does not clear critical timers
-   * (`cleanupRealRunFxAndTimers`), so they guard themselves: see `fxGeneration`.
+   * them (`clearScene`, `timers.clearAll`). The cleanup of a run (`cleanupRealRunFxAndTimers`) does not clear
+   * critical timers, so they guard themselves: see `fxGeneration` for which ways of ending a run that covers.
    */
   scheduleTimeout: (fn: () => void, delayMs: number, opts?: { critical?: boolean }) => void
   pushFloatingLabelWhenReady: (opts: {
@@ -136,8 +136,11 @@ export function useRealTxFx(deps: {
   let txFxTokens = cfg.burst
   let txFxLastRefillAtMs = nowMs()
   let txFxLastSpawnAtMs = 0
-  // Bumped by `resetRateLimiter`, which the app calls when a run is stopped, restarted or found stale
-  // (`cleanupRealRunFxAndTimers`). A pending leg or burst of an earlier generation does nothing.
+  // Bumped by `resetRateLimiter`, which `cleanupRealRunFxAndTimers` calls: on the user's own Stop, on start/restart,
+  // on attach and on a stale-run reset. A pending leg or burst of an earlier generation does nothing.
+  // NOT bumped by an administrative Stop / Stop-all or by a run that ends on the server: those paths do not run that
+  // cleanup, and the effect of the last payment lives on, on the same scene, until the next start/attach
+  // (BACKLOG 038-1 (c)).
   let fxGeneration = 0
 
   function refillTxFxTokens(tNowMs: number) {
