@@ -74,10 +74,14 @@ test('R5 - a mouse drag moves the node by delta / zoom under a zoomed and panned
   expect(cam.zoom, 'the wheel zoomed the camera in').toBeGreaterThan(cam0.zoom * 1.2)
   expect(Math.hypot(cam.panX - cam0.panX, cam.panY - cam0.panY), 'the camera is panned').toBeGreaterThan(30)
 
-  // A node that is on screen now and stays on screen after the drag.
+  // A node that is on screen now and stays on screen after the drag - and that the HUD does not cover. The rectangle
+  // alone assumed the height of the top bar: with the fonts of the CI runner (ubuntu) its balance row wraps at 1280x720,
+  // the navigator panel moves 44 px down onto the chosen node, and the press landed on the panel (038 S2, run
+  // 38148791313: worldDelta 0, pinned []). The assertions below are unchanged; only where the mouse is pressed is.
   const delta = { x: 120, y: -60 }
-  const onScreen = [...(await screenNodes(page)).entries()].find(([, p]) =>
-    p.x > VIEW.x0 && p.x + delta.x < VIEW.x1 && p.y + delta.y > VIEW.y0 && p.y < VIEW.y1)
+  const bare = new Set((await draggableNodes(page, delta)).map(([k]) => k))
+  const onScreen = [...(await screenNodes(page)).entries()].find(([k, p]) =>
+    bare.has(k) && p.x > VIEW.x0 && p.x + delta.x < VIEW.x1 && p.y + delta.y > VIEW.y0 && p.y < VIEW.y1)
   expect(onScreen, 'a node is on screen with room to be dragged').toBeTruthy()
   const [id, at] = onScreen!
   const before = (await layoutNodes(page)).find((n) => n.id === id)!
@@ -101,7 +105,8 @@ test('R5 - a mouse drag moves the node by delta / zoom under a zoomed and panned
   expect(row.windows[1], 'the release after a drag opens no node card').toBe(windowsBefore)
 
   // Counter-check of "moved": a press and release without movement moves nothing and pins nothing more.
-  const other = [...(await screenNodes(page)).entries()].find(([k, p]) => k !== id && p.x > VIEW.x0 && p.x < VIEW.x1 && p.y > VIEW.y0 && p.y < VIEW.y1)
+  const bareNow = new Set((await draggableNodes(page, { x: 0, y: 0 })).map(([k]) => k)) // a press on the HUD would move nothing by itself
+  const other = [...(await screenNodes(page)).entries()].find(([k, p]) => k !== id && bareNow.has(k) && p.x > VIEW.x0 && p.x < VIEW.x1 && p.y > VIEW.y0 && p.y < VIEW.y1)
   expect(other, 'a second node is on screen for the counter-check').toBeTruthy()
   const b = (await layoutNodes(page)).find((n) => n.id === other![0])!
   await mouseDrag(page, other![1], { x: 0, y: 0 }, 1)
