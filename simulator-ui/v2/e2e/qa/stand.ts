@@ -223,6 +223,16 @@ export type BootOptions = {
   beforeLoad?: (page: Page) => Promise<void>
   /** Only for the probe that deliberately opens a WebDriver browser to show what it hides. Everything else must run as a user. */
   allowWebdriver?: true
+  /**
+   * `false` (038 S2): return as soon as the page runs in the user's mode, without waiting for a scene. For the two
+   * surfaces that exist only while there is no scene (the loading and the error message). The clock is not paused.
+   */
+  awaitScene?: false
+  /**
+   * `false` (038 S2): do not wait for physics to stop moving nodes. Only for checks of DOM surfaces that do not read
+   * positions at load; whatever then clicks the canvas waits for a still layout itself. Not with `clock: true`.
+   */
+  awaitLayout?: false
 }
 
 /**
@@ -273,6 +283,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.beforeLoad) await o.beforeLoad(page)
   await page.goto(`/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
   await assertUserMode(page, o)
+  if (o.awaitScene === false) return mock
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   if (o.sseShim !== false) {
     await expect
@@ -284,7 +295,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
     return mock
   }
   await expect.poll(() => layoutNodes(page).then((n) => n.length), { timeout: 20_000 }).toBe(o.snapshot.nodes.length)
-  await waitLayoutStill(page)
+  if (o.awaitLayout !== false || o.clock) await waitLayoutStill(page)
   if (o.clock) {
     const now = await page.evaluate(() => Date.now())
     await page.clock.pauseAt(now + 1000)
