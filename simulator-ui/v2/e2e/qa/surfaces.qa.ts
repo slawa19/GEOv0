@@ -47,7 +47,9 @@ test('matrix <-> catalogue: every catalogue key is in the matrix or excluded by 
 test('matrix <-> baseline: every baselined finding and axe rule belongs to an entry and has a reason', async () => {
   const ids = new Set([...MATRIX.map((e) => e.id), 'page'])
   expect([...Object.keys(KNOWN_FINDINGS), ...Object.keys(AXE_BASELINE)].filter((id) => !ids.has(id)), 'a baseline line of an entry that no longer exists').toEqual([])
-  for (const list of Object.values(KNOWN_FINDINGS)) for (const k of list) expect(k.why.length, `"${k.finding}" has a reason`).toBeGreaterThan(10)
+  for (const list of Object.values(KNOWN_FINDINGS)) {
+    for (const k of list) expect(k.why.length > 10 && /^\d{4}-\d{2}-\d{2}$/.test(k.since), `"${k.finding}" has a reason and a date`).toBe(true)
+  }
   const rules = new Set(Object.values(AXE_BASELINE).flatMap((t) => Object.values(t).flatMap((r) => Object.keys(r ?? {}))))
   expect([...rules].filter((r) => !(r in AXE_WHY)), 'a baselined axe rule without a reason in AXE_WHY').toEqual([])
   expect(Object.keys(AXE_WHY).filter((r) => !rules.has(r)), 'a reason for a rule that is no longer baselined').toEqual([])
@@ -120,7 +122,10 @@ type AxeRow = { counts: Record<string, number>; targets: string[]; incomplete: s
  * stepped in 4 ms slices until the scan answers; the surface lives through that (the scan needs well under a second).
  */
 async function axe(page: Page, include: string | null, clock: boolean): Promise<AxeRow> {
-  let b = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+  // Legacy mode: axe finishes in this page. Otherwise it opens and closes a blank page of its own, the fake clock is
+  // the context's, and a step of the clock that meets the closing page dies with "Target page ... has been closed"
+  // (seen once in about twenty runs, toast-error; 038 S2). There are no cross-origin frames here for the other mode to serve.
+  let b = new AxeBuilder({ page }).setLegacyMode(true).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
   if (include) b = b.include(include)
   let done = false
   const scan = b.analyze().finally(() => { done = true })
@@ -159,13 +164,23 @@ const activeIs = (page: Page, sel: string) =>
 const activeName = (page: Page) =>
   page.evaluate(() => { const a = document.activeElement; return a ? `${a.tagName.toLowerCase()}#${a.id}.${[...a.classList].join('.')}[${a.getAttribute('aria-label') ?? (a as HTMLElement).dataset?.testid ?? ''}]` : 'null' })
 
+/** The click that is "outside" for this surface: the empty canvas, or the place its policy names. */
+async function clickOutside(page: Page, e: Entry): Promise<void> {
+  const at = e.policies.outsideClick?.at
+  if (at) {
+    await page.locator(at).click({ position: { x: 6, y: 6 } })
+    return
+  }
+  const p = await emptyCanvasPoint(page)
+  await page.mouse.click(p.x, p.y)
+}
+
 /** Close the surface the way its own policy says a user can: a click on the empty canvas where that closes it, Escape otherwise. */
 async function closeIt(page: Page, e: Entry): Promise<void> {
   const root = page.locator(e.root).first()
   if (!(await root.isVisible())) return
   if (e.policies.outsideClick?.closes) {
-    const at = await emptyCanvasPoint(page)
-    await page.mouse.click(at.x, at.y)
+    await clickOutside(page, e)
   } else {
     await page.keyboard.press('Escape')
   }
@@ -184,10 +199,10 @@ async function checkPolicies(page: Page, e: Entry): Promise<Record<string, unkno
   const openAnew = async () => { await closeIt(page, e); await e.open(page); await settled(page, e) }
 
   if (p.outsideClick) {
-    const at = await emptyCanvasPoint(page)
-    await page.mouse.click(at.x, at.y)
+    await clickOutside(page, e)
     if (p.outsideClick.closes) await expect(root, `${e.id}: a click on the empty canvas closes it (${p.outsideClick.declared})`).toBeHidden()
     else await expect(root, `${e.id}: a click on the empty canvas leaves it open (${p.outsideClick.declared})`).toBeVisible()
+    if (p.outsideClick.at) await expect(page.locator(p.outsideClick.at), `: the click outside closed this surface only`).toBeVisible()
     seen.outside = p.outsideClick.closes ? 'closed' : 'stayed'
   }
 
@@ -396,6 +411,10 @@ test('matrix [hud] node-card opened from the graph navigator: Escape returns the
   await page.keyboard.press('Enter')
   const card = page.locator('.ws-shell[data-win-type="node-card"]')
   await expect(card).toBeVisible()
+  // The focus is taken off the opener first: left on it, "the focus is on the opener after Escape" would hold with no
+  // restore at all (038 S2, D5a).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await expect(opener, 'counter-check: the focus is not on the opener before the card is closed').not.toBeFocused()
   await page.keyboard.press('Escape')
   await expect(card, 'Escape closes the card (useWindowManager.ts getPolicy: escBehavior close)').toBeHidden()
   await expect(opener, 'the focus is back on the control that opened the card (useWindowManager.ts restoreFocusAfterClose)').toBeFocused()

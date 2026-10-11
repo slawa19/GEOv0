@@ -357,6 +357,13 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   await assertUserMode(page, o)
   if (o.awaitScene === false) return mock
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
+  // The stand is about a machine without a GPU, and the flags that make the browser one live in a config nobody
+  // executes a check of. The product's own verdict is on its root (`data-gpu`, from `useQualityAutoguards`).
+  const gpu = await page.locator('.root').getAttribute('data-gpu')
+  if (gpu !== '0' && !o.allowWebdriver) { // the WebDriver probe starts a browser of its own, on purpose not the stand's
+    throw new Error(`038 QA stand refuses to run: the product says a GPU is likely (data-gpu = ${String(gpu)}, expected "0"). `
+      + 'The stand measures a software-only browser; run through e2e/playwright.qa.config.ts, which starts Chromium with --disable-gpu.')
+  }
   if (o.sseShim !== false) {
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __qaSse: { state: { controllers: unknown[] } } }).__qaSse.state.controllers.length), { timeout: 20_000 })
@@ -416,7 +423,13 @@ let eventSeq = 0
 /** One SSE frame in the wire shape of the backend: `id` equals `event_id`, ids are of the run and grow. */
 export async function pushEvent(
   page: Page, evt: Record<string, unknown> & { type: string },
-  opts?: { eventId?: string; /** `false`: return as soon as the frame is written - only for the probe that shows what that costs. */ awaitTaken?: false },
+  opts?: {
+    eventId?: string
+    /** `false`: return as soon as the frame is written - only for the probe that shows what that costs. */
+    awaitTaken?: false
+    /** `true`: the test MEANS to write into nothing (no connection is listening). Otherwise a frame nobody took is an error. */
+    expectLost?: true
+  },
 ): Promise<string> {
   eventSeq += 1
   const eventId = opts?.eventId ?? `evt_${RUN_ID}_${String(eventSeq).padStart(6, '0')}`
@@ -433,11 +446,17 @@ export async function pushEvent(
   const never = new Promise<never>((_, fail) => {
     limit = setTimeout(() => fail(new Error(`038 QA stand: the product did not take the SSE frame ${eventId} (${evt.type}) in 15 s`)), 15_000)
   })
+  let takenBy = 0
   try {
-    await Promise.race([page.evaluate((f) => (window as unknown as Sse).__qaSse.push(f), frame), never])
+    takenBy = await Promise.race([page.evaluate((f) => (window as unknown as Sse).__qaSse.push(f), frame), never])
   } finally {
     clearTimeout(limit)
   }
+  if (takenBy === 0 && !opts?.expectLost) {
+    throw new Error(`038 QA stand: the SSE frame ${eventId} (${evt.type}) was written into nothing - no connection of the product is listening, so the event is lost. `
+      + 'If the test means that, say so with { expectLost: true }.')
+  }
+  if (takenBy > 0 && opts?.expectLost) throw new Error(`038 QA stand: the SSE frame ${eventId} was expected to be lost, and ${takenBy} connection(s) took it`)
   return eventId
 }
 

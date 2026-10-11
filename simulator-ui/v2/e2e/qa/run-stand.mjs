@@ -8,7 +8,8 @@
  * Both write the standard Playwright HTML report (frames of the matrix are its attachments) into `<output dir>-report`
  * and REFUSE, exit 1, when the number of tests that ran is not the recorded one - in either direction (AGENTS.md §5,
  * §6): a filter that selected nothing, a file that stopped being collected and an unrecorded new test fail alike.
- * A skipped test is refused too: in a gate it is a check that did not happen.
+ * Refused too: a skipped test, a flaky one (retries are off), and - in the gate - a test that is an expected failure.
+ * The verdict is `verdict()` of `run-verdict.mjs`, a pure function exercised by `run-verdict.selfcheck.mjs`.
  *
  * The only extra argument accepted is `--repeat-each=N` (the expected number is multiplied). To run a slice, use
  * `npm run test:e2e:qa -- --grep ...`: a slice is not the gate and is not counted.
@@ -22,6 +23,8 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { exclusionProblems, verdict } from './run-verdict.mjs'
+
 /**
  * Tests that run, by scope. Every movement is a dated line:
  * - 2026-10-11 (038 S2): gate 62, full 185. Of the gate, 31 are the tests of S0/S1 and 31 are `surfaces.qa.ts` (it held 7
@@ -29,8 +32,10 @@ import { fileURLToPath } from 'node:url'
  * - 2026-10-11 (038 S2): gate 62 -> 61, one test of S1 named in NOT_IN_GATE below; full unchanged.
  * - 2026-10-11 (038 S2): gate 61 -> 64, full 185 -> 187. The S1 test is back (62): what it lost was a race of the helper,
  *   and `pushEvent` now returns when the product has taken the frame (`stand.ts`). Two tests of that, `delivery.qa.ts`.
+ * - 2026-10-11 (038 S2, after the adversarial pass on a7f7e1a6): gate 64 -> 68, full 187 -> 191. Four tests: a card opened
+ *   over an open menu, for two menus (D2); the four injected surfaces (D3); a frame written into nothing (D5).
  */
-export const EXPECTED = { gate: 64, full: 187 }
+export const EXPECTED = { gate: 68, full: 191 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
@@ -55,6 +60,12 @@ for (const a of extra) {
   repeat = Number(m[1])
 }
 
+const malformed = exclusionProblems(NOT_IN_GATE)
+if (malformed.length) {
+  for (const problem of malformed) console.error(`run-stand: ${problem}`)
+  process.exit(1)
+}
+
 const here = fileURLToPath(new URL('.', import.meta.url))
 const root = resolve(here, '..', '..')
 const out = resolve(process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR ?? resolve(root, '..', '..', '.local-run', 'playwright', 'simulator', 'qa'))
@@ -63,7 +74,8 @@ const reportDir = `${out}-report`
 rmSync(resultFile, { force: true })
 
 const cli = createRequire(import.meta.url).resolve('@playwright/test/cli')
-const args = [cli, 'test', '--config=e2e/playwright.qa.config.ts', '--project=qa-stand', '--reporter=list,json,html', ...extra]
+// No retries: a test that passes on the second try failed on the first, and the verdict refuses a flaky run anyway.
+const args = [cli, 'test', '--config=e2e/playwright.qa.config.ts', '--project=qa-stand', '--retries=0', '--reporter=list,json,html', ...extra]
 const literal = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 if (scope === 'gate') args.push(`--grep-invert=${['@extended', ...NOT_IN_GATE.map((t) => literal(t.title))].join('|')}`)
 const started = Date.now()
@@ -82,24 +94,10 @@ const run = spawnSync(process.execPath, args, {
 })
 const seconds = Math.round((Date.now() - started) / 1000)
 
-if (!existsSync(resultFile)) {
-  console.error(`run-stand: Playwright left no result file (${resultFile}), exit ${run.status}: the run did not happen, which is not a pass`)
-  process.exit(1)
-}
-const stats = JSON.parse(readFileSync(resultFile, 'utf8')).stats
-const ran = stats.expected + stats.unexpected + stats.flaky
-const want = EXPECTED[scope] * repeat
-console.log(`run-stand [${scope}]: ran ${ran} (as expected ${stats.expected}, failed ${stats.unexpected}, flaky ${stats.flaky}), skipped ${stats.skipped}, `
-  + `recorded ${want}; ${seconds} s; HTML report: ${reportDir}`)
-
-let code = run.status ?? 1
-if (stats.skipped !== 0) {
-  console.error(`run-stand: ${stats.skipped} test(s) were skipped - in a gate a skipped check is a check that did not happen`)
-  code = code || 1
-}
-if (ran !== want) {
-  console.error(`run-stand: ${ran} tests ran, ${want} are recorded in EXPECTED.${scope} (e2e/qa/run-stand.mjs). `
-    + 'Fewer: a test is no longer collected or a filter took it out. More: a new test - record it, with a dated line.')
-  code = code || 1
-}
-process.exit(code)
+const report = existsSync(resultFile) ? JSON.parse(readFileSync(resultFile, 'utf8')) : null
+const v = verdict({ scope, recorded: EXPECTED[scope], repeat, playwrightStatus: run.status, report, notInGate: NOT_IN_GATE })
+const s = report?.stats
+console.log(`run-stand [${scope}]: ran ${v.ran} (as expected ${s?.expected ?? 0}, failed ${s?.unexpected ?? 0}, flaky ${s?.flaky ?? 0}), skipped ${s?.skipped ?? 0}, `
+  + `recorded ${v.want}; ${seconds} s; HTML report: ${reportDir}`)
+for (const problem of v.problems) console.error(`run-stand: ${problem}`)
+process.exit(v.code)

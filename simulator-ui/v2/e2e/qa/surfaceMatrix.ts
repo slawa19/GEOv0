@@ -28,8 +28,9 @@ export const VIEWPORT_RESIZED: Viewport = { width: 1024, height: 640 }
 
 export type Policies = {
   /**
-   * `wm-pad`: a window of the window manager, kept `--ds-wm-clamp-pad` away from every edge (`useWindowManager.ts`,
-   * `reclamp`). `viewport`: any other surface, inside the viewport. `null`: a layer stretched over the scene.
+   * `wm-pad`: kept `--ds-wm-clamp-pad` away from every edge - a window of the window manager (`useWindowManager.ts`,
+   * `reclamp`) and a menu of the bars (`useHudDropdownFocus.ts`); the pad is read from the page, not repeated here.
+   * `viewport`: any other surface, inside the viewport. `null`: a layer stretched over the scene.
    */
   inside: 'wm-pad' | 'viewport' | null
   /**
@@ -38,7 +39,7 @@ export type Policies = {
    */
   escape?: { focusBackTo: string; declared: string; keeps?: string }
   /** A click on an empty place of the canvas. `closes: false` is asserted too - "stays" is a policy. */
-  outsideClick?: { closes: boolean; declared: string }
+  outsideClick?: { closes: boolean; declared: string; /** Where to click instead of the empty canvas (a list is left by a click elsewhere in its panel). */ at?: string }
   /**
    * Tab and Shift+Tab never leave the surface. `enterWith`: the key a keyboard user presses to get inside when the
    * mouse gesture leaves the focus on the trigger (a list opened with the mouse).
@@ -196,7 +197,7 @@ async function runClearing(page: Page, toast: string): Promise<void> {
 }
 
 const HUD_DROPDOWN: Policies = {
-  inside: 'viewport',
+  inside: 'wm-pad', // the menu is shifted in by the same pad (useHudDropdownFocus.ts, clampSurfaceIntoViewport)
   escape: { focusBackTo: '', declared: 'useHudDropdownFocus.ts: onDetailsKeydown -> closeAndRestoreFocus' },
   tabStaysInside: { declared: 'dropdownFocusCore.ts: trapDropdownTabNavigation' },
 }
@@ -217,6 +218,7 @@ const INSPECTOR: Policies = {
 
 const SELECT_LIST = (trigger: string): Policies => ({
   inside: 'viewport',
+  outsideClick: { closes: true, at: '.ws-shell[data-win-type="interact-panel"] .ds-panel__header', declared: 'OverlaySelect.vue onGlobalPointerDown: a press outside the trigger and the list closes the list' },
   escape: { focusBackTo: trigger, keeps: '.ws-shell[data-win-type="interact-panel"]', declared: 'useOverlayDropdownFocus.ts: Escape -> closeAndRestoreFocus (the list, not its panel)' },
   tabStaysInside: { enterWith: 'ArrowDown', declared: 'useOverlayDropdownFocus.ts onSurfaceKeydown -> trapDropdownTabNavigation' },
 })

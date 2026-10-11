@@ -42,6 +42,8 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   workers: 1,
+  // No retries (038 S2): a test of the stand that passes on a second try failed on the first; the gate refuses a flaky run.
+  retries: 0,
   reporter: 'list',
   outputDir: process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR
     ?? fileURLToPath(new URL('../../../.local-run/playwright/simulator/qa/', import.meta.url)),

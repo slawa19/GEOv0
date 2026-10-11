@@ -19,7 +19,7 @@ import type { Theme } from './surfaceMatrix.js'
  * Geometry and target-size findings in the `hud` theme, per entry of the matrix. A finding is a key without pixel
  * amounts (those go to the report): `outside:<edge>@<viewport>`, `small-target:<control>`.
  */
-export const KNOWN_FINDINGS: Record<string, Array<{ finding: string; why: string }>> = {}
+export const KNOWN_FINDINGS: Record<string, Array<{ finding: string; why: string; /** YYYY-MM-DD, the day the line was written. */ since: string }>> = {}
 
 /**
  * axe (WCAG 2.1 A/AA), nodes of impact `serious` or `critical` by rule, for the surface alone (`include` of its

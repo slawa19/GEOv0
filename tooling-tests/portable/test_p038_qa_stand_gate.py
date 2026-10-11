@@ -29,6 +29,13 @@ locally by:
 
     npm --prefix simulator-ui/v2 run test:e2e:qa:gate
 
+WHAT SURVIVED THE ADVERSARIAL PASS ON a7f7e1a6 AND IS STILL NOT SEEN HERE (2026-10-11), by name: `continue-on-error`
+on the JOB, or given as an expression instead of `true`; a `shell:` or a command ending in `|| true`; a `needs:` that
+hangs the required job on a scheduled one; `paths-ignore` on the trigger; and the CONTENT of the browser flags -
+`NO_GPU_ARGS = []` passes this file. The last one is checked where it can be, in the browser: `boot()` of the stand
+refuses a page whose root says `data-gpu="1"` (`e2e/qa/stand.ts`). The five-minute budget of the step is a number in
+the spec, not a `timeout-minutes` here.
+
 Every check goes through `violations()` so that the counter-check at the bottom can feed it broken
 inputs and see it complain (section 9, anti-vacuum).
 """
@@ -38,6 +45,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +67,7 @@ def _inputs() -> dict[str, Any]:
         "package": json.loads((_UI / "package.json").read_text(encoding="utf-8")),
         "config": (_UI / "e2e" / "playwright.qa.config.ts").read_text(encoding="utf-8"),
         "runner": (_UI / "e2e" / "qa" / "run-stand.mjs").read_text(encoding="utf-8"),
+        "verdict": (_UI / "e2e" / "qa" / "run-verdict.mjs").read_text(encoding="utf-8"),
     }
 
 
@@ -104,9 +114,15 @@ def violations(inputs: dict[str, Any]) -> list[str]:
     # 3. The gate entry counts and refuses.
     if not re.search(r"export const EXPECTED = \{ gate: [1-9]\d*, full: [1-9]\d* \}", runner):
         found.append("run-stand.mjs has no recorded EXPECTED numbers")
-    for needle in ("ran !== want", "stats.skipped !== 0", "process.exit(code)"):
+    verdict: str = inputs["verdict"]
+    for needle in ("verdict({", "process.exit(v.code)", "--retries=0"):
         if needle not in runner:
             found.append(f"run-stand.mjs lost its refusal: {needle}")
+    for needle in ("ran !== want", "ran === 0", "stats.skipped !== 0", "stats.flaky !== 0", "expectedFailures !== 0"):
+        if needle not in verdict:
+            found.append(f"run-verdict.mjs lost its refusal: {needle}")
+    if not re.search(r"\bretries:\s*0\b", config):
+        found.append("the stand config does not pin retries to 0")
 
     # 4. The required job runs the gate entry, unconditionally.
     triggers = workflow.get("on", workflow.get(True)) or {}
@@ -167,8 +183,14 @@ _MUTATIONS = {
     "the config turns test mode on": (lambda i: i.update(config=i["config"].replace("VITE_TEST_MODE: '0'", "VITE_TEST_MODE: '1'")), "test mode"),
     "the config announces WebDriver": (
         lambda i: i.update(config=i["config"].replace("--disable-blink-features=AutomationControlled", "")), "navigator.webdriver"),
-    "the entry stops comparing the count": (lambda i: i.update(runner=i["runner"].replace("ran !== want", "false")), "lost its refusal"),
-    "the entry tolerates a skip": (lambda i: i.update(runner=i["runner"].replace("stats.skipped !== 0", "false")), "lost its refusal"),
+    "the verdict stops comparing the count": (lambda i: i.update(verdict=i["verdict"].replace("ran !== want", "false")), "lost its refusal"),
+    "the verdict tolerates a skip": (lambda i: i.update(verdict=i["verdict"].replace("stats.skipped !== 0", "false")), "lost its refusal"),
+    "the verdict tolerates a flaky test": (lambda i: i.update(verdict=i["verdict"].replace("stats.flaky !== 0", "false")), "lost its refusal"),
+    "the verdict lets an expected failure into the gate": (
+        lambda i: i.update(verdict=i["verdict"].replace("expectedFailures !== 0", "false")), "lost its refusal"),
+    "the entry ignores the verdict": (lambda i: i.update(runner=i["runner"].replace("process.exit(v.code)", "process.exit(0)")), "lost its refusal"),
+    "the config allows retries": (lambda i: i.update(config=i["config"].replace("retries: 0", "retries: 2")), "retries"),
+    "the entry allows retries": (lambda i: i.update(runner=i["runner"].replace("--retries=0", "--retries=2")), "lost its refusal"),
     "the scheduled job runs on every pull request": (lambda i: i["workflow"]["jobs"]["simulator-qa-stand"].pop("if"), "not the scheduled/manual job"),
 }
 
@@ -182,6 +204,22 @@ def test_the_guard_notices_a_stand_that_left_the_gate(name: str) -> None:
     mutate(mutated)
     found = violations(mutated)
     assert any(expected in line for line in found), f"mutation '{name}' went unnoticed; findings: {found}"
+
+
+def test_the_verdict_of_the_gate_entry_holds_on_made_up_runs() -> None:
+    """The verdict is a pure function; this runs it on sixteen made-up runs (a wrong count, a skip, a flaky test, an
+    expected failure in the gate, no test at all, no result, malformed exclusions) through node.
+
+    It does not run Playwright: that the JSON report of the installed Playwright has the assumed shape is shown only
+    by a real run of the gate.
+    """
+
+    node = shutil.which("node")
+    assert node, "node is not on PATH: the verdict of the QA stand gate cannot be exercised (this is not a pass)"
+    done = subprocess.run([node, "e2e/qa/run-verdict.selfcheck.mjs"], cwd=_UI, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    summary = re.search(r"^(\d+) of (\d+) cases$", done.stdout, re.MULTILINE)
+    assert summary and summary.group(1) == summary.group(2) and int(summary.group(2)) >= 16, done.stdout
 
 
 def _stand_sources() -> list[Path]:
