@@ -43,8 +43,7 @@ function groupsNobodyMentions(): string[] {
 }
 
 describe('POLICY GUARD: FX_CONFIG has no unread group', () => {
-  // T3404: red on origin/main because of F-034-D15; S8 removes `.fails` together with the fix.
-  it.fails('every group of FX_CONFIG is read by product code', () => {
+  it('every group of FX_CONFIG is read by product code', () => {
     expect(groupsNobodyMentions(), 'groups of FX_CONFIG that no product source reads').toEqual([])
   })
 
