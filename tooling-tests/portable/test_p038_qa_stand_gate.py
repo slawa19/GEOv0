@@ -87,7 +87,7 @@ def violations(inputs: dict[str, Any]) -> list[str]:
         found.append(f"script test:e2e:qa:gate is not the gate entry: {scripts.get('test:e2e:qa:gate')!r}")
     if scripts.get("test:e2e:qa:report") != "node e2e/qa/run-stand.mjs full":
         found.append(f"script test:e2e:qa:report is not the full entry: {scripts.get('test:e2e:qa:report')!r}")
-    for needle in (f"--config={_STAND_CONFIG}", "--project=qa-stand", "--grep-invert=@extended"):
+    for needle in (f"--config={_STAND_CONFIG}", "--project=qa-stand", "--grep-invert=", "'@extended'"):
         if needle not in runner:
             found.append(f"run-stand.mjs does not pass {needle}")
 
