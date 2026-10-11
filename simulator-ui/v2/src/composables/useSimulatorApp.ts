@@ -1717,7 +1717,8 @@ export function useSimulatorApp(opts?: {
 
   if (isDemoUi.value && isRealMode.value) {
     const stopAutoBootstrap = watch(
-      () => !state.loading && !!real.accessToken && !!real.selectedScenarioId && !real.runId,
+      // No access-token condition (034 S8, F-034-D7): a cookie-session visitor has none and never would get the run.
+      () => !state.loading && !!real.selectedScenarioId && !real.runId,
       async (ready) => {
         if (!ready) return
         stopAutoBootstrap()

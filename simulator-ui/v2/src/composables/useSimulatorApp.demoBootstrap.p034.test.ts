@@ -111,8 +111,7 @@ afterEach(() => {
 })
 
 describe('F-034-D7: the eager bootstrap of the demo page', () => {
-  // T3404: red on origin/main because of F-034-D7; S8 removes `.fails` together with the fix.
-  it.fails('a cookie-session visitor (no token) gets the paused demo run prepared', async () => {
+  it('a cookie-session visitor (no token) gets the paused demo run prepared', async () => {
     vi.stubEnv('DEV', false)
     window.history.replaceState({}, '', '/?mode=real&ui=demo')
 

@@ -67,8 +67,7 @@ afterEach(() => {
 })
 
 describe('F-034-D7: the demo buttons without an access token (cookie session)', () => {
-  // T3404: red on origin/main because of F-034-D7; S8 removes `.fails` together with the fix.
-  it.fails('Single Tx sends the action to the run', async () => {
+  it('Single Tx sends the action to the run', async () => {
     const s = stand({ accessToken: '', runId: 'R' })
 
     await s.controls.runTxOnce()
@@ -78,8 +77,7 @@ describe('F-034-D7: the demo buttons without an access token (cookie session)', 
     expect(vi.mocked(actionTxOnce).mock.calls[0]?.[2]).toMatchObject({ equivalent: 'UAH' })
   })
 
-  // T3404: red on origin/main because of F-034-D7; S8 removes `.fails` together with the fix.
-  it.fails('Run Clearing sends the action to the run', async () => {
+  it('Run Clearing sends the action to the run', async () => {
     const s = stand({ accessToken: '', runId: 'R' })
 
     await s.controls.runClearingOnce()
@@ -88,8 +86,7 @@ describe('F-034-D7: the demo buttons without an access token (cookie session)', 
     expect(vi.mocked(actionClearingOnce).mock.calls[0]?.[1]).toBe('R')
   })
 
-  // T3404: red on origin/main because of F-034-D7; S8 removes `.fails` together with the fix.
-  it.fails('with no run yet, the paused demo run is started and the action goes to it', async () => {
+  it('with no run yet, the paused demo run is started and the action goes to it', async () => {
     const s = stand({ accessToken: '', runId: null })
 
     await s.controls.runTxOnce()

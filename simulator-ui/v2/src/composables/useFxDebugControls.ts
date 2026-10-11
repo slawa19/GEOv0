@@ -87,10 +87,8 @@ export function useFxDebugControls(deps: {
       }
     }
 
-    if (!String(deps.real.accessToken ?? '').trim()) {
-      throw new Error('Missing access token')
-    }
-
+    // No access-token guard, here and in the two actions below (034 S8, F-034-D7): an anonymous visitor's session
+    // is the `geo_sim_sid` cookie, which `startRun` ensures and the transport sends (`credentials: 'include'`).
     if (!String(deps.real.selectedScenarioId ?? '').trim()) {
       await deps.realMode.refreshScenarios()
     }
@@ -165,14 +163,13 @@ export function useFxDebugControls(deps: {
 
   async function runTxOnce(): Promise<void> {
     if (!deps.isFxDebugEnabled.value) return
-    if (!deps.real.accessToken) throw new Error('Missing access token')
 
     deps.markDemoActivity()
     busy.value = true
     try {
       const runId = await ensureRunSerialized()
       await waitForRealSseOpen({ timeoutMs: 1200 })
-      await actionTxOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken }, runId, {
+      await actionTxOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken ?? '' }, runId, {
         equivalent: deps.effectiveEq.value,
         seed: `ui-fx-debug-tx:${Date.now()}`,
         client_action_id: `ui-fx-debug-tx:${Date.now()}`,
@@ -184,14 +181,13 @@ export function useFxDebugControls(deps: {
 
   async function runClearingOnce(): Promise<void> {
     if (!deps.isFxDebugEnabled.value) return
-    if (!deps.real.accessToken) throw new Error('Missing access token')
 
     deps.markDemoActivity()
     busy.value = true
     try {
       const runId = await ensureRunSerialized()
       await waitForRealSseOpen({ timeoutMs: 1200 })
-      await actionClearingOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken }, runId, {
+      await actionClearingOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken ?? '' }, runId, {
         equivalent: deps.effectiveEq.value,
         seed: `ui-fx-debug-clearing:${Date.now()}`,
         client_action_id: `ui-fx-debug-clearing:${Date.now()}`,
