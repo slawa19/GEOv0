@@ -1534,7 +1534,9 @@ paths:
           description: >-
             E008: re-entering `running` from an inactive state passes the limits of create (028 `F-028-5`) -
             the owner already has an active run (`details.conflict_kind = owner_active_exists`) or the global
-            limit of active runs is reached (`global_active_limit`).
+            limit of active runs is reached (`global_active_limit`). Also `tick_in_progress`: a restart is
+            applied between two ticks, and the tick that was running did not end within the wait; the run is
+            unchanged and the same request may be sent again.
           content:
             application/json:
               schema:
