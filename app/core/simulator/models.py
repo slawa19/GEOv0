@@ -179,6 +179,11 @@ class RunRecord:
     _event_seq: int = 0
     _subs: list[_Subscription] = field(default_factory=list)
     _heartbeat_task: Optional[asyncio.Task[None]] = None
+    # BACKLOG 036-2 (a): the boundary between two ticks of this run. The heartbeat holds it for the whole of one tick (the
+    # advance of `tick_index` included); `RunLifecycle.restart` takes it before it resets the launch, so a restart lands
+    # between two ticks and never inside one. It serialises against the supported heartbeat only (a tick called directly,
+    # as tests do, does not take it); the epoch guards of 036 B1/B2 stay as they were.
+    _tick_boundary: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # Best-effort in-memory replay buffer for SSE reconnects.
     # Stores recent emitted events (both run_status and domain events).

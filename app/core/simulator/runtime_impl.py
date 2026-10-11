@@ -948,37 +948,40 @@ class _SimulatorRuntimeBase:
                 await asyncio.sleep(self._tick_seconds_of(self.get_run(run_id)))
                 run = self.get_run(run_id)
 
-                with self._lock:
-                    if run.state in ("stopped", "stopping", "error"):
-                        return
-                    if run.state != "running":
-                        continue
+                # BACKLOG 036-2 (a): one tick, from the advance of `tick_index` to the end of its work, is one unit that
+                # `restart` waits for (`RunRecord._tick_boundary`). Released on every way out, a cancellation included.
+                async with run._tick_boundary:
+                    with self._lock:
+                        if run.state in ("stopped", "stopping", "error"):
+                            return
+                        if run.state != "running":
+                            continue
 
-                    # Runner-algorithm: fixed sim-time tick; intensity controls action budget.
-                    run.tick_index += 1
-                    run.sim_time_ms = run.tick_index * int(self._tick_ms_base)
+                        # Runner-algorithm: fixed sim-time tick; intensity controls action budget.
+                        run.tick_index += 1
+                        run.sim_time_ms = run.tick_index * int(self._tick_ms_base)
 
-                    # Real-mode sets queue_depth during tick work; fixtures-mode has no queue.
-                    if run.mode == "fixtures":
-                        run.queue_depth = 0
+                        # Real-mode sets queue_depth during tick work; fixtures-mode has no queue.
+                        if run.mode == "fixtures":
+                            run.queue_depth = 0
 
-                    # Fixtures-mode event generation (best-effort).
-                    if run.mode == "fixtures":
-                        self._fixtures_runner.tick_fixtures_events(run_id)
+                        # Fixtures-mode event generation (best-effort).
+                        if run.mode == "fixtures":
+                            self._fixtures_runner.tick_fixtures_events(run_id)
 
-                # Real-mode runner work is intentionally outside the lock
-                # (it can touch the DB and may take time).
-                if run.mode == "real" and run.state == "running":
-                    _t0 = time.monotonic()
-                    await self._real_runner.tick_real_mode(run_id)
-                    _tick_elapsed_s = time.monotonic() - _t0
-                    if _tick_elapsed_s > 2.0:
-                        logger.warning(
-                            "simulator.heartbeat.slow_tick run_id=%s tick=%d elapsed=%.2fs",
-                            run_id,
-                            run.tick_index,
-                            _tick_elapsed_s,
-                        )
+                    # Real-mode runner work is intentionally outside the lock
+                    # (it can touch the DB and may take time).
+                    if run.mode == "real" and run.state == "running":
+                        _t0 = time.monotonic()
+                        await self._real_runner.tick_real_mode(run_id)
+                        _tick_elapsed_s = time.monotonic() - _t0
+                        if _tick_elapsed_s > 2.0:
+                            logger.warning(
+                                "simulator.heartbeat.slow_tick run_id=%s tick=%d elapsed=%.2fs",
+                                run_id,
+                                run.tick_index,
+                                _tick_elapsed_s,
+                            )
 
                 self.publish_run_status(run_id)
 

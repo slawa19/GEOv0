@@ -20,6 +20,9 @@ from app.utils.exceptions import NotFoundException
 #: The intensity of a run when neither the request nor the scenario's `settings.playback.intensity_percent` names one (036 B2).
 DEFAULT_RUN_INTENSITY_PERCENT = 30
 
+#: BACKLOG 036-2 (a): how long `restart` waits for the tick that is running to end before it answers 409.
+RESTART_TICK_WAIT_SECONDS = 30.0
+
 
 class RunLifecycle:
     def __init__(
@@ -482,6 +485,29 @@ class RunLifecycle:
 
     async def restart(self, run_id: str) -> RunStatus:
         run = self._get_run(run_id)
+        # BACKLOG 036-2 (a): a restart lands BETWEEN two ticks. The tick that is running ends first, whole and in its own
+        # launch (its payments, its clearing event, its pause); until this wait the old tick went on under the new epoch
+        # and spent the new launch's events. The wait is bounded and a request that runs out of it changes nothing.
+        try:
+            async with asyncio.timeout(RESTART_TICK_WAIT_SECONDS):
+                await run._tick_boundary.acquire()
+        except TimeoutError:
+            self._logger.warning("simulator.run.restart_refused_tick_in_progress run_id=%s waited_s=%s", run_id, RESTART_TICK_WAIT_SECONDS)
+            raise ConflictException(
+                "The run's tick is still in progress; the restart was not applied",
+                details={"conflict_kind": "tick_in_progress", "run_id": run_id},
+            ) from None
+        try:
+            self._restart_between_ticks(run_id, run)  # no await while the boundary is held: the heartbeat never waits for it
+        finally:
+            run._tick_boundary.release()
+
+        await self._ensure_heartbeat(run)
+        self._publish_run_status(run_id)
+        await simulator_storage.upsert_run(run)
+        return self._run_to_status(run)
+
+    def _restart_between_ticks(self, run_id: str, run: RunRecord) -> None:
         with self._lock:
             # Refuse before any mutation: a refused restart must leave the run as it was (024 T2416.2).
             # Restore active mapping removed during stop(). Without this,
@@ -534,8 +560,3 @@ class RunLifecycle:
             # Keep buffer but prune to avoid unbounded growth across long sessions.
             self._sse.prune_event_buffer_locked(run)
             self._artifacts.start_events_writer(run_id)  # stop() ended it (F-028-4); idempotent
-
-        await self._ensure_heartbeat(run)
-        self._publish_run_status(run_id)
-        await simulator_storage.upsert_run(run)
-        return self._run_to_status(run)
