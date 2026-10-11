@@ -53,7 +53,7 @@ async function sparkOnChord(page: Page) {
   return { bufferBefore, bufferAfter, screen: await screenshotDiff(page, shotBefore, shotAfter), fx: await fxCounts(page) }
 }
 
-test('the stand runs the user branches: no test mode, navigator.webdriver is false, quality autoguard is live', async ({ page }) => {
+test('the stand runs the user branches: no test mode, navigator.webdriver is false, the quality autoguard has put a no-GPU browser on low', async ({ page }) => {
   const mock = await boot(page, { snapshot: ringSnapshot(), clock: false })
   const flags = await page.evaluate(() => {
     const g = (window as unknown as { __geoSim: { isTestMode: boolean; isWebDriver: boolean } }).__geoSim
@@ -68,6 +68,8 @@ test('the stand runs the user branches: no test mode, navigator.webdriver is fal
   })
   console.log('[038 probe] flags', JSON.stringify(flags), 'unmocked', JSON.stringify([...new Set(mock.unmocked)]))
   expect(flags).toMatchObject({ isTestMode: false, isWebDriver: false, navigatorWebdriver: false, dataWebdriver: '0' })
+  // The autoguard is off under WebDriver (useQualityAutoguards.ts:83) and the default is 'med'; 'low' is its doing.
+  expect(flags.quality, 'the autoguard saw software rendering and lowered the quality').toBe('low')
   expect(Number(flags.fxZ), 'the FX canvas is above the base canvas, as for a user').toBeGreaterThan(Number(flags.baseZ) || 0)
 })
 
@@ -127,7 +129,7 @@ test('under WebDriver without test mode the FX buffer holds the spark and the co
   const browser = await chromium.launch({ args: NO_GPU_ARGS })
   try {
     const page = await browser.newPage({ baseURL, viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
-    await boot(page, { snapshot: ringSnapshot(), clock: true })
+    await boot(page, { snapshot: ringSnapshot(), clock: true, allowWebdriver: true })
     const flags = await page.evaluate(() => {
       const root = document.querySelector<HTMLElement>('.root')!
       return {

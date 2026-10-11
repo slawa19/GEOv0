@@ -10,7 +10,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { test, type CDPSession, type Page } from '@playwright/test'
+import { expect, test, type CDPSession, type Page } from '@playwright/test'
 
 import { EQ, RUN_ID, boot, fixtureSnapshot100 } from './stand.js'
 
@@ -42,9 +42,10 @@ function load(durationMs: number): string[] {
   return frames
 }
 
+type Live = { sparks: number | null; edgePulses: number | null; nodeBursts: number | null; labels: number }
 type Window = {
-  frameDeltaMs: number[]; frameT: number[]; callbackMs: number[]; draws: number; heapUsed: number | null
-  maxLive: { sparks: number; edgePulses: number; nodeBursts: number; labels: number } | null
+  drawAt: number[]; frameT: number[]; callbackMs: number[]; draws: number; heapUsed: number | null
+  maxLive: Live
   telemetry: { lastFps?: number; fxBudgetScale?: number; maxParticles?: number; renderQuality?: string } | null
   minBudgetScale: number | null
 }
@@ -54,7 +55,7 @@ async function measure(page: Page, frames: string[], windowMs: number): Promise<
   return page.evaluate(async ({ frames, windowMs, everyMs }) => {
     type Fx = { sparks: unknown[]; edgePulses: unknown[]; nodeBursts: unknown[]; __lastFps?: number; __fxBudgetScale?: number; __maxParticles?: number; __renderQuality?: string }
     const w = window as unknown as {
-      __qaRaf: { draws: number; callbackMs: number[]; frameT: number[]; record: boolean }
+      __qaRaf: { draws: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
       __qaSse: { push: (t: string) => void }
       __geoSim?: { fxState: Fx }
       gc?: () => void
@@ -62,17 +63,9 @@ async function measure(page: Page, frames: string[], windowMs: number): Promise<
     const q = w.__qaRaf
     q.callbackMs = []
     q.frameT = []
+    q.drawAt = []
     q.record = true
     const draws0 = q.draws
-    const deltas: number[] = []
-    let last = 0
-    let stop = false
-    const tick = (t: number) => {
-      if (last) deltas.push(t - last)
-      last = t
-      if (!stop) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
     const fx = w.__geoSim?.fxState
     const maxLive = { sparks: 0, edgePulses: 0, nodeBursts: 0, labels: 0 }
     let minBudgetScale = 1
@@ -88,14 +81,13 @@ async function measure(page: Page, frames: string[], windowMs: number): Promise<
     }, everyMs)
     await new Promise((r) => setTimeout(r, windowMs))
     clearInterval(pump)
-    stop = true
     q.record = false
     w.gc?.()
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory
     return {
-      frameDeltaMs: deltas, frameT: q.frameT, callbackMs: q.callbackMs, draws: q.draws - draws0,
+      drawAt: q.drawAt, frameT: q.frameT, callbackMs: q.callbackMs, draws: q.draws - draws0,
       heapUsed: mem && w.gc ? mem.usedJSHeapSize : null,
-      maxLive: fx ? maxLive : { ...maxLive, sparks: -1, edgePulses: -1, nodeBursts: -1 },
+      maxLive: fx ? maxLive : { labels: maxLive.labels, sparks: null, edgePulses: null, nodeBursts: null },
       telemetry: fx ? { lastFps: fx.__lastFps, fxBudgetScale: fx.__fxBudgetScale, maxParticles: fx.__maxParticles, renderQuality: fx.__renderQuality } : null,
       minBudgetScale: fx ? minBudgetScale : null,
     }
@@ -109,15 +101,24 @@ const pct = (xs: number[], p: number) => {
 }
 const r1 = (x: number) => Math.round(x * 10) / 10
 
-/** Work per frame: the callbacks of one frame share the rAF timestamp, so their durations are summed by it. */
-function summarize(w: Window) {
+/**
+ * A frame is a completed draw of the PRODUCT's render loop (one clear of the base canvas per `renderFrame`), not a
+ * tick of a rAF chain of the stand's own: if the product's loop sleeps under load, that is what the numbers must show.
+ * A window with no product draws, or with too few to take a percentile of, is refused instead of summarized.
+ * Work per frame: the callbacks of one frame share the rAF timestamp, so their durations are summed by it.
+ */
+function summarize(w: Window, name: string) {
+  expect(w.draws, `${name}: the product's render loop drew during the window (0 = it slept under load, or the draw counter is blind)`).toBeGreaterThan(0)
+  expect(w.drawAt.length, `${name}: at least 20 product frames to take a percentile of`).toBeGreaterThanOrEqual(20)
+  expect(w.callbackMs.length, `${name}: rAF callbacks were timed`).toBeGreaterThan(0)
+  const frameDeltaMs = w.drawAt.slice(1).map((t, i) => t - w.drawAt[i]!)
   const work = new Map<number, number>()
   w.frameT.forEach((t, i) => work.set(t, (work.get(t) ?? 0) + w.callbackMs[i]!))
   const perFrame = [...work.values()]
-  const mean = w.frameDeltaMs.reduce((a, b) => a + b, 0) / Math.max(1, w.frameDeltaMs.length)
+  const mean = frameDeltaMs.reduce((a, b) => a + b, 0) / frameDeltaMs.length
   return {
-    frames: w.frameDeltaMs.length, draws: w.draws, fps: r1(1000 / mean),
-    frameMs: { p50: r1(pct(w.frameDeltaMs, 50)), p95: r1(pct(w.frameDeltaMs, 95)), max: r1(Math.max(...w.frameDeltaMs)) },
+    frames: frameDeltaMs.length, draws: w.draws, fps: r1(1000 / mean),
+    frameMs: { p50: r1(pct(frameDeltaMs, 50)), p95: r1(pct(frameDeltaMs, 95)), max: r1(Math.max(...frameDeltaMs)) },
     workMs: { p50: r1(pct(perFrame, 50)), p95: r1(pct(perFrame, 95)), max: r1(Math.max(...perFrame)) },
     maxLive: w.maxLive, telemetry: w.telemetry, minBudgetScale: w.minBudgetScale,
   }
@@ -128,7 +129,7 @@ const runs: Run[] = []
 
 async function throttled(page: Page, cdp: CDPSession, rate: number) {
   await cdp.send('Emulation.setCPUThrottlingRate', { rate })
-  const s = summarize(await measure(page, load(WINDOW_MS), WINDOW_MS))
+  const s = summarize(await measure(page, load(WINDOW_MS), WINDOW_MS), `CPU x${rate}`)
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
   return s
 }
@@ -149,11 +150,12 @@ for (let run = 1; run <= RUNS; run += 1) {
     })
     const long = await measure(page, load(HEAP_WINDOW_MS), HEAP_WINDOW_MS)
     const mb = (b: number) => Math.round((b / 1048576) * 100) / 100
+    expect(long.draws, 'heap window: the product drew while the heap was watched').toBeGreaterThan(0)
     const row: Run = {
       x1, x4, x8,
       heapStartMb: heap0 === null ? null : mb(heap0),
       heapGrowthMb: heap0 === null || long.heapUsed === null ? null : mb(long.heapUsed - heap0),
-      maxLabels: long.maxLive?.labels ?? -1,
+      maxLabels: long.maxLive.labels,
     }
     runs.push(row)
     console.log(`[038 perf] run ${run}`, JSON.stringify(row))
@@ -163,14 +165,18 @@ for (let run = 1; run <= RUNS; run += 1) {
 
 test.afterAll(async ({}, testInfo) => {
   if (runs.length === 0) return
+  // `null` means "not measurable in this build" (no dev hook, no gc); a negative number is a measurement and stays.
   const med = (xs: Array<number | null>) => {
-    const v = xs.filter((x): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0).sort((a, b) => a - b)
-    return v.length ? { median: v[Math.floor(v.length / 2)]!, min: v[0]!, max: v[v.length - 1]! } : null
+    const v = xs.filter((x): x is number => x !== null).sort((a, b) => a - b)
+    if (v.length === 0) return null
+    if (v.some((x) => !Number.isFinite(x))) throw new Error(`a non-finite measurement reached the summary: ${JSON.stringify(xs)}`)
+    const mid = v.length >> 1
+    return { median: v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2, min: v[0]!, max: v[v.length - 1]!, n: v.length }
   }
   const at = (k: 'x1' | 'x4' | 'x8') => ({
     fps: med(runs.map((r) => r[k].fps)), frameP95Ms: med(runs.map((r) => r[k].frameMs.p95)), frameP50Ms: med(runs.map((r) => r[k].frameMs.p50)),
     workP95Ms: med(runs.map((r) => r[k].workMs.p95)), workP50Ms: med(runs.map((r) => r[k].workMs.p50)),
-    maxLiveSparks: med(runs.map((r) => r[k].maxLive?.sparks ?? null)), maxLiveEdgePulses: med(runs.map((r) => r[k].maxLive?.edgePulses ?? null)),
+    maxLiveSparks: med(runs.map((r) => r[k].maxLive.sparks)), maxLiveEdgePulses: med(runs.map((r) => r[k].maxLive.edgePulses)),
     minBudgetScale: med(runs.map((r) => r[k].minBudgetScale)),
   })
   const summary = {

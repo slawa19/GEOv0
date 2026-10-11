@@ -160,15 +160,18 @@ export async function installSseShim(page: Page): Promise<void> {
 export async function installRafCounter(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const w = window as unknown as {
-      __qaRaf: { calls: number; frames: number; draws: number; callbackMs: number[]; frameT: number[]; record: boolean }
+      __qaRaf: { calls: number; frames: number; draws: number; drawAt: number[]; callbackMs: number[]; frameT: number[]; record: boolean }
     }
-    w.__qaRaf = { calls: 0, frames: 0, draws: 0, callbackMs: [], frameT: [], record: false }
+    w.__qaRaf = { calls: 0, frames: 0, draws: 0, drawAt: [], callbackMs: [], frameT: [], record: false }
     // A completed pass of the render loop owner, not a registered callback: `useRenderLoop` clears the base canvas
     // exactly once per `renderFrame` (and nothing else clears it), whether the frame came from rAF or `renderOnce`.
     const clearRect = CanvasRenderingContext2D.prototype.clearRect
     CanvasRenderingContext2D.prototype.clearRect = function (this: CanvasRenderingContext2D, ...a: [number, number, number, number]) {
       const c = this.canvas as HTMLCanvasElement
-      if (c.classList?.contains('canvas') && !c.classList.contains('canvas-fx')) w.__qaRaf.draws += 1
+      if (c.classList?.contains('canvas') && !c.classList.contains('canvas-fx')) {
+        w.__qaRaf.draws += 1
+        if (w.__qaRaf.record) w.__qaRaf.drawAt.push(performance.now())
+      }
       return clearRect.apply(this, a)
     }
     const inner = window.requestAnimationFrame.bind(window)
@@ -207,6 +210,37 @@ export type BootOptions = {
   sseShim?: boolean
   /** Runs after the backend mock is routed and before the app loads (a later `page.route` wins over an earlier one). */
   beforeLoad?: (page: Page) => Promise<void>
+  /** Only for the probe that deliberately opens a WebDriver browser to show what it hides. Everything else must run as a user. */
+  allowWebdriver?: true
+}
+
+/**
+ * The stand refuses to run on anything but the user's branches of the product: test mode off, navigator.webdriver
+ * false. Checked in the browser, because a line in a config does not see a developer's `.env.local` or a reused dev
+ * server. On a production build there is no dev hook, so test mode cannot be read there; the stand's own server is
+ * started with VITE_TEST_MODE=0 (`playwright.qa.config.ts`), which is the only guard in that case.
+ */
+async function assertUserMode(page: Page, o: BootOptions): Promise<void> {
+  const hook = o.devHook !== false
+  if (hook) await page.waitForFunction(() => '__geoSim' in window, undefined, { timeout: 30_000 })
+  const seen = await page.evaluate(() => {
+    const g = (window as unknown as { __geoSim?: { isTestMode?: boolean } }).__geoSim
+    return { isTestMode: g ? g.isTestMode : null, webdriver: navigator.webdriver }
+  })
+  if (hook && seen.isTestMode !== false) {
+    throw new Error(
+      `038 QA stand refuses to run: the product is in test mode (__geoSim.isTestMode = ${String(seen.isTestMode)}, expected false). `
+      + 'In test mode sparks are not spawned, the render loop never sleeps and dragging is off, so every result here would be about another product. '
+      + 'Look for VITE_TEST_MODE=1 in simulator-ui/v2/.env.local or in the environment, or for a dev server of the snapshot stand reused on this port.',
+    )
+  }
+  if (!o.allowWebdriver && seen.webdriver !== false) {
+    throw new Error(
+      `038 QA stand refuses to run: navigator.webdriver = ${String(seen.webdriver)}, expected false. `
+      + 'Under WebDriver the product puts the FX canvas under the base canvas (App.css:49-51) and turns off label glow, edge hover and the quality autoguard. '
+      + 'Run through e2e/playwright.qa.config.ts, which starts Chromium with --disable-blink-features=AutomationControlled.',
+    )
+  }
 }
 
 /** Seed the run the way a returning user has it, load the app in real mode, wait for the scene and the SSE stream. */
@@ -227,6 +261,7 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
 
   if (o.beforeLoad) await o.beforeLoad(page)
   await page.goto(`/?mode=real&ui=interact${o.query ?? ''}`)
+  await assertUserMode(page, o)
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
   if (o.sseShim !== false) {
     await expect

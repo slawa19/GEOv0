@@ -16,7 +16,7 @@ type GeoSim = {
 
 /** Ways to put a surface on screen that S0 has. S2 owns the full registry. */
 const RECIPES: Record<string, Recipe> = {
-  'top-hud-stack': { open: async () => {}, visible: '.root' },
+  'top-hud-stack': { open: async () => {}, visible: '.ds-ov-top .ds-ov-top-stack' },
   'bottom-hud-stack': { open: async () => {}, visible: '[data-testid="actionbar-payment"]' },
   'wm-interact-window': {
     open: async (page) => page.locator('[data-testid="actionbar-payment"]').click(),

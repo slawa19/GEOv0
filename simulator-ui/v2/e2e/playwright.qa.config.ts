@@ -75,6 +75,9 @@ export default defineConfig({
     stderr: 'pipe',
     env: {
       VITE_DEMO_FIXTURES: '1',
+      // An existing environment variable wins over `.env.local` in Vite, so a developer's local VITE_TEST_MODE=1
+      // cannot put this server (or the production build) in test mode. `boot()` still checks the running page.
+      VITE_TEST_MODE: '0',
     },
   },
 })

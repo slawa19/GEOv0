@@ -61,6 +61,11 @@ test.beforeEach(async ({ page }) => {
   await boot(page, { snapshot: ringSnapshot(), clock: true })
 })
 
+// LIMITS OF R1 (adversarial pass 2026-10-11, AGENTS.md 11: a guard names what it does not check).
+// R1 proves "a spark exists, something is painted, the loop draws". It does NOT measure movement: a spark frozen at
+// phase 0.333 (render/fxRenderer/renderFrame.ts:116) passes this whole file. It does not look at the composed screen
+// either: a DOM panel over the path hides the spark and R1 stays green. Movement, direction and visibility along the
+// whole path are the oracle S1 has to build (spec 038, Verification plan); until then R1 is not evidence of motion.
 test('R1 - the stand sees the spark of a payment: FX state and pixels of the FX canvas (F-038-1)', async ({ page }) => {
   const { ids, bands } = await pickRoute(page)
 
@@ -111,6 +116,11 @@ test('R3 - the beam of a 3-edge payment follows the edges of its route (F-038-3 
   // `maxEdgesPerEvent` (2) with the single pair sender -> receiver. Goes green when S1 fixes it; the annotation then
   // fails the run, which is the signal to drop it.
   test.fail(true, 'F-038-3: a route of more than 2 edges is drawn as one straight beam sender -> receiver')
+  // DO NOT REMOVE `test.fail` ON THE STRENGTH OF THIS TEST GOING GREEN (adversarial pass 2026-10-11).
+  // The two assertions below are satisfied by wrong fixes: sparks on every edge of the graph (edges outside the route
+  // are not sampled), route edges each drawn backwards (the bands are symmetric along the edge), and all edges
+  // started at once (order is not measured). The annotation comes off only after S1 has built the motion oracle and
+  // its four mutations are red: phase frozen, direction reversed, sparks on all edges, simultaneous start.
   const { ids, bands } = await pickRoute(page)
   await pushEvent(page, txUpdated(ids))
   const seen = await watch(page, bands, 75)

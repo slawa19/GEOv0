@@ -3,6 +3,9 @@
  * by the mouse delta divided by the zoom, and is pinned. Zoom and pan are set the way a user sets them (wheel, drag
  * of the empty canvas), so the expected world delta is computed from the camera the product reports.
  * Not checked here (S1): position after a relayout, and the canvas picture against the DOM drag preview.
+ * Known to pass on a broken product (adversarial pass 2026-10-11): "pinned" is read from the pinned-position map, so a
+ * drag that never calls `pinNodeLive` (fx/fy not set on the physics node) passes; and "opens no card" is true today
+ * whether or not the click after a drag is suppressed. Both mutations must turn red in S1 before R5 is relied on.
  */
 import { expect, test, type Page } from '@playwright/test'
 
@@ -81,11 +84,11 @@ test('R5 - a mouse drag moves the node by delta / zoom under a zoomed and panned
 
   // Counter-check of "moved": a press and release without movement moves nothing and pins nothing more.
   const other = [...(await screenNodes(page)).entries()].find(([k, p]) => k !== id && p.x > VIEW.x0 && p.x < VIEW.x1 && p.y > VIEW.y0 && p.y < VIEW.y1)
-  if (other) {
-    const b = (await layoutNodes(page)).find((n) => n.id === other[0])!
-    await mouseDrag(page, other[1], { x: 0, y: 0 }, 1)
-    const a = (await layoutNodes(page)).find((n) => n.id === other[0])!
-    console.log('[038 R5] click without movement', JSON.stringify({ node: other[0], moved: { x: a.x - b.x, y: a.y - b.y }, pinned: await pinned(page), windows: await windows(page) }))
-    expect(await pinned(page), 'a click does not pin').not.toContain(other[0])
-  }
+  expect(other, 'a second node is on screen for the counter-check').toBeTruthy()
+  const b = (await layoutNodes(page)).find((n) => n.id === other![0])!
+  await mouseDrag(page, other![1], { x: 0, y: 0 }, 1)
+  const a = (await layoutNodes(page)).find((n) => n.id === other![0])!
+  console.log('[038 R5] click without movement', JSON.stringify({ node: other![0], moved: { x: a.x - b.x, y: a.y - b.y }, pinned: await pinned(page), windows: await windows(page) }))
+  expect({ x: a.x - b.x, y: a.y - b.y }, 'a click without movement moves nothing').toEqual({ x: 0, y: 0 })
+  expect(await pinned(page), 'a click does not pin').not.toContain(other![0])
 })
