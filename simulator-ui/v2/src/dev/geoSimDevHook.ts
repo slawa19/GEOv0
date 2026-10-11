@@ -42,8 +42,12 @@ type InstallGeoSimDevHookDeps = {
   isWebDriver: () => boolean
   getState: () => GeoSimDevHookState
   getCamera?: () => GeoSimCameraSnapshot
-  /** 038 QA stand: read-only layout geometry in world coordinates (screen = world * zoom + pan). */
-  getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number }>
+  /**
+   * 038 QA stand: read-only layout geometry in world coordinates (screen = world * zoom + pan). `fx`/`fy` are the
+   * fixed position the physics holds a pinned node at (the layout nodes are the physics nodes, `layout/physicsD3.ts`);
+   * null for a node the physics is free to move.
+   */
+  getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number; fx?: number | null; fy?: number | null }>
   /** 038 QA stand: read-only ids of the nodes pinned by the user. */
   getPinnedNodeIds?: () => string[]
   fxState: FxState
@@ -110,7 +114,7 @@ export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps): (() => voi
       return deps.getCamera?.() ?? { panX: 0, panY: 0, zoom: 1 }
     },
     get layoutNodes() {
-      return (deps.getLayoutNodes?.() ?? []).map((n) => ({ id: String(n.id), x: n.__x, y: n.__y }))
+      return (deps.getLayoutNodes?.() ?? []).map((n) => ({ id: String(n.id), x: n.__x, y: n.__y, fx: n.fx ?? null, fy: n.fy ?? null }))
     },
     get pinnedNodeIds() {
       return deps.getPinnedNodeIds?.() ?? []
