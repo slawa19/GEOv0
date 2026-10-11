@@ -30,8 +30,12 @@ import { exclusionProblems, verdict } from './run-verdict.mjs'
  * - 2026-10-11 (038 S2): gate 62, full 185. Of the gate, 31 are the tests of S0/S1 and 31 are `surfaces.qa.ts` (it held 7
  *   measurements before); 123 more of that file run under `@extended`.
  * - 2026-10-11 (038 S2): gate 62 -> 61, one test of S1 named in NOT_IN_GATE below; full unchanged.
- * - 2026-10-11 (038 S2): gate 61 -> 64, full 185 -> 187. The S1 test is back (62): what it lost was a race of the helper,
- *   and `pushEvent` now returns when the product has taken the frame (`stand.ts`). Two tests of that, `delivery.qa.ts`.
+ * - 2026-10-11 (038 S2): gate 61 -> 64, full 185 -> 187. The S1 test (R4) is back (62). The cause written here at the
+ *   time, "a race of the helper", was WRONG: `pushEvent` now returns when the product has taken the frame (`stand.ts`),
+ *   and that closed another race, not this one. Two tests of that, `delivery.qa.ts`. The real cause of the red R4 was the
+ *   random phase of the fake clock on the 16 ms frame grid (R4 steps exactly the life of the beam, 75 x 16 = 1200 ms, and
+ *   on phase 0 the last frame is empty). Fixed later the same day: the phase is pinned (`CLOCK_PHASE_MS` in `stand.ts`)
+ *   and R4 judges a frame by the time it was drawn, not by its number.
  * - 2026-10-11 (038 S2, after the adversarial pass on a7f7e1a6): gate 64 -> 68, full 187 -> 191. Four tests: a card opened
  *   over an open menu, for two menus (D2); the four injected surfaces (D3); a frame written into nothing (D5).
  */
@@ -40,7 +44,8 @@ export const EXPECTED = { gate: 68, full: 191 }
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
  * and date. The count above is the counter-check of the list - a title that matches nothing puts the test back. Empty
- * today (the one entry of 2026-10-11, a test of S1, left when the race it lost was fixed in the helper).
+ * today (the one entry of 2026-10-11, the S1 test R4, left the list the same day; what made it red was the phase of the
+ * fake clock, see the dated line of `EXPECTED` above).
  */
 export const NOT_IN_GATE = []
 
