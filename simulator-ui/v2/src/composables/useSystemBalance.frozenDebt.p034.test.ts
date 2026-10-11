@@ -113,6 +113,41 @@ describe('F-034-D1: the debt of a line that is not active', () => {
     expect(b.activeTrustlines).toBe(1)
   })
 
+  // Adversarial F4: the share of used capacity is counted on ONE base - the usable lines. Total Debt covers every
+  // line; a frozen line gives no capacity, so its debt must not be the numerator over a capacity it is not in.
+  it('the utilization share is the debt of usable lines over their capacity; a frozen debt is not in it', () => {
+    const b = balanceOf(
+      snapshotOf([
+        { source: 'A', target: 'B', trust_limit: '100', used: '10', available: '90', status: 'frozen' },
+        { source: 'B', target: 'A', trust_limit: '50', used: '0', available: '50', status: 'active' },
+      ]),
+    )
+
+    expect(b.totalUsed, 'Total Debt still includes the frozen debt').toBe('10')
+    expect(b.utilization, 'the frozen debt was counted against the capacity of other lines').toBe(0)
+  })
+
+  it('a frozen debt alone does not make the usable capacity look fully used', () => {
+    const b = balanceOf(
+      snapshotOf([{ source: 'A', target: 'B', trust_limit: '100', used: '10', available: '90', status: 'frozen' }]),
+    )
+
+    expect(b.totalUsed).toBe('10')
+    expect(b.utilization, 'no usable line, yet the bar says 100 % used').toBe(0)
+  })
+
+  it('anti-vacuum: the share of usable lines is still counted (30 of 100)', () => {
+    const b = balanceOf(
+      snapshotOf([
+        { source: 'A', target: 'B', trust_limit: '100', used: '30', available: '70', status: 'active' },
+        { source: 'B', target: 'A', trust_limit: '100', used: '40', available: '60', status: 'frozen' },
+      ]),
+    )
+
+    expect(b.totalUsed).toBe('70')
+    expect(b.utilization).toBeCloseTo(0.3, 10)
+  })
+
   it('anti-vacuum: with no debt on any line the system is clean', () => {
     const b = balanceOf(
       snapshotOf([{ source: 'A', target: 'B', trust_limit: '100', used: '0', available: '100', status: 'frozen' }]),
