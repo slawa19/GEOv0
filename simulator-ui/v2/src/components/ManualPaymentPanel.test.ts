@@ -1912,7 +1912,11 @@ describe('ManualPaymentPanel', () => {
 })
 
 describe('BACKLOG 037-5: what the recipient step says and lets the user choose', () => {
-  async function mountPanel(over: Record<string, unknown> & { fromPid?: string | null; toPid?: string | null; phase?: string }) {
+  /** `live` is a reactive bag of props read at every render: change it to change what the parent passes. */
+  async function mountPanel(
+    over: Record<string, unknown> & { fromPid?: string | null; toPid?: string | null; phase?: string },
+    live: Record<string, unknown> = {},
+  ) {
     const { fromPid = 'alice', toPid = null, phase = 'picking-payment-to', ...props } = over
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1943,6 +1947,7 @@ describe('BACKLOG 037-5: what the recipient step says and lets the user choose',
           confirmPayment: vi.fn(),
           cancel: vi.fn(),
           ...props,
+          ...live,
         }),
     })
     app.mount(host)
@@ -1986,6 +1991,70 @@ describe('BACKLOG 037-5: what the recipient step says and lets the user choose',
       const reason = (p.host.querySelector('[data-testid="mp-confirm-reason"]')?.textContent ?? '').trim()
       expect(reason).toContain('Backend reports no payment routes between selected participants.')
       expect(reason).toContain('Selected sender is not active (status: suspended)')
+      p.done()
+    })
+  })
+
+  describe('(c) the recipient list while the routes are being asked for', () => {
+    const three: ParticipantInfo[] = [
+      { pid: 'alice', name: 'Alice', type: 'person', status: 'active' },
+      { pid: 'bob', name: 'Bob', type: 'person', status: 'active' },
+      { pid: 'dave', name: 'Dave', type: 'person', status: 'active' },
+    ]
+    const surfaceOption = (pid: string) =>
+      document.querySelector(`#mp-to__surface [data-option-value="${pid}"]`) as HTMLButtonElement | null
+    const openList = async (host: HTMLElement) => {
+      ;(host.querySelector('#mp-to__trigger') as HTMLButtonElement).click()
+      await nextTick()
+      await nextTick()
+    }
+
+    it('no recipient can be chosen from the list before the server answers; the answer makes its recipients choosable', async () => {
+      const live = reactive<{ paymentTargetsLoading: boolean; paymentToTargetIds: Set<string> | undefined }>({
+        paymentTargetsLoading: true,
+        paymentToTargetIds: undefined,
+      })
+      const p = await mountPanel({ participants: three }, live)
+
+      // the list still opens (the form opens it by itself after the sender is chosen) ...
+      const trigger = p.host.querySelector('#mp-to__trigger') as HTMLButtonElement
+      expect(trigger.disabled).toBe(false)
+      await openList(p.host)
+      // ... and shows who MAY come, but none of them can be taken yet
+      for (const pid of ['bob', 'dave']) {
+        const option = surfaceOption(pid)
+        expect(option, pid).toBeTruthy()
+        expect(option!.disabled, pid).toBe(true)
+        option!.click()
+      }
+      await nextTick()
+      expect(p.setToPid).not.toHaveBeenCalled()
+      expect(p.helpText()).toContain('Routes are updating')
+      expect(p.helpText()).not.toContain('may include unreachable')
+
+      // the server answered: only bob is reachable
+      live.paymentTargetsLoading = false
+      live.paymentToTargetIds = new Set(['bob'])
+      await nextTick()
+      await nextTick()
+      expect(surfaceOption('dave')).toBeNull()
+      const bob = surfaceOption('bob')
+      expect(bob!.disabled).toBe(false)
+      bob!.click()
+      await nextTick()
+      expect(p.setToPid).toHaveBeenCalledWith('bob')
+      p.done()
+    })
+
+    it('anti-vacuum: a FAILED routes request keeps the fallback list choosable (it says so), as before', async () => {
+      const p = await mountPanel({ participants: three, paymentTargetsLastError: 'HTTP 500', paymentToTargetIds: undefined })
+      await openList(p.host)
+      const dave = surfaceOption('dave')
+      expect(dave!.disabled).toBe(false)
+      expect(p.helpText()).toContain('Routes update failed')
+      dave!.click()
+      await nextTick()
+      expect(p.setToPid).toHaveBeenCalledWith('dave')
       p.done()
     })
   })

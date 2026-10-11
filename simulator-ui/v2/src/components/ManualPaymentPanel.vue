@@ -471,7 +471,7 @@ const toInlineHelpText = computed<string | null>(() => {
 
   const targets = dropdownToTargetIds.value
   if (targets === undefined) {
-    if (routesLoading.value) return 'Routes are updating; the list may include unreachable recipients.'
+    if (routesLoading.value) return 'Routes are updating; a recipient can be chosen once the server answers.'
     if (props.paymentTargetsLastError || props.trustlinesLastError) {
       return 'Routes update failed; showing fallback data. Some recipients may be unreachable.'
     }
@@ -619,9 +619,14 @@ const fromOptions = computed(() => fromParticipants.value.map((participant) => (
   label: participantLabel(participant, showPid),
 })))
 
+// BACKLOG 037-5 (c): while the routes are being asked for, the list is the unfiltered fallback - it names who MAY come, and
+// none of them can be taken until the server has answered (the list still opens: the form opens it after the sender is chosen).
+// A FAILED request is not this state: its fallback list stays choosable and says so (`toInlineHelpText`).
+// Not covered here: a recipient picked on the canvas goes around the list; the watcher above drops it when the answer excludes it.
 const toOptions = computed(() => toParticipants.value.map((participant) => ({
   value: participant.pid,
   label: toOptionLabel(participant),
+  disabled: routesLoading.value,
 })))
 </script>
 
