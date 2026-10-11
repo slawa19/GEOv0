@@ -27,25 +27,17 @@ import { fileURLToPath } from 'node:url'
  * - 2026-10-11 (038 S2): gate 62, full 185. Of the gate, 31 are the tests of S0/S1 and 31 are `surfaces.qa.ts` (it held 7
  *   measurements before); 123 more of that file run under `@extended`.
  * - 2026-10-11 (038 S2): gate 62 -> 61, one test of S1 named in NOT_IN_GATE below; full unchanged.
+ * - 2026-10-11 (038 S2): gate 61 -> 64, full 185 -> 187. The S1 test is back (62): what it lost was a race of the helper,
+ *   and `pushEvent` now returns when the product has taken the frame (`stand.ts`). Two tests of that, `delivery.qa.ts`.
  */
-export const EXPECTED = { gate: 61, full: 185 }
+export const EXPECTED = { gate: 64, full: 187 }
 
 /**
- * Tests kept OUT of the required subset by name, although they carry no `@extended` tag. Each line has its reason
- * and date; the test itself is not touched and still runs in the `full` scope. The count above is the counter-check:
- * a title that stops matching anything puts the test back and the gate reads 62 against 61.
+ * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
+ * and date. The count above is the counter-check of the list - a title that matches nothing puts the test back. Empty
+ * today (the one entry of 2026-10-11, a test of S1, left when the race it lost was fixed in the helper).
  */
-export const NOT_IN_GATE = [
-  {
-    title: 'R4 - a 3-edge beam started from deep sleep is drawn on every frame of its flight, and the loop sleeps again afterwards',
-    since: '2026-10-11',
-    why: 'Failed once in the required step on the CI runner (run 38152711087, ubuntu): "there is a spark in the FX state on every one '
-      + 'of them - Expected: 0, Received: 1", and passed in five other executions on the same runner and in every local one. The event '
-      + 'reaches the product over the SSE stream in real time while the test steps the fake clock at once, so on a loaded machine the '
-      + 'first frame can be stepped before the event is taken. A race of the test, not a measured defect of the product; a required '
-      + 'gate cannot carry it. Recipient: the owner of the motion oracle, BACKLOG 038-1.',
-  },
-]
+export const NOT_IN_GATE = []
 
 const scope = process.argv[2]
 const extra = process.argv.slice(3)
