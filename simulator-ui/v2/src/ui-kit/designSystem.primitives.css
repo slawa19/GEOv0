@@ -992,13 +992,6 @@
   align-items: center;
 }
 
-/* Flat node card (no nested surface/border). Used inside NodeCardOverlay. */
-.ds-node-card--flat {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-}
-
 /* shadcn node card: add border, background, hover effect (match reference .s-data-card) */
 [data-theme='shadcn'] .ds-node-card {
   background: var(--ds-surface-2);
