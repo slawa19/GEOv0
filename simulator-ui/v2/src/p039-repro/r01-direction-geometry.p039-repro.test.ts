@@ -13,14 +13,23 @@
  * would leave it red on a correct product (the spec names `baseGraph.ts`). (2) It judges where something is drawn, not
  * what it looks like - shape, size and colour are the pixel tier's and the owner's. (3) Zoom 1 only.
  *
- * SLICE B (direction marker in `baseGraph.ts`) must turn the two `red` tests green: then replace `red` by `it`.
+ * SLICE B, PR 2 (2026-10-12) drew the marker in `baseGraph.ts`: the two reproducers are plain `it` now. Re-read
+ * against decision 4 of the slice's design before the flip, and two things were corrected:
+ *  - "in the debtor's half" accepted a marker in the MIDDLE of a line. Decision 4 puts the tip 2 px before the rim and
+ *    the base 5 px farther: every piece of marker evidence must now lie within `AT_THE_END_PX` of the rim of that node,
+ *    and the piece nearest to the node must be on the axis (the triangle POINTS at the debtor, it is not a bar or a
+ *    triangle turned round). Shown by the two new synthetic controls.
+ *  - a mutual pair was accepted with any evidence at both ends; it now needs the same amount at each (one arrowhead
+ *    per direction), and the two bodies are counted.
+ * What it still does not see: WHICH line a marker belongs to (two markers of a pair drawn for the wrong lines look the
+ * same on the picture, too) - `render/baseGraph.direction.test.ts` holds the order; and zoom other than 1.
  */
 import { describe, expect, it, vi } from 'vitest'
 
 import { drawBaseGraph } from '../render/baseGraph'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { createVizMapping } from '../vizMapping'
-import { measured, red } from './p039'
+import { measured } from './p039'
 import { allPoints, dist, recordingCtx, segmentsOf, type Draw, type Pt } from './recordingCtx'
 
 // 039 slice B (2026-10-12): the mapping is created per app, not a module singleton - only this line moved.
@@ -31,6 +40,10 @@ vi.mock('../render/glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 
 /** A path point this far from the axis of the line is not the line (the line is drawn on its axis exactly). */
 const OFF_AXIS_PX = 0.75
+/** Decision 4: tip 2 px before the rim, base 5 px farther back - the whole marker is within 7 px of the rim. One more for rounding. */
+const AT_THE_END_PX = 8
+/** The stand-in nodes are 24 px circles. */
+const RIM_PX = 12
 
 const node = (id: string, x: number, y: number): LayoutNode => ({
   id, __x: x, __y: y, type: 'person', status: 'active', viz_shape_key: 'circle', viz_size: { w: 24, h: 24 }, viz_color_key: 'person',
@@ -85,6 +98,25 @@ function markerEvidence(draws: Draw[], near: LayoutNode, far: LayoutNode): numbe
   return n
 }
 
+/**
+ * Is what is drawn near `near` an arrowhead AT THE END of the line and pointing at that node? Every path point of a
+ * fill or stroke that is not a line body, in the half of `near`: all within `AT_THE_END_PX` of the rim, and the one
+ * nearest to the node on the axis.
+ */
+function pointsAtTheEnd(draws: Draw[], near: LayoutNode, far: LayoutNode): { points: number; farthestFromRimPx: number; nearestIsOnAxis: boolean } {
+  const a = { x: near.__x, y: near.__y }
+  const b = { x: far.__x, y: far.__y }
+  const bodySet = new Set(lineBodies(draws, near, far).flat())
+  const pts = draws.filter((d) => d.kind === 'stroke' || d.kind === 'fill').flatMap((d) => d.path.flatMap((op) => op.at))
+    .filter((p) => !bodySet.has(p) && dist(p, a) < dist(p, b))
+  const nearest = [...pts].sort((p, q) => dist(p, a) - dist(q, a))[0]
+  return {
+    points: pts.length,
+    farthestFromRimPx: pts.length ? Math.max(...pts.map((p) => dist(p, a) - RIM_PX)) : Number.NaN,
+    nearestIsOnAxis: !!nearest && offAxis(nearest, a, b) <= OFF_AXIS_PX,
+  }
+}
+
 describe('039 R1 - a trust line shows its direction (geometry of the edge pass)', () => {
   const creditor = node('creditor', 100, 300)
   const debtor = node('debtor', 300, 300)
@@ -115,22 +147,45 @@ describe('039 R1 - a trust line shows its direction (geometry of the edge pass)'
     expect(markerEvidence([body], debtor, creditor), 'the line alone is not a marker').toBe(0)
   })
 
-  red('one-way line creditor -> debtor: a marker is drawn at the debtor end (today: none anywhere)', 'marker evidence at the debtor end of creditor -> debtor', () => {
+  it('counter-check of "at the end, pointing at the node": a triangle in the middle of the debtor half and a triangle turned round at the rim are both refused; the arrowhead of decision 4 is accepted', () => {
+    const body: Draw = { kind: 'stroke', strokeStyle: '', fillStyle: '', lineWidth: 1, globalAlpha: 1, path: [{ op: 'moveTo', at: [{ x: 112, y: 300 }] }, { op: 'lineTo', at: [{ x: 288, y: 300 }] }] }
+    const tri = (tip: number, base: number): Draw => ({ ...body, kind: 'fill', path: [{ op: 'moveTo', at: [{ x: tip, y: 300 }] }, { op: 'lineTo', at: [{ x: base, y: 298 }] }, { op: 'lineTo', at: [{ x: base, y: 302 }] }, { op: 'close', at: [] }] })
+    const good = pointsAtTheEnd([body, tri(286, 281)], debtor, creditor)
+    expect(good.farthestFromRimPx, 'decision 4: within 7 px of the rim').toBeLessThanOrEqual(AT_THE_END_PX)
+    expect(good.nearestIsOnAxis).toBe(true)
+    const midLine = pointsAtTheEnd([body, tri(240, 235)], debtor, creditor)
+    expect(midLine.farthestFromRimPx, 'a marker in the middle of the half is far from the rim').toBeGreaterThan(AT_THE_END_PX)
+    const turnedRound = pointsAtTheEnd([body, tri(281, 286)], debtor, creditor)
+    expect(turnedRound.nearestIsOnAxis, 'a triangle whose BASE is at the node points away from it').toBe(false)
+  })
+
+  it('one-way line creditor -> debtor: a marker is drawn at the debtor end, at the rim and pointing at the debtor; none at the creditor', () => {
     const draws = drawScene([creditor, debtor], [link('creditor', 'debtor')])
     const atDebtor = markerEvidence(draws, debtor, creditor)
     const atCreditor = markerEvidence(draws, creditor, debtor)
     measured('R1 geometry one-way', { atDebtor, atCreditor, draws: draws.length })
     expect(atDebtor, 'marker evidence at the debtor end of creditor -> debtor').toBeGreaterThan(0)
-    // Meaningful only once the line above is green: with no marker anywhere this is 0 by default.
     expect(atCreditor, 'no marker at the creditor end of a ONE-WAY line').toBe(0)
+    const end = pointsAtTheEnd(draws, debtor, creditor)
+    measured('R1 geometry one-way, at the end', end)
+    expect(end.farthestFromRimPx, 'the whole marker is at the END of the line (within 8 px of the rim of the debtor)').toBeLessThanOrEqual(AT_THE_END_PX)
+    expect(end.farthestFromRimPx, 'and outside the node').toBeGreaterThan(0)
+    expect(end.nearestIsOnAxis, 'its point nearest to the debtor is on the axis: it points AT the debtor').toBe(true)
   })
 
-  red('mutual pair a -> b and b -> a: each is the debtor of one line, so a marker is drawn at BOTH ends (today: none)', 'marker evidence at the first node of a mutual pair', () => {
+  it('mutual pair a -> b and b -> a: each is the debtor of one line, so a marker is drawn at BOTH ends - the same at each, at the rim, pointing at its node', () => {
     const draws = drawScene([creditor, debtor], [link('creditor', 'debtor'), link('debtor', 'creditor')])
     const ends = { atFirst: markerEvidence(draws, creditor, debtor), atSecond: markerEvidence(draws, debtor, creditor) }
     measured('R1 geometry mutual', { ...ends, lineBodies: lineBodies(draws, creditor, debtor).length })
     expect(ends.atFirst, 'marker evidence at the first node of a mutual pair').toBeGreaterThan(0)
     expect(ends.atSecond, 'marker evidence at the second node of a mutual pair').toBeGreaterThan(0)
+    expect(ends.atSecond, 'one arrowhead per direction: the same evidence at both ends').toBe(ends.atFirst)
+    expect(lineBodies(draws, creditor, debtor), 'the pair keeps its two bodies, one over the other').toHaveLength(2)
+    for (const [near, far] of [[creditor, debtor], [debtor, creditor]] as const) {
+      const end = pointsAtTheEnd(draws, near, far)
+      expect(end.farthestFromRimPx, `the marker at ${near.id} is at the end of the line`).toBeLessThanOrEqual(AT_THE_END_PX)
+      expect(end.nearestIsOnAxis, `and points at ${near.id}`).toBe(true)
+    }
   })
 
   it('measurement (dated 2026-10-12, base 90e17a4c; not an acceptance condition): the two lines of a mutual pair lie on one axis, one over the other', () => {

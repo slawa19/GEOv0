@@ -5,6 +5,7 @@ import { clamp01 } from '../utils/math'
 import { createThrottledWarn } from '../utils/throttledWarn'
 import { withAlpha } from './color'
 import { drawGlowSprite } from './glowSprites'
+import { newArrowhead, trustArrowhead, type Arrowhead } from './linkArrowhead'
 import { getLinkTermination } from './linkGeometry'
 import { getNodeBaseGeometry } from './nodeGeometry'
 import type { LayoutNode } from '../types/layout'
@@ -40,6 +41,29 @@ function linkColor(l: GraphLink, mapping: VizMapping, palette?: Palette) {
   const k = String(l.viz_color_key ?? '')
   const p = k && palette ? palette[k] : undefined
   return p?.color ?? mapping.link.color.default
+}
+
+/**
+ * The alpha of a direction marker: OPAQUE (039 slice B, PR 2). The marker must not inherit the alpha of its line - a
+ * line with little or no debt is drawn at 0.06 and its marker would be invisible, although the direction of trust is
+ * the same whatever is owed. At 1 the line colour `#64748b` has a contrast of 3.9 to the canvas of `saas` and 4.2 to
+ * that of `hud` (WCAG relative luminance, computed 2026-10-12; 3 is the floor for a graphical object); at 0.8 it is 3.0
+ * and below that it fails. Opaque also means that markers lying one over another do not add up to another colour.
+ */
+export const DIRECTION_MARKER_ALPHA = 1
+
+/** One reused object: `trustArrowhead` writes the corners of the current marker into it. */
+const arrowhead: Arrowhead = newArrowhead()
+
+/** A closed path of its own and one `fill`: the body of the line stays an open path with its own stroke. */
+function fillArrowhead(ctx: CanvasRenderingContext2D, a: Arrowhead, style: string) {
+  ctx.fillStyle = style
+  ctx.beginPath()
+  ctx.moveTo(a.tipX, a.tipY)
+  ctx.lineTo(a.leftX, a.leftY)
+  ctx.lineTo(a.rightX, a.rightY)
+  ctx.closePath()
+  ctx.fill()
 }
 
 export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
@@ -150,6 +174,24 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     ctx.stroke()
   }
 
+  // Links: direction markers. `source -> target` is creditor -> debtor (AGENTS.md section 8): the arrowhead stands
+  // at the TARGET. A pass of its own after every body, so that no body is stroked over a marker, in the resolved
+  // colour of the line and opaque - the same triangle whatever `used` is (it shows trust, not a debt). The lines are
+  // the ones the pass above drew: all of them in `full` LOD, the remaining ones in `focus`. No batching: one fill each.
+  for (const link of links) {
+    if (linkLod === 'focus') {
+      const isActive = activeEdges.has(link.__key)
+      const isFocusIncident = !!selectedNodeId && isIncident(link, selectedNodeId)
+      if (!isActive && !isFocusIncident) continue
+    }
+    const a = pos.get(link.source)
+    const b = pos.get(link.target)
+    // An orphan link was counted and reported by the pass above.
+    if (!a || !b) continue
+    if (!trustArrowhead(a, b, invZ, arrowhead)) continue
+    fillArrowhead(ctx, arrowhead, withAlpha(linkColor(link, mapping, palette), DIRECTION_MARKER_ALPHA))
+  }
+
   // Links: overlay pass = UX highlight for focus/active without overwriting base style.
   if (!dragMode && (selectedNodeId || activeEdges.size > 0)) {
     for (const link of links) {
@@ -209,6 +251,12 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(end.x, end.y)
           ctx.stroke()
+          // The highlight stroke runs over the marker of this line: the marker is drawn again in the highlight
+          // colour, at the same TARGET end, and fades with the highlight back to the marker underneath. A focus
+          // overlay (above) keeps the line's own colour, so the marker of the pass before stays as it is.
+          if (trustArrowhead(a, b, invZ, arrowhead)) {
+            fillArrowhead(ctx, arrowhead, withAlpha(mapping.fx.tx_spark.trail, DIRECTION_MARKER_ALPHA * edgeAlpha))
+          }
         }
       }
     }
