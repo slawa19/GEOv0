@@ -1,25 +1,28 @@
 /**
- * 039 T3901 - R10 (batching of the edge pass) in the BROWSER, MEASUREMENT ONLY since 2026-10-12 (debug-only config).
- * WITHDRAWN AS A REPRODUCER (spec 039, P-8): the experiment below shows that grouping changes the picture on today's
- * fixture, so batching is not done and the red assertion "strokes <= style groups" was removed. No slice flips
- * anything here; the file stays as the runnable record of why, with its control case (the same drawing twice: 0 px).
+ * 039 T3901 - R10 in the BROWSER: a MEASUREMENT of one static frame and a MODEL experiment. Debug-only config.
+ * Dated 2026-10-12, base 90e17a4c. No slice flips anything here: nothing in this file is a reproducer.
  *
- * What it measures: what one static frame of the 100-node scene issues, and
- * an experiment on whether grouping keeps the picture. Renderer tier: `src/p039-repro/r10-*.p039-repro.test.ts`.
+ * R10 as a stroke budget is WITHDRAWN (spec 039, P-8). What this file is, and is not:
  *
- * Corrected form (P-2, P-8): the EDGE pass is counted apart from node outlines; the budget is the number of real style
- * groups; batching is allowed only if it does not change the picture - two alpha-0.2 strokes that cross give 0.36,
- * one combined stroke gives 0.2.
+ * 1. The static frame of the PRODUCT (100 nodes, 348 lines, quality low): how many drawing calls of which kind one
+ *    pass of the render loop issues. Every `stroke()` on the base canvas is classed by the path it strokes - "line"
+ *    (only moveTo / lineTo) or "shape" (an arc, a rect, a curve). The numbers are logged. Asserted is only what a
+ *    correct product keeps: one pass was counted, the lines and the nodes were drawn.
  *
- * Counting: every `stroke()` on the base canvas is classed by the path it strokes - "line" (only moveTo / lineTo: how
- * an edge is drawn) or "shape" (an arc, a rect, a curve: a node outline). Path-building calls are wrapped for that.
- *
- * The experiment (MEASUREMENT, not a verdict on a fix that does not exist): the 348 lines of the scene are drawn three
- * ways on off-screen canvases of the stand - as today (one stroke each, snapshot order), one path per style group
- * (order changed), one path per run of consecutive same-style lines (order kept) - and compared pixel by pixel.
- * LIMITS of the experiment: lines run from rim to rim of a CIRCLE of the node's larger half-size (the product clips a
- * business node as a rounded rectangle); nodes are not drawn over the lines; zoom and pan are the page's. It says how
- * much the EDGE layer changes, not what a user sees after nodes are painted on top.
+ * 2. A MODEL of the edge pass, off-screen - NOT the product's renderer and not the product's scene. It draws the 348
+ *    lines three ways (one stroke each in snapshot order; one path per style group; one path per run of consecutive
+ *    same-style lines) and compares them pixel by pixel. What the model does differently from the product:
+ *      - a line runs from rim to rim of a CIRCLE of the node's larger half-size, and that radius is taken in WORLD
+ *        units and scaled by the zoom, whereas the product keeps node sizes constant in SCREEN pixels (inverse zoom)
+ *        and clips a business node as a rounded rectangle;
+ *      - nodes are not painted over the lines, although in the product they cover where lines meet a node;
+ *      - colours are the mapping's default: a palette override of the snapshot is ignored;
+ *      - "differs" is a difference of premultiplied channel values of 1/255 or more - not Playwright's screenshot
+ *        comparator, so the pixel count that `maxDiffPixelRatio 0.01` would allow is arithmetic, not a verdict.
+ *    Its percentages therefore say that the three ALGORITHMS are not equivalent on overlapping translucent lines.
+ *    They are NOT percentages of the painted pixels of the product's scene, and they do not move when the product's
+ *    renderer changes: the model is fixed code. Asserted: the control (the same drawing twice differs in 0 pixels) and
+ *    that the model painted something. The numbers are printed.
  */
 import { expect, test } from '@playwright/test'
 
@@ -94,13 +97,12 @@ test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes
     quality: await page.evaluate(() => document.querySelector<HTMLElement>('.root')?.dataset.quality),
   })
   expect(d1.draws - d0.draws, 'precondition: exactly one pass of the render loop was counted').toBe(1)
-  expect(c.lineSegments, 'coverage: all 348 trust lines are drawn in the pass').toBe(snapshot.links.length)
-  expect(c.baseShapeStrokes, 'counter-check: node outlines are counted apart (one per node)').toBe(snapshot.nodes.length)
-  expect(groups, 'counter-check: the scene has several line styles').toBeGreaterThan(1)
-  expect(c.baseLineStrokes, 'today: one stroke per trust line in the edge pass').toBe(snapshot.links.length)
-  expect(groups, 'style groups of the scene').toBe(12)
+  expect(c.lineSegments, 'by contract: at least one line segment per trust line is drawn in the pass').toBeGreaterThanOrEqual(snapshot.links.length)
+  expect(c.baseShapeStrokes + c.baseFills + c.baseDrawImages, 'by contract: nodes are drawn in the pass').toBeGreaterThanOrEqual(snapshot.nodes.length)
+  // 348 line strokes, 100 shape strokes and 12 style groups are LOGGED above as a dated measurement of the base
+  // (2026-10-12, 90e17a4c). They are not asserted: a direction marker, hatching or a hub ring changes them.
 
-  // --- the experiment: does grouping change the edge layer? -----------------------------------------------------
+  // --- the MODEL experiment (see the header: not the product's renderer, not the product's scene) -----------------------------------------------------
   const pos = new Map((await layoutNodes(page)).map((n) => [n.id, n]))
   const cam = await camera(page)
   const size = new Map(snapshot.nodes.map((n) => { const s = n.viz_size as { w: number; h: number } | undefined; return [n.id, Math.max(s?.w ?? 12, s?.h ?? 12) / 2] }))
@@ -176,11 +178,7 @@ test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes
     }
   }, { lines, w: page.viewportSize()!.width, h: page.viewportSize()!.height })
   await frames(page, 1)
-  note('R10 batching experiment (edge layer only)', experiment)
+  note('R10 batching MODEL (off-screen, not the product scene)', experiment)
   expect(experiment.controlSameDrawingTwice.differingPx, 'counter-check of the comparison: the same drawing twice differs in no pixel').toBe(0)
   expect(experiment.onePathPerStyleGroup.paintedPx, 'counter-check: the experiment painted the lines').toBeGreaterThan(0)
-  // The finding the withdrawal rests on, held two-sided: if a change of the scene or of the renderer makes grouping
-  // picture-preserving, this turns red and the decision of P-8 is to be looked at again.
-  expect(experiment.onePathPerStyleGroup.differingPx, 'one path per style group changes pixels of the edge layer').toBeGreaterThan(0)
-  expect(experiment.onePathPerRunInSnapshotOrder.differingPx, 'one path per run, order kept, changes pixels too (lines of one run overlap where they meet a node)').toBeGreaterThan(0)
 })

@@ -18,6 +18,12 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { boot, frames, pushEvent, ringSnapshot, syncCssToClock, txUpdated, type LabelSample } from '../stand.js'
 
+/**
+ * "Clearly visible" before it fades: P-2 asks that the label is visible first, it does not ask for full opacity. 0.8 is
+ * well above the fade-out threshold (0.05) and leaves room for a design with a softer peak; today's peak is 1.
+ */
+const CLEARLY_VISIBLE = 0.8
+
 type Trace = { samples: LabelSample[]; last: LabelSample; removedAfterMs: number; opacityOneFrameBeforeCssEnd: number }
 
 async function traceLabel(page: Page, match: (l: LabelSample) => boolean, maxFrames: number): Promise<Trace> {
@@ -56,8 +62,10 @@ function judge(name: string, t: Trace) {
   }
   console.log(`[039 R5 ${name}]`, JSON.stringify(row))
   test.info().annotations.push({ type: `039-R5-${name}`, description: JSON.stringify(row) })
-  expect(t.last.animations, 'counter-check: the label has exactly one CSS animation, and the stand drives it').toBe(1)
-  expect(row.peakOpacity, 'first: the label was fully visible (the reader is not stuck at 0)').toBeGreaterThan(0.99)
+  // How many animations a label has is the product's business (one today; a separate move and fade would be as good).
+  // What the stand needs is that it drives at least one - otherwise opacity would not follow the clock at all.
+  expect(t.last.animations, 'counter-check: the label is animated by CSS, and the stand drives it').toBeGreaterThanOrEqual(1)
+  expect(row.peakOpacity, `first: the label was clearly visible (peak opacity at least ${CLEARLY_VISIBLE})`).toBeGreaterThanOrEqual(CLEARLY_VISIBLE)
   expect.soft(row.opacityInLastPresentFrame, `opacity of the ${name} label in its last present frame (threshold 0.05; the animation one frame before its end: ${row.opacityOneFrameBeforeCssEnd})`).toBeLessThanOrEqual(0.05)
   expect.soft(row.removedByJsAfterMs, `the ${name} label is removed not earlier than its CSS animation ends (${row.cssDurationMs} ms)`).toBeGreaterThanOrEqual(row.cssDurationMs)
 }

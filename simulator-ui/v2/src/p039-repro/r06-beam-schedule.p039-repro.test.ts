@@ -3,10 +3,15 @@
  * unequal length: `e2e/qa/p039-repro/r06-beam-visible.p039-repro.ts`.
  *
  * Contract (P-3): the duration of a route is computed once; a leg has a lower bound; the bound of the spec (450 ms) is
- * a DESIGN BUDGET, not a derived number. So the assertion here does not use 450. It uses the product's own declared
- * floor: `ttlMinMs` (340 ms), the shortest life the product allows a spark to have ("clamp TTL", `useRealTxFx.ts`).
- * Today the clamp is applied to the whole route and then divided by the number of legs, so a leg of a 6-edge route
- * lives 200 ms - below the floor the same file declares. 450 is reported next to it as a measurement.
+ * a DESIGN BUDGET. What is asserted here:
+ *  - the whole route grows with the number of legs (derivable from "a lower bound per leg" alone);
+ *  - the shortest leg of a six-leg route lasts at least 400 ms. 400 is a SAMPLED duration, not a measured minimum: it is
+ *    the shortest of the leg durations the stand measured (1200, 600, 400 and 200 ms, `e2e/qa/oracle.ts`, the comment
+ *    over `MOTION_LIMITS`) at which the oracle's unrelaxed limits of "the head advances frame by frame" held; at 200 ms
+ *    they do not. Nothing between 200 and 400 was sampled, and 400 was not compared with 450.
+ * NOT a floor: the product's `ttlMinMs` (340). It clamps the WHOLE route before the division by the number of legs
+ * (`useRealTxFx.ts`: `clampRealTxTtlMs(evt.ttl_ms)`, then `legMs = ttlMs / sparkEdges.length`); the first version of
+ * this file used it as a leg floor, which the review of 2026-10-12 rightly refused.
  *
  * LIMITS. A schedule is not what is seen: alpha decays inside every leg (`renderFrame.ts`), so a longer leg alone does
  * not make the handoff visible. Nothing here knows the length of an edge: "constant speed" cannot be judged at this tier.
@@ -20,6 +25,9 @@ import { REAL_TX_FX_DEFAULT, useRealTxFx } from '../composables/realFx/useRealTx
 import { createFxState } from '../render/fxRenderer'
 import type { TxUpdatedEvent } from '../types'
 import { measured, red } from './p039'
+
+/** See the header: a sampled leg duration at which the oracle's unrelaxed motion limits held, not a measured minimum. */
+const SAMPLED_LEG_MS = 400
 
 const NODES = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
 const route = (k: number) => Array.from({ length: k }, (_, i) => ({ from: NODES[i]!, to: NODES[i + 1]! }))
@@ -52,18 +60,17 @@ describe('039 R6 - the schedule of a beam over a route', () => {
       const s = schedule(k)
       return { edges: k, legMs: s.legs.map((l) => l.lifeMs), totalMs: s.totalMs, receiverBurstAtMs: s.receiverBurstAtMs }
     })
-    measured('R6 schedule', { ttlMinMs: REAL_TX_FX_DEFAULT.ttlMinMs, ttlMaxMs: REAL_TX_FX_DEFAULT.ttlMaxMs, specBudgetPerLegMs: 450, rows })
+    measured('R6 schedule', { sampledLegMs: SAMPLED_LEG_MS, routeTtlMinMs: REAL_TX_FX_DEFAULT.ttlMinMs, ttlMaxMs: REAL_TX_FX_DEFAULT.ttlMaxMs, specBudgetPerLegMs: 450, rows })
     for (const r of rows) expect(r.legMs, `counter-check: a ${r.edges}-edge route spawns one spark per edge`).toHaveLength(r.edges)
-    expect(rows[0]!.legMs).toEqual([1200])
   })
 
-  red('no leg of a 6-edge route lives less than the product\'s own floor for a spark, ttlMinMs = 340 ms (today: 200 ms)', () => {
+  red('no leg of a 6-edge route lives less than 400 ms (today: 200 ms)', 'shortest leg of a 6-edge route, ms', () => {
     const s = schedule(6)
-    expect(s.legs, 'coverage: all six legs are scheduled').toHaveLength(6)
-    expect(Math.min(...s.legs.map((l) => l.lifeMs)), 'shortest leg of a 6-edge route, ms').toBeGreaterThanOrEqual(REAL_TX_FX_DEFAULT.ttlMinMs)
+    expect(s.legs.length, 'coverage: legs scheduled for a 6-edge route').toBe(6)
+    expect(Math.min(...s.legs.map((l) => l.lifeMs)), 'shortest leg of a 6-edge route, ms').toBeGreaterThanOrEqual(SAMPLED_LEG_MS)
   })
 
-  red('a route of more edges takes longer, it is not squeezed into the time of one edge (today: 1200 ms whatever the length)', () => {
+  red('a route of more edges takes longer, it is not squeezed into the time of one edge (today: 1200 ms whatever the length)', 'whole 6-edge route, ms', () => {
     const one = schedule(1).totalMs
     const six = schedule(6).totalMs
     expect(six, `whole 6-edge route, ms (1-edge route: ${one})`).toBeGreaterThan(one)

@@ -63,7 +63,7 @@ describe('039 R8 - the Interact history names participants', () => {
     expect(texts(im)).toEqual(['Payment 1.00 UAH: Alice Baker → Bob Carter'])
   })
 
-  red('a trust line CREATED: one history line with both names and no id (today: "pid-0002 → pid-0003")', async () => {
+  red('a trust line CREATED: one history line with both names and no id (today: "pid-0002 → pid-0003")', 'CREATED: the history line names', async () => {
     const im = mode()
     im.startTrustlineFlow()
     im.selectNode('pid-0002')
@@ -72,31 +72,31 @@ describe('039 R8 - the Interact history names participants', () => {
     await im.confirmTrustlineCreate('10.00')
     measured('R8 trustline created', { history: texts(im), toast: im.successMessage.value })
     expect(texts(im), 'exactly one history line').toHaveLength(1)
-    expect(texts(im)[0]).toContain('Bob Carter')
-    expect(texts(im)[0]).toContain('Carol Dean')
+    expect(texts(im)[0], 'CREATED: the history line names Bob Carter').toContain('Bob Carter')
+    expect(texts(im)[0], 'CREATED: the history line names Carol Dean').toContain('Carol Dean')
     expect(texts(im)[0]).not.toMatch(/pid-000\d/)
   })
 
-  red('a trust line limit CHANGED: one history line with both names and no id (today: ids)', async () => {
+  red('a trust line limit CHANGED: one history line with both names and no id (today: ids)', 'CHANGED: the history line names', async () => {
     const im = mode()
     expect(im.selectEdge('pid-0001→pid-0003'), 'counter-check: the existing line is selected').toBe(true)
     await im.confirmTrustlineUpdate('20.00')
     measured('R8 trustline updated', { history: texts(im), toast: im.successMessage.value })
     expect(texts(im), 'exactly one history line').toHaveLength(1)
-    expect(texts(im)[0]).toContain('Alice Baker')
-    expect(texts(im)[0]).toContain('Carol Dean')
+    expect(texts(im)[0], 'CHANGED: the history line names Alice Baker').toContain('Alice Baker')
+    expect(texts(im)[0], 'CHANGED: the history line names Carol Dean').toContain('Carol Dean')
     expect(texts(im)[0]).not.toMatch(/pid-000\d/)
   })
 
-  red('a trust line CLOSED: the history line and the toast carry both names and no id (today: ids)', async () => {
+  red('a trust line CLOSED: the history line and the toast carry both names and no id (today: ids)', 'CLOSED: the text names', async () => {
     const im = mode()
     expect(im.selectEdge('pid-0001→pid-0003')).toBe(true)
     await im.confirmTrustlineClose()
     measured('R8 trustline closed', { history: texts(im), toast: im.successMessage.value })
     expect(texts(im), 'exactly one history line').toHaveLength(1)
     for (const text of [texts(im)[0]!, String(im.successMessage.value)]) {
-      expect(text).toContain('Alice Baker')
-      expect(text).toContain('Carol Dean')
+      expect(text, 'CLOSED: the text names Alice Baker').toContain('Alice Baker')
+      expect(text, 'CLOSED: the text names Carol Dean').toContain('Carol Dean')
       expect(text).not.toMatch(/pid-000\d/)
     }
   })

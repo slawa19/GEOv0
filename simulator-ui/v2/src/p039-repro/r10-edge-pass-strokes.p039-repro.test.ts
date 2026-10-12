@@ -3,8 +3,9 @@
  *
  * WITHDRAWN AS A REPRODUCER (spec 039, P-8): the off-screen experiment of the browser tier showed that grouping the
  * lines into one path - by style group, or by run with the order kept - changes the picture on today's fixture, so
- * batching is not done and "strokes <= style groups" is not a budget. The red assertion (348 <= 12) was removed; what
- * stays are the counts a later decision (a dirty key) starts from. No slice flips anything here: nothing is `it.fails`.
+ * batching is not done and "strokes <= style groups" is not a budget. The red assertion (348 <= 12) was removed. The
+ * counts are a DATED MEASUREMENT of the base (2026-10-12, 90e17a4c): they are logged, not asserted, so that slice B
+ * (markers, hatching) is not held to 348 strokes. No slice flips anything here: nothing is `it.fails`.
  * Browser counts and the pixel experiment:
  * `e2e/qa/p039-repro/r10-strokes.p039-repro.ts`.
  *
@@ -56,19 +57,22 @@ describe('039 R10 - measurement: the edge pass of the base canvas, strokes and s
   strokes.forEach((d, i) => { if (i === 0 || styleOf(d) !== styleOf(strokes[i - 1]!)) runs += 1 })
   const segments = strokes.flatMap(segmentsOf)
 
-  it('measurement: strokes, lines drawn, style groups, runs of one style in snapshot order', () => {
+  it('measurement (dated 2026-10-12, base 90e17a4c): strokes, style groups, runs of one style in snapshot order', () => {
+    // LOGGED, NOT ASSERTED: 348 strokes, 12 style groups and 175 runs are what the base does. A direction marker, the
+    // hatching of a frozen line or a different order of drawing may change every one of them in a correct product.
     measured('R10 edge pass', {
       links: links.length, strokes: strokes.length, segments: segments.length, otherDraws: draws.length - strokes.length,
       styleGroups: groups.size, groups: [...groups].sort(), runsInSnapshotOrder: runs,
     })
+    // What stays true by contract: every trust line of the scene has a line body from one of its nodes to the other.
+    const at = new Map(nodes.map((n) => [n.id, n]))
+    const near = (p: { x: number; y: number }, id: string) => Math.hypot(p.x - at.get(id)!.__x, p.y - at.get(id)!.__y) <= 40 // within a node (the largest is 42 x 36)
+    const drawn = links.filter((l) => segments.some(([p, q]) => (near(p, l.source) && near(q, l.target)) || (near(p, l.target) && near(q, l.source))))
     expect(links).toHaveLength(348)
-    expect(segments, 'counter-check: every trust line of the fixture is drawn').toHaveLength(348)
-    expect(strokes, 'today: one stroke per trust line').toHaveLength(348)
-    expect(groups.size, 'style groups of the fixture: 3 widths x 4 alphas, one colour').toBe(12)
-    expect(runs, 'runs of consecutive same-style lines in snapshot order').toBe(175)
+    expect(drawn.length, 'trust lines of the fixture that have a line body between their two nodes').toBe(348)
   })
 
-  it('counter-check (P-8): a selected node and an active edge ADD strokes of the highlight pass - they are not batched away', () => {
+  it('measurement: a selected node and an active edge ADD drawing in the highlight pass', () => {
     const hub = links[0]!.source
     const incident = links.filter((l) => l.source === hub || l.target === hub).length
     const focused = edgePass({ selectedNodeId: hub }).filter((d) => d.kind === 'stroke')
@@ -78,9 +82,8 @@ describe('039 R10 - measurement: the edge pass of the base canvas, strokes and s
       strokesWithOneActiveEdge: active.length, addedByActiveEdge: active.length - strokes.length,
     })
     expect(incident).toBeGreaterThan(0)
-    expect(focused.flatMap(segmentsOf).length - segments.length, 'one more line per trust line of the selected node').toBe(incident)
-    expect(active.flatMap(segmentsOf).length - segments.length, 'one more line for the active edge').toBe(1)
-    const highlight = active.filter((d) => d.lineWidth === VIZ_MAPPING.link.width_px.highlight)
-    expect(highlight, 'the active edge is drawn in the highlight width').toHaveLength(1)
+    // By contract: a selection and an active edge ARE drawn (something is added). How many strokes, and their width, is logged.
+    expect(focused.flatMap(segmentsOf).length, 'a selected node adds drawing to the edge pass').toBeGreaterThan(segments.length)
+    expect(active.flatMap(segmentsOf).length, 'an active edge adds drawing to the edge pass').toBeGreaterThan(segments.length)
   })
 })

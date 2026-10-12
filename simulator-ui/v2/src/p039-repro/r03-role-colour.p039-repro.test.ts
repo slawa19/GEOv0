@@ -27,12 +27,14 @@ const base: GraphNode = { id: 'n', name: 'N', type: 'person', status: 'active', 
 const fill = (over: Partial<GraphNode>) => fillForNode({ ...base, ...over }, VIZ_MAPPING)
 
 describe('039 R3 - the colour of a node says its net role (inputs: net_sign, status)', () => {
-  it('counter-check: the mapping answers a colour, and a different key gives a different colour', () => {
-    expect(fill({})).toMatch(/^#[0-9a-f]{6}$/i)
-    expect(fill({ viz_color_key: 'business' })).not.toBe(fill({ viz_color_key: 'person' }))
+  it('counter-check: the mapping answers a colour for every case the reproducers use', () => {
+    // Nothing here requires a colour per KIND of participant: after slice B an unknown role looks the same for a person and a business.
+    for (const over of [{}, { net_sign: 1 as const }, { net_sign: -1 as const }, { net_sign: 0 as const }, { net_sign: null }, { status: 'frozen' }, { type: 'business', viz_color_key: 'business' }]) {
+      expect(fill(over), JSON.stringify(over)).toMatch(/^(#[0-9a-f]{3,8}|rgba?\(.+\)|hsla?\(.+\))$/i)
+    }
   })
 
-  red('net creditor (+1) and net debtor (-1) of the same kind get different colours (today: net_sign is not read)', () => {
+  red('net creditor (+1) and net debtor (-1) of the same kind get different colours (today: net_sign is not read)', 'creditor vs debtor', () => {
     const row = { creditor: fill({ net_sign: 1 }), debtor: fill({ net_sign: -1 }), neutral: fill({ net_sign: 0 }), unknown: fill({ net_sign: null }), absent: fill({}) }
     measured('R3 fills by net_sign, same viz_color_key', row)
     expect(row.creditor, 'creditor vs debtor').not.toBe(row.debtor)
@@ -42,13 +44,13 @@ describe('039 R3 - the colour of a node says its net role (inputs: net_sign, sta
     expect([row.creditor, row.debtor], 'an absent net_sign is not shown as a role').not.toContain(row.absent)
   })
 
-  red('the same role gets the same colour whatever the kind of participant and its debt bin (today: 15 keys)', () => {
+  red('the same role gets the same colour whatever the kind of participant and its debt bin (today: 15 keys)', 'distinct colours among three net debtors', () => {
     const debtors = [fill({ net_sign: -1, viz_color_key: 'debt-2' }), fill({ net_sign: -1, viz_color_key: 'debt-8' }), fill({ net_sign: -1, type: 'business', viz_color_key: 'business' })]
     measured('R3 fills of three net debtors', debtors)
     expect(new Set(debtors).size, 'distinct colours among three net debtors').toBe(1)
   })
 
-  red('a freeze wins over the role: a frozen creditor and a frozen debtor look the same, and unlike both roles', () => {
+  red('a freeze wins over the role: a frozen creditor and a frozen debtor look the same, and unlike both roles', 'not the colour of a role', () => {
     // The fixture and the pipeline name the state `frozen` (snapshot) / `suspended` (after a topology event); both are a freeze.
     for (const status of ['frozen', 'suspended']) {
       const frozenCreditor = fill({ status, net_sign: 1 })
@@ -58,7 +60,7 @@ describe('039 R3 - the colour of a node says its net role (inputs: net_sign, sta
     }
   })
 
-  it('measurement: what the shipped 100-node fixture gives the mapping today (role inputs and colour keys)', () => {
+  it('measurement (dated 2026-10-12, base 90e17a4c; not an acceptance condition): what the shipped 100-node fixture gives the mapping (role inputs and colour keys)', () => {
     const snap = fixture100()
     const count = (f: (n: GraphNode) => string) => snap.nodes.reduce<Record<string, number>>((m, n) => ({ ...m, [f(n)]: (m[f(n)] ?? 0) + 1 }), {})
     const fills = new Set(snap.nodes.map((n) => fillForNode(n, VIZ_MAPPING)))
@@ -73,6 +75,6 @@ describe('039 R3 - the colour of a node says its net role (inputs: net_sign, sta
       hubFieldCandidates: fields.filter((f) => /hub|links_count|degree|role/i.test(f)),
     })
     expect(snap.nodes).toHaveLength(100)
-    expect(fills.size, 'counter-check: the fixture exercises several colours').toBeGreaterThan(4)
+    // No bound on the number of fills: after slice B the fixture needs at most four (creditor, debtor, neutral, frozen).
   })
 })

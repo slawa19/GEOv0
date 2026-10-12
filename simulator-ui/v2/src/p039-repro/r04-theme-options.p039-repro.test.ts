@@ -50,7 +50,7 @@ describe('039 R4 - the theme switcher', () => {
     expect(options.map((o) => o.value)).toContain('hud')
   })
 
-  red('offers exactly two themes, and `shadcn` is not one of them (today: four, shadcn first)', async () => {
+  red('offers exactly two themes, and `shadcn` is not one of them (today: four, shadcn first)', 'options of the theme switcher', async () => {
     const values = (await themeOptions()).map((o) => o.value)
     expect(values, 'options of the theme switcher').toHaveLength(2)
     expect(values).not.toContain('shadcn')
