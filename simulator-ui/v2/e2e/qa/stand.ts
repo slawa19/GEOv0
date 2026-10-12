@@ -55,6 +55,21 @@ export function ringSnapshot(): QaSnapshot {
   }
 }
 
+/**
+ * An OPEN route of six legs over seven different nodes (039: T3901, then slice A): seven nodes on a ring with four
+ * lines across it, and the route n0 > n1 > n3 > n6 > n5 > n2 > n4 along lines of the scene only. The ring of six
+ * cannot stand in for it at six legs: there sender and receiver are one node and the chord has no length.
+ */
+export const OPEN_ROUTE = ['n0', 'n1', 'n3', 'n6', 'n5', 'n2', 'n4'] as const
+
+export function openRouteSnapshot(): QaSnapshot {
+  const s = ringSnapshot()
+  const ids = Array.from({ length: 7 }, (_, i) => `n${i}`)
+  const ring = ids.map((id, i) => [id, ids[(i + 1) % 7]!] as const)
+  const across = [['n1', 'n3'], ['n3', 'n6'], ['n5', 'n2'], ['n2', 'n4']] as const
+  return { ...s, nodes: ids.map((id) => node(id, id.toUpperCase())), links: [...ring, ...across].map(([a, b]) => link(a, b)) }
+}
+
 /** The versioned 100-node demo snapshot (029 S4): the size the no-GPU policy speaks about. */
 export function fixtureSnapshot100(): QaSnapshot {
   const path = fileURLToPath(new URL('../../public/simulator-fixtures/v1/UAH/snapshot.json', import.meta.url))

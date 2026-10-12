@@ -50,8 +50,11 @@ import { exclusionProblems, verdict } from './run-verdict.mjs'
  * - 2026-10-12 (039 slice A, delivery): gate 76 -> 78, full 199 -> 201. Two tests of `delivery.qa.ts`: a frame whose
  *   connection is lost before the product read it is refused and not counted as taken, with `pushFrames` holding
  *   `taken === pushed`; and a delivery during which the product's SSE handler threw is refused.
+ * - 2026-10-12 (039 slice A, the chord): gate 78 -> 80, full 201 -> 203. Two tests of `chord.qa.ts`: the refusal of a
+ *   route whose chord cannot be told from it, on made-up points; and, on an open six-leg route over seven nodes,
+ *   property 3 accepting the beam on its legs and refusing the same payment drawn as one beam sender > receiver.
  */
-export const EXPECTED = { gate: 78, full: 201 }
+export const EXPECTED = { gate: 80, full: 203 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
