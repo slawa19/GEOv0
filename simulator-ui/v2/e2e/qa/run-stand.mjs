@@ -68,8 +68,14 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   `leg-order.qa.ts`: the judge of leg order on made-up legs - the cases the count of common frames accepted
  *   (alternating frames, a leg inside a dark hole of the leg before it), the handoff allowance to the frame, an
  *   unpainted leg, and the same verdicts at a third of the tempo. No browser page; under a second.
+ * - 2026-10-12 (039 slice B, PR 1 - palette, roles, legend): gate 81 -> 85, full 204 -> 208. Four tests, one new file,
+ *   `data-colours.qa.ts`: the data tokens are one value under every theme; the legend names what the scene contains in
+ *   the resolved colours; a live theme switch redraws by itself and leaves the base canvas byte-identical; canvas,
+ *   legend and node card move together when a token changes. In the GATE, not `@extended`: they hold the three
+ *   class-1 risks of the slice's design, and nothing else that a pull request runs sees a pixel of the new colours.
+ *   Real clock (nothing in them is about time), about 45 s locally in one worker. No existing test left or changed scope.
  */
-export const EXPECTED = { gate: 81, full: 204 }
+export const EXPECTED = { gate: 85, full: 208 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
