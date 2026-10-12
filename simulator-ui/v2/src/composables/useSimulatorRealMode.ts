@@ -25,7 +25,7 @@ import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 import { fetchEquivalentPrecisions } from '../api/equivalentsApi'
 import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
-import { sameEquivalent } from '../config/equivalents'
+import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
@@ -329,7 +329,7 @@ export function useSimulatorRealMode(opts: {
     return {
       runId: real.runId,
       accessToken: real.accessToken,
-      equivalent: String(effectiveEq.value || '').trim().toUpperCase(),
+      equivalent: canonicalEquivalent(effectiveEq.value),
       apiBase: real.apiBase,
     }
   }

@@ -59,7 +59,7 @@ import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { intensityScale } from '../config/fxConfig'
-import { EQUIVALENT_CODE_RE, equivalentOptions as listEquivalentOptions, sameEquivalent } from '../config/equivalents'
+import { EQUIVALENT_CODE_RE, canonicalEquivalent, equivalentOptions as listEquivalentOptions, sameEquivalent } from '../config/equivalents'
 import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
@@ -92,7 +92,7 @@ export async function loadStrictRunRecoverySnapshot(input: {
   equivalent: string
 }): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
   const runId = String(input.runId || '').trim()
-  const equivalent = String(input.equivalent || '').trim().toUpperCase()
+  const equivalent = canonicalEquivalent(input.equivalent)
   if (!runId || !equivalent) throw new Error('Replay recovery requires a run id and equivalent')
 
   // Recovery after an unreplayable cursor must never fall back to a scenario
@@ -817,7 +817,7 @@ export function useSimulatorApp(opts?: {
   const effectiveEq = uiDerived.effectiveEq
   // 028 F-028-47 (B6): while a new equivalent loads, or after its load failed, the old snapshot stays on
   // screen - its numbers, units and interact actions are of ITS equivalent, not of the selector's.
-  const sceneEq = computed(() => String(state.snapshot?.equivalent ?? '').trim().toUpperCase() || effectiveEq.value)
+  const sceneEq = computed(() => canonicalEquivalent(state.snapshot?.equivalent) || effectiveEq.value)
   const equivalentOptions = computed(() => listEquivalentOptions({
     apiMode: apiMode.value,
     scenario: real.scenarios.find((x) => x.scenario_id === real.selectedScenarioId)?.equivalents,

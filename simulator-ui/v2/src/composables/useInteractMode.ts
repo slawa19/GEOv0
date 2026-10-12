@@ -1,7 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
-import { sameEquivalent } from '../config/equivalents'
+import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { extractErrorMessage, withRequestRef } from '../utils/errorMessage'
 import { interactText } from '../i18n/interactStrings'
 import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
@@ -277,10 +277,6 @@ export function useInteractMode(opts: {
   const invalidateTrustlinesCache = dataCache.invalidateTrustlinesCache
   const findActiveTrustline = dataCache.findActiveTrustline
 
-  function normalizeEq(v: unknown): string {
-    return String(v ?? '').trim().toUpperCase()
-  }
-
   function normalizePid(v: unknown): string {
     return String(v ?? '').trim()
   }
@@ -351,7 +347,7 @@ export function useInteractMode(opts: {
 
   const paymentTargetsActiveKey = computed(() => {
     const runId = normalizeRunId(opts.runId.value)
-    const eq = normalizeEq(opts.equivalent.value)
+    const eq = canonicalEquivalent(opts.equivalent.value)
     const fromPid = normalizePid(state.fromPid)
     if (!runId || !eq || !fromPid) return null
     return dataCache.paymentTargetsKey({ runId, eq, fromPid, maxHops: PAYMENT_TARGETS_MAX_HOPS })
@@ -505,7 +501,7 @@ export function useInteractMode(opts: {
     if (p !== 'picking-payment-to' && p !== 'confirm-payment') return new Set()
 
     const runId = normalizeRunId(opts.runId.value)
-    const eq = normalizeEq(opts.equivalent.value)
+    const eq = canonicalEquivalent(opts.equivalent.value)
     const fromPid = normalizePid(state.fromPid)
     if (!runId || !eq || !fromPid) return new Set()
 

@@ -48,7 +48,7 @@ export function equivalentOptions(input: {
   current: string
 }): string[] {
   const norm = (xs: readonly string[] | null | undefined) =>
-    (xs ?? []).map((x) => String(x ?? '').trim().toUpperCase()).filter((x) => EQUIVALENT_CODE_RE.test(x))
+    (xs ?? []).map(canonicalEquivalent).filter((x) => EQUIVALENT_CODE_RE.test(x))
   const scenario = norm(input.scenario)
   const fromApi = input.apiMode === 'fixtures' ? [...FIXTURE_EQUIVALENT_CODES] : scenario.length ? scenario : norm(input.catalogue)
   return Array.from(new Set([...fromApi, ...norm([input.current])]))

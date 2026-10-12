@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 
 import type { ClearingDoneEvent } from '../../types'
+import { canonicalEquivalent } from '../../config/equivalents'
 import { CLEARING_LABEL_COLOR } from '../../config/fxConfig'
 import type { FxState } from '../../render/fxRenderer'
 import { spawnEdgePulses as spawnEdgePulsesDefault, spawnNodeBursts as spawnNodeBurstsDefault } from '../../render/fxRenderer'
@@ -156,7 +157,7 @@ export function useRealClearingFx(deps: {
     const { edges: edgesAll, totalAmount, equivalent, planId } = params
 
     // 028 F-028-47 (B5): the same edges cleared in another equivalent are another clearing.
-    const edgeSig = `${String(equivalent ?? '').trim().toUpperCase()}#${edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')}`
+    const edgeSig = `${canonicalEquivalent(equivalent)}#${edgesAll.map((e) => `${e.from}>${e.to}`).sort().join('|')}`
     const now = nowEpochMs()
 
     if (planId) {

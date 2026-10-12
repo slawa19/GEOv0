@@ -3,7 +3,7 @@ import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
 import { extractErrorMessage } from '../utils/errorMessage'
 import type { GraphSnapshot } from '../types'
-import { sameEquivalent } from '../config/equivalents'
+import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
 type SceneId = 'A' | 'B' | 'C'
 
@@ -253,7 +253,7 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
   async function loadRecoveryScene(context: RecoverySceneContext): Promise<boolean> {
     if (!deps.loadRecoverySnapshot) throw new Error('Strict replay recovery snapshot loader is not configured')
     const runId = String(context.runId || '').trim()
-    const equivalent = String(context.equivalent || '').trim().toUpperCase()
+    const equivalent = canonicalEquivalent(context.equivalent)
     if (!runId || !equivalent) throw new Error('Replay recovery requires a run id and equivalent')
 
     return await applySceneLoad({

@@ -3,6 +3,7 @@ import { computed, type ComputedRef, getCurrentScope, onScopeDispose, type Ref, 
 import type { GraphSnapshot } from '../types'
 import { addMoney, moneyText } from '../utils/money'
 import { isActiveStatus } from '../utils/status'
+import { canonicalEquivalent } from '../config/equivalents'
 
 /** 028 F-028-48: the totals are money TEXT of the snapshot's `equivalent` (exact sums, no float). */
 export type SystemBalance = {
@@ -90,7 +91,7 @@ export function useSystemBalance(snapshot: Ref<GraphSnapshot | null>): {
     return {
       totalUsed,
       totalAvailable,
-      equivalent: String(snap.equivalent ?? '').trim().toUpperCase(),
+      equivalent: canonicalEquivalent(snap.equivalent),
       activeTrustlines,
       activeParticipants,
       utilization: Number.isFinite(utilization) ? utilization : 0,
