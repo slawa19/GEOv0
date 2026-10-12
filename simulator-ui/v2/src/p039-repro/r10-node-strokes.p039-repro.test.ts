@@ -1,0 +1,30 @@
+/**
+ * 039 T3901 - R10, MEASUREMENT ONLY: what the node pass of the base canvas issues per frame, so that the budget of the
+ * edge pass is not confused with a budget of the whole canvas (the arbiter's F2: "node strokes alone exceed 20").
+ * The real node painter runs; only the glow sprites (off-screen canvases) are mocked out, so their `drawImage` calls
+ * are NOT in these numbers - the browser tier counts those.
+ */
+import { describe, expect, it, vi } from 'vitest'
+
+import { drawNodeShape } from '../render/nodePainter'
+import type { LayoutNode } from '../types/layout'
+import { VIZ_MAPPING } from '../vizMapping'
+import { fixture100, measured } from './p039'
+import { recordingCtx } from './recordingCtx'
+
+vi.mock('../render/glowSprites', () => ({ drawGlowSprite: vi.fn() }))
+
+const snapshot = fixture100()
+
+describe('039 R10 - measurement: the node pass (fixture: 100 nodes), per quality', () => {
+  for (const quality of ['low', 'med', 'high'] as const) {
+    it(`quality ${quality}: strokes and fills of 100 nodes`, () => {
+      const { ctx, draws } = recordingCtx()
+      snapshot.nodes.forEach((n, i) => drawNodeShape(ctx, { ...n, __x: 40 + (i % 10) * 80, __y: 40 + Math.floor(i / 10) * 60 } as LayoutNode, { mapping: VIZ_MAPPING, cameraZoom: 1, quality }))
+      const by = (k: string) => draws.filter((d) => d.kind === k).length
+      const row = { nodes: snapshot.nodes.length, strokes: by('stroke'), fills: by('fill'), fillRects: by('fillRect') }
+      measured(`R10 node pass ${quality}`, row)
+      expect(row.strokes, 'one outline stroke per node').toBe(snapshot.nodes.length)
+    })
+  }
+})
