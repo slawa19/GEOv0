@@ -792,8 +792,10 @@ jobs:
         run: npm --prefix simulator-ui/v2 run test:e2e:qa:gate
 
       # The standard Playwright HTML report: the frames of the window matrix are its attachments.
-      # On EVERY run since 2026-10-12 (039 slice A): green, red and timed out alike, so the evidence of
-      # a failure survives it and a green run can be looked at. `always()` is on this step only - it
+      # ATTEMPTED on every run since 2026-10-12 (039 slice A): green, red and timed out alike, so that
+      # a report that exists survives a failure and a green run can be looked at. It cannot promise a
+      # report: a step cut off before Playwright wrote one leaves nothing to upload, and the upload
+      # then succeeds empty (`ignore`). `always()` is on this step only - it
       # decides whether the UPLOAD runs, never the result of the step above: a failed gate step still
       # fails the job. When an earlier step failed there is no report yet, hence `ignore`.
       - name: Upload the QA stand report
