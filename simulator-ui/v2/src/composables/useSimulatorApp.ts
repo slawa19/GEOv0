@@ -1065,6 +1065,8 @@ export function useSimulatorApp(opts?: {
   // Use replaceable getters to avoid temporal coupling / TDZ hazards.
   type DragToPinStateSafe = { active: boolean; dragging: boolean; nodeId: string | null }
   let getDragToPinStateSafe = (): DragToPinStateSafe => ({ active: false, dragging: false, nodeId: null })
+  // Bound once the drag owner exists (it is created after the render loop).
+  let syncDragWithSceneSafe: () => void = () => undefined
   let tickPhysicsAndSyncSafe = (): boolean => false
   let isPhysicsRunningSafe = (): boolean => false
 
@@ -1106,6 +1108,8 @@ export function useSimulatorApp(opts?: {
       return ds.active && ds.dragging ? ds.nodeId : null
     },
     beforeDraw: () => {
+      // 039 slice B: a drag follows its node (patch, theme) or ends with the scene it was over - see `syncDragWithScene`.
+      syncDragWithSceneSafe()
       const didTick = tickPhysicsAndSyncSafe()
       const ds = getDragToPinStateSafe()
       if (didTick || (ds.active && ds.dragging)) layoutCoordinator.bumpLayoutVersion()
@@ -1410,7 +1414,7 @@ export function useSimulatorApp(opts?: {
     }
   }
 
-  const { dragToPin, hideDragPreview } = useAppDragToPinAndPreview({
+  const { dragToPin, hideDragPreview, syncDragWithScene, cancelDrag } = useAppDragToPinAndPreview({
     dragPreviewEl,
     isTestMode: () => isTestMode.value,
 
@@ -1434,9 +1438,11 @@ export function useSimulatorApp(opts?: {
     sizeForNode,
     fillForNode: (n) => fillForNode(n, vizMapping),
     lookForNode: (n) => classifyNode(n),
+    hubColor: () => vizMapping.node.palette.hub,
   })
 
   getDragToPinStateSafe = () => dragToPin.dragState
+  syncDragWithSceneSafe = syncDragWithScene
 
   const canvasInteractionsWiring = useAppCanvasInteractionsWiring({
     isTestMode: () => isTestMode.value,
@@ -1587,7 +1593,12 @@ export function useSimulatorApp(opts?: {
     clearScheduledTimeouts,
     resetCamera,
     resetLayoutKeyCache: () => layoutCoordinator.resetLayoutKeyCache(),
-    resetOverlays,
+    // What `clearScene` drops with the scene: the FX overlays, and (039 slice B) a drag in progress - its preview
+    // is a picture of a node of the scene that is being replaced.
+    resetOverlays: () => {
+      resetOverlays()
+      cancelDrag()
+    },
     resizeAndLayout,
     ensureRenderLoop,
     setupResizeListener: () => layoutCoordinator.setupResizeListener(),

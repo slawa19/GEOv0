@@ -24,6 +24,7 @@ function preview(node: GraphNode) {
     sizeForNode: () => ({ w: 20, h: 20 }),
     fillForNode: (n) => fillForNode(n, MAPPING),
     lookForNode: (n) => classifyNode(n),
+    hubColor: () => MAPPING.node.palette.hub,
   })
   api.showDragPreviewForNode(node.id)
   return el.value!
