@@ -516,15 +516,6 @@ export async function frames(page: Page, n: number): Promise<void> {
   for (let i = 0; i < n; i += 1) await page.clock.runFor(16)
 }
 
-export function pointsAlong(a: Pt, b: Pt, o: { stepPx?: number; endMarginPx?: number } = {}): Pt[] {
-  const step = o.stepPx ?? 4
-  const margin = o.endMarginPx ?? 28
-  const len = Math.hypot(b.x - a.x, b.y - a.y)
-  const out: Pt[] = []
-  for (let d = margin; d <= len - margin; d += step) out.push({ x: a.x + ((b.x - a.x) * d) / len, y: a.y + ((b.y - a.y) * d) / len })
-  return out
-}
-
 export function distToSegment(p: Pt, a: Pt, b: Pt): number {
   const dx = b.x - a.x
   const dy = b.y - a.y
