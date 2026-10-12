@@ -239,14 +239,6 @@ export async function loadSnapshot(eq: string): Promise<{ snapshot: GraphSnapsho
   return { snapshot, sourcePath }
 }
 
-export async function loadEvents(eq: string, playlist: string): Promise<{ events: DemoEvent[]; sourcePath: string }> {
-  const base = String(import.meta.env.VITE_FIXTURES_BASE ?? '/simulator-fixtures/v1')
-  const sourcePath = `${base}/${encodeURIComponent(eq)}/events/${playlist}.json`
-  const raw = await loadJson<unknown>(sourcePath)
-  const events = validateEvents(raw, sourcePath)
-  return { events, sourcePath }
-}
-
 export function validateSnapshot(raw: unknown, sourcePath: string): GraphSnapshot {
   if (!isRecord(raw)) throw new Error(`Snapshot must be an object (${sourcePath})`)
 
