@@ -43,9 +43,10 @@ const linkColor = linkColorOf
 /**
  * The alpha of a direction marker: OPAQUE (039 slice B, PR 2). The marker must not inherit the alpha of its line - a
  * line with little or no debt is drawn at 0.06 and its marker would be invisible, although the direction of trust is
- * the same whatever is owed. At 1 the line colour `#64748b` has a contrast of 3.9 to the canvas of `saas` and 4.2 to
- * that of `hud` (WCAG relative luminance, computed 2026-10-12; 3 is the floor for a graphical object); at 0.8 it is 3.0
- * and below that it fails. Opaque also means that markers lying one over another do not add up to another colour.
+ * the same whatever is owed. At 1 the line colour `#64748b` has a contrast of 3.93 to the canvas of `saas` and 4.14
+ * to that of `hud` (WCAG relative luminance, computed 2026-10-12, not measured on pixels; 3 is the floor for a
+ * graphical object); at 0.8 it is 2.94 and 3.03 - at the floor and under it. Opaque also means that markers lying
+ * one over another do not add up to another colour.
  */
 export const DIRECTION_MARKER_ALPHA = 1
 
