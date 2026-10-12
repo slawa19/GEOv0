@@ -104,8 +104,6 @@ export function paymentRefusalText(
  * (030 S2: the database holds debts finer than the equivalent's step), and the tick names the same refusal as
  * `last_error.code` CLEARING_REFUSED (which carries no reason, so no equivalent either: `equivalent` is optional).
  */
-export const CLEARING_REFUSAL_REASONS: readonly string[] = Object.freeze(['occurrence_amount_not_in_step'])
-
 export function clearingStepRefusalText(equivalent: string | null, locale: UiLocale = uiLocale()): string {
   const eq = equivalent ? ` ${equivalent.toUpperCase()}` : ''
   return locale === 'ru'
