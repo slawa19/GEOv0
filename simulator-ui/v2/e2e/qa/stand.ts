@@ -24,7 +24,9 @@ export type QaSnapshot = {
 function node(id: string, name: string) {
   return {
     id, name, type: 'person', status: 'active', links_count: 2, net_balance_atoms: '0', net_sign: 0, net_balance: '0',
-    viz_color_key: 'default', viz_shape_key: 'circle', viz_size: { w: 24, h: 24 }, viz_badge_key: '',
+    viz_color_key: 'default', viz_shape_key: 'circle', viz_size: { w: 24, h: 24 },
+    // `null`, as the backend and the demo fixtures give it: the product paints a badge pip for any non-null key.
+    viz_badge_key: null,
   }
 }
 
