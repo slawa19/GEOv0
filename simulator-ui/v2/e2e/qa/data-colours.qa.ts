@@ -85,10 +85,13 @@ const keepCanvas = (page: Page, key: string, against?: string) =>
     const c = document.querySelector<HTMLCanvasElement>(selector)!
     const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
     const store = ((window as unknown as { __p039px?: Record<string, Uint8ClampedArray> }).__p039px ??= {})
+    // The reference is read BEFORE this frame is stored, and a frame is never compared with the key it is stored under.
+    if (against === key) throw new Error(`039: the canvas kept as "${key}" would be compared with itself`)
+    const ref = against ? (store[against] ?? null) : null
+    if (against && !ref) throw new Error(`039: no canvas was kept as "${against}"`)
     store[key] = d
     let painted = 0
     for (let i = 3; i < d.length; i += 4) if (d[i]! > 0) painted += 1
-    const ref = against ? store[against]! : null
     let differing = -1
     if (ref && ref.length === d.length) {
       differing = 0
@@ -197,7 +200,10 @@ test('039 B1: a live theme switch redraws the scene by itself and the base canva
   await page.mouse.click(hub.x, hub.y)
   await expect(page.locator('.node-label-inner').first()).toBeVisible()
   await waitLoopAsleep(page)
-  const first = await keepCanvas(page, 'saas')
+  // The reference is kept under a key of its OWN ('first'): a later frame stored as 'saas' would overwrite a
+  // reference kept under that name before it is read, and the return to saas would be compared with itself
+  // (external review of 2026-10-12).
+  const first = await keepCanvas(page, 'first')
   expect(first.painted, 'counter-check: the scene is painted').toBeGreaterThan(500)
   const labelColour = () => page.locator('.node-label-inner').first().evaluate((el) => getComputedStyle(el).color)
   const nameSaas = await labelColour()
@@ -210,7 +216,7 @@ test('039 B1: a live theme switch redraws the scene by itself and the base canva
     // The proof that the pixels compared below are NEW: the product drew a pass after the switch, unprompted.
     await expect.poll(async () => (await loopCounters(page)).draws - before, { message: `the scene is redrawn after the switch ${from} -> ${to}`, timeout: 15_000 }).toBeGreaterThan(0)
     await waitLoopAsleep(page)
-    const now = await keepCanvas(page, to, 'saas')
+    const now = await keepCanvas(page, to, 'first')
     expect(now.painted).toBeGreaterThan(500)
     expect(now.differing, `base canvas under ${to} against the first saas frame: differing pixels`).toBe(0)
   }

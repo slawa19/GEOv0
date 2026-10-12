@@ -51,7 +51,15 @@ export function useDragToPinInteraction(opts: {
     cachedNode: null as LayoutNode | null,
   })
 
+  /**
+   * The pointer of a drag that was CANCELLED while its button was still down (`cancelDrag`). Its remaining moves and
+   * its release are taken and do nothing: they must not start a pan, pick a node, or pin anything.
+   */
+  let cancelledPointerId: number | null = null
+
   function onPointerDown(ev: PointerEvent): boolean {
+    // A new press ends whatever was left of a cancelled gesture (its release may never have arrived).
+    cancelledPointerId = null
     if (!isEnabled()) return false
 
     const hit = pickNodeAt(ev.clientX, ev.clientY)
@@ -87,6 +95,7 @@ export function useDragToPinInteraction(opts: {
   }
 
   function onPointerMove(ev: PointerEvent): boolean {
+    if (cancelledPointerId !== null && ev.pointerId === cancelledPointerId) return true
     if (!dragState.active || dragState.pointerId !== ev.pointerId || !dragState.cachedNode) return false
 
     const dx = ev.clientX - dragState.startClientX
@@ -130,6 +139,11 @@ export function useDragToPinInteraction(opts: {
   }
 
   function onPointerUp(ev: PointerEvent): boolean {
+    if (cancelledPointerId !== null && ev.pointerId === cancelledPointerId) {
+      // The release of a cancelled drag: no pin is written - the node it held belongs to a scene that is gone.
+      cancelledPointerId = null
+      return true
+    }
     if (!dragState.active || dragState.pointerId !== ev.pointerId) return false
 
     const id = dragState.nodeId
@@ -162,5 +176,33 @@ export function useDragToPinInteraction(opts: {
     return true
   }
 
-  return { dragState, onPointerDown, onPointerMove, onPointerUp }
+  /**
+   * End the gesture WITHOUT a drop (039 slice B, review of 2026-10-12): the scene under it was replaced, or its node
+   * left the scene. The preview is hidden, nothing is pinned (`commitPinnedPos` is the drop's alone), the pointer is
+   * released, and the rest of that pointer's gesture is swallowed. It does not draw: the caller is the scene loader
+   * or a frame, and both draw afterwards. Safe to call when no drag is active.
+   */
+  function cancelDrag(): void {
+    if (!dragState.active) return
+    const pointerId = dragState.pointerId
+
+    hideDragPreview()
+
+    dragState.active = false
+    dragState.dragging = false
+    dragState.nodeId = null
+    dragState.pointerId = null
+    dragState.cachedNode = null
+
+    if (pointerId !== null) {
+      cancelledPointerId = pointerId
+      try {
+        getCanvasEl()?.releasePointerCapture(pointerId)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return { dragState, onPointerDown, onPointerMove, onPointerUp, cancelDrag }
 }
