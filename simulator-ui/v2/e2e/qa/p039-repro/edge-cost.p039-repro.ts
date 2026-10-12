@@ -283,7 +283,8 @@ async function runWindowOnce(page: Page, o: WindowOpts, mayStall = false) {
   const frames = o.kind === 'mixed' ? load.frames(0, slots, `e${(tagSeq += 1)}`) : []
   if (o.kind === 'static') {
     await startPump(page)
-    await page.waitForTimeout(400) // the loop is awake and at its rate before the window opens
+    // The loop is awake and drawing before the window opens: a condition, not a sleep (the stand's guard forbids waits by time).
+    await expect.poll(async () => (await loopCounters(page)).draws - c0.draws, { timeout: 10_000 }).toBeGreaterThanOrEqual(5)
   }
   const raw = await measureWindow(page, frames, WINDOW_MS, load.everyMs)
   if (o.kind === 'static') await stopPump(page)
