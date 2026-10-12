@@ -2,14 +2,6 @@ export function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v))
 }
 
-/**
- * Return `v` if it is a finite number, otherwise return `def`.
- * Used to sanitize NaN/Infinity inputs before they reach rendering/geometry code.
- */
-export function finiteOr(v: number, def: number): number {
-  return Number.isFinite(v) ? v : def
-}
-
 export function clamp01(v: number) {
   return clamp(v, 0, 1)
 }
