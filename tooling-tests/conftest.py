@@ -167,8 +167,12 @@ _HERE = Path(__file__).resolve().parent
 #:
 #: 2026-10-11, 038 S2 + S3 merged (I3): portable 433 -> 436. Three more mutations in the same module: the perf job put on every pull
 #: request, the required step made to run the perf project, the perf job without its production build.
+#:
+#: 2026-10-12, 039 slice A (hardening of the QA stand step): portable 436 -> 440. Four more mutations in the same module: the
+#: report of the gate step uploaded only on failure, the gate step without a `timeout-minutes` of its own, that number not under
+#: the job's, and a wall-clock window (`perf-measure.ts`) imported by a file of the counted project.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 436,
+    "portable": 440,
     "powershell": 235,
 }
 
