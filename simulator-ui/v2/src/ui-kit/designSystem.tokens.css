@@ -428,6 +428,24 @@
   --ds-fx-clearing-debt: #f97316;
   --ds-fx-flash-clearing-from: rgba(251,191,36,0.45);
   --ds-fx-flash-clearing-to: rgba(251,191,36,0.00);
+
+  /*
+    DATA colours of the graph (039 slice B, owner's decision R3 of 2026-10-12): four semantic colours and a neutral.
+    Declared HERE ONCE, in the common :root, and NOT overridden by any [data-theme] block: what a colour says about
+    a participant does not depend on the theme. Form: #rrggbb only (the canvas composes alpha onto it;
+    `vizMapping.ts` refuses another form). `vizMapping.ts` DATA_PALETTE_DEFAULT is a guarded copy of these values.
+
+      debtor   - net debtor: owes more than it is owed          (sign "-" inside the node)
+      creditor - net creditor: is owed more than it owes        (sign "+")
+      neutral  - even overall ("0") and balance unknown ("?")
+      frozen   - frozen / suspended, over the role; with a dashed outline
+      hub      - the thin extra ring of a participant of type "hub"; never a fill
+  */
+  --ds-data-debtor: #f2545b;
+  --ds-data-creditor: #4c8dff;
+  --ds-data-neutral: #dfe5ee;
+  --ds-data-frozen: #8c8c8c;
+  --ds-data-hub: #a3e635;
 }
 
 /* Density */

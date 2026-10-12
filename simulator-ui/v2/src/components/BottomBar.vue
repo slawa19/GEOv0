@@ -132,6 +132,8 @@ async function onRunClearingOnce() {
 
 <template>
   <div class="ds-ov-bottom">
+    <!-- 039 slice B: the legend is a row of this bar, above the controls - its height is part of the measured bar. -->
+    <div v-if="$slots.legend" class="ds-ov-bottom__legend"><slot name="legend" /></div>
     <HudBar variant="ghost" layout="between" aria-label="Bottom bar">
       <div class="hud-bar__left" aria-label="View settings">
         <div class="ds-row bb-row" aria-label="Equivalent">

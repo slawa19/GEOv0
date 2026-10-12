@@ -8,6 +8,7 @@ import TrustlineManagementPanel from '../components/TrustlineManagementPanel.vue
 import ClearingPanel from '../components/ClearingPanel.vue'
 
 import type { GraphNode } from '../types'
+import { DATA_PALETTE_DEFAULT } from '../vizMapping'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import type { InteractPhase, InteractState } from '../composables/useInteractMode'
 
@@ -63,6 +64,9 @@ describe('Legacy windows reference — markup snapshots', () => {
       node,
       edgeStats: { outLimitText: '100', inLimitText: '50', degree: 3 },
       equivalentText: 'UAH',
+      // 039 slice B (2026-10-12): the card takes the resolved data palette; its markup gained the role line and its
+      // balance is coloured by the role (creditor here) - the stored snapshot of THIS component was regenerated.
+      palette: DATA_PALETTE_DEFAULT,
       showPinActions: true,
       isPinned: false,
       pin: () => {},

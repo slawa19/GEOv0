@@ -1,9 +1,13 @@
 /**
  * 039 T3901 - the NAMES the browser reproducers look for, in one place. Not a test file.
  *
- * None of these exists in the product yet: they are what spec 039 names (the legend, the data colour tokens) plus the
- * minimum a test needs to tell one legend entry from another without reading a language. The slice that builds the
- * thing may rename any of them - HERE, once - and the reproducers follow.
+ * They are what spec 039 names (the legend, the data colour tokens) plus the minimum a test needs to tell one legend
+ * entry from another without reading a language. The slice that builds the thing may rename any of them - HERE,
+ * once - and the reproducers follow.
+ *
+ * 039 slice B, PR 1 (2026-10-12): the legend, its entries and the data tokens EXIST now, under exactly these names
+ * (`src/components/Legend.vue`, `src/vizMapping.ts` `DATA_TOKEN`). Nothing was renamed. Added: the entries the design
+ * decisions of slice B brought (`LEGEND_ENTRIES_ALL`) and the fifth token, the neutral. `DEBT` is still slice D's.
  */
 
 /** Net roles a legend explains (spec 039, owner's decision R3 and amendment P-1). A hub is a shape or a ring, not a colour. */
@@ -26,6 +30,15 @@ export const DATA_TOKEN: Record<LegendRole, `--${string}`> = {
   frozen: '--ds-data-frozen',
   hub: '--ds-data-hub',
 }
+
+/**
+ * Every entry the legend can show, in its fixed order (slice B, decision 7). An entry is on screen only when the shown
+ * snapshot has the feature; `LEGEND_ROLES` above are the four the first form of R2 asked for.
+ */
+export const LEGEND_ENTRIES_ALL = ['debtor', 'creditor', 'neutral', 'unknown', 'frozen', 'hub', 'person', 'organisation'] as const
+
+/** The fifth data token: the fill of an even and of an unknown net position. */
+export const NEUTRAL_TOKEN = '--ds-data-neutral' as const
 
 /** Roles whose legend entry carries a COLOUR swatch (a hub is told by shape). */
 export const COLOURED_ROLES: readonly LegendRole[] = ['debtor', 'creditor', 'frozen']

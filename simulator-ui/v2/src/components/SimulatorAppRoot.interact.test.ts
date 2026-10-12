@@ -142,6 +142,8 @@ type GeoTestGlobals = {
   __GEO_TEST_ANALYTICS_BOTTLENECKS_REASON_REF?: Ref<string>
   __GEO_TEST_ANALYTICS_IS_VISIBLE?: () => boolean
   __GEO_TEST_FOCUS_ON_EDGE?: TestFnMock
+  /** 039 slice B: the app's re-resolution of the colour tokens (on mount, after a theme change). */
+  __GEO_TEST_RESOLVE_VIZ_COLORS?: TestFnMock
 
   // Camera + highlight, wired to the real composables rather than to spies, so a test can ask
   // what the graph is showing instead of asking which functions ran (spec 007, §4.2 item 4).
@@ -250,6 +252,10 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       await vi.importActual<typeof import('../composables/useSimulatorApp')>(
         '../composables/useSimulatorApp',
       )
+    // 039 slice B: the real default palette (not re-stated here) and a spy on the re-resolution of the colours.
+    const mockDataPalette = (await vi.importActual<typeof import('../vizMapping')>('../vizMapping')).DATA_PALETTE_DEFAULT
+    const mockResolveVizColors = vi.fn()
+    setGeoTestGlobal('__GEO_TEST_RESOLVE_VIZ_COLORS', mockResolveVizColors)
 
         return {
     useSimulatorApp: (opts?: MockUseSimulatorAppOpts) => {
@@ -660,6 +666,10 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
         // env
         gpuAccelLikely: computed(() => false),
+
+        // 039 slice B: the resolved data colours and their re-resolution (mount, theme change).
+        dataPalette: ref(mockDataPalette),
+        resolveVizColors: mockResolveVizColors,
 
         // refs
         hostEl: ref<HTMLElement | null>(null),
@@ -5782,5 +5792,96 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
       app.unmount()
       host.remove()
     }
+  })
+})
+
+/**
+ * 039 slice B, PR 1 - the legend and the colours at the level of the mounted root (the app composable is mocked,
+ * as everywhere in this file; what is real here is the root's template and its wiring).
+ * NOT seen here: pixels, the real resolution of the tokens (`vizMapping.test.ts`, `e2e/qa/data-colours.qa.ts`).
+ */
+describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
+  const role = (over: Record<string, unknown>) => ({ ...makeSelectedNode(String(over.id), String(over.id)), viz_shape_key: 'circle', ...over })
+  const snapshotOf = (equivalent: string, nodes: Array<Record<string, unknown>>): GraphSnapshot =>
+    ({ equivalent, generated_at: '2026-10-12T00:00:00Z', nodes, links: [] }) as unknown as GraphSnapshot
+
+  function mount(search = '/?mode=real&ui=interact') {
+    setUrl(search)
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    return { host, done: () => { app.unmount(); host.remove(); clearGeoTestGlobals('__GEO_TEST_SNAPSHOT'); vi.unstubAllGlobals() } }
+  }
+
+  it('the legend is a row INSIDE the measured bottom bar, above its controls', async () => {
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snapshotOf('UAH', [role({ id: 'a', net_sign: 1 }), role({ id: 'b', net_sign: -1 })]))
+    const { host, done } = mount()
+    await nextTick()
+    // The element the bottom-bar measurer takes (`queryBottomStackElement`): the first `.ds-ov-bottom` that is not the history overlay.
+    const measured = [...host.querySelectorAll('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
+    const legend = host.querySelector('[data-testid="legend"]')!
+    expect(legend, 'a legend is rendered').not.toBeNull()
+    expect(measured.contains(legend), 'inside the measured bar: its height is published with it').toBe(true)
+    const bar = measured.querySelector('.hud-bar')!
+    expect(legend.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING, 'the controls come after the legend').toBeTruthy()
+    expect(host.querySelectorAll('[data-testid="legend"]')).toHaveLength(1)
+    done()
+  })
+
+  it('the title names the equivalent of the SHOWN snapshot, not the selector (which may run ahead)', async () => {
+    // The mocked app's selector says UAH; the snapshot on screen is of EUR (as after a switch that has not landed, reversed).
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snapshotOf(' eur ', [role({ id: 'a', net_sign: 1 })]))
+    const { host, done } = mount()
+    await nextTick()
+    expect(host.querySelector('[data-testid="legend-title"]')?.textContent).toBe('Overall balance · EUR')
+    // Counter-check: the selector (the mocked app's `eq` is UAH, with no option list here) does not say EUR.
+    const selector = host.querySelector<HTMLSelectElement>('select[aria-label="Equivalent"]')
+    expect(selector, 'the equivalent selector is on screen').not.toBeNull()
+    expect(selector!.value).not.toBe('EUR')
+    done()
+  })
+
+  it('entries follow the snapshot: only what it contains; no Hub without a participant of type hub', async () => {
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snapshotOf('UAH', [role({ id: 'a', net_sign: 1, links_count: 99, name: 'Hub' }), role({ id: 'b', net_sign: null })]))
+    const { host, done } = mount()
+    await nextTick()
+    const ids = () => [...host.querySelectorAll('[data-testid="legend"] [data-legend-role]')].map((el) => el.getAttribute('data-legend-role'))
+    expect(ids()).toEqual(['creditor', 'unknown', 'person'])
+    done()
+  })
+
+  it('no scene, or a scene without participants: no legend, and its row takes no element of the bar', async () => {
+    for (const snap of [null, snapshotOf('UAH', [])]) {
+      if (snap) setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snap)
+      const { host, done } = mount()
+      await nextTick()
+      expect(host.querySelector('[data-testid="legend"]'), snap ? 'empty scene' : 'no scene').toBeNull()
+      expect(host.querySelector('.ds-ov-bottom__legend')?.children.length ?? 0).toBe(0)
+      done()
+    }
+  })
+
+  it('the colours are resolved on mount and again after the theme changed in the same mounted app', async () => {
+    const resolve = getGeoTestGlobal('__GEO_TEST_RESOLVE_VIZ_COLORS')!
+    resolve.mockClear()
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snapshotOf('UAH', [role({ id: 'a', net_sign: 1 })]))
+    const { host, done } = mount('/?mode=real&ui=interact&theme=saas')
+    await nextTick()
+    expect(resolve, 'on mount').toHaveBeenCalledTimes(1)
+    const root = host.querySelector<HTMLElement>('.root')!
+    expect(root.getAttribute('data-theme')).toBe('saas')
+
+    let themeAtResolve: string | null = null
+    resolve.mockImplementation(() => { themeAtResolve = root.getAttribute('data-theme') })
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
+    select.value = 'hud'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    await nextTick()
+    expect(resolve, 'after the switch').toHaveBeenCalledTimes(2)
+    expect(themeAtResolve, 'the tokens are read when the new theme is already on the root element').toBe('hud')
+    resolve.mockReset()
+    done()
   })
 })

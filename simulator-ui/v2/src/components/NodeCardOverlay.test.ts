@@ -4,6 +4,7 @@ import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
+import { DATA_PALETTE_DEFAULT } from '../vizMapping'
 import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 
 const nodeCardOverlaySource = readFileSync(resolve(process.cwd(), 'src/components/NodeCardOverlay.vue'), 'utf8')
@@ -17,6 +18,7 @@ function mountNodeCard(overrides: Record<string, unknown> = {}) {
     style: { left: '0px', top: '0px' },
     edgeStats: { outLimitText: '0', inLimitText: '0', degree: 0 },
     equivalentText: 'UAH',
+    palette: DATA_PALETTE_DEFAULT,
 
     showPinActions: false,
     isPinned: false,

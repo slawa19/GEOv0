@@ -3,7 +3,7 @@ import type { GraphNode, GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import type { LabelsLod } from '../types/uiPrefs'
 
-export type LabelNode = { id: string; x: number; y: number; text: string; color: string }
+export type LabelNode = { id: string; x: number; y: number; text: string }
 
 type UseLabelNodesDeps = {
   isTestMode: () => boolean
@@ -17,7 +17,6 @@ type UseLabelNodesDeps = {
   getNodeById: (id: string) => GraphNode | null
   getCameraZoom: () => number
   sizeForNode: (n: LayoutNode) => { w: number; h: number }
-  fxColorForNode: (nodeId: string, fallback: string) => string
 
   /** When provided and returns true, the label of the selected node is hidden (node-card inspector window is open). */
   hasNodeCardInspectorOpen?: () => boolean
@@ -77,7 +76,6 @@ export function useLabelNodes(deps: UseLabelNodesDeps): UseLabelNodesReturn {
         x: ln.__x,
         y: ln.__y + dyW,
         text: showPid(gn?.name ? String(gn.name) : id),
-        color: deps.fxColorForNode(id, '#e2e8f0'),
       })
     }
 

@@ -16,6 +16,7 @@ import ErrorToast from './ErrorToast.vue'
 import SuccessToast from './SuccessToast.vue'
 import InteractHistoryLog from './InteractHistoryLog.vue'
 import GraphNavigator from './GraphNavigator.vue'
+import Legend from './Legend.vue'
 import RealMetricsPanel from './RealMetricsPanel.vue'
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -31,6 +32,7 @@ import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } fr
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
  import { toLower } from '../utils/stringHelpers'
+ import { canonicalEquivalent } from '../config/equivalents'
  import { extractErrorMessage } from '../utils/errorMessage'
  import { useReducedMotionPreference } from '../composables/useReducedMotionPreference'
 
@@ -385,6 +387,8 @@ const {
   gpuAccelLikely,
 
   // refs
+  dataPalette,
+  resolveVizColors,
   hostEl,
   canvasEl,
   fxCanvasEl,
@@ -436,6 +440,14 @@ const {
 } = app
 
 getHostEl = () => hostEl.value
+
+/** 039 slice B: the equivalent of the snapshot ON SCREEN - the legend's title. Never the selector's pending choice. */
+const shownSnapshotEquivalent = computed(() => canonicalEquivalent(state.snapshot?.equivalent))
+
+// 039 slice B: data and FX colours are read at the app's real root - once it is mounted, and again after a theme
+// change has reached the DOM (`flush: 'post'`: the `data-theme` attribute is already the new one). Then one frame.
+onMounted(() => resolveVizColors())
+watch(uiTheme, () => resolveVizColors(), { flush: 'post' })
 
 function nodeEdgeStatsFor(nodeId: string): ReturnType<typeof computeNodeEdgeStats> | null {
   const snapshot = state.snapshot
@@ -1351,6 +1363,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :node="getNodeById(String(win.data.nodeId))!"
           :edge-stats="nodeEdgeStatsFor(String(win.data.nodeId))"
           :equivalent-text="state.snapshot?.equivalent ?? ''"
+          :palette="dataPalette"
           :show-pin-actions="!isTestMode && !isWebDriver"
           :is-pinned="isNodePinned(String(win.data.nodeId))"
           :pin="() => pinNode(String(win.data.nodeId))"
@@ -1432,6 +1445,10 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     </TransitionGroup>
     <!-- E2E screenshot tests: minimal offline controls only (match stored snapshots). -->
     <div v-if="isE2eScreenshots" class="ds-ov-bottom ds-panel ds-ov-bar">
+      <!-- 039 slice B: the legend is not hidden for the stored snapshots - it is part of the picture. -->
+      <div class="ds-ov-bottom__legend sar-e2e-legend">
+        <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" />
+      </div>
       <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runTxOnce">Single Tx</button>
       <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
     </div>
@@ -1467,7 +1484,12 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :fx-busy="fxDebug.busy.value"
       :run-tx-once="isDemoUi ? demoRunTxOnce : fxDebug.runTxOnce"
       :run-clearing-once="isDemoUi ? demoRunClearingOnce : fxDebug.runClearingOnce"
-    />
+    >
+      <!-- 039 slice B: a row INSIDE the bottom bar, above its controls; the bar's measured height includes it. -->
+      <template #legend>
+        <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" />
+      </template>
+    </BottomBar>
 
     <!-- Analytics overlay surface (spec 007, T705). Registered in `overlaySurfaceCatalog`; the
          geometry below is the descriptor's, not this component's. -->
@@ -1585,6 +1607,11 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
   flex-direction: column;
   min-height: 0;
   pointer-events: auto;
+}
+
+.sar-e2e-legend {
+  flex: 1 0 100%;
+  margin-bottom: 0;
 }
 
 .sar-interact-history-overlay {

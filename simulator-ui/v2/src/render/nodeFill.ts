@@ -1,8 +1,10 @@
 import type { GraphNode } from '../types'
-import type { VizMapping } from '../vizMapping'
+import { classifyNode, fillOf, type VizMapping } from '../vizMapping'
 
-export function fillForNode(n: GraphNode, mapping: VizMapping): string {
-  // Backend-first: UI only interprets viz keys; never derives colors from `type`.
-  const key = String(n.viz_color_key ?? 'unknown')
-  return mapping.node.color[key]?.fill ?? mapping.node.color.unknown.fill
+/**
+ * The fill of a node: the colour of its net role, or of the freeze (039 slice B). `viz_color_key` is not read.
+ * The palette is the mapping's resolved one - the object the legend and the node card show.
+ */
+export function fillForNode(n: Pick<GraphNode, 'net_sign' | 'status' | 'type'>, mapping: VizMapping): string {
+  return fillOf(classifyNode(n), mapping.node.palette)
 }
