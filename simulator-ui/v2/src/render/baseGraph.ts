@@ -1,6 +1,6 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
-import type { VizMapping } from '../vizMapping'
+import { linkColorOf, type VizMapping } from '../vizMapping'
 import { clamp01 } from '../utils/math'
 import { createThrottledWarn } from '../utils/throttledWarn'
 import { withAlpha } from './color'
@@ -37,11 +37,8 @@ function isIncident(link: LayoutLink, nodeId: string) {
 
 type Palette = Record<string, { color: string; label?: string }>
 
-function linkColor(l: GraphLink, mapping: VizMapping, palette?: Palette) {
-  const k = String(l.viz_color_key ?? '')
-  const p = k && palette ? palette[k] : undefined
-  return p?.color ?? mapping.link.color.default
-}
+/** The one resolver of a line's colour, shared with the arrow of the legend (`vizMapping.ts`). */
+const linkColor = linkColorOf
 
 /**
  * The alpha of a direction marker: OPAQUE (039 slice B, PR 2). The marker must not inherit the alpha of its line - a

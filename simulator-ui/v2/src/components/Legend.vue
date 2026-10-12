@@ -12,13 +12,15 @@
  * colour itself, the sign is the glyph drawn inside the node. Its `background-color` IS the data colour (the dimming
  * is an inset shadow over it), so a test can compare it with the token.
  *
- * The direction of a trust line is NOT explained here yet: that entry comes with the direction marker (PR 2) and
- * takes the slot after the shapes.
+ * THE DIRECTION OF A TRUST LINE (PR 2) is the last entry, after the shapes: an arrow and `Trust → potential debtor`.
+ * It is shown when the snapshot has trust lines - the parent hands over `trustLineColor`, the colour the canvas draws
+ * the marker with (`linkColorOf`), and nothing when there are none. The arrow points at the words that name the end
+ * it stands at on the canvas: the debtor. It is not a participant feature and not part of `LEGEND_VOCABULARY`.
  */
 import { computed } from 'vue'
 
 import type { GraphNode } from '../types'
-import { LEGEND_HELP, LEGEND_TITLE, LEGEND_VOCABULARY, legendEntriesFor, type DataPalette, type LegendEntryId } from '../vizMapping'
+import { LEGEND_HELP, LEGEND_TITLE, LEGEND_VOCABULARY, legendEntriesFor, TRUST_DIRECTION_TEXT, type DataPalette, type LegendEntryId } from '../vizMapping'
 
 // The file is `Legend.vue` (the name spec 039 gives it); the component's own name is multi-word, as the lint policy asks.
 defineOptions({ name: 'GraphLegend' })
@@ -30,6 +32,8 @@ const props = defineProps<{
   equivalent: string
   /** The resolved data colours - the object the canvas paints with. */
   palette: DataPalette
+  /** The colour trust lines and their direction markers are drawn with; `null` / empty when the snapshot has no lines. */
+  trustLineColor?: string | null
 }>()
 
 type Swatch = { cls: string; sign: string; color: string | null }
@@ -74,6 +78,16 @@ function swatchStyle(s: Swatch): Record<string, string> {
       <li v-for="e in entries" :key="e.id" class="ds-legend__entry" :data-legend-role="e.id">
         <span class="ds-data-swatch" :class="e.swatch.cls" :style="swatchStyle(e.swatch)" data-legend-swatch aria-hidden="true">{{ e.swatch.sign }}</span>
         <span class="ds-legend__text">{{ e.text }}</span>
+      </li>
+      <li v-if="trustLineColor" class="ds-legend__entry" data-legend-direction>
+        <span class="ds-legend__arrow" data-legend-swatch>
+          <!-- The marker of the canvas, on a stretch of its line: head 5 x 4, the tip at the end the words name. -->
+          <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true" focusable="false">
+            <line x1="1" y1="4" x2="16" y2="4" :stroke="trustLineColor" stroke-width="1.25" />
+            <polygon points="21,4 16,2 16,6" :fill="trustLineColor" />
+          </svg>
+        </span>
+        <span class="ds-legend__text">{{ TRUST_DIRECTION_TEXT }}</span>
       </li>
     </ul>
   </div>
@@ -125,5 +139,11 @@ function swatchStyle(s: Swatch): Record<string, string> {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+
+.ds-legend__arrow {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
 }
 </style>

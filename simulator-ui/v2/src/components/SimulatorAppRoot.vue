@@ -389,6 +389,7 @@ const {
   // refs
   dataPalette,
   resolveVizColors,
+  trustLineColor,
   hostEl,
   canvasEl,
   fxCanvasEl,
@@ -1447,7 +1448,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     <div v-if="isE2eScreenshots" class="ds-ov-bottom ds-panel ds-ov-bar">
       <!-- 039 slice B: the legend is not hidden for the stored snapshots - it is part of the picture. -->
       <div class="ds-ov-bottom__legend sar-e2e-legend">
-        <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" />
+        <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" :trust-line-color="trustLineColor" />
       </div>
       <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runTxOnce">Single Tx</button>
       <button class="ds-btn ds-btn--secondary" type="button" @click="e2e.runClearingOnce">Run Clearing</button>
@@ -1487,7 +1488,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     >
       <!-- 039 slice B: a row INSIDE the bottom bar, above its controls; the bar's measured height includes it. -->
       <template #legend>
-        <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" />
+        <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" :trust-line-color="trustLineColor" />
       </template>
     </BottomBar>
 

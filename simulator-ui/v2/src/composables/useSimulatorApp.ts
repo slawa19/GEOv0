@@ -17,7 +17,7 @@ import { sizeForNode } from '../render/nodeSizing'
 import type { ClearingDoneEvent, GraphSnapshot } from '../types'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
-import { classifyNode, createVizMapping, resolveVizColors as resolveVizColorsInto, type DataPalette } from '../vizMapping'
+import { classifyNode, createVizMapping, linkColorOf, resolveVizColors as resolveVizColorsInto, type DataPalette } from '../vizMapping'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
@@ -232,6 +232,8 @@ export type SimulatorAppApi = {
   dataPalette: Readonly<Ref<DataPalette>>
   /** Read the colour tokens again at the app's root and draw one frame. On mount and after a theme change. */
   resolveVizColors: () => void
+  /** 039 slice B, PR 2: the colour of the trust lines of the shown snapshot, for the arrow of the legend; `null` without lines. */
+  trustLineColor: Readonly<Ref<string | null>>
 
   hostEl: Ref<HTMLElement | null>
   canvasEl: Ref<HTMLCanvasElement | null>
@@ -795,6 +797,18 @@ export function useSimulatorApp(opts?: {
     // One frame with the new colours: the loop may be asleep, and a theme change moves nothing by itself.
     wakeUp()
   }
+
+  /**
+   * 039 slice B, PR 2: the colour the arrow of the legend is drawn with - what `drawBaseGraph` resolves for a trust
+   * line of the SHOWN snapshot (`linkColorOf`, the same function), `null` when it has no lines (no arrow entry then).
+   * Lines of one snapshot share a colour key today (the backend sends none); if they ever differ, the legend shows
+   * the colour of the first line - it does not invent one.
+   */
+  const trustLineColor = computed<string | null>(() => {
+    const snap = state.snapshot
+    const first = snap?.links?.[0]
+    return first ? linkColorOf(first, vizMapping, snap?.palette) : null
+  })
 
   function fxColorForNode(nodeId: string, fallback: string): string {
     const n = getNodeById(nodeId)
@@ -1928,6 +1942,7 @@ export function useSimulatorApp(opts?: {
 
     dataPalette,
     resolveVizColors,
+    trustLineColor,
 
     // refs
     hostEl,

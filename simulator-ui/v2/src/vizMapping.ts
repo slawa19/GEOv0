@@ -18,7 +18,7 @@
  * `null` / absent UNKNOWN - never shown as zero and never as a role. A net position of zero does not mean "no debts".
  * The wire key `viz_color_key` is NOT read for the fill: a sign is never derived from it, from atoms, or from lines.
  */
-import type { GraphNode } from './types'
+import type { GraphLink, GraphNode } from './types'
 import { readCssVar } from './render/readCssVar'
 
 /* ------------------------------------------------------------------ */
@@ -213,6 +213,21 @@ export function resolveVizColors(mapping: VizMapping, scope: Element | null | un
   return mapping.node.palette
 }
 
+/**
+ * The colour a trust line is drawn with - its body (at the alpha of the line) and its direction marker (opaque): the
+ * snapshot's palette entry of the line's `viz_color_key`, else the mapping's default. ONE resolver for the canvas
+ * (`render/baseGraph.ts`) and for the arrow of the legend (039 slice B, PR 2), so the two cannot differ.
+ */
+export function linkColorOf(
+  link: Pick<GraphLink, 'viz_color_key'> | null | undefined,
+  mapping: Pick<VizMapping, 'link'>,
+  palette?: Record<string, { color: string; label?: string }> | null,
+): string {
+  const k = String(link?.viz_color_key ?? '')
+  const p = k && palette ? palette[k] : undefined
+  return p?.color ?? mapping.link.color.default
+}
+
 /* ------------------------------------------------------------------ */
 /*  Legend: fixed vocabulary and order                                 */
 /* ------------------------------------------------------------------ */
@@ -240,6 +255,15 @@ export const LEGEND_VOCABULARY: ReadonlyArray<{ id: LegendEntryId; text: string 
   { id: 'person', text: 'Person' },
   { id: 'organisation', text: 'Organisation' },
 ]
+
+/**
+ * The words of the direction entry of the legend (039 slice B, PR 2; decision 7). The arrowhead of a line
+ * `source -> target` (creditor -> debtor) stands at the target: the one who MAY come to owe. It is the direction of
+ * trust - not of a payment (that runs the other way) and not a statement that anything is owed.
+ * Not a member of `LEGEND_VOCABULARY`: that list is the features of PARTICIPANTS; this entry is shown when the
+ * snapshot has trust lines and takes the slot after the shapes.
+ */
+export const TRUST_DIRECTION_TEXT = 'Trust → potential debtor'
 
 export const LEGEND_TITLE = 'Overall balance'
 export const LEGEND_HELP = 'Net position: what others owe minus what this participant owes.'
