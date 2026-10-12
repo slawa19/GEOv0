@@ -846,12 +846,36 @@ jobs:
           GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/simulator-qa-stand
         run: npm --prefix simulator-ui/v2 run test:e2e:qa:report
 
-      - name: Upload the QA stand report
+      # 039 slice A (2026-10-12): what the owner LOOKS at, recorded by the same job - three short
+      # videos in real time (the beam of a payment over a route, the amount labels fading, a node
+      # dragged) and the frames of the empty screen (`e2e/qa/owner.qavideo.ts`, its own config:
+      # wall clock, `video: 'on'`). Until this date the gallery came from this job and the videos
+      # only from somebody's machine. NOT a check of the product: the assertions of that file only
+      # make sure a video shows what its title says. It is a step of the job all the same - when
+      # it fails, the job is red, and a red step above does not keep it from running (`always()`).
+      - name: Record the videos for the owner
+        if: always()
+        env:
+          PW_E2E_PORT: "41737"
+          GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/simulator-qa-video
+        run: npm --prefix simulator-ui/v2 run test:e2e:qa:video
+
+      # ONE artifact for the human tester: the HTML report of the stand (the gallery - a frame of
+      # every window in four themes - is its attachments), the HTML report of the video run (the
+      # videos are embedded in it) and the raw output of the video run (one folder a test, each with
+      # its `video.webm`). ATTEMPTED on every run; it cannot promise the content: a step cut off
+      # before Playwright wrote its report leaves that part out, and the upload still succeeds with
+      # what is there (`warn`). Whether the videos are in it is read in the log of the step above
+      # ("4 passed") and in the artifact itself.
+      - name: Upload the QA stand report, the gallery and the videos
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: simulator-qa-stand-report-all-themes
-          path: ${{ runner.temp }}/simulator-qa-stand-report
+          path: |
+            ${{ runner.temp }}/simulator-qa-stand-report
+            ${{ runner.temp }}/simulator-qa-video-report
+            ${{ runner.temp }}/simulator-qa-video
           if-no-files-found: warn
           retention-days: 14
 

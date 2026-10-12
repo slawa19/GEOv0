@@ -20,7 +20,10 @@ WHAT THIS PROVES. Four files agree: `simulator-ui/v2/package.json` (the scripts 
 * no file of the counted project imports the stand's wall-clock instrument (`perf-measure.ts`): the
   counted project is counts on a fake clock, and a machine-dependent number must not decide a pull
   request (039 slice A, R14);
-* the scheduled job runs the whole stand and uploads its HTML report;
+* the scheduled job runs the whole stand and uploads its HTML report; since 2026-10-12 (039 slice A) the same job
+  records the owner's videos (`owner.qavideo.ts`), and the stand's report (the gallery), the report of the video run
+  and the raw videos leave it in ONE artifact, uploaded on every run after both steps; no pull-request job records
+  videos. Not seen: that the artifact really holds three videos - that is the log of the step and the artifact itself;
 * two things the spec forbids are absent: `waitForTimeout` in the stand, and a product branch on
   "am I under the QA stand".
 
@@ -73,6 +76,7 @@ _UI = _ROOT / "simulator-ui" / "v2"
 _STAND_CONFIG = "e2e/playwright.qa.config.ts"
 _GATE_COMMAND = "npm --prefix simulator-ui/v2 run test:e2e:qa:gate"
 _FULL_COMMAND = "npm --prefix simulator-ui/v2 run test:e2e:qa:report"
+_VIDEO_COMMAND = "npm --prefix simulator-ui/v2 run test:e2e:qa:video"
 _SCHEDULE_ONLY_IF = "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
 
 
@@ -83,6 +87,7 @@ def _inputs() -> dict[str, Any]:
         "config": (_UI / "e2e" / "playwright.qa.config.ts").read_text(encoding="utf-8"),
         "runner": (_UI / "e2e" / "qa" / "run-stand.mjs").read_text(encoding="utf-8"),
         "verdict": (_UI / "e2e" / "qa" / "run-verdict.mjs").read_text(encoding="utf-8"),
+        "video_config": (_UI / "e2e" / "qa" / "playwright.video.config.ts").read_text(encoding="utf-8"),
         # The files of the counted project, by the glob of its `testMatch` (`**/*.qa.ts` under `e2e/qa`).
         "counted": {p.name: p.read_text(encoding="utf-8") for p in sorted((_UI / "e2e" / "qa").rglob("*.qa.ts"))},
     }
@@ -191,9 +196,54 @@ def violations(inputs: dict[str, Any]) -> list[str]:
         found.append("job simulator-qa-stand is not the scheduled/manual job")
     if len(_runs(full, _FULL_COMMAND)) != 1:
         found.append("job simulator-qa-stand does not run the full entry exactly once")
-    uploads = [s for s in full.get("steps", []) if isinstance(s, dict) and str(s.get("uses", "")).startswith("actions/upload-artifact@")]
+    full_steps = [s for s in full.get("steps", []) if isinstance(s, dict)]
+    uploads = [s for s in full_steps if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
     if not any(s.get("if") == "always()" for s in uploads):
         found.append("job simulator-qa-stand does not upload the HTML report on every run")
+    # 5a. 039 slice A (2026-10-12): the same job records the owner's videos, and the gallery (attachments of the stand's
+    #     HTML report) and the videos leave it in ONE artifact. The directories are taken from the steps' own `env`: a
+    #     Playwright run of the stand writes its report into `<output dir>-report` (`run-stand.mjs`, the video config).
+    video_runs = _runs(full, _VIDEO_COMMAND)
+    if len(video_runs) != 1:
+        found.append(f"job simulator-qa-stand has {len(video_runs)} steps that record the owner's videos, expected exactly one")
+    for step in video_runs:
+        if step.get("continue-on-error") not in (None, False):
+            found.append("the video step of simulator-qa-stand is allowed to fail")
+    if len(uploads) != 1:
+        found.append(f"job simulator-qa-stand uploads {len(uploads)} artifacts: the gallery and the videos must leave it in one")
+    else:
+        upload = uploads[0]
+        paths = [line.strip() for line in str(upload.get("with", {}).get("path", "")).splitlines() if line.strip()]
+        wanted = {
+            "the stand's HTML report (the gallery)": [str(s.get("env", {}).get("GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR", "?")) + "-report" for s in _runs(full, _FULL_COMMAND)],
+            "the HTML report of the video run": [str(s.get("env", {}).get("GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR", "?")) + "-report" for s in video_runs],
+            "the raw videos": [str(s.get("env", {}).get("GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR", "?")) for s in video_runs],
+        }
+        for what, directories in wanted.items():
+            for directory in directories:
+                if directory not in paths:
+                    found.append(f"the one artifact of simulator-qa-stand does not hold {what}: {directory} is not among {paths}")
+        if len(set(paths)) != len(paths) or len({d for ds in wanted.values() for d in ds}) != 3:
+            found.append(f"the stand run and the video run of simulator-qa-stand do not write into three different directories: {wanted}")
+        if upload.get("if") != "always()":
+            found.append("the one artifact of simulator-qa-stand is not uploaded on every run")
+        if any(full_steps.index(step) > full_steps.index(upload) for step in video_runs + _runs(full, _FULL_COMMAND)):
+            found.append("job simulator-qa-stand uploads its artifact before a step that fills it has run")
+    full_ports = [str(s.get("env", {}).get("PW_E2E_PORT")) for s in full_steps if "PW_E2E_PORT" in s.get("env", {})]
+    if len(full_ports) != len(set(full_ports)):
+        found.append(f"steps of simulator-qa-stand share a Playwright port: {full_ports}")
+    if scripts.get("test:e2e:qa:video") != "playwright test --config=e2e/qa/playwright.video.config.ts":
+        found.append(f"script test:e2e:qa:video does not run the video config: {scripts.get('test:e2e:qa:video')!r}")
+    video_config: str = inputs["video_config"]
+    if not re.search(r"video:\s*\{\s*mode:\s*'on'", video_config) or "'**/*.qavideo.ts'" not in video_config:
+        found.append("the video config does not record a video of every *.qavideo.ts test (video mode 'on')")
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict) or job.get("if") == _SCHEDULE_ONLY_IF:
+            continue
+        for step in job.get("steps", []):
+            run = str(step.get("run", "")) if isinstance(step, dict) else ""
+            if re.search(r"qa:video|qavideo|playwright\.video\.config", run):
+                found.append(f"job {job_id}, which runs on pull requests, records the owner's videos: {' '.join(run.split())}")
     # 6. The perf project (wall clock, a real-time fps threshold) never blocks a pull request.
     perf = jobs.get("simulator-qa-perf", {})
     if perf.get("if") != _SCHEDULE_ONLY_IF:
@@ -282,7 +332,43 @@ _MUTATIONS = {
     "a wall-clock window enters the counted project": (
         lambda i: i["counted"].update({"frame.qa.ts": "import { measureWindow } from './perf-measure.js'\n"}), "uses the wall-clock window"),
     "the scheduled job runs on every pull request": (lambda i: i["workflow"]["jobs"]["simulator-qa-stand"].pop("if"), "not the scheduled/manual job"),
+    "the scheduled job no longer records the videos": (
+        lambda i: i["workflow"]["jobs"]["simulator-qa-stand"].update(steps=[s for s in _full_steps(i) if s not in _runs(_full_job(i), _VIDEO_COMMAND)]),
+        "0 steps that record the owner's videos"),
+    "the video step may fail": (lambda i: _runs(_full_job(i), _VIDEO_COMMAND)[0].update({"continue-on-error": True}), "video step of simulator-qa-stand is allowed to fail"),
+    "the videos leave the job in an artifact of their own": (
+        lambda i: _full_steps(i).append({"uses": "actions/upload-artifact@v4", "if": "always()", "with": {"name": "videos", "path": "${{ runner.temp }}/simulator-qa-video"}}),
+        "uploads 2 artifacts"),
+    "the one artifact holds the gallery only": (
+        lambda i: _full_upload(i)["with"].update(path="${{ runner.temp }}/simulator-qa-stand-report"), "does not hold the HTML report of the video run"),
+    "the one artifact holds the videos only": (
+        lambda i: _full_upload(i)["with"].update(path="${{ runner.temp }}/simulator-qa-video-report\n${{ runner.temp }}/simulator-qa-video\n"),
+        "does not hold the stand's HTML report (the gallery)"),
+    "the video run writes over the report of the stand": (
+        lambda i: _runs(_full_job(i), _VIDEO_COMMAND)[0]["env"].update(GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR="${{ runner.temp }}/simulator-qa-stand"),
+        "do not write into three different directories"),
+    "the one artifact is uploaded only when the job is green": (lambda i: _full_upload(i).pop("if"), "is not uploaded on every run"),
+    "the artifact is uploaded before the videos are recorded": (
+        # The video step goes last, behind the upload.
+        lambda i: _full_steps(i).append(_full_steps(i).pop(_full_steps(i).index(_runs(_full_job(i), _VIDEO_COMMAND)[0]))),
+        "before a step that fills it has run"),
+    "a pull-request job records the videos": (
+        lambda i: i["workflow"]["jobs"]["ui-smoke"]["steps"].append({"run": _VIDEO_COMMAND}), "which runs on pull requests, records the owner's videos"),
+    "the video config records only on failure": (
+        lambda i: i.update(video_config=i["video_config"].replace("mode: 'on'", "mode: 'retain-on-failure'")), "does not record a video of every"),
 }
+
+
+def _full_job(i: dict) -> dict:
+    return i["workflow"]["jobs"]["simulator-qa-stand"]
+
+
+def _full_steps(i: dict) -> list:
+    return _full_job(i)["steps"]
+
+
+def _full_upload(i: dict) -> dict:
+    return next(s for s in _full_steps(i) if str(s.get("uses", "")).startswith("actions/upload-artifact@"))
 
 
 @pytest.mark.parametrize("name", sorted(_MUTATIONS))

@@ -176,8 +176,14 @@ _HERE = Path(__file__).resolve().parent
 #: mutation is replaced (the plain script ran the snapshot config -> the plain script runs Playwright past the runner again) and
 #: four are added: another script runs the counted project past the runner, a script runs the stand config with no project
 #: named, the debug run prints the line of a counted verdict, every scope is judged as a debug run.
+#:
+#: 2026-10-12, 039 slice A (the owner's videos are recorded by the scheduled job `simulator-qa-stand` and leave it with the
+#: gallery in one artifact): portable 444 -> 454. Ten more mutations in the same module: the video step removed, allowed to
+#: fail, or writing over the stand's report; a second artifact; the one artifact without the videos, without the gallery, not
+#: uploaded on every run, or uploaded before the videos are recorded; a pull-request job recording videos; a video config
+#: that records only on failure.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 444,
+    "portable": 454,
     "powershell": 235,
 }
 
