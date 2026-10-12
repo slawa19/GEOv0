@@ -61,7 +61,7 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
   hiddenNodeId?: string | null
   pos?: Map<string, LayoutNode>
 }) {
-  const { w, h, nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
+  const { nodes, links, mapping, palette, selectedNodeId, activeEdges } = opts
   const activeNodes = opts.activeNodes
   const dimmedNodeIds = opts.dimmedNodeIds
   // A node is dimmed when dimmedNodeIds is non-null/non-empty AND the node is not in it.

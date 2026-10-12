@@ -14,7 +14,7 @@ import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode } from '../render/nodeFill'
 import { sizeForNode } from '../render/nodeSizing'
-import type { ClearingDoneEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, GraphSnapshot } from '../types'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
 import { VIZ_MAPPING } from '../vizMapping'
@@ -36,7 +36,7 @@ import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError, isTimeoutError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
-import type { LayoutNode, Point } from '../types/layout'
+import type { Point } from '../types/layout'
 
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
@@ -1012,9 +1012,6 @@ export function useSimulatorApp(opts?: {
   const screenToWorld = viewWiring.screenToWorld
   const clientToScreen = viewWiring.clientToScreen
 
-  const worldToCssTranslateNoScale = viewWiring.worldToCssTranslateNoScale
-
-  const selectedNode = viewWiring.selectedNode
   const selectedNodeScreenCenter = viewWiring.selectedNodeScreenCenter
 
   function getNodeScreenCenter(nodeId: string): Point | null {
@@ -1112,12 +1109,8 @@ export function useSimulatorApp(opts?: {
   const fxState = fxOverlays.fxState
   const hoveredEdge = fxOverlays.hoveredEdge
   const clearHoveredEdge = fxOverlays.clearHoveredEdge
-  const activeEdges = fxOverlays.activeEdges
   const addActiveEdge = fxOverlays.addActiveEdge
-  const pruneActiveEdges = fxOverlays.pruneActiveEdges
-  const activeNodes = fxOverlays.activeNodes
   const addActiveNode = fxOverlays.addActiveNode
-  const pruneActiveNodes = fxOverlays.pruneActiveNodes
   const pushFloatingLabel = fxOverlays.pushFloatingLabel
   const pushClearingAmountOverlay = fxOverlays.pushClearingAmountOverlay
   const resetOverlays = fxOverlays.resetOverlays

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { WindowInstance } from '../composables/windowManager/types'
-import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { provideWindowContainerEl } from '../composables/windowManager/windowContainerContext'
 

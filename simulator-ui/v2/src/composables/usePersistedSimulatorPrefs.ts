@@ -91,14 +91,6 @@ function safeSet(storage: StorageLike, key: PersistedKey, value: string) {
   }
 }
 
-function safeRemove(storage: StorageLike, key: PersistedKey) {
-  try {
-    storage.removeItem?.(key)
-  } catch {
-    // ignore
-  }
-}
-
 export function usePersistedSimulatorPrefs(deps: UsePersistedSimulatorPrefsDeps): UsePersistedSimulatorPrefsReturn {
   const debounceMs = deps.debounceMs ?? 250
 

@@ -12,7 +12,7 @@ import {
 
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { sizeForNode } from '../render/nodeSizing'
-import { clamp, safeClampToViewport } from '../utils/math'
+import { safeClampToViewport } from '../utils/math'
 
 export type PhysicsQuality = 'low' | 'med' | 'high'
 

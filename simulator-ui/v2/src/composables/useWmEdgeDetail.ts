@@ -222,7 +222,7 @@ export function useWmEdgeDetail(): {
     state.value = 'keepAlive'
   }
 
-  function suppress(_reason?: string): void {
+  function suppress(): void {
     // Suppression implies keepAlive is cleared (matches existing root semantics).
     releaseKeepAlive()
 

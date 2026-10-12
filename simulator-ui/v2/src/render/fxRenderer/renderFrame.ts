@@ -70,7 +70,7 @@ export function renderFxFrame(opts: {
   /** Pass snapshot identity key so the Path2D cache can be invalidated on scene changes. */
   snapshotKey?: string | null
 }): void {
-  const { nowMs, ctx, pos, w, h, mapping, fxState, isTestMode } = opts
+  const { nowMs, ctx, pos, w, h, mapping, fxState } = opts
   const z = Math.max(0.01, Number(opts.cameraZoom ?? 1))
   const invZ = 1 / z
   const spx = (v: number) => v * invZ
@@ -524,12 +524,8 @@ export function renderFxFrame(opts: {
         // --- Orange pulsing phase ---
         const t0 = clamp01(age / p.durationMs)
 
-        // Raised cosine envelope (Hann window) — smooth from 0→1→0, no flat sustain.
-        // No hard boundary breakpoints, perfectly smooth derivative everywhere.
-        const envelope = 0.5 * (1 - Math.cos(Math.PI * 2 * Math.min(t0, 0.5)))
-        // Peaks at t0=0.5, symmetric fade-in/fade-out over the full duration.
-        // But we want the fade-out to be a bit slower, so use an asymmetric shape:
-        // fast attack (first 15%), sustained middle, gentle release.
+        // Asymmetric envelope: fast attack (first 12%), sustained middle, gentle release (last 30%).
+        // (A symmetric raised-cosine variant was computed here and never used; removed 2026-10-12, 039 R13.)
         const envAsym = t0 < 0.12
           ? 0.5 * (1 - Math.cos(Math.PI * (t0 / 0.12))) // smooth rise 0→1
           : t0 < 0.70
