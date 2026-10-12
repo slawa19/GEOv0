@@ -31,6 +31,17 @@ const CASES = [
   ['an exclusion without a reason', run({ notInGate: [{ ...entry, why: '' }] }), false, 'no reason'],
   ['an exclusion without a date', run({ notInGate: [{ ...entry, since: 'yesterday' }] }), false, 'no date'],
   ['an exclusion that is a bare title', run({ notInGate: ['R0 - a test that exists'] }), false, 'does not name a test'],
+  // The debug scope (039 slice A): a slice, no recorded number - the count is not judged, everything else is.
+  ['debug: a clean slice of any size passes', run({ scope: 'debug', recorded: null, report: { stats: stats({ expected: 1 }), suites: [] } }), true, null],
+  ['debug: a failed test', run({ scope: 'debug', recorded: null, playwrightStatus: 1, report: { stats: stats({ expected: 1, unexpected: 1 }), suites: [] } }), false, 'failed'],
+  ['debug: a filter that selected nothing', run({ scope: 'debug', recorded: null, report: { stats: stats({ expected: 0 }), suites: [] } }), false, 'no test ran'],
+  ['debug: a skipped test', run({ scope: 'debug', recorded: null, report: { stats: stats({ skipped: 1 }), suites: [] } }), false, 'skipped'],
+  ['debug: a flaky test', run({ scope: 'debug', recorded: null, report: { stats: stats({ expected: 2, flaky: 1 }), suites: [] } }), false, 'retry'],
+  ['debug: Playwright left no result', run({ scope: 'debug', recorded: null, report: null }), false, 'no result'],
+  ['debug: given a recorded number', run({ scope: 'debug' }), false, 'not compared with one'],
+  // ... and the leniency of the debug scope does not leak into the counted ones.
+  ['the gate without a recorded number', run({ recorded: null }), false, 'no recorded number'],
+  ['the full scope with a recorded number of NaN', run({ scope: 'full', recorded: Number.NaN }), false, 'no recorded number'],
 ]
 
 let failed = 0
@@ -47,5 +58,8 @@ for (const [name, input, passes, word] of CASES) {
   }
 }
 assert.equal(countExpectedFailures({ suites: suites('failed', 'passed', 'failed') }), 2)
+// What a caller prints is decided by `counted`: a debug run never carries the mark of a counted verdict.
+assert.deepEqual([verdict(run()).counted, verdict(run({ scope: 'full' })).counted, verdict(run({ scope: 'debug', recorded: null })).counted], [true, true, false])
+assert.equal(verdict(run({ scope: 'debug', recorded: null })).want, null)
 console.log(`${CASES.length - failed} of ${CASES.length} cases`)
 process.exit(failed ? 1 : 0)

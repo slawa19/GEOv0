@@ -12,6 +12,11 @@
  *  - in the `gate` scope, no test is an EXPECTED failure (`test.fail`): Playwright counts those as "expected", and a
  *    known defect parked in the required subset would be green there for ever;
  *  - every entry of NOT_IN_GATE names its test, its reason and its date.
+ *
+ * THE DEBUG SCOPE (039 slice A, 2026-10-12) is a slice somebody chose with a filter: there is no number to compare it
+ * with, so the count is NOT judged and the result says `counted: false` - it is never the verdict of the stand. Every
+ * other refusal stands in it (a failure, no test at all, a skip, a flaky test, no result). The leniency cannot leak:
+ * outside the debug scope a run without a recorded positive number is itself a refusal.
  */
 
 /** Tests whose expected status is "failed" (`test.fail`), anywhere in the JSON report of Playwright. */
@@ -38,23 +43,28 @@ export function exclusionProblems(notInGate) {
 }
 
 /**
- * @param {{ scope: 'gate' | 'full', recorded: number, repeat: number, playwrightStatus: number | null,
+ * @param {{ scope: 'gate' | 'full' | 'debug', recorded: number | null, repeat: number, playwrightStatus: number | null,
  *           report: { stats?: { expected: number, unexpected: number, flaky: number, skipped: number }, suites?: unknown[] } | null,
  *           notInGate: unknown[] }} run
- * @returns {{ code: number, ran: number, want: number, problems: string[] }}
+ * @returns {{ code: number, ran: number, want: number | null, counted: boolean, problems: string[] }}
  */
 export function verdict(run) {
   const problems = [...exclusionProblems(run.notInGate)]
-  const want = run.recorded * run.repeat
+  const counted = run.scope !== 'debug'
+  if (counted && !(Number.isInteger(run.recorded) && run.recorded > 0)) {
+    problems.push(`the scope "${run.scope}" has no recorded number of tests (got ${JSON.stringify(run.recorded ?? null)}): only the debug scope runs uncounted`)
+  }
+  if (!counted && run.recorded != null) problems.push('the debug scope was given a recorded number: a slice is not compared with one')
+  const want = counted ? run.recorded * run.repeat : null
   const stats = run.report?.stats
   if (!stats) {
     problems.push(`Playwright left no result (exit ${run.playwrightStatus}): the run did not happen, which is not a pass`)
-    return { code: run.playwrightStatus || 1, ran: 0, want, problems }
+    return { code: run.playwrightStatus || 1, ran: 0, want, counted, problems }
   }
   const ran = stats.expected + stats.unexpected + stats.flaky
   if (run.playwrightStatus !== 0) problems.push(`Playwright exited ${run.playwrightStatus}: ${stats.unexpected} test(s) failed`)
   if (ran === 0) problems.push('no test ran: a filter that selected nothing is not a pass')
-  if (ran !== want) {
+  if (counted && ran !== want) {
     problems.push(`${ran} tests ran, ${want} are recorded in EXPECTED.${run.scope} (e2e/qa/run-stand.mjs). `
       + 'Fewer: a test is no longer collected or a filter took it out. More: a new test - record it, with a dated line.')
   }
@@ -65,5 +75,5 @@ export function verdict(run) {
     problems.push(`${expectedFailures} test(s) of the required subset are expected failures (test.fail): a known defect does not belong `
       + 'in the required subset - tag its reproducer @extended')
   }
-  return { code: run.playwrightStatus || (problems.length ? 1 : 0), ran, want, problems }
+  return { code: run.playwrightStatus || (problems.length ? 1 : 0), ran, want, counted, problems }
 }

@@ -5,7 +5,9 @@ WHAT THIS PROVES. Four files agree: `simulator-ui/v2/package.json` (the scripts 
 `simulator-ui/v2/e2e/qa/run-stand.mjs` (the gate entry that counts what ran) and
 `.github/workflows/quality.yml`. Namely:
 
-* the stand's scripts run THE STAND'S config and its `qa-stand` project, not the snapshot stand's;
+* the stand's scripts run THE STAND'S config and its `qa-stand` project, not the snapshot stand's, and reach the
+  counted project through the runner only: `test:e2e:qa` is the runner's debug scope, which is marked as not a gate
+  and never prints the line of a counted verdict (039 slice A, 2026-10-12; until then it was a bare `playwright test`);
 * the stand's config does not put the product in test mode and clears `navigator.webdriver`: under
   either, sparks are not spawned, the render loop never sleeps, dragging and edge hover are off, and
   every result of the stand would be about another product (spec 038, F-038-1);
@@ -103,11 +105,17 @@ def violations(inputs: dict[str, Any]) -> list[str]:
     jobs = workflow.get("jobs", {})
 
     # 1. The scripts run the stand's config and project.
-    script = scripts.get("test:e2e:qa", "")
-    if f"--config={_STAND_CONFIG}" not in script:
-        found.append(f"script test:e2e:qa does not run {_STAND_CONFIG}: {script!r}")
-    if "--project=qa-stand" not in scripts.get("test:e2e:qa", ""):
-        found.append("script test:e2e:qa does not select the qa-stand project")
+    #    039 slice A (2026-10-12): the counted project is reached through the runner ONLY. `test:e2e:qa` used to be a bare
+    #    `playwright test --project=qa-stand`: a run nobody judged, whose "N passed" read like a result of the stand. It
+    #    is the runner's debug scope now, and no other script may run the counted project past the runner.
+    if scripts.get("test:e2e:qa") != "node e2e/qa/run-stand.mjs debug":
+        found.append(f"script test:e2e:qa is not the debug entry of the runner: {scripts.get('test:e2e:qa')!r}")
+    for name, command in scripts.items():
+        if "qa-stand" in str(command) or (_STAND_CONFIG in str(command) and "--project=qa-perf" not in str(command)):
+            found.append(f"script {name} runs the counted project past the runner (run-stand.mjs): {command!r}")
+    for needle in ("export const DEBUG_BANNER = 'DEBUG-ONLY, NOT A GATE'", "if (v.counted) console.log(", "recorded: debug ? null : EXPECTED[scope]"):
+        if needle not in runner:
+            found.append(f"run-stand.mjs lost the mark of its debug scope: {needle}")
     if scripts.get("test:e2e:qa:gate") != "node e2e/qa/run-stand.mjs gate":
         found.append(f"script test:e2e:qa:gate is not the gate entry: {scripts.get('test:e2e:qa:gate')!r}")
     if scripts.get("test:e2e:qa:report") != "node e2e/qa/run-stand.mjs full":
@@ -133,7 +141,10 @@ def violations(inputs: dict[str, Any]) -> list[str]:
     for needle in ("verdict({", "process.exit(v.code)", "--retries=0"):
         if needle not in runner:
             found.append(f"run-stand.mjs lost its refusal: {needle}")
-    for needle in ("ran !== want", "ran === 0", "stats.skipped !== 0", "stats.flaky !== 0", "expectedFailures !== 0"):
+    for needle in (
+        "counted && ran !== want", "ran === 0", "stats.skipped !== 0", "stats.flaky !== 0", "expectedFailures !== 0",
+        "const counted = run.scope !== 'debug'",
+    ):
         if needle not in verdict:
             found.append(f"run-verdict.mjs lost its refusal: {needle}")
     if not re.search(r"\bretries:\s*0\b", config):
@@ -230,15 +241,26 @@ _MUTATIONS = {
     "the job is narrowed to the schedule": (lambda i: i["workflow"]["jobs"]["ui-smoke"].update({"if": _SCHEDULE_ONLY_IF}), "job ui-smoke is conditional"),
     "the step runs the plain stand script, uncounted": (
         lambda i: _gate_step(i).update({"run": "npm --prefix simulator-ui/v2 run test:e2e:qa"}), "expected exactly one"),
-    "the script runs the snapshot config": (
-        lambda i: i["package"]["scripts"].update({"test:e2e:qa": "playwright test --project=qa-stand"}), "does not run e2e/playwright.qa.config.ts"),
+    "the plain stand script runs Playwright past the runner again": (
+        lambda i: i["package"]["scripts"].update({"test:e2e:qa": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-stand"}),
+        "is not the debug entry of the runner"),
+    "another script runs the counted project past the runner": (
+        lambda i: i["package"]["scripts"].update({"test:e2e:qa:quick": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-stand"}),
+        "script test:e2e:qa:quick runs the counted project past the runner"),
+    "a script runs the stand config with no project named": (
+        lambda i: i["package"]["scripts"].update({"test:e2e:qa:all": "playwright test --config=e2e/playwright.qa.config.ts"}),
+        "script test:e2e:qa:all runs the counted project past the runner"),
+    "the debug run prints the line of a counted verdict": (
+        lambda i: i.update(runner=i["runner"].replace("if (v.counted) console.log(", "if (true) console.log(")), "lost the mark of its debug scope"),
+    "every scope is judged as a debug run": (
+        lambda i: i.update(verdict=i["verdict"].replace("const counted = run.scope !== 'debug'", "const counted = false")), "lost its refusal"),
     "the gate script bypasses the counting entry": (
         lambda i: i["package"]["scripts"].update({"test:e2e:qa:gate": "playwright test --config=e2e/playwright.qa.config.ts --project=qa-stand"}),
         "is not the gate entry"),
     "the config turns test mode on": (lambda i: i.update(config=i["config"].replace("VITE_TEST_MODE: '0'", "VITE_TEST_MODE: '1'")), "test mode"),
     "the config announces WebDriver": (
         lambda i: i.update(config=i["config"].replace("--disable-blink-features=AutomationControlled", "")), "navigator.webdriver"),
-    "the verdict stops comparing the count": (lambda i: i.update(verdict=i["verdict"].replace("ran !== want", "false")), "lost its refusal"),
+    "the verdict stops comparing the count": (lambda i: i.update(verdict=i["verdict"].replace("counted && ran !== want", "false")), "lost its refusal"),
     "the verdict tolerates a skip": (lambda i: i.update(verdict=i["verdict"].replace("stats.skipped !== 0", "false")), "lost its refusal"),
     "the verdict tolerates a flaky test": (lambda i: i.update(verdict=i["verdict"].replace("stats.flaky !== 0", "false")), "lost its refusal"),
     "the verdict lets an expected failure into the gate": (
@@ -275,8 +297,10 @@ def test_the_guard_notices_a_stand_that_left_the_gate(name: str) -> None:
 
 
 def test_the_verdict_of_the_gate_entry_holds_on_made_up_runs() -> None:
-    """The verdict is a pure function; this runs it on sixteen made-up runs (a wrong count, a skip, a flaky test, an
-    expected failure in the gate, no test at all, no result, malformed exclusions) through node.
+    """The verdict is a pure function; this runs it on twenty-five made-up runs (a wrong count, a skip, a flaky test, an
+    expected failure in the gate, no test at all, no result, malformed exclusions; since 2026-10-12 the debug scope -
+    uncounted, and red on a failure, an empty filter, a skip, a flaky test - and a counted scope left without its
+    number) through node.
 
     It does not run Playwright: that the JSON report of the installed Playwright has the assumed shape is shown only
     by a real run of the gate.
@@ -287,7 +311,7 @@ def test_the_verdict_of_the_gate_entry_holds_on_made_up_runs() -> None:
     done = subprocess.run([node, "e2e/qa/run-verdict.selfcheck.mjs"], cwd=_UI, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stdout + done.stderr
     summary = re.search(r"^(\d+) of (\d+) cases$", done.stdout, re.MULTILINE)
-    assert summary and summary.group(1) == summary.group(2) and int(summary.group(2)) >= 16, done.stdout
+    assert summary and summary.group(1) == summary.group(2) and int(summary.group(2)) >= 25, done.stdout
 
 
 def _stand_sources() -> list[Path]:

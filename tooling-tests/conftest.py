@@ -171,8 +171,13 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-12, 039 slice A (hardening of the QA stand step): portable 436 -> 440. Four more mutations in the same module: the
 #: report of the gate step uploaded only on failure, the gate step without a `timeout-minutes` of its own, that number not under
 #: the job's, and a wall-clock window (`perf-measure.ts`) imported by a file of the counted project.
+#:
+#: 2026-10-12, 039 slice A (`test:e2e:qa` goes through the runner as a debug scope): portable 440 -> 444. In the same module one
+#: mutation is replaced (the plain script ran the snapshot config -> the plain script runs Playwright past the runner again) and
+#: four are added: another script runs the counted project past the runner, a script runs the stand config with no project
+#: named, the debug run prints the line of a counted verdict, every scope is judged as a debug run.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 440,
+    "portable": 444,
     "powershell": 235,
 }
 
