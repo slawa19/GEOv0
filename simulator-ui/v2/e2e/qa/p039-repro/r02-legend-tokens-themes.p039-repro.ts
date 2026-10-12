@@ -11,6 +11,8 @@
  * names are the contract being reproduced. (2) "Legend and canvas use one source" cannot be judged while there is no
  * legend: only the canvas side is measured. (3) The empty-scene exception of the legend (P-2) is not exercised - there
  * is nothing to except yet. (4) Contrast is not here: axe runs in the stand's own matrix (`../surfaces.qa.ts`).
+ *
+ * SLICE B must turn the three red tests green (legend, data tokens, switcher); plain failing tests, no `test.fail`.
  */
 import { expect, test, type Page } from '@playwright/test'
 

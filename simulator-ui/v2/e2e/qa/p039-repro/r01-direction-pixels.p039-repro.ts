@@ -15,6 +15,8 @@
  * LIMITS. It needs nodes with ONE line each (the control direction must be empty) - it is not a probe for the 100-node
  * scene. A marker thinner than the line, or one that lies wholly within 3 px of the axis, is not seen. Colour, shape
  * and size of the marker are not judged. Quality `low` (the stand's browser), theme `hud`, zoom as the layout gives it.
+ *
+ * SLICE B must turn this test green (it is a plain failing test here, there is no `test.fail` to remove).
  */
 import { expect, test, type Page } from '@playwright/test'
 

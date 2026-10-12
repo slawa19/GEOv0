@@ -8,6 +8,8 @@
  *
  * LIMITS. The producer of the text is judged, not the component that renders it (`InteractHistoryLog.vue` prints the
  * text it is given). Three producers are walked: create, change of limit, close. A producer added later is not seen.
+ *
+ * SLICE D (names) must turn the three `red` tests green: then replace `red` by `it`.
  */
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'

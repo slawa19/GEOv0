@@ -1,5 +1,11 @@
 /**
- * 039 T3901 - R10 (batching of the edge pass), RENDERER tier. Browser counts and the pixel experiment:
+ * 039 T3901 - R10 (batching of the edge pass), RENDERER tier. MEASUREMENT ONLY since 2026-10-12.
+ *
+ * WITHDRAWN AS A REPRODUCER (spec 039, P-8): the off-screen experiment of the browser tier showed that grouping the
+ * lines into one path - by style group, or by run with the order kept - changes the picture on today's fixture, so
+ * batching is not done and "strokes <= style groups" is not a budget. The red assertion (348 <= 12) was removed; what
+ * stays are the counts a later decision (a dirty key) starts from. No slice flips anything here: nothing is `it.fails`.
+ * Browser counts and the pixel experiment:
  * `e2e/qa/p039-repro/r10-strokes.p039-repro.ts`.
  *
  * Corrected form (P-2): the EDGE PASS is counted, apart from node outlines; the budget is derived from the number of
@@ -16,7 +22,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { drawBaseGraph } from '../render/baseGraph'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { VIZ_MAPPING } from '../vizMapping'
-import { fixture100, measured, red } from './p039'
+import { fixture100, measured } from './p039'
 import { recordingCtx, segmentsOf, type Draw } from './recordingCtx'
 
 vi.mock('../render/nodePainter', () => ({ drawNodeShape: vi.fn() }))
@@ -41,7 +47,7 @@ function edgePass(o: { selectedNodeId?: string | null; activeEdges?: Map<string,
 
 const styleOf = (d: Draw) => `${d.strokeStyle}|${d.lineWidth}`
 
-describe('039 R10 - the edge pass of the base canvas: strokes against style groups (fixture: 100 nodes, 348 lines)', () => {
+describe('039 R10 - measurement: the edge pass of the base canvas, strokes and style groups (fixture: 100 nodes, 348 lines)', () => {
   const draws = edgePass()
   const strokes = draws.filter((d) => d.kind === 'stroke')
   const groups = new Set(strokes.map(styleOf))
@@ -57,12 +63,9 @@ describe('039 R10 - the edge pass of the base canvas: strokes against style grou
     })
     expect(links).toHaveLength(348)
     expect(segments, 'counter-check: every trust line of the fixture is drawn').toHaveLength(348)
-    expect(groups.size, 'counter-check: the fixture really has several styles (width x alpha)').toBeGreaterThan(1)
-  })
-
-  red('the edge pass issues one stroke per style group, not one per line (today: 348 strokes for 12 groups)', () => {
-    expect(segments, 'coverage: all 348 lines are still drawn - a batcher that drops lines must not pass').toHaveLength(348)
-    expect(strokes.length, `strokes of the edge pass; budget = style groups of the scene (${groups.size})`).toBeLessThanOrEqual(groups.size)
+    expect(strokes, 'today: one stroke per trust line').toHaveLength(348)
+    expect(groups.size, 'style groups of the fixture: 3 widths x 4 alphas, one colour').toBe(12)
+    expect(runs, 'runs of consecutive same-style lines in snapshot order').toBe(175)
   })
 
   it('counter-check (P-8): a selected node and an active edge ADD strokes of the highlight pass - they are not batched away', () => {

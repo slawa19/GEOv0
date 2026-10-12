@@ -12,6 +12,8 @@
  *
  * LIMITS. One of the 21 comparisons of the product is exercised: the one with the asymmetry. The other twenty are not
  * walked here; their migration to one function is slice A's, with its own enumeration.
+ *
+ * SLICE A, its part after T3901 (`sameEquivalent`), must turn the two `red` tests green: then replace `red` by `it`.
  */
 import { describe, expect, it } from 'vitest'
 

@@ -9,6 +9,8 @@
  *  2. MEMBERSHIP - the reproducer: the deterministic budgets (tests titled "budget: ...", counts taken on `page.clock`)
  *     are members of the COUNTED project `qa-stand`. Today they are collected by `qa-perf` only, which the gate never runs.
  *
+ * SLICE A, its stand part after T3901 (budgets moved into `qa-stand` with their counts), must turn check 2 green.
+ *
  * What it reads: `playwright test --list` of the stand's own config (collection, no browser, no server) and the pure
  * function `verdict()`. What it does NOT see: whether a listed test would pass, and a skip decided at run time
  * (`test.skip(cond)` inside a test is listed like any other test).

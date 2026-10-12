@@ -1,5 +1,10 @@
 /**
- * 039 T3901 - R10 (batching of the edge pass) in the BROWSER: what one static frame of the 100-node scene issues, and
+ * 039 T3901 - R10 (batching of the edge pass) in the BROWSER, MEASUREMENT ONLY since 2026-10-12 (debug-only config).
+ * WITHDRAWN AS A REPRODUCER (spec 039, P-8): the experiment below shows that grouping changes the picture on today's
+ * fixture, so batching is not done and the red assertion "strokes <= style groups" was removed. No slice flips
+ * anything here; the file stays as the runnable record of why, with its control case (the same drawing twice: 0 px).
+ *
+ * What it measures: what one static frame of the 100-node scene issues, and
  * an experiment on whether grouping keeps the picture. Renderer tier: `src/p039-repro/r10-*.p039-repro.test.ts`.
  *
  * Corrected form (P-2, P-8): the EDGE pass is counted apart from node outlines; the budget is the number of real style
@@ -29,7 +34,7 @@ const note = (id: string, row: unknown) => {
   test.info().annotations.push({ type: `039-${id}`, description: JSON.stringify(row) })
 }
 
-test('039 R10 - one static frame of 100 nodes and 348 lines: strokes of the edge pass against style groups (today: one stroke per line)', async ({ page }) => {
+test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes by kind, style groups, and the off-screen batching experiment with its control', async ({ page }) => {
   const snapshot = fixtureSnapshot100()
   await boot(page, {
     snapshot, clock: true,
@@ -92,7 +97,8 @@ test('039 R10 - one static frame of 100 nodes and 348 lines: strokes of the edge
   expect(c.lineSegments, 'coverage: all 348 trust lines are drawn in the pass').toBe(snapshot.links.length)
   expect(c.baseShapeStrokes, 'counter-check: node outlines are counted apart (one per node)').toBe(snapshot.nodes.length)
   expect(groups, 'counter-check: the scene has several line styles').toBeGreaterThan(1)
-  expect.soft(c.baseLineStrokes, `strokes of the edge pass in one frame; budget = style groups of the scene (${groups})`).toBeLessThanOrEqual(groups)
+  expect(c.baseLineStrokes, 'today: one stroke per trust line in the edge pass').toBe(snapshot.links.length)
+  expect(groups, 'style groups of the scene').toBe(12)
 
   // --- the experiment: does grouping change the edge layer? -----------------------------------------------------
   const pos = new Map((await layoutNodes(page)).map((n) => [n.id, n]))
@@ -173,4 +179,8 @@ test('039 R10 - one static frame of 100 nodes and 348 lines: strokes of the edge
   note('R10 batching experiment (edge layer only)', experiment)
   expect(experiment.controlSameDrawingTwice.differingPx, 'counter-check of the comparison: the same drawing twice differs in no pixel').toBe(0)
   expect(experiment.onePathPerStyleGroup.paintedPx, 'counter-check: the experiment painted the lines').toBeGreaterThan(0)
+  // The finding the withdrawal rests on, held two-sided: if a change of the scene or of the renderer makes grouping
+  // picture-preserving, this turns red and the decision of P-8 is to be looked at again.
+  expect(experiment.onePathPerStyleGroup.differingPx, 'one path per style group changes pixels of the edge layer').toBeGreaterThan(0)
+  expect(experiment.onePathPerRunInSnapshotOrder.differingPx, 'one path per run, order kept, changes pixels too (lines of one run overlap where they meet a node)').toBeGreaterThan(0)
 })

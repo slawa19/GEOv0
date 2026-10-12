@@ -11,6 +11,8 @@
  *
  * LIMITS. CSS animations are put on the JS clock by the stand (`installCssClockSync`); a transition is not seen. One
  * label of each kind, on the ring of six, quality `low`. The removal time is known to one frame (16 ms).
+ *
+ * SLICE C must turn both tests green; plain failing tests, no `test.fail`.
  */
 import { expect, test, type Page } from '@playwright/test'
 

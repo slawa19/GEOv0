@@ -13,6 +13,8 @@
  * LIMITS. (1) It judges that roles are told apart, not which hue each gets. (2) "unknown is not zero": only "unknown is
  * not a role" is asserted; whether unknown and neutral share the neutral colour is the spec's to say - measured here.
  * (3) Label colour and the non-colour cue of a role (P-6) are not seen by this tier at all.
+ *
+ * SLICE B (colour language) must turn the three `red` tests green: then replace `red` by `it`.
  */
 import { describe, expect, it } from 'vitest'
 

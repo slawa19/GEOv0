@@ -3,6 +3,7 @@
  * edge pass is not confused with a budget of the whole canvas (the arbiter's F2: "node strokes alone exceed 20").
  * The real node painter runs; only the glow sprites (off-screen canvases) are mocked out, so their `drawImage` calls
  * are NOT in these numbers - the browser tier counts those.
+ * No slice flips anything here: a measurement, nothing is `it.fails` (R10 as a budget is withdrawn, spec 039 P-8).
  */
 import { describe, expect, it, vi } from 'vitest'
 

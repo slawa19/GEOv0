@@ -16,6 +16,8 @@
  * element with `pointer-events: none` over the canvas (labels, the FX canvas) does not count as covering it; a
  * translucent panel counts as covering it fully; hit-testing is not visibility. Theme `hud`, the ring of six, Interact.
  * Long names, wrapped rows and growing content (P-7) are NOT walked: the ring's names are one letter.
+ *
+ * SLICE E must turn the four window tests green; plain failing tests, no `test.fail`. The rest is measurement or already green.
  */
 import { expect, test, type Page } from '@playwright/test'
 

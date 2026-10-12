@@ -12,6 +12,8 @@
  * no refusal (in `oracle.ts` the clearance only enters the score of a candidate).
  * NOT a reproducer: whether an open route with a chord under the threshold exists depends on the force layout of the
  * day (the candidates are listed with their clearance); a red test built on that would be red by luck of the layout.
+ *
+ * No slice flips anything here: measurements, green today. They serve SLICE A's stand work (the chord refusal).
  */
 import { expect, test } from '@playwright/test'
 

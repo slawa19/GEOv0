@@ -10,6 +10,8 @@
  *
  * LIMITS. A schedule is not what is seen: alpha decays inside every leg (`renderFrame.ts`), so a longer leg alone does
  * not make the handoff visible. Nothing here knows the length of an edge: "constant speed" cannot be judged at this tier.
+ *
+ * SLICE C (motion) must turn the two `red` tests green: then replace `red` by `it`.
  */
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'

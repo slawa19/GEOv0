@@ -11,6 +11,8 @@
  * LIMITS. (1) It sees a marker drawn by `drawBaseGraph` only; a marker drawn by another function of the render loop
  * would leave it red on a correct product (the spec names `baseGraph.ts`). (2) It judges where something is drawn, not
  * what it looks like - shape, size and colour are the pixel tier's and the owner's. (3) Zoom 1 only.
+ *
+ * SLICE B (direction marker in `baseGraph.ts`) must turn the two `red` tests green: then replace `red` by `it`.
  */
 import { describe, expect, it, vi } from 'vitest'
 

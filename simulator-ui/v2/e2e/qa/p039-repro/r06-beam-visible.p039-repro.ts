@@ -25,6 +25,8 @@
  * sees it". One layout of one scene; the speed bound is judged on whatever lengths the force layout gave (the test
  * refuses a layout whose legs are nearly equal). The route is a path over trust lines found by geometry, not a route
  * the backend computed. Reduced motion and the clearing spark (P-3) are not walked here.
+ *
+ * SLICE C must turn the handoff test green; plain failing test, no `test.fail`. The one-leg test is a measurement.
  */
 import { expect, test, type Page } from '@playwright/test'
 

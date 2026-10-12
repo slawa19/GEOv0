@@ -7,6 +7,8 @@
  *
  * LIMITS. It mounts `TopBar` alone: a theme control that moves into another component (variant A puts it into a "..."
  * menu) is not found here and the test must move with it. It does not judge which theme is the default.
+ *
+ * SLICE B (themes, owner's decision R1) must turn the `red` test green: then replace `red` by `it`.
  */
 import { createApp, h, nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'

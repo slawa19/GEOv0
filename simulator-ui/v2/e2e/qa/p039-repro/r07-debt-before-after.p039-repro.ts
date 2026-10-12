@@ -13,6 +13,8 @@
  * numbers in one bar are judged, not their order, wording or arrow. (3) On the base the first red assertion is the
  * finding; the hold and reset steps after it are then trivially true or false and prove nothing until it is green.
  * (4) Replay, an incomplete patch and a change of equivalent (P-5) are not walked.
+ *
+ * SLICE D must turn this test green; plain failing test, no `test.fail`.
  */
 import { expect, test, type Page } from '@playwright/test'
 
