@@ -29,7 +29,7 @@ import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
-import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
+import { resetFxRendererCaches, spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
@@ -1783,16 +1783,10 @@ export function useSimulatorApp(opts?: {
     sceneState,
     hideDragPreview,
     resetFxRendererCaches: () => {
-      // glowSprites is a synchronous, already-loaded module — reset its cache immediately
-      // to avoid race conditions where the cache is read before async teardown completes.
+      // Both modules are statically imported by this file, so both caches are reset synchronously:
+      // nothing can read a stale cache between teardown and a late import callback.
       resetGlowSpritesCache()
-      // Fire-and-forget: lifecycle teardown should not depend on dynamic import timing.
-      // Also ensure we don't surface unhandled rejections if import fails during HMR/teardown.
-      void import('../render/fxRenderer')
-        .then((m) => m.resetFxRendererCaches())
-        .catch(() => {
-          // Best-effort.
-        })
+      resetFxRendererCaches()
     },
     physics,
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
