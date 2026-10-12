@@ -19,18 +19,6 @@
   50% { opacity: 1; }
 }
 
-/* HUD helpers */
-.ds-clip {
-  clip-path: polygon(
-    0 0,
-    calc(100% - var(--ds-cut)) 0,
-    100% var(--ds-cut),
-    100% 100%,
-    var(--ds-cut) 100%,
-    0 calc(100% - var(--ds-cut))
-  );
-}
-
 /* Page */
 .ds-page {
   /* Match reference: html { font-size: 15px } */
