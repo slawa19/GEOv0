@@ -10,9 +10,11 @@
  *
  * States, each in both themes that remain (`saas`, `hud`), 1366x768, DPR 1, no GPU:
  *   scene100        the versioned 100-node fixture through the real pipeline (mocked backend);
- *   roles           a small scene: net creditor / net debtor of both kinds, even, unknown (`net_sign: null`), a frozen
- *                   creditor, a suspended debtor, a participant of type `hub`; a one-way line, a mutual pair;
- *   roles-nodes     the same frame cut to the nodes, so that a 16 px node can be looked at;
+ *   roles           a small scene: creditor / debtor / even / unknown (`net_sign: null`) / frozen, EACH as a person
+ *                   (circle) and as an organisation (rounded square), and a participant of type `hub`; a one-way
+ *                   line, a mutual pair;
+ *   roles-nodes     the same frame cut to the nodes; `roles-nodes-zoom3x` is that cut magnified three times with hard
+ *                   pixels, so that the sign inside a node can be read;
  *   roles-labels    the same scene, Labels: Neighbors, the hub selected - name labels on screen;
  *   node-card       the card of the net debtor, cut to the card;
  *   bottom          the bottom bar (after the slice: with the legend row), cut to it.
@@ -57,8 +59,14 @@ const link = (source: string, target: string, used: string) => ({
   viz_color_key: 'default', viz_width_key: 'mid', viz_alpha_key: 'hi',
 })
 
-/** The colour keys are the ones the backend gives such a node today (`app/core/simulator/viz_rules.py` `node_color_key`). */
+/**
+ * Five states of the net position, each as a PERSON (circle) and as an ORGANISATION (rounded square), plus a hub:
+ * the shape by kind of participant is not changed by the slice, and every state must be seen on both shapes.
+ * The colour keys are the ones the backend gives such a node today (`app/core/simulator/viz_rules.py` `node_color_key`).
+ * (2026-10-12, before any frame was kept: the first form of this scene had only persons for even / unknown / frozen.)
+ */
 export function rolesSnapshot(): QaSnapshot {
+  const B = { type: 'business' }
   return {
     equivalent: 'UAH',
     generated_at: '2026-02-01T00:00:00.000Z',
@@ -66,22 +74,35 @@ export function rolesSnapshot(): QaSnapshot {
     limits: { max_particles: 120 },
     nodes: [
       node('cr', 'Creditor', { net_sign: 1, atoms: '3000', key: 'person' }),
+      node('crB', 'Creditor shop', { ...B, net_sign: 1, atoms: '4500', key: 'business' }),
       node('db', 'Debtor', { net_sign: -1, atoms: '3000', key: 'debt-4' }),
-      node('crB', 'Creditor shop', { type: 'business', net_sign: 1, atoms: '4500', key: 'business' }),
-      node('dbB', 'Debtor shop', { type: 'business', net_sign: -1, atoms: '4500', key: 'debt-8' }),
+      node('dbB', 'Debtor shop', { ...B, net_sign: -1, atoms: '4500', key: 'debt-8' }),
       node('ev', 'Even', { net_sign: 0, atoms: '0', key: 'person' }),
+      node('evB', 'Even shop', { ...B, net_sign: 0, atoms: '0', key: 'business' }),
       node('un', 'Unknown', { net_sign: null, atoms: null, key: 'person' }),
-      node('fzC', 'Frozen creditor', { status: 'frozen', net_sign: 1, atoms: '1000', key: 'suspended' }),
-      node('fzD', 'Suspended debtor', { status: 'suspended', net_sign: -1, atoms: '1000', key: 'suspended' }),
+      node('unB', 'Unknown shop', { ...B, net_sign: null, atoms: null, key: 'business' }),
+      node('fz', 'Frozen creditor', { status: 'frozen', net_sign: 1, atoms: '1000', key: 'suspended' }),
+      node('fzB', 'Suspended debtor shop', { ...B, status: 'suspended', net_sign: -1, atoms: '1000', key: 'suspended' }),
       node('hub', 'Hub', { type: 'hub', net_sign: 0, atoms: '0', key: 'person' }),
     ],
     links: [
       link('cr', 'db', '30'), // one-way: cr trusts db, db owes 30
       link('crB', 'dbB', '50'), link('dbB', 'crB', '5'), // a mutual pair with different debts
-      link('hub', 'cr', '0'), link('hub', 'ev', '0'), link('hub', 'fzC', '10'), link('fzD', 'hub', '0'),
-      link('hub', 'un', '0'), link('hub', 'crB', '0'), link('fzC', 'fzD', '10'), link('ev', 'dbB', '0'),
+      // The hub trusts everyone: with the hub selected and Labels: Neighbors every name is on screen.
+      ...['cr', 'crB', 'db', 'dbB', 'ev', 'evB', 'un', 'unB', 'fz', 'fzB'].map((id) => link('hub', id, '0')),
     ],
   }
+}
+
+/** Magnify a kept PNG `k` times with hard pixels (no smoothing): the real pixels of the frame, made big enough to read a 6 px sign. */
+async function magnify(page: Page, from: string, to: string, k: number): Promise<void> {
+  const zoom = await page.context().newPage()
+  await zoom.setContent(`<body style="margin:0;background:#000"><img id="i" style="display:block;image-rendering:pixelated" src="data:image/png;base64,${readFileSync(from).toString('base64')}"></body>`)
+  await zoom.waitForFunction(() => { const i = document.images[0]!; return i.complete && i.naturalWidth > 0 })
+  const size = await zoom.locator('#i').evaluate((el, k) => { const i = el as HTMLImageElement; i.width = i.naturalWidth * k; i.height = i.naturalHeight * k; return { width: i.width, height: i.height } }, k)
+  await zoom.setViewportSize(size)
+  await zoom.locator('#i').screenshot({ path: to })
+  await zoom.close()
 }
 
 async function bootThemed(page: Page, snapshot: QaSnapshot, theme: string): Promise<void> {
@@ -111,7 +132,8 @@ for (const theme of THEMES) {
     const dir = outDir()
     await bootThemed(page, rolesSnapshot(), theme)
     await page.screenshot({ path: join(dir, `${theme}-roles.png`) })
-    await page.screenshot({ path: join(dir, `${theme}-roles-nodes.png`), clip: await nodesBox(page) })
+    await page.screenshot({ path: join(dir, `${theme}-roles-nodes.png`), clip: await nodesBox(page, 40) })
+    await magnify(page, join(dir, `${theme}-roles-nodes.png`), join(dir, `${theme}-roles-nodes-zoom3x.png`), 3)
     const bottom = await page.locator('.ds-ov-bottom').first().boundingBox()
     expect(bottom, 'the bottom bar is on screen').not.toBeNull()
     await page.screenshot({ path: join(dir, `${theme}-bottom.png`), clip: bottom! })
