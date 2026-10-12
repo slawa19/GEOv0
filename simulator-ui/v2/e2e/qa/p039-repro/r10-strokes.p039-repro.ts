@@ -5,9 +5,16 @@
  * R10 as a stroke budget is WITHDRAWN (spec 039, P-8). What this file is, and is not:
  *
  * 1. The static frame of the PRODUCT (100 nodes, 348 lines, quality low): how many drawing calls of which kind one
- *    pass of the render loop issues. Every `stroke()` on the base canvas is classed by the path it strokes - "line"
- *    (only moveTo / lineTo) or "shape" (an arc, a rect, a curve). The numbers are logged. Asserted is only what a
- *    correct product keeps: one pass was counted, the lines and the nodes were drawn.
+ *    pass of the render loop issues. Every `stroke()` and `fill()` on the base canvas is classed by the SEGMENTS of
+ *    the path it paints - "line" (straight segments only: moveTo / lineTo, closed or not) or "shape" (the path has an
+ *    arc, a rect or a curve). The numbers are logged. Asserted is only what a correct product keeps: one pass was
+ *    counted, the lines and the nodes were drawn.
+ *    CORRECTED 2026-10-12 (039 slice B, PR 2; BACKLOG 039-3 (a)): `closePath` used to make the whole stroke a "shape",
+ *    so a shaft and a closed arrowhead stroked as ONE path left that line without a counted body - the model would
+ *    have forbidden a correct way to draw. A closing segment is a straight segment: the path stays a "line" and its
+ *    `lineTo` bodies are counted; how many such strokes were closed is logged apart (`baseClosedLineStrokes`).
+ *    For the same reason fills are classed too: a filled triangle (the direction marker) is "line" geometry, not a
+ *    node, and must not be counted as one by the "nodes are drawn" check (348 marker fills alone would satisfy it).
  *
  * 2. A MODEL of the edge pass, off-screen - NOT the product's renderer and not the product's scene. It draws the 348
  *    lines three ways (one stroke each in snapshot order; one path per style group; one path per run of consecutive
@@ -33,7 +40,7 @@ import { createVizMapping } from '../../../src/vizMapping.js'
 const VIZ_MAPPING = createVizMapping()
 import { boot, camera, fixtureSnapshot100, frames, layoutNodes, loopCounters, pushEvent, txUpdated } from '../stand.js'
 
-type Counts = { baseLineStrokes: number; baseShapeStrokes: number; baseFills: number; baseFillRects: number; baseDrawImages: number; fxDraws: number; lineStyles: Record<string, number>; lineSegments: number }
+type Counts = { baseLineStrokes: number; baseClosedLineStrokes: number; baseShapeStrokes: number; baseFills: number; baseStraightFills: number; baseFillRects: number; baseDrawImages: number; fxDraws: number; lineStyles: Record<string, number>; lineSegments: number }
 
 const note = (id: string, row: unknown) => {
   console.log(`[039 ${id}]`, JSON.stringify(row))
@@ -46,19 +53,21 @@ test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes
     snapshot, clock: true,
     beforeLoad: (p) => p.addInitScript(() => {
       const w = window as unknown as { __p039: { on: boolean; c: Record<string, unknown> } }
-      const fresh = () => ({ baseLineStrokes: 0, baseShapeStrokes: 0, baseFills: 0, baseFillRects: 0, baseDrawImages: 0, fxDraws: 0, lineStyles: {} as Record<string, number>, lineSegments: 0 })
+      const fresh = () => ({ baseLineStrokes: 0, baseClosedLineStrokes: 0, baseShapeStrokes: 0, baseFills: 0, baseStraightFills: 0, baseFillRects: 0, baseDrawImages: 0, fxDraws: 0, lineStyles: {} as Record<string, number>, lineSegments: 0 })
       w.__p039 = { on: false, c: fresh() }
       ;(w as unknown as { __p039Reset: () => void }).__p039Reset = () => { w.__p039.c = fresh() }
-      const path = new WeakMap<object, { lines: number; other: number }>()
+      const path = new WeakMap<object, { lines: number; other: number; closed: number }>()
       const proto = CanvasRenderingContext2D.prototype as unknown as Record<string, (...a: unknown[]) => unknown>
       const wrap = (name: string, before: (ctx: CanvasRenderingContext2D) => void) => {
         const real = proto[name]!
         proto[name] = function (this: CanvasRenderingContext2D, ...a: unknown[]) { before(this); return real.apply(this, a) }
       }
-      const cur = (ctx: object) => { let p = path.get(ctx); if (!p) { p = { lines: 0, other: 0 }; path.set(ctx, p) } return p }
-      wrap('beginPath', (ctx) => { path.set(ctx, { lines: 0, other: 0 }) })
+      const cur = (ctx: object) => { let p = path.get(ctx); if (!p) { p = { lines: 0, other: 0, closed: 0 }; path.set(ctx, p) } return p }
+      wrap('beginPath', (ctx) => { path.set(ctx, { lines: 0, other: 0, closed: 0 }) })
       wrap('lineTo', (ctx) => { cur(ctx).lines += 1 })
-      for (const m of ['arc', 'arcTo', 'rect', 'roundRect', 'ellipse', 'quadraticCurveTo', 'bezierCurveTo', 'closePath']) wrap(m, (ctx) => { cur(ctx).other += 1 })
+      // A closing segment is straight: it does not turn the path into a "shape" (see the header, the correction of 2026-10-12).
+      wrap('closePath', (ctx) => { cur(ctx).closed += 1 })
+      for (const m of ['arc', 'arcTo', 'rect', 'roundRect', 'ellipse', 'quadraticCurveTo', 'bezierCurveTo']) wrap(m, (ctx) => { cur(ctx).other += 1 })
       const kind = (ctx: CanvasRenderingContext2D) => {
         const cl = (ctx.canvas as HTMLCanvasElement).classList
         return !cl?.contains('canvas') ? 'offscreen' : cl.contains('canvas-fx') ? 'fx' : 'base'
@@ -74,12 +83,17 @@ test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes
         const p = cur(ctx)
         if (p.other === 0 && p.lines > 0) {
           c.baseLineStrokes += 1
+          if (p.closed > 0) c.baseClosedLineStrokes += 1
           c.lineSegments += p.lines
           const style = `${String(ctx.strokeStyle)}|${ctx.lineWidth.toFixed(4)}`
           c.lineStyles[style] = (c.lineStyles[style] ?? 0) + 1
         } else c.baseShapeStrokes += 1
       }))
-      wrap('fill', (ctx) => count(ctx, (c) => { c.baseFills += 1 }))
+      wrap('fill', (ctx) => count(ctx, (c) => {
+        const p = cur(ctx)
+        if (p.other === 0 && p.lines > 0) c.baseStraightFills += 1
+        else c.baseFills += 1
+      }))
       wrap('fillRect', (ctx) => count(ctx, (c) => { c.baseFillRects += 1 }))
       wrap('drawImage', (ctx) => count(ctx, (c) => { c.baseDrawImages += 1 }))
     }),
@@ -104,6 +118,8 @@ test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes
   expect(c.baseShapeStrokes + c.baseFills + c.baseDrawImages, 'by contract: nodes are drawn in the pass').toBeGreaterThanOrEqual(snapshot.nodes.length)
   // 348 line strokes, 100 shape strokes and 12 style groups are LOGGED above as a dated measurement of the base
   // (2026-10-12, 90e17a4c). They are not asserted: a direction marker, hatching or a hub ring changes them.
+  // Since 039 slice B, PR 2 the pass also holds one straight-edged fill per direction marker (`baseStraightFills`):
+  // counted apart, so `baseFills` stays "fills of shapes" and the check above still speaks of nodes.
 
   // --- the MODEL experiment (see the header: not the product's renderer, not the product's scene) -----------------------------------------------------
   const pos = new Map((await layoutNodes(page)).map((n) => [n.id, n]))
