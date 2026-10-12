@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
+import type { NodeLook } from '../vizMapping'
 import { useDragPreview } from './useDragPreview'
 import { useDragToPinInteraction } from './useDragToPinInteraction'
 
@@ -27,6 +28,8 @@ export function useAppDragToPinAndPreview(opts: {
   getCamera: () => { panX: number; panY: number; zoom: number }
   sizeForNode: (n: GraphNode) => { w: number; h: number }
   fillForNode: (n: GraphNode) => string
+  /** 039 slice B: the classifier's answer for the dragged node - its sign and freeze are shown on the preview too. */
+  lookForNode: (n: GraphNode) => NodeLook
 }) {
   let showDragPreviewForNode: (nodeId: string) => void = () => {}
   let scheduleDragPreview: () => void = () => {}
@@ -58,6 +61,7 @@ export function useAppDragToPinAndPreview(opts: {
     renderOnce: opts.renderOnce,
     sizeForNode: opts.sizeForNode,
     fillForNode: opts.fillForNode,
+    lookForNode: opts.lookForNode,
   })
 
   hideDragPreview = dragPreview.hideDragPreview

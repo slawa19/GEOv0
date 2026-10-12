@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { GraphNode } from '../types'
 import type { TrustlineInfo } from '../api/simulatorTypes'
-import { VIZ_MAPPING } from '../vizMapping'
+import { classifyNode, fillOf, FROZEN_TEXT, HUB_TEXT, ROLE_TEXT, type DataPalette } from '../vizMapping'
 import { parseAmountNumber } from '../utils/numberFormat'
 import { equivalentPrecision } from '../config/equivalentPrecision'
 import { atomsToMoney, formatMoney } from '../utils/money'
@@ -19,6 +19,8 @@ type Props = {
   node: GraphNode
   edgeStats: NodeEdgeStats | null
   equivalentText: string
+  /** 039 slice B: the resolved data colours - the object the canvas paints with (never a second read of the tokens). */
+  palette: DataPalette
 
   showPinActions: boolean
   isPinned: boolean
@@ -68,10 +70,14 @@ function isSaturatedAvailable(v: unknown): boolean {
   return Number.isFinite(n) && n <= 0
 }
 
-const nodeColor = computed(() => {
-  const key = String(props.node.viz_color_key ?? 'unknown')
-  return VIZ_MAPPING.node.color[key]?.fill ?? VIZ_MAPPING.node.color.unknown.fill
-})
+/**
+ * 039 slice B: the card asks the SAME classifier as the canvas and the legend, and takes its colour from the same
+ * resolved palette - so a participant cannot be one thing on the graph and another in its card.
+ */
+const look = computed(() => classifyNode(props.node))
+const nodeColor = computed(() => fillOf(look.value, props.palette))
+/** The role in the legend's words; a freeze and a hub mark are said after it. */
+const roleWords = computed(() => [ROLE_TEXT[look.value.role], look.value.frozen ? FROZEN_TEXT : '', look.value.hub ? HUB_TEXT : ''].filter(Boolean).join(' · '))
 
 /**
  * Fraction digits the equivalent this card is labelled with declares (012 / `F-012-4`).
@@ -104,7 +110,12 @@ function netText(node: GraphNode): string | null {
       ? `-${s}`
       : node.net_sign === 0
         ? '0'
-        : s
+        : node.net_sign === 1
+          ? s
+          // 039 slice B (P-1): atoms are a MAGNITUDE and the sign was not given - printing them would show a
+          // positive balance, that is a role. Unknown stays unknown.
+          : null
+  if (signed === null) return null
 
   // Unparseable atoms: show what arrived rather than invent a scale for it.
   return atomsToMoney(signed, precision.value) ?? signed
@@ -164,6 +175,16 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
           <div class="ds-ov-node-card__text">
             <div class="ds-node-card__name">{{ nodeName }}</div>
             <div class="ds-node-card__meta">{{ node.type ?? '—' }} · {{ node.status ?? '—' }}</div>
+            <div class="nco-role" data-testid="node-card-role" :data-role="look.role">
+              <span
+                class="ds-data-swatch"
+                :class="look.frozen ? 'ds-data-swatch--frozen' : 'ds-data-swatch--role'"
+                :style="{ backgroundColor: nodeColor, borderColor: nodeColor }"
+                data-testid="node-card-role-swatch"
+                aria-hidden="true"
+              >{{ look.sign }}</span>
+              <span>{{ roleWords }}</span>
+            </div>
           </div>
           <div class="ds-ov-node-card__right">
             <div class="ds-ov-node-card__service">
@@ -313,6 +334,18 @@ const inTrustlines = computed<TrustlineInfo[]>(() =>
 .nco-interact-actions > .ds-btn {
   flex: 1 1 0;
   min-width: var(--ds-nco-actions-min-btn-width);
+}
+
+/* 039 slice B: the role line - the swatch the legend shows, and the same words. */
+.nco-role {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  /* Not the muted colour of the meta line: the role is information, and `--ds-text-3` fails contrast in a theme. */
+  color: var(--ds-text-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 /* Trustlines list */

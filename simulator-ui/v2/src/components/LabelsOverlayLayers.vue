@@ -5,7 +5,6 @@ type LabelNode = {
   x: number
   y: number
   text: string
-  color: string
 }
 
 type FloatingLabel = {
@@ -36,7 +35,8 @@ defineProps<Props>()
       class="node-label"
       :style="{ transform: worldToCssTranslateNoScale(n.x, n.y) }"
     >
-      <div class="node-label-inner" :style="{ borderColor: n.color, color: n.color }">{{ n.text }}</div>
+      <!-- A NAME is text of the theme (`--ds-text-1`, App.css), with a halo: it carries no data colour (039 slice B). -->
+      <div class="node-label-inner">{{ n.text }}</div>
     </div>
   </div>
 

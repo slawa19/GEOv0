@@ -9,7 +9,7 @@
  * Important: this is intentionally a thin wiring entry point — avoid changing behavior here unless necessary.
  */
 
-import { computed, onMounted, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode } from '../render/nodeFill'
@@ -17,7 +17,7 @@ import { sizeForNode } from '../render/nodeSizing'
 import type { ClearingDoneEvent, GraphSnapshot } from '../types'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
-import { VIZ_MAPPING } from '../vizMapping'
+import { classifyNode, createVizMapping, resolveVizColors as resolveVizColorsInto, type DataPalette } from '../vizMapping'
 import type { SimulatorAppState } from '../types/simulatorApp'
 import { keyEdge } from '../utils/edgeKey'
 import { fnv1a } from '../utils/hash'
@@ -227,6 +227,11 @@ export type SimulatorAppApi = {
   }
 
   gpuAccelLikely: ReturnType<typeof useQualityAutoguards>['gpuAccelLikely']
+
+  /** 039 slice B: the resolved data colours - the object the renderer paints with. For the legend and the node card. */
+  dataPalette: Readonly<Ref<DataPalette>>
+  /** Read the colour tokens again at the app's root and draw one frame. On mount and after a theme change. */
+  resolveVizColors: () => void
 
   hostEl: Ref<HTMLElement | null>
   canvasEl: Ref<HTMLCanvasElement | null>
@@ -776,10 +781,25 @@ export function useSimulatorApp(opts?: {
 
   const getNodeById = snapshotIndex.getNodeById
 
+  /**
+   * 039 slice B: the ONE mapping of this app. The renderer holds this object; `dataPalette` is its resolved data
+   * colours as the legend and the node card receive them - the same object, so the canvas and the DOM cannot differ.
+   * Colours are read from the stylesheet here (before mount: the document root) and again by `resolveVizColors` at
+   * the app's real root, on mount and after every theme change. Nothing reads a token per node or per frame.
+   */
+  const vizMapping = createVizMapping(null)
+  const dataPalette = shallowRef<DataPalette>(vizMapping.node.palette)
+
+  function resolveVizColors(): void {
+    dataPalette.value = resolveVizColorsInto(vizMapping, hostEl.value)
+    // One frame with the new colours: the loop may be asleep, and a theme change moves nothing by itself.
+    wakeUp()
+  }
+
   function fxColorForNode(nodeId: string, fallback: string): string {
     const n = getNodeById(nodeId)
     if (!n) return fallback
-    return fillForNode(n, VIZ_MAPPING)
+    return fillForNode(n, vizMapping)
   }
 
   const labelsLod = ref<LabelsLod>('selection')
@@ -1069,7 +1089,7 @@ export function useSimulatorApp(opts?: {
     pruneActiveNodes: fxOverlays.pruneActiveNodes,
     pruneFloatingLabels: fxOverlays.pruneFloatingLabels,
     hasFloatingLabels: fxOverlays.hasFloatingLabels,
-    mapping: VIZ_MAPPING,
+    mapping: vizMapping,
     fxState: fxOverlays.fxState,
     getSelectedNodeId: () => state.selectedNodeId,
     activeEdges: fxOverlays.activeEdges,
@@ -1124,7 +1144,7 @@ export function useSimulatorApp(opts?: {
     isWebDriver,
     keyEdge,
     seedFn: fnv1a,
-    clearingColor: VIZ_MAPPING.fx.clearing_debt,
+    clearingColor: vizMapping.fx.clearing_debt,
     addActiveNode,
     addActiveEdge,
     pushClearingAmountOverlay,
@@ -1274,9 +1294,9 @@ export function useSimulatorApp(opts?: {
     resolveTxDirection,
     keyEdge,
     seedFn: fnv1a,
-    txSparkColorCore: VIZ_MAPPING.fx.tx_spark.core,
-    txSparkColorTrail: VIZ_MAPPING.fx.tx_spark.trail,
-    clearingDebtColor: VIZ_MAPPING.fx.clearing_debt,
+    txSparkColorCore: vizMapping.fx.tx_spark.core,
+    txSparkColorTrail: vizMapping.fx.tx_spark.trail,
+    clearingDebtColor: vizMapping.fx.clearing_debt,
     fxColorForNode,
     scheduleTimeout,
     pushFloatingLabelWhenReady,
@@ -1296,7 +1316,6 @@ export function useSimulatorApp(opts?: {
     getNodeById,
     getCameraZoom: () => camera.zoom,
     sizeForNode: (n) => sizeForNode(n),
-    fxColorForNode,
     hasNodeCardInspectorOpen: () => hasNodeCardInspectorOpen.value,
     showPid: participantDisplayIdFor(() => shownScenarioId.value),
   }).labelNodes
@@ -1413,7 +1432,8 @@ export function useSimulatorApp(opts?: {
     getNodeById,
     getCamera: () => camera,
     sizeForNode,
-    fillForNode: (n) => fillForNode(n, VIZ_MAPPING),
+    fillForNode: (n) => fillForNode(n, vizMapping),
+    lookForNode: (n) => classifyNode(n),
   })
 
   getDragToPinStateSafe = () => dragToPin.dragState
@@ -1905,6 +1925,9 @@ export function useSimulatorApp(opts?: {
 
     // env
     gpuAccelLikely,
+
+    dataPalette,
+    resolveVizColors,
 
     // refs
     hostEl,

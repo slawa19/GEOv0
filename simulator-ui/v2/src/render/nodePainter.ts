@@ -1,7 +1,6 @@
 import type { LayoutNode } from '../types/layout'
-import type { VizMapping } from '../vizMapping'
+import { classifyNode, fillOf, type VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
-import { fillForNode } from './nodeFill'
 import {
   NODE_BODY_FILL_ALPHA_HI_A,
   NODE_BODY_FILL_ALPHA_HI_B,
@@ -15,7 +14,6 @@ import {
 import { getLinearGradient2Stops } from './gradientCache'
 import { drawGlowSprite } from './glowSprites'
 import { getNodeBaseGeometry } from './nodeGeometry'
-import { readCssVar } from './readCssVar'
 import { roundedRectPath } from './roundedRect'
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +85,13 @@ function drawNodeIcon(
   ctx.restore()
 }
 
+/** Frozen outline: dash and gap, and the line width, in CSS px. */
+const NODE_FROZEN_DASH_PX = [3, 2.5] as const
+const NODE_FROZEN_OUTLINE_PX = 1.6
+/** Hub ring: its distance from the node's outline and its line width, in CSS px. */
+const NODE_HUB_RING_GAP_PX = 3.5
+const NODE_HUB_RING_LINE_PX = 1.4
+
 /**
  * Draw optional badge pip. Cost ≈ one arc + fill — negligible.
  */
@@ -96,11 +101,11 @@ function drawNodeBadge(
   cy: number,
   r: number,
   px: (v: number) => number,
+  glint: string,
 ) {
   const br = Math.max(px(1.6), r * 0.22)
   ctx.save()
   ctx.globalCompositeOperation = 'lighter'
-  const glint = readCssVar('--ds-glint', NODE_GLINT_COLOR_HEX)
   ctx.fillStyle = withAlpha(glint, NODE_GLINT_BADGE_ALPHA)
   ctx.beginPath()
   ctx.arc(cx + r * 0.72, cy - r * 0.72, br, 0, Math.PI * 2)
@@ -125,16 +130,15 @@ export function drawNodeShape(
   // Sprite glow quality scaling.
   // (Even in low, we keep a modest glow for readability.)
   const glowK = NODE_GLOW_K_BY_QUALITY[q] ?? 1
-  const fill = fillForNode(node, mapping)
+  // 039 slice B: ONE classifier says what the node is; the fill is its role colour, or the freeze colour.
+  const look = classifyNode(node)
+  const fill = fillOf(look, mapping.node.palette)
   const geom = getNodeBaseGeometry(node, invZ)
   const w = geom.w
   const h = geom.h
   const isRoundedRect = geom.shape === 'rounded-rect'
 
-  // IMPORTANT: node appearance follows the prototypes:
-  // - business: emerald square
-  // - person: blue circle
-  // Additional semantics (debt bins, statuses) are still fixtures/backend-driven via viz_color_key.
+  // The SHAPE and the SIZE are the wire's (`viz_shape_key`, `viz_size`); the COLOUR is not (`viz_color_key` is ignored).
   const r = Math.max(px(4), Math.min(w, h) / 2)
 
   const x = node.__x - w / 2
@@ -193,11 +197,12 @@ export function drawNodeShape(
   }
   ctx.restore()
 
-  // 3) Glow sprite: rim (outer)
+  // 3) Glow sprite: rim (outer). A frozen node has NO continuous rim: its outline is the dashed stroke below, and a
+  //    solid ring under the dashes would make them unreadable.
   ctx.save()
   ctx.globalCompositeOperation = 'screen'
   const rimLineW = Math.max(px(2), r * 0.15)
-  drawGlowSprite(ctx, {
+  if (!look.frozen) drawGlowSprite(ctx, {
     kind: 'rim',
     shape: isRoundedRect ? 'rounded-rect' : 'circle',
     x: node.__x,
@@ -212,10 +217,12 @@ export function drawNodeShape(
     composite: 'screen',
   })
 
-  // Inner bright core stroke (white-ish)
+  // Inner bright core stroke (white-ish). Frozen / suspended: the same stroke DASHED and a little heavier - the
+  // non-colour cue of a freeze. The dash is set inside this save/restore pair, so no later stroke inherits it.
   ctx.strokeStyle = withAlpha(NODE_GLINT_COLOR_HEX, NODE_GLINT_INNER_STROKE_ALPHA)
-  ctx.lineWidth = Math.max(px(1), r * 0.05)
-  
+  ctx.lineWidth = look.frozen ? Math.max(px(NODE_FROZEN_OUTLINE_PX), r * 0.08) : Math.max(px(1), r * 0.05)
+  ctx.setLineDash(look.frozen ? [px(NODE_FROZEN_DASH_PX[0]), px(NODE_FROZEN_DASH_PX[1])] : [])
+
   if (isRoundedRect) {
     roundedRectPath(ctx, x, y, w, h, rr)
     ctx.stroke()
@@ -226,12 +233,31 @@ export function drawNodeShape(
   }
   ctx.restore()
 
-  // 4) Icons (Holographic Projections inside)
+  // 4) Hub mark: a thin extra ring OUTSIDE the outline, only for `type === 'hub'` (`classifyNode`). The size of
+  //    the node is not changed; the ring is a stroke, never a fill.
+  if (look.hub) {
+    const gap = px(NODE_HUB_RING_GAP_PX)
+    ctx.save()
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.setLineDash([])
+    ctx.strokeStyle = mapping.node.palette.hub
+    ctx.lineWidth = px(NODE_HUB_RING_LINE_PX)
+    if (isRoundedRect) {
+      roundedRectPath(ctx, x - gap, y - gap, w + gap * 2, h + gap * 2, rr + gap)
+    } else {
+      ctx.beginPath()
+      ctx.arc(node.__x, node.__y, r + gap, 0, Math.PI * 2)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // 5) Icons (Holographic Projections inside)
   drawNodeIcon(ctx, fill, node.__x, node.__y, w, h, r, isRoundedRect)
 
   // Optional badge pip if viz_badge_key is present (no semantics, just presence).
   if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
-    drawNodeBadge(ctx, node.__x, node.__y, r, px)
+    drawNodeBadge(ctx, node.__x, node.__y, r, px, mapping.fx.glint)
   }
 
   ctx.restore()

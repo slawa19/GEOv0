@@ -19,9 +19,12 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { drawBaseGraph } from '../render/baseGraph'
 import type { LayoutLink, LayoutNode } from '../types/layout'
-import { VIZ_MAPPING } from '../vizMapping'
+import { createVizMapping } from '../vizMapping'
 import { measured, red } from './p039'
 import { allPoints, dist, recordingCtx, segmentsOf, type Draw, type Pt } from './recordingCtx'
+
+// 039 slice B (2026-10-12): the mapping is created per app, not a module singleton - only this line moved.
+const VIZ_MAPPING = createVizMapping()
 
 vi.mock('../render/nodePainter', () => ({ drawNodeShape: vi.fn() }))
 vi.mock('../render/glowSprites', () => ({ drawGlowSprite: vi.fn() }))

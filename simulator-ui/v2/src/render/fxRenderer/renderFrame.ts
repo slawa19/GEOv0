@@ -29,7 +29,6 @@ import {
   GLOW_BLUR_R_K,
   HEAD_DOT_MIN_SPX,
   HEAD_DOT_TH_K,
-  NODE_GLINT_COLOR_HEX,
   SEED_BUCKET_1K,
   SEED_BUCKET_4K,
   SPARK_CORE_LIFE_K,
@@ -54,7 +53,6 @@ import {
 } from './outlineCache'
 import type { FxState } from './state'
 import { worldRectForCanvas } from './worldRect'
-import { readCssVar } from '../readCssVar'
 
 export function renderFxFrame(opts: {
   nowMs: number
@@ -641,8 +639,8 @@ export function renderFxFrame(opts: {
         ctx.lineWidth = baseWidth
         ctx.stroke(outline)
 
-        const glint = readCssVar('--ds-glint', NODE_GLINT_COLOR_HEX)
-        ctx.strokeStyle = withAlpha(glint, 0.7 * alpha)
+        // The glint is the mapping's resolved `--ds-glint` (039 slice B): no stylesheet read inside a frame.
+        ctx.strokeStyle = withAlpha(mapping.fx.glint, 0.7 * alpha)
         ctx.lineWidth = Math.max(spx(1), baseWidth * 0.4)
         ctx.stroke(outline)
 

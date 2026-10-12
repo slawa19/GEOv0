@@ -50,7 +50,6 @@ describe('useLabelNodes', () => {
       getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
-      fxColorForNode: () => '#fff',
     })
 
     expect(labelNodes.value.map((n) => n.id)).toEqual(['A'])
@@ -68,7 +67,6 @@ describe('useLabelNodes', () => {
       getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
-      fxColorForNode: () => '#fff',
     })
 
     const ids = labelNodes.value.map((n) => n.id).sort()
@@ -86,7 +84,6 @@ describe('useLabelNodes', () => {
       getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
-      fxColorForNode: () => '#fff',
       hasNodeCardInspectorOpen: () => true,
     })
 
@@ -108,7 +105,6 @@ describe('useLabelNodes', () => {
       getNodeById: findSnapshotNode,
       getCameraZoom: () => 1,
       sizeForNode: () => ({ w: 20, h: 20 }),
-      fxColorForNode: () => '#fff',
       hasNodeCardInspectorOpen: () => false,
     })
 

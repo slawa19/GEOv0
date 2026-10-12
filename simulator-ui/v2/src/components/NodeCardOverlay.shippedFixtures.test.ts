@@ -5,6 +5,7 @@ import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
+import { DATA_PALETTE_DEFAULT } from '../vizMapping'
 import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
 import type { GraphNode, GraphSnapshot } from '../types'
 
@@ -69,6 +70,7 @@ function renderBalance(node: GraphNode, equivalentText: string): string {
         style: { left: '0px', top: '0px' },
         edgeStats: { outLimitText: '0', inLimitText: '0', degree: 0 },
         equivalentText,
+        palette: DATA_PALETTE_DEFAULT,
 
         showPinActions: false,
         isPinned: false,

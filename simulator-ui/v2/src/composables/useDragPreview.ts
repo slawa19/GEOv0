@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import type { GraphNode } from '../types'
 import type { LayoutNode } from '../types/layout'
 import { getNodeShape } from '../types/nodeShape'
+import type { NodeLook } from '../vizMapping'
 
 export function useDragPreview(opts: {
   el: Ref<HTMLDivElement | null>
@@ -11,8 +12,9 @@ export function useDragPreview(opts: {
   renderOnce: () => void
   sizeForNode: (n: GraphNode) => { w: number; h: number }
   fillForNode: (n: GraphNode) => string
+  lookForNode: (n: GraphNode) => NodeLook
 }) {
-  const { el, getDraggedNode, getNodeById, getCamera, renderOnce, sizeForNode, fillForNode } = opts
+  const { el, getDraggedNode, getNodeById, getCamera, renderOnce, sizeForNode, fillForNode, lookForNode } = opts
 
   let previewW = 0
   let previewH = 0
@@ -41,8 +43,13 @@ export function useDragPreview(opts: {
     previewH = s.h
 
     const fill = fillForNode(n)
+    // While a node is dragged the canvas does not draw it: this element stands for it, and it carries the same
+    // non-colour cues - the sign of the net position, and the dashed outline of a freeze (039 slice B).
+    const look = lookForNode(n)
+    node.textContent = look.sign
+    node.style.borderStyle = look.frozen ? 'dashed' : 'solid'
 
-    node.style.display = 'block'
+    node.style.display = 'flex'
     node.style.width = `${previewW}px`
     node.style.height = `${previewH}px`
     node.style.background = `linear-gradient(135deg, ${fill}88, ${fill}44)`

@@ -102,6 +102,11 @@
   transform: translate3d(0, 0, 0);
   border: var(--ds-app-drag-preview-border);
   backdrop-filter: blur(6px);
+  /* The sign of the dragged participant's net position (039 slice B), centred like the glyph on the canvas. */
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font: 700 11px/1 var(--ds-font-mono);
 }
 
 .mono {
@@ -139,6 +144,8 @@
   padding: 1px 6px;
   border: none;
   background: transparent;
+  /* The name of a participant is TEXT of the theme, never a data colour (039 slice B); the halo is the text-shadow. */
+  color: var(--ds-text-1);
   text-align: center;
   text-shadow: var(--ds-app-node-label-text-shadow);
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18));

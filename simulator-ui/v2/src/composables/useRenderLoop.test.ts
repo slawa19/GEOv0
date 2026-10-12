@@ -4,7 +4,7 @@ import { ref, type Ref } from 'vue'
 import { clearGradientCache } from '../render/gradientCache'
 import type { GraphSnapshot } from '../types'
 import type { LayoutNode } from '../types/layout'
-import type { VizMapping } from '../vizMapping'
+import { DATA_PALETTE_DEFAULT, type VizMapping } from '../vizMapping'
 
 import {
   __cachedPosHygiene,
@@ -39,7 +39,7 @@ vi.mock('../render/gradientCache', () => ({
 }))
 
 const TEST_MAPPING: VizMapping = {
-  node: { color: {} },
+  node: { palette: DATA_PALETTE_DEFAULT },
   link: {
     width_px: {},
     alpha: {},
@@ -50,6 +50,7 @@ const TEST_MAPPING: VizMapping = {
     clearing_credit: '#000',
     clearing_debt: '#000',
     flash: { clearing: { from: '#000', to: '#000' } },
+    glint: '#000',
   },
 }
 

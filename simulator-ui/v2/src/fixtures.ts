@@ -1,6 +1,6 @@
 import type { DemoEvent, EdgePatch, GraphLink, GraphNode, GraphSnapshot, NodePatch } from './types'
 import { isRecord } from './utils/isRecord'
-import { VIZ_MAPPING } from './vizMapping'
+import { LEGACY_NODE_COLOR_KEYS, VIZ_LINK } from './vizMapping'
 
 function asString(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`${label} must be string`)
@@ -205,7 +205,8 @@ function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_shape_key' | 'viz_width_
   if (!strict) return
 
   if (kind === 'viz_color_key') {
-    if (!VIZ_MAPPING.node.color[key]) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
+    // The admissible WIRE keys (039 slice B): the key is validated as input and no longer chooses a colour.
+    if (!LEGACY_NODE_COLOR_KEYS.has(key)) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
     return
   }
 
@@ -215,12 +216,12 @@ function assertVizKeyKnown(kind: 'viz_color_key' | 'viz_shape_key' | 'viz_width_
   }
 
   if (kind === 'viz_width_key') {
-    if (VIZ_MAPPING.link.width_px[key] === undefined) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
+    if (VIZ_LINK.width_px[key] === undefined) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
     return
   }
 
   if (kind === 'viz_alpha_key') {
-    if (VIZ_MAPPING.link.alpha[key] === undefined) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
+    if (VIZ_LINK.alpha[key] === undefined) throw new Error(`Unknown ${kind}='${key}' at ${context}`)
   }
 }
 

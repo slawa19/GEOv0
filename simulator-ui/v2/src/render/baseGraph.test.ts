@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LayoutLink, LayoutNode } from '../types/layout'
-import type { VizMapping } from '../vizMapping'
+import { DATA_PALETTE_DEFAULT, type VizMapping } from '../vizMapping'
 import { drawBaseGraph } from './baseGraph'
 
 // ------------------------------------------------------------------ mocks --
@@ -30,7 +30,7 @@ vi.mock('./glowSprites', () => ({
 // ----------------------------------------------------------------- helpers -
 
 const MAPPING: VizMapping = {
-  node: { color: {} },
+  node: { palette: DATA_PALETTE_DEFAULT },
   link: {
     width_px: { hairline: 0.6, thin: 0.9, mid: 1.1, thick: 1.25, highlight: 2.2 },
     alpha: { bg: 0.06, muted: 0.12, active: 0.20, hi: 0.32 },
@@ -41,6 +41,7 @@ const MAPPING: VizMapping = {
     clearing_credit: '#fff',
     clearing_debt: '#fff',
     flash: { clearing: { from: '#fff', to: '#fff' } },
+    glint: '#fff',
   },
 }
 

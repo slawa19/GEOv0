@@ -27,7 +27,10 @@
 import { expect, test } from '@playwright/test'
 
 import { withAlpha } from '../../../src/render/color.js'
-import { VIZ_MAPPING } from '../../../src/vizMapping.js'
+import { createVizMapping } from '../../../src/vizMapping.js'
+
+// 039 slice B (2026-10-12): the mapping is created per app, not a module singleton - only this line moved.
+const VIZ_MAPPING = createVizMapping()
 import { boot, camera, fixtureSnapshot100, frames, layoutNodes, loopCounters, pushEvent, txUpdated } from '../stand.js'
 
 type Counts = { baseLineStrokes: number; baseShapeStrokes: number; baseFills: number; baseFillRects: number; baseDrawImages: number; fxDraws: number; lineStyles: Record<string, number>; lineSegments: number }
