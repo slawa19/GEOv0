@@ -53,8 +53,12 @@ import { exclusionProblems, verdict } from './run-verdict.mjs'
  * - 2026-10-12 (039 slice A, the chord): gate 78 -> 80, full 201 -> 203. Two tests of `chord.qa.ts`: the refusal of a
  *   route whose chord cannot be told from it, on made-up points; and, on an open six-leg route over seven nodes,
  *   property 3 accepting the beam on its legs and refusing the same payment drawn as one beam sender > receiver.
+ * - 2026-10-12 (039 slice A, property 4 by intervals; BACKLOG 038-1 (a)): gate 80 -> 81, full 203 -> 204. One test,
+ *   `leg-order.qa.ts`: the judge of leg order on made-up legs - the cases the count of common frames accepted
+ *   (alternating frames, a leg inside a dark hole of the leg before it), the handoff allowance to the frame, an
+ *   unpainted leg, and the same verdicts at a third of the tempo. No browser page; under a second.
  */
-export const EXPECTED = { gate: 80, full: 203 }
+export const EXPECTED = { gate: 81, full: 204 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

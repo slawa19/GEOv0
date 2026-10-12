@@ -6,9 +6,11 @@
  *   1. displacement - the painted head moves along the edge between frames;
  *   2. direction    - it moves from the source of the edge to its target;
  *   3. route        - nothing is painted away from the route (other edges of the graph, the chord);
- *   4. order        - edge k lights up strictly after edge k-1, and not before edge k-1 has gone dark. WEAK BY PIXELS:
- *                     a beam is painted for only about half of its leg, so legs that overlap by half still pass on 3
- *                     and 6 edges. What holds order strictly is the FX-state test in `motion.qa.ts` (one spark alive);
+ *   4. order        - edge k lights up strictly after edge k-1, and not before edge k-1 has gone dark: judged by the
+ *                     painted INTERVALS of the two legs (`legOrder`), not by how many painted frames they share.
+ *                     WEAK BY PIXELS all the same: a beam is painted for only about half of its leg, so legs whose
+ *                     LIVES overlap by half are painted one after another and pass (run 2026-10-12: on 2, 3 and 6
+ *                     edges). What holds order strictly is the FX-state test in `motion.qa.ts` (one spark alive);
  *   5. composition  - where the FX buffer is painted, the screenshot of the page shows it, on every sampled frame.
  *
  * What it does NOT see: colour, shape and easing of the beam; anything within `NODE_CLEAR_PX` of a route node (the
@@ -410,6 +412,51 @@ export function summarize(g: RouteGeom, probes: FrameProbe[]): EdgeSummary[] {
 export const MOTION_LIMITS = { minDistinctHeads: 6, maxStepPerFrame: 0.15, minCovered: 0.6 } as const
 export const MOTION_LIMITS_AT_CAP = { minDistinctHeads: 4, maxStepPerFrame: 0.3, minCovered: 0.4 } as const
 
+/**
+ * PROPERTY 4 BY INTERVALS (039 slice A, BACKLOG 038-1 (a); until 2026-10-12 the rule was "at most one painted frame in
+ * common"). A leg is judged by the interval of frames from its first painted frame to its last, holes included: legs
+ * painted in alternating frames have no frame in common and intervals that overlap from end to end; a leg painted
+ * inside a dark hole of the leg before it has none in common either.
+ *
+ * `HANDOFF_FRAMES` is how many frames the interval of leg k may share with the interval of leg k-1. What it rests on:
+ *  - the schedule of the product (`composables/realFx/useRealTxFx.ts`): leg i starts at i x legMs and lives legMs, so no
+ *    INSTANT belongs to two legs, whatever legMs is; and the judged parts of two legs that meet at a node are
+ *    2 x NODE_CLEAR_PX apart along the route. From the schedule alone the number would be 0;
+ *  - the grain of the oracle: `watchFlight` probes once a frame, and one frame is the unit a handoff can be told to.
+ *    1 is that grain, and it is what the rule of common frames allowed - this rule is nowhere weaker than that one
+ *    (two common frames f < g give firstLit(k) <= f < g <= lastLit(k-1), two shared frames here).
+ * It does NOT depend on the duration of a leg or of the route: every number here is a frame index compared with a
+ * frame index, so a slower tempo moves both sides alike (`leg-order.qa.ts` shows the verdicts at 1x and 3x). A product
+ * that lets the tail of a leg live on into the next one (a cross-fade) changes the schedule above: then this constant
+ * is moved, with a dated line, by whoever changes the schedule.
+ *
+ * Not judged: how long the route stays DARK between two legs (measured 2026-10-12: 6-18 frames - a beam fades inside its leg; the
+ * visible handoff is slice C of 039, reproducer R6); legs whose lives overlap while their painted intervals do not.
+ */
+export const HANDOFF_FRAMES = 1
+export type LegOrder = {
+  /** Both legs were painted at all: an unpainted leg has no interval, and "no overlap" of nothing is not order. */
+  bothPainted: boolean
+  startsStrictlyLater: boolean
+  afterPreviousWentDark: boolean
+  /** Frames that lie in both intervals: lastLit(prev) - firstLit(cur) + 1, not below 0. */
+  sharedFrames: number
+}
+
+export function legOrder(prev: Pick<EdgeSummary, 'firstLit' | 'lastLit'>, cur: Pick<EdgeSummary, 'firstLit' | 'lastLit'>): LegOrder {
+  if (prev.firstLit === null || prev.lastLit === null || cur.firstLit === null || cur.lastLit === null) {
+    return { bothPainted: false, startsStrictlyLater: false, afterPreviousWentDark: false, sharedFrames: 0 }
+  }
+  const sharedFrames = Math.max(0, Math.min(prev.lastLit, cur.lastLit) - Math.max(prev.firstLit, cur.firstLit) + 1)
+  return {
+    bothPainted: true,
+    startsStrictlyLater: cur.firstLit > prev.firstLit,
+    // Not "sharedFrames <= HANDOFF_FRAMES" alone: a leg that was over before the previous one began shares nothing.
+    afterPreviousWentDark: cur.firstLit >= prev.lastLit - (HANDOFF_FRAMES - 1),
+    sharedFrames,
+  }
+}
+
 const pct = (v: number | null) => (v === null ? 'none' : v.toFixed(3))
 
 /** Property 3 as a value: what `expectBeamOnRoute` compares with 'nothing painted off the route'. */
@@ -458,16 +505,18 @@ export function expectBeamOnRoute(g: RouteGeom, probes: FrameProbe[], o: { order
     `P3 route: pixels of the FX canvas outside the route ${g.ids.join(' > ')} (other edges of the graph, the chord ${g.ids[0]} > ${g.ids[g.ids.length - 1]}) stay dark`,
   ).toBe('nothing painted off the route')
 
-  // 4. Order: strictly one after another. Mutation: all edges of the route started at once.
+  // 4. Order: strictly one after another, by painted intervals (`legOrder`). Mutations: all edges of the route started
+  //    at once; and the one the count of common frames could not tell - all edges alive at once, each painted in every
+  //    other frame, so that no frame shows two of them.
   if (o.order) {
     for (let k = 1; k < sum.length; k += 1) {
       const prev = sum[k - 1]!
       const cur = sum[k]!
-      const overlap = cur.litFrames.filter((f) => prev.litFrames.includes(f)).length
+      const v = legOrder(prev, cur)
       expect.soft(
-        { startsStrictlyLater: cur.firstLit !== null && prev.firstLit !== null && cur.firstLit > prev.firstLit, overlapAtMostOneFrame: overlap <= 1 },
-        `P4 order: edge ${cur.name} lights up strictly after edge ${prev.name} and not while it is still lit (first painted frames ${String(prev.firstLit)} and ${String(cur.firstLit)}, last painted frame of ${prev.name} ${String(prev.lastLit)}, ${overlap} frames in common)`,
-      ).toEqual({ startsStrictlyLater: true, overlapAtMostOneFrame: true })
+        { bothPainted: v.bothPainted, startsStrictlyLater: v.startsStrictlyLater, afterPreviousWentDark: v.afterPreviousWentDark },
+        `P4 order: edge ${cur.name} lights up strictly after edge ${prev.name} and not while it is still lit (painted intervals in frames: ${prev.name} ${String(prev.firstLit)}..${String(prev.lastLit)}, ${cur.name} ${String(cur.firstLit)}..${String(cur.lastLit)}; the intervals share ${v.sharedFrames} frame(s), allowed ${HANDOFF_FRAMES})`,
+      ).toEqual({ bothPainted: true, startsStrictlyLater: true, afterPreviousWentDark: true })
     }
   }
 
