@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LayoutNode } from '../types/layout'
 import { createVizMapping, type VizMapping } from '../vizMapping'
 import { drawGlowSprite } from './glowSprites'
-import { drawNodeShape } from './nodePainter'
+import { drawNodeShape, NODE_SIGN_SIZE_PX } from './nodePainter'
 
 vi.mock('./glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 
@@ -62,6 +62,8 @@ const paint = (n: LayoutNode, o: { zoom?: number; quality?: 'low' | 'med' | 'hig
   return r
 }
 
+/** The glyph is the one stroke with round caps (the outline and the hub ring are butt-capped). */
+const glyphOf = (draws: Draw[]) => draws.filter((d) => d.kind === 'stroke' && d.lineCap === 'round')
 const shapeOf = (d: Draw) => d.path.map((p) => p.op).join(' ')
 
 beforeEach(() => { vi.mocked(drawGlowSprite).mockClear() })
@@ -91,6 +93,60 @@ describe('node painter - the fill is the role', () => {
     expect(big.path[0]!.args[2]).toBe(20)
     const rect = paint(node({ viz_shape_key: 'rounded-rect', viz_size: { w: 26, h: 22 } })).draws.find((d) => d.kind === 'fill')!
     expect(shapeOf(rect)).not.toBe('arc')
+  })
+})
+
+describe('node painter - the sign glyph', () => {
+  const SIGNS = [{ net_sign: -1, name: 'minus' }, { net_sign: 1, name: 'plus' }, { net_sign: 0, name: 'zero' }, { net_sign: null, name: 'unknown' }] as const
+
+  it('each of the four signs is a different drawing, one stroke each', () => {
+    const shapes = SIGNS.map((s) => {
+      const g = glyphOf(paint(node({ net_sign: s.net_sign })).draws)
+      expect(g, s.name).toHaveLength(1)
+      return shapeOf(g[0]!)
+    })
+    expect(shapes).toEqual(['moveTo lineTo', 'moveTo lineTo moveTo lineTo', 'moveTo quad quad quad quad', 'arc lineTo moveTo lineTo'])
+  })
+
+  it('minus is a horizontal bar through the centre and plus adds the vertical one: about 6 CSS px on screen', () => {
+    const minus = glyphOf(paint(node({ net_sign: -1 })).draws)[0]!.path
+    expect(minus.map((p) => p.args)).toEqual([[100 - NODE_SIGN_SIZE_PX / 2, 100], [100 + NODE_SIGN_SIZE_PX / 2, 100]])
+    const plus = glyphOf(paint(node({ net_sign: 1 })).draws)[0]!.path
+    expect(plus.slice(2).map((p) => p.args)).toEqual([[100, 100 - NODE_SIGN_SIZE_PX / 2], [100, 100 + NODE_SIGN_SIZE_PX / 2]])
+    expect(NODE_SIGN_SIZE_PX).toBe(6)
+  })
+
+  it('never dropped: every quality and every zoom draws it, at a constant size on screen', () => {
+    for (const quality of ['low', 'med', 'high'] as const) {
+      for (const zoom of [0.05, 0.2, 1, 4, 20]) {
+        for (const s of SIGNS) {
+          const g = glyphOf(paint(node({ net_sign: s.net_sign }), { quality, zoom }).draws)
+          expect(g, `${s.name} q=${quality} z=${zoom}`).toHaveLength(1)
+        }
+        const bar = glyphOf(paint(node({ net_sign: -1 }), { quality, zoom }).draws)[0]!.path
+        expect((bar[1]!.args[0]! - bar[0]!.args[0]!) * zoom, `bar length on screen, q=${quality} z=${zoom}`).toBeCloseTo(NODE_SIGN_SIZE_PX, 6)
+      }
+    }
+  })
+
+  it('the glyph is light ink, not the fill colour, and is never dashed - also inside a frozen node', () => {
+    for (const status of ['active', 'frozen']) {
+      const g = glyphOf(paint(node({ net_sign: -1, status })).draws)[0]!
+      expect(g.strokeStyle).toContain('rgba(255,255,255,')
+      expect(g.dash).toEqual([])
+    }
+  })
+
+  it('a frozen node keeps the sign of its known role', () => {
+    expect(shapeOf(glyphOf(paint(node({ net_sign: 1, status: 'frozen' })).draws)[0]!)).toBe('moveTo lineTo moveTo lineTo')
+    expect(shapeOf(glyphOf(paint(node({ net_sign: -1, status: 'suspended' })).draws)[0]!)).toBe('moveTo lineTo')
+  })
+
+  it('a node smaller than the glyph gets a smaller glyph, still drawn (the sizing floor is 6 px)', () => {
+    const bar = glyphOf(paint(node({ net_sign: -1, viz_size: { w: 6, h: 6 } })).draws)[0]!.path
+    const len = bar[1]!.args[0]! - bar[0]!.args[0]!
+    expect(len).toBeGreaterThan(2)
+    expect(len).toBeLessThan(6)
   })
 })
 
@@ -128,7 +184,7 @@ describe('node painter - a freeze is a dashed outline', () => {
     expect(r.ctx.depth, 'every save has its restore').toBe(0)
     drawNodeShape(r.ctx, node({ status: 'active', type: 'hub' }), { mapping: MAPPING, cameraZoom: 1, quality: 'low' })
     const second = r.draws.slice(r.draws.length / 2)
-    expect(second.filter((d) => d.kind === 'stroke').map((d) => d.dash)).toEqual([[], []])
+    expect(second.filter((d) => d.kind === 'stroke').map((d) => d.dash)).toEqual([[], [], []])
   })
 })
 

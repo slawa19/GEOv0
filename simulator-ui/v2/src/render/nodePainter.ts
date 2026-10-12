@@ -1,5 +1,5 @@
 import type { LayoutNode } from '../types/layout'
-import { classifyNode, fillOf, type VizMapping } from '../vizMapping'
+import { classifyNode, fillOf, type NodeSign, type VizMapping } from '../vizMapping'
 import { withAlpha } from './color'
 import {
   NODE_BODY_FILL_ALPHA_HI_A,
@@ -9,7 +9,6 @@ import {
   NODE_GLINT_COLOR_HEX,
   NODE_GLINT_INNER_STROKE_ALPHA,
   NODE_GLOW_K_BY_QUALITY,
-  OPAQUE_BLACK_HEX,
 } from './fxConfig'
 import { getLinearGradient2Stops } from './gradientCache'
 import { drawGlowSprite } from './glowSprites'
@@ -17,80 +16,72 @@ import { getNodeBaseGeometry } from './nodeGeometry'
 import { roundedRectPath } from './roundedRect'
 
 /* ------------------------------------------------------------------ */
-/*  Lightweight icon / badge helpers                                  */
+/*  Sign glyph, badge                                                  */
 /* ------------------------------------------------------------------ */
 
-/**
- * Draw the node's inner icon (person silhouette or building silhouette).
- * Cost ≈ a few arc/rect calls, no blur/gradient.
- */
-function drawNodeIcon(
-  ctx: CanvasRenderingContext2D,
-  fill: string,
-  cx: number,
-  cy: number,
-  w: number,
-  h: number,
-  r: number,
-  isRoundedRect: boolean,
-  alpha: number = 0.95,
-) {
-  ctx.save()
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.fillStyle = withAlpha(fill, alpha)
-
-  if (!isRoundedRect) {
-    // PERSON: "Pawn" / User silhouette
-    const s = r * 0.045
-    ctx.translate(cx, cy + r * 0.08)
-
-    ctx.beginPath()
-    // Head
-    ctx.arc(0, -9 * s, 5.5 * s, 0, Math.PI * 2)
-    // Body (Shoulders)
-    ctx.moveTo(-8 * s, 1 * s)
-    ctx.quadraticCurveTo(0, -4 * s, 8 * s, 1 * s)
-    ctx.quadraticCurveTo(9 * s, 11 * s, 0, 11 * s)
-    ctx.quadraticCurveTo(-9 * s, 11 * s, -8 * s, 1 * s)
-    ctx.closePath()
-    ctx.fill()
-  } else {
-    // BUSINESS: "Building" / Briefcase silhouette
-    const s = Math.min(w, h) * 0.024
-    ctx.translate(cx, cy + h * 0.05)
-
-    ctx.beginPath()
-    // Main tower
-    const bw = 12 * s
-    const bh = 16 * s
-    ctx.rect(-bw / 2, -bh / 2, bw, bh)
-
-    // Roof detail (antenna or stepped)
-    ctx.rect(-bw / 2 + 2 * s, -bh / 2 - 2 * s, bw - 4 * s, 2 * s)
-    ctx.rect(-1 * s, -bh / 2 - 5 * s, 2 * s, 3 * s)
-
-    ctx.fill()
-
-    // Window lines (cutouts)
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.fillStyle = OPAQUE_BLACK_HEX
-    const winW = 2.5 * s
-    const winH = 2.5 * s
-    const gap = 1.5 * s
-    for (let row = -1; row <= 1; row++) {
-      ctx.fillRect(-bw / 2 + gap + 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
-      ctx.fillRect(0 + gap - 0.5 * s, row * (winH + gap) - 1 * s, winW, winH)
-    }
-  }
-  ctx.restore()
-}
-
+/** The sign glyph is about this tall and wide on screen, in CSS px, whatever the zoom and the quality. */
+export const NODE_SIGN_SIZE_PX = 6
+const NODE_SIGN_LINE_PX = 1.6
+const NODE_SIGN_INK_ALPHA = 0.95
 /** Frozen outline: dash and gap, and the line width, in CSS px. */
 const NODE_FROZEN_DASH_PX = [3, 2.5] as const
 const NODE_FROZEN_OUTLINE_PX = 1.6
 /** Hub ring: its distance from the node's outline and its line width, in CSS px. */
 const NODE_HUB_RING_GAP_PX = 3.5
 const NODE_HUB_RING_LINE_PX = 1.4
+
+/**
+ * The sign of the node's net position, in the middle of the node: MINUS, PLUS, ZERO or a question mark (unknown).
+ * 039 slice B: it stands where the person / building pictogram was, and it is the NON-COLOUR cue of the role - so it
+ * is drawn whenever the node is, at every zoom, quality and label LOD. Short vector strokes (no text, no font):
+ * one path, one `stroke()`. The ink is the glint white: the body under it is the role colour at reduced alpha over
+ * a dark page, against which white holds 5:1 and more for every data colour (measured, `visual-language.md`).
+ */
+function drawNodeSign(
+  ctx: CanvasRenderingContext2D,
+  sign: NodeSign,
+  cx: number,
+  cy: number,
+  sizePx: number,
+  px: (v: number) => number,
+) {
+  const h = px(sizePx) / 2 // half of the glyph box
+  ctx.save()
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.strokeStyle = withAlpha(NODE_GLINT_COLOR_HEX, NODE_SIGN_INK_ALPHA)
+  ctx.lineWidth = px(NODE_SIGN_LINE_PX * (sizePx / NODE_SIGN_SIZE_PX))
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.setLineDash([])
+  ctx.beginPath()
+  if (sign === '+') {
+    ctx.moveTo(cx - h, cy)
+    ctx.lineTo(cx + h, cy)
+    ctx.moveTo(cx, cy - h)
+    ctx.lineTo(cx, cy + h)
+  } else if (sign === '0') {
+    // A narrow oval: told from a plain ring (the node outline) by being taller than wide.
+    const w = h * 0.68
+    ctx.moveTo(cx, cy - h)
+    ctx.quadraticCurveTo(cx + w, cy - h, cx + w, cy)
+    ctx.quadraticCurveTo(cx + w, cy + h, cx, cy + h)
+    ctx.quadraticCurveTo(cx - w, cy + h, cx - w, cy)
+    ctx.quadraticCurveTo(cx - w, cy - h, cx, cy - h)
+  } else if (sign === '?') {
+    // Hook: three quarters of a small circle, a short stem, then the dot as a zero-length round-capped segment.
+    const r = h * 0.5
+    ctx.arc(cx, cy - h + r, r, Math.PI, Math.PI * 0.5)
+    ctx.lineTo(cx, cy + h * 0.28)
+    ctx.moveTo(cx, cy + h)
+    ctx.lineTo(cx, cy + h)
+  } else {
+    // MINUS SIGN.
+    ctx.moveTo(cx - h, cy)
+    ctx.lineTo(cx + h, cy)
+  }
+  ctx.stroke()
+  ctx.restore()
+}
 
 /**
  * Draw optional badge pip. Cost ≈ one arc + fill — negligible.
@@ -252,8 +243,10 @@ export function drawNodeShape(
     ctx.restore()
   }
 
-  // 5) Icons (Holographic Projections inside)
-  drawNodeIcon(ctx, fill, node.__x, node.__y, w, h, r, isRoundedRect)
+  // 5) The sign of the net position, in place of the old pictogram. Never skipped: see `drawNodeSign`.
+  //    About 6 CSS px; smaller only when the node itself is smaller than the glyph (the sizing floor is 6 px).
+  const signPx = Math.min(NODE_SIGN_SIZE_PX, (Math.min(w, h) / invZ) * 0.6)
+  drawNodeSign(ctx, look.sign, node.__x, node.__y, signPx, px)
 
   // Optional badge pip if viz_badge_key is present (no semantics, just presence).
   if (node.viz_badge_key !== undefined && node.viz_badge_key !== null) {
