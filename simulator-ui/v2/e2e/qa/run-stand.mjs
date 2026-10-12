@@ -89,8 +89,9 @@ if (!debug && !Object.hasOwn(EXPECTED, scope ?? '')) {
 let repeat = 1
 for (const a of extra) {
   if (debug) {
-    // `-c` is Playwright's short form of `--config`; `--project=x` and `--project x` both start with the word.
-    if (/^(--project|--config|-c)(=|$)/.test(a)) {
+    // `-c` is Playwright's short form of `--config` (also written `-cfile`); `--project=x` and `--project x` both
+    // start with the word.
+    if (/^(--project|--config)(=|$)|^-c/.test(a)) {
       console.error(`run-stand: "${a}" is not accepted in a debug run - it is a slice of the qa-stand project by the stand's config`)
       process.exit(1)
     }
