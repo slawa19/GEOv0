@@ -11,10 +11,17 @@
  *
  * Not seen: a product that would handle a message asynchronously after its read loop moved on (today it is
  * synchronous, `api/sse.ts`); a frame split over several chunks (the shim writes one frame a chunk).
+ *
+ * 039 slice A (2026-10-12): "taken" is the product's NEXT READ and nothing weaker - the last two tests. A frame whose
+ * connection ended before the product read it used to be answered as taken (the shim settled every pending answer of
+ * a dropped connection the same way); a handler that threw was taken too (the product catches and reads on). What
+ * "taken" still does not prove - that the event was applied - is written at `installSseShim` in `stand.ts`.
+ * Not exercised here: the third outcome, `closed` (handed to the product, connection ended before its loop came
+ * back) - it needs a handler that ends its own connection, and no event of the stand makes the product do that.
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { boot, frames, fxCounts, holdSse, pushEvent, releaseSse, ringSnapshot, txUpdated } from './stand.js'
+import { boot, frames, fxCounts, holdSse, pushEvent, pushFrames, releaseSse, ringSnapshot, sseCounts, sseFrame, txUpdated } from './stand.js'
 
 /**
  * Write a payment while the transport holds the frame, step ONE frame, report the sparks in the FX state. The frame
@@ -71,4 +78,57 @@ test('pushEvent answers for a frame the product drops as well: the same event_id
   await pushEvent(page, { ...txUpdated(['a', 'b'], '10.00', { amount_flyout: false }), equivalent: 'ZZZ' }) // not of this scene
   await frames(page, 1)
   expect((await fxCounts(page)).sparks, 'neither dropped frame animated, and neither left pushEvent waiting').toBe(1)
+})
+
+type Shim = { __qaSse: { deliver: (t: string) => Promise<{ read: number; closed: number; unread: number }>; release: () => void; breakTransport: () => void } }
+/** How a delivery ended, as text: a failed `expect(...).rejects` of Playwright 1.5x reports an error of its own instead of what happened. */
+const outcome = (delivery: Promise<unknown>): Promise<string> => delivery.then(() => 'ACCEPTED: the stand counted the delivery as taken', (e: Error) => `REFUSED: ${e.message}`)
+const quiet = (n: number) => Array.from({ length: n }, () => sseFrame(txUpdated(['a', 'b'], '10.00', { amount_flyout: false })).frame)
+
+test('taken is the product\'s next read: pushFrames holds taken === pushed, and a frame whose connection is lost before it was read is refused, not counted', async ({ page }) => {
+  await boot(page, { snapshot: ringSnapshot(), clock: true })
+  const c0 = await sseCounts(page)
+
+  // Control: a batch that arrives. Every frame is answered by a read, and the shim's own count moves by the same number.
+  await pushFrames(page, quiet(3))
+  const c1 = await sseCounts(page)
+  expect({ pushed: c1.pushed - c0.pushed, taken: c1.taken - c0.taken, closed: c1.closed - c0.closed, lost: c1.lost - c0.lost },
+    'three frames pushed, three taken').toEqual({ pushed: 3, taken: 3, closed: 0, lost: 0 })
+
+  // The transport is lost with the frame written and not yet read. The frame is held, the write is awaited, and the
+  // release and the loss happen in ONE task of the page: the chunk is in the stream and no read has returned it.
+  await holdSse(page)
+  const unread = outcome(pushEvent(page, txUpdated(['a', 'b'], '10.00', { amount_flyout: false })))
+  await page.evaluate(() => 0) // one round trip: the write is in the page, held
+  await page.evaluate(() => {
+    const sse = (window as unknown as Shim).__qaSse
+    sse.release()
+    sse.breakTransport()
+  })
+  expect(await unread, 'pushEvent refuses a frame its connection never read').toMatch(/^REFUSED: .*the connection ended before the product read it/)
+  const c2 = await sseCounts(page)
+  expect({ pushed: c2.pushed - c1.pushed, taken: c2.taken - c1.taken, closed: c2.closed - c1.closed, lost: c2.lost - c1.lost },
+    'the unread frame is counted as lost, not as taken').toEqual({ pushed: 1, taken: 0, closed: 0, lost: 1 })
+
+  // And a batch of which only a part can arrive: two frames written, the transport lost before either is read.
+  // (The clock is paused, so the product's reconnect timer has not fired: nobody is listening any more.)
+  expect(await outcome(pushFrames(page, quiet(2))), 'pushFrames names the numbers').toMatch(/^REFUSED: .*pushed 2 SSE frame\(s\), the product took 0/)
+})
+
+test('a frame whose handler threw is not taken: the product catches the exception and reads on, the stand refuses', async ({ page }) => {
+  await boot(page, { snapshot: ringSnapshot(), clock: true })
+  // The product's own line (`api/sse.ts`, the catch around `onMessage`) is PLANTED here, between the write and the
+  // read: no event of the stand makes the handler throw, and the product is not mutated. What this shows is that the
+  // stand hears the line and ties it to the delivery in flight - not that a real exception produces it.
+  await holdSse(page)
+  const thrown = outcome(pushEvent(page, txUpdated(['a', 'b'], '10.00', { amount_flyout: false })))
+  await page.evaluate(() => 0)
+  await page.evaluate(() => {
+    console.error('[SSE] onMessage error:', 'planted by delivery.qa.ts', 'event:', 'tx.updated', 'id:', 'planted')
+    ;(window as unknown as Shim).__qaSse.release()
+  })
+  expect(await thrown, 'a delivery during which the handler threw is refused').toMatch(/^REFUSED: .*SSE handler threw/)
+  // Counter-check: the line fails one delivery, not every later one, and another error of the console fails none.
+  await page.evaluate(() => console.error('some other error of the page'))
+  await pushEvent(page, txUpdated(['a', 'b'], '10.00', { amount_flyout: false }))
 })

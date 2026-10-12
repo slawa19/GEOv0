@@ -91,7 +91,8 @@ function clearShare(a: Pt, b: Pt, occ: Rect[]): number {
 /**
  * A route of `hops` edges over consecutive nodes of the ring: the one whose edges are least under the named HUD and
  * cross each other least, whose chord sender -> receiver runs away from its edges, and whose edges are long enough to
- * watch. The test refuses to run on a layout that leaves it nothing to look at.
+ * watch. The test refuses to run on a layout that leaves it nothing to look at - since 2026-10-12 that includes a
+ * chord that cannot be told from the route (`expectChordTold` below; until then the chord only entered the score).
  */
 export async function pickRingRoute(page: Page, ring: string[], hops: number): Promise<RouteGeom> {
   const n = await screenNodes(page)
@@ -125,8 +126,91 @@ export async function pickRingRoute(page: Page, ring: string[], hops: number): P
   const ys = nodes.map((p) => p.y)
   const x = Math.max(0, Math.floor(Math.min(...xs)) - 30)
   const y = Math.max(0, Math.floor(Math.min(...ys)) - 30)
+  // The refusal of R3 (039 slice A): an open route whose chord cannot be told from it is not handed back.
+  expectChordTold(ids, nodes)
   return { ids, edges, nodes, occluders, clip: { x, y, width: Math.ceil(Math.max(...xs)) + 30 - x, height: Math.ceil(Math.max(...ys)) + 30 - y } }
 }
+/** The geometry of a route given by its node ids, in page pixels, as the oracle judges it. No preconditions are asserted here. */
+export async function routeGeomOf(page: Page, ids: readonly string[]): Promise<RouteGeom> {
+  const n = await screenNodes(page)
+  const nodes = ids.map((id) => {
+    const p = n.get(id)
+    if (!p) throw new Error(`038 oracle: route node ${id} is not in the layout`)
+    return p
+  })
+  const edges = nodes.slice(0, -1).map((a, k) => ({ name: `${ids[k]}>${ids[k + 1]}`, from: ids[k]!, to: ids[k + 1]!, a, b: nodes[k + 1]! }))
+  const xs = nodes.map((p) => p.x)
+  const ys = nodes.map((p) => p.y)
+  const x = Math.max(0, Math.floor(Math.min(...xs)) - 30)
+  const y = Math.max(0, Math.floor(Math.min(...ys)) - 30)
+  return { ids: [...ids], edges, nodes, occluders: await namedOccluders(page), clip: { x, y, width: Math.ceil(Math.max(...xs)) + 30 - x, height: Math.ceil(Math.max(...ys)) + 30 - y } }
+}
+
+/**
+ * THE CHORD (039 slice A, R14). The defect property 3 was built against (F-038-3) is a payment over a route drawn as
+ * ONE beam from the sender straight to the receiver. Property 3 sees it only where the chord sender > receiver leaves
+ * the corridors of the route: on a layout whose chord runs inside them, a straightened beam is painted "on the route"
+ * and properties 1 to 4 can hold for it. The oracle refuses to judge such a layout (`expectChordTold`).
+ *
+ * A point of the chord is one where a beam drawn along it IS seen off the route when it is
+ *  - farther than `CHORD_CLEAR_PX` from the axis of every route edge. Twice the corridor: `CORRIDOR_PX` is the
+ *    half-width of a beam at ALPHA_MIN (3 px, measured) plus 2 px for rounding of the layout, so at twice that
+ *    distance the whole cross-section of a beam centred on the chord is outside the corridor, with the same 2 px to
+ *    spare - derived from the corridor, not from a fixture;
+ *  - farther than `NODE_CLEAR_PX` from every route node (nothing is judged there).
+ * What is asked for is one unbroken STRETCH of such points at least `MOTION_LIMITS.maxStepPerFrame` of the chord long:
+ * the head of a beam that advances by no more than the step the oracle accepts per frame cannot jump over it, so it
+ * is painted off the route in at least one probed frame.
+ *
+ * NOT the middle of the chord alone (the first wording of R14: "refuse when the middle is within 2 x CORRIDOR_PX of a
+ * route edge"): a chord that CROSSES a leg of its route at its middle has no clearance there and is told from the
+ * route on both sides of the crossing; and a clear middle does not show that the stretch around it is long enough.
+ * A closed route (sender = receiver) has no chord and a route of one edge is its chord: neither is judged - the
+ * straightening of a closed route would be no beam at all, which property 1 refuses.
+ *
+ * Not seen: a chord beam fainter than `ALPHA_MIN`; one whose head steps farther per frame than the limit above; a
+ * "shortcut" that is not the chord sender > receiver (a beam that skips ONE node of a longer route).
+ */
+export const CHORD_CLEAR_PX = 2 * CORRIDOR_PX
+export type ChordSeen = { judged: boolean; chordPx: number; seenPx: number; share: number }
+
+/** The longest unbroken stretch of the chord first node > last node on which a beam would be painted off the route. */
+export function chordSeen(nodes: Pt[]): ChordSeen {
+  const a = nodes[0]!
+  const b = nodes[nodes.length - 1]!
+  const chordPx = Math.hypot(b.x - a.x, b.y - a.y)
+  if (nodes.length < 3 || chordPx < 1) return { judged: false, chordPx, seenPx: 0, share: 0 }
+  let seenPx = 0
+  let run = 0
+  for (let d = 0; d <= chordPx; d += 1) {
+    const p = { x: a.x + ((b.x - a.x) * d) / chordPx, y: a.y + ((b.y - a.y) * d) / chordPx }
+    const seen = nodes.every((n) => Math.hypot(n.x - p.x, n.y - p.y) > NODE_CLEAR_PX)
+      && nodes.slice(0, -1).every((from, k) => distToSegment(p, from, nodes[k + 1]!) > CHORD_CLEAR_PX)
+    run = seen ? run + 1 : 0
+    if (run > seenPx) seenPx = run
+  }
+  return { judged: true, chordPx, seenPx, share: seenPx / chordPx }
+}
+
+/**
+ * The refusal: an open route of two or more edges whose chord cannot be told from it is not judged at all. A red
+ * here is a property of the LAYOUT (the route is too straight), not of the product; the message says so.
+ */
+export function expectChordTold(ids: readonly string[], nodes: Pt[]): ChordSeen {
+  const closed = ids[0] === ids[ids.length - 1]
+  const c = chordSeen(nodes)
+  if (closed || !c.judged) return { ...c, judged: false }
+  expect(
+    c.share,
+    `R3 refusal: the chord ${ids[0]} > ${ids[ids.length - 1]} of the route ${ids.join(' > ')} must be told from the route - a payment straightened into one beam `
+      + `sender > receiver has to be painted OFF the route somewhere. Longest stretch of the chord farther than ${CHORD_CLEAR_PX} px (2 x CORRIDOR_PX) from every route edge and `
+      + `${NODE_CLEAR_PX} px from every route node: ${c.seenPx} px of ${c.chordPx.toFixed(0)} px = ${c.share.toFixed(3)} of the chord; needed ${MOTION_LIMITS.maxStepPerFrame} `
+      + '(the largest step of a head per frame the oracle accepts). Below that, property 3 cannot refuse a straightened beam on this layout: the oracle has nothing to judge by. '
+      + 'This is the layout, not the product - choose another route or scene; do not lower the number.',
+  ).toBeGreaterThanOrEqual(MOTION_LIMITS.maxStepPerFrame)
+  return c
+}
+
 
 export type EdgeFrame = {
   /** Painted pixels of this edge's corridor (alpha >= ALPHA_MIN), away from the route nodes. */
@@ -328,6 +412,14 @@ export const MOTION_LIMITS_AT_CAP = { minDistinctHeads: 4, maxStepPerFrame: 0.3,
 
 const pct = (v: number | null) => (v === null ? 'none' : v.toFixed(3))
 
+/** Property 3 as a value: what `expectBeamOnRoute` compares with 'nothing painted off the route'. */
+export function offRouteVerdict(probes: FrameProbe[]): string {
+  const off = probes.filter((p) => p.offRoute > 0)
+  return off.length === 0
+    ? 'nothing painted off the route'
+    : `${off[0]!.offRoute} px painted off the route in frame ${off[0]!.frame}, e.g. at (${off[0]!.offRouteAt!.x}, ${off[0]!.offRouteAt!.y}); ${off.length} such frames`
+}
+
 /**
  * The five properties, each as its own soft assertion, so that one run names every property that fails.
  * `order: false` is for a route of one edge, where property 4 has nothing to compare; the caller says so in its title.
@@ -360,9 +452,9 @@ export function expectBeamOnRoute(g: RouteGeom, probes: FrameProbe[], o: { order
   }
 
   // 3. Route: nothing painted off the route during the whole flight. Mutation: sparks on every edge of the graph.
-  const off = probes.filter((p) => p.offRoute > 0)
+  //    And the chord: a payment drawn as one beam sender > receiver (`chord.qa.ts` shows this very verdict refuse it).
   expect.soft(
-    off.length === 0 ? 'nothing painted off the route' : `${off[0]!.offRoute} px painted off the route in frame ${off[0]!.frame}, e.g. at (${off[0]!.offRouteAt!.x}, ${off[0]!.offRouteAt!.y}); ${off.length} such frames`,
+    offRouteVerdict(probes),
     `P3 route: pixels of the FX canvas outside the route ${g.ids.join(' > ')} (other edges of the graph, the chord ${g.ids[0]} > ${g.ids[g.ids.length - 1]}) stay dark`,
   ).toBe('nothing painted off the route')
 

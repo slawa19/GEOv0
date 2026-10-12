@@ -12,6 +12,8 @@
  *     renamed in the list too.
  *
  * SLICE A, its stand part after T3901 (budgets moved into `qa-stand` with their counts), must turn check 2 green.
+ * DONE 2026-10-12 (039 slice A): the two files are `budgets.qa.ts` and `no-gpu-effects.qa.ts`; this checker exits 0.
+ * Run on the base a5e60d00 it printed "actual: 0 of 6 in qa-stand" and exited 1.
  *
  * What it reads: `playwright test --list` of the stand's own config (collection, no browser, no server) and the pure
  * function `verdict()`. What it does NOT see: whether a listed test would pass, and a skip decided at run time
@@ -43,18 +45,18 @@ const stand = list('qa-stand')
 const perf = list('qa-perf')
 const byFile = (tests) => tests.reduce((m, t) => ({ ...m, [t.file]: (m[t.file] ?? 0) + 1 }), {})
 /**
- * The deterministic budget tests, BY IDENTITY: the title of each, with the file it lives in today (2026-10-12, base
- * 90e17a4c). The file changes when a test moves (`qa-stand` collects `*.qa.ts`), so membership is judged by title. A
+ * The deterministic budget tests, BY IDENTITY: the title of each, with the file it lives in today (2026-10-12, after
+ * the move of 039 slice A). The file changes when a test moves (`qa-stand` collects `*.qa.ts`), so membership is judged by title. A
  * test that is renamed while it moves must be renamed HERE in the same commit - otherwise this check is red, which is
  * the point: a prefix match would let five budgets stay outside the count under new names.
  */
 const BUDGET_TESTS = [
-  ['budgets.qaperf.ts', 'budget: in deep sleep nothing is drawn and no frame is requested; an event is drawn within 48 ms; one payment costs a fixed number of draws'],
-  ['budgets.qaperf.ts', 'budget: one period of the named load reaches the recorded peaks of sparks, edge pulses and node bursts, and leaves no FX object alive'],
-  ['budgets.qaperf.ts', 'budget: one period of the named load is one pass per frame of a recorded drawing volume, with the recorded peak of labels, no blur effects, and nothing left'],
-  ['budgets.qaperf.ts', 'budget: at a sustained 10 fps the FX budget falls, the particle cap follows and holds; at 60 fps both come back'],
-  ['budgets.qaperf.ts', 'budget: a flood of amount labels stops at the cap'],
-  ['no-gpu-effects.qaperf.ts', 'budget: without a GPU no element of the page carries a CSS filter or a backdrop-filter, in any state the stand can open'],
+  ['budgets.qa.ts', 'budget: in deep sleep nothing is drawn and no frame is requested; an event is drawn within 48 ms; one payment costs a fixed number of draws'],
+  ['budgets.qa.ts', 'budget: one period of the named load reaches the recorded peaks of sparks, edge pulses and node bursts, and leaves no FX object alive'],
+  ['budgets.qa.ts', 'budget: one period of the named load is one pass per frame of a recorded drawing volume, with the recorded peak of labels, no blur effects, and nothing left'],
+  ['budgets.qa.ts', 'budget: at a sustained 10 fps the FX budget falls, the particle cap follows and holds; at 60 fps both come back'],
+  ['budgets.qa.ts', 'budget: a flood of amount labels stops at the cap'],
+  ['no-gpu-effects.qa.ts', 'budget: without a GPU no element of the page carries a CSS filter or a backdrop-filter, in any state the stand can open'],
 ]
 const titled = (tests, title) => tests.filter((t) => t.title === title)
 const where = BUDGET_TESTS.map(([file, title]) => ({ file, title, inQaStand: titled(stand, title).length, inQaPerf: titled(perf, title).length }))

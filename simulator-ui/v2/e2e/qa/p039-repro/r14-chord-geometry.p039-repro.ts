@@ -14,6 +14,12 @@
  * day (the candidates are listed with their clearance); a red test built on that would be red by luck of the layout.
  *
  * No slice flips anything here: measurements, green today. They serve SLICE A's stand work (the chord refusal).
+ *
+ * AFTER SLICE A (2026-10-12): the refusal exists - `expectChordTold` in `oracle.ts`, called by `pickRingRoute` - and
+ * its red case is in the gate (`chord.qa.ts`). It is NOT the rule measured here: the oracle asks for an unbroken
+ * stretch of the chord off the route, not for a clear middle (the route n0 > ... > n4 has 9.2 px at the middle, under
+ * the 10 px printed below, and 129 px of its 470 px chord clear in one stretch). A closed route is still handed back:
+ * it has no chord. The numbers of this file stay what they were - the clearance of the middle, a measurement.
  */
 import { expect, test } from '@playwright/test'
 

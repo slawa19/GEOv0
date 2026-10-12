@@ -776,15 +776,30 @@ jobs:
       # of tests that ran is not the recorded one, in either direction, or when a test was skipped
       # (`simulator-ui/v2/e2e/qa/run-stand.mjs`, `EXPECTED.gate`): a filter that selected nothing does
       # not pass. Its form is pinned by `tooling-tests/portable/test_p038_qa_stand_gate.py`.
+      # Since 2026-10-12 (039 slice A, R14) the subset holds the discrete budgets of `e2e/qa/budgets.ts`
+      # too (`budgets.qa.ts`, `no-gpu-effects.qa.ts`: counts on a fake clock, an exact two-sided
+      # ratchet). The constants were recorded on Windows and read the same on this runner in the
+      # scheduled perf job (run 38200925497); from here on this step is what holds them.
+      # A bound of its own (2026-10-12, 039 slice A; BACKLOG 038-2 (c)): the step took 269-286 s on
+      # this runner with 68 tests and is about 6.5 minutes with the budgets; a browser that hangs fails
+      # THIS step by name after 15 minutes and leaves the job (30) the time to upload the report. A
+      # step that times out is a failed step: the job is red.
       - name: Run the Simulator UI QA stand, required subset
+        timeout-minutes: 15
         env:
           PW_E2E_PORT: "41733"
           GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/simulator-qa-stand
         run: npm --prefix simulator-ui/v2 run test:e2e:qa:gate
 
       # The standard Playwright HTML report: the frames of the window matrix are its attachments.
+      # ATTEMPTED on every run since 2026-10-12 (039 slice A): green, red and timed out alike, so that
+      # a report that exists survives a failure and a green run can be looked at. It cannot promise a
+      # report: a step cut off before Playwright wrote one leaves nothing to upload, and the upload
+      # then succeeds empty (`ignore`). `always()` is on this step only - it
+      # decides whether the UPLOAD runs, never the result of the step above: a failed gate step still
+      # fails the job. When an earlier step failed there is no report yet, hence `ignore`.
       - name: Upload the QA stand report
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: simulator-qa-stand-report
@@ -841,12 +856,13 @@ jobs:
           retention-days: 14
 
   # 038 S3 (job added 2026-10-11 with the merge of S2 and S3): the perf project of the QA stand - the
-  # discrete budgets of `e2e/qa/budgets.ts` (counts on a fake clock, a two-sided ratchet) and the
-  # frame-time diagnostics (wall clock, no thresholds), on the dev server and on a production build.
-  # NEVER part of the required gate: `quality-guard.qaperf.ts` runs in real time with a threshold of
-  # 24 fps, and a wall-clock number of a shared runner must not block a pull request. The budgets were
-  # recorded on Windows; if this runner gives other counts, that is a decision about the platform of
-  # the ratchet, not a reason to move a constant here. Form pinned by
+  # frame-time diagnostics (wall clock, no thresholds) and the FPS guard, on the dev server and on a
+  # production build. NEVER part of the required gate: `quality-guard.qaperf.ts` runs in real time
+  # with a threshold of 24 fps, and a wall-clock number of a shared runner must not block a pull
+  # request. The discrete budgets of `e2e/qa/budgets.ts` left this project for the required subset on
+  # 2026-10-12 (039 slice A, R14); the production-build step below still collects them
+  # (`e2e/playwright.qa.config.ts`, `BUDGET_FILES`) - the only run that holds them on a production
+  # build, with three skipped for want of the dev hook. Form pinned by
   # `tooling-tests/portable/test_p038_qa_stand_gate.py`.
   simulator-qa-perf:
     name: Simulator UI QA stand, performance without GPU (scheduled/manual)

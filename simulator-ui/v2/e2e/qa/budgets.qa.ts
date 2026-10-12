@@ -6,8 +6,14 @@
  * "Low FPS" is forced with `page.clock.fastForward(100)`: one animation frame per 100 ms of the product's clock, which
  * is what the product's own meters see on a slow machine (`updateFxBudgetScale` reads the rAF timestamps).
  *
+ * MEMBERSHIP (2026-10-12, 039 slice A, R14): this file is `*.qa.ts`, a member of the counted project `qa-stand`, and
+ * carries no `@extended` tag - the required gate runs all six tests (`run-stand.mjs`, `EXPECTED`). It used to be
+ * `budgets.qaperf.ts`, collected only by `qa-perf`, which runs on a schedule. Nothing here may read a wall clock.
+ *
  * On a production build there is no `window.__geoSim`: the budgets read from FX state are SKIPPED there with the
  * reason printed - not measured, which is not the same as held. Draw counts and label counts are measured on both.
+ * A production build is run by `qa-perf` only (`playwright.qa.config.ts`); in the gate, on the dev server, nothing
+ * skips - and a skip there is a refusal (`run-verdict.mjs`).
  *
  * What these budgets do not see: how long a frame takes; what is painted (the motion oracle of `motion.qa.ts` does);
  * a second render loop that draws on another canvas; work done outside `requestAnimationFrame`.
@@ -16,7 +22,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { BUDGETS, type Budget } from './budgets.js'
 import { buildPerfLoad } from './perf-load.js'
-import { EQ, RUN_ID, boot, fixtureSnapshot100, loopCounters, pausedClockTime, pretendGpu, stepToFrameBoundary, type QaSnapshot } from './stand.js'
+import { EQ, RUN_ID, boot, fixtureSnapshot100, loopCounters, pausedClockTime, pretendGpu, pushFrames, stepToFrameBoundary, type QaSnapshot } from './stand.js'
 
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
 const NEEDS_HOOK = 'reads FX state through window.__geoSim, which exists on the dev server only: on a production build this budget is NOT measured'
@@ -39,8 +45,9 @@ async function bootClocked(page: Page, snap: QaSnapshot, beforeLoad?: (page: Pag
   await stepToFrameBoundary(page) // the one phase mechanism of the stand (`stand.ts`); these counts hold at any `CLOCK_PHASE_MS`
 }
 
-const push = (page: Page, frames: string[]) =>
-  page.evaluate((fs) => { for (const f of fs) (window as unknown as { __qaSse: { push: (t: string) => void } }).__qaSse.push(f) }, frames)
+// Awaited (2026-10-12, 039 slice A): a count taken after frames that the product has not read yet is a count of
+// something else. `pushFrames` returns when the product took every frame, and throws when `taken !== pushed`.
+const push = pushFrames
 
 let seq = 0
 function sse(evt: Record<string, unknown> & { type: string }): string {

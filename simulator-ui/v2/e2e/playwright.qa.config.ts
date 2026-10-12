@@ -6,6 +6,12 @@
  * Two projects, never mixed: `qa-stand` is deterministic (`page.clock`), `qa-perf` measures wall clock.
  * Files are `*.qa.ts` / `*.qaperf.ts` on purpose: the default config (`testDir: ./e2e`) collects `*.spec.ts` only, so the
  * snapshot stand does not pick these up.
+ *
+ * The discrete budgets (`qa/budgets.qa.ts`, `qa/no-gpu-effects.qa.ts`: counts on `page.clock`) are members of `qa-stand`
+ * since 2026-10-12 (039 slice A, R14): the counted project, run by the required gate. Until then `qa-perf` collected
+ * them, which the gate never runs. On a production build (`QA_STAND_SERVER=preview`) `qa-perf` collects them AS WELL:
+ * that is the only run that holds the draw and label counts on a production build, and there three of them skip for
+ * want of the dev hook - which the counted gate would refuse, and `qa-perf` (not counted) reports.
  */
 import { fileURLToPath } from 'node:url'
 
@@ -27,6 +33,8 @@ const AS_USER_ARGS = ['--disable-blink-features=AutomationControlled']
  * no dev hook there, so only what the page itself can measure is recorded (frame times, heap), not FX state.
  */
 const preview = process.env.QA_STAND_SERVER === 'preview'
+/** The deterministic budget files: of `qa-stand` always, of `qa-perf` on a production build too (see the header). */
+const BUDGET_FILES = ['**/budgets.qa.ts', '**/no-gpu-effects.qa.ts']
 
 const use = {
   baseURL,
@@ -55,7 +63,7 @@ export default defineConfig({
     },
     {
       name: 'qa-perf',
-      testMatch: '**/*.qaperf.ts',
+      testMatch: preview ? ['**/*.qaperf.ts', ...BUDGET_FILES] : '**/*.qaperf.ts',
       timeout: 300_000,
       use: {
         ...use,

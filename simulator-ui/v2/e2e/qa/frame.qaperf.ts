@@ -5,7 +5,7 @@
  * Nothing here is a threshold on time: a frame time is a property of the machine the run happened on. The tests fail
  * only when the measurement itself is void - no product frames, the named load not pushed in full, labels not
  * animating (BACKLOG 034-6 (k): until S3 the stand paused them and the numbers described a lighter page).
- * The discrete, machine-independent budgets are in `budgets.qaperf.ts`.
+ * The discrete, machine-independent budgets are in `budgets.qa.ts` (project `qa-stand`).
  *
  * Load: `S3-MIXED-V1` (`perf-load.ts`). Every window starts from a sleeping render loop and from slot 0, so the
  * windows at x1, x4 and x8 carry the same events. Output: `qa-perf-summary-<dev|preview>.json` in the output folder -
@@ -22,7 +22,7 @@ import { expect, test, type CDPSession, type Page } from '@playwright/test'
 import { LOAD_FINGERPRINT } from './budgets.js'
 import { buildPerfLoad } from './perf-load.js'
 import { measureWindow, med, summarizeWindow, type RawWindow, type WindowSummary } from './perf-measure.js'
-import { boot, fixtureSnapshot100, installCssClockSync, waitLoopAsleep } from './stand.js'
+import { boot, fixtureSnapshot100, installCssClockSync, pushFrames, waitLoopAsleep } from './stand.js'
 
 const RUNS = 3
 const NOISE_WINDOWS = 10
@@ -83,7 +83,7 @@ test('the load is the named one, and the perf boot leaves the CSS animation of a
   for (const k of ['1', '3', '6']) expect(c.byRouteEdges[k] ?? 0, `a window contains payments over ${k} edge(s)`).toBeGreaterThanOrEqual(10)
 
   await bootPerf(page)
-  await page.evaluate((f) => (window as unknown as { __qaSse: { push: (t: string) => void } }).__qaSse.push(f), load.frames(0, 1, 'css')[0]!)
+  await pushFrames(page, [load.frames(0, 1, 'css')[0]!])
   const inner = page.locator('.floating-label-inner').first()
   await expect(inner).toBeAttached()
   const state = await inner.evaluate((el) => el.getAnimations().map((a) => a.playState))
@@ -113,6 +113,9 @@ for (let run = 1; run <= RUNS; run += 1) {
     const mb = (b: number) => Math.round((b / 1048576) * 100) / 100
     expect(long.draws, 'heap window: the product drew while the heap was watched').toBeGreaterThan(0)
     expect(long.pushed, 'heap window: the whole load was pushed into the stream').toBe(n)
+    // 2026-10-12 (039 slice A; BACKLOG 038-4 (a)): the short windows refuse a load the product did not take in full
+    // (`summarizeWindow`); the minute of the heap did not, and a stream that stopped being read still gave a heap number.
+    expect(long.taken, `heap window: the product read and handled every event that was pushed (${long.pushed}) - a load that did not arrive leaves the heap flat for the wrong reason`).toBe(long.pushed)
     const row: Run = {
       x1, x4, x8,
       heapStartMb: heap0 === null ? null : mb(heap0),

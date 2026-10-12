@@ -11,6 +11,9 @@
  * error toasts, the trust line and clearing panels, HUD dropdowns, the metrics panel, the history overlay, the loading
  * and error messages, the dev perf overlay (the window matrix of slice S2 owns the recipes).
  *
+ * MEMBERSHIP (2026-10-12, 039 slice A, R14): `*.qa.ts`, the counted project `qa-stand`, in the required gate; it was
+ * `no-gpu-effects.qaperf.ts`. On a production build (run by `qa-perf` only) the census is skipped: no dev hook.
+ *
  * It does not see: `box-shadow`, `text-shadow`, `opacity`, `mix-blend-mode`, masks, canvas `shadowBlur` (a separate
  * budget), pseudo-elements, an effect that appears only on hover or focus, and what any of it costs in time.
  */
@@ -18,7 +21,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { BUDGETS, CSS_EFFECTS_NO_GPU, type Budget } from './budgets.js'
 import { buildPerfLoad } from './perf-load.js'
-import { boot, fixtureSnapshot100, pausedClockTime, pretendGpu, screenNodes, selectHub, type QaSnapshot } from './stand.js'
+import { boot, fixtureSnapshot100, pausedClockTime, pretendGpu, pushFrames, screenNodes, selectHub, type QaSnapshot } from './stand.js'
 
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
 const snapshot = fixtureSnapshot100()
@@ -43,8 +46,7 @@ const census = (page: Page): Promise<string[]> => page.evaluate(() => {
   return [...by].sort().map(([k, n]) => `${n} x ${k}`)
 })
 
-const push = (page: Page, frames: string[]) =>
-  page.evaluate((fs) => { for (const f of fs) (window as unknown as { __qaSse: { push: (t: string) => void } }).__qaSse.push(f) }, frames)
+const push = pushFrames // awaited: returns when the product took every frame (`stand.ts`)
 
 async function bootNeighbors(page: Page, snap: QaSnapshot, gpu: boolean) {
   await boot(page, {

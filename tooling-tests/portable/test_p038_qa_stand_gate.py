@@ -12,6 +12,12 @@ WHAT THIS PROVES. Four files agree: `simulator-ui/v2/package.json` (the scripts 
 * the required job `ui-smoke` - every pull request, no condition - has a step that runs the gate
   entry, and that step is neither conditional nor allowed to fail;
 * the gate entry compares the number of tests that ran with a recorded number and refuses a skip;
+* that step has a `timeout-minutes` of its own, under the job's, and the HTML report of the step is
+  uploaded on every run (`if: always()` on the UPLOAD step only), so that the evidence of a red or a
+  timed-out step survives it (039 slice A, 2026-10-12);
+* no file of the counted project imports the stand's wall-clock instrument (`perf-measure.ts`): the
+  counted project is counts on a fake clock, and a machine-dependent number must not decide a pull
+  request (039 slice A, R14);
 * the scheduled job runs the whole stand and uploads its HTML report;
 * two things the spec forbids are absent: `waitForTimeout` in the stand, and a product branch on
   "am I under the QA stand".
@@ -30,11 +36,18 @@ locally by:
     npm --prefix simulator-ui/v2 run test:e2e:qa:gate
 
 WHAT SURVIVED THE ADVERSARIAL PASS ON a7f7e1a6 AND IS STILL NOT SEEN HERE (2026-10-11), by name: `continue-on-error`
-on the JOB, or given as an expression instead of `true`; a `shell:` or a command ending in `|| true`; a `needs:` that
+on the JOB, or given as an expression instead of `true`; a `shell:` that swallows the exit code; a `needs:` that
 hangs the required job on a scheduled one; `paths-ignore` on the trigger; and the CONTENT of the browser flags -
 `NO_GPU_ARGS = []` passes this file. The last one is checked where it can be, in the browser: `boot()` of the stand
-refuses a page whose root says `data-gpu="1"` (`e2e/qa/stand.ts`). The five-minute budget of the step is a number in
-the spec, not a `timeout-minutes` here.
+refuses a page whose root says `data-gpu="1"` (`e2e/qa/stand.ts`). A `|| true` appended to the command of the step IS
+seen (corrected 2026-10-12, BACKLOG 038-2 (g): this text used to name it a blind spot): the command of the step is
+compared whole and exactly one such step is required.
+
+ABOUT THE TIMEOUT AND `always()` (2026-10-12). What is checked is that the number exists and is under the job's, and
+that `always()` sits on the upload step and not on the gate step. Whether a step that times out fails the job, and
+whether a later `always()` step leaves the job red, is the behaviour of GitHub Actions and is NOT executed here; and
+that the number is ENOUGH for the step is shown only by the duration in the log of the step. The wall-clock check sees
+an import of `perf-measure` or a call of its two functions - not a threshold on `performance.now()` written by hand.
 
 Every check goes through `violations()` so that the counter-check at the bottom can feed it broken
 inputs and see it complain (section 9, anti-vacuum).
@@ -68,6 +81,8 @@ def _inputs() -> dict[str, Any]:
         "config": (_UI / "e2e" / "playwright.qa.config.ts").read_text(encoding="utf-8"),
         "runner": (_UI / "e2e" / "qa" / "run-stand.mjs").read_text(encoding="utf-8"),
         "verdict": (_UI / "e2e" / "qa" / "run-verdict.mjs").read_text(encoding="utf-8"),
+        # The files of the counted project, by the glob of its `testMatch` (`**/*.qa.ts` under `e2e/qa`).
+        "counted": {p.name: p.read_text(encoding="utf-8") for p in sorted((_UI / "e2e" / "qa").rglob("*.qa.ts"))},
     }
 
 
@@ -139,6 +154,22 @@ def violations(inputs: dict[str, Any]) -> list[str]:
             found.append(f"the gate step is conditional: {step['if']}")
         if step.get("continue-on-error") in (True, "true"):
             found.append("the gate step is allowed to fail")
+        # 039 slice A: a bound of its own, under the job's - a hung browser fails THIS step, named, and leaves the job
+        # the time to upload the report.
+        limit, job_limit = step.get("timeout-minutes"), smoke.get("timeout-minutes")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            found.append(f"the gate step has no timeout-minutes of its own: {limit!r}")
+        elif not isinstance(job_limit, int) or limit >= job_limit:
+            found.append(f"the gate step's timeout-minutes ({limit}) is not under the job's ({job_limit!r})")
+    steps = [s for s in smoke.get("steps", []) if isinstance(s, dict)]
+    reports = [
+        i for i, s in enumerate(steps)
+        if str(s.get("uses", "")).startswith("actions/upload-artifact@") and s.get("with", {}).get("name") == "simulator-qa-stand-report"
+    ]
+    if len(reports) != 1 or steps[reports[0]].get("if") != "always()":
+        found.append("job ui-smoke does not upload the report of the gate step on every run (one upload step, if: always())")
+    elif gate_steps and reports[0] < steps.index(gate_steps[0]):
+        found.append("job ui-smoke uploads the report of the gate step before the step has run")
     ports = [str(step.get("env", {}).get("PW_E2E_PORT")) for step in smoke.get("steps", []) if isinstance(step, dict) and "PW_E2E_PORT" in step.get("env", {})]
     if len(ports) != len(set(ports)):
         found.append(f"steps of ui-smoke share a Playwright port: {ports}")
@@ -168,6 +199,14 @@ def violations(inputs: dict[str, Any]) -> list[str]:
                 found.append(f"job {job_id}, which runs on pull requests, runs the perf project: {' '.join(run.split())}")
     if "--project=qa-perf" in runner or ".qaperf" in runner:
         found.append("run-stand.mjs, the entry of the required step, selects the perf project")
+    # 7. The counted project holds no wall-clock window (039 slice A, R14: the deterministic budgets moved in, the
+    #    frame-time measurements must not follow them).
+    counted: dict[str, str] = inputs["counted"]
+    if len(counted) < 10:
+        found.append(f"only {len(counted)} files of the counted project were found; the wall-clock scan would be over nothing")
+    for name, text in counted.items():
+        if re.search(r"perf-measure|\bmeasureWindow\s*\(|\bsummarizeWindow\s*\(", text):
+            found.append(f"{name}, a file of the counted project, uses the wall-clock window of perf-measure.ts")
     return found
 
 
@@ -212,6 +251,14 @@ _MUTATIONS = {
         lambda i: _gate_step(i).update({"run": _GATE_COMMAND + " && npm --prefix simulator-ui/v2 run test:e2e:qa:perf"}), "runs the perf project"),
     "the perf job loses its production build": (
         lambda i: [s.get("env", {}).pop("QA_STAND_SERVER", None) for s in i["workflow"]["jobs"]["simulator-qa-perf"]["steps"]], "once on a production build"),
+    "the gate report is uploaded only when the step failed": (
+        lambda i: [s.update({"if": "failure()"}) for s in i["workflow"]["jobs"]["ui-smoke"]["steps"] if s.get("with", {}).get("name") == "simulator-qa-stand-report"],
+        "does not upload the report of the gate step on every run"),
+    "the gate step has no timeout of its own": (lambda i: _gate_step(i).pop("timeout-minutes"), "no timeout-minutes of its own"),
+    "the gate step may run as long as the job": (
+        lambda i: _gate_step(i).update({"timeout-minutes": i["workflow"]["jobs"]["ui-smoke"]["timeout-minutes"]}), "is not under the job's"),
+    "a wall-clock window enters the counted project": (
+        lambda i: i["counted"].update({"frame.qa.ts": "import { measureWindow } from './perf-measure.js'\n"}), "uses the wall-clock window"),
     "the scheduled job runs on every pull request": (lambda i: i["workflow"]["jobs"]["simulator-qa-stand"].pop("if"), "not the scheduled/manual job"),
 }
 
