@@ -14,6 +14,17 @@
  *
  * SLICE B must turn the three red tests green (legend, data tokens, switcher); plain failing tests, no `test.fail`.
  *
+ * STATE AFTER SLICE B, PR 1 (2026-10-12). R2 and the browser half of R3 are GREEN and were re-read against the design
+ * decisions of slice B:
+ *  - R2 asked for all four entries on the ring of six even persons. Decision 7 says an entry is shown ONLY for a
+ *    feature the snapshot contains (and a hub is only `type: "hub"`), so the first form now contradicts the
+ *    contract: the scene of R2 is the ring with a net debtor, a net creditor, a frozen participant and a hub in it,
+ *    and the ring as it is must show NO debtor, creditor, frozen or hub entry (the path round the first form: a
+ *    legend that always lists everything).
+ *  - R3: the neutral token is walked with the four.
+ * The counted checks of the same things are in the stand's gate: `../data-colours.qa.ts`.
+ * R4 (the switcher) is still RED: it belongs to PR 3 of the slice (themes and the stand).
+ *
  * LIMITS. (1) "The canvas paints with the same colours as the legend" is NOT judged: the legend's swatch is compared
  * with the token, and whether the renderer consumes that token is the mapping tier's (`src/p039-repro/r03-...`) and the
  * implementing slice's to show. (2) The empty-scene exception of the legend (P-2) is not exercised. (3) Words of an
@@ -23,7 +34,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { boot, loopCounters, ringSnapshot, waitLoopAsleep } from '../stand.js'
-import { ALL_THEME_IDS, COLOURED_ROLES, DATA_TOKEN, LEGEND, LEGEND_ROLES, THEME } from './contract.js'
+import { ALL_THEME_IDS, COLOURED_ROLES, DATA_TOKEN, LEGEND, LEGEND_ENTRIES_ALL, LEGEND_ROLES, NEUTRAL_TOKEN, THEME } from './contract.js'
 
 const note = (id: string, row: unknown) => {
   console.log(`[039 ${id}]`, JSON.stringify(row))
@@ -62,11 +73,21 @@ const resolvedColour = (page: Page, token: string) =>
     return c
   }, { token, root: THEME.root })
 
-test.beforeEach(async ({ page }) => {
-  await boot(page, { snapshot: ringSnapshot(), clock: false })
+/** The ring of six with the four features R2 names put into it: a net debtor, a net creditor, a frozen participant, a hub. */
+function ringWithRoles() {
+  const s = ringSnapshot()
+  Object.assign(s.nodes[0]!, { net_sign: -1, net_balance_atoms: '1000' })
+  Object.assign(s.nodes[1]!, { net_sign: 1, net_balance_atoms: '1000' })
+  Object.assign(s.nodes[2]!, { status: 'frozen' })
+  Object.assign(s.nodes[3]!, { type: 'hub' })
+  return s
+}
+
+test.beforeEach(async ({ page }, info) => {
+  await boot(page, { snapshot: info.title.startsWith('039 R2 -') ? ringWithRoles() : ringSnapshot(), clock: false })
 })
 
-test('039 R2 - a legend is visible: an entry in words for debtor, creditor, frozen and hub, and each colour swatch has the colour of its data token (today: no legend)', async ({ page }) => {
+test('039 R2 - a legend is visible: an entry in words for debtor, creditor, frozen and hub (the scene has each), and each colour swatch has the colour of its data token', async ({ page }) => {
   await expect(page.locator('canvas.canvas').first(), 'counter-check: the scene is on screen').toBeVisible()
   const legend = page.locator(LEGEND.root)
   note('R2 legend', { legends: await legend.count() })
@@ -90,10 +111,19 @@ test('039 R2 - a legend is visible: an entry in words for debtor, creditor, froz
   note('R2 legend entries', rows)
   const colours = COLOURED_ROLES.map((r) => (rows[r] as { swatch?: string }).swatch)
   expect.soft(new Set(colours).size, 'debtor, creditor and frozen are three different colours').toBe(COLOURED_ROLES.length)
+  const shown = await legend.locator('[data-legend-role]').evaluateAll((els) => els.map((el) => el.getAttribute('data-legend-role')))
+  expect.soft(shown, 'entries in the fixed order, only of what this scene contains (no unknown, no organisation)').toEqual(LEGEND_ENTRIES_ALL.filter((e) => e !== 'unknown' && e !== 'organisation'))
+})
+
+test('039 R2 (counter-form, slice B) - the ring of six even persons shows NO entry for a debtor, a creditor, a freeze or a hub: the legend lists what the scene contains', async ({ page }) => {
+  const legend = page.locator(LEGEND.root)
+  await expect(legend).toBeVisible({ timeout: 2000 })
+  for (const role of LEGEND_ROLES) await expect.soft(legend.locator(LEGEND.entry(role)), `no entry for "${role}" in a scene without one`).toHaveCount(0)
+  expect(await legend.locator('[data-legend-role]').count(), 'counter-check: the legend does have entries (even, person)').toBe(2)
 })
 
 test('039 R3 (browser) - the data colour tokens resolve to ONE value: in every theme the switcher offers (switched live), and under every theme id that has tokens, the frozen one included (today: not declared)', async ({ page }) => {
-  const names = Object.values(DATA_TOKEN)
+  const names = [...Object.values(DATA_TOKEN), NEUTRAL_TOKEN]
   const offered = await offeredThemes(page)
   const viaUi: Record<string, Record<string, string>> = {}
   for (const theme of offered) {
