@@ -134,3 +134,32 @@ describe('Legend - the direction of a trust line', () => {
     }
   })
 })
+
+describe('Legend - the frozen swatch shows its dashed outline', () => {
+  const frozenScene: GraphNode[] = [...NODES, { id: 'f', name: 'f', type: 'person', status: 'frozen', viz_shape_key: 'circle', net_sign: 1 }]
+
+  it('the outline is a circle of separate dashes round the swatch, and the fill is still the freeze colour of the palette', () => {
+    const { host, done } = mount(Legend, { ...base, nodes: frozenScene })
+    const swatch = host.querySelector<HTMLElement>('[data-legend-role="frozen"] [data-legend-swatch]')!
+    expect(rgbOf(swatch.style.backgroundColor)).toBe(rgbOf(DATA_PALETTE_DEFAULT.frozen))
+    const circle = swatch.querySelector('[data-legend-dash] circle')!
+    expect(circle, 'the dashed outline').not.toBeNull()
+    const [dash, gap] = circle.getAttribute('stroke-dasharray')!.split(/\s+/).map(Number) as [number, number]
+    const total = Number(circle.getAttribute('pathLength'))
+    expect(dash).toBeGreaterThan(0)
+    expect(gap, 'there IS a gap between dashes').toBeGreaterThan(0)
+    expect(Number.isInteger(Math.round((total / (dash + gap)) * 1e6) / 1e6), 'a whole number of dashes: no seam where the circle closes').toBe(true)
+    // On screen (r = 7 px): each dash and each gap is long enough to be told apart at legend size.
+    const unitPx = (2 * Math.PI * Number(circle.getAttribute('r'))) / total
+    expect(dash * unitPx, 'dash length in px').toBeGreaterThanOrEqual(2.5)
+    expect(gap * unitPx, 'gap length in px').toBeGreaterThanOrEqual(2)
+    done()
+  })
+
+  it('only the frozen swatch carries it', () => {
+    const { host, done } = mount(Legend, { ...base, nodes: frozenScene, trustLineColor: '#64748b' })
+    expect(host.querySelectorAll('[data-legend-dash]')).toHaveLength(1)
+    expect(host.querySelector('[data-legend-role="creditor"] [data-legend-dash]')).toBeNull()
+    done()
+  })
+})
