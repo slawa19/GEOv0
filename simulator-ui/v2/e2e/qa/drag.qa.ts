@@ -31,7 +31,11 @@ async function draggableNodes(page: Page, delta: Pt): Promise<Array<[string, Pt]
 
 const VIEW = { x0: 140, x1: 1140, y0: 150, y1: 560 }
 
-/** A point of the canvas far from every node: a press there pans the camera instead of picking a node. */
+/**
+ * A point of the canvas far from every node: a press there pans the camera instead of picking a node.
+ * NOT the same as `emptyCanvasPoint` of `surfaceMatrix.ts` (the first point clear of nodes AND lines that hit-tests as the
+ * canvas): this one is the farthest from every node in a fixed box and asks nothing of lines or of the DOM above.
+ */
 async function emptyPoint(page: Page): Promise<Pt> {
   const nodes = [...(await screenNodes(page)).values()]
   let best: Pt = { x: 0, y: 0 }

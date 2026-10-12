@@ -7,9 +7,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { pickRingRoute } from './oracle.js'
-import { RUN_ID, SCENARIO_ID, EQ, boot, fxCounts, pushEvent, ringSnapshot, screenNodes, txUpdated } from './stand.js'
-
-const RING = ['a', 'b', 'c', 'd', 'e', 'f']
+import { RING, RUN_ID, SCENARIO_ID, EQ, boot, fxCounts, pushEvent, ringSnapshot, screenNodes, txUpdated } from './stand.js'
 
 /** Let the page render `n` frames in real time. */
 async function realFrames(page: Page, n: number): Promise<void> {

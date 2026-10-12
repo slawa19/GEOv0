@@ -117,7 +117,7 @@ Per-object `shadowBlur` на Canvas 2D — один из самых дороги
 
 ```powershell
 $env:PW_E2E_PORT = "5281"
-npm --prefix simulator-ui/v2 run test:e2e:qa -- budgets.qa no-gpu-effects.qa      # бюджеты, dev-сервер (срез, не гейт)
+npm --prefix simulator-ui/v2 run test:e2e:qa -- budgets.qa no-gpu-effects.qa      # бюджеты, dev-сервер (срез: debug-only, не гейт)
 npm --prefix simulator-ui/v2 run test:e2e:qa:perf -- quality-guard.qaperf          # регулятор качества, настенные часы
 $env:QA_STAND_SERVER = "preview"                                                   # бюджеты на production-сборке:
 npm --prefix simulator-ui/v2 run test:e2e:qa:perf -- budgets.qa no-gpu-effects.qa  # их там собирает только qa-perf

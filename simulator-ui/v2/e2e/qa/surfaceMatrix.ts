@@ -76,6 +76,7 @@ export type Entry = {
 /**
  * Physics has stopped moving nodes (to a pixel, two equal reads in a row). The matrix boots without waiting for it -
  * a menu does not need a still graph - so every gesture ON the canvas waits here first. A condition, not a sleep.
+ * NOT the same as `waitLayoutStill` of `stand.ts` (to 0.1 px, 3 reads, every 150 ms): this one is coarser and sooner.
  */
 async function layoutStill(page: Page): Promise<void> {
   let prev = ''
@@ -114,7 +115,11 @@ export async function freeEdge(page: Page): Promise<{ from: string; to: string; 
   throw new Error('038 matrix: the middle of every trust line is under a DOM surface')
 }
 
-/** A point of the canvas away from every node and line: a click there is "outside" for the product. */
+/**
+ * A point of the canvas away from every node and line: a click there is "outside" for the product.
+ * NOT the same as `emptyPoint` of `drag.qa.ts` (the point FARTHEST from every node in a fixed box, lines and DOM not asked):
+ * this one is the first point 60 px from nodes and 30 px from lines that hit-tests as the canvas.
+ */
 export async function emptyCanvasPoint(page: Page): Promise<Pt> {
   await layoutStill(page) // a node that is still drifting could arrive under the click
   const nodes = await screenNodes(page)

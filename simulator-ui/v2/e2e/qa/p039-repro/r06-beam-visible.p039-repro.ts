@@ -38,10 +38,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { ALPHA_MIN, MOTION_LIMITS, NODE_CLEAR_PX, pickRingRoute, probeFrame, summarize, type EdgeSummary, type FrameProbe, type RouteGeom } from '../oracle.js'
-import { boot, fixtureSnapshot100, frames, pushEvent, ringSnapshot, screenNodes, txUpdated, type Pt } from '../stand.js'
+import { RING, boot, fixtureSnapshot100, frames, pushEvent, ringSnapshot, screenNodes, txUpdated, type Pt } from '../stand.js'
 import { routeGeom } from './route7.js'
 
-const RING = ['a', 'b', 'c', 'd', 'e', 'f']
 /** The product holds no spark for this long after a flight: it is over (legs follow each other at once; 30 frames = 480 ms). */
 const QUIET_FRAMES = 30
 /** The bound of the wait: 8 s. Six legs of a whole second each fit; a flight still running then is an error. */

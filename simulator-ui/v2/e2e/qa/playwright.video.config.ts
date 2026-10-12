@@ -6,7 +6,8 @@
  *
  * Files are `*.qavideo.ts`: neither the snapshot stand (`*.spec.ts`) nor the QA stand (`*.qa.ts`, `*.qaperf.ts`)
  * collects them. Run: `npm run test:e2e:qa:video`. Videos land in the Playwright output directory, one folder a test;
- * the HTML report next to it embeds them.
+ * the HTML report next to it embeds them. On CI: a step of the scheduled job `simulator-qa-stand` (since 2026-10-12, 039
+ * slice A), whose one artifact holds the stand's report with the gallery, this report and the raw videos. Never on a pull request.
  */
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

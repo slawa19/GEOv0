@@ -171,8 +171,23 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-12, 039 slice A (hardening of the QA stand step): portable 436 -> 440. Four more mutations in the same module: the
 #: report of the gate step uploaded only on failure, the gate step without a `timeout-minutes` of its own, that number not under
 #: the job's, and a wall-clock window (`perf-measure.ts`) imported by a file of the counted project.
+#:
+#: 2026-10-12, 039 slice A (`test:e2e:qa` goes through the runner as a debug scope): portable 440 -> 444. In the same module one
+#: mutation is replaced (the plain script ran the snapshot config -> the plain script runs Playwright past the runner again) and
+#: four are added: another script runs the counted project past the runner, a script runs the stand config with no project
+#: named, the debug run prints the line of a counted verdict, every scope is judged as a debug run.
+#:
+#: 2026-10-12, 039 slice A (the owner's videos are recorded by the scheduled job `simulator-qa-stand` and leave it with the
+#: gallery in one artifact): portable 444 -> 454. Ten more mutations in the same module: the video step removed, allowed to
+#: fail, or writing over the stand's report; a second artifact; the one artifact without the videos, without the gallery, not
+#: uploaded on every run, or uploaded before the videos are recorded; a pull-request job recording videos; a video config
+#: that records only on failure.
+#:
+#: 2026-10-12, 039 slice A, fix-delta of the external review of 0d0deae3 (the debug scope was escaped by `--`): portable 454 -> 457.
+#: Three more mutations in the same module: the debug run accepts the option terminator, the runner builds its arguments past
+#: the checked function, the debug run writes where a counted run does. (The selfcheck it runs through node went 25 -> 56 cases.)
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 440,
+    "portable": 457,
     "powershell": 235,
 }
 

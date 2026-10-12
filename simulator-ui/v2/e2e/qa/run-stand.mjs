@@ -1,18 +1,29 @@
 /**
- * 038 S2 - the QA stand as a gate: one entry, two scopes.
+ * 038 S2 - the QA stand as a gate: one entry, two counted scopes and one debug scope.
  *
  *   node e2e/qa/run-stand.mjs gate   the required subset: project `qa-stand` without the tests tagged `@extended`
  *                                    (clock, pixels, the window matrix in the `hud` theme, axe). No wall-clock thresholds.
  *   node e2e/qa/run-stand.mjs full   the whole `qa-stand` project: the same plus the frames and axe of the other three themes.
+ *   node e2e/qa/run-stand.mjs debug [playwright arguments]
+ *                                    a SLICE of the `qa-stand` project, for debugging (`npm run test:e2e:qa -- --grep ...`).
  *
- * Both write the standard Playwright HTML report (frames of the matrix are its attachments) into `<output dir>-report`
- * and REFUSE, exit 1, when the number of tests that ran is not the recorded one - in either direction (AGENTS.md §5,
- * §6): a filter that selected nothing, a file that stopped being collected and an unrecorded new test fail alike.
- * Refused too: a skipped test, a flaky one (retries are off), and - in the gate - a test that is an expected failure.
- * The verdict is `verdict()` of `run-verdict.mjs`, a pure function exercised by `run-verdict.selfcheck.mjs`.
+ * `gate` and `full` write the standard Playwright HTML report (frames of the matrix are its attachments) into
+ * `<output dir>-report` and REFUSE, exit 1, when the number of tests that ran is not the recorded one - in either
+ * direction (AGENTS.md §5, §6): a filter that selected nothing, a file that stopped being collected and an unrecorded
+ * new test fail alike. Refused too: a skipped test, a flaky one (retries are off), and - in the gate - a test that is
+ * an expected failure. The verdict is `verdict()` of `run-verdict.mjs`, a pure function exercised by
+ * `run-verdict.selfcheck.mjs`. The only extra argument they accept is `--repeat-each=N` (the expected number is multiplied).
  *
- * The only extra argument accepted is `--repeat-each=N` (the expected number is multiplied). To run a slice, use
- * `npm run test:e2e:qa -- --grep ...`: a slice is not the gate and is not counted.
+ * `debug` (039 slice A, 2026-10-12) is NOT a gate and says so in its first and its last line. Until that date
+ * `npm run test:e2e:qa` was a bare `playwright test`: a run nobody judged, whose "N passed" read like a result of the
+ * stand. It now comes here: the filter is the caller's, the number that ran is compared with nothing, and the line it
+ * ends with carries no "recorded" and names the two counted entries. It still exits non-zero on a failed test, on a
+ * filter that selected nothing, on a skip and on a flaky test, so a red slice is red; a green slice proves only itself.
+ * It writes no HTML report and its files have their own names (`<out>-debug-result.json`; the HTML variables point at
+ * `<out>-debug-report`): the result and the report of a counted run are never overwritten by it.
+ * Its arguments are a CLOSED list (`debugArgProblems` in `run-verdict.mjs`): file filters, `--grep` and a few options
+ * that pace a run. Everything else is refused - `--`, `--config`, `--project`, `--reporter`, `--output`, `--retries`
+ * among them. The first form (refuse two options, pass the rest) was escaped at runtime by `-- <file>`: see there.
  *
  * What this does NOT see: the composition behind the number (one test replaced by another passes), and anything about
  * the perf project (`qa-perf`, slice S3) - it is not run here.
@@ -23,7 +34,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { exclusionProblems, verdict } from './run-verdict.mjs'
+import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verdict } from './run-verdict.mjs'
 
 /**
  * Tests that run, by scope. Every movement is a dated line:
@@ -53,8 +64,12 @@ import { exclusionProblems, verdict } from './run-verdict.mjs'
  * - 2026-10-12 (039 slice A, the chord): gate 78 -> 80, full 201 -> 203. Two tests of `chord.qa.ts`: the refusal of a
  *   route whose chord cannot be told from it, on made-up points; and, on an open six-leg route over seven nodes,
  *   property 3 accepting the beam on its legs and refusing the same payment drawn as one beam sender > receiver.
+ * - 2026-10-12 (039 slice A, property 4 by intervals; BACKLOG 038-1 (a)): gate 80 -> 81, full 203 -> 204. One test,
+ *   `leg-order.qa.ts`: the judge of leg order on made-up legs - the cases the count of common frames accepted
+ *   (alternating frames, a leg inside a dark hole of the leg before it), the handoff allowance to the frame, an
+ *   unpainted leg, and the same verdicts at a third of the tempo. No browser page; under a second.
  */
-export const EXPECTED = { gate: 80, full: 203 }
+export const EXPECTED = { gate: 81, full: 204 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
@@ -64,17 +79,28 @@ export const EXPECTED = { gate: 80, full: 203 }
  */
 export const NOT_IN_GATE = []
 
+/** The first and the last line of a debug run. A guard reads this text (`tooling-tests/portable/test_p038_qa_stand_gate.py`). */
+export const DEBUG_BANNER = 'DEBUG-ONLY, NOT A GATE'
+
 const scope = process.argv[2]
 const extra = process.argv.slice(3)
-if (!(scope in EXPECTED)) {
-  console.error(`run-stand: the scope is "gate" or "full", got "${scope ?? ''}"`)
+const debug = scope === 'debug'
+if (!debug && !Object.hasOwn(EXPECTED, scope ?? '')) {
+  console.error(`run-stand: the scope is "gate", "full" or "debug", got "${scope ?? ''}"`)
   process.exit(1)
 }
 let repeat = 1
-for (const a of extra) {
+// A debug run accepts a CLOSED list of arguments (`debugArgProblems`): what is not named there is refused, the option
+// terminator `--` first of all.
+const refused = debug ? debugArgProblems(extra) : []
+if (refused.length) {
+  for (const problem of refused) console.error(`run-stand: ${problem}`)
+  process.exit(1)
+}
+for (const a of debug ? [] : extra) {
   const m = /^--repeat-each=(\d+)$/.exec(a)
   if (!m) {
-    console.error(`run-stand: "${a}" is not accepted - the gate runs whole. For a slice: npm run test:e2e:qa -- ${a}`)
+    console.error(`run-stand: "${a}" is not accepted - the gate runs whole. For a slice (debug-only, not counted): npm run test:e2e:qa -- ${a}`)
     process.exit(1)
   }
   repeat = Number(m[1])
@@ -89,15 +115,15 @@ if (malformed.length) {
 const here = fileURLToPath(new URL('.', import.meta.url))
 const root = resolve(here, '..', '..')
 const out = resolve(process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR ?? resolve(root, '..', '..', '.local-run', 'playwright', 'simulator', 'qa'))
-const resultFile = `${out}-result.json`
-const reportDir = `${out}-report`
+const { resultFile, reportDir } = destinations(scope, out)
 rmSync(resultFile, { force: true })
+if (debug) console.log(`run-stand [debug]: ${DEBUG_BANNER} - a slice of the qa-stand project chosen by: ${extra.join(' ') || '(no filter)'}`)
 
 const cli = createRequire(import.meta.url).resolve('@playwright/test/cli')
 // No retries: a test that passes on the second try failed on the first, and the verdict refuses a flaky run anyway.
-const args = [cli, 'test', '--config=e2e/playwright.qa.config.ts', '--project=qa-stand', '--retries=0', '--reporter=list,json,html', ...extra]
-const literal = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-if (scope === 'gate') args.push(`--grep-invert=${['@extended', ...NOT_IN_GATE.map((t) => literal(t.title))].join('|')}`)
+// The stand's own options (config, project, no retries, the reporters whose JSON the verdict reads) come first in every
+// scope: `playwrightArgs` of `run-verdict.mjs`, where the selfcheck holds the order.
+const args = [cli, ...playwrightArgs(scope, extra, NOT_IN_GATE.map((t) => t.title))]
 const started = Date.now()
 const run = spawnSync(process.execPath, args, {
   cwd: root,
@@ -110,14 +136,23 @@ const run = spawnSync(process.execPath, args, {
     PLAYWRIGHT_HTML_OUTPUT_DIR: reportDir,
     PLAYWRIGHT_HTML_REPORT: reportDir,
     PLAYWRIGHT_HTML_OPEN: 'never',
+    PW_TEST_HTML_REPORT_OPEN: 'never',
+    // Variables of the caller's shell that would add a reporter or move the JSON: set here, so the caller's are not read.
+    PW_TEST_REPORTER: '',
+    PLAYWRIGHT_JSON_OUTPUT_DIR: '',
   },
 })
 const seconds = Math.round((Date.now() - started) / 1000)
 
 const report = existsSync(resultFile) ? JSON.parse(readFileSync(resultFile, 'utf8')) : null
-const v = verdict({ scope, recorded: EXPECTED[scope], repeat, playwrightStatus: run.status, report, notInGate: NOT_IN_GATE })
+const v = verdict({ scope, recorded: debug ? null : EXPECTED[scope], repeat, playwrightStatus: run.status, report, notInGate: debug ? [] : NOT_IN_GATE })
 const s = report?.stats
-console.log(`run-stand [${scope}]: ran ${v.ran} (as expected ${s?.expected ?? 0}, failed ${s?.unexpected ?? 0}, flaky ${s?.flaky ?? 0}), skipped ${s?.skipped ?? 0}, `
-  + `recorded ${v.want}; ${seconds} s; HTML report: ${reportDir}`)
+const ran = `ran ${v.ran} (as expected ${s?.expected ?? 0}, failed ${s?.unexpected ?? 0}, flaky ${s?.flaky ?? 0}), skipped ${s?.skipped ?? 0}`
+// The mark of a counted verdict is "recorded N" - the line a CI log is read by. A run that was not counted never prints it.
+if (v.counted) console.log(`run-stand [${scope}]: ${ran}, recorded ${v.want}; ${seconds} s; HTML report: ${reportDir}`)
+else {
+  console.log(`run-stand [debug]: ${DEBUG_BANNER} - ${ran}; compared with no number; ${seconds} s. This is not the verdict of the stand: `
+    + `the counted entries are "npm run test:e2e:qa:gate" (${EXPECTED.gate} tests) and "npm run test:e2e:qa:report" (${EXPECTED.full}).`)
+}
 for (const problem of v.problems) console.error(`run-stand: ${problem}`)
 process.exit(v.code)

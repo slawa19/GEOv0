@@ -39,12 +39,15 @@ function link(source: string, target: string) {
   }
 }
 
+/** The node ids of the ring of `ringSnapshot`, in ring order: what `pickRingRoute` walks. One literal, here (039 slice A). */
+export const RING: readonly string[] = ['a', 'b', 'c', 'd', 'e', 'f']
+
 /**
  * A ring of six: a route a -> b -> c -> d runs round three sides, and the chord a -> d crosses the inside of the
  * ring, away from every route edge. A chain would lay out straight and hide the straightening of the beam.
  */
 export function ringSnapshot(): QaSnapshot {
-  const ids = ['a', 'b', 'c', 'd', 'e', 'f']
+  const ids = RING
   return {
     equivalent: EQ,
     generated_at: '2026-02-01T00:00:00.000Z',
@@ -500,7 +503,10 @@ export async function screenNodes(page: Page): Promise<Map<string, Pt>> {
   return new Map(nodes.map((n) => [n.id, { x: n.x * cam.zoom + cam.panX, y: n.y * cam.zoom + cam.panY }]))
 }
 
-/** Physics has stopped moving nodes: three equal reads in a row. A condition, not a sleep; it times out if it never settles. */
+/**
+ * Physics has stopped moving nodes: three equal reads in a row. A condition, not a sleep; it times out if it never settles.
+ * NOT the same as `layoutStill` of `surfaceMatrix.ts` (to 1 px, 2 reads, every 100 ms): this one is to 0.1 px, 3 reads, every 150 ms.
+ */
 export async function waitLayoutStill(page: Page): Promise<void> {
   let prev = ''
   let same = 0

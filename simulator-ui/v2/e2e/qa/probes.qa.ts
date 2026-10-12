@@ -6,7 +6,7 @@
 import { chromium, expect, test } from '@playwright/test'
 
 import { pickRingRoute, rememberBaseline, summarize, watchFlight } from './oracle.js'
-import { EQ, RUN_ID, boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, syncCssToClock, txUpdated } from './stand.js'
+import { EQ, RING, RUN_ID, boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, syncCssToClock, txUpdated } from './stand.js'
 
 const NO_GPU_ARGS = ['--disable-gpu', '--disable-accelerated-2d-canvas', '--disable-gpu-compositing']
 
@@ -90,7 +90,7 @@ test('under WebDriver without test mode the FX buffer holds the beam and the com
         baseZ: getComputedStyle(document.querySelector('canvas.canvas:not(.canvas-fx)')!).zIndex,
       }
     })
-    const g = await pickRingRoute(page, ['a', 'b', 'c', 'd', 'e', 'f'], 1)
+    const g = await pickRingRoute(page, RING, 1)
     await rememberBaseline(page, g)
     await pushEvent(page, txUpdated(g.ids, '10.00', { amount_flyout: false }))
     const [edge] = summarize(g, await watchFlight(page, g, 30, 1))
