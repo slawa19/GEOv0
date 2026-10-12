@@ -347,12 +347,6 @@
   --ds-app-clearing-premium-pop-dur: 4.2s;
   --ds-app-clearing-premium-pop-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 
-  --ds-app-panel-slide-opacity-dur: 0.2s;
-  --ds-app-panel-slide-opacity-ease: ease;
-  --ds-app-panel-slide-transform-dur: 0.22s;
-  --ds-app-panel-slide-transform-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --ds-app-panel-slide-shift-y: 12px;
-
   /* Components */
   --ds-mpp-min-h: 188px;
 

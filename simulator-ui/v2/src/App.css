@@ -279,23 +279,3 @@
   }
 }
 
-/* ── BUG-7: Interact Mode panel slide transitions ── */
-
-.panel-slide-enter-active,
-.panel-slide-leave-active {
-  transition:
-    opacity var(--ds-app-panel-slide-opacity-dur) var(--ds-app-panel-slide-opacity-ease),
-    transform var(--ds-app-panel-slide-transform-dur) var(--ds-app-panel-slide-transform-ease);
-}
-
-.panel-slide-enter-from,
-.panel-slide-leave-to {
-  opacity: 0;
-  transform: translateY(var(--ds-app-panel-slide-shift-y));
-}
-
-/* Low quality: disable panel slide animation */
-.root[data-quality='low'] .panel-slide-enter-active,
-.root[data-quality='low'] .panel-slide-leave-active {
-  transition: none;
-}

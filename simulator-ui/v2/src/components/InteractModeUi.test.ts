@@ -144,12 +144,9 @@ describe('Interact Mode UI (components)', () => {
     await nextTick()
     expect(im.phase.value).toBe('idle')
 
-    // Panel should be gone or in CSS leave-transition state.
-    // (In jsdom, CSS transitions never fire transitionend, so the element stays with
-    // leave-active class during the test. We accept both states as correct.)
+    // The panel is mounted without a transition, so it is simply gone.
     await nextTick()
-    const panel = host.querySelector('[data-testid="manual-payment-panel"]')
-    expect(!panel || panel.classList.contains('panel-slide-leave-active')).toBe(true)
+    expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeNull()
 
     app.unmount()
     host.remove()
