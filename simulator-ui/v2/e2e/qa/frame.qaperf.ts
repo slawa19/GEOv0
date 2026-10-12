@@ -5,7 +5,7 @@
  * Nothing here is a threshold on time: a frame time is a property of the machine the run happened on. The tests fail
  * only when the measurement itself is void - no product frames, the named load not pushed in full, labels not
  * animating (BACKLOG 034-6 (k): until S3 the stand paused them and the numbers described a lighter page).
- * The discrete, machine-independent budgets are in `budgets.qaperf.ts`.
+ * The discrete, machine-independent budgets are in `budgets.qa.ts` (project `qa-stand`).
  *
  * Load: `S3-MIXED-V1` (`perf-load.ts`). Every window starts from a sleeping render loop and from slot 0, so the
  * windows at x1, x4 and x8 carry the same events. Output: `qa-perf-summary-<dev|preview>.json` in the output folder -

@@ -5,7 +5,7 @@
  * `page.clock`, so they are the same on any machine. Time (frame ms, fps, heap) is NOT here and must not be put
  * here: it is a property of the machine, reported as diagnostics by `frame.qaperf.ts`.
  *
- * The test (`budgets.qaperf.ts`) demands exact equality: a worse number is a regression, a better one has to be
+ * The test (`budgets.qa.ts`, a member of the counted project `qa-stand` since 2026-10-12) demands exact equality: a worse number is a regression, a better one has to be
  * recorded - otherwise the constant drifts above reality and lets the debt back in. Every move of a value is a dated
  * line in `since` with the reason; the old value stays in the line.
  *
@@ -110,7 +110,7 @@ export const BUDGETS = {
 
 /**
  * Elements with a computed CSS `filter` or `backdrop-filter` without a GPU, by state of the page
- * (`no-gpu-effects.qaperf.ts`). The whole list is the budget: expected empty in every state.
+ * (`no-gpu-effects.qa.ts`). The whole list is the budget: expected empty in every state.
  * An entry here is a recorded debt and needs a dated line with its measured cost.
  * 2026-10-11: first record (038 S3).
  */

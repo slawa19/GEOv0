@@ -6,8 +6,14 @@
  * "Low FPS" is forced with `page.clock.fastForward(100)`: one animation frame per 100 ms of the product's clock, which
  * is what the product's own meters see on a slow machine (`updateFxBudgetScale` reads the rAF timestamps).
  *
+ * MEMBERSHIP (2026-10-12, 039 slice A, R14): this file is `*.qa.ts`, a member of the counted project `qa-stand`, and
+ * carries no `@extended` tag - the required gate runs all six tests (`run-stand.mjs`, `EXPECTED`). It used to be
+ * `budgets.qaperf.ts`, collected only by `qa-perf`, which runs on a schedule. Nothing here may read a wall clock.
+ *
  * On a production build there is no `window.__geoSim`: the budgets read from FX state are SKIPPED there with the
  * reason printed - not measured, which is not the same as held. Draw counts and label counts are measured on both.
+ * A production build is run by `qa-perf` only (`playwright.qa.config.ts`); in the gate, on the dev server, nothing
+ * skips - and a skip there is a refusal (`run-verdict.mjs`).
  *
  * What these budgets do not see: how long a frame takes; what is painted (the motion oracle of `motion.qa.ts` does);
  * a second render loop that draws on another canvas; work done outside `requestAnimationFrame`.

@@ -38,8 +38,17 @@ import { exclusionProblems, verdict } from './run-verdict.mjs'
  *   and R4 judges a frame by the time it was drawn, not by its number.
  * - 2026-10-11 (038 S2, after the adversarial pass on a7f7e1a6): gate 64 -> 68, full 187 -> 191. Four tests: a card opened
  *   over an open menu, for two menus (D2); the four injected surfaces (D3); a frame written into nothing (D5).
+ * - 2026-10-12 (039 slice A, R14): gate 68 -> 76, full 191 -> 199. Eight tests moved in from the perf project, none
+ *   written: the six deterministic budgets (five of `budgets.qa.ts`, one of `no-gpu-effects.qa.ts`) and the two
+ *   counter-checks that live beside them ("with a GPU believed present ..."), without which a budget of 0 filters
+ *   would hold for a rule that removed the filter everywhere. All eight are counts on `page.clock`; the scheduled
+ *   perf job was their only runner, so a pull request never ran them. They are in the GATE, not `@extended`: a budget
+ *   the required step does not run is the state this line ends. Added time: 65 s locally (the eight tests, one worker; the gate 313 s);
+ *   about 85 s on the CI runner by the timestamps of run 38200925497, whose gate step took 269 s - so the step is
+ *   now past the five minutes the spec of 038 named as an orientation; `timeout-minutes` of the step is what holds.
+ *   The wall-clock files of the perf project (frame time, heap, the FPS guard) did NOT move and must not.
  */
-export const EXPECTED = { gate: 68, full: 191 }
+export const EXPECTED = { gate: 76, full: 199 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

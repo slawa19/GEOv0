@@ -11,6 +11,9 @@
  * error toasts, the trust line and clearing panels, HUD dropdowns, the metrics panel, the history overlay, the loading
  * and error messages, the dev perf overlay (the window matrix of slice S2 owns the recipes).
  *
+ * MEMBERSHIP (2026-10-12, 039 slice A, R14): `*.qa.ts`, the counted project `qa-stand`, in the required gate; it was
+ * `no-gpu-effects.qaperf.ts`. On a production build (run by `qa-perf` only) the census is skipped: no dev hook.
+ *
  * It does not see: `box-shadow`, `text-shadow`, `opacity`, `mix-blend-mode`, masks, canvas `shadowBlur` (a separate
  * budget), pseudo-elements, an effect that appears only on hover or focus, and what any of it costs in time.
  */
