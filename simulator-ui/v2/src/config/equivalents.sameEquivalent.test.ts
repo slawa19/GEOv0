@@ -75,4 +75,10 @@ describe('sameEquivalent', () => {
     expect(sameEquivalent(undefined, 'UNDEFINED')).toBe(false)
     expect(sameEquivalent('null', 'NULL')).toBe(true)
   })
+
+  it('inner whitespace is part of the spelling: it is neither removed nor ignored', () => {
+    expect(sameEquivalent('A B', 'AB')).toBe(false)
+    expect(sameEquivalent('U AH', 'UAH')).toBe(false)
+    expect(sameEquivalent(' a b ', 'A B')).toBe(true)
+  })
 })

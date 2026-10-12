@@ -52,7 +52,7 @@ describe('039 R11 sites - SSE admission (`createRealEventReplayOwner.admit`)', (
   })
 
   it('rejects an event of another equivalent, and an event or a connection without one', () => {
-    for (const [evt, conn] of [...DIFFERENT, ['', 'UAH'], ['UAH', ''], ['  ', 'UAH']] as const) {
+    for (const [evt, conn] of [...DIFFERENT, ['', 'UAH'], ['UAH', ''], ['  ', 'UAH'], ['', ''], ['  ', '']] as const) {
       expect(admit(evt, conn), `event "${evt}", connection "${conn}"`).toEqual({ status: 'rejected', kind: 'context', diagnostic: 'equivalent_mismatch' })
     }
   })

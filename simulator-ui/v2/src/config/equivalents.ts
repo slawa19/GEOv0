@@ -14,6 +14,9 @@ export const EQUIVALENT_CODE_RE = /^[A-Z0-9_]{1,16}$/
  * (`app/core/equivalents.py`: `str(code or "").strip().upper()`): trim + upper case, and NOTHING else. No alias, no
  * character is removed (`AA_B` and `AAB` are two codes), no fallback to the selected equivalent. A missing value
  * (`null`, `undefined`) is the empty string. This is a spelling, not a validation: `EQUIVALENT_CODE_RE` validates.
+ * Parity with the backend holds for strings of valid codes plus ordinary blanks; the two "whitespace" sets differ at
+ * the edges (JS `trim()` strips U+FEFF, Python `strip()` strips U+001C-U+001F) - such a spelling is not a valid code
+ * on either side.
  */
 export function canonicalEquivalent(code: unknown): string {
   return String(code ?? '').trim().toUpperCase()

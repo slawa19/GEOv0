@@ -44,8 +44,8 @@ const tsLanguageOptions = {
 // The typescript-eslint preset is narrowed to the product files; upstream scopes its "eslint-recommended" part to
 // `*.ts` only, here it also covers `<script lang="ts">` of `*.vue`.
 //
-// NOT covered by this config: every test file under `src` (ignored below; the windowManager tests get only their
-// parser and ARCH-4), `e2e/`, the configs in the package root. Type-aware rules are not enabled.
+// NOT covered by this config: every test file under `src` (ignored below; the windowManager tests get their parser,
+// ARCH-4 and the vue preset, whose rule block has no `files` - not the typescript-eslint preset), `e2e/`, the configs in the package root. Type-aware rules are not enabled.
 const productFiles = ['src/**/*.ts', 'src/**/*.vue']
 const typescriptRecommended = tseslint.configs.recommended.map((config) => ({
   ...config,
