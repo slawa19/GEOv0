@@ -469,8 +469,7 @@ export function useSimulatorRealMode(opts: {
       }, 80)
     }
 
-    let promise: Promise<SnapshotRefreshOutcome>
-    promise = Promise.resolve().then(async (): Promise<SnapshotRefreshOutcome> => {
+    const promise: Promise<SnapshotRefreshOutcome> = Promise.resolve().then(async (): Promise<SnapshotRefreshOutcome> => {
       try {
         if (!isContextStillValid()) return 'superseded'
 

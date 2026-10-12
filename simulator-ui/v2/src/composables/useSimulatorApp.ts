@@ -950,11 +950,11 @@ export function useSimulatorApp(opts?: {
   // Any consumer that uses Vue `computed()` based on node.__x/__y must explicitly depend on
   // layoutCoordinator.layoutVersion to re-evaluate during physics/drag updates.
   const getLayoutNodesLive = () => {
-    layoutCoordinator.layoutVersion.value
+    void layoutCoordinator.layoutVersion.value // dependency read (see above) - the read itself is the effect
     return layout.nodes
   }
   const getLayoutNodeByIdLive = (id: string) => {
-    layoutCoordinator.layoutVersion.value
+    void layoutCoordinator.layoutVersion.value // dependency read (see above) - the read itself is the effect
     return getLayoutNodeById(id)
   }
 

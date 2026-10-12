@@ -55,7 +55,7 @@ function snap8(v: number): number {
 function snap8InRange(v: number, min: number, max: number): number {
   if (min >= max) return min
 
-  let snapped = snap8(v)
+  const snapped = snap8(v)
   if (snapped < min) {
     const ceil = Math.ceil(min / 8) * 8
     if (ceil <= max) return ceil
@@ -702,8 +702,8 @@ export function useWindowManager(): WindowManagerApi {
 
     let nextLeft = before.left
     let nextTop = before.top
-    let nextWidth = resolvedWidth
-    let nextHeight = resolvedHeight
+    const nextWidth = resolvedWidth
+    const nextHeight = resolvedHeight
 
     // If pinned to anchor, recalculate position from anchor first.
     // IMPORTANT: once the window has been measured (exists in DOM), do NOT overwrite

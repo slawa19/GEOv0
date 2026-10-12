@@ -51,7 +51,8 @@ export function useFloatingLabelsViewFx<N extends LayoutNodeLike>(
   }
 
   const floatingLabelsViewFx = computed((): FloatingLabelFx[] => {
-    gate.value
+    // Read the gate so this computed depends on it (the read IS the effect); `void` marks it as intended.
+    void gate.value
 
     const base = deps.getFloatingLabelsView()
     if (base.length === 0) return []
