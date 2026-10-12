@@ -19,18 +19,6 @@
   50% { opacity: 1; }
 }
 
-/* HUD helpers */
-.ds-clip {
-  clip-path: polygon(
-    0 0,
-    calc(100% - var(--ds-cut)) 0,
-    100% var(--ds-cut),
-    100% 100%,
-    var(--ds-cut) 100%,
-    0 calc(100% - var(--ds-cut))
-  );
-}
-
 /* Page */
 .ds-page {
   /* Match reference: html { font-size: 15px } */
@@ -111,9 +99,6 @@
 
 /* Muted = tertiary text (matches reference: shadcn text-muted / HUD h-muted) */
 .ds-muted { color: var(--ds-text-3); }
-
-/* Secondary = slightly stronger than muted (kept for places that really need it). */
-.ds-secondary { color: var(--ds-text-2); }
 
 /* Help / description text (avoid using ds-label for sentences; ds-label is a label, may become uppercase in HUD). */
 .ds-help {
@@ -1005,13 +990,6 @@
   grid-template-columns: 36px 1fr auto;
   gap: 0.75rem;
   align-items: center;
-}
-
-/* Flat node card (no nested surface/border). Used inside NodeCardOverlay. */
-.ds-node-card--flat {
-  background: transparent;
-  border: none;
-  border-radius: 0;
 }
 
 /* shadcn node card: add border, background, hover effect (match reference .s-data-card) */
