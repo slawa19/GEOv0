@@ -9,8 +9,10 @@ import { keyEdge } from '../utils/edgeKey'
  * update is incremental (same node IDs), it may skip relayout; the copies then have to be brought up to date
  * here, keeping node positions and the identity of the existing objects.
  *
- * Moved out of `useSimulatorApp.ts` unchanged (039 slice A, R12) so that it can be exercised without mounting
- * the whole app. It does not wake the render loop: the caller does.
+ * Moved out of `useSimulatorApp.ts` (039 slice A, R12) so that it can be exercised without mounting the whole
+ * app. It does not wake the render loop: the caller does.
+ *
+ * Nodes are still synced field by field; that list is complete for today's `GraphNode` but is not guarded.
  */
 export function syncLayoutFromSnapshot(layout: { nodes: LayoutNode[]; links: LayoutLink[] }, snapshot: GraphSnapshot): void {
   const snapNodeById = new Map(snapshot.nodes.map((n) => [n.id, n] as const))
@@ -43,16 +45,15 @@ export function syncLayoutFromSnapshot(layout: { nodes: LayoutNode[]; links: Lay
     const k = keyEdge(String(src.source), String(src.target))
     const existing = oldLinkByKey.get(k)
     if (existing) {
-      existing.source = src.source
-      existing.target = src.target
-      existing.trust_limit = src.trust_limit
-      existing.used = src.used
-      existing.available = src.available
-      existing.status = src.status
-      existing.close_requested_at = src.close_requested_at
-      existing.viz_color_key = src.viz_color_key
-      existing.viz_width_key = src.viz_width_key
-      existing.viz_alpha_key = src.viz_alpha_key
+      // The snapshot is authoritative for every data field of a link, whatever the field is called: no list of
+      // names here (039 R12 - the list that used to be here had drifted and left `id` and `reverse_used` stale).
+      // Only what the layout itself owns (`__`-prefixed, see `types/layout.ts`) is kept; a data field the new
+      // snapshot no longer carries is reset, as the per-field assignments did.
+      const fields = existing as unknown as Record<string, unknown>
+      for (const name of Object.keys(fields)) {
+        if (!name.startsWith('__') && !(name in src)) fields[name] = undefined
+      }
+      Object.assign(existing, src)
       existing.__key = k
       nextLinks.push(existing)
     } else {
