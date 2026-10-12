@@ -36,6 +36,8 @@
     "@vitejs/plugin-vue": "^6.0.1",
     "@playwright/test": "^1.50.1",
     "eslint": "^8.57.1",
+    "eslint-plugin-vue": "9.33.0",
+    "typescript-eslint": "8.71.0",
     "typescript": "~5.9.3",
     "vitest": "^4.1.11",
     "happy-dom": "^20.14.5",
