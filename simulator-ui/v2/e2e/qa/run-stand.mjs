@@ -74,8 +74,16 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   legend and node card move together when a token changes. In the GATE, not `@extended`: they hold the three
  *   class-1 risks of the slice's design, and nothing else that a pull request runs sees a pixel of the new colours.
  *   Real clock (nothing in them is about time), about 45 s locally in one worker. No existing test left or changed scope.
+ * - 2026-10-12 (039 slice B, PR 2 - the direction marker of trust): gate 85 -> 88, full 208 -> 211. Three tests, one new
+ *   file, `direction.qa.ts`: pixels of the marker at the debtor end (and none at a creditor end) on a small scene, in the
+ *   colour of the legend's arrow; trust without debt, existing debt and a moving payment as three pictures, with the
+ *   beam running against the marker and not repainting it; on the 100-node scene every marker at the target end of a
+ *   line, the lines without one the recorded number (0), and markers going exactly where zooming out takes the room.
+ *   In the GATE, not `@extended`: a turned-round direction is a class-1 risk of the slice's design, and nothing else a
+ *   pull request runs looks at a pixel of the marker. About 20 s locally in one worker. No existing test left or
+ *   changed scope; three budgets of `budgets.ts` moved the same day (the markers are drawing calls).
  */
-export const EXPECTED = { gate: 85, full: 208 }
+export const EXPECTED = { gate: 88, full: 211 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
