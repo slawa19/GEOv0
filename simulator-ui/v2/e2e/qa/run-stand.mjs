@@ -19,8 +19,11 @@
  * stand. It now comes here: the filter is the caller's, the number that ran is compared with nothing, and the line it
  * ends with carries no "recorded" and names the two counted entries. It still exits non-zero on a failed test, on a
  * filter that selected nothing, on a skip and on a flaky test, so a red slice is red; a green slice proves only itself.
- * It writes no HTML report and its JSON result has its own name: the report of a gate run is never overwritten by it.
- * It refuses `--project` and `--config`: the slice is of the counted project, by the stand's config.
+ * It writes no HTML report and its files have their own names (`<out>-debug-result.json`; the HTML variables point at
+ * `<out>-debug-report`): the result and the report of a counted run are never overwritten by it.
+ * Its arguments are a CLOSED list (`debugArgProblems` in `run-verdict.mjs`): file filters, `--grep` and a few options
+ * that pace a run. Everything else is refused - `--`, `--config`, `--project`, `--reporter`, `--output`, `--retries`
+ * among them. The first form (refuse two options, pass the rest) was escaped at runtime by `-- <file>`: see there.
  *
  * What this does NOT see: the composition behind the number (one test replaced by another passes), and anything about
  * the perf project (`qa-perf`, slice S3) - it is not run here.
@@ -31,7 +34,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { exclusionProblems, verdict } from './run-verdict.mjs'
+import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verdict } from './run-verdict.mjs'
 
 /**
  * Tests that run, by scope. Every movement is a dated line:
@@ -87,16 +90,14 @@ if (!debug && !Object.hasOwn(EXPECTED, scope ?? '')) {
   process.exit(1)
 }
 let repeat = 1
-for (const a of extra) {
-  if (debug) {
-    // `-c` is Playwright's short form of `--config` (also written `-cfile`); `--project=x` and `--project x` both
-    // start with the word.
-    if (/^(--project|--config)(=|$)|^-c/.test(a)) {
-      console.error(`run-stand: "${a}" is not accepted in a debug run - it is a slice of the qa-stand project by the stand's config`)
-      process.exit(1)
-    }
-    continue
-  }
+// A debug run accepts a CLOSED list of arguments (`debugArgProblems`): what is not named there is refused, the option
+// terminator `--` first of all.
+const refused = debug ? debugArgProblems(extra) : []
+if (refused.length) {
+  for (const problem of refused) console.error(`run-stand: ${problem}`)
+  process.exit(1)
+}
+for (const a of debug ? [] : extra) {
   const m = /^--repeat-each=(\d+)$/.exec(a)
   if (!m) {
     console.error(`run-stand: "${a}" is not accepted - the gate runs whole. For a slice (debug-only, not counted): npm run test:e2e:qa -- ${a}`)
@@ -114,21 +115,15 @@ if (malformed.length) {
 const here = fileURLToPath(new URL('.', import.meta.url))
 const root = resolve(here, '..', '..')
 const out = resolve(process.env.GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR ?? resolve(root, '..', '..', '.local-run', 'playwright', 'simulator', 'qa'))
-const resultFile = debug ? `${out}-debug-result.json` : `${out}-result.json`
-const reportDir = `${out}-report`
+const { resultFile, reportDir } = destinations(scope, out)
 rmSync(resultFile, { force: true })
 if (debug) console.log(`run-stand [debug]: ${DEBUG_BANNER} - a slice of the qa-stand project chosen by: ${extra.join(' ') || '(no filter)'}`)
 
 const cli = createRequire(import.meta.url).resolve('@playwright/test/cli')
 // No retries: a test that passes on the second try failed on the first, and the verdict refuses a flaky run anyway.
-// In a debug run the caller's arguments come first and the stand's own last: config, project, no retries, and the
-// reporters whose JSON the verdict reads. Whether the last value of a repeated option wins is Playwright's (commander's)
-// behaviour; the cases that matter were run: `--retries=2` and `--reporter=dot` given by the caller change nothing.
-const args = debug
-  ? [cli, 'test', ...extra, '--config=e2e/playwright.qa.config.ts', '--project=qa-stand', '--retries=0', '--reporter=list,json']
-  : [cli, 'test', '--config=e2e/playwright.qa.config.ts', '--project=qa-stand', '--retries=0', '--reporter=list,json,html', ...extra]
-const literal = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-if (scope === 'gate') args.push(`--grep-invert=${['@extended', ...NOT_IN_GATE.map((t) => literal(t.title))].join('|')}`)
+// The stand's own options (config, project, no retries, the reporters whose JSON the verdict reads) come first in every
+// scope: `playwrightArgs` of `run-verdict.mjs`, where the selfcheck holds the order.
+const args = [cli, ...playwrightArgs(scope, extra, NOT_IN_GATE.map((t) => t.title))]
 const started = Date.now()
 const run = spawnSync(process.execPath, args, {
   cwd: root,
@@ -141,6 +136,10 @@ const run = spawnSync(process.execPath, args, {
     PLAYWRIGHT_HTML_OUTPUT_DIR: reportDir,
     PLAYWRIGHT_HTML_REPORT: reportDir,
     PLAYWRIGHT_HTML_OPEN: 'never',
+    PW_TEST_HTML_REPORT_OPEN: 'never',
+    // Variables of the caller's shell that would add a reporter or move the JSON: set here, so the caller's are not read.
+    PW_TEST_REPORTER: '',
+    PLAYWRIGHT_JSON_OUTPUT_DIR: '',
   },
 })
 const seconds = Math.round((Date.now() - started) / 1000)

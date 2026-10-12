@@ -43,6 +43,68 @@ export function exclusionProblems(notInGate) {
 }
 
 /**
+ * THE ARGUMENTS OF A DEBUG RUN (039 slice A, external review of 0d0deae3, 2026-10-12). The first form of the debug scope
+ * refused `--project` and `--config` and passed everything else through, with the stand's own options appended LAST.
+ * Run at runtime: `debug --reporter=json,html -- console-guard` - Playwright's option terminator `--` turned the
+ * appended `--config/--project/--retries/--reporter` into positional filters, the default `playwright.config.ts` ran
+ * `e2e/console-guard.spec.ts` (not a test of the stand), the run exited 0, and the caller's HTML reporter replaced the
+ * report of the last gate run in `<out>-report`.
+ *
+ * So the list is closed the other way round: what is not named here is refused. Named are the options that choose or
+ * pace a slice and nothing that says WHAT is run by which config, where results go, or how failures are counted:
+ * no `--` (the terminator), `--config`/`-c`, `--project`, `--reporter`, `--output`, `--retries`, `--shard`,
+ * `--update-snapshots`/`-u`, `--tsconfig`, `--test-list`, `--only-changed`, `--ui`, `--no-deps`, `--global-timeout`,
+ * `--fail-on-flaky-tests`, `--ignore-snapshots`, combined or attached short forms (`-xg`, `-j4`).
+ * `--pass-with-no-tests` and `--list` are let through and neutralised by the verdict (no test ran: exit 1).
+ */
+export const DEBUG_FLAGS = ['--headed', '--debug', '-x', '--list', '--pass-with-no-tests', '--last-failed']
+export const DEBUG_VALUE_OPTIONS = ['--grep', '-g', '--grep-invert', '--repeat-each', '--workers', '-j', '--max-failures', '--timeout', '--trace']
+
+/** Why the arguments of a debug run are refused; empty when they are accepted. */
+export function debugArgProblems(extra) {
+  const out = []
+  const list = 'accepted: file filters, ' + [...DEBUG_VALUE_OPTIONS.map((o) => `${o} <value>`), ...DEBUG_FLAGS].join(', ')
+  for (let i = 0; i < extra.length; i += 1) {
+    const a = String(extra[i])
+    if (a === '--') {
+      out.push('"--" is not accepted in a debug run: after the option terminator the stand\'s own config and project would be read as file filters')
+      continue
+    }
+    if (!a.startsWith('-')) continue // a file filter
+    if (DEBUG_FLAGS.includes(a)) continue
+    const eq = a.indexOf('=')
+    if (a.startsWith('--') && eq > 0 && DEBUG_VALUE_OPTIONS.includes(a.slice(0, eq))) continue
+    if (DEBUG_VALUE_OPTIONS.includes(a)) {
+      const value = extra[i + 1]
+      if (value === undefined || value === '--') out.push(`"${a}" has no value`)
+      i += 1 // the value, whatever it starts with
+      continue
+    }
+    out.push(`"${a}" is not accepted in a debug run - it is a slice of the qa-stand project, by the stand's config, into the debug run's own files (${list})`)
+  }
+  return out
+}
+
+/** Where a run writes. A debug run has files of its own: nothing it does can replace the result or the report of a counted run. */
+export function destinations(scope, out) {
+  return scope === 'debug'
+    ? { resultFile: `${out}-debug-result.json`, reportDir: `${out}-debug-report` }
+    : { resultFile: `${out}-result.json`, reportDir: `${out}-report` }
+}
+
+/**
+ * The arguments of `playwright test`. The stand's own options come FIRST in every scope and the caller's after them:
+ * no caller argument can demote them to file filters, and none of them can be given twice - a counted scope accepts
+ * `--repeat-each=N` only, a debug scope what `debugArgProblems` lets through. A debug run has no HTML reporter.
+ */
+export function playwrightArgs(scope, extra, notInGateTitles = []) {
+  const literal = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const own = ['--config=e2e/playwright.qa.config.ts', '--project=qa-stand', '--retries=0', scope === 'debug' ? '--reporter=list,json' : '--reporter=list,json,html']
+  if (scope === 'gate') own.push(`--grep-invert=${['@extended', ...notInGateTitles.map(literal)].join('|')}`)
+  return ['test', ...own, ...extra]
+}
+
+/**
  * @param {{ scope: 'gate' | 'full' | 'debug', recorded: number | null, repeat: number, playwrightStatus: number | null,
  *           report: { stats?: { expected: number, unexpected: number, flaky: number, skipped: number }, suites?: unknown[] } | null,
  *           notInGate: unknown[] }} run

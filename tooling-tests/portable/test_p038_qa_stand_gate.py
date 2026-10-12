@@ -125,9 +125,14 @@ def violations(inputs: dict[str, Any]) -> list[str]:
         found.append(f"script test:e2e:qa:gate is not the gate entry: {scripts.get('test:e2e:qa:gate')!r}")
     if scripts.get("test:e2e:qa:report") != "node e2e/qa/run-stand.mjs full":
         found.append(f"script test:e2e:qa:report is not the full entry: {scripts.get('test:e2e:qa:report')!r}")
+    #    The arguments of `playwright test` are built by `playwrightArgs` of run-verdict.mjs (since the review of 0d0deae3,
+    #    2026-10-12), where the selfcheck holds their order; the runner must take them from there and nowhere else.
     for needle in (f"--config={_STAND_CONFIG}", "--project=qa-stand", "--grep-invert=", "'@extended'"):
+        if needle not in inputs["verdict"]:
+            found.append(f"run-verdict.mjs (playwrightArgs) does not pass {needle}")
+    for needle in ("const args = [cli, ...playwrightArgs(scope, extra,", "debug ? debugArgProblems(extra) : []", "= destinations(scope, out)"):
         if needle not in runner:
-            found.append(f"run-stand.mjs does not pass {needle}")
+            found.append(f"run-stand.mjs does not take its arguments, its refusals or its files from run-verdict.mjs: {needle}")
 
     # 2. The stand's config keeps the product in the user's mode.
     if not re.search(r"VITE_TEST_MODE:\s*'0'", config):
@@ -143,12 +148,12 @@ def violations(inputs: dict[str, Any]) -> list[str]:
     if not re.search(r"export const EXPECTED = \{ gate: [1-9]\d*, full: [1-9]\d* \}", runner):
         found.append("run-stand.mjs has no recorded EXPECTED numbers")
     verdict: str = inputs["verdict"]
-    for needle in ("verdict({", "process.exit(v.code)", "--retries=0"):
+    for needle in ("verdict({", "process.exit(v.code)"):
         if needle not in runner:
             found.append(f"run-stand.mjs lost its refusal: {needle}")
     for needle in (
         "counted && ran !== want", "ran === 0", "stats.skipped !== 0", "stats.flaky !== 0", "expectedFailures !== 0",
-        "const counted = run.scope !== 'debug'",
+        "const counted = run.scope !== 'debug'", "--retries=0", "if (a === '--') {",
     ):
         if needle not in verdict:
             found.append(f"run-verdict.mjs lost its refusal: {needle}")
@@ -258,7 +263,7 @@ def violations(inputs: dict[str, Any]) -> list[str]:
             run = str(step.get("run", "")) if isinstance(step, dict) else ""
             if re.search(r"qa:perf|qa-perf|qaperf", run):
                 found.append(f"job {job_id}, which runs on pull requests, runs the perf project: {' '.join(run.split())}")
-    if "--project=qa-perf" in runner or ".qaperf" in runner:
+    if any("--project=qa-perf" in text or ".qaperf" in text for text in (runner, inputs["verdict"])):
         found.append("run-stand.mjs, the entry of the required step, selects the perf project")
     # 7. The counted project holds no wall-clock window (039 slice A, R14: the deterministic budgets moved in, the
     #    frame-time measurements must not follow them).
@@ -317,7 +322,12 @@ _MUTATIONS = {
         lambda i: i.update(verdict=i["verdict"].replace("expectedFailures !== 0", "false")), "lost its refusal"),
     "the entry ignores the verdict": (lambda i: i.update(runner=i["runner"].replace("process.exit(v.code)", "process.exit(0)")), "lost its refusal"),
     "the config allows retries": (lambda i: i.update(config=i["config"].replace("retries: 0", "retries: 2")), "retries"),
-    "the entry allows retries": (lambda i: i.update(runner=i["runner"].replace("--retries=0", "--retries=2")), "lost its refusal"),
+    "the entry allows retries": (lambda i: i.update(verdict=i["verdict"].replace("--retries=0", "--retries=2")), "lost its refusal"),
+    "the debug run accepts the option terminator": (lambda i: i.update(verdict=i["verdict"].replace("if (a === '--') {", "if (false) {")), "lost its refusal"),
+    "the runner builds its arguments past the checked function": (
+        lambda i: i.update(runner=i["runner"].replace("...playwrightArgs(scope, extra,", "'test', ...extra, ...own(")), "does not take its arguments"),
+    "the debug run writes where a counted run does": (
+        lambda i: i.update(runner=i["runner"].replace("= destinations(scope, out)", "= destinations('gate', out)")), "its files from run-verdict.mjs"),
     "the perf job runs on every pull request": (lambda i: i["workflow"]["jobs"]["simulator-qa-perf"].pop("if"), "runs the perf project"),
     "the required step also runs the perf project": (
         lambda i: _gate_step(i).update({"run": _GATE_COMMAND + " && npm --prefix simulator-ui/v2 run test:e2e:qa:perf"}), "runs the perf project"),
@@ -383,7 +393,9 @@ def test_the_guard_notices_a_stand_that_left_the_gate(name: str) -> None:
 
 
 def test_the_verdict_of_the_gate_entry_holds_on_made_up_runs() -> None:
-    """The verdict is a pure function; this runs it on twenty-five made-up runs (a wrong count, a skip, a flaky test, an
+    """The verdict is a pure function; this runs it on twenty-five made-up runs and, since the review of 0d0deae3
+    (2026-10-12), on twenty-seven argument lists of a debug run and four checks of its files and of the order of the
+    arguments - fifty-six cases in all (a wrong count, a skip, a flaky test, an
     expected failure in the gate, no test at all, no result, malformed exclusions; since 2026-10-12 the debug scope -
     uncounted, and red on a failure, an empty filter, a skip, a flaky test - and a counted scope left without its
     number) through node.
@@ -397,7 +409,7 @@ def test_the_verdict_of_the_gate_entry_holds_on_made_up_runs() -> None:
     done = subprocess.run([node, "e2e/qa/run-verdict.selfcheck.mjs"], cwd=_UI, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stdout + done.stderr
     summary = re.search(r"^(\d+) of (\d+) cases$", done.stdout, re.MULTILINE)
-    assert summary and summary.group(1) == summary.group(2) and int(summary.group(2)) >= 25, done.stdout
+    assert summary and summary.group(1) == summary.group(2) and int(summary.group(2)) >= 56, done.stdout
 
 
 def _stand_sources() -> list[Path]:

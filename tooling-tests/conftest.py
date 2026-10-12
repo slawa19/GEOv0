@@ -182,8 +182,12 @@ _HERE = Path(__file__).resolve().parent
 #: fail, or writing over the stand's report; a second artifact; the one artifact without the videos, without the gallery, not
 #: uploaded on every run, or uploaded before the videos are recorded; a pull-request job recording videos; a video config
 #: that records only on failure.
+#:
+#: 2026-10-12, 039 slice A, fix-delta of the external review of 0d0deae3 (the debug scope was escaped by `--`): portable 454 -> 457.
+#: Three more mutations in the same module: the debug run accepts the option terminator, the runner builds its arguments past
+#: the checked function, the debug run writes where a counted run does. (The selfcheck it runs through node went 25 -> 56 cases.)
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 454,
+    "portable": 457,
     "powershell": 235,
 }
 
