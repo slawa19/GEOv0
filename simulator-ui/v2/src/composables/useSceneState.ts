@@ -3,6 +3,7 @@ import { watch } from 'vue'
 import type { LayoutMode } from '../layout/forceLayout'
 import { extractErrorMessage } from '../utils/errorMessage'
 import type { GraphSnapshot } from '../types'
+import { sameEquivalent } from '../config/equivalents'
 
 type SceneId = 'A' | 'B' | 'C'
 
@@ -169,9 +170,11 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
 
       if (input.recoveryContext) {
         const source = parseSceneContext(sourcePath)
-        const expectedEq = String(input.recoveryContext.equivalent || '').trim().toUpperCase()
-        const snapshotEq = String(snapshot.equivalent || '').trim().toUpperCase()
-        if (source.kind !== 'run' || source.id !== input.recoveryContext.runId || snapshotEq !== expectedEq) {
+        if (
+          source.kind !== 'run' ||
+          source.id !== input.recoveryContext.runId ||
+          !sameEquivalent(snapshot.equivalent, input.recoveryContext.equivalent)
+        ) {
           throw new Error('Replay recovery snapshot does not match the active run/equivalent context')
         }
       }
@@ -180,10 +183,8 @@ export function useSceneState(deps: UseSceneStateDeps): UseSceneStateReturn {
       // Incremental: skip camera reset, overlay clear, and layout cache invalidation.
       // This prevents "explosion" animations when transitioning preview → run with the same graph.
       // 028 F-028-47 (B4): the same participants in another equivalent are a new scene, not an increment.
-      const sameEquivalent =
-        String(deps.state.snapshot?.equivalent ?? '').trim().toUpperCase() ===
-        String(snapshot.equivalent ?? '').trim().toUpperCase()
-      const nodeIdsMatch = sameEquivalent && snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
+      const ofSameEquivalent = sameEquivalent(deps.state.snapshot?.equivalent, snapshot.equivalent)
+      const nodeIdsMatch = ofSameEquivalent && snapshotNodeIdsMatch(lastSnapshotNodeIds, snapshot)
       const isIncrementalUpdate =
         hasLoadedOnce &&
         deps.state.snapshot !== null &&

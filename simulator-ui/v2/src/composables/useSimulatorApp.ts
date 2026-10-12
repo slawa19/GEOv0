@@ -59,7 +59,7 @@ import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { intensityScale } from '../config/fxConfig'
-import { EQUIVALENT_CODE_RE, equivalentOptions as listEquivalentOptions } from '../config/equivalents'
+import { EQUIVALENT_CODE_RE, equivalentOptions as listEquivalentOptions, sameEquivalent } from '../config/equivalents'
 import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
@@ -102,7 +102,7 @@ export async function loadStrictRunRecoverySnapshot(input: {
     runId,
     equivalent,
   )
-  if (String(snapshot.equivalent || '').trim().toUpperCase() !== equivalent) {
+  if (!sameEquivalent(snapshot.equivalent, equivalent)) {
     throw new Error('Replay recovery snapshot equivalent does not match the requested context')
   }
   return {

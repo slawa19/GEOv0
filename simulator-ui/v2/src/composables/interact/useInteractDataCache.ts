@@ -7,6 +7,7 @@ import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
 import type { useInteractActions } from '../useInteractActions'
 import { findAnsweredRow, type TrustlinesFetchState } from './trustlinesSourceState'
+import { sameEquivalent } from '../../config/equivalents'
 
 function normalizeEq(v: unknown): string {
   return String(v ?? '').trim().toUpperCase()
@@ -136,13 +137,13 @@ export function useInteractDataCache(opts: {
     const eq = normalizeEq(opts.equivalent.value)
     const fetchedOk =
       fetchedTrustlinesRunId.value === runId &&
-      normalizeEq(fetchedTrustlinesEq.value) === eq &&
+      sameEquivalent(fetchedTrustlinesEq.value, eq) &&
       fetchedTrustlines.value != null
     return fetchedOk ? fetchedTrustlines.value : null
   })
 
   // 028 F-028-47 (B2): the snapshot fallback is of the snapshot's equivalent, so it serves only that one.
-  const snapshotIsCurrentEq = () => normalizeEq(opts.snapshot.value?.equivalent) === normalizeEq(opts.equivalent.value)
+  const snapshotIsCurrentEq = () => sameEquivalent(opts.snapshot.value?.equivalent, opts.equivalent.value)
   const trustlines = computed(() => {
     return answeredTrustlines.value ?? (snapshotIsCurrentEq() ? snapshotTrustlines.value : [])
   })
@@ -169,7 +170,7 @@ export function useInteractDataCache(opts: {
 
   function invalidateTrustlinesCache(eq?: string) {
     const curEq = normalizeEq(eq ?? opts.equivalent.value)
-    if (normalizeEq(fetchedTrustlinesEq.value) !== curEq) return
+    if (!sameEquivalent(fetchedTrustlinesEq.value, curEq)) return
     fetchedTrustlines.value = null
     fetchedTrustlinesEq.value = ''
     fetchedTrustlinesRunId.value = ''
@@ -215,12 +216,12 @@ export function useInteractDataCache(opts: {
     if (!limit) return
 
     // Patch fetched list only if it's for the active equivalent.
-    if (normalizeEq(fetchedTrustlinesEq.value) === targetEq) {
+    if (sameEquivalent(fetchedTrustlinesEq.value, targetEq)) {
       fetchedTrustlines.value = patchList(fetchedTrustlines.value, fromPid, toPid, limit)
     }
 
     // Patch snapshot-derived list (used as fallback) - only when it is of the same equivalent (B2).
-    if (normalizeEq(opts.snapshot.value?.equivalent) !== targetEq) return
+    if (!sameEquivalent(opts.snapshot.value?.equivalent, targetEq)) return
     snapshotTrustlines.value = (patchList(snapshotTrustlines.value, fromPid, toPid, limit) ?? snapshotTrustlines.value) as TrustlineInfo[]
   }
 
@@ -232,7 +233,7 @@ export function useInteractDataCache(opts: {
     const now = Date.now()
     const cachedForContext =
       fetchedTrustlinesRunId.value === runId &&
-      normalizeEq(fetchedTrustlinesEq.value) === eq &&
+      sameEquivalent(fetchedTrustlinesEq.value, eq) &&
       fetchedTrustlines.value != null
     if (!o?.force && cachedForContext && now - trustlinesFetchedAtMs < 15_000) return
 
@@ -245,7 +246,7 @@ export function useInteractDataCache(opts: {
       if (
         trustlinesFetchEpoch !== myEpoch ||
         normalizeRunId(opts.runId.value) !== runId ||
-        normalizeEq(opts.equivalent.value) !== eq
+        !sameEquivalent(opts.equivalent.value, eq)
       )
         return
       if (Array.isArray(items)) {
@@ -259,7 +260,7 @@ export function useInteractDataCache(opts: {
       if (
         trustlinesFetchEpoch !== myEpoch ||
         normalizeRunId(opts.runId.value) !== runId ||
-        normalizeEq(opts.equivalent.value) !== eq
+        !sameEquivalent(opts.equivalent.value, eq)
       )
         return
       // Best-effort: fall back on snapshot-derived trustlines.
@@ -269,7 +270,7 @@ export function useInteractDataCache(opts: {
       if (
         trustlinesFetchEpoch === myEpoch &&
         normalizeRunId(opts.runId.value) === runId &&
-        normalizeEq(opts.equivalent.value) === eq
+        sameEquivalent(opts.equivalent.value, eq)
       ) {
         trustlinesLoadingRef.value = false
       }

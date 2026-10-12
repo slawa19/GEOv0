@@ -1,6 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Reactive, type Ref } from 'vue'
 
 import type { GraphSnapshot } from '../types'
+import { sameEquivalent } from '../config/equivalents'
 import { extractErrorMessage, withRequestRef } from '../utils/errorMessage'
 import { interactText } from '../i18n/interactStrings'
 import { clearingRefusalText, paymentRefusalText } from '../utils/paymentRefusalText'
@@ -965,7 +966,7 @@ export function useInteractMode(opts: {
 
       // BUG-3: trigger FX animation immediately after receiving clearing response.
       // This call is fire-and-forget — errors are intentionally ignored.
-      if (res && typeof opts.onClearingDone === 'function' && opts.equivalent.value === eq) {
+      if (res && typeof opts.onClearingDone === 'function' && sameEquivalent(opts.equivalent.value, eq)) {
         try { opts.onClearingDone(res) } catch { /* ignore */ }
       }
 
