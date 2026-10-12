@@ -34,7 +34,6 @@ export function useDragToPinInteraction(opts: {
     renderOnce,
     pinNodeLive,
     commitPinnedPos,
-    reheatPhysics,
     showDragPreviewForNode,
     scheduleDragPreview,
     hideDragPreview,

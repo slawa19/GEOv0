@@ -13,10 +13,11 @@
  * woken. (Until the review of 2026-10-12 the applier was a stub that logged ids: a fix that normalised the equivalent
  * and then failed to apply the money would have passed.)
  *
- * SLICE A, its part after T3901 (`sameEquivalent`), must turn the two `red` tests green: then replace `red` by `it`.
+ * FIXED 2026-10-12 by slice A (`sameEquivalent`, `config/equivalents.ts`): the two cases of the snapshot side were `red`,
+ * are plain `it` now. On the base `a5e60d00` they failed with the applied state `UNTOUCHED`.
  *
- * LIMITS. One of the 21 comparisons of the product is exercised: the one with the asymmetry. The other twenty are not
- * walked here; their migration to one function is slice A's, with its own enumeration.
+ * LIMITS. One of the 21 comparisons of the product is exercised here: the one with the asymmetry. The function itself
+ * and the other sites are in `config/equivalents.sameEquivalent.test.ts` and `composables/sameEquivalent.sites.p039.test.ts`.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -26,7 +27,7 @@ import { createPatchApplier } from '../demo/patches'
 import type { GraphSnapshot } from '../types'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import type { SimulatorAppState } from '../types/simulatorApp'
-import { measured, red } from './p039'
+import { measured } from './p039'
 
 const keyEdge = (a: string, b: string) => `${a}→${b}`
 
@@ -86,13 +87,13 @@ describe('039 R11 - a topology event of the snapshot\'s own equivalent is applie
     }
   })
 
-  red('whitespace on the SNAPSHOT side: snapshot "UAH ", event "UAH" - a structural change and its patches are applied (today: dropped silently)', 'snapshot "UAH " + structural event "UAH": applied state', () => {
+  it('whitespace on the SNAPSHOT side: snapshot "UAH ", event "UAH" - a structural change and its patches are applied (until 039 slice A: dropped silently)', () => {
     const got = apply('UAH ', 'UAH', 'structural')
     measured('R11 snapshot "UAH " + structural event "UAH"', got)
     expect(got, 'snapshot "UAH " + structural event "UAH": applied state').toEqual(APPLIED_STRUCTURAL)
   })
 
-  red('whitespace on the SNAPSHOT side: snapshot " UAH", event "UAH" - a patch-only event changes the balance and the debt (today: dropped silently)', 'snapshot " UAH" + patch-only event "UAH": applied state', () => {
+  it('whitespace on the SNAPSHOT side: snapshot " UAH", event "UAH" - a patch-only event changes the balance and the debt (until 039 slice A: dropped silently)', () => {
     const got = apply(' UAH', 'UAH', 'patch-only')
     measured('R11 snapshot " UAH" + patch-only event "UAH"', got)
     expect(got, 'snapshot " UAH" + patch-only event "UAH": applied state').toEqual(APPLIED_PATCH_ONLY)

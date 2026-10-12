@@ -14,7 +14,7 @@ import { loadSnapshot as loadSnapshotFixtures } from '../fixtures'
 import { computeLayoutForMode, type LayoutMode } from '../layout/forceLayout'
 import { fillForNode } from '../render/nodeFill'
 import { sizeForNode } from '../render/nodeSizing'
-import type { ClearingDoneEvent, GraphSnapshot, TxUpdatedEvent } from '../types'
+import type { ClearingDoneEvent, GraphSnapshot } from '../types'
 import type { LabelsLod, Quality } from '../types/uiPrefs'
 import type { SceneId } from '../scenes'
 import { VIZ_MAPPING } from '../vizMapping'
@@ -36,7 +36,7 @@ import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError, isTimeoutError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
-import type { LayoutNode, Point } from '../types/layout'
+import type { Point } from '../types/layout'
 
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
@@ -59,7 +59,7 @@ import { useSimulatorRealMode, type RealModeState } from './useSimulatorRealMode
 import { useAppSceneState } from './useAppSceneState'
 import { useGeoSimDevHookSetup } from './useGeoSimDevHookSetup'
 import { intensityScale } from '../config/fxConfig'
-import { EQUIVALENT_CODE_RE, equivalentOptions as listEquivalentOptions } from '../config/equivalents'
+import { EQUIVALENT_CODE_RE, canonicalEquivalent, equivalentOptions as listEquivalentOptions, sameEquivalent } from '../config/equivalents'
 import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
 import { createDemoActivityHold } from './demoActivityHold'
@@ -92,7 +92,7 @@ export async function loadStrictRunRecoverySnapshot(input: {
   equivalent: string
 }): Promise<{ snapshot: GraphSnapshot; sourcePath: string }> {
   const runId = String(input.runId || '').trim()
-  const equivalent = String(input.equivalent || '').trim().toUpperCase()
+  const equivalent = canonicalEquivalent(input.equivalent)
   if (!runId || !equivalent) throw new Error('Replay recovery requires a run id and equivalent')
 
   // Recovery after an unreplayable cursor must never fall back to a scenario
@@ -102,7 +102,7 @@ export async function loadStrictRunRecoverySnapshot(input: {
     runId,
     equivalent,
   )
-  if (String(snapshot.equivalent || '').trim().toUpperCase() !== equivalent) {
+  if (!sameEquivalent(snapshot.equivalent, equivalent)) {
     throw new Error('Replay recovery snapshot equivalent does not match the requested context')
   }
   return {
@@ -817,7 +817,7 @@ export function useSimulatorApp(opts?: {
   const effectiveEq = uiDerived.effectiveEq
   // 028 F-028-47 (B6): while a new equivalent loads, or after its load failed, the old snapshot stays on
   // screen - its numbers, units and interact actions are of ITS equivalent, not of the selector's.
-  const sceneEq = computed(() => String(state.snapshot?.equivalent ?? '').trim().toUpperCase() || effectiveEq.value)
+  const sceneEq = computed(() => canonicalEquivalent(state.snapshot?.equivalent) || effectiveEq.value)
   const equivalentOptions = computed(() => listEquivalentOptions({
     apiMode: apiMode.value,
     scenario: real.scenarios.find((x) => x.scenario_id === real.selectedScenarioId)?.equivalents,
@@ -950,11 +950,11 @@ export function useSimulatorApp(opts?: {
   // Any consumer that uses Vue `computed()` based on node.__x/__y must explicitly depend on
   // layoutCoordinator.layoutVersion to re-evaluate during physics/drag updates.
   const getLayoutNodesLive = () => {
-    layoutCoordinator.layoutVersion.value
+    void layoutCoordinator.layoutVersion.value // dependency read (see above) - the read itself is the effect
     return layout.nodes
   }
   const getLayoutNodeByIdLive = (id: string) => {
-    layoutCoordinator.layoutVersion.value
+    void layoutCoordinator.layoutVersion.value // dependency read (see above) - the read itself is the effect
     return getLayoutNodeById(id)
   }
 
@@ -1012,9 +1012,6 @@ export function useSimulatorApp(opts?: {
   const screenToWorld = viewWiring.screenToWorld
   const clientToScreen = viewWiring.clientToScreen
 
-  const worldToCssTranslateNoScale = viewWiring.worldToCssTranslateNoScale
-
-  const selectedNode = viewWiring.selectedNode
   const selectedNodeScreenCenter = viewWiring.selectedNodeScreenCenter
 
   function getNodeScreenCenter(nodeId: string): Point | null {
@@ -1112,12 +1109,8 @@ export function useSimulatorApp(opts?: {
   const fxState = fxOverlays.fxState
   const hoveredEdge = fxOverlays.hoveredEdge
   const clearHoveredEdge = fxOverlays.clearHoveredEdge
-  const activeEdges = fxOverlays.activeEdges
   const addActiveEdge = fxOverlays.addActiveEdge
-  const pruneActiveEdges = fxOverlays.pruneActiveEdges
-  const activeNodes = fxOverlays.activeNodes
   const addActiveNode = fxOverlays.addActiveNode
-  const pruneActiveNodes = fxOverlays.pruneActiveNodes
   const pushFloatingLabel = fxOverlays.pushFloatingLabel
   const pushClearingAmountOverlay = fxOverlays.pushClearingAmountOverlay
   const resetOverlays = fxOverlays.resetOverlays

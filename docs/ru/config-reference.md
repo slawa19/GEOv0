@@ -151,9 +151,8 @@ debug path: у него умолчания нет, `TEST_DATABASE_URL` обяз�
 
 Admin UI использует `VITE_API_BASE_URL` и `VITE_ADMIN_TOKEN` (режима mock и `VITE_API_MODE` у него
 нет с 2026-10-07, 032 S4); локальный runner пишет `admin-ui/.env.local`. Playwright output можно изолировать через
-`GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR`, `GEO_ADMIN_PLAYWRIGHT_REPORT_DIR`,
-`GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR` и отдельный
-`GEO_SIMULATOR_HUD_QA_OUTPUT_DIR`; дефолты находятся под `.local-run/`.
+`GEO_ADMIN_PLAYWRIGHT_OUTPUT_DIR`, `GEO_ADMIN_PLAYWRIGHT_REPORT_DIR` и
+`GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR`; дефолты находятся под `.local-run/`.
 
 Секреты, `.env`, локальные БД, логи, PID, NDJSON и test output не являются
 каноническими данными и не коммитятся.

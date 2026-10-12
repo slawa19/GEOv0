@@ -25,6 +25,7 @@ import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
 import { ApiError, authHeaders } from '../api/http'
 import { fetchEquivalentPrecisions } from '../api/equivalentsApi'
 import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
+import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 
 import type { ClearingDoneEvent, EdgePatch, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
@@ -328,7 +329,7 @@ export function useSimulatorRealMode(opts: {
     return {
       runId: real.runId,
       accessToken: real.accessToken,
-      equivalent: String(effectiveEq.value || '').trim().toUpperCase(),
+      equivalent: canonicalEquivalent(effectiveEq.value),
       apiBase: real.apiBase,
     }
   }
@@ -337,7 +338,7 @@ export function useSimulatorRealMode(opts: {
     const current = currentSceneContext()
     return current.runId === context.runId &&
       current.accessToken === context.accessToken &&
-      current.equivalent === context.equivalent &&
+      sameEquivalent(current.equivalent, context.equivalent) &&
       current.apiBase === context.apiBase
   }
 
@@ -468,8 +469,7 @@ export function useSimulatorRealMode(opts: {
       }, 80)
     }
 
-    let promise: Promise<SnapshotRefreshOutcome>
-    promise = Promise.resolve().then(async (): Promise<SnapshotRefreshOutcome> => {
+    const promise: Promise<SnapshotRefreshOutcome> = Promise.resolve().then(async (): Promise<SnapshotRefreshOutcome> => {
       try {
         if (!isContextStillValid()) return 'superseded'
 
@@ -601,7 +601,7 @@ export function useSimulatorRealMode(opts: {
   }): void {
     const { msg, signal, runId, equivalent } = input
     if (signal.aborted) return
-    if (String(effectiveEq.value || '').trim().toUpperCase() !== String(equivalent || '').trim().toUpperCase()) return
+    if (!sameEquivalent(effectiveEq.value, equivalent)) return
     if (!msg.data) return
 
     let parsed: unknown
@@ -716,7 +716,6 @@ export function useSimulatorRealMode(opts: {
     url: string
   }): Promise<ReplayRecoveryConnectionOutcome> {
     const { runId, ctrl, sseLoopSeq, equivalent, url } = input
-    const equivalentKey = String(equivalent || '').trim().toUpperCase()
     const connectionCtrl = new AbortController()
     const isCurrentContext = () =>
       !ctrl.signal.aborted &&
@@ -724,7 +723,7 @@ export function useSimulatorRealMode(opts: {
       sseLoopSeq === sseSeq &&
       isRealMode.value &&
       real.runId === runId &&
-      String(effectiveEq.value || '').trim().toUpperCase() === equivalentKey
+      sameEquivalent(effectiveEq.value, equivalent)
 
     if (!isCurrentContext()) return 'stop'
 

@@ -365,7 +365,8 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   const floatingLabelsView = computed((): FloatingLabelView[] => {
     // Read layoutVersion so Vue tracks a reactive dependency.
     // When it changes (relayout/physics/drag), this computed re-evaluates.
-    deps.layoutVersion?.value
+    // (`void`: the read itself is the effect - it must stay.)
+    void deps.layoutVersion?.value
 
     const out: FloatingLabelView[] = []
     const z = Math.max(0.01, deps.getCameraZoom())

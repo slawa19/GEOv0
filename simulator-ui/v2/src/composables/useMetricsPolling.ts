@@ -14,6 +14,7 @@ import { getBottlenecks, getMetrics } from '../api/simulatorApi'
 import type { BottlenecksResponse, MetricsResponse, RunStatus } from '../api/simulatorTypes'
 import { extractErrorMessage } from '../utils/errorMessage'
 import { toLower } from '../utils/stringHelpers'
+import { sameEquivalent } from '../config/equivalents'
 
 /** Poll cadence required by the product spec (acceptance item 5): every 5 seconds. */
 export const METRICS_POLL_INTERVAL_MS = 5_000
@@ -304,7 +305,7 @@ export function useMetricsPolling(deps: {
       !disposed.value &&
       seq === mySeq &&
       activeRunId.value === runId &&
-      equivalentKey.value === equivalent
+      sameEquivalent(equivalentKey.value, equivalent)
 
     const cfg: HttpConfig = {
       apiBase: deps.apiBase.value,

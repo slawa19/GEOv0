@@ -1,4 +1,6 @@
 import tsParser from '@typescript-eslint/parser'
+import pluginVue from 'eslint-plugin-vue'
+import tseslint from 'typescript-eslint'
 import vueParser from 'vue-eslint-parser'
 
 const correctnessRules = {
@@ -32,6 +34,25 @@ const tsLanguageOptions = {
   },
 }
 
+// 039 slice A (R13): `typescript-eslint` recommended + `eslint-plugin-vue` flat/essential on the PRODUCT sources.
+//
+// Order matters (flat config: the later block wins). The two presets come FIRST, so every block below - the
+// correctness rules and the ARCH-* `no-restricted-syntax` blocks - overrides them and none of the earlier rules is
+// weakened: the typescript-eslint preset switches `getter-return`, `no-import-assign`, `no-unreachable` and
+// `no-unsafe-negation` off for TypeScript, and `correctnessRules` switches them back on.
+//
+// The typescript-eslint preset is narrowed to the product files; upstream scopes its "eslint-recommended" part to
+// `*.ts` only, here it also covers `<script lang="ts">` of `*.vue`.
+//
+// NOT covered by this config: every test file under `src` (ignored below; the windowManager tests get their parser,
+// ARCH-4 and the vue preset, whose rule block has no `files` - not the typescript-eslint preset), `e2e/`, the configs in the package root. Type-aware rules are not enabled.
+const productFiles = ['src/**/*.ts', 'src/**/*.vue']
+const typescriptRecommended = tseslint.configs.recommended.map((config) => ({
+  ...config,
+  files: productFiles,
+  ignores: ['src/**/*.test.ts'],
+}))
+
 export default [
   {
     ignores: [
@@ -39,6 +60,8 @@ export default [
       '!src/composables/windowManager/**/*.test.ts',
     ],
   },
+  ...typescriptRecommended,
+  ...pluginVue.configs['flat/essential'],
   {
     files: ['src/composables/windowManager/**/*.ts'],
     languageOptions: tsLanguageOptions,

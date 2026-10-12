@@ -6,6 +6,7 @@ import type {
 import type { RunStatus, TopologyChangedEvent } from '../api/simulatorTypes'
 import type { ClearingDoneEvent, EdgePatch, GraphLink, GraphNode, NodePatch, TxUpdatedEvent } from '../types'
 import type { SimulatorAppState } from '../types/simulatorApp'
+import { canonicalEquivalent, sameEquivalent } from '../config/equivalents'
 import { runStatusErrorText } from '../utils/runErrorClassification'
 import { resolveTxDirection } from '../utils/txDirection'
 import { toLowerTrim } from '../utils/stringHelpers'
@@ -78,7 +79,7 @@ export function createRealEventReplayOwner(opts?: { maxIds?: number; pruneBatch?
       if (event.run_id !== connectionRunId) {
         return { status: 'rejected', kind: 'context', diagnostic: 'run_id_mismatch' }
       }
-    } else if (event.equivalent.trim().toUpperCase() !== connectionEquivalent.trim().toUpperCase()) {
+    } else if (!sameEquivalent(event.equivalent, connectionEquivalent)) {
       return { status: 'rejected', kind: 'context', diagnostic: 'equivalent_mismatch' }
     }
 
@@ -233,7 +234,9 @@ function applyTopologyEvent(
   }
 
   const snapshot = draft.state.snapshot
-  if (String(snapshot.equivalent ?? '').toUpperCase() !== event.equivalent.trim().toUpperCase()) return
+  // 039 R11: until 2026-10-12 the snapshot's side was upper-cased but not trimmed, so a snapshot `"UAH "` dropped
+  // every topology event of `"UAH"` silently.
+  if (!sameEquivalent(snapshot.equivalent, event.equivalent)) return
 
   if (!hasStructuralChanges) {
     deps.patchApplier.applyNodePatches(payload.node_patch)
@@ -346,8 +349,9 @@ export function applyAcceptedRealEvent(
 
   // 028 F-028-47 (B3): a patch of another equivalent than the snapshot's never reaches it - the
   // connection may already be on the new equivalent while the old snapshot is still on screen.
-  const snapshotEq = String(draft.state.snapshot?.equivalent ?? '').trim().toUpperCase()
-  const otherEquivalent = 'equivalent' in event && !!snapshotEq && snapshotEq !== event.equivalent.trim().toUpperCase()
+  // A snapshot WITHOUT an equivalent restricts nothing here (as before 039): that guard is this site's own.
+  const snapshotEq = canonicalEquivalent(draft.state.snapshot?.equivalent)
+  const otherEquivalent = 'equivalent' in event && !!snapshotEq && !sameEquivalent(snapshotEq, event.equivalent)
 
   if (isTxUpdatedEvent(event)) {
     draft.real.runStats.attempts += 1
@@ -467,8 +471,9 @@ export function executeRealEventIntents(
     } else if (intent.type === 'tx-label-delayed') {
       deps.scheduleTimeout(
         () => {
-          const sceneEq = String(deps.getSceneEquivalent?.() ?? intent.equivalent).trim().toUpperCase()
-          if (deps.getActiveRunId() !== intent.runId || sceneEq !== intent.equivalent.trim().toUpperCase()) {
+          // No getter, or a scene without a snapshot (`null`): the label's own equivalent stands in, as before 039.
+          const sceneEq = deps.getSceneEquivalent?.() ?? intent.equivalent
+          if (deps.getActiveRunId() !== intent.runId || !sameEquivalent(sceneEq, intent.equivalent)) {
             deps.onReceiverGuardDropped?.()
             return
           }

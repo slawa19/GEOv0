@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 
 import { DEFAULT_MONEY_PRECISION, normalizePrecision } from '../utils/money'
+import { canonicalEquivalent } from './equivalents'
 
 /**
  * Where the simulator UI learns how many fraction digits an equivalent declares
@@ -46,7 +47,7 @@ export function setEquivalentPrecisions(
 ): void {
   const next: Record<string, number> = {}
   for (const item of items ?? []) {
-    const code = String(item?.code ?? '').trim().toUpperCase()
+    const code = canonicalEquivalent(item?.code)
     if (!code) continue
     if (item?.precision == null) continue
     next[code] = normalizePrecision(item.precision)
@@ -61,7 +62,7 @@ export function resetEquivalentPrecisions(): void {
 
 /** Fraction digits the given equivalent declares. */
 export function equivalentPrecision(code: unknown): number {
-  const key = String(code ?? '').trim().toUpperCase()
+  const key = canonicalEquivalent(code)
   if (!key) return DEFAULT_MONEY_PRECISION
 
   const served = fromApi.value[key]

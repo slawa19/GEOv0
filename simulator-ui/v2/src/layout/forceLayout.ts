@@ -440,7 +440,7 @@ export function applyForceLayout(opts: ForceLayoutOptions): { nodes: LayoutNode[
       const yi = y[i] ?? 0
       const ri = r[i] ?? 0
 
-      qt.visit((quad: unknown, x0: number, y0: number, x1: number, y1: number) => {
+      qt.visit((quad: unknown, x0: number, y0: number, x1: number) => {
         const q = quad as QuadNode
         const m = q.mass ?? 0
         if (!m) return true

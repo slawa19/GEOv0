@@ -150,10 +150,6 @@ export function useInteractFSM(opts: {
     state.clearingFailure = null
   }
 
-  function startNewFlow(p: InteractPhase) {
-    _initFlowState(p)
-  }
-
   function startPaymentFlow() {
     _initFlowState('picking-payment-from')
   }

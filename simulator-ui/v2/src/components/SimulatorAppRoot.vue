@@ -149,9 +149,7 @@ import { computeNodeEdgeStats } from '../composables/useSelectedNodeEdgeStats'
  import { keyEdge } from '../utils/edgeKey'
  import { useWindowManager } from '../composables/windowManager/useWindowManager'
  import type { WindowInstance } from '../composables/windowManager/types'
- import type { WindowAnchor } from '../composables/windowManager/types'
  import { isInteractPanelWindow, isNodeCardWindow, isEdgeDetailWindow } from '../composables/windowManager/types'
- import { interactWindowOfPhase } from '../composables/windowManager/interactWindowOfPhase'
  import { useWmEdgeDetail } from '../composables/useWmEdgeDetail'
  import { useWindowController } from '../composables/useWindowController'
 import { resolveOverlayDockStyle, resolveWindowSurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
@@ -408,11 +406,9 @@ const {
   clearHoveredEdge,
   addActiveEdge,
   edgeTooltipStyle: calcEdgeTooltipStyle,
-  selectedNode,
   getNodeScreenCenter,
 
   // pinning
-  dragToPin,
   isNodePinned,
   pinNode,
   unpinNode,
@@ -467,7 +463,8 @@ const paymentTargetsMaxHops = computed(() => interact.mode.paymentTargetsMaxHops
 // This also gives Vue a chance to cache style until hoveredEdge/host changes.
 const edgeTooltipStyle = computed(() => calcEdgeTooltipStyle())
 
-const { activePanelType } = provideActivePanelState(interactPhase)
+// The call PROVIDES the panel state to the subtree (`provide`); its return value is not needed here.
+provideActivePanelState(interactPhase)
 
 // Components that PRINT a participant id remove the namespace of this scenario from it (`utils/participantDisplayId.ts`).
 const shownScenarioId = computed(() => shownScenarioIdOf(real.runStatus, real.selectedScenarioId))
@@ -947,15 +944,6 @@ function cancelInteractWindowFromUi(): void {
   interactFlowUsesStrictFocusOwner = false
   interact.mode.cancel()
 }
-
-/** Computed: should TrustlineManagementPanel be shown? */
-const showTrustlinePanel = computed(() => {
-  if (activePanelType.value !== 'trustline') return false
-  // For editing-trustline phase, show panel only if explicitly requested
-  if (interactPhase.value === 'editing-trustline') return useFullTrustlineEditor.value
-  // For all other trustline phases (picking, confirm-create, etc.) always show the panel
-  return true
-})
 
 async function exitDemoUi() {
   isExiting.value = true

@@ -9,7 +9,7 @@ export type LayoutState<N, L> = {
   h: number
 }
 
-type UseLayoutCoordinatorDeps<N, L, M extends string, S extends { generated_at: string; nodes: unknown[]; links: unknown[] }> = {
+type UseLayoutCoordinatorDeps<M extends string, S extends { generated_at: string; nodes: unknown[]; links: unknown[] }> = {
   canvasEl: Ref<HTMLCanvasElement | null>
   fxCanvasEl: Ref<HTMLCanvasElement | null>
   hostEl: Ref<HTMLDivElement | null>
@@ -148,7 +148,7 @@ export function useLayoutCoordinator<
   L,
   M extends string,
   S extends { generated_at: string; nodes: unknown[]; links: unknown[] },
->(deps: UseLayoutCoordinatorDeps<N, L, M, S>): UseLayoutCoordinatorReturn<N, L> {
+>(deps: UseLayoutCoordinatorDeps<M, S>): UseLayoutCoordinatorReturn<N, L> {
   // IMPORTANT: keep nodes/links RAW.
   // We still want `layout.w/h` to be reactive, but layout.nodes/links must NOT be Vue proxies.
   // Physics writes to node.__x/__y on every tick; proxied nodes would trigger massive overhead.

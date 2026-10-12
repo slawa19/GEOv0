@@ -7,10 +7,7 @@ import { isActiveStatus } from '../../utils/status'
 import type { ParticipantInfo, TrustlineInfo } from '../../api/simulatorTypes'
 import type { useInteractActions } from '../useInteractActions'
 import { findAnsweredRow, type TrustlinesFetchState } from './trustlinesSourceState'
-
-function normalizeEq(v: unknown): string {
-  return String(v ?? '').trim().toUpperCase()
-}
+import { canonicalEquivalent, sameEquivalent } from '../../config/equivalents'
 
 // Register 271: an `InteractActionError` is a plain object, not an `Error` - read its `message` too.
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -133,16 +130,16 @@ export function useInteractDataCache(opts: {
    */
   const answeredTrustlines = computed<TrustlineInfo[] | null>(() => {
     const runId = normalizeRunId(opts.runId.value)
-    const eq = normalizeEq(opts.equivalent.value)
+    const eq = canonicalEquivalent(opts.equivalent.value)
     const fetchedOk =
       fetchedTrustlinesRunId.value === runId &&
-      normalizeEq(fetchedTrustlinesEq.value) === eq &&
+      sameEquivalent(fetchedTrustlinesEq.value, eq) &&
       fetchedTrustlines.value != null
     return fetchedOk ? fetchedTrustlines.value : null
   })
 
   // 028 F-028-47 (B2): the snapshot fallback is of the snapshot's equivalent, so it serves only that one.
-  const snapshotIsCurrentEq = () => normalizeEq(opts.snapshot.value?.equivalent) === normalizeEq(opts.equivalent.value)
+  const snapshotIsCurrentEq = () => sameEquivalent(opts.snapshot.value?.equivalent, opts.equivalent.value)
   const trustlines = computed(() => {
     return answeredTrustlines.value ?? (snapshotIsCurrentEq() ? snapshotTrustlines.value : [])
   })
@@ -168,8 +165,8 @@ export function useInteractDataCache(opts: {
   }
 
   function invalidateTrustlinesCache(eq?: string) {
-    const curEq = normalizeEq(eq ?? opts.equivalent.value)
-    if (normalizeEq(fetchedTrustlinesEq.value) !== curEq) return
+    const curEq = canonicalEquivalent(eq ?? opts.equivalent.value)
+    if (!sameEquivalent(fetchedTrustlinesEq.value, curEq)) return
     fetchedTrustlines.value = null
     fetchedTrustlinesEq.value = ''
     fetchedTrustlinesRunId.value = ''
@@ -210,29 +207,29 @@ export function useInteractDataCache(opts: {
     const toPid = String(to ?? '').trim()
     if (!fromPid || !toPid) return
 
-    const targetEq = normalizeEq(eq ?? opts.equivalent.value)
+    const targetEq = canonicalEquivalent(eq ?? opts.equivalent.value)
     const limit = normalizeAmount(newLimit)
     if (!limit) return
 
     // Patch fetched list only if it's for the active equivalent.
-    if (normalizeEq(fetchedTrustlinesEq.value) === targetEq) {
+    if (sameEquivalent(fetchedTrustlinesEq.value, targetEq)) {
       fetchedTrustlines.value = patchList(fetchedTrustlines.value, fromPid, toPid, limit)
     }
 
     // Patch snapshot-derived list (used as fallback) - only when it is of the same equivalent (B2).
-    if (normalizeEq(opts.snapshot.value?.equivalent) !== targetEq) return
+    if (!sameEquivalent(opts.snapshot.value?.equivalent, targetEq)) return
     snapshotTrustlines.value = (patchList(snapshotTrustlines.value, fromPid, toPid, limit) ?? snapshotTrustlines.value) as TrustlineInfo[]
   }
 
   async function refreshTrustlines(o?: { force?: boolean }) {
     // Best-effort only: dropdowns can fall back to snapshot.
     const runId = normalizeRunId(opts.runId.value)
-    const eq = normalizeEq(opts.equivalent.value)
+    const eq = canonicalEquivalent(opts.equivalent.value)
     if (!runId || !eq) return
     const now = Date.now()
     const cachedForContext =
       fetchedTrustlinesRunId.value === runId &&
-      normalizeEq(fetchedTrustlinesEq.value) === eq &&
+      sameEquivalent(fetchedTrustlinesEq.value, eq) &&
       fetchedTrustlines.value != null
     if (!o?.force && cachedForContext && now - trustlinesFetchedAtMs < 15_000) return
 
@@ -245,7 +242,7 @@ export function useInteractDataCache(opts: {
       if (
         trustlinesFetchEpoch !== myEpoch ||
         normalizeRunId(opts.runId.value) !== runId ||
-        normalizeEq(opts.equivalent.value) !== eq
+        !sameEquivalent(opts.equivalent.value, eq)
       )
         return
       if (Array.isArray(items)) {
@@ -259,7 +256,7 @@ export function useInteractDataCache(opts: {
       if (
         trustlinesFetchEpoch !== myEpoch ||
         normalizeRunId(opts.runId.value) !== runId ||
-        normalizeEq(opts.equivalent.value) !== eq
+        !sameEquivalent(opts.equivalent.value, eq)
       )
         return
       // Best-effort: fall back on snapshot-derived trustlines.
@@ -269,7 +266,7 @@ export function useInteractDataCache(opts: {
       if (
         trustlinesFetchEpoch === myEpoch &&
         normalizeRunId(opts.runId.value) === runId &&
-        normalizeEq(opts.equivalent.value) === eq
+        sameEquivalent(opts.equivalent.value, eq)
       ) {
         trustlinesLoadingRef.value = false
       }
@@ -293,7 +290,7 @@ export function useInteractDataCache(opts: {
 
   function paymentTargetsKey(o: { runId: string; eq: string; fromPid: string; maxHops: number }): string {
     const runId = normalizeRunId(o.runId)
-    const eq = normalizeEq(o.eq)
+    const eq = canonicalEquivalent(o.eq)
     const fromPid = normalizePid(o.fromPid)
     const maxHops = Number(o.maxHops)
     return `${runId}::${eq}::${fromPid}::${Number.isFinite(maxHops) ? String(maxHops) : 'NaN'}`
@@ -332,7 +329,7 @@ export function useInteractDataCache(opts: {
 
   async function refreshPaymentTargets(o: { fromPid: string; maxHops: number; force?: boolean }) {
     const runId = normalizeRunId(opts.runId.value)
-    const eq = normalizeEq(opts.equivalent.value)
+    const eq = canonicalEquivalent(opts.equivalent.value)
     const fromPid = normalizePid(o.fromPid)
     const maxHops = Number(o.maxHops)
     if (!runId || !eq || !fromPid || !Number.isFinite(maxHops) || !(maxHops >= 1)) return
@@ -408,7 +405,7 @@ export function useInteractDataCache(opts: {
 
   // Run/EQ change invalidates payment targets semantics.
   watch(
-    () => `${normalizeRunId(opts.runId.value)}::${normalizeEq(opts.equivalent.value)}`,
+    () => `${normalizeRunId(opts.runId.value)}::${canonicalEquivalent(opts.equivalent.value)}`,
     () => {
       paymentTargetsContext += 1
       paymentTargetsLastAnswerByKey.value = new Map()
@@ -471,7 +468,7 @@ export function useInteractDataCache(opts: {
   // Trustlines are scoped by run and equivalent. Epoch invalidation also keeps
   // late success/error/finally branches from publishing into the new context.
   watch(
-    () => `${normalizeRunId(opts.runId.value)}::${normalizeEq(opts.equivalent.value)}`,
+    () => `${normalizeRunId(opts.runId.value)}::${canonicalEquivalent(opts.equivalent.value)}`,
     () => {
       trustlinesFetchEpoch += 1
       fetchedTrustlines.value = null
@@ -510,7 +507,7 @@ export function useInteractDataCache(opts: {
         nameByPid.set(pid, nm)
       }
 
-      const eq = normalizeEq(snap.equivalent)
+      const eq = canonicalEquivalent(snap.equivalent)
       snapshotTrustlines.value = (snap.links ?? []).map((l) => {
         const from = l.source
         const to = l.target
