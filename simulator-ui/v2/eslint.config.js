@@ -64,6 +64,7 @@ export default [
   {
     files: [
       'src/components/SimulatorAppRoot.vue',
+      'src/composables/useWindowController.ts',
       'src/composables/windowManager/**/*.ts',
     ],
     rules: {
