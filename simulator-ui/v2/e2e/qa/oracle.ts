@@ -96,7 +96,7 @@ function clearShare(a: Pt, b: Pt, occ: Rect[]): number {
  * watch. The test refuses to run on a layout that leaves it nothing to look at - since 2026-10-12 that includes a
  * chord that cannot be told from the route (`expectChordTold` below; until then the chord only entered the score).
  */
-export async function pickRingRoute(page: Page, ring: string[], hops: number): Promise<RouteGeom> {
+export async function pickRingRoute(page: Page, ring: readonly string[], hops: number): Promise<RouteGeom> {
   const n = await screenNodes(page)
   const occluders = await namedOccluders(page)
   let best: { score: number; ids: string[] } | null = null

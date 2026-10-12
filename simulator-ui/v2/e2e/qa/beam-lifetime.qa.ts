@@ -14,10 +14,8 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { pickRingRoute } from './oracle.js'
 import {
-  OTHER_SCENARIO, RUN_ID, SCENARIO_ID, bootTwoScenarios, frames, fxCounts, pushEvent, sampleCanvas, txUpdated, type SceneFail,
+  OTHER_SCENARIO, RING, RUN_ID, SCENARIO_ID, bootTwoScenarios, frames, fxCounts, pushEvent, sampleCanvas, txUpdated, type SceneFail,
 } from './stand.js'
-
-const RING = ['a', 'b', 'c', 'd', 'e', 'f']
 
 async function aliveSparks(page: Page): Promise<string[]> {
   return page.evaluate(() => {

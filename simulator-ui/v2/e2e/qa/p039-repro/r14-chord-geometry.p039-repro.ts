@@ -24,10 +24,8 @@
 import { expect, test } from '@playwright/test'
 
 import { CORRIDOR_PX, pickRingRoute } from '../oracle.js'
-import { boot, ringSnapshot } from '../stand.js'
+import { RING, boot, ringSnapshot } from '../stand.js'
 import { ROUTE7, route7Snapshot, routeGeom } from './route7.js'
-
-const RING = ['a', 'b', 'c', 'd', 'e', 'f']
 
 test('039 R14 measurement - clearance of the chord: the routes of the ring of six, closed six-leg route included', async ({ page }) => {
   await boot(page, { snapshot: ringSnapshot(), clock: true })

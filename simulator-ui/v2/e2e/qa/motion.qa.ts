@@ -6,9 +6,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { expectBeamOnRoute, pickRingRoute, probeFrame, rememberBaseline, watchFlight } from './oracle.js'
-import { boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, sampleCanvas, txUpdated } from './stand.js'
-
-const RING = ['a', 'b', 'c', 'd', 'e', 'f']
+import { RING, boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, sampleCanvas, txUpdated } from './stand.js'
 
 async function sparks(page: Page) {
   return page.evaluate(() =>
