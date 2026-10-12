@@ -283,6 +283,37 @@ for (const theme of THEMES) {
   })
 }
 
+/**
+ * Added AFTER the product change (2026-10-12), so it has no "before" and is not laid side by side: a HUB and an
+ * ORGANISATION as the debtor. The ring of a hub stands 3.5 px outside its outline and is painted after the lines, so
+ * it crosses the marker (2 to 7 px outside the outline) - a picture for the owner's look, not judged by any test.
+ */
+function debtorShapesSnapshot(): QaSnapshot {
+  const person = (id: string, name: string) => ({ ...node(id, name, { net_sign: 1, atoms: '100', key: 'person' }), viz_size: { w: 24, h: 24 } })
+  return {
+    equivalent: 'UAH',
+    generated_at: '2026-02-01T00:00:00.000Z',
+    palette: { default: { color: '#64748b', label: 'Default' } },
+    limits: { max_particles: 120 },
+    nodes: [
+      person('p1', 'Creditor 1'), { ...node('hubD', 'Hub debtor', { type: 'hub', net_sign: -1, atoms: '100', key: 'person' }), viz_size: { w: 24, h: 24 } },
+      person('p2', 'Creditor 2'), node('shopD', 'Shop debtor', { type: 'business', net_sign: -1, atoms: '100', key: 'debt-4' }),
+    ],
+    links: [trust('p1', 'hubD', 80), trust('p2', 'shopD', 80)],
+  }
+}
+
+for (const theme of THEMES) {
+  test(`039 B2 frames [${theme}] - a hub and an organisation as the debtor (after only)`, async ({ page }) => {
+    test.skip(PHASE !== 'after', 'this scene was added after the product change: it has no "before"')
+    const dir = join(DIR, 'after-only')
+    mkdirSync(dir, { recursive: true })
+    await bootThemed(page, debtorShapesSnapshot(), theme)
+    await pairCut(page, dir, `${theme}-direction-hub-debtor`, ['p1', 'hubD'])
+    await pairCut(page, dir, `${theme}-direction-organisation-debtor`, ['p2', 'shopD'])
+  })
+}
+
 test('039 B1 frames - before | after, side by side (only when both phases exist)', async ({ page }) => {
   if (!isAbsolute(DIR)) throw new Error('039 frames: P039_FRAMES_DIR must be an absolute directory')
   const before = join(DIR, 'before')
