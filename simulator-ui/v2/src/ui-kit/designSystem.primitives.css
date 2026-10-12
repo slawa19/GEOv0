@@ -100,9 +100,6 @@
 /* Muted = tertiary text (matches reference: shadcn text-muted / HUD h-muted) */
 .ds-muted { color: var(--ds-text-3); }
 
-/* Secondary = slightly stronger than muted (kept for places that really need it). */
-.ds-secondary { color: var(--ds-text-2); }
-
 /* Help / description text (avoid using ds-label for sentences; ds-label is a label, may become uppercase in HUD). */
 .ds-help {
   margin: 0;
