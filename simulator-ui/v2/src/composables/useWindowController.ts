@@ -13,8 +13,7 @@ import { useWmEdgeDetail, type EdgeDetailCloseReason } from './useWmEdgeDetail'
 // ARCH-4 (WM bridging): `watchEffect` запрещён.
 // `wm.open()`/`wm.closeGroup()` читают реактивное состояние WM, и `watchEffect` может
 // незаметно создать циклические зависимости (и множественные `wm.open()` в одном flush).
-const watchEffect: never = null as never
-void watchEffect
+// Держит запрет lint-правило `no-restricted-syntax` в `eslint.config.js` (этот файл в его списке).
 
 type InteractModeApi = {
 	state: InteractState

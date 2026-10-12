@@ -54,14 +54,12 @@ describe('designSystem.overlays dropdown contract', () => {
   it('keeps pointer transparency on passive overlays while interactive surfaces opt in explicitly', () => {
     const overlays = readHere('./designSystem.overlays.css')
 
-    expect(overlays).toContain('.ds-ov-layer {')
     expect(overlays).toContain('.ds-ov-item {')
     expect(overlays).toContain('.ds-ov-top {')
     expect(overlays).toContain('.ds-ov-bottom {')
     expect(overlays).toContain('.ds-ov-inset {')
     expect(overlays).toContain('.ds-ov-tooltip {')
 
-    expect(overlays).toContain('.ds-ov-layer {\n  position: absolute;\n  inset: 0;\n  pointer-events: none;\n}')
     expect(overlays).toContain('.ds-ov-item {\n  pointer-events: auto;\n}')
     expect(overlays).toContain('.ds-ov-top {\n  position: absolute;')
     expect(overlays).toContain('z-index: var(--ds-z-top, 40);\n  pointer-events: none;')

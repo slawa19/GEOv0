@@ -14,21 +14,6 @@
    Overlay layers / placement utilities
    ────────────────────────────────────────────────────────────── */
 
-.ds-ov-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.ds-ov-layer--ui {
-  z-index: var(--ds-z-top, 40);
-}
-
-.ds-ov-layer--floating {
-  z-index: var(--ds-z-dev, 50);
-  contain: layout paint;
-}
-
 .ds-ov-item {
   pointer-events: auto;
 }
@@ -45,7 +30,6 @@
 
   We use a single tokenized inset and also respect mobile safe-areas.
 */
-.ds-ov-layer,
 .ds-ov-vars {
   --ds-ov-inset: var(--ds-space-3, 12px);
   --ds-ov-safe-top: env(safe-area-inset-top, 0px);

@@ -29,19 +29,20 @@ import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
 import { createPatchApplier } from '../demo/patches'
-import { spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
+import { resetFxRendererCaches, spawnEdgePulses, spawnNodeBursts } from '../render/fxRenderer'
 import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError, isTimeoutError } from '../api/http'
 import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
-import type { LayoutLink, LayoutNode, Point } from '../types/layout'
+import type { LayoutNode, Point } from '../types/layout'
 
 import { useAppLifecycle } from './useAppLifecycle'
 import { useAppUiDerivedState } from './useAppUiDerivedState'
 import { useLabelNodes } from './useLabelNodes'
 import { useLayoutIndex } from './useLayoutIndex'
+import { syncLayoutFromSnapshot as syncLayoutFromSnapshotImpl } from './syncLayoutFromSnapshot'
 import { usePersistedSimulatorPrefs } from './usePersistedSimulatorPrefs'
 import { useMetricsPolling } from './useMetricsPolling'
 import { useSelectedNodeEdgeStats } from './useSelectedNodeEdgeStats'
@@ -958,59 +959,7 @@ export function useSimulatorApp(opts?: {
   }
 
   function syncLayoutFromSnapshot(snapshot: GraphSnapshot) {
-    // Layout nodes/links are copies (see forceLayout.ts spreads base objects).
-    // When the scene loader decides an update is incremental (same node IDs), it may skip relayout.
-    // In that case we must sync viz fields AND reconcile topology into the existing layout objects used for rendering.
-    const snapNodeById = new Map(snapshot.nodes.map((n) => [n.id, n] as const))
-    for (const n of layout.nodes) {
-      const src = snapNodeById.get(String(n.id))
-      if (!src) continue
-      n.name = src.name
-      n.type = src.type
-      n.status = src.status
-      n.links_count = src.links_count
-      n.net_balance_atoms = src.net_balance_atoms
-      n.net_sign = src.net_sign
-      n.net_balance = src.net_balance
-      n.viz_color_key = src.viz_color_key
-      n.viz_shape_key = src.viz_shape_key
-      n.viz_size = src.viz_size
-      n.viz_badge_key = src.viz_badge_key
-    }
-
-    // Links are more volatile than nodes (preview → run, scenario switch, live run updates).
-    // We want to keep node positions/camera stable, but we MUST reflect link add/remove changes.
-    const oldLinkByKey = new Map<string, LayoutLink>()
-    for (const l of layout.links) {
-      const k = String(l.__key ?? keyEdge(String(l.source), String(l.target)))
-      oldLinkByKey.set(k, l)
-    }
-
-    const nextLinks: LayoutLink[] = []
-    for (const src of snapshot.links) {
-      const k = keyEdge(String(src.source), String(src.target))
-      const existing = oldLinkByKey.get(k)
-      if (existing) {
-        existing.source = src.source
-        existing.target = src.target
-        existing.trust_limit = src.trust_limit
-        existing.used = src.used
-        existing.available = src.available
-        existing.status = src.status
-        existing.close_requested_at = src.close_requested_at
-        existing.viz_color_key = src.viz_color_key
-        existing.viz_width_key = src.viz_width_key
-        existing.viz_alpha_key = src.viz_alpha_key
-        existing.__key = k
-        nextLinks.push(existing)
-      } else {
-        nextLinks.push({ ...src, __key: k })
-      }
-    }
-
-    // Assign even if length matches: link composition/order may change.
-    layout.links = nextLinks
-
+    syncLayoutFromSnapshotImpl(layout, snapshot)
     wakeUp()
   }
 
@@ -1834,16 +1783,10 @@ export function useSimulatorApp(opts?: {
     sceneState,
     hideDragPreview,
     resetFxRendererCaches: () => {
-      // glowSprites is a synchronous, already-loaded module — reset its cache immediately
-      // to avoid race conditions where the cache is read before async teardown completes.
+      // Both modules are statically imported by this file, so both caches are reset synchronously:
+      // nothing can read a stale cache between teardown and a late import callback.
       resetGlowSpritesCache()
-      // Fire-and-forget: lifecycle teardown should not depend on dynamic import timing.
-      // Also ensure we don't surface unhandled rejections if import fails during HMR/teardown.
-      void import('../render/fxRenderer')
-        .then((m) => m.resetFxRendererCaches())
-        .catch(() => {
-          // Best-effort.
-        })
+      resetFxRendererCaches()
     },
     physics,
     getLayoutSize: () => ({ w: layout.w, h: layout.h }),
