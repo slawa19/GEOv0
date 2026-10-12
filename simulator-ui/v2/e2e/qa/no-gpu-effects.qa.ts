@@ -21,7 +21,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { BUDGETS, CSS_EFFECTS_NO_GPU, type Budget } from './budgets.js'
 import { buildPerfLoad } from './perf-load.js'
-import { boot, fixtureSnapshot100, pausedClockTime, pretendGpu, screenNodes, selectHub, type QaSnapshot } from './stand.js'
+import { boot, fixtureSnapshot100, pausedClockTime, pretendGpu, pushFrames, screenNodes, selectHub, type QaSnapshot } from './stand.js'
 
 const devHook = process.env.QA_STAND_SERVER !== 'preview'
 const snapshot = fixtureSnapshot100()
@@ -46,8 +46,7 @@ const census = (page: Page): Promise<string[]> => page.evaluate(() => {
   return [...by].sort().map(([k, n]) => `${n} x ${k}`)
 })
 
-const push = (page: Page, frames: string[]) =>
-  page.evaluate((fs) => { for (const f of fs) (window as unknown as { __qaSse: { push: (t: string) => void } }).__qaSse.push(f) }, frames)
+const push = pushFrames // awaited: returns when the product took every frame (`stand.ts`)
 
 async function bootNeighbors(page: Page, snap: QaSnapshot, gpu: boolean) {
   await boot(page, {

@@ -47,8 +47,11 @@ import { exclusionProblems, verdict } from './run-verdict.mjs'
  *   about 85 s on the CI runner by the timestamps of run 38200925497, whose gate step took 269 s - so the step is
  *   now past the five minutes the spec of 038 named as an orientation; `timeout-minutes` of the step is what holds.
  *   The wall-clock files of the perf project (frame time, heap, the FPS guard) did NOT move and must not.
+ * - 2026-10-12 (039 slice A, delivery): gate 76 -> 78, full 199 -> 201. Two tests of `delivery.qa.ts`: a frame whose
+ *   connection is lost before the product read it is refused and not counted as taken, with `pushFrames` holding
+ *   `taken === pushed`; and a delivery during which the product's SSE handler threw is refused.
  */
-export const EXPECTED = { gate: 76, full: 199 }
+export const EXPECTED = { gate: 78, full: 201 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

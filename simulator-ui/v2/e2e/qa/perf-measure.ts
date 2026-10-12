@@ -10,6 +10,9 @@
  * the counting reader of the SSE shim (`stand.ts`, `installSseShim`: the product's read loop asked for the next chunk
  * after ours). A stream that stops being read part of the way leaves `taken` short of `pushed`, and the window is
  * refused: a load that did not arrive makes any frame time look good (external review of S3, P2; 038 S2, I2).
+ * Since 2026-10-12 (039 slice A) `__qaSse.push` answers with the connections whose read loop CAME BACK, so a frame of
+ * a connection that ended before reading it is no longer counted as taken. What "taken" does not prove - that the
+ * event was applied - is written at `installSseShim`.
  *
  * It does not read pixels, and it does not see: time spent outside `requestAnimationFrame` callbacks (style, paint,
  * raster, compositing - `frame-breakdown.qaperf.ts` traces those), input latency, the first load of the page.

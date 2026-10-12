@@ -117,45 +117,88 @@ export async function mockBackend(page: Page, snapshot: QaSnapshot): Promise<{ u
  * loop: it handles every message of a chunk synchronously and only then asks the stream for the next chunk, so the
  * `read()` call that FOLLOWS the one that returned our chunk means the handler has run - for a duplicate and for a
  * rejected event as well (the frame reached the handler; whether it animated is the test's question). No timer is
- * involved. A connection that is dropped answers for its frames too: they can no longer be taken.
+ * involved.
+ *
+ * THREE OUTCOMES, KEPT APART (2026-10-12, 039 slice A; BACKLOG 038-2 (e) of S2's review). Until then a connection that
+ * was dropped answered "taken" for all of its frames, read or not, and `push` returned the number of connections it
+ * had written to - an acknowledgement of the shim, not of the product. Now, for each connection a frame went to:
+ *   `read`   - the product's read loop came back for the next chunk: its handler for this frame has returned;
+ *   `closed` - the product was handed the chunk and the connection ended before its loop came back (a handler that
+ *              ends the connection itself, or a loss in between): delivered to the reader, handling not shown;
+ *   `unread` - the connection ended with the chunk still in the stream: the product never had it.
+ * `push` / `deliver` count only `read` as taken, and `state.taken` is the number of pushed frames with at least one.
+ *
+ * THE BOUNDARY - what "taken" proves and what it does not. Proven: the bytes went through the product's `fetch`
+ * reader and SSE parser, and `onMessage` returned for every message of the chunk (`api/sse.ts`: the loop awaits the
+ * next `read()` only after the `for` over the messages). NOT proven: that the event was APPLIED. The handler may
+ * return without applying - an event of another run or equivalent, a duplicate `event_id`, a message only put into
+ * the replay buffer during recovery (`useSimulatorRealMode.ts`), an effect cut by the rate limiter - and effects
+ * scheduled on timers or animation frames have not happened yet. A handler that THREW is caught by the product and
+ * logged; `pushEvent` / `pushFrames` refuse that separately (`boot()` listens for the line). Whether state changed is
+ * for the test to assert on state. Also not seen: handling made asynchronous after the loop moved on; a frame split
+ * over several chunks (the shim writes one frame a chunk).
  * `hold()` / `release()` keep written frames out of the stream: a delay in transport, for the probe of the above.
+ * `breakTransport()` ends every open connection the way a lost transport does, for the probe of `unread`.
  */
 export async function installSseShim(page: Page): Promise<void> {
   await page.addInitScript(() => {
     type Ctl = ReadableStreamDefaultController<Uint8Array>
-    type Done = (() => void) | null
+    type How = 'read' | 'closed' | 'unread'
+    type Done = ((how: How) => void) | null
+    type Outcome = { read: number; closed: number; unread: number }
     /** `queued`: chunks in the stream, not yet read. `handed`: chunks the last read returned, not yet followed by a read. */
     type Conn = { queued: Done[]; handed: Done[] }
     const realFetch = window.fetch.bind(window)
     const enc = new TextEncoder()
-    const state = { controllers: [] as Ctl[], opened: 0, pushed: 0, held: null as Array<() => void> | null }
+    /** `pushed` = `taken` + `closed` + `lost` + frames still held or in flight. Counted where the outcome is known, not where it is asked for. */
+    const state = { controllers: [] as Ctl[], opened: 0, pushed: 0, taken: 0, closed: 0, lost: 0, held: null as Array<() => void> | null }
     const conns = new Map<Ctl, Conn>()
     const drop = (c: Ctl) => {
       const i = state.controllers.indexOf(c)
       if (i >= 0) state.controllers.splice(i, 1)
       const conn = conns.get(c)
       conns.delete(c)
-      for (const done of [...(conn?.queued ?? []), ...(conn?.handed ?? [])]) done?.()
+      if (!conn) return
+      for (const done of conn.handed.splice(0)) done?.('closed')
+      for (const done of conn.queued.splice(0)) done?.('unread')
     }
-    const send = (text: string): Promise<number> =>
-      Promise.all(state.controllers.map((c) => new Promise<void>((done) => {
+    const send = (text: string): Promise<Outcome> =>
+      Promise.all(state.controllers.map((c) => new Promise<How>((done) => {
         conns.get(c)!.queued.push(done)
         c.enqueue(enc.encode(text))
-      }))).then((all) => all.length)
+      }))).then((all) => {
+        const count = (how: How) => all.filter((h) => h === how).length
+        const out = { read: count('read'), closed: count('closed'), unread: count('unread') }
+        if (out.read > 0) state.taken += 1
+        else if (out.closed > 0) state.closed += 1
+        else state.lost += 1 // nobody was listening, or every connection ended before reading it
+        return out
+      })
+    const deliver = (text: string): Promise<Outcome> => {
+      state.pushed += 1
+      const held = state.held
+      if (held) return new Promise((answer) => { held.push(() => answer(send(text))) })
+      return send(text)
+    }
     ;(window as unknown as { __qaSse: unknown }).__qaSse = {
       state,
-      /** Resolves with the number of connections that took the frame (0: nobody was listening, the frame is lost). */
-      push(text: string): Promise<number> {
-        state.pushed += 1
-        const held = state.held
-        if (held) return new Promise((taken) => { held.push(() => taken(send(text))) })
-        return send(text)
-      },
+      /** How the frame left each connection it was written to (all zeros: nobody was listening). */
+      deliver,
+      /** The number of connections whose read loop came back after the frame (0: the product did not take it). */
+      push: (text: string): Promise<number> => deliver(text).then((o) => o.read),
       hold() { state.held = state.held ?? [] },
       release() {
         const held = state.held ?? []
         state.held = null
         for (const go of held) go()
+      },
+      breakTransport() {
+        for (const c of [...state.controllers]) {
+          drop(c)
+          try {
+            c.error(new TypeError('038 QA stand: transport lost'))
+          } catch { /* already closed */ }
+        }
       },
     }
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
@@ -186,7 +229,7 @@ export async function installSseShim(page: Page): Promise<void> {
       const reader = body.getReader()
       const counting = {
         read() {
-          for (const done of conn.handed.splice(0)) done?.()
+          for (const done of conn.handed.splice(0)) done?.('read')
           return reader.read().then((r) => {
             if (!r.done) conn.handed.push(conn.queued.shift() ?? null)
             return r
@@ -370,6 +413,12 @@ export async function stepToFrameBoundary(page: Page): Promise<void> {
 /** Seed the run the way a returning user has it, load the app in real mode, wait for the scene and the SSE stream. */
 export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: string[] }> {
   const mock = await mockBackend(page, o.snapshot)
+  if (!handlerErrors.has(page)) {
+    const errors = { lines: [] as string[], seen: 0 }
+    handlerErrors.set(page, errors)
+    // `api/sse.ts` catches an exception of the handler and logs this line; the read loop goes on as if the frame was handled.
+    page.on('console', (m) => { if (m.type() === 'error' && m.text().startsWith('[SSE] onMessage error')) errors.lines.push(m.text().slice(0, 300)) })
+  }
   if (o.clock) await page.clock.install({ time: new Date('2026-02-01T00:00:00Z') })
   if (o.sseShim !== false) await installSseShim(page)
   await installRafCounter(page)
@@ -452,7 +501,15 @@ export async function waitLayoutStill(page: Page): Promise<void> {
 
 let eventSeq = 0
 
-/** One SSE frame in the wire shape of the backend: `id` equals `event_id`, ids are of the run and grow. */
+/** The text of one SSE frame in the wire shape of the backend: `id` equals `event_id`, ids are of the run and grow. */
+export function sseFrame(evt: Record<string, unknown> & { type: string }, id?: string): { eventId: string; frame: string } {
+  eventSeq += 1
+  const eventId = id ?? `evt_${RUN_ID}_${String(eventSeq).padStart(6, '0')}`
+  const body = { event_id: eventId, ts: '2026-02-01T00:00:01.000Z', equivalent: EQ, ...evt }
+  return { eventId, frame: `id: ${eventId}\nevent: ${evt.type}\ndata: ${JSON.stringify(body)}\n\n` }
+}
+
+/** One SSE frame, written and awaited: returns when the product has taken it (`installSseShim`, THE BOUNDARY). */
 export async function pushEvent(
   page: Page, evt: Record<string, unknown> & { type: string },
   opts?: {
@@ -463,34 +520,88 @@ export async function pushEvent(
     expectLost?: true
   },
 ): Promise<string> {
-  eventSeq += 1
-  const eventId = opts?.eventId ?? `evt_${RUN_ID}_${String(eventSeq).padStart(6, '0')}`
-  const body = { event_id: eventId, ts: '2026-02-01T00:00:01.000Z', equivalent: EQ, ...evt }
-  const frame = `id: ${eventId}\nevent: ${evt.type}\ndata: ${JSON.stringify(body)}\n\n`
-  type Sse = { __qaSse: { push: (t: string) => Promise<number> } }
+  const { eventId, frame } = sseFrame(evt, opts?.eventId)
   if (opts?.awaitTaken === false) {
-    await page.evaluate((f) => { void (window as unknown as Sse).__qaSse.push(f) }, frame)
+    await page.evaluate((f) => { void (window as unknown as SseWindow).__qaSse.push(f) }, frame)
     return eventId
   }
-  // The answer comes from the product's read loop (see `installSseShim`), in real time and not on the fake clock.
-  // The limit is not a wait for anything: it only turns a product that never reads into an error instead of a hang.
+  const [o] = (await deliverFrames(page, [frame], `the SSE frame ${eventId} (${evt.type})`)).outcomes
+  if (o!.read === 0 && !opts?.expectLost) {
+    if (o!.closed > 0) {
+      throw new Error(`038 QA stand: the product was handed the SSE frame ${eventId} (${evt.type}) and its connection ended before its read loop came back `
+        + 'for the next chunk - delivered, and not shown to be handled. The stand counts a frame as taken only by that next read.')
+    }
+    throw new Error(`038 QA stand: the SSE frame ${eventId} (${evt.type}) was written into nothing - ${o!.unread > 0 ? 'the connection ended before the product read it' : 'no connection of the product is listening'}, so the event is lost. `
+      + 'If the test means that, say so with { expectLost: true }.')
+  }
+  if (o!.read > 0 && opts?.expectLost) throw new Error(`038 QA stand: the SSE frame ${eventId} was expected to be lost, and ${o!.read} connection(s) took it`)
+  return eventId
+}
+
+type SseOutcome = { read: number; closed: number; unread: number }
+type SseCounts = { pushed: number; taken: number; closed: number; lost: number }
+type SseWindow = { __qaSse: { push: (t: string) => Promise<number>; deliver: (t: string) => Promise<SseOutcome>; state: SseCounts & { opened: number; controllers: unknown[] } } }
+
+/**
+ * Lines the product logged when its SSE handler threw (`api/sse.ts` catches and logs), per page; filled by `boot()`.
+ * `seen`: how many of them a delivery has already reported - each line fails ONE delivery, the one it is first seen by.
+ */
+const handlerErrors = new WeakMap<Page, { lines: string[]; seen: number }>()
+
+/**
+ * Write frames and AWAIT the answer of each, with a bounded wait; report how each left the stream and how many the
+ * shim's reader counted as taken meanwhile. The answer comes from the product's read loop (see `installSseShim`), in
+ * real time and not on the fake clock. The limit is not a wait for anything: it only turns a product that never
+ * reads - or a frame that never reached the stream - into an error instead of a hang.
+ * A handler that threw - during this delivery, or since the last one (a frame written without waiting) - is an error
+ * here: the product catches it and reads on, so the read loop alone would call such a frame taken.
+ */
+async function deliverFrames(page: Page, frames: string[], what: string): Promise<{ outcomes: SseOutcome[]; taken: number }> {
   let limit: ReturnType<typeof setTimeout> | undefined
   const never = new Promise<never>((_, fail) => {
-    limit = setTimeout(() => fail(new Error(`038 QA stand: the product did not take the SSE frame ${eventId} (${evt.type}) in 15 s`)), 15_000)
+    limit = setTimeout(() => fail(new Error(`038 QA stand: the product did not take ${what} in 15 s`)), 15_000)
   })
-  let takenBy = 0
   try {
-    takenBy = await Promise.race([page.evaluate((f) => (window as unknown as Sse).__qaSse.push(f), frame), never])
+    const out = await Promise.race([
+      page.evaluate(async (fs) => {
+        const sse = (window as unknown as SseWindow).__qaSse
+        const taken0 = sse.state.taken
+        const outcomes = await Promise.all(fs.map((f) => sse.deliver(f)))
+        return { outcomes, taken: sse.state.taken - taken0 }
+      }, frames),
+      never,
+    ])
+    const errors = handlerErrors.get(page)
+    const thrown = errors ? errors.lines.slice(errors.seen) : []
+    if (errors) errors.seen = errors.lines.length
+    if (thrown.length > 0) throw new Error(`038 QA stand: the product's SSE handler threw by the time it took ${what} - read, and not handled: ${thrown[0]}`)
+    return out
   } finally {
     clearTimeout(limit)
   }
-  if (takenBy === 0 && !opts?.expectLost) {
-    throw new Error(`038 QA stand: the SSE frame ${eventId} (${evt.type}) was written into nothing - no connection of the product is listening, so the event is lost. `
-      + 'If the test means that, say so with { expectLost: true }.')
-  }
-  if (takenBy > 0 && opts?.expectLost) throw new Error(`038 QA stand: the SSE frame ${eventId} was expected to be lost, and ${takenBy} connection(s) took it`)
-  return eventId
 }
+
+/**
+ * A batch of raw SSE frames, each awaited: returns only when the product has TAKEN every one of them (`taken ===
+ * pushed`), and throws otherwise, naming the numbers. For the load of the budgets, which used to write frames and
+ * step the clock without waiting (BACKLOG 038-2 (e)). What "taken" proves - see `installSseShim`, THE BOUNDARY.
+ */
+export async function pushFrames(page: Page, frames: string[]): Promise<void> {
+  const { outcomes, taken } = await deliverFrames(page, frames, `${frames.length} SSE frame(s)`)
+  const byRead = outcomes.filter((o) => o.read > 0).length
+  if (taken !== frames.length || byRead !== frames.length) {
+    const closed = outcomes.filter((o) => o.read === 0 && o.closed > 0).length
+    throw new Error(`038 QA stand: pushed ${frames.length} SSE frame(s), the product took ${taken} (answers with a read: ${byRead}; handed and then closed: ${closed}; `
+      + `never read: ${frames.length - byRead - closed}). A load that did not arrive in full makes every count taken after it look better than it is.`)
+  }
+}
+
+/** The shim's own account of the page so far: frames written, taken by a read, handed and then closed, lost. */
+export const sseCounts = (page: Page): Promise<SseCounts & { opened: number }> =>
+  page.evaluate(() => {
+    const s = (window as unknown as SseWindow).__qaSse.state
+    return { pushed: s.pushed, taken: s.taken, closed: s.closed, lost: s.lost, opened: s.opened }
+  })
 
 /** Keep written SSE frames out of the stream until `releaseSse`: a delay in transport. */
 export const holdSse = (page: Page) => page.evaluate(() => (window as unknown as { __qaSse: { hold: () => void } }).__qaSse.hold())
