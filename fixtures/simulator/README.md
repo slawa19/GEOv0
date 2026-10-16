@@ -77,10 +77,9 @@ Regenerate realistic-v2 seed scenarios:
 python scripts/generate_simulator_seed_scenarios.py
 ```
 
-Patch events для realistic-v2:
-```bash
-python scripts/generate_scenario_events.py
-```
+События (`events`) realistic-v2 пишет тот же генератор (`_make_seasonal_stress_events`). Прежний патчер
+`scripts/generate_scenario_events.py` удалён 2026-10-16 (041 `T4105`): он перезаписывал `events` таймлайном
+`inject`/`note` с синтетическими PID, которого в текущих фикстурах нет.
 
 ## Как загружаются сценарии
 
