@@ -6132,7 +6132,9 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
     }
   })
 
-  it('a remembered open analytics dock is not shown (nor polled) while Details is off, and comes back with it', async () => {
+  // The polling half is the real composable's (`useSimulatorApp.analyticsGate.test.ts`: `analytics.isVisible`, which
+  // gates the poll, follows the getter the root feeds); here the analytics are mocked and only the DOM is observed.
+  it('a remembered open analytics dock is not shown while Details is off, and comes back with it', async () => {
     storedDetails(null)
     getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
     const { host, done } = mount()
@@ -6256,12 +6258,28 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       byText('Start')!.click()
       expect(actions.startRun).toHaveBeenCalledTimes(1)
 
+      // The mocked app has no per-run admin actions; they are given before the Admin menu is first rendered (its
+      // "can attach / can stop" flags are read then), with one run in the list, so all four admin bindings are walked.
+      admin.attachRun = vi.fn()
+      admin.stopRun = vi.fn()
+      ;(admin.runs as unknown as { value: unknown[] }).value = [{ run_id: 'run-9', state: 'running', scenario_id: 'sc1', owner_id: 'o' }]
       real.accessToken = 'admin-token'
+      // The root binds a member-expression handler by value at render: it renders again (Details off and on) so the
+      // handlers given above are the ones bound - in the app they exist from the start.
+      toggle(host).click()
+      await nextTick()
+      toggle(host).click()
       await nextTick()
       const adminSummary = host.querySelector<HTMLElement>('summary[aria-label="Admin"]')
       expect(adminSummary, 'Admin with an admin token').not.toBeNull()
       host.querySelector<HTMLButtonElement>('button[aria-label="Refresh runs list"]')!.click()
       expect(admin.getRuns).toHaveBeenCalledTimes(1)
+      host.querySelector<HTMLButtonElement>('button[aria-label="Stop all runs"]')!.click()
+      expect(admin.stopRuns, 'admin-stop-runs reaches admin.stopRuns').toHaveBeenCalledTimes(1)
+      host.querySelector<HTMLButtonElement>('button[aria-label="Attach to selected run"]')!.click()
+      expect(admin.attachRun, 'admin-attach-run reaches admin.attachRun with the run id').toHaveBeenCalledWith('run-9')
+      host.querySelector<HTMLButtonElement>('button[aria-label="Stop selected run"]')!.click()
+      expect(admin.stopRun, 'admin-stop-run reaches admin.stopRun with the run id').toHaveBeenCalledWith('run-9')
 
       const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
       theme.value = 'hud'

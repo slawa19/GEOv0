@@ -79,8 +79,7 @@ describe('EdgeTooltip - 043 S1: the line in words and numbers, while watching to
 
   it('outside Interact the figures are a sentence with the unit, and the direction is creditor -> debtor', async () => {
     const { host, done } = mountTip({
-      edge: { key: 'm->o', fromId: 'm', toId: 'o', amountText: 'from: 120.00 / to: 500.00 UAH', trustLimit: '500.00', used: '120.00', available: '380.00' },
-      unit: 'UAH',
+      edge: { key: 'm->o', fromId: 'm', toId: 'o', amountText: 'from: 120.00 / to: 500.00 UAH', trustLimit: '500.00', used: '120.00', available: '380.00', equivalent: 'UAH' },
     })
     await nextTick()
     const text = textOf(host)
@@ -92,7 +91,7 @@ describe('EdgeTooltip - 043 S1: the line in words and numbers, while watching to
   })
 
   it('a negative "available" reads as the excess over the limit; without figures the amount line stays', async () => {
-    const over = mountTip({ edge: { key: 'm->o', fromId: 'm', toId: 'o', amountText: '', trustLimit: '100', used: '130', available: '-30' }, unit: 'UAH' })
+    const over = mountTip({ edge: { key: 'm->o', fromId: 'm', toId: 'o', amountText: '', trustLimit: '100', used: '130', available: '-30', equivalent: 'UAH' } })
     await nextTick()
     expect(textOf(over.host)).toContain('сверх лимита на 30 UAH')
     over.done()
@@ -102,5 +101,24 @@ describe('EdgeTooltip - 043 S1: the line in words and numbers, while watching to
     expect(textOf(bare.host)).toContain('from: — / to: — UAH')
     expect(textOf(bare.host)).not.toContain('доверяет')
     bare.done()
+  })
+})
+
+describe('EdgeTooltip - 043 S1 review finding 1: the figures carry their own equivalent', () => {
+  it('prints the equivalent the figures were read with, never a live one handed in beside them', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    // `unit` is what the root passed until the fix: the LIVE scene equivalent. After the fix it is not a prop at all.
+    const app = createApp({ render: () => h(edgeTooltipComponent, {
+      style: {}, getNodeName: () => null, unit: 'EUR',
+      edge: { key: 'm->o', fromId: 'm', toId: 'o', amountText: '', trustLimit: '500.00', used: '120.00', available: '380.00', equivalent: 'UAH' },
+    }) })
+    app.mount(host)
+    await nextTick()
+    const text = (host.textContent ?? '').replace(/\s+/g, ' ')
+    expect(text).toContain('до 500.00 UAH')
+    expect(text).not.toContain('EUR')
+    app.unmount()
+    host.remove()
   })
 })

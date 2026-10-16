@@ -1242,7 +1242,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :style="edgeTooltipStyle"
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
       :interact-mode="isInteractUi"
-      :unit="sceneEq"
     />
 
     <TopBar

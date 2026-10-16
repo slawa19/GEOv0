@@ -77,14 +77,14 @@ for (const theme of THEMES) {
     const link = snapshot.links.find((l) => nodes.has(String(l.source)) && nodes.has(String(l.target)))!
     const a = nodes.get(String(link.source))!
     const b = nodes.get(String(link.target))!
-    await page.evaluate(({ link, x, y }) => {
+    await page.evaluate(({ link, eq, x, y }) => {
       const hook = (window as unknown as { __geoSim: { showEdgeTooltip: (e: Record<string, unknown>) => void } }).__geoSim
       hook.showEdgeTooltip({
         key: `${link.source}→${link.target}`, fromId: link.source, toId: link.target, amountText: '',
         screenX: x, screenY: y, trustLimit: link.trust_limit ?? null, used: link.used ?? null, available: link.available ?? null,
-        edgeStatus: link.status ?? null,
+        edgeStatus: link.status ?? null, equivalent: eq,
       })
-    }, { link: link as unknown as Record<string, string>, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+    }, { link: link as unknown as Record<string, string>, eq: snapshot.equivalent, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
     const tip = page.locator('.ds-ov-tooltip')
     await expect(tip, 'the tooltip is on screen').toBeVisible()
     await waitLoopAsleep(page)

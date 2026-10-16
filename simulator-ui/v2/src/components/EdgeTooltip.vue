@@ -15,6 +15,8 @@ type HoveredEdge = {
   used?: string | number | null
   available?: string | number | null
   edgeStatus?: string | null
+  /** 043 S1 (review finding 1): the equivalent captured with the figures; the only unit this tooltip prints. */
+  equivalent?: string | null
 }
 
 type Props = {
@@ -23,8 +25,6 @@ type Props = {
   getNodeName: (id: string) => string | null
   /** When true, also show the line's status row (Interact). */
   interactMode?: boolean
-  /** 043 S1: the equivalent the figures are in (the scene's). */
-  unit?: string
 }
 
 const props = defineProps<Props>()
@@ -36,7 +36,9 @@ const props = defineProps<Props>()
  * amount. Without any of the three figures the sentence is not drawn and the bare amount line stays.
  */
 const hasFigures = computed(() => props.edge.trustLimit != null || props.edge.used != null || props.edge.available != null)
-const unitSuffix = computed(() => (props.unit ? ` ${props.unit}` : ''))
+// 043 S1 (review finding 1): the unit is the one captured with the figures, never the live scene's: a scene replaced
+// under a still pointer must not relabel old figures. No captured equivalent - no unit printed.
+const unitSuffix = computed(() => (props.edge.equivalent ? ` ${props.edge.equivalent}` : ''))
 const availableText = computed(() => {
   const s = renderOrDash(props.edge.available)
   if (s === '—') return 'доступно —'
