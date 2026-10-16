@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (
     BaseModel,
@@ -491,12 +491,26 @@ class ScenariosListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-RunMode = Literal["fixtures", "real"]
+# 042 S1 (owner, 2026-10-16): one run mode. The server mode `fixtures` - events drawn on the scenario's picture with no
+# money behind them - is gone; an explicit `fixtures` is refused by validation (422), never coerced. The JSON schema is
+# spelled as OpenAPI 3.0.3 can say it, an enum of one (`api/openapi.yaml`); pydantic's own spelling, `const`, is 3.1.
+class _EnumOfOne:
+    """The JSON schema of a one-value Literal as OpenAPI 3.0.3 spells it; a fresh dict per use, so the `default` a field
+    adds to its own copy (`RunCreateRequest.mode`) does not leak into another field's."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def __get_pydantic_json_schema__(self, _core_schema: Any, _handler: Any) -> Dict[str, Any]:
+        return {"type": "string", "enum": [self._value]}
+
+
+RunMode = Annotated[Literal["real"], _EnumOfOne("real")]
 
 
 class RunCreateRequest(BaseModel):
     scenario_id: str
-    mode: RunMode
+    mode: RunMode = "real"
     # 036 B2 (MAKE-OPTIONAL): the request's value (0 included), else `settings.playback.intensity_percent` of the scenario,
     # else 30.
     intensity_percent: Optional[int] = Field(default=None, ge=0, le=100)

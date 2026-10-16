@@ -78,10 +78,6 @@ async function mountBottomBar(opts: { isDemoUi: boolean; propOverrides?: Record<
     analyticsPanelOpen: false,
     toggleAnalyticsPanel: vi.fn(),
 
-    fxDebugEnabled: false,
-    fxBusy: false,
-    runTxOnce: vi.fn(),
-    runClearingOnce: vi.fn(),
     // 043 S1: the controls these tests are about live behind "Подробнее".
     detailsOpen: true,
     ...opts.propOverrides,
@@ -185,6 +181,23 @@ describe('BottomBar — DevTools panel (<details>)', () => {
       app.unmount()
       host.remove()
     }
+  })
+
+  it('042 S1: in `?ui=demo` the Dev tools hold the demo toggle and no "Single Tx" / "Run Clearing" button', async () => {
+    // The server actions `tx-once` / `clearing-once` are gone, so the buttons that sent them are gone with them: a
+    // control that did nothing is worse than no control. Anti-vacuum: the panel is open and its other button is there.
+    const { app, host } = await mountBottomBar({ isDemoUi: true })
+    await nextTick()
+
+    const details = host.querySelector('details[aria-label="Dev tools"]') as HTMLDetailsElement
+    expect(details.open).toBe(true)
+    const labels = [...details.querySelectorAll('.bb-devtools-dropdown button')].map((b) => b.textContent?.trim())
+    expect(labels).toEqual(['Exit Demo'])
+    expect(host.textContent).not.toContain('Single Tx')
+    expect(host.textContent).not.toContain('Run Clearing')
+
+    app.unmount()
+    host.remove()
   })
 
   it('moves keyboard-opened focus inside Dev tools and restores summary focus on Escape', async () => {

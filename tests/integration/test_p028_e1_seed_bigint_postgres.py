@@ -7,6 +7,7 @@ The seed is NOT masked to fit (spec 028, «Запрещено»): masking would 
 Via `runtime.create_run`, the path the API takes; the heartbeat clock is the p024 stand (no real time)."""
 
 import hashlib
+from unittest.mock import AsyncMock
 
 from sqlalchemy import select
 
@@ -31,9 +32,10 @@ async def test_a_32_bit_seed_is_stored(db_session, monkeypatch) -> None:
     monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
     monkeypatch.setattr(app_db_session, "AsyncSessionLocal", factory)
     monkeypatch.setattr(runtime_impl, "asyncio", _Clock())
+    monkeypatch.setattr(runtime._real_runner, "tick_real_mode", AsyncMock())  # the seed is the subject, not the tick
     run_id = _high_seed_run_id()
     monkeypatch.setattr(runtime._run_lifecycle, "_new_run_id", lambda: run_id)
-    await runtime.create_run(scenario_id="greenfield-village-100-realistic-v2", mode="fixtures",
+    await runtime.create_run(scenario_id="greenfield-village-100-realistic-v2", mode="real",
                              intensity_percent=50, owner_id="anon:p028-e1-seed")
     try:
         expected = int.from_bytes(hashlib.sha256(run_id.encode()).digest()[:4], "big")

@@ -49,11 +49,6 @@ type Props = {
    * Refresh, Analytics, Artifacts, Dev Tools and "Inspect graph" (slot `navigator`). Hidden means not rendered.
    */
   detailsOpen?: boolean
-
-  fxDebugEnabled: boolean
-  fxBusy: boolean
-  runTxOnce: () => void | Promise<void>
-  runClearingOnce: () => void | Promise<void>
 }
 
 const props = withDefaults(defineProps<Props>(), { detailsOpen: false })
@@ -124,16 +119,6 @@ watch(
 
 function onDevToolsToggle(ev: Event) {
   onDevToolsDropdownToggle(ev)
-}
-
-async function onRunTxOnce() {
-  if (props.fxBusy) return
-  await props.runTxOnce()
-}
-
-async function onRunClearingOnce() {
-  if (props.fxBusy) return
-  await props.runClearingOnce()
 }
 </script>
 
@@ -286,25 +271,6 @@ async function onRunClearingOnce() {
               >
                 {{ isDemoUi ? (isExiting ? 'Exiting…' : 'Exit Demo') : 'Enter Demo' }}
               </button>
-
-              <template v-if="isDemoUi && fxDebugEnabled">
-                <button
-                  class="ds-btn ds-btn--secondary ds-btn--sm"
-                  type="button"
-                  :disabled="fxBusy"
-                  @click="onRunTxOnce"
-                >
-                  Single Tx
-                </button>
-                <button
-                  class="ds-btn ds-btn--secondary ds-btn--sm"
-                  type="button"
-                  :disabled="fxBusy"
-                  @click="onRunClearingOnce"
-                >
-                  Run Clearing
-                </button>
-              </template>
             </div>
           </div>
         </details>

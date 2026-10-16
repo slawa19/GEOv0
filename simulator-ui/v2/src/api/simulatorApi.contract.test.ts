@@ -7,13 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SimulatorContractError } from './simulatorContracts'
 import type { ScenarioDetail } from './simulatorTypes'
 import {
-  actionClearingOnce,
   actionClearingReal,
   actionPaymentReal,
   actionTrustlineClose,
   actionTrustlineCreate,
   actionTrustlineUpdate,
-  actionTxOnce,
   getBottlenecks,
   getMetrics,
   getParticipantsList,
@@ -232,16 +230,6 @@ const bottlenecksResponse = {
 }
 
 const uncheckedActionCases = [
-  {
-    label: 'tx-once',
-    payload: { ok: true, emitted_event_id: 'evt-1', client_action_id: null },
-    call: () => actionTxOnce(cfg, 'run-1', { equivalent: 'UAH' }),
-  },
-  {
-    label: 'clearing-once',
-    payload: { ok: true, plan_id: 'plan-1', done_event_id: 'evt-2', client_action_id: null },
-    call: () => actionClearingOnce(cfg, 'run-1', { equivalent: 'UAH' }),
-  },
   {
     label: 'trustline-create',
     payload: {
@@ -495,9 +483,13 @@ describe('Simulator critical REST response contracts', () => {
     expect(new URL(asked, 'http://x.test').searchParams.get('mode')).toBe('real')
   })
 
-  it('042 S2: a run status that carries the legacy `fixtures` mode of an older run still decodes', async () => {
+  it('042 S1: a run status saying `fixtures` is refused - no server of this version can send it', async () => {
+    // Was 042 S2's "the legacy `fixtures` mode of an older run still decodes": kept while the server could still
+    // return such a run. Stage 1 removed the mode and migration 037 refuses the row, so the reply is a contract break.
     respondWith({ ...runStatus, mode: 'fixtures' })
-    await expect(getRun(cfg, 'run-1')).resolves.toMatchObject({ mode: 'fixtures' })
+    await expect(getRun(cfg, 'run-1')).rejects.toBeInstanceOf(SimulatorContractError)
+    respondWith({ ...runStatus, mode: 'real' })
+    await expect(getRun(cfg, 'run-1')).resolves.toMatchObject({ mode: 'real' })
   })
 
   it('accepts the canonical metrics response and keeps every value in its wire form', async () => {
@@ -731,67 +723,53 @@ describe('Simulator critical REST response contracts', () => {
 
   it.each([
     {
-      label: 'tx-once event id',
-      payload: { ok: true, emitted_event_id: 1, client_action_id: null },
-      call: uncheckedActionCases[0].call,
-      contract: 'action-tx-once',
-      diagnostic: '$.emitted_event_id',
-    },
-    {
-      label: 'clearing-once plan id',
-      payload: { ok: true, plan_id: 1, done_event_id: 'evt-2', client_action_id: null },
-      call: uncheckedActionCases[1].call,
-      contract: 'action-clearing-once',
-      diagnostic: '$.plan_id',
-    },
-    {
       label: 'trustline-create decimal limit',
-      payload: { ...uncheckedActionCases[2].payload, limit: 100 },
-      call: uncheckedActionCases[2].call,
+      payload: { ...uncheckedActionCases[0].payload, limit: 100 },
+      call: uncheckedActionCases[0].call,
       contract: 'action-trustline-create',
       diagnostic: '$.limit',
     },
     {
       label: 'trustline-update non-canonical decimal',
-      payload: { ...uncheckedActionCases[3].payload, new_limit: '1e3' },
-      call: uncheckedActionCases[3].call,
+      payload: { ...uncheckedActionCases[1].payload, new_limit: '1e3' },
+      call: uncheckedActionCases[1].call,
       contract: 'action-trustline-update',
       diagnostic: '$.new_limit',
     },
     {
       label: 'trustline-close missing id',
       payload: { ok: true, client_action_id: null },
-      call: uncheckedActionCases[4].call,
+      call: uncheckedActionCases[2].call,
       contract: 'action-trustline-close',
       diagnostic: '$.trustline_id',
     },
     {
       label: 'payment-real decimal amount',
-      payload: { ...uncheckedActionCases[5].payload, amount: 12.5 },
-      call: uncheckedActionCases[5].call,
+      payload: { ...uncheckedActionCases[3].payload, amount: 12.5 },
+      call: uncheckedActionCases[3].call,
       contract: 'action-payment-real',
       diagnostic: '$.amount',
     },
     {
       label: 'participants-list item',
       payload: { items: [{ pid: 1, name: 'Alice', type: 'person', status: 'active' }] },
-      call: uncheckedActionCases[6].call,
+      call: uncheckedActionCases[4].call,
       contract: 'action-participants-list',
       diagnostic: '$.items[0].pid',
     },
     {
       label: 'trustlines-list alias',
       payload: {
-        items: [{ ...uncheckedActionCases[7].payload.items[0], from_pid: undefined, from: 'alice' }],
+        items: [{ ...uncheckedActionCases[5].payload.items[0], from_pid: undefined, from: 'alice' }],
       },
-      call: uncheckedActionCases[7].call,
+      call: uncheckedActionCases[5].call,
       contract: 'action-trustlines-list',
       diagnostic: '$.items[0].from',
     },
     {
       label: 'payment-targets hops',
       payload: { items: [{ to_pid: 'bob', hops: 0, max_available: '95' }] },
-      call: uncheckedActionCases[8].call,
+      call: uncheckedActionCases[6].call,
       contract: 'payment-targets',
       diagnostic: '$.items[0].hops',
     },

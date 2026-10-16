@@ -603,6 +603,8 @@ async def check_periodic_isolation(session) -> None:
     if not settings.SIMULATOR_DB_ENABLED:
         # This process's real runs would leave no `simulator_runs` row: the absence of rows proves nothing.
         raise ClearingPeriodicRefused("simulator_persistence_disabled")
+    # Since migration 037 (042 S1) the CHECK admits `mode = 'real'` only, so the filter selects every row. It stays: it
+    # names the evidence this rule stands on (a run that moved money), and it would stay right were a mode ever added.
     real_run = (
         await session.execute(select(SimulatorRun.run_id).where(SimulatorRun.mode == "real").limit(1))
     ).scalar_one_or_none()

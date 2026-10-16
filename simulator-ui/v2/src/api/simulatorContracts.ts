@@ -5,7 +5,6 @@ import type {
   BottleneckReasonCode,
   BottleneckTarget,
   BottlenecksResponse,
-  ClearingOnceResponse,
   MetricPoint,
   MetricSeries,
   MetricSeriesKey,
@@ -38,7 +37,6 @@ import type {
   SimulatorActionTrustlinesListResponse,
   SimulatorGraphSnapshot,
   SimulatorPaymentTargetsResponse,
-  TxOnceResponse,
 } from './simulatorTypes'
 
 const SIMULATOR_API_VERSION = 'simulator-api/1'
@@ -429,8 +427,10 @@ function decodeRunStatus(value: unknown, path: string): RunStatus {
     'episode_progress',
   ])
 
+  // `real` only (042 S1): the server mode `fixtures` is gone and the database refuses a `fixtures` run (migration 037), so
+  // a run status saying `fixtures` comes from no server of this version - a contract break, refused like any other.
   const mode = stringAt(raw.mode, `${path}.mode`)
-  if (mode !== 'fixtures' && mode !== 'real') fail(`${path}.mode`, 'expected fixtures or real')
+  if (mode !== 'real') fail(`${path}.mode`, 'expected real')
   const state = stringAt(raw.state, `${path}.state`)
   if (!RUN_STATES.has(state)) fail(`${path}.state`, 'expected canonical run state')
 
@@ -657,29 +657,6 @@ function clientActionId(value: JsonObject, path: string): { client_action_id?: s
 
 function requireOk(value: JsonObject, path: string): void {
   if (value.ok !== true) fail(`${path}.ok`, 'expected true')
-}
-
-function decodeTxOnce(value: unknown, path: string): TxOnceResponse {
-  const raw = objectAt(value, path)
-  onlyKeys(raw, path, ['ok', 'emitted_event_id', 'client_action_id'])
-  requireOk(raw, path)
-  return {
-    ok: true,
-    emitted_event_id: stringAt(raw.emitted_event_id, `${path}.emitted_event_id`),
-    ...clientActionId(raw, path),
-  }
-}
-
-function decodeClearingOnce(value: unknown, path: string): ClearingOnceResponse {
-  const raw = objectAt(value, path)
-  onlyKeys(raw, path, ['ok', 'plan_id', 'done_event_id', 'client_action_id'])
-  requireOk(raw, path)
-  return {
-    ok: true,
-    plan_id: stringAt(raw.plan_id, `${path}.plan_id`),
-    done_event_id: stringAt(raw.done_event_id, `${path}.done_event_id`),
-    ...clientActionId(raw, path),
-  }
 }
 
 function decodeTrustlineCreate(value: unknown, path: string): SimulatorActionTrustlineCreateResponse {
@@ -1056,14 +1033,6 @@ export function decodeGraphSnapshotResponse(value: unknown): SimulatorGraphSnaps
 
 export function decodeSimulatorActionClearingRealResponse(value: unknown): SimulatorActionClearingRealResponse {
   return decodeSimulatorResponse('action-clearing-real', value, decodeClearingReal)
-}
-
-export function decodeTxOnceResponse(value: unknown): TxOnceResponse {
-  return decodeSimulatorResponse('action-tx-once', value, decodeTxOnce)
-}
-
-export function decodeClearingOnceResponse(value: unknown): ClearingOnceResponse {
-  return decodeSimulatorResponse('action-clearing-once', value, decodeClearingOnce)
 }
 
 export function decodeSimulatorActionTrustlineCreateResponse(

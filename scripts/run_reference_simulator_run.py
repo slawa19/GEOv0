@@ -425,7 +425,7 @@ def main() -> int:
     ap.add_argument("--admin-token", default="dev-admin-token-change-me")
 
     ap.add_argument("--scenario-id", required=True)
-    ap.add_argument("--mode", default="real", choices=["fixtures", "real"])
+    ap.add_argument("--mode", default="real", choices=["real"])
     ap.add_argument("--intensity", type=int, default=80)
 
     ap.add_argument("--target-ticks", type=int, default=300)

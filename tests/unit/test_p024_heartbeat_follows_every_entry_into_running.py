@@ -1,6 +1,8 @@
 """T2416.2 (programme 024): every successful transition into `running` has exactly one live heartbeat.
 
-Via the runtime facade the API calls; progress is `tick_index` and `_event_seq` (a new SSE event)."""
+Via the runtime facade the API calls; progress is `tick_index` and `_event_seq` (a new SSE event). The runs are real-mode
+(the only mode since 042) with the real tick replaced by a no-op (`clock`): the heartbeat is the subject, not the tick, and
+a real tick would plan payments and seed the scenario into whatever database the session reaches."""
 
 import asyncio
 from unittest.mock import AsyncMock
@@ -40,6 +42,7 @@ async def clock(monkeypatch):
     monkeypatch.setattr(simulator_storage, "upsert_run", AsyncMock())
     monkeypatch.setattr(simulator_storage, "sync_artifacts", AsyncMock())
     monkeypatch.setattr(runtime_impl, "asyncio", fake := _Clock())
+    monkeypatch.setattr(runtime._real_runner, "tick_real_mode", AsyncMock())
     yield fake
     for run in fake.runs:
         await runtime.stop(run.run_id)
@@ -50,7 +53,7 @@ def _heartbeats(run_id: str) -> int:
 
 
 async def _started(clock: _Clock, owner_id: str = ""):
-    run_id = await runtime.create_run(scenario_id="greenfield-village-100-realistic-v2", mode="fixtures", intensity_percent=50, owner_id=owner_id)
+    run_id = await runtime.create_run(scenario_id="greenfield-village-100-realistic-v2", mode="real", intensity_percent=50, owner_id=owner_id)
     clock.runs.append(run := runtime.get_run(run_id))
     assert await clock.progress(run) >= (1, 1), "control: the stand sees the heartbeat tick"
     return run

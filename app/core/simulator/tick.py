@@ -1997,9 +1997,6 @@ class RealTick:
         if not rr._db_enabled():
             return
 
-        if str(run.mode) != "real":
-            return
-
         payload = run._real_last_tick_storage_payload
         if not isinstance(payload, dict):
             return

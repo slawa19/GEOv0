@@ -91,10 +91,14 @@ PARAMETER_SCHEMA_DRIFT_COUNT = 23
 # `GET /admin/clearing/cycles`. Measured with a per-entry dump of
 # every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
 # the removed keys equals the new one entry by entry, so no other entry changed.
+# 2026-10-16 / programme 042 S1 (`T4202`): 58 -> 56, TWO entries leave and none enters - the debug actions
+# `POST /simulator/runs/{run_id}/actions/tx-once` and `/clearing-once`, removed by the owner's decision of 2026-10-16 (spec 042).
+# Measured with a per-entry dump of every ledger on `1beb8670` and on this tree (`.local-run/p042-s1/dump_ledgers.py`,
+# not committed): the base ledger minus the two keys equals the new one entry by entry.
 TRANSPORT_HEADER_DRIFT_SHA256 = (
-    "8e3f2b8bf9aed9dc93d5db28e9ffde8dc5f49f804f58cd407db078e7d5063bc9"
+    "432ff9081c5c2e95cf1252deffcac99168fcd7c9ab174eb6af26b0d6b6cb21a3"
 )
-TRANSPORT_HEADER_DRIFT_COUNT = 58
+TRANSPORT_HEADER_DRIFT_COUNT = 56
 # 2026-08-23 / p011_t1102, slice 5: count unchanged at 13, digest moves. Describing
 # TrustLine.policy touches the create and update REQUEST bodies too - the same node is
 # declared on all three schemas, and leaving one of the three vague would have been a
@@ -454,8 +458,14 @@ REQUEST_SCHEMA_DRIFT_COUNT = 13
 # the integer `minimum` of `index`/`epoch`/`attempts`/`cleared_cycles` where FastAPI emits the float (1 against 1.0). Nothing
 # else differs on those paths (measured with `.local-run/p036b2_drift.py`, not committed); a change of recorded content, not an
 # improvement.
+# Fifth move, 2026-10-16, programme 042 S1 (`T4202`): count HOLDS at 61, digest moves. The run mode has one value, `real`
+# (owner, 2026-10-16), so `mode` reads `enum: [real]` on BOTH halves of the six run-status entries (get, intensity, pause,
+# restart, resume, stop) and on the canon half of `GET /simulator/runs/{run_id}/artifacts/{name}` (the artifact documents,
+# written with `json.dumps`, so canon-only). `RunMode` keeps the OpenAPI 3.0.3 spelling (an enum of one, not pydantic's
+# `const`), so no entry enters. Measured with the per-entry dump (`.local-run/p042-s1/dump_ledgers.py`, not committed): the
+# base ledger with `fixtures` removed from those enums equals the new one entry by entry.
 SUCCESS_SCHEMA_DRIFT_SHA256 = (
-    "bfd9924a818699947d8a480aaae8eac86d1d9b7104f39b67bf5d5a022f7f9867"
+    "2c32bd9f6dbefbb92aa495201179f1fe0742feb90aef2cab89a701ec72533774"
 )
 SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # 2026-08-11 / T501: public DB health no longer declares exception details;
@@ -629,10 +639,14 @@ SUCCESS_SCHEMA_DRIFT_COUNT = 61
 # refused with, in the canon AND on the decorator, so the entry gains an EQUAL pair and no difference: the only path where the
 # two halves differ in the entry is still `/404`. Measured with the per-entry dump (`.local-run/p036a_dump_drift.py`, not
 # committed): the entry's differences before and after are the same one.
+# 2026-10-16 / programme 042 S1 (`T4202`): 46 -> 44, TWO entries leave and none enters - the debug actions
+# `POST /simulator/runs/{run_id}/actions/tx-once` and `/clearing-once`, removed by the owner's decision of 2026-10-16 (spec 042).
+# Measured with a per-entry dump of every ledger on `1beb8670` and on this tree (`.local-run/p042-s1/dump_ledgers.py`,
+# not committed): the base ledger minus the two keys equals the new one entry by entry.
 ERROR_RESPONSE_DRIFT_SHA256 = (
-    "5433fc719235af4728fea439419aeedfed115724d2f3f6cfe051145a1480974b"
+    "c933ffdfc609354d5876c3b4361a3c6872a1199f62c8853311dc4720b3801806"
 )
-ERROR_RESPONSE_DRIFT_COUNT = 46
+ERROR_RESPONSE_DRIFT_COUNT = 44
 # 2026-08-23 / p011_t1101: 59 -> 67, see the note above TRANSPORT_HEADER_DRIFT_SHA256.
 # Missed by the first pass of this task: the error-response assert aborts before this one, so a
 # run that stops there says nothing about security drift. Measured directly instead.
@@ -657,10 +671,14 @@ ERROR_RESPONSE_DRIFT_COUNT = 46
 # `GET /admin/clearing/cycles`. Measured with a per-entry dump of
 # every ledger on `58876244` and on this tree (`.local-run/s5/dump_ledgers.py`, not committed): the base ledger minus
 # the removed keys equals the new one entry by entry, so no other entry changed.
+# 2026-10-16 / programme 042 S1 (`T4202`): 58 -> 56, TWO entries leave and none enters - the debug actions
+# `POST /simulator/runs/{run_id}/actions/tx-once` and `/clearing-once`, removed by the owner's decision of 2026-10-16 (spec 042).
+# Measured with a per-entry dump of every ledger on `1beb8670` and on this tree (`.local-run/p042-s1/dump_ledgers.py`,
+# not committed): the base ledger minus the two keys equals the new one entry by entry.
 SECURITY_DRIFT_SHA256 = (
-    "89e20f730962890958e4643e3191098541816061414793c42f3a75572119efd6"
+    "e9558602391b56058a3508b3dba60c241e633beacda984cbd50a76f5256025a9"
 )
-SECURITY_DRIFT_COUNT = 58
+SECURITY_DRIFT_COUNT = 56
 
 
 def _repo_root() -> Path:
@@ -1537,7 +1555,7 @@ def test_generated_transport_header_mutations_are_not_filtered(
 ) -> None:
     generated = _load_fastapi_openapi()
     path_item = generated["paths"][
-        "/api/v1/simulator/runs/{run_id}/actions/tx-once"
+        "/api/v1/simulator/runs/{run_id}/actions/payment-real"
     ]
     operation = path_item["post"]
     baseline_parameters = _normalized_parameters(operation, path_item, generated)
@@ -1615,7 +1633,7 @@ async def test_served_openapi_validation_statuses_are_not_filterable_noise(
     generated = response.json()
     non_action = generated["paths"]["/api/v1/auth/challenge"]["post"]
     action = generated["paths"][
-        "/api/v1/simulator/runs/{run_id}/actions/tx-once"
+        "/api/v1/simulator/runs/{run_id}/actions/payment-real"
     ]["post"]
 
     assert non_action["responses"]["422"]["content"]["application/json"][
@@ -1996,7 +2014,7 @@ def test_openapi_wire_schemas_use_from_alias_not_python_field_name() -> None:
     assert "from_" not in _property_names(canonical)
     assert "from_" not in _property_names(generated)
     assert (
-        "from" in generated["components"]["schemas"]["TxOnceRequestBody"]["properties"]
+        "from" in generated["components"]["schemas"]["SimulatorActionEdgeRef"]["properties"]
     )
 
 
@@ -2005,7 +2023,7 @@ async def test_simulator_action_validation_uses_flat_error_envelope(client) -> N
     from app.config import settings
 
     response = await client.post(
-        "/api/v1/simulator/runs/missing/actions/tx-once",
+        "/api/v1/simulator/runs/missing/actions/payment-real",
         json={},
         headers={"X-Admin-Token": settings.ADMIN_TOKEN},
     )
@@ -2025,8 +2043,8 @@ async def test_simulator_invalid_owner_transport_uses_nested_error_envelope(
     from app.config import settings
 
     response = await client.post(
-        "/api/v1/simulator/runs/missing/actions/tx-once",
-        json={"equivalent": "USD"},
+        "/api/v1/simulator/runs/missing/actions/payment-real",
+        json={"from_pid": "a", "to_pid": "b", "equivalent": "USD", "amount": "1"},
         headers={
             "X-Admin-Token": settings.ADMIN_TOKEN,
             "X-Simulator-Owner": "invalid owner!",
@@ -2038,50 +2056,6 @@ async def test_simulator_invalid_owner_transport_uses_nested_error_envelope(
     assert payload["error"]["code"] == "E009"
     assert payload["error"]["message"] == "Invalid X-Simulator-Owner header"
     assert "code" not in payload
-
-
-@pytest.mark.asyncio
-async def test_simulator_action_disabled_uses_documented_403_envelope(
-    client, monkeypatch
-) -> None:
-    from app.config import settings
-
-    monkeypatch.delenv("SIMULATOR_ACTIONS_ENABLE", raising=False)
-    response = await client.post(
-        "/api/v1/simulator/runs/missing/actions/tx-once",
-        json={"equivalent": "USD"},
-        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-    )
-
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "E006"
-
-
-@pytest.mark.asyncio
-async def test_simulator_terminal_action_uses_documented_409_envelope(
-    client, monkeypatch
-) -> None:
-    from app.api.v1.simulator import runtime
-    from app.config import settings
-    from app.core.simulator.models import RunRecord
-
-    terminal_run = RunRecord(
-        run_id="terminal-run",
-        scenario_id="scenario",
-        mode="real",
-        state="stopped",
-    )
-    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-    monkeypatch.setattr(runtime, "get_run", lambda _run_id: terminal_run)
-
-    response = await client.post(
-        "/api/v1/simulator/runs/terminal-run/actions/clearing-once",
-        json={"equivalent": "USD"},
-        headers={"X-Admin-Token": settings.ADMIN_TOKEN},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "E008"
 
 
 @pytest.mark.asyncio

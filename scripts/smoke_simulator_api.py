@@ -79,7 +79,7 @@ def main() -> int:
         opener,
         "POST",
         "/api/v1/simulator/runs",
-        body={"scenario_id": scenario_id, "mode": "fixtures", "intensity_percent": 10},
+        body={"scenario_id": scenario_id, "mode": "real", "intensity_percent": 10},
         headers={"Origin": ORIGIN},
     )
     pr("start run", (status, run_resp))

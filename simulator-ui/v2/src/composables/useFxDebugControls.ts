@@ -1,9 +1,14 @@
 import type { Ref } from 'vue'
-import { onUnmounted, ref, watch } from 'vue'
+import { onUnmounted, watch } from 'vue'
 
-import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
 import { toLower } from '../utils/stringHelpers'
 
+/**
+ * REMNANT of the Demo UI (`?ui=demo`): the paused-run bootstrap (`ensureRunSerialized`) and the SSE-open wait, nothing
+ * else. The server debug actions `tx-once` / `clearing-once` and their buttons are gone (042 S1, 2026-10-16): an event
+ * about a payment is born only in the core, never drawn on request. The module itself is removed in programme 043 S3,
+ * after 042 `T4205` (the offline playlist workbench).
+ */
 export function useFxDebugControls(deps: {
   isFxDebugEnabled: Readonly<Ref<boolean>>
   real: {
@@ -28,15 +33,10 @@ export function useFxDebugControls(deps: {
     refreshSnapshot: () => Promise<void>
   }
 }): {
-  busy: Ref<boolean>
   ensureRunSerialized: () => Promise<string>
-  runTxOnce: () => Promise<void>
-  runClearingOnce: () => Promise<void>
   waitForRealSseOpen: (opts?: { timeoutMs?: number }) => Promise<boolean>
   dispose: () => void
 } {
-  const busy = ref(false)
-
   let disposed = false
   const pendingWaitResolves = new Set<(ok: boolean) => void>()
 
@@ -161,41 +161,5 @@ export function useFxDebugControls(deps: {
     })
   }
 
-  async function runTxOnce(): Promise<void> {
-    if (!deps.isFxDebugEnabled.value) return
-
-    deps.markDemoActivity()
-    busy.value = true
-    try {
-      const runId = await ensureRunSerialized()
-      await waitForRealSseOpen({ timeoutMs: 1200 })
-      await actionTxOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken ?? '' }, runId, {
-        equivalent: deps.effectiveEq.value,
-        seed: `ui-fx-debug-tx:${Date.now()}`,
-        client_action_id: `ui-fx-debug-tx:${Date.now()}`,
-      })
-    } finally {
-      busy.value = false
-    }
-  }
-
-  async function runClearingOnce(): Promise<void> {
-    if (!deps.isFxDebugEnabled.value) return
-
-    deps.markDemoActivity()
-    busy.value = true
-    try {
-      const runId = await ensureRunSerialized()
-      await waitForRealSseOpen({ timeoutMs: 1200 })
-      await actionClearingOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken ?? '' }, runId, {
-        equivalent: deps.effectiveEq.value,
-        seed: `ui-fx-debug-clearing:${Date.now()}`,
-        client_action_id: `ui-fx-debug-clearing:${Date.now()}`,
-      })
-    } finally {
-      busy.value = false
-    }
-  }
-
-  return { busy, ensureRunSerialized, runTxOnce, runClearingOnce, waitForRealSseOpen, dispose }
+  return { ensureRunSerialized, waitForRealSseOpen, dispose }
 }

@@ -254,13 +254,6 @@ export type SimulatorAppApi = {
     canvasDpr: number | null
   }
 
-  fxDebug: {
-    enabled: ComputedRef<boolean>
-    busy: Ref<boolean>
-    runTxOnce: () => Promise<void>
-    runClearingOnce: () => Promise<void>
-  }
-
   e2e: {
     runTxOnce: () => Promise<void>
     runClearingOnce: () => Promise<void>
@@ -1697,15 +1690,11 @@ export function useSimulatorApp(opts?: {
     realMode,
   })
 
-  const fxDebugBusy = fxDebugControls.busy
-  const fxDebugTxOnce = fxDebugControls.runTxOnce
-  const fxDebugClearingOnce = fxDebugControls.runClearingOnce
-
   // ── Demo UI: eager auto-bootstrap ────────────────────────────────────
   // When Demo UI opens (?mode=real&ui=demo), automatically create a paused run
   // in the background right after the initial scene finishes loading.
-  // This ensures "Single TX" / "Run Clearing" buttons respond instantly on
-  // first click — no heavy startRun() cascade that causes a visual "page reload".
+  // This keeps the first interaction from paying for a heavy startRun() cascade
+  // (a visual "page reload").
   //
   // Serialization: `_ensureRunPromise` prevents concurrent bootstrap + user-click
   // from racing and creating duplicate runs.
@@ -1779,8 +1768,6 @@ export function useSimulatorApp(opts?: {
     getLayoutNodes: () => layout.nodes,
     getPinnedNodeIds: () => [...pinnedPos.keys()],
     fxState,
-    runTxOnce: fxDebugTxOnce,
-    runClearingOnce: fxDebugClearingOnce,
     showEdgeTooltip: (edge) => {
       hoveredEdge.key = edge.key
       hoveredEdge.fromId = edge.fromId
@@ -1955,13 +1942,6 @@ export function useSimulatorApp(opts?: {
     // dev / diagnostics
     showPerfOverlay,
     perf,
-
-    fxDebug: {
-      enabled: isFxDebugEnabled,
-      busy: fxDebugBusy,
-      runTxOnce: fxDebugTxOnce,
-      runClearingOnce: fxDebugClearingOnce,
-    },
 
     // E2E-only (offline) actions for screenshot tests
     e2e: {

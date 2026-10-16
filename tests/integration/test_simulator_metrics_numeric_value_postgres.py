@@ -72,7 +72,6 @@ def _reader() -> MetricsBottlenecks:
     return MetricsBottlenecks(
         lock=threading.RLock(),
         runs={_RUN_ID: run},
-        scenarios={"scn-1": SimpleNamespace(scenario_id="scn-1", raw=_SCENARIO_RAW)},
         db_enabled=lambda: True,
         logger=logging.getLogger("tests.simulator.t715"),
     )

@@ -5,8 +5,9 @@ nothing else. Any other exception of an iteration - here the status publication,
 the task; the run stayed `running`, no tick ever came again, `last_error` said nothing and no log line was written
 by the application (only asyncio's "Task exception was never retrieved", if and when the task was collected).
 
-THE STAND is 024's (`test_p024_heartbeat_follows_every_entry_into_running.py`): the runtime singleton, a fixtures-mode
-run, and a clock that replaces `asyncio.sleep` inside `runtime_impl` with a beat the test gives - no real time.
+THE STAND is 024's (`test_p024_heartbeat_follows_every_entry_into_running.py`): the runtime singleton, a real-mode
+run with its tick replaced by a no-op, and a clock that replaces `asyncio.sleep` inside `runtime_impl` with a beat the
+test gives - no real time.
 
 THE TARGET is an invariant, not a mechanism: after a failed iteration the run is either still being ticked or is no
 longer `running` - and if it was stopped, it says why (`last_error`) and the failure is in the log.

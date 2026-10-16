@@ -224,7 +224,7 @@ def main() -> int:
     ap.add_argument("--base-url", default="http://127.0.0.1:18000/api/v1", help="API base URL")
     ap.add_argument("--admin-token", default="dev-admin-token-change-me")
     ap.add_argument("--scenario-id", default="greenfield-village-100-realistic-v2")
-    ap.add_argument("--mode", default="real", choices=["fixtures", "real"])
+    ap.add_argument("--mode", default="real", choices=["real"])
     ap.add_argument("--intensity", type=int, default=80)
     ap.add_argument("--run-seconds", type=int, default=20)
     ap.add_argument("--equivalent", default="UAH")

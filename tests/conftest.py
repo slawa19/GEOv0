@@ -881,3 +881,23 @@ async def auth_user(client: AsyncClient):
         "private_key": private_key,
         "headers": {"Authorization": f"Bearer {tokens['access_token']}"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _routing_graph_cache_is_per_test():
+    """The payment router's graph cache is process-wide and keyed by equivalent code only, while every test has its
+    own database: a test that pays in `UAH` left its graph for the next test to route on for up to
+    `ROUTING_GRAPH_CACHE_TTL_SECONDS`, and that test's payments found no route (042 S1, CI run 38926998043:
+    `test_simulator_clearing_no_deadlock.py` after `test_simulator_artifacts_events_ndjson.py`, reproduced with the TTL
+    raised to 60 s). In production one process serves one database; the cache is reset here, before and after each test.
+    """
+    from app.core.payments.router import PaymentRouter
+
+    def _reset() -> None:
+        PaymentRouter.invalidate_cache()
+        PaymentRouter._read_started.clear()
+        PaymentRouter._inflight.clear()
+
+    _reset()
+    yield
+    _reset()

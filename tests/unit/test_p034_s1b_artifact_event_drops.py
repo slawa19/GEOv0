@@ -42,7 +42,7 @@ def _stand(state_dir: Path, run_id: str) -> tuple[ArtifactsManager, RunRecord, P
     )
     artifacts = state_dir / "runs" / run_id / "artifacts"
     artifacts.mkdir(parents=True)
-    run = RunRecord(run_id=run_id, scenario_id="s", mode="fixtures", state="running")
+    run = RunRecord(run_id=run_id, scenario_id="s", mode="real", state="running")
     run.artifacts_dir = artifacts
     runs[run_id] = run
     return manager, run, artifacts
