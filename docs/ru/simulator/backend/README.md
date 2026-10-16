@@ -31,7 +31,7 @@
 ## Design and acceptance documents
 
 - [Behavior model spec](behavior-model-spec.md)
-- [Backend-driven demo mode](backend-driven-demo-mode-spec.md)
+- [Backend-driven demo mode](backend-driven-demo-mode-spec.md) — исторический: режим `fixtures` и actions `tx-once`/`clearing-once` удалены 2026-10-16 (042)
 - [Acceptance criteria](acceptance-criteria.md)
 - [Test plan](test-plan.md)
 

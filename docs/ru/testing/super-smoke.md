@@ -1,6 +1,6 @@
 # Simulator super-smoke
 
-Super-smoke — дорогой backend milestone для сценария Simulator через fixtures,
+Super-smoke — дорогой backend milestone для сценария Simulator:
 deterministic real logic и real-mode HTTP startup. Он не предназначен для
 внутреннего debug-цикла.
 

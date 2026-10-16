@@ -73,8 +73,7 @@ Dev-диагностика (localhost only):
 
 Примечание про `mode`:
 - `real` — прогон с **DB enrichment** (балансы/долги/статусы для `viz_*`, если доступно).
-- `fixtures` — **sandbox/topology-only**: backend строит снапшот из topology сценария без DB enrichment.
-  Это удобно для быстрых smoke/e2e и отладки UI, но визуально может отличаться от «семантических» fixtures из Admin UI.
+- `fixtures` — **удалён 2026-10-16 (программа 042)**: явный `mode=fixtures` отвергается валидацией (`422`), без `mode` создаётся `real`. Клиентское демо без сервера (Sandbox, статические снимки) серверного режима не использует.
 - `GET /api/v1/simulator/runs/{run_id}`
   - Текущее состояние прогона (для polling UI).
 - `POST /api/v1/simulator/runs/{run_id}/pause`
@@ -88,15 +87,13 @@ Dev-диагностика (localhost only):
 - `GET /api/v1/simulator/runs/{run_id}/events?equivalent=UAH` (SSE)
   - То же, что `/api/v1/simulator/events`, но привязанное к конкретному run.
 
-### Debug/demo actions (backend-driven)
+### Debug/demo actions (backend-driven) — удалены
 
-Для отладки визуальных эффектов без offline demo backend может предоставлять actions endpoints,
-которые **эмитят обычные доменные события** в SSE (никакой отдельной демо-семантики).
+`POST /api/v1/simulator/runs/{run_id}/actions/tx-once` и `.../actions/clearing-once` удалены 2026-10-16
+(программа 042): событие о платеже или клиринге рождается только в ядре. Ручные действия Interact
+(`payment-real`, `clearing-real`, `trustline-*`, списки) остаются; список — в `api/openapi.yaml`.
 
-- `POST /api/v1/simulator/runs/{run_id}/actions/tx-once`
-- `POST /api/v1/simulator/runs/{run_id}/actions/clearing-once`
-
-Спецификация: [../../backend/backend-driven-demo-mode-spec.md](../../backend/backend-driven-demo-mode-spec.md)
+Историческая спецификация: [../../backend/backend-driven-demo-mode-spec.md](../../backend/backend-driven-demo-mode-spec.md)
 
 ### Snapshot (namespace by run)
 - `GET /api/v1/simulator/runs/{run_id}/graph/snapshot?equivalent=UAH`
@@ -264,7 +261,7 @@ export type GraphLink = {
 - `amount` — **в major units** (строка, без локальных конвертаций на UI); знак выводимого дельта-лейбла на узлах задаётся UI как `-amount` у `from` и `+amount` у `to`.
 - `amount_flyout` — управление amount flyout (лейблы `-amount/+amount` на узлах):
   - `true`: backend гарантирует «минимальный контракт» для лейблов: непустой `amount` и разрешимые endpoints (либо `from/to`, либо хотя бы один `edges[*]`).
-  - `false`: UI **не должен** показывать amount flyout для этого события (даже если `amount` присутствует). Используется для patch-only/fixtures/debug событий, где лейблы не нужны.
+  - `false`: UI **не должен** показывать amount flyout для этого события (даже если `amount` присутствует). Используется для patch-only событий, где лейблы не нужны.
   - `null/отсутствует`: backward compatible режим (best-effort; UI может показать лейблы, если данных достаточно).
 
 ### 4.3 `tx.failed` (диагностика ошибок/отказов)
@@ -402,7 +399,7 @@ export type RunStatus = {
 
   run_id: string
   scenario_id: string
-  mode: 'fixtures' | 'real'
+  mode: 'real' // с 2026-10-16 (042) единственное значение
 
   state: RunState
   started_at?: string // ISO
