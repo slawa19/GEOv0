@@ -29,7 +29,7 @@
 
 ## Archive
 
-- [Frontend archive](docs/archive/) — заменённые UI-концепции и ранние спецификации.
-- [Specs archive](docs/specs/archive/) — завершённые или заменённые датированные specs.
+- [Frontend archive](../../archive/simulator/frontend/docs/archive/) — заменённые UI-концепции и ранние спецификации.
+- [Specs archive](../../archive/simulator/frontend/docs/specs/archive/) — завершённые или заменённые датированные specs.
 
 Совпадение текста архивного документа с текущим UI не повышает его статус.

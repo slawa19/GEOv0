@@ -39,6 +39,6 @@
 
 ## Archive
 
-- [Backend archive](archive/) — исторические и заменённые specs, включая ранний anonymous visitor design.
+- [Backend archive](../../archive/simulator/backend/archive/) — исторические и заменённые specs, включая ранний anonymous visitor design.
 
 Архив используется только как контекст и не является current contract.
