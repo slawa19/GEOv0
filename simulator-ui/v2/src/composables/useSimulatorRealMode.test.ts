@@ -115,7 +115,6 @@ function createRealState(): RealModeState {
     loadingScenarios: false,
     scenarios: [],
     selectedScenarioId: '',
-    desiredMode: 'real',
     intensityPercent: 0,
     runId: null,
     runStatus: null,
@@ -536,7 +535,7 @@ describe('useSimulatorRealMode - startRun conflict attach', () => {
       wakeUp: () => undefined,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     expect(real.runId).toBe('r_attached')
     expect(loadScene).toHaveBeenCalled()
@@ -594,7 +593,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       wakeUp: () => undefined,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     // No amount → no sender label, no receiver label scheduled.
     expect(pushTxAmountLabel).toHaveBeenCalledTimes(0)
@@ -652,7 +651,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       wakeUp: () => undefined,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     // Self-payment: sender label pushed but NO receiver label scheduled.
     expect(pushTxAmountLabel).toHaveBeenCalledTimes(1)
@@ -714,7 +713,7 @@ describe('useSimulatorRealMode - receiver label guards', () => {
       wakeUp: () => undefined,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     // Sender label: inferred from edges[0].from = 'X'.
     expect(pushTxAmountLabel).toHaveBeenCalledTimes(1)
@@ -775,7 +774,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
       wakeUp: () => undefined,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     // connectSse mock will emit the same tx.updated twice.
     // Only the first should produce UI effects.
@@ -897,7 +896,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
       onAnySseEvent,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     expect(real.lastEventId).toBeNull()
     expect(real.runStatus?.run_id).not.toBe('r_other')
@@ -1004,7 +1003,7 @@ describe('useSimulatorRealMode - SSE replay dedup', () => {
       wakeUp: () => undefined,
     })
 
-    await h.startRun({ mode: 'real', intensityPercent: 0 })
+    await h.startRun({ intensityPercent: 0 })
 
     expect(runRealTxFx).toHaveBeenCalledTimes(1)
     expect(pushTxAmountLabel).toHaveBeenCalledTimes(0)

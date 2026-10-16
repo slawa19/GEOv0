@@ -17,7 +17,7 @@ export function useInteractAutoBootstrapRun(deps: {
   }
   realMode: {
     refreshScenarios: () => Promise<void>
-    startRun: (opts: { mode: 'real'; intensityPercent: number; pauseImmediately: true }) => Promise<void>
+    startRun: (opts: { intensityPercent: number; pauseImmediately: true }) => Promise<void>
   }
 }): {
   ensureSerialized: () => Promise<void>
@@ -47,7 +47,7 @@ export function useInteractAutoBootstrapRun(deps: {
 
     if (!String(deps.real.selectedScenarioId ?? '').trim()) return
 
-    await deps.realMode.startRun({ mode: 'real', intensityPercent: 0, pauseImmediately: true })
+    await deps.realMode.startRun({ intensityPercent: 0, pauseImmediately: true })
   }
 
   function ensureSerialized(): Promise<void> {

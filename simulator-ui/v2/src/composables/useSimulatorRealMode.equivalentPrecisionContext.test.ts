@@ -67,7 +67,6 @@ function createRealState(): RealModeState {
     loadingScenarios: false,
     scenarios: [],
     selectedScenarioId: '',
-    desiredMode: 'real',
     intensityPercent: 0,
     runId: null,
     runStatus: null,

@@ -481,9 +481,23 @@ describe('Simulator critical REST response contracts', () => {
     })
 
     respondWith(snapshot)
-    await expect(getScenarioPreview(cfg, 'scenario-1', 'UAH', { mode: 'real' })).resolves.toMatchObject({
+    await expect(getScenarioPreview(cfg, 'scenario-1', 'UAH')).resolves.toMatchObject({
       links: [{ source: 'A', target: 'B' }],
     })
+  })
+
+  it('042 S2: the preview request asks for the real run mode, whatever the caller does', async () => {
+    respondWith(snapshot)
+    await getScenarioPreview(cfg, 'scenario-1', 'UAH')
+    const fetchMock = vi.mocked(globalThis.fetch)
+    const asked = String(fetchMock.mock.calls[0]?.[0])
+    expect(asked).toContain('/simulator/scenarios/scenario-1/graph/preview?')
+    expect(new URL(asked, 'http://x.test').searchParams.get('mode')).toBe('real')
+  })
+
+  it('042 S2: a run status that carries the legacy `fixtures` mode of an older run still decodes', async () => {
+    respondWith({ ...runStatus, mode: 'fixtures' })
+    await expect(getRun(cfg, 'run-1')).resolves.toMatchObject({ mode: 'fixtures' })
   })
 
   it('accepts the canonical metrics response and keeps every value in its wire form', async () => {

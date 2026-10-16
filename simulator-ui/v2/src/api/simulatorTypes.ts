@@ -1,5 +1,10 @@
 import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingDoneEvent } from '../types'
 
+/**
+ * The run mode as the SERVER reports it back in a run status. Decoding keeps accepting `fixtures` until the server
+ * stops serving it (042 stage 1), so that an older run still decodes; the client never REQUESTS it (042 S2) -
+ * `RunCreateRequest.mode` and the preview query are `real` only.
+ */
 export type SimulatorMode = 'fixtures' | 'real'
 
 /** A text of the scenario in both languages (036): the content lives in the scenario, not in the UI dictionary. */
@@ -75,7 +80,7 @@ export type ScenariosListResponse = {
 
 export type RunCreateRequest = {
   scenario_id: string
-  mode: SimulatorMode
+  mode: 'real'
   intensity_percent: number
 }
 

@@ -23,7 +23,7 @@ export function useFxDebugControls(deps: {
     refreshRunStatus: () => Promise<void>
     resetStaleRun: (opts?: { clearError?: boolean }) => void
     refreshScenarios: () => Promise<void>
-    startRun: (opts: { mode: 'real'; pauseImmediately: true }) => Promise<void>
+    startRun: (opts: { pauseImmediately: true }) => Promise<void>
     pause: () => Promise<void>
     refreshSnapshot: () => Promise<void>
   }
@@ -104,7 +104,7 @@ export function useFxDebugControls(deps: {
       // ignore
     }
 
-    await deps.realMode.startRun({ mode: 'real', pauseImmediately: true })
+    await deps.realMode.startRun({ pauseImmediately: true })
 
     // A 409 is `startRun`'s to handle: it reads the status of the error and attaches to the active run itself.
     // What is left here is only `lastError`, a text - never a reason to pick a run (034 S8, F-034-D14).

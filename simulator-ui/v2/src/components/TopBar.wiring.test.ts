@@ -11,12 +11,10 @@ describe('TopBar wiring smoke', () => {
 
     // Emits (child)
     expect(sfc).toContain("emit('update:selected-scenario-id'")
-    expect(sfc).toContain("emit('update:desired-mode'")
     expect(sfc).toContain("emit('update:intensity-percent'")
 
     // Optional: ensure we did not regress to camelCase
     expect(sfc).not.toContain("emit('update:selectedScenarioId'")
-    expect(sfc).not.toContain("emit('update:desiredMode'")
     expect(sfc).not.toContain("emit('update:intensityPercent'")
   })
 
@@ -46,7 +44,6 @@ describe('TopBar wiring smoke', () => {
     const parent = readHere('./SimulatorAppRoot.vue')
 
     expect(parent).toContain('@update:selected-scenario-id="realActions.setSelectedScenarioId"')
-    expect(parent).toContain('@update:desired-mode="realActions.setDesiredMode"')
     expect(parent).toContain('@update:intensity-percent="realActions.setIntensityPercent"')
   })
 
