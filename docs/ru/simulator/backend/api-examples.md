@@ -139,7 +139,7 @@ Invoke-RestMethod -Method Get -Uri "$BaseUrl/simulator/scenarios/minimal" -Heade
 
 ```powershell
 $run = Invoke-RestMethod -Method Post -Uri "$BaseUrl/simulator/runs" -Headers $Headers -ContentType 'application/json' -Body (
-  @{ scenario_id = 'minimal'; mode = 'fixtures'; intensity_percent = 30 } | ConvertTo-Json
+  @{ scenario_id = 'minimal'; mode = 'real'; intensity_percent = 30 } | ConvertTo-Json
 )
 $runId = $run.run_id
 "run_id=$runId"

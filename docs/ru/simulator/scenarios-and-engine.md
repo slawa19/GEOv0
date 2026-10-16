@@ -25,14 +25,10 @@
 
 Дальше сценарий запускает **один и тот же движок симулятора**, который в «тиках» (шаги времени) пытается генерировать платежи/клиринг на основе правил и ограничений.
 
-### Есть два режима запуска
-В API/UI есть `mode`:
+### Режим запуска
+В API есть `mode`, и он один — **Real mode** (серверный режим `fixtures` удалён 2026-10-16, программа 042: явный `mode=fixtures` — `422`, без `mode` создаётся `real`). Демо без сервера на статических снимках (Sandbox в UI) — клиентская функция и серверного режима не использует.
 
-1) **Fixtures mode**
-- Это «демо-режим», который генерирует **визуальные события** (подсветки `tx.updated`, `clearing.done`) без реального прохождения по платежному стеку.
-- Нужен, чтобы быстро проверить UI/визуализацию и топологию графа.
-
-2) **Real mode**
+**Real mode**
 - Это режим, где runner делает реальные вызовы в backend (payments/clearing), и события отражают реальные результаты.
 - Для реалистичной проверки (конкурентность, локи, таймауты) предпочтительнее Postgres + Redis.
 
@@ -189,7 +185,6 @@ classDiagram
 - Runtime “фасад”: [../../../app/core/simulator/runtime_impl.py](../../../app/core/simulator/runtime_impl.py)
 - Жизненный цикл run: [../../../app/core/simulator/run_lifecycle.py](../../../app/core/simulator/run_lifecycle.py)
 - Реестр сценариев + schema validation: [../../../app/core/simulator/scenario_registry.py](../../../app/core/simulator/scenario_registry.py)
-- Fixtures mode генератор событий: [../../../app/core/simulator/fixtures_runner.py](../../../app/core/simulator/fixtures_runner.py)
 - Real mode runner: [../../../app/core/simulator/real_runner_impl.py](../../../app/core/simulator/real_runner_impl.py), тик — [../../../app/core/simulator/tick.py](../../../app/core/simulator/tick.py)
 - SSE broadcast + replay buffer: [../../../app/core/simulator/sse_broadcast.py](../../../app/core/simulator/sse_broadcast.py)
 - Snapshot builder: [../../../app/core/simulator/snapshot_builder.py](../../../app/core/simulator/snapshot_builder.py)
@@ -208,11 +203,9 @@ flowchart LR
   Runtime -->|POST /runs| RunLifecycle
   RunLifecycle --> Run[(RunRecord)]
 
-  RunLifecycle -->|mode=fixtures| FixturesRunner
   RunLifecycle -->|mode=real| RealRunner
 
-  FixturesRunner -->|SSE events| SSE[SseBroadcast]
-  RealRunner -->|SSE events| SSE
+  RealRunner -->|SSE events| SSE[SseBroadcast]
 
   SSE --> UI[Simulator UI]
   Runtime --> Snapshot[SnapshotBuilder]
@@ -220,12 +213,9 @@ flowchart LR
   UI -->|GET snapshot/metrics| Runtime
 ```
 
-### 2.4 Fixtures mode vs Real mode (что реально отличается)
+### 2.4 Real mode (единственный серверный режим)
 
-**Fixtures mode** (см. [../../../app/core/simulator/fixtures_runner.py](../../../app/core/simulator/fixtures_runner.py)):
-- Не делает реальные платежи.
-- Эмитит «визуальные» события на основе графа trustlines.
-- Каденс клиринга/tx.updated в основном тайм‑based (`_next_*_at_ms`), а не “каждые N тиков”.
+Серверный режим `fixtures` (генератор «визуальных» событий без платежей, `fixtures_runner.py`) удалён 2026-10-16, программа 042; сравнение «fixtures vs real» потеряло предмет.
 
 **Real mode** (см. [../../../app/core/simulator/real_runner_impl.py](../../../app/core/simulator/real_runner_impl.py) и [../../../app/core/simulator/tick.py](../../../app/core/simulator/tick.py)):
 - (Один раз на run) сидит сценарий в БД и потом выполняет тик‑цикл.
@@ -370,7 +360,7 @@ Seed‑сценарии собираются **детерминированно*
 
 **Шаг 3. Запуск симулятора и проверка поведения**
 
-Дальше вы выбираете сценарий в Simulator UI и запускаете его в `fixtures` или `real` mode.
+Дальше вы выбираете сценарий в Simulator UI и запускаете его в режиме `real` (серверного режима `fixtures` с 2026-10-16 нет, 042).
 Быстрый старт полного стека:
 ```powershell
 ./scripts/run_full_stack.ps1 -Action start
@@ -389,7 +379,7 @@ flowchart TD
   E -->|write| F[Seed scenarios\n fixtures/simulator/*/scenario.json]
   F -->|schema validation| Fs[scenario.schema.json]
 
-  F -->|run| G[Simulator runtime\n fixtures mode / real mode]
+  F -->|run| G[Simulator runtime\n real mode]
   G -->|events/metrics| H[Simulator UI]
 ```
 

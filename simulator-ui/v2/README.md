@@ -36,7 +36,7 @@ The v2 UI uses a unified HUD:
 
 The segmented switch in the TopBar maps to URL params and triggers a **full reload** (by design, to fully re-init pipelines):
 
-- **Sandbox** → `?mode=fixtures`
+- **Sandbox** → `?mode=fixtures` (client-side offline demo on static snapshots, no server; the backend run mode `fixtures` was removed on 2026-10-16, programme 042 - a run is always `real`)
 - **Auto-Run** → `?mode=real`
 - **Interact** → `?mode=real&ui=interact`
 
@@ -62,7 +62,7 @@ Visibility matches code in `src/components/BottomBar.vue`:
 Deep-links / query flags:
 
 - FX Debug is considered enabled when `ui=demo` **or** `debug=1` is present in the URL (see `useSimulatorApp.ts`).
-- Note: if the Dev tools group is hidden (no `DEV` and no `VITE_ALLOW_DEMO_UI`), the underlying flags may still take effect, but the UI buttons (Enter/Exit Demo UI, Single Tx, Run Clearing) are not shown.
+- Note: if the Dev tools group is hidden (no `DEV` and no `VITE_ALLOW_DEMO_UI`), the underlying flags may still take effect, but the UI buttons (Enter/Exit Demo UI) are not shown. The "Single Tx" / "Run Clearing" debug buttons, `window.__geoSim.runTxOnce` / `runClearingOnce` and the backend actions `tx-once` / `clearing-once` were removed on 2026-10-16 (programme 042): a payment or clearing event is born in the core only.
 
 #### Glossary (plain English)
 
@@ -185,6 +185,7 @@ Interact Mode is a **Real Mode** UI variant that enables a small set of *manual 
 Backend action endpoints are feature-flagged.
 
 - Set `SIMULATOR_ACTIONS_ENABLE=1` **before starting the backend**.
+- It gates the Interact actions (`payment-real`, `clearing-real`, `trustline-*`, lists); the debug actions `tx-once` / `clearing-once` no longer exist (042).
 - When the flag is off, calling any `/api/v1/simulator/runs/{run_id}/actions/*` endpoint returns HTTP **403** with JSON error code `ACTIONS_DISABLED`.
 
 ### 2) Run UI and open Interact Mode

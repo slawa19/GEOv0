@@ -97,7 +97,7 @@ print(edge.model_dump_json())                 # {"from":"A","to":"B"}     ✅
 
 Файлы:
 - `app/core/simulator/sse_broadcast.py` — tx.updated, clearing.done
-- `app/core/simulator/fixtures_runner.py` — tx.updated, clearing.done
+- `app/core/simulator/fixtures_runner.py` — tx.updated, clearing.done (файл удалён 2026-10-16, программа 042: серверного режима `fixtures` больше нет)
 
 ```python
 # Было:

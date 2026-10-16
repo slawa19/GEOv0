@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS simulator_runs (
 ALTER TABLE simulator_runs
   ADD CONSTRAINT chk_simulator_runs_mode
   CHECK (mode IN ('fixtures', 'real'));
+-- 2026-10-16, 042: миграция 037_simulator_run_mode_real_only сужает CHECK до mode = 'real'
+-- (отказывает, пока есть строки 'fixtures'; ничего не удаляет).
 
 ALTER TABLE simulator_runs
   ADD CONSTRAINT chk_simulator_runs_state

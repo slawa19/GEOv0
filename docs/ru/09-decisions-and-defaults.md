@@ -287,6 +287,7 @@ Real mode: артефакты (dev perf)
 
 - UI получает события только через backend SSE (единый контракт/пайплайн визуализации).
 - Демо-кнопки (Single TX / Run Clearing) реализуются как backend actions, которые эмитят те же `tx.updated` / `clearing.*`.
+- **2026-10-16, 042: эта часть снята.** Серверный режим прогона `fixtures`, отладочные actions `tx-once` / `clearing-once` и кнопки «Single Tx» / «Run Clearing» удалены: событие о платеже или клиринге рождается только в ядре (режим `real`), `RunMode` — единственное значение `real`. Остаётся клиентское демо без сервера на статических снимках (`simulator-ui/v2/public/simulator-fixtures/`), оно решением не затронуто; ручные действия Interact (`payment-real`, `clearing-real`, trustline-*) остаются за `SIMULATOR_ACTIONS_ENABLE`.
 - Спецификация: [simulator/backend/backend-driven-demo-mode-spec.md](simulator/backend/backend-driven-demo-mode-spec.md)
 
 #### 1.11.1. Порядок SSE replay и абсолютных patch
