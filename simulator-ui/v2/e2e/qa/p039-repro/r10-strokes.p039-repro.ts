@@ -15,6 +15,12 @@
  *    `lineTo` bodies are counted; how many such strokes were closed is logged apart (`baseClosedLineStrokes`).
  *    For the same reason fills are classed too: a filled triangle (the direction marker) is "line" geometry, not a
  *    node, and must not be counted as one by the "nodes are drawn" check (348 marker fills alone would satisfy it).
+ *    NARROWED 2026-10-16 (external review of 039 B2, finding 3): "line" here means STRAIGHT GEOMETRY, not "a trust
+ *    line". `lineSegments` and `baseLineStrokes` also count the strokes of the `+` / `-` signs inside nodes and any
+ *    straight-edged shape; so the check on them is a necessary condition, and a pass that dropped some trust-line
+ *    bodies while drawing signs could still pass it. That every trust line has its body is NOT claimed by this file
+ *    (the edge pass is identified rim to rim by `edge-cost.p039-repro.ts` and drawn per line by
+ *    `src/render/baseGraph.direction.test.ts`).
  *
  * 2. A MODEL of the edge pass, off-screen - NOT the product's renderer and not the product's scene. It draws the 348
  *    lines three ways (one stroke each in snapshot order; one path per style group; one path per run of consecutive
@@ -114,7 +120,7 @@ test('039 R10 measurement - one static frame of 100 nodes and 348 lines: strokes
     quality: await page.evaluate(() => document.querySelector<HTMLElement>('.root')?.dataset.quality),
   })
   expect(d1.draws - d0.draws, 'precondition: exactly one pass of the render loop was counted').toBe(1)
-  expect(c.lineSegments, 'by contract: at least one line segment per trust line is drawn in the pass').toBeGreaterThanOrEqual(snapshot.links.length)
+  expect(c.lineSegments, 'a NECESSARY condition only: the straight segments of the pass - trust-line bodies, node signs and straight polygon edges counted together - are at least as many as the trust lines (this does NOT show that every trust line has a body)').toBeGreaterThanOrEqual(snapshot.links.length)
   expect(c.baseShapeStrokes + c.baseFills + c.baseDrawImages, 'by contract: nodes are drawn in the pass').toBeGreaterThanOrEqual(snapshot.nodes.length)
   // 348 line strokes, 100 shape strokes and 12 style groups are LOGGED above as a dated measurement of the base
   // (2026-10-12, 90e17a4c). They are not asserted: a direction marker, hatching or a hub ring changes them.

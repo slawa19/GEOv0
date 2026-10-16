@@ -21,7 +21,7 @@ import { getLinkTermination } from './linkGeometry'
  * 5 x 4; revised 2026-10-16 after the external review found it barely legible. A test may override this one line
  * (the size frames of the owner do): everything below is derived from it.
  */
-export const ARROW_LENGTH_PX = 5
+export const ARROW_LENGTH_PX = 7
 /** Width to length, kept from decision 4 (4 : 5). */
 export const ARROW_ASPECT = 0.8
 /** The tip stops this far before the rim of the target (`getLinkTermination`), as in decision 4. */

@@ -161,7 +161,7 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
   })
 
   it('`full` LOD never drops a marker for the number of lines or for the zoom while there is room', () => {
-    const ring = Array.from({ length: 120 }, (_, i) => node(`n${i}`, 4000 * Math.cos((i / 120) * 2 * Math.PI), 4000 * Math.sin((i / 120) * 2 * Math.PI)))
+    const ring = Array.from({ length: 120 }, (_, i) => node(`n${i}`, 6000 * Math.cos((i / 120) * 2 * Math.PI), 6000 * Math.sin((i / 120) * 2 * Math.PI)))
     const links = ring.map((n, i) => link(n.id, ring[(i + 1) % ring.length]!.id))
     for (const zoom of [0.2, 1, 3]) expect(markers(draw(ring, links, { cameraZoom: zoom })), `120 lines at zoom ${zoom}`).toHaveLength(120)
   })

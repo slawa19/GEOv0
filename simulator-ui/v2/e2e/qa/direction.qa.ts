@@ -27,7 +27,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { compareWithModel, lastPass, markerSeen, minLineLengthPx, modelOf, probeEnd, recordMarkers, type End } from './directionProbe.js'
+import { compareWithModel, lastPass, legibility, markerSeen, minLineLengthPx, modelOf, probeEnd, recordMarkers, SHIPPED_ARROW, zoomTo, type End } from './directionProbe.js'
 import { boot, camera, fixtureSnapshot100, frames, pushEvent, ringSnapshot, sampleCanvas, screenNodes, txUpdated, waitLoopAsleep, type Pt, type QaSnapshot } from './stand.js'
 
 /** `viz_size` of the small scene is 24 x 24: a circle of this radius in SCREEN px at any zoom. */
@@ -102,8 +102,9 @@ test('039 B2: pixels - a marker at the debtor end of a one-way line and none at 
     mutual_c: await probe('c', 'd'), mutual_d: await probe('d', 'c'),
     noDebtDebtor_f: await probe('f', 'e'), noDebtCreditor_e: await probe('e', 'f'),
   }
-  // POSITIVE CONTROL of "none at the creditor end": the triangle of decision 4 (tip 2 px off the rim, 5 long, 4 wide)
-  // painted at the two creditor ends on a COPY of the frame, in the legend's colour, is seen there by the same reading.
+  // POSITIVE CONTROL of "none at the creditor end": the triangle of decision 4 (tip 2 px off the rim, 5 long, 4 wide -
+  // SMALLER than the shipped marker since 2026-10-16, so a stricter control) painted at the two creditor ends on a COPY
+  // of the frame, in the legend's colour, is seen there by the same reading.
   const css = `rgb(${legend.rgb.join(',')})`
   const d4 = (end: string, other: string) => ({ at: at(end), to: at(other), tipGapPx: 2, lengthPx: 5, halfWidthPx: 2, fill: css })
   const synthetic = { atCreditor_a: await probe('a', 'b', d4('a', 'b')), atCreditor_e: await probe('e', 'f', d4('e', 'f')) }
@@ -217,11 +218,13 @@ test('039 B2: trust without debt, existing debt and a moving payment are three p
 
 /**
  * Lines of the 100-node fixture that have NO marker at the layout and zoom the stand loads it with (1280 x 720, zoom
- * 1): the free line between the two rims is under 14 screen px. A record (AGENTS.md section 6): more = markers are
+ * 1): the free line between the two rims is under the bound (`ARROW.minFreeGapPx`). A record (AGENTS.md section 6): more = markers are
  * disappearing - find it, do not move the number; it cannot be fewer.
  * 2026-10-12: 0 of 348 - first record (039 slice B, PR 2). Derived from the scene's measured gaps, not chosen: the
  * shortest free line is 23.2 px, 9.2 px above the bound; the 5th percentile is 74.7 px, the median 153.6 px. So on
  * the ordinary scene EVERY trust line shows its direction, and one missing marker fails this test.
+ * 2026-10-16: still 0 with the measured size (length 7, bound 2 x (2 + 7) = 18 px): the shortest free line is 5.2 px
+ * above the new bound.
  */
 const LINES_WITHOUT_A_MARKER_100 = 0
 
@@ -250,10 +253,10 @@ test('039 B2: the 100-node scene - every marker is at the target (debtor) end of
   test.info().annotations.push({ type: '039-B2-100-nodes', description: JSON.stringify(row) })
 
   expect(atLoad.lines, 'the fixture has 348 trust lines').toBe(348)
-  expect(atLoad.linesWithRoomWithoutTheirMarker, 'every line with 14 px of room has its marker at its TARGET end').toBe(0)
+  expect(atLoad.linesWithRoomWithoutTheirMarker, 'every line with room has its marker at its TARGET end').toBe(0)
   expect(atLoad.markersThatAreNoLinesTargetEnd, 'and there is no other marker: none at a source end, none for a line without room, none twice').toBe(0)
   expect(atLoad.drawn, 'drawn = lines with room').toBe(atLoad.withRoom)
-  expect(atLoad.withoutRoom, `lines without a marker (free line under 14 px: ${JSON.stringify(atLoad.belowBound)}) - the recorded number, two-sided`).toBe(LINES_WITHOUT_A_MARKER_100)
+  expect(atLoad.withoutRoom, `lines without a marker (free line under the bound of ${SHIPPED_ARROW.minFreeGapPx} px: ${JSON.stringify(atLoad.belowBound)}) - the recorded number, two-sided`).toBe(LINES_WITHOUT_A_MARKER_100)
   // The colour on the canvas is the colour of the legend's arrow, for every marker of the scene.
   expect(styles, 'every marker has one fill style').toHaveLength(1)
   expect(styles[0]!.startsWith('#') ? [1, 3, 5].map((i) => parseInt(styles[0]!.slice(i, i + 2), 16)) : rgbOf(styles[0]!), 'and it is the colour the legend draws its arrow with').toEqual(legend.rgb)
@@ -264,4 +267,42 @@ test('039 B2: the 100-node scene - every marker is at the target (debtor) end of
   expect(zoomedOut.linesWithRoomWithoutTheirMarker, 'zoomed out: every line that still has room keeps its marker').toBe(0)
   expect(zoomedOut.markersThatAreNoLinesTargetEnd, 'zoomed out: no marker is left for a line without room').toBe(0)
   expect(zoomedOut.drawn).toBe(zoomedOut.withRoom)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The shipped size is legible (039 slice B, PR 2, fix-delta of 2026-10-16; external review finding 2)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** At least this many markers of the 100-node scene must be measured at zoom 0.6, or the share proves nothing. */
+const MIN_MEASURED_AT_06 = 3
+
+test('039 B2: the shipped marker is DISTINGUISHABLE as an arrowhead at application zoom 0.6 - on the 100-node scene and on a line with no debt, in both themes', async ({ browser }) => {
+  // The criterion is `legibility` of `directionProbe.ts` (contrast against a bare stretch of the same line, a base at
+  // least twice as wide as a line at rest, a taper); the size it holds was DERIVED with it by the debug sweep
+  // `p039-repro/marker-size.p039-repro.ts` - this test holds that the product still ships a size that passes.
+  const rows: Record<string, unknown> = {}
+  for (const theme of ['hud', 'saas'] as const) {
+    for (const [name, snapshot, only] of [['scene100', fixtureSnapshot100(), undefined], ['noDebt', directionScene(), (k: string) => k === 'e>f']] as const) {
+      // A fresh page for every boot: init scripts, routes and the fake clock of a page accumulate over boots.
+      const context = await browser.newContext({ baseURL: test.info().project.use.baseURL, viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
+      const pg = await context.newPage()
+      await boot(pg, { snapshot, clock: true, query: `&theme=${theme}` })
+      const rgb = (await legendArrow(pg)).rgb
+      await zoomTo(pg, 0.6)
+      await pg.mouse.move(5, 5)
+      await frames(pg, 3)
+      const l = await legibility(pg, await modelOf(pg, snapshot, SHIPPED_ARROW), rgb, only)
+      rows[`${theme} ${name}`] = { measured: l.measured, hiddenUnderANode: l.hidden, notMeasured: l.notMeasured, legible: l.legible, share: l.share, failedBy: l.failedBy, baseWidths: l.baseWidths, tipWidths: l.tipWidths }
+      if (name === 'scene100') {
+        expect(l.measured, `${theme}: enough markers of the 100-node scene are measured at zoom 0.6 (the rest lie under a node, by design)`).toBeGreaterThanOrEqual(MIN_MEASURED_AT_06)
+        expect(l.share, `${theme}: every measured marker of the 100-node scene is distinguishable (${JSON.stringify(l.failedBy)})`).toBeGreaterThanOrEqual(0.95)
+      } else {
+        expect(l.measured, `${theme}: the marker of the line with no debt is measured`).toBe(1)
+        expect(l.legible, `${theme}: the marker of the line with NO debt is distinguishable (${JSON.stringify(l.failedBy)}; base ${l.baseWidths[0]} px, tip ${l.tipWidths[0]} px)`).toBe(1)
+      }
+      await context.close()
+    }
+  }
+  console.log('[039 B2 legible at 0.6]', JSON.stringify({ arrow: SHIPPED_ARROW, rows }))
+  test.info().annotations.push({ type: '039-B2-legible', description: JSON.stringify({ arrow: SHIPPED_ARROW, rows }) })
 })

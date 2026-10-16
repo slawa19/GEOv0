@@ -27,9 +27,15 @@
  * `src/render/baseGraph.direction.test.ts`). A marker fainter than `STANDS_OUT` is not seen. Thresholds are held by
  * the synthetic controls of the callers, at the angles and the zoom of their scene - not proven for every angle.
  */
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
-import { camera, layoutNodes, type Pt, type QaSnapshot } from './stand.js'
+import { ARROW } from '../../src/render/linkArrowhead.js'
+import { VIZ_LINK } from '../../src/vizMapping.js'
+import { camera, frames, layoutNodes, type Pt, type QaSnapshot } from './stand.js'
+
+/** The size the model assumes: the product's own constants, unless a caller overrides the size in the page too. */
+export type ArrowSize = { tipGapPx: number; lengthPx: number; widthPx: number; minFreeGapPx: number }
+export const SHIPPED_ARROW: ArrowSize = { tipGapPx: ARROW.tipGapPx, lengthPx: ARROW.lengthPx, widthPx: ARROW.widthPx, minFreeGapPx: ARROW.minFreeGapPx }
 
 /** A sample stands out from its control when the sum of |dR| + |dG| + |dB| is above this (a line at alpha 0.32 gives about 96). */
 export const STANDS_OUT = 36
@@ -186,7 +192,7 @@ export function rim(n: Pt & Shape, toward: Pt, zoom: number): Pt {
 }
 
 /** For every line of the snapshot: the free line between the rims in screen px, and where the tip of its marker must be (world). */
-export async function modelOf(page: Page, snapshot: Pick<QaSnapshot, 'nodes' | 'links'>) {
+export async function modelOf(page: Page, snapshot: Pick<QaSnapshot, 'nodes' | 'links'>, arrow: ArrowSize = SHIPPED_ARROW) {
   const zoom = (await camera(page)).zoom
   const shapes = new Map(snapshot.nodes.map((n) => { const s = n.viz_size as { w?: number; h?: number } | null | undefined; return [n.id, { shape: String(n.viz_shape_key ?? 'circle'), w: Number(s?.w ?? 12), h: Number(s?.h ?? 12) }] }))
   const pos = new Map((await layoutNodes(page)).map((n) => [n.id, { x: n.x, y: n.y, ...shapes.get(n.id)! }]))
@@ -198,14 +204,34 @@ export async function modelOf(page: Page, snapshot: Pick<QaSnapshot, 'nodes' | '
     const from = rim(s, t, zoom)
     const to = rim(t, s, zoom)
     const freePx = ((to.x - from.x) * u.x + (to.y - from.y) * u.y) * zoom
-    return { key: `${k.source}>${k.target}`, freePx, tip: { x: to.x - (u.x * 2) / zoom, y: to.y - (u.y * 2) / zoom }, sourceRim: from }
+    const tip = { x: to.x - (u.x * arrow.tipGapPx) / zoom, y: to.y - (u.y * arrow.tipGapPx) / zoom }
+    const base = { x: tip.x - (u.x * arrow.lengthPx) / zoom, y: tip.y - (u.y * arrow.lengthPx) / zoom }
+    const half = arrow.widthPx / 2 / zoom
+    const corners = [tip, { x: base.x - u.y * half, y: base.y + u.x * half }, { x: base.x + u.y * half, y: base.y - u.x * half }]
+    // Under a THIRD node (its painted extent: size + 1.5 px outline, + 4.9 px for a hub's ring): the product draws
+    // that marker before the nodes, so the node covers it. Box test for organisations, distance test for circles.
+    const underThirdNode = [...pos.entries()].some(([id, n]) => {
+      if (id === k.source || id === k.target) return false
+      const isHub = String(snapshot.nodes.find((m) => m.id === id)?.type ?? '').toLowerCase() === 'hub'
+      const pad = (isHub ? 6.4 : 1.5) / zoom
+      const w = Math.max(6, n.w) / zoom / 2 + pad
+      const h = Math.max(6, n.h) / zoom / 2 + pad
+      if (n.shape === 'rounded-rect') return corners.some((c) => Math.abs(c.x - n.x) <= w) && corners.some((c) => Math.abs(c.y - n.y) <= h)
+        && Math.max(...corners.map((c) => c.x)) >= n.x - w && Math.min(...corners.map((c) => c.x)) <= n.x + w
+        && Math.max(...corners.map((c) => c.y)) >= n.y - h && Math.min(...corners.map((c) => c.y)) <= n.y + h
+      const r = Math.max(w, h)
+      const segDist = (a: Pt, b: Pt) => { const dx = b.x - a.x; const dy = b.y - a.y; const l2 = dx * dx + dy * dy; const tt = l2 > 0 ? Math.max(0, Math.min(1, ((n.x - a.x) * dx + (n.y - a.y) * dy) / l2)) : 0; return Math.hypot(a.x + tt * dx - n.x, a.y + tt * dy - n.y) }
+      return segDist(corners[0]!, corners[1]!) <= r || segDist(corners[1]!, corners[2]!) <= r || segDist(corners[2]!, corners[0]!) <= r
+    })
+    return { key: `${k.source}>${k.target}`, freePx, u, tip, sourceRim: from, underThirdNode }
   })
-  return { zoom, lines }
+  return { zoom, lines, arrow }
 }
 
 /** Every drawn marker must be the marker of ONE line with room, tip at its target; every such line must have one. */
 export function compareWithModel(markers: Marker[], model: Awaited<ReturnType<typeof modelOf>>) {
-  const expected = model.lines.filter((l) => l.freePx >= 14)
+  const bound = model.arrow.minFreeGapPx
+  const expected = model.lines.filter((l) => l.freePx >= bound)
   const left = [...markers]
   let unmatched = 0
   let worst = 0
@@ -221,7 +247,138 @@ export function compareWithModel(markers: Marker[], model: Awaited<ReturnType<ty
     lines: model.lines.length, withRoom: expected.length, withoutRoom: model.lines.length - expected.length, drawn: markers.length,
     linesWithRoomWithoutTheirMarker: unmatched, markersThatAreNoLinesTargetEnd: left.length, worstTipErrorPx: Math.round(worst * 1e5) / 1e5,
     freePx: { min: Math.round(gaps[0]! * 10) / 10, p05: Math.round(gaps[Math.floor(gaps.length * 0.05)]! * 10) / 10, median: Math.round(gaps[Math.floor(gaps.length / 2)]! * 10) / 10 },
-    nearestToTheBoundPx: Math.round(Math.min(...gaps.map((g) => Math.abs(g - 14))) * 100) / 100,
-    belowBound: gaps.filter((g) => g < 14).map((g) => Math.round(g * 10) / 10),
+    nearestToTheBoundPx: Math.round(Math.min(...gaps.map((g) => Math.abs(g - bound))) * 100) / 100,
+    belowBound: gaps.filter((g) => g < bound).map((g) => Math.round(g * 10) / 10),
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Legibility of a marker against its own line (039 slice B, PR 2, fix-delta of 2026-10-16)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * A marker is DISTINGUISHABLE - as an arrowhead on its line, not as a speck or a thicker bit of line - when all three
+ * hold on the rendered pixels:
+ *  1. CONTRAST: at least `LEGIBLE_SHARE` of the samples inside its triangle (a 0.5 px grid) stand out (`STANDS_OUT`)
+ *     from the samples at the same places of a BARE STRETCH OF THE SAME LINE (the triangle moved back along the line by
+ *     one length and `BARE_GAP_PX`). `STANDS_OUT` is the probe's own threshold; half the triangle is its body, not the
+ *     anti-aliased rim that any line also has.
+ *  2. WIDER THAN A LINE: near its base (rows at 0.8, 0.85 and 0.9 of its length from the tip, the widest kept) the
+ *     run of samples of the marker's own colour (`SOLID_TOLERANCE`) across the axis is at least `HEAD_OVER_LINE` times
+ *     the widest stroke of a trust line at rest (`WIDEST_LINE_PX`). A head no wider than that reads as the line
+ *     itself, thicker for a moment.
+ *  3. POINTED: at a quarter of its length from the tip that run is at most half the one at the base.
+ * Why these numbers: the factor 2 is the plain "clearly wider" of a size comparison, the quarter/base pair is the
+ * smallest taper that is still a taper; they are written here so that a reader can dispute them, and the size the
+ * product ships is the smallest one that passes them (`e2e/qa/p039-repro/marker-size.p039-repro.ts`).
+ * What it does NOT judge: whether a person at a given distance recognises the shape - the owner's look at the frames.
+ * A marker is NOT MEASURED when the bare stretch would leave the free line (less than tip gap + 2 lengths + gap + 2 px
+ * between the rims): it is reported as such, never counted as legible. A marker UNDER A THIRD NODE is hidden by
+ * design (the node covers it as it covers the line): counted apart (`hidden`), not in the share.
+ */
+export const LEGIBLE_SHARE = 0.5
+export const BARE_GAP_PX = 4
+export const HEAD_OVER_LINE = 2
+/**
+ * The widest stroke a trust line is drawn with AT REST (`thick`, 1.25 px). The 2.2 px highlight is left out on
+ * purpose: under a highlight the marker is redrawn in the highlight colour and is compared with that, not with a line.
+ */
+export const WIDEST_LINE_PX = VIZ_LINK.width_px.thick!
+
+export type Legibility = { measured: number; notMeasured: number; hidden: number; legible: number; share: number; fracs: number[]; baseWidths: number[]; tipWidths: number[]; failedBy: Record<string, number> }
+
+export async function legibility(page: Page, model: Awaited<ReturnType<typeof modelOf>>, markerRgb: [number, number, number], only?: (key: string) => boolean): Promise<Legibility> {
+  const cam = await camera(page)
+  const a = model.arrow
+  const drawn = model.lines.filter((l) => l.freePx >= a.minFreeGapPx && (!only || only(l.key)))
+  const hidden = drawn.filter((l) => l.underThirdNode).length
+  const tris = drawn.filter((l) => !l.underThirdNode)
+    .map((l) => ({ ok: l.freePx >= a.tipGapPx + 2 * a.lengthPx + BARE_GAP_PX + 2, tip: { x: l.tip.x * cam.zoom + cam.panX, y: l.tip.y * cam.zoom + cam.panY }, u: l.u }))
+  const rows = await page.evaluate(({ tris, L, W, GAP, standsOut, rgb, TOL }) => {
+    const c = document.querySelector<HTMLCanvasElement>('canvas.canvas:not(.canvas-fx)')!
+    const k = c.width / Math.max(1, c.clientWidth)
+    const box = c.getBoundingClientRect()
+    const img = c.getContext('2d')!.getImageData(0, 0, c.width, c.height)
+    const px = (x: number, y: number) => {
+      const i = (Math.round((y - box.y) * k) * c.width + Math.round((x - box.x) * k)) * 4
+      return [img.data[i] ?? 0, img.data[i + 1] ?? 0, img.data[i + 2] ?? 0]
+    }
+    const diff = (v: number[], w: number[]) => Math.abs(v[0]! - w[0]!) + Math.abs(v[1]! - w[1]!) + Math.abs(v[2]! - w[2]!)
+    return tris.map((t) => {
+      if (!t.ok) return null
+      const n = { x: -t.u.y, y: t.u.x }
+      const at = (d: number, s: number) => ({ x: t.tip.x - t.u.x * d + n.x * s, y: t.tip.y - t.u.y * d + n.y * s })
+      const back = L + GAP
+      let all = 0
+      let out = 0
+      for (let d = 0; d <= L; d += 0.5) {
+        const half = (W / 2) * (d / L)
+        for (let s = -half; s <= half; s += 0.5) {
+          const p = at(d, s)
+          all += 1
+          if (diff(px(p.x, p.y), px(p.x - t.u.x * back, p.y - t.u.y * back)) > standsOut) out += 1
+        }
+      }
+      // The longest run of samples of the marker's colour across the axis, 0.25 px apart, centred on it.
+      const run = (d: number) => {
+        let best = 0
+        let cur = 0
+        for (let s = -W; s <= W; s += 0.25) {
+          const p = at(d, s)
+          if (diff(px(p.x, p.y), rgb) <= TOL) { cur += 1; best = Math.max(best, cur) } else cur = 0
+        }
+        return best * 0.25
+      }
+      return { frac: all ? out / all : 0, base: Math.max(run(0.8 * L), run(0.85 * L), run(0.9 * L)), tip: run(0.25 * L) }
+    })
+  }, { tris, L: a.lengthPx, W: a.widthPx, GAP: BARE_GAP_PX, standsOut: STANDS_OUT, rgb: markerRgb, TOL: SOLID_TOLERANCE })
+  const measured = rows.filter((r): r is { frac: number; base: number; tip: number } => r !== null)
+  const failedBy = { contrast: 0, notWiderThanALine: 0, notPointed: 0 }
+  let legible = 0
+  for (const r of measured) {
+    const c1 = r.frac >= LEGIBLE_SHARE
+    const c2 = r.base >= HEAD_OVER_LINE * WIDEST_LINE_PX
+    const c3 = r.tip <= r.base / 2
+    if (!c1) failedBy.contrast += 1
+    if (!c2) failedBy.notWiderThanALine += 1
+    if (!c3) failedBy.notPointed += 1
+    if (c1 && c2 && c3) legible += 1
+  }
+  const r2 = (v: number) => Math.round(v * 100) / 100
+  return {
+    measured: measured.length, notMeasured: rows.length - measured.length, hidden, legible, share: measured.length ? legible / measured.length : 0,
+    fracs: measured.map((r) => r2(r.frac)), baseWidths: measured.map((r) => r.base), tipWidths: measured.map((r) => r.tip), failedBy,
+  }
+}
+
+/**
+ * TEST-ONLY override of the size of the marker in the page: the dev server's copy of `src/render/linkArrowhead.ts`
+ * is served with another `ARROW_LENGTH_PX` (everything else there is derived from it). No product switch exists or is
+ * added. Must be installed before the app loads (`boot({ beforeLoad })`).
+ */
+export async function overrideArrowLength(page: Page, lengthPx: number): Promise<void> {
+  await page.route(/\/src\/render\/linkArrowhead\.ts(\?.*)?$/, async (route) => {
+    // Without the conditional headers: a 304 "not modified" has no body to rewrite.
+    const headers = Object.fromEntries(Object.entries(route.request().headers()).filter(([k]) => !/^if-(none-match|modified-since)$/i.test(k)))
+    const res = await route.fetch({ headers })
+    const body = await res.text()
+    const pattern = /ARROW_LENGTH_PX\s*=\s*[\d.]+/
+    const next = body.replace(pattern, `ARROW_LENGTH_PX = ${lengthPx}`)
+    if (!pattern.test(body)) throw new Error(`039 marker size: ARROW_LENGTH_PX was not found in the served module (status ${res.status()}, ${body.length} bytes) - the override would be silent`)
+    await route.fulfill({ status: 200, headers: { 'content-type': res.headers()['content-type'] ?? 'text/javascript', 'cache-control': 'no-store' }, body: next })
+  })
+}
+
+export const arrowOfLength = (lengthPx: number): ArrowSize => ({ tipGapPx: ARROW.tipGapPx, lengthPx, widthPx: lengthPx * (ARROW.widthPx / ARROW.lengthPx), minFreeGapPx: 2 * (ARROW.tipGapPx + lengthPx) })
+
+/** Bring the application's zoom to `target` with ONE wheel event (the camera multiplies by exp(-deltaY / 1000)). */
+export async function zoomTo(page: Page, target: number): Promise<number> {
+  const z0 = (await camera(page)).zoom
+  const vp = page.viewportSize()!
+  await page.mouse.move(vp.width / 2, vp.height / 2)
+  await page.mouse.wheel(0, -1000 * Math.log(target / z0))
+  await frames(page, 12)
+  const z = (await camera(page)).zoom
+  expect(Math.abs(z - target), `the application zoom reached ${target} (it is ${z})`).toBeLessThan(0.005)
+  return z
 }

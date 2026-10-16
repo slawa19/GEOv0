@@ -82,8 +82,12 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   In the GATE, not `@extended`: a turned-round direction is a class-1 risk of the slice's design, and nothing else a
  *   pull request runs looks at a pixel of the marker. About 20 s locally in one worker. No existing test left or
  *   changed scope; three budgets of `budgets.ts` moved the same day (the markers are drawing calls).
+ * - 2026-10-16 (039 slice B, PR 2, fix-delta after the external review): gate 88 -> 89, full 211 -> 212. One test of
+ *   `direction.qa.ts`: the shipped marker is distinguishable as an arrowhead at application zoom 0.6 on the 100-node
+ *   scene and on a line with no debt, in both themes (the criterion of `directionProbe.ts`, the size derived by the
+ *   debug sweep `p039-repro/marker-size.p039-repro.ts`). In the GATE: it holds the revised decision 4. About 25 s.
  */
-export const EXPECTED = { gate: 88, full: 211 }
+export const EXPECTED = { gate: 89, full: 212 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
