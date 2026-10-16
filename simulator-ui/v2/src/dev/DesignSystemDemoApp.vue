@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { UiThemeId } from '../types/uiPrefs'
+// The design-system demo shows every token block, the frozen `shadcn` and `library` included (039 B3: the app
+// offers only `saas` and `hud`, see `types/uiPrefs.ts`; the tokens stay).
+type DemoThemeId = 'hud' | 'shadcn' | 'saas' | 'library'
 
-const theme = ref<UiThemeId>('hud')
+const theme = ref<DemoThemeId>('hud')
 const density = ref<'comfortable' | 'compact'>('comfortable')
 const reducedMotion = ref(false)
 
