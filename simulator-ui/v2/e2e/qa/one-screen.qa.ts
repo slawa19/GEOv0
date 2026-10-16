@@ -81,7 +81,11 @@ test('(c) a run somebody paused is attached and left paused: no create, no resum
   // A returning visitor: the stand seeds the stored run, which the backend says is paused.
   await boot(page, { snapshot: ringSnapshot(), clock: false, beforeLoad: async (p) => { log = await mockLiveRun(p, { initial: 'paused' }) } })
   await expect(page.locator(STATE)).toContainText('на паузе')
-  await page.waitForTimeout(1_000) // the opening is over (the scene and the stream are up); a late start or resume would be in the log by now
+  // The opening is over: the stream is connected, and the product decides on a start BEFORE it connects (the decision
+  // is taken when the scene is up; the stream follows the run's snapshot). A start or a resume would be in the log by now.
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __qaSse: { state: { controllers: unknown[] } } }).__qaSse.state.controllers.length), { timeout: 15_000 })
+    .toBeGreaterThan(0)
   expect(log!.calls, 'opening neither created nor resumed a run').toEqual([])
 })
 

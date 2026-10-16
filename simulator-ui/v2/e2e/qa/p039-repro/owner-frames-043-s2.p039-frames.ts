@@ -61,7 +61,7 @@ async function payIfListening(page: Page): Promise<boolean> {
   const route = ids.length >= OPEN_ROUTE.length ? ids.slice(0, 3) : [...OPEN_ROUTE].slice(0, 3)
   const { frame } = sseFrame(txUpdated(route, '10.00', { ttl_ms: 4000 }))
   await page.evaluate((f) => (window as unknown as { __qaSse: { push: (t: string) => Promise<number> } }).__qaSse.push(f), frame)
-  await page.waitForTimeout(350)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __geoSim?: { fxState?: { sparks?: unknown[] } } }).__geoSim?.fxState?.sparks?.length ?? 0), { timeout: 5_000 }).toBeGreaterThan(0)
   return true
 }
 
@@ -83,13 +83,13 @@ for (const theme of THEMES) {
     await expect(send, 'the action bar is on screen').toBeVisible({ timeout: 20_000 })
     await send.click()
     await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
-    await page.waitForTimeout(500)
+    await expect(page.locator('[data-testid="network-state"]'), 'the state the frame is named for').toContainText(/на паузе|живёт/)
     await page.screenshot({ path: join(dir, `${theme}-3-manual-action.png`) })
 
     const flow = page.locator('[data-testid="flow-toggle"]')
     if ((await flow.count()) > 0) {
       await flow.click()
-      await page.waitForTimeout(500)
+      await expect(page.locator('[data-testid="network-state"]')).toContainText('живёт')
     }
     await page.screenshot({ path: join(dir, `${theme}-4-flow-resumed.png`) })
   })
