@@ -1061,6 +1061,43 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
+  it('043 S1: with Details on, an ActionBar panel opens under the whole top stack, not over its Details rows', async () => {
+    storedDetails(true)
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      await nextTick()
+      const root = host.querySelector('.root') as HTMLElement
+      stubRect(root, { left: 0, top: 0, width: 1400, height: 800 })
+      const actionBar = host.querySelector('[aria-label="Interact actions"]') as HTMLElement
+      stubRect((actionBar.querySelector('.hud-bar') as HTMLElement | null) ?? actionBar, { left: 400, top: 14, width: 404, height: 40 })
+      const stack = host.querySelector('.ds-ov-top-stack') as HTMLElement
+      expect(stack.contains(actionBar), 'counter-check: the ActionBar is a row of the stack').toBe(true)
+      stubRect(stack, { left: 14, top: 14, width: 1372, height: 132 })
+
+      host.querySelector<HTMLButtonElement>('[data-testid="actionbar-payment"]')!.click()
+      await nextTick()
+      await nextTick()
+      const calls = getGeoTestGlobal('__GEO_TEST_WM_OPEN')!.mock.calls.map((c) => c[0] as { type?: string; anchor?: { x: number; y: number } })
+      const anchor = [...calls].reverse().find((c) => c?.type === 'interact-panel')?.anchor
+      expect(anchor, 'the panel was opened with an anchor').toBeTruthy()
+      expect(anchor!.x, 'still at the ActionBar').toBe(400)
+      expect(anchor!.y, 'under the stack (146), not under the first row (54)').toBe(146)
+    } finally {
+      app.unmount()
+      host.remove()
+      storedDetails(null)
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    }
+  })
+
   it('keeps canvas pointer and wheel handlers bound to canvas while overlay shell pointer paths stay separate', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())

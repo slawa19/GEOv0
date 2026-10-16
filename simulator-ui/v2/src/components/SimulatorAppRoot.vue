@@ -772,8 +772,12 @@ function getActionBarAnchor(): Point | null {
 
   // Anchor at the left edge under the bar so the panel opens near ActionBar,
   // not docked to the far right.
+  // 043 S1: the ActionBar is in the FIRST row of the top stack; with "Подробнее" on, rows follow it. The panel opens
+  // under the whole stack, never over those rows (until 043 S1 the ActionBar was the stack's last row).
+  const stack = host.querySelector('.ds-ov-top-stack')
+  const stackBottom = stack instanceof HTMLElement ? stack.getBoundingClientRect().bottom - hostRect.top : Number.NEGATIVE_INFINITY
   const x = r.left - hostRect.left
-  const y = r.bottom - hostRect.top
+  const y = Math.max(r.bottom - hostRect.top, Number.isFinite(stackBottom) ? stackBottom : Number.NEGATIVE_INFINITY)
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   return { x, y }
 }

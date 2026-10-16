@@ -333,6 +333,12 @@ async function onRunClearingOnce() {
 </template>
 
 <style scoped>
+/* 043 S1: the rows of this bar are as tight as the top stack's (`--ds-hud-bar-py: 2px` there); nested HudBars inherit
+   it. Measured at 1366x768 (layout.qa.ts, R9): the main row with 10 px paddings made the first view 81 % canvas. */
+.ds-ov-bottom {
+  --ds-hud-bar-py: 2px;
+}
+
 .bb-row {
   gap: var(--ds-space-2, 8px);
 }
