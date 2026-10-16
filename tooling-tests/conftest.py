@@ -186,8 +186,29 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-12, 039 slice A, fix-delta of the external review of 0d0deae3 (the debug scope was escaped by `--`): portable 454 -> 457.
 #: Three more mutations in the same module: the debug run accepts the option terminator, the runner builds its arguments past
 #: the checked function, the debug run writes where a counted run does. (The selfcheck it runs through node went 25 -> 56 cases.)
+#:
+#: 2026-10-16, 040 slice A (`T4010`, the second reviewer's call script): portable 457 -> 480. Twenty-three cases, new module
+#: `portable/test_p040_argon_review.py`: five refusals before sending (no key, a non-commit SHA, a payload over the limit, a
+#: secret-looking path x4, the key inside the payload), what is sent (dry run, committed objects only, a binary named) (3), a saved
+#: response verified with its cost or `unknown` (2), a missing marker x3 and an incomplete response x3 unverified, the key in no
+#: file and no output x2, and the live path in process with `post` replaced (2).
+#:
+#: 2026-10-16, 040 slice A, review of the stopped agent's `bdd99526` before any gate ran: portable 480 -> 490. Ten cases
+#: added to the same module: an empty range x2 (the same SHA; `--paths` matching nothing), an `--out` holding a previous run,
+#: the versioned `.env*.example` templates pass while a real `.env`/`.env.local` is still refused (1), a response from another,
+#: a lookalike or no model x3, a response that is not JSON (1), the network guard met by a real live call (1), an HTTP 429
+#: that is not retried (1). Every subprocess case now runs through a guard that closes the sockets.
+#:
+#: 2026-10-16, 040 slice A, adversarial pass: portable 490 -> 491. One case added to the same module: a 3xx from the API is
+#: not followed, so the `Authorization` header never reaches the redirect target (urllib's default would carry it there).
+#:
+#: 2026-10-16, 040 slice A, fix-delta of the external review of `3dad3761` (Codex): portable 491 -> 510. Nineteen cases added to
+#: the same module, each a counterexample that was red on `3dad3761`: a signature helper named by repository config ran with the
+#: key (1) and every git child's environment (1), a replacement ref swapping a frozen blob (1), a gitlink expanded x2, malformed
+#: markers x6 and a prompt declaring no verdict values (1), model lookalikes x3 and the exact requested id (1), a key with CR/LF
+#: x2, and a response over the read cap (1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 457,
+    "portable": 510,
     "powershell": 235,
 }
 
