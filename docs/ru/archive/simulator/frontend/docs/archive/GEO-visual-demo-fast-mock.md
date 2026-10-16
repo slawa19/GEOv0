@@ -16,7 +16,7 @@
 - Legacy прототип (не трогаем, только как историческая справка): `simulator-ui/v1/`
 
 Визуальные референсы (узлы/эффекты/сцены):
-- `docs/ru/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
+- `docs/ru/archive/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
 
 ---
 
@@ -333,7 +333,7 @@ Guardrail: `validate-fixtures` держит allow-list `seed_id` (и ожида�
 Нужны 4–6 «сцен» (как презентационные пресеты), переключаемые из UI.
 
 Связанные screen-prototypes (референсы к ожидаемому виду):
-- `docs/ru/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
+- `docs/ru/archive/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
 
 ---
 

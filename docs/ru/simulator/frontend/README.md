@@ -25,7 +25,7 @@
 ## Design and acceptance documents
 
 - [Real-mode screens spec](docs/specs/simulator-real-mode-screens-spec.md) — целевое/приёмочное описание; статус конкретного поведения сверять с `simulator-ui/v2`, тестами и runtime.
-- [Screen prototypes](screen-prototypes/) — визуальные референсы, не runtime contract.
+- [Screen prototypes](../../archive/simulator/frontend/screen-prototypes/) — прототипы прежнего экрана, до программы 043 (перенесены в архив 2026-10-16, 041 `T4108`); не runtime contract.
 
 ## Archive
 
