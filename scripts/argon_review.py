@@ -26,6 +26,8 @@ was sent: the markers prove a complete answer, not a careful one; the orchestrat
 reproduces every P1/P2 (runbook section 4). The model runs no tests and reads no files.
 `--timeout` bounds each socket operation, not the whole call. There is no retry on
 purpose: a retry is a second paid call, so a failed run is rerun by hand and recorded.
+Redirects are not followed: urllib would carry the `Authorization` header to wherever a
+3xx points, so a redirect is an HTTP error, UNVERIFIED, and the key stays with the API.
 """
 
 from __future__ import annotations
@@ -161,6 +163,13 @@ def build_payload(base: str, head: str, prompt: str, paths: list[str]) -> tuple[
     return "".join(parts), meta
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A 3xx becomes an `HTTPError`: the key is never re-sent to another URL."""
+
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
 def post(body: dict, key: str, timeout: float) -> tuple[int, str]:
     headers = {
         "Authorization": f"Bearer {key}",
@@ -170,7 +179,8 @@ def post(body: dict, key: str, timeout: float) -> tuple[int, str]:
     data = json.dumps(body).encode("utf-8")
     request = urllib.request.Request(API_URL, data=data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        opener = urllib.request.build_opener(NoRedirect)
+        with opener.open(request, timeout=timeout) as response:
             return response.status, response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode("utf-8", "replace")

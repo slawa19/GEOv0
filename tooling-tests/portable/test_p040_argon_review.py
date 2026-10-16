@@ -32,12 +32,17 @@ is served, or what a call costs: that is the first real call (040 `T4030`), reco
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
+import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import urllib.error
+import urllib.request
+import urllib.response
 from pathlib import Path
 
 import pytest
@@ -385,3 +390,37 @@ def test_a_rate_limited_live_call_is_unverified_and_not_retried(repo: dict, monk
     code, out = _live(_load_module(), repo, monkeypatch, limited_post)
     assert code == 2 and len(calls) == 1
     assert _meta(out)["reason"] == "HTTP 429"
+
+
+def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real `post`, with a handler in front of urllib's HTTPS handler that answers 302 without a socket.
+
+    urllib's default follows a 301/302/303 of a POST as a GET and carries the `Authorization` header along.
+    """
+    module, seen = _load_module(), []
+
+    def blocked(*args: object, **kwargs: object) -> None:
+        raise ConnectionRefusedError("NETWORK-BLOCKED by the 040 test guard")
+
+    for name in ("getaddrinfo", "create_connection"):
+        monkeypatch.setattr(socket, name, blocked)
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(module, "API_URL", "https://127.0.0.1:9/api/v1/chat/completions")
+
+    class Answers302(urllib.request.BaseHandler):
+        handler_order = 100  # before the real HTTPSHandler (500)
+
+        def https_open(self, request: urllib.request.Request) -> urllib.response.addinfourl:
+            seen.append((request.full_url, request.get_header("Authorization")))
+            headers = http.client.HTTPMessage()
+            headers["Location"] = "https://elsewhere.invalid/collect"
+            response = urllib.response.addinfourl(io.BytesIO(b"moved"), headers, request.full_url, code=302)
+            response.msg = "Found"
+            return response
+
+    real_build_opener = urllib.request.build_opener
+    monkeypatch.setattr(module.urllib.request, "build_opener",
+                        lambda *handlers: real_build_opener(*handlers, Answers302))
+    status, raw = module.post({"model": "m"}, KEY, 5)
+    assert (status, raw) == (302, "moved")
+    assert seen == [("https://127.0.0.1:9/api/v1/chat/completions", f"Bearer {KEY}")]

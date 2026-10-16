@@ -198,8 +198,11 @@ _HERE = Path(__file__).resolve().parent
 #: the versioned `.env*.example` templates pass while a real `.env`/`.env.local` is still refused (1), a response from another,
 #: a lookalike or no model x3, a response that is not JSON (1), the network guard met by a real live call (1), an HTTP 429
 #: that is not retried (1). Every subprocess case now runs through a guard that closes the sockets.
+#:
+#: 2026-10-16, 040 slice A, adversarial pass: portable 490 -> 491. One case added to the same module: a 3xx from the API is
+#: not followed, so the `Authorization` header never reaches the redirect target (urllib's default would carry it there).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 490,
+    "portable": 491,
     "powershell": 235,
 }
 
