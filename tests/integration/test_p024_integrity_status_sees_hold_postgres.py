@@ -38,14 +38,8 @@ from app.config import settings
 from app.core.ledger.reconciliation import PASSED, UNVERIFIABLE
 from app.utils.background_jobs import background_health_status
 from tests.conftest import MODE_B, sessionmaker_of
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 from tests.tier_on_a_clone import tier_on_a_clone  # noqa: F401 - opt-in fixture
-
-
-def target_xfail_024(task: str, what: str):
-    """An expected `TargetMismatch`, strict: the task that delivers the target takes the marker off."""
-
-    return pytest.mark.xfail(raises=TargetMismatch, strict=True, reason=f"024 target, delivered by {task}: {what}")
 
 
 async def _equivalent(factory, code: str) -> uuid.UUID:

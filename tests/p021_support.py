@@ -16,7 +16,6 @@ methods and calls straight through; it replaces no domain behaviour.
 
 from __future__ import annotations
 
-import pytest
 
 from tests.p019_support import TargetMismatch, require_target  # noqa: F401 - re-exported for 021 tests
 
@@ -26,16 +25,6 @@ CHECKPOINT_SCOPE_KEY = "checkpoint_scope"
 CHECKPOINT_SCOPE_CALLER_TRANSACTION = "caller_transaction"
 
 TRUST_LINE_OPERATIONS = ("TRUST_LINE_CREATE", "TRUST_LINE_UPDATE", "TRUST_LINE_CLOSE")
-
-
-def target_xfail_021(stage: str, what: str):
-    """The 021 marker: an expected `TargetMismatch`, strict, naming the task that removes it."""
-
-    return pytest.mark.xfail(
-        raises=TargetMismatch,
-        strict=True,
-        reason=f"021 target, delivered by {stage}: {what}",
-    )
 
 
 class TrustLineBatchPoints:

@@ -34,13 +34,9 @@ from app.db.models.integrity_checkpoint import IntegrityCheckpoint
 from app.db.models.participant import Participant
 from app.db.reconciliation_tables import debt_reconciliation_baseline_offsets, debt_reconciliation_baselines
 from tests.conftest import MODE_B, sessionmaker_of
-from tests.p019_support import TargetMismatch, require_target
+from tests.p019_support import require_target
 
 ADMIN = {"X-Admin-Token": settings.ADMIN_TOKEN}
-
-
-def target_xfail_024(task: str, what: str):
-    return pytest.mark.xfail(raises=TargetMismatch, strict=True, reason=f"024 target, delivered by {task}: {what}")
 
 
 async def _count(factory, stmt) -> int:
