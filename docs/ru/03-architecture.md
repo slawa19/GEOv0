@@ -12,7 +12,7 @@
 > **Классификация:** архитектурный vision/target-документ, а не снимок полностью
 > реализованного продукта. Текущие executable surfaces: backend `app/`, REST
 > schema [`api/openapi.yaml`](../../api/openapi.yaml), Admin UI `admin-ui/` и
-> Simulator UI `simulator-ui/v2/`. `simulator-ui/v1/` и каталоги `archive/` —
+> Simulator UI `simulator-ui/v2/`. `simulator-ui/v1/` удалён 2026-10-16 (041 `T4106`), тег `legacy/simulator-ui-v1-removed`; каталоги `archive/` —
 > исторические/read-only по умолчанию. Конкретное current behavior устанавливают
 > код, runtime и тесты; принятые решения —
 > [`09-decisions-and-defaults.md`](09-decisions-and-defaults.md). Разделы ниже с

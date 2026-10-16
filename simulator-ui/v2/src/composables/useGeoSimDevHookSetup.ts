@@ -24,6 +24,7 @@ export function useGeoSimDevHookSetup(opts: {
     used?: string | number | null
     available?: string | number | null
     edgeStatus?: string | null
+    equivalent?: string | null
   }) => void
   hideEdgeTooltip?: () => void
   openNodeCard?: (o: { nodeId: string; anchor: { x: number; y: number } | null }) => void

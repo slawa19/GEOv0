@@ -1,9 +1,9 @@
 # GEO Simulator UI
 
-This folder contains two versions:
+This folder contains one version:
 
 - `v2/` — **current** demo-fast-mock v2 (active development)
-- `v1/` — legacy prototype (archived, outdated)
+- `v1/` — legacy prototype, removed 2026-10-16 (041 `T4106`); kept in git under the tag `legacy/simulator-ui-v1-removed`
 
 ## Run v2 (Windows)
 

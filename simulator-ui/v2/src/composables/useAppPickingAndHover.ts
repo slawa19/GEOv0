@@ -64,6 +64,8 @@ export function useAppPickingAndHover(opts: {
     pickEdgeAt: picking.pickEdgeAt,
     getLinkByKey: opts.getLinkByKey,
     formatEdgeAmountText: edgeTooltip.formatEdgeAmountText,
+    // 043 S1: the same unit the amount text is written in, captured with the figures.
+    getEquivalent: () => opts.getUnit() || null,
     clientToScreen: opts.clientToScreen,
     screenToWorld: opts.screenToWorld,
     worldToScreen: opts.worldToScreen,

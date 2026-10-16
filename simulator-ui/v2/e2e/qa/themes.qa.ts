@@ -14,7 +14,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { boot, loopCounters, ringSnapshot, waitLoopAsleep } from './stand.js'
+import { boot, loopCounters, openDetails, ringSnapshot, waitLoopAsleep } from './stand.js'
 
 const KEY = 'geo.uiTheme'
 const root = (page: Page) => page.locator('.root')
@@ -39,6 +39,7 @@ test('039 B3: the first visit shows saas and writes nothing; the switcher offers
   expect(await themeParam(page), 'nor into the URL').toBeNull()
   // Counter-check of the reader: the stand's own keys are in this same storage.
   expect(await stored(page, 'geo.sim.v2.apiBase')).toBe('/api/v1')
+  await openDetails(page) // 043 S1: the theme switcher is behind "Подробнее"
   const offered = await switcher(page).locator('option').evaluateAll((els) => els.map((o) => (o as HTMLOptionElement).value))
   expect(offered).toEqual(['saas', 'hud'])
 })
@@ -85,6 +86,7 @@ test('039 B3: ?theme=hud beats a stored saas; back/forward follow the URL, then 
   await expect.poll(swatch, { message: 'the legend reads the palette resolved again after the popstate switch' }).toBe('rgb(0, 255, 0)')
   expect(await stored(page), 'back/forward write nothing').toBe('saas')
 
+  await openDetails(page) // 043 S1: the theme switcher is behind "Подробнее"
   await switcher(page).selectOption('hud')
   await expect(root(page)).toHaveAttribute('data-theme', 'hud')
   expect([await stored(page), await themeParam(page)], 'a switch to hud: stored and in the URL').toEqual(['hud', 'hud'])

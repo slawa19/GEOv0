@@ -9,14 +9,14 @@
 - состояния (suspended/left/deleted),
 - поведение при фокусе/выборе/событиях (tx/clearing).
 
-Ключевое правило (как в Admin UI): **клиент не вычисляет семантику визуализации** — визуальные решения приходят готовыми как `viz_*` (см. источник правды: [docs/ru/simulator/frontend/docs/api.md](../api.md)).
+Ключевое правило (как в Admin UI): **клиент не вычисляет семантику визуализации** — визуальные решения приходят готовыми как `viz_*` (см. источник правды: [docs/ru/simulator/frontend/docs/api.md](../../../../../simulator/frontend/docs/api.md)).
 
 Этот документ описывает подготовку и разработку **demo-fast-mock v2**.
 - Код демки: `simulator-ui/v2/`
 - Legacy прототип (не трогаем, только как историческая справка): `simulator-ui/v1/`
 
 Визуальные референсы (узлы/эффекты/сцены):
-- `docs/ru/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
+- `docs/ru/archive/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
 
 ---
 
@@ -88,7 +88,7 @@
    **Статус:** ✅ DONE (2026-01-22)
 
 2) **Контракт: runtime-валидация snapshot/events**
-   - Проверяем соответствие структуре SoT: [docs/ru/simulator/frontend/docs/api.md](../api.md).
+   - Проверяем соответствие структуре SoT: [docs/ru/simulator/frontend/docs/api.md](../../../../../simulator/frontend/docs/api.md).
    - Приемка:
      - любой `snapshot.json` и `events/*.json` из набора демо проходят валидатор;
      - dangling edges (source/target без node) приводят к ошибке.
@@ -229,7 +229,7 @@ Guardrail: `validate-fixtures` держит allow-list `seed_id` (и ожида�
 **Важно:** направление trustline: `from → to` = creditor → debtor (risk limit), не наоборот.
 
 ### 2.2 Что именно кладём в демо
-Демо потребляет **готовые snapshot JSON**, соответствующие контракту [docs/ru/simulator/frontend/docs/api.md](../api.md):
+Демо потребляет **готовые snapshot JSON**, соответствующие контракту [docs/ru/simulator/frontend/docs/api.md](../../../../../simulator/frontend/docs/api.md):
 - `GraphSnapshot` (nodes/links, `viz_*` ключи)
 - события (плейлист) для `tx.updated` / `clearing.plan` / `clearing.done`
 
@@ -333,7 +333,7 @@ Guardrail: `validate-fixtures` держит allow-list `seed_id` (и ожида�
 Нужны 4–6 «сцен» (как презентационные пресеты), переключаемые из UI.
 
 Связанные screen-prototypes (референсы к ожидаемому виду):
-- `docs/ru/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
+- `docs/ru/archive/simulator/frontend/screen-prototypes/screenshots.md` (PROMPT A–F)
 
 ---
 
@@ -458,7 +458,7 @@ Guardrail: `validate-fixtures` держит allow-list `seed_id` (и ожида�
 
 ### 6.2 Типографика и текстовые роли
 Для всего текста в демо (панель/карточки/подсказки) использовать принципы:
-- [docs/ru/admin-ui/typography.md](../../../../admin-ui/typography.md)
+- [docs/ru/admin-ui/typography.md](../../../../../admin-ui/typography.md)
 
 (Да, демо не на Element Plus, но роли/масштаб/иерархия должны совпадать.)
 

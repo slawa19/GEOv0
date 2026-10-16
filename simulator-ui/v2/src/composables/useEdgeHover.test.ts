@@ -87,3 +87,31 @@ describe('useEdgeHover', () => {
     expect(hoveredEdge.key).toBe('keep')
   })
 })
+
+describe('useEdgeHover - 043 S1 review finding 1', () => {
+  it('captures the equivalent of the figures with them, from the scene the link was read from', () => {
+    const hoveredEdge = makeHoveredEdge()
+    let sceneEquivalent = 'UAH'
+    const seg: EdgeSeg = { key: 'A→B', fromId: 'A', toId: 'B', ax: 0, ay: 0, bx: 10, by: 0 }
+    const h = useEdgeHover({
+      hoveredEdge,
+      clearHoveredEdge: () => { hoveredEdge.key = null },
+      isWebDriver: () => false,
+      getSelectedNodeId: () => 'A',
+      hasSelectedIncidentEdges: () => true,
+      pickNodeAt: () => null,
+      pickEdgeAt: () => seg,
+      getLinkByKey: () => ({ source: 'A', target: 'B', used: '1', trust_limit: '2', available: '1' }),
+      formatEdgeAmountText: () => 'amt',
+      getEquivalent: () => sceneEquivalent,
+      clientToScreen: (x, y) => ({ x, y }),
+      screenToWorld: (x, y) => ({ x, y }),
+      worldToScreen: (x, y) => ({ x, y }),
+    })
+    h.onPointerMove({ clientX: 5, clientY: 6 } as PointerEvent, { panActive: false })
+    expect(hoveredEdge.equivalent).toBe('UAH')
+    // The scene changes while the pointer stays still: the captured equivalent does not follow it.
+    sceneEquivalent = 'EUR'
+    expect(hoveredEdge.equivalent).toBe('UAH')
+  })
+})

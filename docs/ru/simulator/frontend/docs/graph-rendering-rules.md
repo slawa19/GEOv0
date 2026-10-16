@@ -48,7 +48,7 @@
 - Прозрачность: `viz_alpha_key` → `alpha`.
 - Цвет по умолчанию — нейтральный (slate).
 
-Таблица ключей: [archive/GEO-visual-demo-fast-mock.md](archive/GEO-visual-demo-fast-mock.md).
+Таблица ключей: [archive/GEO-visual-demo-fast-mock.md](../../../archive/simulator/frontend/docs/archive/GEO-visual-demo-fast-mock.md).
 
 ### 3.2 LOD
 

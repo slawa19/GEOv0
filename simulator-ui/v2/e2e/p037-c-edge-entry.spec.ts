@@ -18,12 +18,16 @@ import { expect, test, type Page } from '@playwright/test'
 import { measure, problems } from './helpers/p037Fit.js'
 import { mockApp, ready } from './helpers/p037Mock.js'
 
-const VIEWPORTS = [{ w: 390, h: 844 }, { w: 375, h: 667 }, { w: 360, h: 640 }, { w: 844, h: 390 }]
+// 2026-10-16 (043 S1): the phone sizes 390x844, 375x667, 360x640 and 844x390 are dropped - the owner's word 2026-10-10:
+// the simulator is a desktop browser, not a phone; the layout is not fitted to phones. The desktop size stays.
+const VIEWPORTS = [{ w: 1366, h: 768 }]
 const ENTRIES = 4
 
 async function viaLine(page: Page) {
   await page.goto('/?mode=real&ui=interact&e2eReal=1')
   await ready(page, true)
+  // 043 S1: "Inspect graph" is a button of the bottom row, behind "Подробнее".
+  await page.locator('[data-testid="details-toggle"]').tap()
   const nav = page.getByRole('region', { name: 'Graph navigator' })
   await nav.getByText('Inspect graph', { exact: true }).tap()
   await nav.getByRole('button', { name: 'Inspect edge' }).tap()

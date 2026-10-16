@@ -444,6 +444,14 @@ async function installRealMocks(
 
 async function waitReady(page: Page) {
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 20_000 })
+  // 043 S1: the controls this matrix walks (scene, scenario, run lifecycle, navigator) live behind "Подробнее";
+  // it is turned on from the keyboard, like everything else here. Remembered by the browser: a no-op after a reload.
+  const details = page.locator('[data-testid="details-toggle"]')
+  if ((await details.getAttribute('aria-expanded')) !== 'true') {
+    await details.focus()
+    await details.press('Enter')
+  }
+  await expect(details).toHaveAttribute('aria-expanded', 'true')
 }
 
 async function activateButton(page: Page, name: string) {

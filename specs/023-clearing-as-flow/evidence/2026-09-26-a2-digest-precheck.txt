@@ -2,7 +2,7 @@
 # The 20 cells' eligible edges rebuilt in memory from the frozen generator (the same ids and the same
 # _policy_flag / status / perimeter filter as the build and the snapshot read), planned with the planner
 # before the change batch (cddabb6) and after it; both compared with the digests recorded by the v1 run
-# 20260926T052821Z (evidence/2026-09-26-a-acceptance-results.json). No timing was taken.
+# 20260926T052821Z (evidence/2026-09-26-a-acceptance-results.json; с 2026-10-16: git show evidence/041-before:specs/023-clearing-as-flow/evidence/2026-09-26-a-acceptance-results.json). No timing was taken.
 
 h4k planted global before 28a1e4d60d4cbb9e after 28a1e4d60d4cbb9e recorded ['28a1e4d60d4cbb9e'] IDENTICAL
 h4k planted perimeter before 8f9209856dd28aee after 8f9209856dd28aee recorded ['8f9209856dd28aee'] IDENTICAL
