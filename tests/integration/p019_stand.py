@@ -384,25 +384,3 @@ async def set_integrity_hold(factory, equivalent_id: uuid.UUID) -> None:  # noqa
             .values(integrity_hold_result_id=result_id)
         )
         await s.commit()
-
-
-async def backend_waits_on_advisory(factory, pid: int, *, timeout: float = 10.0) -> bool:  # noqa: F811
-    """Backend `pid` is waiting (not granted) on an advisory lock. Observed on its own connection."""
-
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    async with factory() as observer:
-        while True:
-            waiting = await observer.scalar(
-                text(
-                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
-                    "AND NOT granted AND pid = :pid)"
-                ),
-                {"pid": pid},
-            )
-            await observer.rollback()
-            if waiting:
-                return True
-            if loop.time() > deadline:
-                return False
-            await asyncio.sleep(0.02)

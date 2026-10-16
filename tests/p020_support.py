@@ -1,10 +1,8 @@
 """Programme 020, stage 2: the shared stand of the selection characterization. NOT a test module.
 
 One seeding helper with FIXED identities, so an ordered list of cycle identities can be written down in
-a test and compared verbatim, and one expected-failure marker in the 019 shape (`tests/p019_support.py`):
-`xfail(raises=TargetMismatch, strict=True)`. A broken stand raises `AssertionError`, which the marker does
-not accept; a tree that already meets the target XPASSes and `strict=True` turns that into a failure, so
-the target is undelivered (020 closed narrowed 2026-09-26) and superseded by programme 023, which decides whether these assertions are replaced or removed.
+a test and compared verbatim. Its expected-failure marker in the 019 shape (`tests/p019_support.py`) lost
+its last use and was deleted 2026-10-16 (041 `T4104`); the target is undelivered (020 closed narrowed 2026-09-26) and superseded by programme 023, which decides whether these assertions are replaced or removed.
 
 WHAT A "CANONICAL IDENTITY" IS HERE (spec, "Решения" -> selection rule): the sorted tuple of ALL debt UUIDs
 of the cycle, in their canonical lowercase hyphenated spelling. It is the tie key of the owner's rule and
@@ -19,25 +17,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable, Sequence
 
-import pytest
 
 from tests.p019_support import TargetMismatch, require_target  # noqa: F401 - re-exported for 020 tests
 
 _PID_NAMESPACE = uuid.UUID("2d0f2e3a-5a0b-4f7e-9d7c-0200000000a0")
-
-
-def target_xfail_020(what: str):
-    """The 020 marker: an expected `TargetMismatch`, strict; its fate is decided by programme 023 (020 stage 3 superseded)."""
-
-    return pytest.mark.xfail(
-        raises=TargetMismatch,
-        strict=True,
-        reason=(
-            "020 target UNDELIVERED (owner's amount-first rule, 2026-09-25), superseded by programme 023's "
-            "objective (maximum total eligible debt reduction on a snapshot); 023 decides whether these assertions "
-            f"are replaced or removed and records the change there: {what}"
-        ),
-    )
 
 
 def participant_uuid(pid: str) -> uuid.UUID:
