@@ -24,6 +24,8 @@ const ENTRIES = 4
 async function viaLine(page: Page) {
   await page.goto('/?mode=real&ui=interact&e2eReal=1')
   await ready(page, true)
+  // 043 S1: "Inspect graph" is a button of the bottom row, behind "Подробнее".
+  await page.locator('[data-testid="details-toggle"]').tap()
   const nav = page.getByRole('region', { name: 'Graph navigator' })
   await nav.getByText('Inspect graph', { exact: true }).tap()
   await nav.getByRole('button', { name: 'Inspect edge' }).tap()

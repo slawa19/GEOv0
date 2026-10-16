@@ -16,7 +16,7 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 
-import { boot, ringSnapshot, screenNodes } from './stand.js'
+import { boot, openDetails, ringSnapshot, screenNodes } from './stand.js'
 import { AXE_BASELINE, AXE_WHY, KNOWN_FINDINGS } from './surfaceBaseline.js'
 import {
   bootEntry, catalogueKeys, claims, emptyCanvasPoint, EXCLUDED_FROM_MATRIX, freeEdge, freeNode, MATRIX, settled, SURFACE_DOM, THEMES, unmatchedInstances,
@@ -408,6 +408,7 @@ test('matrix [hud] node-card opened from the graph navigator: Escape returns the
   await page.setViewportSize(VIEWPORT_MAIN)
   // Pinned: since 039 B3 the default theme is saas, and the title promises hud (external review 2026-10-16).
   await boot(page, { snapshot: ringSnapshot(), clock: false, query: '&theme=hud' })
+  await openDetails(page) // 043 S1: "Inspect graph" is a button of the bottom row, behind "Подробнее"
   await page.locator('.graph-navigator summary').click()
   const opener = page.locator('.graph-navigator button', { hasText: 'Inspect node' })
   await opener.focus()
@@ -542,6 +543,7 @@ for (const vp of [VIEWPORT_MAIN, { width: 1280, height: 720 }]) {
     }
     const collapsed = await measure()
     await frame(page, info, `hud-cover-collapsed-${vp.width}x${vp.height}`)
+    await openDetails(page) // 043 S1: the navigator is behind "Подробнее"; "collapsed" above is the first view
     await page.locator('.graph-navigator summary').click()
     await expect(page.locator('#graph-navigator-node')).toBeVisible()
     const expanded = await measure()

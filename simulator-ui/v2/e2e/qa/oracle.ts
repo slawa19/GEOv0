@@ -111,7 +111,14 @@ export async function pickRingRoute(page: Page, ring: readonly string[], hops: n
       const chordClear = Math.min(...pts.slice(0, -1).map((p, k) => distToSegment(mid, p, pts[k + 1]!)))
       let crossings = 0
       for (let p = 0; p < hops; p += 1) for (let q = p + 2; q < hops; q += 1) if (segmentsCross(pts[p]!, pts[p + 1]!, pts[q]!, pts[q + 1]!)) crossings += 1
-      const score = Math.min(...shares) * 1000 - crossings * 300 + Math.min(chordClear, 200) + Math.min(...lens) / 10
+      // 043 S1 (2026-10-16): an edge that runs over ANOTHER node of the scene is not judgeable - where the beam crosses
+      // that node's bright disc the page barely changes (`SHOT_DIFF_MIN`), and property 5 reads it as hidden. Until
+      // the HUD shrank, the only such edge of the ring (f>a, over d) lay under the top stack and was never picked.
+      let overNodes = 0
+      for (let k = 0; k < hops; k += 1) {
+        for (const [id, p] of n) if (id !== ids[k] && id !== ids[k + 1] && distToSegment(p, pts[k]!, pts[k + 1]!) < NODE_CLEAR_PX) overNodes += 1
+      }
+      const score = Math.min(...shares) * 1000 - crossings * 300 - overNodes * 500 + Math.min(chordClear, 200) + Math.min(...lens) / 10
       if (!best || score > best.score) best = { score, ids }
     }
   }

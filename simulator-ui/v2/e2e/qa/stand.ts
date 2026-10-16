@@ -761,9 +761,24 @@ export async function pretendGpu(page: Page): Promise<void> {
  * Select the node with the most trust lines by clicking the canvas: points of a 16 px grid that the base canvas owns
  * (not the HUD) are clicked until 28 node labels are mounted - the cap of `useLabelNodes.ts`, reached only by a hub.
  * Needs no dev hook, so it works on a production build too. Returns the number of node labels.
+ *
+ * With the dev hook (2026-10-16, 043 S1) the CENTRES of the nodes are clicked instead of the grid: in Interact a click
+ * on a trust line opens its popup and holds a flow (BACKLOG 037-4), which locks the action bar for the rest of the
+ * test. The grid used to start under the old, taller top bar, so its first rows never reached a line; with the first
+ * view's single row they do. The grid stays the fallback of a production build.
  */
 export async function selectHub(page: Page): Promise<number> {
   const count = () => page.evaluate(() => document.querySelectorAll('.node-label-inner').length)
+  const hooked = await page.evaluate(() => !!(window as unknown as { __geoSim?: { layoutNodes?: unknown[] } }).__geoSim?.layoutNodes?.length)
+  if (hooked) {
+    for (const [, at] of await screenNodes(page)) {
+      const onCanvas = await page.evaluate(({ x, y }) => { const el = document.elementFromPoint(x, y); return el instanceof HTMLCanvasElement && !el.classList.contains('canvas-fx') }, at)
+      if (!onCanvas) continue
+      await page.mouse.click(at.x, at.y)
+      if ((await count()) >= 28) return 28
+    }
+    return count()
+  }
   for (let y = 100; y < 700; y += 16) {
     const xs = await page.evaluate((y) => {
       const out: number[] = []
@@ -802,6 +817,23 @@ export async function syncCssToClock(page: Page): Promise<LabelSample[]> {
     }))
 }
 
+// --- 043 S1: the service controls of the two bars live behind one toggle, "Подробнее". ---
+
+export const DETAILS_TOGGLE = '[data-testid="details-toggle"]'
+
+/**
+ * Turn "Подробнее" on, the way the recipes that need a service control (the scenario selector, Quality, the theme
+ * switcher, the menus, Analytics, "Inspect graph") reach it since 043 S1. A DOM click, not a pointer gesture: several
+ * callers hold the fake clock paused, and Playwright's pointer click waits for animation frames that a paused clock
+ * never fires. What a user's click does is held by `layout.qa.ts`, which clicks with the pointer. Idempotent.
+ */
+export async function openDetails(page: Page): Promise<void> {
+  const toggle = page.locator(DETAILS_TOGGLE)
+  await expect(toggle, '043 S1: the "Подробнее" toggle is on screen').toBeVisible()
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.evaluate((el) => (el as HTMLButtonElement).click())
+  await expect(toggle, '043 S1: "Подробнее" is on').toHaveAttribute('aria-expanded', 'true')
+}
+
 // --- A second scenario next to the stand's own: for a change of scene and for a scene that cannot be loaded. ---
 
 export const OTHER_SCENARIO = 'p038-qa-unloadable'
@@ -814,7 +846,7 @@ export async function bootTwoScenarios(page: Page, fail: SceneFail) {
   await boot(page, {
     snapshot: ringSnapshot(),
     clock: true,
-    ui: 'auto', // the Auto-Run segment: the scenario selector lives there
+    ui: 'auto', // the Auto-Run segment: the scenario selector lives there (behind "Подробнее" since 043 S1, opened below)
     beforeLoad: async (p) => {
       await p.route(/\/simulator\/scenarios$/i, (r) => r.fulfill({
         status: 200, contentType: 'application/json',
@@ -832,6 +864,8 @@ export async function bootTwoScenarios(page: Page, fail: SceneFail) {
       })
     },
   })
+  // 043 S1: the scenario selector is a service control, behind "Подробнее".
+  await openDetails(page)
 }
 
 /** The ring with other participant ids. */

@@ -87,8 +87,17 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   (2 x 25 entries), -2 their `page` tests, -1 `matrix [saas] page` (now in the gate, counted above), +17 the other
  *   viewports (1920x1080, resized 1024x640) of the 17 entries placed by CSS, now in `saas` as well as `hud`.
  *   208 + 29 - 50 - 2 - 1 + 17 = 201. No other test left or changed scope.
+ * - 2026-10-16 (043 S1 - the first view and the "Подробнее" toggle): gate 114 -> 122, full 201 -> 217. Exact accounting,
+ *   gate: +4 a new file, `layout.qa.ts` (reproducer (d): service surfaces absent from the first view and present after
+ *   a pointer click on the toggle; Tab through the first view; the canvas share at 1366x768 in `saas` and `hud`);
+ *   +4 two new entries of the matrix in both themes, `top-bar-interact-details` and `bottom-bar-details` (the bars
+ *   with Details on: the state the service controls now live in). 114 + 4 + 4 = 122. Full: the gate's +8, and under
+ *   `@extended` +4 the gallery of the two entries in both themes and +4 their other viewports (both are placed by CSS).
+ *   201 + 8 + 4 + 4 = 217. No test left or changed scope; seven entries (four menus, `top-bar-auto-run`,
+ *   `graph-navigator`, `analytics-panel`) now first hold that their surface is NOT rendered on the first view
+ *   (`bootEntry`, `details.hiddenByDefault`) and then turn "Подробнее" on.
  */
-export const EXPECTED = { gate: 114, full: 201 }
+export const EXPECTED = { gate: 122, full: 217 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

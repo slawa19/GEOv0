@@ -24,7 +24,7 @@ import { isAbsolute, join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { boot, fixtureSnapshot100, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
+import { boot, fixtureSnapshot100, openDetails, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
 
 const DIR = process.env.P039_FRAMES_DIR ?? ''
 const PHASE = process.env.P039_FRAMES_PHASE ?? ''
@@ -48,6 +48,7 @@ async function bootQuery(page: Page, snapshot: QaSnapshot, query: string): Promi
 
 /** The switcher, and beside it the list of what it offers with the chosen one marked: a native popup is not in a screenshot. */
 async function switcherSheet(page: Page, path: string): Promise<void> {
+  await openDetails(page) // 043 S1: the switcher is behind "Подробнее"
   const select = page.getByRole('combobox', { name: 'UI theme' })
   await expect(select, 'the theme switcher is on screen').toBeVisible()
   const options = await select.evaluate((el) => {
