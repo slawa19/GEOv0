@@ -53,8 +53,6 @@ type InstallGeoSimDevHookDeps = {
   /** 038 QA stand: read-only ids of the nodes pinned by the user. */
   getPinnedNodeIds?: () => string[]
   fxState: FxState
-  runTxOnce: () => Promise<void> | void
-  runClearingOnce: () => Promise<void> | void
   showEdgeTooltip?: (edge: GeoSimTooltipInput) => void
   hideEdgeTooltip?: () => void
   openNodeCard?: (o: GeoSimNodeCardInput) => void
@@ -122,8 +120,6 @@ export function installGeoSimDevHook(deps: InstallGeoSimDevHookDeps): (() => voi
       return deps.getPinnedNodeIds?.() ?? []
     },
     fxState: deps.fxState,
-    runTxOnce: deps.runTxOnce,
-    runClearingOnce: deps.runClearingOnce,
     showEdgeTooltip: (edge: GeoSimTooltipInput) => deps.showEdgeTooltip?.(edge),
     hideEdgeTooltip: () => deps.hideEdgeTooltip?.(),
     openNodeCard: (o: GeoSimNodeCardInput) => deps.openNodeCard?.(o),

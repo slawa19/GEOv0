@@ -33,7 +33,6 @@ import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } fr
  import { useUiTheme } from '../composables/useUiTheme'
  import { toLower } from '../utils/stringHelpers'
  import { canonicalEquivalent } from '../config/equivalents'
- import { extractErrorMessage } from '../utils/errorMessage'
  import { useReducedMotionPreference } from '../composables/useReducedMotionPreference'
 
 // TD-1: all localStorage access is delegated to this composable.
@@ -381,7 +380,6 @@ const {
   // dev / diagnostics
   showPerfOverlay,
   perf,
-  fxDebug,
 
   e2e,
 
@@ -660,32 +658,6 @@ const selectedLine = useSelectedTrustlineLine({
 const interactSelectedLink = selectedLine.selectedLink
 const interactSelectedLinkFiguresSource = selectedLine.figuresSource
 const wmEdgeDetailFiguresSource = selectedLine.edgeDetailFiguresSource
-
-function formatDemoActionError(e: unknown): string {
-  const msg = extractErrorMessage(e)
-  // Structured API errors may carry a `bodyText` field with the raw response body.
-  const hasBodyText = e !== null && typeof e === 'object' && 'bodyText' in e
-  const bodyText = hasBodyText ? String((e as Record<string, unknown>).bodyText ?? '').trim() : ''
-  return bodyText ? `${msg}\n${bodyText}` : msg
-}
-
-const demoRunTxOnce = async () => {
-  return runDemoFxOnce(() => fxDebug.runTxOnce())
-}
-
-const demoRunClearingOnce = async () => {
-  return runDemoFxOnce(() => fxDebug.runClearingOnce())
-}
-
-async function runDemoFxOnce(action: () => Promise<void>): Promise<void> {
-  if (fxDebug.busy.value) return
-  real.lastError = ''
-  try {
-    await action()
-  } catch (e: unknown) {
-    real.lastError = formatDemoActionError(e)
-  }
-}
 
 function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
   const u = new URL(window.location.href)
@@ -1496,10 +1468,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :analytics-panel-open="analyticsPanelOpen"
       :toggle-analytics-panel="toggleAnalyticsPanel"
       :details-open="detailsOpen"
-      :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"
-      :fx-busy="fxDebug.busy.value"
-      :run-tx-once="isDemoUi ? demoRunTxOnce : fxDebug.runTxOnce"
-      :run-clearing-once="isDemoUi ? demoRunClearingOnce : fxDebug.runClearingOnce"
     >
       <!-- 039 slice B: a row INSIDE the bottom bar, above its controls; the bar's measured height includes it. -->
       <template #legend>

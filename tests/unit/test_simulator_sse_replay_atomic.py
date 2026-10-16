@@ -12,7 +12,7 @@ from app.core.simulator.sse_broadcast import SseBroadcast, SseReplayUnavailable
 def _make_sse(*, queue_max: int = 8, buffer_max: int = 16):
     lock = threading.RLock()
     run = RunRecord(
-        run_id="run_atomic", scenario_id="scenario", mode="fixtures", state="running"
+        run_id="run_atomic", scenario_id="scenario", mode="real", state="running"
     )
     runs = {run.run_id: run}
     sse = SseBroadcast(

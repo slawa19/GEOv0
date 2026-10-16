@@ -6,9 +6,6 @@ import threading
 import time
 from typing import Any, Optional
 from pathlib import Path
-import secrets
-import hashlib
-import random
 
 from app.schemas.simulator import (
     BottlenecksResponse,
@@ -20,7 +17,6 @@ from app.schemas.simulator import (
     SimulatorRunStatusEvent,
 )
 from app.core.simulator.artifacts import ArtifactsManager
-from app.core.simulator.fixtures_runner import FixturesRunner
 from app.core.simulator.metrics_bottlenecks import MetricsBottlenecks
 from app.core.simulator.models import RunRecord, ScenarioRecord, _Subscription
 from app.core.simulator.real_runner_impl import RealRunnerImpl
@@ -43,7 +39,7 @@ from app.core.simulator.runtime_utils import (
 from app.core.simulator.scenario_registry import ScenarioRegistry
 from app.core.simulator.snapshot_builder import SnapshotBuilder, scenario_to_snapshot
 import app.core.simulator.storage as simulator_storage
-from app.core.simulator.sse_broadcast import SseBroadcast, SseEventEmitter
+from app.core.simulator.sse_broadcast import SseBroadcast
 from app.utils.exceptions import NotFoundException
 from app.utils.exceptions import ConflictException
 
@@ -119,7 +115,6 @@ class _SimulatorRuntimeBase:
         self._metrics_bottlenecks = MetricsBottlenecks(
             lock=self._lock,
             runs=self._runs,
-            scenarios=self._scenarios,
             db_enabled=simulator_storage.db_enabled,
             logger=logger,
         )
@@ -189,13 +184,6 @@ class _SimulatorRuntimeBase:
                 self._active_run_id_by_owner.get(owner_id) if owner_id else None
             ),
             get_max_active_runs_per_owner=lambda: int(self._max_active_runs_per_owner),
-        )
-
-        self._fixtures_runner = FixturesRunner(
-            lock=self._lock,
-            get_run=self.get_run,
-            sse=self._sse,
-            utc_now=_utc_now,
         )
 
         self._real_runner = RealRunnerImpl(
@@ -355,16 +343,13 @@ class _SimulatorRuntimeBase:
         mode: RunMode,
         session=None,
     ) -> SimulatorGraphSnapshot:
-        """Build a graph preview without starting a run.
+        """Build a graph preview without starting a run, with best-effort DB enrichment (balances/debts -> viz_*).
 
-        - mode=fixtures: topology-only preview (no DB enrichment)
-        - mode=real: best-effort DB enrichment (balances/debts -> viz_*)
+        `mode` is always `real` (042: the topology-only `fixtures` preview is gone; the API refuses it with 422).
         """
 
         rec = self.get_scenario(scenario_id)
         snap = scenario_to_snapshot(rec.raw, equivalent=equivalent, utc_now=_utc_now)
-        if mode != "real":
-            return snap
         return await self._snapshot_builder.enrich_snapshot_from_db_if_enabled(
             snap, equivalent=equivalent, session=session
         )
@@ -480,216 +465,6 @@ class _SimulatorRuntimeBase:
             raise RuntimeError("Cannot publish status for missing simulator run")
         return str(payload["event_id"])
 
-    def _ensure_run_accepts_actions(self, run_id: str) -> RunRecord:
-        run = self.get_run(run_id)
-        state = str(run.state or "")
-        if state in {"stopped", "error"}:
-            raise ConflictException(
-                "Run does not accept actions in terminal state",
-                details={"run_id": run_id, "state": state},
-            )
-        return run
-
-    def emit_debug_tx_once(
-        self,
-        *,
-        run_id: str,
-        equivalent: str,
-        from_: str | None,
-        to: str | None,
-        amount: str | None,
-        ttl_ms: int | None,
-        intensity_key: str | None,
-        seed: str | int | None,
-    ) -> str:
-        run = self._ensure_run_accepts_actions(run_id)
-
-        eq = str(equivalent or "").strip().upper()
-        if not eq:
-            raise ConflictException("equivalent is required")
-
-        edges = None
-        with self._lock:
-            edges = (run._edges_by_equivalent or {}).get(eq)
-        edges = list(edges or [])
-
-        # Deterministic-ish selection for debug.
-        seed_raw = f"{run_id}:{eq}:{seed}".encode("utf-8")
-        seed_int = int.from_bytes(hashlib.sha256(seed_raw).digest()[:4], "big")
-        rng = random.Random(seed_int)
-
-        src = str(from_ or "").strip()
-        dst = str(to or "").strip()
-
-        if (not src or not dst) and edges:
-            # Pick any 1-hop edge.
-            a, b = rng.choice(edges)
-            src = src or str(a)
-            dst = dst or str(b)
-
-        if not src or not dst:
-            raise ConflictException(
-                "Cannot choose from/to for tx-once (no edges available)",
-                details={"run_id": run_id, "equivalent": eq},
-            )
-
-        if src == dst:
-            raise ConflictException(
-                "from and to must differ", details={"from": src, "to": dst}
-            )
-
-        amt = str(amount or "").strip() or "1.00"
-        ttl = int(ttl_ms) if ttl_ms is not None else 1200
-        ttl = max(50, min(ttl, 30_000))
-        ik = str(intensity_key or "").strip() or "mid"
-
-        emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
-        event_id = emitter.emit_tx_updated(
-            run_id=run_id,
-            run=run,
-            equivalent=eq,
-            from_pid=src,
-            to_pid=dst,
-            amount=amt,
-            amount_flyout=True,
-            ttl_ms=ttl,
-            intensity_key=ik,
-            edges=[{"from": src, "to": dst}],
-            node_badges=None,
-        )
-        if event_id is None:
-            raise RuntimeError("Failed to emit debug tx.updated event")
-
-        with self._lock:
-            run.last_event_type = "tx.updated"
-        return str(event_id)
-
-    def emit_debug_clearing_once(
-        self,
-        *,
-        run_id: str,
-        equivalent: str,
-        cycle_edges: list[dict[str, str]] | None,
-        cleared_amount: str | None,
-        seed: str | int | None,
-    ) -> tuple[str, str, str]:
-        """Emits (plan_id, done_event_id, equivalent)."""
-        run = self._ensure_run_accepts_actions(run_id)
-
-        eq = str(equivalent or "").strip().upper()
-        if not eq:
-            raise ConflictException("equivalent is required")
-
-        # Determine cycle edges: either user-provided, or best-effort find a small cycle.
-        picked: list[tuple[str, str]] = []
-
-        if cycle_edges:
-            for e in cycle_edges:
-                if not isinstance(e, dict):
-                    continue
-                a = str(e.get("from") or "").strip()
-                b = str(e.get("to") or "").strip()
-                if a and b and a != b:
-                    picked.append((a, b))
-
-        if not picked:
-            with self._lock:
-                edges = list(((run._edges_by_equivalent or {}).get(eq) or []))
-
-            if not edges:
-                raise ConflictException(
-                    "Cannot choose clearing cycle (no edges available)",
-                    details={"run_id": run_id, "equivalent": eq},
-                )
-
-            seed_raw = f"{run_id}:{eq}:clearing:{seed}".encode("utf-8")
-            seed_int = int.from_bytes(hashlib.sha256(seed_raw).digest()[:4], "big")
-            rng = random.Random(seed_int)
-            rng.shuffle(edges)
-
-            # Build adjacency and attempt to find a short directed cycle (3..6).
-            adj: dict[str, list[str]] = {}
-            for a, b in edges:
-                adj.setdefault(str(a), []).append(str(b))
-
-            nodes = list(adj.keys())
-            rng.shuffle(nodes)
-            max_depth = 6
-
-            def _find_cycle(start: str) -> list[tuple[str, str]] | None:
-                stack: list[str] = [start]
-                seen: set[str] = {start}
-
-                def dfs(cur: str, depth: int) -> list[str] | None:
-                    if depth > max_depth:
-                        return None
-                    for nxt in adj.get(cur, []):
-                        if nxt == start and depth >= 3:
-                            return stack + [start]
-                        if nxt in seen:
-                            continue
-                        seen.add(nxt)
-                        stack.append(nxt)
-                        res = dfs(nxt, depth + 1)
-                        if res is not None:
-                            return res
-                        stack.pop()
-                        seen.remove(nxt)
-                    return None
-
-                path = dfs(start, 1)
-                if not path:
-                    return None
-                out: list[tuple[str, str]] = []
-                for i in range(len(path) - 1):
-                    out.append((path[i], path[i + 1]))
-                return out
-
-            for start in nodes[:50]:
-                cyc = _find_cycle(str(start))
-                if cyc:
-                    picked = cyc
-                    break
-
-        if not picked:
-            # Fallback: 2-edge "cycle-like" viz (won't be a true cycle).
-            with self._lock:
-                edges = list(((run._edges_by_equivalent or {}).get(eq) or []))
-            if len(edges) >= 2:
-                picked = [
-                    (str(edges[0][0]), str(edges[0][1])),
-                    (str(edges[1][0]), str(edges[1][1])),
-                ]
-            else:
-                a, b = str(edges[0][0]), str(edges[0][1])
-                picked = [(a, b)]
-
-        plan_id = f"plan_dbg_{secrets.token_hex(6)}"
-        emitter = SseEventEmitter(sse=self._sse, utc_now=_utc_now, logger=logger)
-
-        done_amt = str(cleared_amount or "").strip() or "10.00"
-
-        # The response promises the exact emitted ID. Emit synchronously so the
-        # ID is allocated at publication time instead of reserving a lower ID
-        # that can be overtaken by unrelated producers.
-        with self._lock:
-            run.last_event_type = "clearing.done"
-        done_event_id = emitter.emit_clearing_done(
-            run_id=run_id,
-            run=run,
-            equivalent=eq,
-            plan_id=plan_id,
-            cleared_cycles=1,
-            cleared_amount=done_amt,
-            cycle_edges=[{"from": a, "to": b} for a, b in picked] if picked else None,
-            node_patch=None,
-            edge_patch=None,
-        )
-        if done_event_id is None:
-            raise RuntimeError("Failed to emit debug clearing.done event")
-
-        return plan_id, str(done_event_id), eq
-
     async def pause(self, run_id: str) -> RunStatus:
         return await self._run_lifecycle.pause(run_id)
 
@@ -736,33 +511,10 @@ class _SimulatorRuntimeBase:
     async def subscribe(
         self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
     ) -> _Subscription:
-        run = self.get_run(run_id)
-        sub = await self._sse.subscribe(
+        self.get_run(run_id)
+        return await self._sse.subscribe(
             run_id, equivalent=equivalent, after_event_id=after_event_id
         )
-
-        # For fixtures-mode UX/tests: emit one domain event immediately after subscribe.
-        if after_event_id is None and run.state == "running" and run.mode == "fixtures":
-            evt = self._fixtures_runner.maybe_make_tx_updated(
-                run_id=run_id, equivalent=equivalent
-            )
-            if evt is not None:
-                SseEventEmitter(
-                    sse=self._sse, utc_now=_utc_now, logger=logger
-                ).emit_tx_updated(
-                    run_id=run_id,
-                    run=run,
-                    equivalent=equivalent,
-                    from_pid=str(evt.get("from") or "") or None,
-                    to_pid=str(evt.get("to") or "") or None,
-                    amount=str(evt.get("amount") or "") or None,
-                    amount_flyout=bool(evt.get("amount_flyout")),
-                    ttl_ms=int(evt.get("ttl_ms") or 1200),
-                    intensity_key=str(evt.get("intensity_key") or "") or None,
-                    edges=list(evt.get("edges") or []),
-                    node_badges=(list(evt.get("node_badges") or []) or None),
-                )
-        return sub
 
     async def subscribe_with_status(
         self, run_id: str, *, equivalent: str, after_event_id: Optional[str] = None
@@ -784,29 +536,6 @@ class _SimulatorRuntimeBase:
         if payload is None:  # pragma: no cover - defensive invariant
             raise RuntimeError("SSE status bootstrap was not created")
 
-        # Preserve the fixtures-mode first-frame hint through the same ordered
-        # publish path as every other runtime event.
-        run = self.get_run(run_id)
-        if after_event_id is None and run.state == "running" and run.mode == "fixtures":
-            evt = self._fixtures_runner.maybe_make_tx_updated(
-                run_id=run_id, equivalent=equivalent
-            )
-            if evt is not None:
-                SseEventEmitter(
-                    sse=self._sse, utc_now=_utc_now, logger=logger
-                ).emit_tx_updated(
-                    run_id=run_id,
-                    run=run,
-                    equivalent=equivalent,
-                    from_pid=str(evt.get("from") or "") or None,
-                    to_pid=str(evt.get("to") or "") or None,
-                    amount=str(evt.get("amount") or "") or None,
-                    amount_flyout=bool(evt.get("amount_flyout")),
-                    ttl_ms=int(evt.get("ttl_ms") or 1200),
-                    intensity_key=str(evt.get("intensity_key") or "") or None,
-                    edges=list(evt.get("edges") or []),
-                    node_badges=(list(evt.get("node_badges") or []) or None),
-                )
         return sub, str(payload["event_id"])
 
     def finish_replay_bootstrap(
@@ -958,17 +687,9 @@ class _SimulatorRuntimeBase:
                     run.tick_index += 1
                     run.sim_time_ms = run.tick_index * int(self._tick_ms_base)
 
-                    # Real-mode sets queue_depth during tick work; fixtures-mode has no queue.
-                    if run.mode == "fixtures":
-                        run.queue_depth = 0
-
-                    # Fixtures-mode event generation (best-effort).
-                    if run.mode == "fixtures":
-                        self._fixtures_runner.tick_fixtures_events(run_id)
-
-                # Real-mode runner work is intentionally outside the lock
-                # (it can touch the DB and may take time).
-                if run.mode == "real" and run.state == "running":
+                # The runner's work is intentionally outside the lock (it can touch the DB and may take time).
+                # Every run is real-mode (042 S1).
+                if run.state == "running":
                     _t0 = time.monotonic()
                     await self._real_runner.tick_real_mode(run_id)
                     _tick_elapsed_s = time.monotonic() - _t0

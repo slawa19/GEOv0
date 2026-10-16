@@ -1,7 +1,6 @@
 import { ApiError, httpJson, httpJsonMeta, httpUrl, LONG_REQUEST_TIMEOUT_MS, type HttpConfig, type HttpRequestInit } from './http'
 import {
   decodeBottlenecksResponse,
-  decodeClearingOnceResponse,
   decodeGraphSnapshotResponse,
   decodeMetricsResponse,
   decodeRunStatusResponse,
@@ -15,14 +14,11 @@ import {
   decodeSimulatorActionTrustlineUpdateResponse,
   decodeSimulatorActionTrustlinesListResponse,
   decodeSimulatorPaymentTargetsResponse,
-  decodeTxOnceResponse,
 } from './simulatorContracts'
 import type {
   ActiveRunResponse,
   ArtifactIndexResponse,
   BottlenecksResponse,
-  ClearingOnceRequest,
-  ClearingOnceResponse,
   MetricsResponse,
   SimulatorActionClearingRealRequest,
   SimulatorActionClearingRealResponse,
@@ -43,8 +39,6 @@ import type {
   ScenarioSummary,
   ScenariosListResponse,
   SimulatorGraphSnapshot,
-  TxOnceRequest,
-  TxOnceResponse,
 } from './simulatorTypes'
 
 async function simulatorContractJson<T>(
@@ -80,7 +74,7 @@ export function getScenarioPreview(
   scenarioId: string,
   equivalent: string,
 ): Promise<SimulatorGraphSnapshot> {
-  // `real` is the only run mode a client asks for (042 S2); the server still defaults/accepts `fixtures` until stage 1.
+  // `real` is the only run mode (042): the client asks for it (S2) and the server accepts nothing else (S1, 422 otherwise).
   const q = new URLSearchParams({ equivalent, mode: 'real' }).toString()
   return simulatorContractJson(
     cfg,
@@ -206,36 +200,6 @@ export function listArtifacts(cfg: HttpConfig, runId: string): Promise<ArtifactI
 export function artifactDownloadUrl(cfg: HttpConfig, runId: string, name: string): string {
   // Note: browser downloads will include Authorization only if same-origin + cookies; we use proxy + same-origin.
   return httpUrl(cfg, `/simulator/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(name)}`)
-}
-
-export function actionTxOnce(cfg: HttpConfig, runId: string, req: TxOnceRequest): Promise<TxOnceResponse> {
-  return simulatorContractJson(
-    cfg,
-    `/simulator/runs/${encodeURIComponent(runId)}/actions/tx-once`,
-    decodeTxOnceResponse,
-    {
-      method: 'POST',
-      body: JSON.stringify(req),
-      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
-    },
-  )
-}
-
-export function actionClearingOnce(
-  cfg: HttpConfig,
-  runId: string,
-  req: ClearingOnceRequest,
-): Promise<ClearingOnceResponse> {
-  return simulatorContractJson(
-    cfg,
-    `/simulator/runs/${encodeURIComponent(runId)}/actions/clearing-once`,
-    decodeClearingOnceResponse,
-    {
-      method: 'POST',
-      body: JSON.stringify(req),
-      timeoutMs: LONG_REQUEST_TIMEOUT_MS,
-    },
-  )
 }
 
 // ============================

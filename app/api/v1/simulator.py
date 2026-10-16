@@ -9,9 +9,8 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Callable, Optional
-from pydantic import BaseModel, Field
-from pydantic.config import ConfigDict
+from typing import Annotated, Any, AsyncIterator, Callable, Optional
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from starlette.responses import FileResponse, Response, StreamingResponse, JSONResponse
@@ -458,11 +457,6 @@ _ACTION_FORBIDDEN_RESPONSE: dict[str, Any] = {
 
 def _actions_enabled() -> bool:
     return settings.SIMULATOR_ACTIONS_ENABLE
-
-
-def _require_actions_enabled() -> None:
-    if not _actions_enabled():
-        raise ForbiddenException("Simulator actions are disabled (set SIMULATOR_ACTIONS_ENABLE=1)")
 
 
 def _action_error(
@@ -1058,42 +1052,6 @@ def _mutate_runtime_trustline_topology_best_effort(
             str(to_pid),
             exc_info=True,
         )
-
-
-class TxOnceRequestBody(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    equivalent: str
-    from_: Optional[str] = Field(default=None, alias="from")
-    to: Optional[str] = None
-    amount: Optional[str] = None
-    ttl_ms: Optional[int] = None
-    intensity_key: Optional[str] = None
-    seed: Optional[Any] = None
-    client_action_id: Optional[str] = None
-
-
-class TxOnceResponseBody(BaseModel):
-    ok: bool = True
-    emitted_event_id: str
-    client_action_id: Optional[str] = None
-
-
-class ClearingOnceRequestBody(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    equivalent: str
-    cycle_edges: Optional[list[dict[str, str]]] = None
-    cleared_amount: Optional[str] = None
-    seed: Optional[Any] = None
-    client_action_id: Optional[str] = None
-
-
-class ClearingOnceResponseBody(BaseModel):
-    ok: bool = True
-    plan_id: str
-    done_event_id: str
-    client_action_id: Optional[str] = None
 
 
 # ----------------------------------
@@ -2843,7 +2801,15 @@ async def get_scenario_summary(
 async def scenario_graph_preview(
     scenario_id: str,
     equivalent: str = Query(...),
-    mode: RunMode = Query("fixtures"),
+    # The Query sits INSIDE `Annotated`: as a default value FastAPI 0.109 strips `RunMode`'s own JSON schema and emits
+    # pydantic's `const`, which OpenAPI 3.0.3 does not have.
+    mode: Annotated[
+        RunMode,
+        Query(
+            description="Only `real` (042): the preview enriched from the database. Before 042 the default was "
+            "`fixtures`, a topology-only picture; an explicit `fixtures` is now refused (422).",
+        ),
+    ] = "real",
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
@@ -3004,71 +2970,6 @@ async def run_events_stream(
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-@router.post(
-    "/runs/{run_id}/actions/tx-once",
-    response_model=TxOnceResponseBody,
-    responses={
-        400: {"model": SimulatorActionError},
-        403: {"model": ErrorEnvelope},
-        409: {"model": ErrorEnvelope},
-        422: {
-            "model": ErrorEnvelope,
-            "description": "Invalid simulator identity transport",
-        },
-    },
-)
-async def action_tx_once(
-    run_id: str,
-    body: TxOnceRequestBody,
-    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
-):
-    _require_actions_enabled()
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
-    emitted = runtime.emit_debug_tx_once(
-        run_id=run_id,
-        equivalent=body.equivalent,
-        from_=body.from_,
-        to=body.to,
-        amount=body.amount,
-        ttl_ms=body.ttl_ms,
-        intensity_key=body.intensity_key,
-        seed=body.seed,
-    )
-    return TxOnceResponseBody(emitted_event_id=emitted, client_action_id=body.client_action_id)
-
-@router.post(
-    "/runs/{run_id}/actions/clearing-once",
-    response_model=ClearingOnceResponseBody,
-    responses={
-        400: {"model": SimulatorActionError},
-        403: {"model": ErrorEnvelope},
-        409: {"model": ErrorEnvelope},
-        422: {
-            "model": ErrorEnvelope,
-            "description": "Invalid simulator identity transport",
-        },
-    },
-)
-async def action_clearing_once(
-    run_id: str,
-    body: ClearingOnceRequestBody,
-    actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
-):
-    _require_actions_enabled()
-    _check_run_access(runtime.get_run(run_id), actor, run_id)
-    plan_id, done_event_id, _eq = runtime.emit_debug_clearing_once(
-        run_id=run_id,
-        equivalent=body.equivalent,
-        cycle_edges=body.cycle_edges,
-        cleared_amount=body.cleared_amount,
-        seed=body.seed,
-    )
-    return ClearingOnceResponseBody(
-        plan_id=plan_id,
-        done_event_id=done_event_id,
-        client_action_id=body.client_action_id,
     )
 
 @router.get("/runs/{run_id}/graph/snapshot", response_model=SimulatorGraphSnapshot)

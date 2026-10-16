@@ -4,12 +4,13 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core.simulator.runtime import runtime
+from tests.p042_support import no_real_tick  # noqa: F401 - a fixture: the run's real tick does nothing
 
 
 @pytest.mark.asyncio
-async def test_subscribe_replays_events_after_last_event_id() -> None:
+async def test_subscribe_replays_events_after_last_event_id(no_real_tick) -> None:  # noqa: F811
     scenario_id = runtime.list_scenarios()[0].scenario_id
-    run_id = await runtime.create_run(scenario_id=scenario_id, mode="fixtures", intensity_percent=50)
+    run_id = await runtime.create_run(scenario_id=scenario_id, mode="real", intensity_percent=50)
     try:
         run = runtime.get_run(run_id)
 

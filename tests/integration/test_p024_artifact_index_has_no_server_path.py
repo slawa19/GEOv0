@@ -9,39 +9,24 @@ it); its value is now the directory relative to the simulator's local state root
 
 from __future__ import annotations
 
-import asyncio
 import re
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
 
-from app.core.simulator.runtime import runtime
 from app.core.simulator.runtime_utils import local_state_dir, repo_root
+from tests.conftest import MODE_B
+from tests.p042_support import no_real_tick, pay_once, start_real_run  # noqa: F401 - `no_real_tick` is a fixture
+
+pytestmark = MODE_B
 
 
-async def _stopped_fixtures_run(client: AsyncClient, auth_headers) -> str:
-    response = await client.post(
-        "/api/v1/simulator/runs",
-        headers=auth_headers,
-        json={"scenario_id": "minimal", "mode": "fixtures", "intensity_percent": 90},
-    )
-    assert response.status_code == 200, response.text
-    run_id = response.json()["run_id"]
+async def _stopped_run_with_a_payment(client: AsyncClient, auth_headers, monkeypatch) -> str:
+    """A stopped real-mode run with one real payment (042 S1: it was a `fixtures` run and that mode's first event)."""
 
-    observer = await runtime.subscribe(run_id, equivalent="UAH")
-    try:
-
-        async def _wait_for_domain_event() -> None:
-            while True:
-                event = await observer.queue.get()
-                if event.get("type") != "run_status":
-                    return
-
-        await asyncio.wait_for(_wait_for_domain_event(), timeout=5.0)
-    finally:
-        await runtime.unsubscribe(run_id, observer)
-
+    run_id = await start_real_run(client, auth_headers)
+    await pay_once(client, auth_headers, run_id, monkeypatch)
     stop = await client.post(f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers)
     assert stop.status_code == 200, stop.text
     return run_id
@@ -49,9 +34,9 @@ async def _stopped_fixtures_run(client: AsyncClient, auth_headers) -> str:
 
 @pytest.mark.asyncio
 async def test_artifact_index_path_is_relative_to_the_simulator_state_root(
-    client: AsyncClient, auth_headers
+    client: AsyncClient, auth_headers, monkeypatch, no_real_tick  # noqa: F811
 ) -> None:
-    run_id = await _stopped_fixtures_run(client, auth_headers)
+    run_id = await _stopped_run_with_a_payment(client, auth_headers, monkeypatch)
 
     index = await client.get(f"/api/v1/simulator/runs/{run_id}/artifacts", headers=auth_headers)
     assert index.status_code == 200, index.text

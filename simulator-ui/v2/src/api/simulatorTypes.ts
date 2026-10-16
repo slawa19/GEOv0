@@ -1,9 +1,9 @@
 import type { EdgePatch, GraphSnapshot, NodePatch, TxUpdatedEvent, ClearingDoneEvent } from '../types'
 
 /**
- * The run mode as the SERVER reports it back in a run status. Decoding keeps accepting `fixtures` until the server
- * stops serving it (042 stage 1), so that an older run still decodes; the client never REQUESTS it (042 S2) -
- * `RunCreateRequest.mode` and the preview query are `real` only.
+ * The run mode in a run status. The server no longer serves `fixtures` (042 stage 1, migration 037) and the decoder
+ * refuses it (`simulatorApi.contract.test.ts`); the client never REQUESTS it (042 S2) - `RunCreateRequest.mode` and
+ * the preview query are `real` only. The union is not narrowed here: that is a separate typing change.
  */
 export type SimulatorMode = 'fixtures' | 'real'
 
@@ -90,38 +90,6 @@ export type RunCreateResponse = {
 
 export type ActiveRunResponse = {
   run_id: string | null
-}
-
-export type TxOnceRequest = {
-  equivalent: string
-  from?: string
-  to?: string
-  amount?: string
-  ttl_ms?: number
-  intensity_key?: string
-  seed?: unknown
-  client_action_id?: string
-}
-
-export type TxOnceResponse = {
-  ok: true
-  emitted_event_id: string
-  client_action_id?: string | null
-}
-
-export type ClearingOnceRequest = {
-  equivalent: string
-  cycle_edges?: Array<{ from: string; to: string }>
-  cleared_amount?: string
-  seed?: unknown
-  client_action_id?: string
-}
-
-export type ClearingOnceResponse = {
-  ok: true
-  plan_id: string
-  done_event_id: string
-  client_action_id?: string | null
 }
 
 // ============================

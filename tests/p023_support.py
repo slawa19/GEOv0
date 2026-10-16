@@ -1,9 +1,5 @@
 """Programme 023: shared helpers of the planner's reproducers and correctness tests. NOT a test module.
 
-* `target_xfail_023` - the expected-failure marker in the 019/020 shape (`tests/p019_support.py`):
-  `xfail(raises=TargetMismatch, strict=True)`. A broken stand raises `AssertionError`, which the marker does
-  not accept; a tree that already meets the target XPASSes and `strict=True` turns that into a failure, so
-  the slice that delivers the target must take the marker off.
 * `oracle_max_volume` - the SMALL EXHAUSTIVE ORACLE of Verification plan §5: the maximum of `Σ_e T_e` over
   every integer circulation `0 <= T <= L` of a small graph, found by enumerating every integer vector with
   balance pruning. It shares no code and no idea with the planner (no potentials, no shortest paths, no
@@ -21,7 +17,6 @@ import uuid
 from decimal import Decimal
 from typing import Hashable, Sequence
 
-import pytest
 
 from tests.p019_support import TargetMismatch, require_target  # noqa: F401 - re-exported for 023 tests
 
@@ -116,16 +111,6 @@ def slice_c_surface():
         RenewableLease=distributed_lock.RenewableLease,
         renewable_lease=distributed_lock.renewable_lease,
         **{name: getattr(runner, name) for name in names},
-    )
-
-
-def target_xfail_023(slice_: str, what: str):
-    """The 023 marker: an expected `TargetMismatch`, strict, naming the slice whose switch removes it."""
-
-    return pytest.mark.xfail(
-        raises=TargetMismatch,
-        strict=True,
-        reason=f"023 target (maximum total eligible debt reduction on a snapshot), delivered by slice {slice_}: {what}",
     )
 
 

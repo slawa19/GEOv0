@@ -4,7 +4,8 @@ WHY A DEDICATED EXCEPTION. A target test of 019 first asserts, with ordinary ass
 mechanism was reached and that the operation completed: the barrier was hit, the observer's snapshot
 is fresh, the conflict really was the SQLSTATE it claims, the payment ended. Only AFTER all of that
 does it compare the observed outcome with the target, and a mismatch there - and only there - is
-raised as `TargetMismatch`. The marker is `xfail(raises=TargetMismatch, strict=True)`:
+raised as `TargetMismatch`. The marker is `xfail(raises=TargetMismatch, strict=True)`, written inline
+(the per-programme factories `target_xfail*` lost their last use and were deleted 2026-10-16, 041 `T4104`):
 
 * a broken stand raises `AssertionError` (or anything else), which `raises=` does NOT accept, so the
   test goes red instead of being filed as an expected failure. `raises=AssertionError` would accept a
@@ -22,21 +23,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-import pytest
 
 
 class TargetMismatch(Exception):
     """The observed outcome differs from the 019 target. Raised only after every control passed."""
-
-
-def target_xfail(stage: str, what: str):
-    """The 019 marker: an expected `TargetMismatch`, strict, naming the stage that removes it."""
-
-    return pytest.mark.xfail(
-        raises=TargetMismatch,
-        strict=True,
-        reason=f"019 target, fixed by {stage}: {what}",
-    )
 
 
 def require_target(condition: bool, message: str) -> None:

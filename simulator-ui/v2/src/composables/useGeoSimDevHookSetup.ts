@@ -11,8 +11,6 @@ export function useGeoSimDevHookSetup(opts: {
   getLayoutNodes?: () => ReadonlyArray<{ id: string; __x: number; __y: number; fx?: number | null; fy?: number | null }>
   getPinnedNodeIds?: () => string[]
   fxState: FxState
-  runTxOnce: () => void
-  runClearingOnce: () => void
   showEdgeTooltip?: (edge: {
     key: string
     fromId: string
@@ -46,8 +44,6 @@ export function useGeoSimDevHookSetup(opts: {
       getLayoutNodes: opts.getLayoutNodes,
       getPinnedNodeIds: opts.getPinnedNodeIds,
       fxState: opts.fxState,
-      runTxOnce: opts.runTxOnce,
-      runClearingOnce: opts.runClearingOnce,
       showEdgeTooltip: opts.showEdgeTooltip,
       hideEdgeTooltip: opts.hideEdgeTooltip,
       openNodeCard: opts.openNodeCard,

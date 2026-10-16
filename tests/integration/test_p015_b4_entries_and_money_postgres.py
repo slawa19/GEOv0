@@ -774,9 +774,8 @@ async def test_c8_the_payment_owners_own_retry_leaves_one_envelope_and_the_winni
 
     seeded = await _seed(serializable_factory)
     world = seeded.world
-    # Built BEFORE the block: `fixture_block_violations` allows only constructors and session
-    # calls inside one, and `_debt_row(...)` is indistinguishable in the AST from a helper that
-    # drives a writer. Same object, same single `add`, same flush.
+    # Built BEFORE the block: a fixture block holds only model construction and session
+    # calls, and `_debt_row(...)` is a helper call. Same object, same single `add`, same flush.
     starting_edge = _debt_row(world, starting)
     async with serializable_factory() as setup:
         async with debt_fixture_setup(setup, label="c8-owner-starting-edge"):
@@ -1462,8 +1461,8 @@ async def test_c14_the_clearing_envelope_records_the_pre_amounts_it_actually_cle
     world = seeded.world
     a, b, c = world.debtor, world.creditor, world.extra_participants[0]
     debt_ids = [uuid.uuid4() for _ in range(3)]
-    # Built before the fixture block: `fixture_block_violations` allows only constructors and
-    # session calls inside one, and a comprehension is control flow.
+    # Built before the fixture block: a fixture block holds only model construction and
+    # session calls, and a comprehension is control flow.
     cycle_debts = [
         Debt(
             id=debt_id,

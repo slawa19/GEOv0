@@ -609,15 +609,16 @@ def test_an_operation_that_over_declares_is_not_reported() -> None:
 def test_the_guard_bites_when_a_declaration_is_deleted() -> None:
     """Delete two statuses from a currently clean operation and require both back.
 
-    `POST /simulator/runs/{run_id}/actions/tx-once` is one of the eight Interact Mode operations
-    with no gaps on either side, so anything reported for it after the mutation came from the
+    `POST /simulator/runs/{run_id}/actions/payment-real` is one of the Interact Mode operations
+    with no gaps on either side (042 S1: it was `tx-once` until that debug action was removed),
+    so anything reported for it after the mutation came from the
     mutation. `403` proves the dependency-graph half; `429` proves S5 is genuinely wired through
     `declare_rate_limit_status` and not merely imported.
 
     The mutation is on a deep copy. This module never writes to `api/openapi.yaml`.
     """
 
-    key = "POST /simulator/runs/{run_id}/actions/tx-once"
+    key = "POST /simulator/runs/{run_id}/actions/payment-real"
     canonical = copy.deepcopy(_load_openapi_yaml())
     generated = _load_fastapi_openapi()
 
@@ -627,7 +628,7 @@ def test_the_guard_bites_when_a_declaration_is_deleted() -> None:
         "distinguish its own damage otherwise"
     )
 
-    responses = canonical["paths"]["/simulator/runs/{run_id}/actions/tx-once"]["post"]["responses"]
+    responses = canonical["paths"]["/simulator/runs/{run_id}/actions/payment-real"]["post"]["responses"]
     for status in ("403", "429"):
         assert status in responses, f"{key} no longer declares {status}; pick another operation"
         del responses[status]

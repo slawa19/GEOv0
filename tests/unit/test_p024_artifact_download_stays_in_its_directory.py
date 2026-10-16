@@ -28,7 +28,7 @@ def _manager(tmp_path: Path) -> tuple[ArtifactsManager, Path]:
     sibling = tmp_path / "runs" / "r1" / "artifacts_x"
     sibling.mkdir()
     (sibling / "secret.json").write_text("{}", encoding="utf-8")
-    run = RunRecord(run_id="r1", scenario_id="s", mode="fixtures", state="stopped")
+    run = RunRecord(run_id="r1", scenario_id="s", mode="real", state="stopped")
     run.artifacts_dir = base
     manager = ArtifactsManager(
         lock=threading.RLock(),

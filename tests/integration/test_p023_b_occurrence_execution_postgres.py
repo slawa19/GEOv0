@@ -5,8 +5,8 @@ Spec `specs/023-clearing-as-flow/spec.md`, decisions 5-6 and Verification plan Â
 descriptor - plan UUID, equivalent, cycle ordinal, debt ids in cycle order, integer amount in atoms - and
 reduces each declared edge by exactly `c` through `Book`, inside the SAME boundary as v1: the exclusive
 equivalent session lock, the retry owner `_run_attempts`, the stop/hold read `FOR SHARE`, the commit
-resolver and `ClearingCommittedAfterCancellation`. Nothing in production calls it yet (slice (d) switches the
-callers; `tests/unit/test_p023_b_occurrence_is_not_wired.py`).
+resolver and `ClearingCommittedAfterCancellation`. Nothing in production calls it yet (slice (d) switched the
+callers; who reaches it since is held by `tests/unit/test_p023_d_product_callers_go_through_the_runner.py`).
 
 * R-023-4b (the v2 regression): two plans commit two EQUAL partial amounts on the SAME surviving debt ids -
   two occurrences, two identities, both effects (`p_e - 2c`), and criterion (b) recomputes both PASSED.

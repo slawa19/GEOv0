@@ -780,8 +780,8 @@ async def test_c13_a_replayed_clearing_leaves_exactly_one_envelope(db_session) -
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
     debt_ids = []
-    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    # Built outside the fixture block, added inside it: a loop is not fixture setup, so it
+    # stays out of the block, and the rows and the single flush are unchanged.
     cycle_debts = [
         Debt(
             id=uuid.uuid4(),
@@ -1258,8 +1258,8 @@ async def test_c6_a_clearing_cycle_that_leaves_one_atom_on_every_edge_is_still_v
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
     debt_ids: list[str] = []
-    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    # Built outside the fixture block, added inside it: a loop is not fixture setup, so it
+    # stays out of the block, and the rows and the single flush are unchanged.
     cycle_debts = [
         Debt(
             id=uuid.uuid4(),
@@ -1418,8 +1418,8 @@ async def test_c6_control_the_same_cycle_without_the_listener_satisfies_criterio
     )
     cycle_edges = [("a", "b"), ("b", "c"), ("c", "a")]
     debt_ids = []
-    # Built outside the fixture block, added inside it: a loop is not fixture setup as far as
-    # `fixture_block_violations` is concerned, and the rows and the single flush are unchanged.
+    # Built outside the fixture block, added inside it: a loop is not fixture setup, so it
+    # stays out of the block, and the rows and the single flush are unchanged.
     cycle_debts = [
         Debt(
             id=uuid.uuid4(),
