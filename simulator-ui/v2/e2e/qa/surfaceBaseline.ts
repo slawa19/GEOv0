@@ -12,11 +12,18 @@
  * either constant is a dated line here:
  *
  * - 2026-10-11 (038 S2): first record.
+ * - 2026-10-16 (039 B3, themes): the matrix walks `saas` and `hud` only (owner's decision R1; slice B, decision 6).
+ *   The rows of `shadcn` and `library` are REMOVED with the themes, not measured away: `page` and `top-bar-interact`
+ *   lose their `shadcn`/`library` columns (2 + 1 `aria-prohibited-attr` each, the same nodes as in the other
+ *   themes); `edge-popup` loses `shadcn: 1`; `payment-panel` (3), `trustline-panel` (3), `clearing-panel` (4) and
+ *   `node-card` (2), which were `shadcn` only, lose their lines - 15 `color-contrast` nodes of `shadcn` in all, none of
+ *   them fixed: they leave with the theme. `library` had no line apart from the two columns above. The `saas` and
+ *   `hud` numbers did not move. `KNOWN_FINDINGS` now holds for both themes (it held for `hud` alone).
  */
 import type { Theme } from './surfaceMatrix.js'
 
 /**
- * Geometry and target-size findings in the `hud` theme, per entry of the matrix. A finding is a key without pixel
+ * Geometry and target-size findings in the themes of the matrix (`saas`, `hud`; `hud` alone until 2026-10-16), per entry. A finding is a key without pixel
  * amounts (those go to the report): `outside:<edge>@<viewport>`, `small-target:<control>`.
  */
 export const KNOWN_FINDINGS: Record<string, Array<{ finding: string; why: string; /** YYYY-MM-DD, the day the line was written. */ since: string }>> = {}
@@ -30,19 +37,13 @@ export const KNOWN_FINDINGS: Record<string, Array<{ finding: string; why: string
  */
 export const AXE_BASELINE: Record<string, Partial<Record<Theme, Record<string, number>>>> = {
   // `.hud-bar__center` and `.wm-layer`: the S0 start value (R8), unchanged.
-  page: { hud: { 'aria-prohibited-attr': 2 }, shadcn: { 'aria-prohibited-attr': 2 }, saas: { 'aria-prohibited-attr': 2 }, library: { 'aria-prohibited-attr': 2 } },
+  page: { hud: { 'aria-prohibited-attr': 2 }, saas: { 'aria-prohibited-attr': 2 } },
   // `.hud-bar__center` again, seen from inside the top bar; in Auto-Run the same node holds controls and axe does not flag it.
-  'top-bar-interact': { hud: { 'aria-prohibited-attr': 1 }, shadcn: { 'aria-prohibited-attr': 1 }, saas: { 'aria-prohibited-attr': 1 }, library: { 'aria-prohibited-attr': 1 } },
-  // hud: "Send payment", "Change limit", the ghost close button. shadcn: the ghost close button.
-  'edge-popup': { hud: { 'color-contrast': 3 }, shadcn: { 'color-contrast': 1 } },
+  'top-bar-interact': { hud: { 'aria-prohibited-attr': 1 }, saas: { 'aria-prohibited-attr': 1 } },
+  // hud: "Send payment", "Change limit", the ghost close button.
+  'edge-popup': { hud: { 'color-contrast': 3 } },
   // The "Copy" button of a dev-only overlay (`?perf=1`).
   'dev-perf-overlay': { hud: { 'color-contrast': 1 } },
-  // shadcn: the muted "(ESC to close)" of the header, the pick hint, the ghost Cancel; in clearing also the primary Confirm.
-  'payment-panel': { shadcn: { 'color-contrast': 3 } },
-  'trustline-panel': { shadcn: { 'color-contrast': 3 } },
-  'clearing-panel': { shadcn: { 'color-contrast': 4 } },
-  // shadcn: the meta line and the primary button of the card.
-  'node-card': { shadcn: { 'color-contrast': 2 } },
 }
 
 /** Why each baselined axe rule stands. A rule that appears in `AXE_BASELINE` must be named here. */

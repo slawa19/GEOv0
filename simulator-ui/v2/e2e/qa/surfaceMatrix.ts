@@ -17,7 +17,11 @@ import { expect, type Page, type Route } from '@playwright/test'
 
 import { boot, distToSegment, EQ, frames, layoutNodes, pausedClockTime, pushEvent, ringSnapshot, RUN_ID, screenNodes, syncCssToClock, txUpdated, type Pt } from './stand.js'
 
-export const THEMES = ['hud', 'shadcn', 'saas', 'library'] as const
+/**
+ * The themes the app offers (039 B3, 2026-10-16; owner's decision R1): `saas` (the default) and `hud`. Until that date
+ * four: `shadcn` and `library` were walked too; they are frozen (tokens kept, out of the switcher) and not walked.
+ */
+export const THEMES = ['saas', 'hud'] as const
 export type Theme = (typeof THEMES)[number]
 
 export type Viewport = { width: number; height: number }

@@ -25,6 +25,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { boot, loopCounters, ringSnapshot, screenNodes, waitLoopAsleep, type QaSnapshot } from './stand.js'
 
 const DATA_TOKENS = ['--ds-data-debtor', '--ds-data-creditor', '--ds-data-neutral', '--ds-data-frozen', '--ds-data-hub'] as const
+/** Every theme id the design system has TOKENS for: `library` and `shadcn` are frozen (out of the app, tokens kept). */
 const ALL_THEME_IDS = ['hud', 'saas', 'library', 'shadcn'] as const
 const BASE = 'canvas.canvas:not(.canvas-fx)'
 
@@ -124,7 +125,7 @@ test('039 B1: the five data tokens resolve to ONE value under every theme - swit
   }, [...DATA_TOKENS])
   const offered = await switcher(page).locator('option').evaluateAll((els) => els.map((o) => (o as HTMLOptionElement).value))
   expect(offered.length, 'counter-check: the switcher offers themes to walk').toBeGreaterThan(1)
-  expect(offered, 'both themes that remain are offered').toEqual(expect.arrayContaining(['saas', 'hud']))
+  expect(offered, 'the two themes that remain are offered, and only they (039 B3)').toEqual(['saas', 'hud'])
   const seen: Array<Record<string, string>> = []
   for (const theme of offered) {
     await switchTheme(page, theme)
