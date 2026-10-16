@@ -6,7 +6,7 @@
 Последнее обновление: 2026-08-11
 ```
 
-Входная точка документации текущего UI в [`simulator-ui/v2`](../../../../simulator-ui/v2/README.md). `simulator-ui/v1` и документы в `archive/` — исторические материалы.
+Входная точка документации текущего UI в [`simulator-ui/v2`](../../../../simulator-ui/v2/README.md). `simulator-ui/v1` удалён 2026-10-16 (041 `T4106`), тег `legacy/simulator-ui-v1-removed`; документы в `archive/` — исторические материалы.
 
 ## Implementation-oriented guides
 
