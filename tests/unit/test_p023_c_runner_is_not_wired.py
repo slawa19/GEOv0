@@ -1,81 +1,23 @@
-"""Guard (programme 023, slice (c), narrowed in slice (d)): the periodic loop is off by default and a refusal is loud.
+"""Programme 023, slice (c), narrowed in slice (d) and in 041: the periodic loop is off by default and its failures are loud.
 
-HISTORY: until slice (d) this module also asserted that no production entrypoint used the runner; the atomic switch
-inverted that check into `test_p023_d_product_callers_go_through_the_runner.py` (recorded below and in the spec).
+HISTORY: the module name is historical. Until slice (d) it also asserted that no production entrypoint used the
+runner; the atomic switch inverted that check into `test_p023_d_product_callers_go_through_the_runner.py`. The AST
+walker that remained, with its anti-vacuum probe, guarded nothing after that and was deleted 2026-10-16 (041
+`T4104`); what is left is behaviour, not form.
 
-Slice (c) is ADDITIVE and INACTIVE on production entrypoints (spec "Стадии", row (c); decision 7): the runner, the
-periodic loop and the renewable lease exist and are tested directly, but `POST /clearing/auto` and both simulator
-callers keep the v1 path, and the periodic loop is not started by default. Slice (d) switches all of them at once
-and replaces this guard.
-
-What it checks:
-
-* statically (AST - a comment or a docstring does not count): outside `app/core/clearing/runner.py` and
-  `app/main.py`, no module under `app/` imports the runner or names one of its entry points; inside `app/main.py`
-  they are named only in the periodic loop's own function;
-* behaviourally: with default settings `_start_configured_background_tasks` starts no `clearing` task, the
-  setting's default is False, and a refusal of the isolation rule is recorded as a failed job (health `degraded`),
-  not swallowed.
-
-Anti-vacuum: the same walker finds the names in the runner's own tests, and with `CLEARING_PERIODIC_ENABLED` set
-the loop IS started - the default-off check can see a start when there is one.
-
-What it does not see: a call through `getattr` with a computed string, or a copy of the runner pasted elsewhere.
+What it checks: with default settings `_start_configured_background_tasks` starts no `clearing` task and the
+setting's default is False (anti-vacuum: with `CLEARING_PERIODIC_ENABLED` set the loop IS started); a refusal of
+the isolation rule is recorded as a failed job (health `degraded`), not swallowed; an equivalent pass that stopped
+on an error degrades health, while ordinary interruptions keep it `ok`.
 """
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tests.p023_support import require_target
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-_RUNNER = REPO_ROOT / "app" / "core" / "clearing" / "runner.py"
-_MAIN = REPO_ROOT / "app" / "main.py"
-_MODULE = "app.core.clearing.runner"
-_SYMBOLS = frozenset(
-    {"run_clearing_pass", "run_awaited_clearing", "run_periodic_clearing_pass", "check_periodic_isolation"}
-)
-
-
-def _uses(tree: ast.AST) -> set[str]:
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in _SYMBOLS:
-            found.add(node.attr)
-        elif isinstance(node, ast.Name) and node.id in _SYMBOLS:
-            found.add(node.id)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module == _MODULE:
-                found.add(_MODULE)
-            found.update(alias.name for alias in node.names if alias.name in _SYMBOLS)
-        elif isinstance(node, ast.Import):
-            found.update(_MODULE for alias in node.names if alias.name == _MODULE)
-    return found
-
-
-def _parse(path: Path) -> ast.AST:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-
-# REMOVED 2026-09-28, slice (d): `test_no_production_module_but_the_periodic_loop_reaches_the_runner` asserted that
-# nothing but the periodic loop reached the runner - the (c) state the atomic switch ends. Its assertion is INVERTED,
-# not dropped, in `tests/unit/test_p023_d_product_callers_go_through_the_runner.py` (each product caller must go
-# through its runner entry and call no executor itself). The default-off checks below stay: decision R1 keeps the
-# loop off by default.
-
-
-def test_the_walker_sees_the_forms_it_looks_for() -> None:
-    probe = REPO_ROOT / "tests" / "integration" / "test_p023_c_periodic_isolation_postgres.py"
-    assert {"run_periodic_clearing_pass", "check_periodic_isolation"} <= _uses(_parse(probe))
-    assert _uses(ast.parse("from app.core.clearing.runner import run_clearing_pass")) == {_MODULE, "run_clearing_pass"}
-    assert _uses(ast.parse("import app.core.clearing.runner")) == {_MODULE}
-    # Names in strings and comments are not uses.
-    assert _uses(ast.parse('"run_clearing_pass app.core.clearing.runner"  # run_periodic_clearing_pass')) == set()
 
 
 def _started_names(monkeypatch, *, periodic: bool | None) -> list[str]:
