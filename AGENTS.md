@@ -12,6 +12,7 @@ Front-door и обязательный контракт для ИИ-агенто
 |---|---|
 | «Что делать дальше» | [`specs/README.md`](specs/README.md) — реестр программ 001–007, порядок волн, **статус авторизации** |
 | Находка без программы | [`specs/BACKLOG.md`](specs/BACKLOG.md) |
+| Я советник верхнего уровня (вторая сессия над оркестратором) | [`docs/codex-orchestrator-rule.md`](docs/codex-orchestrator-rule.md) §7 — оценка хода, разбор сложных случаев, спеки и сводки владельцу; код и агенты-разработчики — не здесь |
 | Я работаю оркестратором | [`docs/codex-orchestrator-rule.md`](docs/codex-orchestrator-rule.md) — обязателен целиком; §0 фиксирует постоянную авторизацию владельца на автономное доведение **явно начатой** фазы |
 | Кто и как делает внешнее ревью | [`docs/external-review-runbook.md`](docs/external-review-runbook.md) — матрица «оркестратор → ревьюер» и механика обоих направлений |
 | REST wire contract | `api/openapi.yaml` — авторитет №1 |
