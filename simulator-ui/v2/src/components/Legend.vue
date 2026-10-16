@@ -12,8 +12,8 @@
  * colour itself, the sign is the glyph drawn inside the node. Its `background-color` IS the data colour (the dimming
  * is an inset shadow over it), so a test can compare it with the token.
  *
- * The direction of a trust line is NOT explained here yet: that entry comes with the direction marker (PR 2) and
- * takes the slot after the shapes.
+ * The direction of a trust line is not drawn on the canvas and has no entry here: the owner withdrew the direction
+ * marker on 2026-10-16 (spec 039, Changelog); the edge tooltip and the edge window name it as "A -> B".
  */
 import { computed } from 'vue'
 
