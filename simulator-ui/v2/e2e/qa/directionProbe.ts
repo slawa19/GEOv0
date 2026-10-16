@@ -372,12 +372,14 @@ export async function overrideArrowLength(page: Page, lengthPx: number): Promise
 export const arrowOfLength = (lengthPx: number): ArrowSize => ({ tipGapPx: ARROW.tipGapPx, lengthPx, widthPx: lengthPx * (ARROW.widthPx / ARROW.lengthPx), minFreeGapPx: 2 * (ARROW.tipGapPx + lengthPx) })
 
 /** Bring the application's zoom to `target` with ONE wheel event (the camera multiplies by exp(-deltaY / 1000)). */
-export async function zoomTo(page: Page, target: number): Promise<number> {
+export async function zoomTo(page: Page, target: number, clock: 'fake' | 'real' = 'fake'): Promise<number> {
   const z0 = (await camera(page)).zoom
   const vp = page.viewportSize()!
   await page.mouse.move(vp.width / 2, vp.height / 2)
   await page.mouse.wheel(0, -1000 * Math.log(target / z0))
-  await frames(page, 12)
+  // On the fake clock the frame that applies the wheel is stepped; on the real one it is waited for (a condition).
+  if (clock === 'fake') await frames(page, 12)
+  else await expect.poll(async () => Math.abs((await camera(page)).zoom - target), { timeout: 10_000 }).toBeLessThan(0.005)
   const z = (await camera(page)).zoom
   expect(Math.abs(z - target), `the application zoom reached ${target} (it is ${z})`).toBeLessThan(0.005)
   return z
