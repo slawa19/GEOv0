@@ -360,6 +360,46 @@ export type BootOptions = {
    * positions at load; whatever then clicks the canvas waits for a still layout itself. Not with `clock: true`.
    */
   awaitLayout?: false
+  /**
+   * `true` (043 S2): a FIRST VISIT - storage is cleared and nothing is seeded (no run, no scenario, no API base), and the
+   * address is `/` with `query` only (no `?mode=`). What a person sees who opens the demo for the first time.
+   */
+  firstVisit?: true
+}
+
+/** What `mockLiveRun` saw: the requests that create or steer the run, in order, and the bodies of the create requests. */
+export type LiveRunLog = { calls: string[]; createBodies: Array<Record<string, unknown>>; state: () => string }
+
+/**
+ * 043 S2: the stand's run as a live one, with a state that follows the requests: a create (`POST /runs`) answers a
+ * run that is `running` (or `paused`, when `initial` says so - a run somebody else paused), `/pause` makes it `paused`,
+ * `/resume` and `/intensity` leave it as asked. Register it in `beforeLoad` (a later `page.route` wins over the stand's).
+ * It does NOT emit events: a payment of the run is still a frame the test writes (`pushEvent`). What it proves is the
+ * client's side: what it asked the backend, in which order, and what it shows for the answer.
+ */
+export async function mockLiveRun(page: Page, o: { initial?: 'running' | 'paused' | 'stopped' } = {}): Promise<LiveRunLog> {
+  let state = o.initial ?? 'running'
+  const log: LiveRunLog = { calls: [], createBodies: [], state: () => state }
+  const body = () => ({
+    api_version: 'simulator-api/1', run_id: RUN_ID, scenario_id: SCENARIO_ID, mode: 'real', state,
+    sim_time_ms: 0, intensity_percent: 30, ops_sec: 0, queue_depth: 0,
+  })
+  const json = (route: Route, b: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+  await page.route(/\/simulator\/runs$/i, (r) => {
+    if (r.request().method() !== 'POST') return r.fallback()
+    log.calls.push('POST /runs')
+    log.createBodies.push(JSON.parse(r.request().postData() ?? '{}') as Record<string, unknown>)
+    state = 'running'
+    return json(r, { run_id: RUN_ID })
+  })
+  await page.route(new RegExp(`/simulator/runs/${RUN_ID}(/(pause|resume|intensity))?$`, 'i'), (r) => {
+    const what = new URL(r.request().url()).pathname.split('/').pop()
+    if (what === 'pause') { log.calls.push('POST /pause'); state = 'paused' }
+    else if (what === 'resume') { log.calls.push('POST /resume'); state = 'running' }
+    else if (what === 'intensity') log.calls.push('POST /intensity')
+    return json(r, body())
+  })
+  return log
 }
 
 /**
@@ -441,17 +481,24 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   if (o.sseShim !== false) await installSseShim(page)
   await installRafCounter(page)
   if (o.clock && o.cssClock !== false) await installCssClockSync(page)
-  await page.addInitScript(({ scenarioId, runId }) => {
+  await page.addInitScript(({ scenarioId, runId, fresh }) => {
     try {
+      // A first visit: cleared once, before the first load only - a reload in the test keeps what the product stored.
+      if (fresh) {
+        if (sessionStorage.getItem('qa.firstVisit') === '1') return
+        sessionStorage.setItem('qa.firstVisit', '1')
+        localStorage.clear()
+        return
+      }
       localStorage.clear()
       localStorage.setItem('geo.sim.v2.apiBase', '/api/v1')
       localStorage.setItem('geo.sim.v2.selectedScenarioId', scenarioId)
       localStorage.setItem('geo.sim.v2.runId', runId)
     } catch { /* ignore */ }
-  }, { scenarioId: SCENARIO_ID, runId: RUN_ID })
+  }, { scenarioId: SCENARIO_ID, runId: RUN_ID, fresh: o.firstVisit === true })
 
   if (o.beforeLoad) await o.beforeLoad(page)
-  await page.goto(`/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
+  await page.goto(o.firstVisit ? `/?${(o.query ?? '').replace(/^&/, '')}` : `/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
   await assertUserMode(page, o)
   if (o.awaitScene === false) return mock
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
