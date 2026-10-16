@@ -14,9 +14,10 @@ import type { LayoutNode } from '../types/layout'
 import { getLinkTermination } from './linkGeometry'
 
 /**
- * THE length of the arrowhead, tip to base, in screen px - the one size the product ships. MEASURED, not chosen: the
- * smallest whole length at which the marker stands out from a bare stretch of its own line at application zoom 0.6,
- * on the 100-node scene and on a line with no debt, in both themes (`e2e/qa/p039-repro/marker-size.p039-repro.ts`, the
+ * THE length of the arrowhead, tip to base, in screen px - the one size the product ships. An EMPIRICAL design choice,
+ * not a derived perceptual minimum: the smallest tested whole length that passed the documented pixel heuristic at
+ * application zoom 0.6 in both themes, supported mainly by the isolated no-debt line and a small, size-dependent subset
+ * of the 100-node scene's markers; it does not establish general human recognisability (external review 2026-10-16) (`e2e/qa/p039-repro/marker-size.p039-repro.ts`, the
  * curve is in `docs/ru/simulator/frontend/docs/visual-language.md` section 3.1). Decision 4 of the slice's design said
  * 5 x 4; revised 2026-10-16 after the external review found it barely legible. A test may override this one line
  * (the size frames of the owner do): everything below is derived from it.
