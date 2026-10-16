@@ -4,10 +4,12 @@
  * show the network living: within 15 s of opening, a `tx.updated` of a run has arrived and its beam is on the canvas,
  * with no click on Start.
  *
- * Read through the dev server's hook (`window.__geoSim.fxState`) and the real mode's diagnostic counters
- * (`__geo_real_mode_diag`, installed on a localhost page): both are the product's own state, not a copy.
- * WHAT IT DOES NOT SEE: a production build (no dev hook there), another scenario than the one the product picks by
- * default, a backend under load. The run it starts is stopped at the end, so a second run of the test starts its own.
+ * Read through the real mode's diagnostic counters (`__geo_real_mode_diag`, installed on a localhost page, production
+ * build too) and the pixels of the FX canvas (cleared to transparent every frame: a painted pixel is an effect of an
+ * event - a beam, a pulse, a burst - never the graph, which lives on the base canvas). A production build has no dev
+ * hook, so "the beam" is read as "the FX canvas is painted after a `tx.updated` arrived", not as `fxState.sparks`.
+ * WHAT IT DOES NOT SEE: which effect was painted (a clearing's would count too), another scenario than the one the
+ * product picks by default, a backend under load. The run it starts is stopped at the end.
  */
 import { expect, test, type Page } from '@playwright/test'
 
@@ -15,8 +17,17 @@ type Diag = { events_by_type?: Record<string, number> }
 
 const txUpdatedSeen = (page: Page) =>
   page.evaluate(() => Number(((globalThis as unknown as { __geo_real_mode_diag?: Diag }).__geo_real_mode_diag?.events_by_type ?? {})['tx.updated'] ?? 0))
-const sparks = (page: Page) =>
-  page.evaluate(() => (window as unknown as { __geoSim?: { fxState?: { sparks?: unknown[] } } }).__geoSim?.fxState?.sparks?.length ?? 0)
+/** Pixels of the FX canvas with alpha >= 24 (the stand's threshold, `sampleCanvas`). */
+const fxPainted = (page: Page) =>
+  page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('canvas.canvas-fx')
+    const ctx = c?.getContext('2d')
+    if (!c || !ctx || c.width === 0 || c.height === 0) return 0
+    const d = ctx.getImageData(0, 0, c.width, c.height).data
+    let n = 0
+    for (let i = 3; i < d.length; i += 4) if (d[i]! >= 24) n += 1
+    return n
+  })
 
 test('a first visit to a seeded backend: a live run starts by itself, a payment arrives and its beam is drawn within 15 s', async ({ page }) => {
   // Cleared before the first load only.
@@ -42,7 +53,7 @@ test('a first visit to a seeded backend: a live run starts by itself, a payment 
 
   await expect.poll(() => txUpdatedSeen(page), { timeout: Math.max(1, 15_000 - (Date.now() - opened)), intervals: [100], message: 'a tx.updated of the run arrived within 15 s of opening' })
     .toBeGreaterThan(0)
-  await expect.poll(() => sparks(page), { timeout: Math.max(1, 15_000 - (Date.now() - opened)), intervals: [50], message: 'a beam is on the canvas within 15 s of opening' })
+  await expect.poll(() => fxPainted(page), { timeout: Math.max(1, 15_000 - (Date.now() - opened)), intervals: [50], message: 'a beam is on the canvas within 15 s of opening' })
     .toBeGreaterThan(0)
   const tookMs = Date.now() - opened
   console.log(`043 S2 LIVE ${JSON.stringify({ tookMs, creates, pauses: pauses.length })}`)
