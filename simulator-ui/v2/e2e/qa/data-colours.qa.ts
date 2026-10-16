@@ -3,7 +3,7 @@
  * Real pipeline over the mocked backend, real clock (nothing here is about time), Chromium without a GPU.
  *
  * What each test holds:
- *  1. the five data tokens resolve to ONE value under every theme - switched live through the switcher, and set as
+ *  1. the data tokens resolve to ONE value under every theme - switched live through the switcher, and set as
  *     the attribute for every theme id the design system has tokens for;
  *  2. the legend says what the scene contains and nothing else, in the fixed order, and each colour swatch has the
  *     resolved colour of its token; a scene without a hub has no Hub entry;
@@ -24,7 +24,8 @@ import { expect, test, type Page } from '@playwright/test'
 
 import { boot, loopCounters, ringSnapshot, screenNodes, waitLoopAsleep, type QaSnapshot } from './stand.js'
 
-const DATA_TOKENS = ['--ds-data-debtor', '--ds-data-creditor', '--ds-data-neutral', '--ds-data-frozen', '--ds-data-hub'] as const
+// 2026-10-16 (039 slice B, PR 2): the sixth, '--ds-data-direction' - the direction marker of a trust line.
+const DATA_TOKENS = ['--ds-data-debtor', '--ds-data-creditor', '--ds-data-neutral', '--ds-data-frozen', '--ds-data-hub', '--ds-data-direction'] as const
 const ALL_THEME_IDS = ['hud', 'saas', 'library', 'shadcn'] as const
 const BASE = 'canvas.canvas:not(.canvas-fx)'
 
@@ -116,7 +117,7 @@ const differingRound = (page: Page, a: string, b: string, at: { x: number; y: nu
     return n
   }, { a, b, at, half, selector: BASE })
 
-test('039 B1: the five data tokens resolve to ONE value under every theme - switched live, and by attribute for every theme id', async ({ page }) => {
+test('039 B1: the data tokens resolve to ONE value under every theme - switched live, and by attribute for every theme id', async ({ page }) => {
   await boot(page, { snapshot: rolesSnapshot(), clock: false })
   const read = () => page.evaluate((names) => {
     const el = document.querySelector('.root')!
@@ -146,7 +147,7 @@ test('039 B1: the five data tokens resolve to ONE value under every theme - swit
     expect(values.every((v) => /^#[0-9a-f]{6}$/i.test(v)), `${token} is declared as #rrggbb under every theme: ${JSON.stringify(values)}`).toBe(true)
     expect(new Set(values).size, `${token} has ONE value across the themes`).toBe(1)
   }
-  expect(new Set(DATA_TOKENS.map((t) => seen[0]![t])).size, 'the five tokens are five different colours').toBe(DATA_TOKENS.length)
+  expect(new Set(DATA_TOKENS.map((t) => seen[0]![t])).size, 'the data tokens are all different colours').toBe(DATA_TOKENS.length)
 })
 
 test('039 B1: the legend names what the scene contains, in the fixed order, each swatch in the resolved colour of its token; no Hub entry without a hub', async ({ page }) => {

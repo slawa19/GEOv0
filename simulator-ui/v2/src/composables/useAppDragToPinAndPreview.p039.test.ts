@@ -46,7 +46,7 @@ import { useAppDragToPinAndPreview } from './useAppDragToPinAndPreview'
 import { useSceneState } from './useSceneState'
 
 const TS = '2026-10-12T00:00:00Z'
-const PALETTE: DataPalette = { debtor: '#a10000', creditor: '#0000b2', neutral: '#c3c3c3', frozen: '#444444', hub: '#00e500' }
+const PALETTE: DataPalette = { debtor: '#a10000', creditor: '#0000b2', neutral: '#c3c3c3', frozen: '#444444', hub: '#00e500', direction: '#060606' }
 const MINUS = '−'
 
 const person = (id: string, over: Partial<GraphNode> = {}): GraphNode => ({ id, name: id, type: 'person', status: 'active', net_sign: 1, net_balance_atoms: '500', viz_shape_key: 'circle', viz_size: { w: 20, h: 20 }, ...over })
@@ -217,7 +217,7 @@ describe('039 B1 review, class 1 - a drag FOLLOWS its node while the scene is th
     s.beginDrag('A')
     expect(s.preview().outline).toContain(PALETTE.hub)
     expect(s.preview().outline).toContain('solid')
-    s.mapping.node.palette = { ...PALETTE, hub: '#654321' }
+    s.mapping.node.palette = { ...PALETTE, hub: '#654321', direction: '#060606' }
     s.frame()
     expect(s.preview().outline).toContain('#654321')
     expect(s.drag.dragToPin.onPointerUp(s.pointer(160))).toBe(true)

@@ -15,6 +15,7 @@ import type { LayoutLink, LayoutNode } from '../types/layout'
 import { createVizMapping } from '../vizMapping'
 import { DIRECTION_MARKER_ALPHA, drawBaseGraph } from './baseGraph'
 import { withAlpha } from './color'
+import { ARROW } from './linkArrowhead'
 
 vi.mock('./nodePainter', () => ({ drawNodeShape: vi.fn() }))
 vi.mock('./glowSprites', () => ({ drawGlowSprite: vi.fn() }))
@@ -22,6 +23,11 @@ vi.mock('./glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 const MAPPING = createVizMapping()
 const LINE = MAPPING.link.color.default
 const TX = MAPPING.fx.tx_spark.trail
+/** The marker's own colour: the data token `--ds-data-direction`, not the line's (revised 2026-10-16). */
+const DIR = withAlpha(MAPPING.node.palette.direction, 1)
+/** Distances in the shipped size: tip from the centre of a 24 px circle; the minimum room between two rims. */
+const TIP_AT = 12 + ARROW.tipGapPx
+const ROOM = ARROW.minFreeGapPx
 
 const node = (id: string, x: number, y: number): LayoutNode =>
   ({ id, __x: x, __y: y, type: 'person', status: 'active', viz_shape_key: 'circle', viz_size: { w: 24, h: 24 }, viz_color_key: 'person' }) as LayoutNode
@@ -63,22 +69,22 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
   it('one-way line creditor -> debtor: ONE marker, at the debtor (target), none at the creditor (source)', () => {
     const m = markers(draw(both, [link('creditor', 'debtor')]))
     expect(m, 'markers of a one-way line').toHaveLength(1)
-    expect(dist(m[0]!.tip, at(debtor)), 'the tip is 2 px before the rim of the debtor (radius 12)').toBeCloseTo(14, 6)
-    expect(dist(m[0]!.tip, at(creditor)), 'and far from the creditor').toBeCloseTo(186, 6)
+    expect(dist(m[0]!.tip, at(debtor)), 'the tip is 2 px before the rim of the debtor (radius 12)').toBeCloseTo(TIP_AT, 6)
+    expect(dist(m[0]!.tip, at(creditor)), 'and far from the creditor').toBeCloseTo(200 - TIP_AT, 6)
     expect(m.filter((x) => dist(x.tip, at(creditor)) < 100), 'no marker in the creditor half').toHaveLength(0)
   })
 
   it('the SAME two nodes with source and target swapped: the marker is at the other node - it follows the wire direction, not the picture', () => {
     const m = markers(draw(both, [link('debtor', 'creditor')]))
     expect(m).toHaveLength(1)
-    expect(dist(m[0]!.tip, at(creditor)), 'now `creditor` is the target of the line').toBeCloseTo(14, 6)
+    expect(dist(m[0]!.tip, at(creditor)), 'now `creditor` is the target of the line').toBeCloseTo(TIP_AT, 6)
   })
 
   it('mutual pair with different debts: two markers, one at each end, each drawn for ITS line (in the order of the lines)', () => {
     const m = markers(draw(both, [link('creditor', 'debtor', { used: '50' }), link('debtor', 'creditor', { used: '5', viz_alpha_key: 'bg' })]))
     expect(m, 'markers of a mutual pair').toHaveLength(2)
-    expect(dist(m[0]!.tip, at(debtor)), 'the first line creditor -> debtor: at `debtor`').toBeCloseTo(14, 6)
-    expect(dist(m[1]!.tip, at(creditor)), 'the second line debtor -> creditor: at `creditor`').toBeCloseTo(14, 6)
+    expect(dist(m[0]!.tip, at(debtor)), 'the first line creditor -> debtor: at `debtor`').toBeCloseTo(TIP_AT, 6)
+    expect(dist(m[1]!.tip, at(creditor)), 'the second line debtor -> creditor: at `creditor`').toBeCloseTo(TIP_AT, 6)
     // Both on the common axis y = 300, pointing at their own target.
     for (const x of m) expect((x.base[0].y + x.base[1].y) / 2).toBeCloseTo(300, 6)
     expect(m[0]!.style, 'the two markers have the same solid colour although the lines have different alpha').toBe(m[1]!.style)
@@ -92,15 +98,21 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
     expect(none[0]!.style).toBe(debt[0]!.style)
   })
 
-  it('the marker is solid in the colour of its line: it does not inherit the alpha of a faint line, and a palette colour of the snapshot is followed', () => {
+  it('the marker is solid in the direction colour of the palette: it does not inherit the alpha of a faint line, nor the colour the snapshot gives the line body', () => {
     expect(DIRECTION_MARKER_ALPHA, 'opaque').toBe(1)
+    expect(MAPPING.node.palette.direction, 'not the faint colour of the line').not.toBe(LINE)
     for (const key of ['bg', 'muted', 'active', 'hi']) {
       const m = markers(draw(both, [link('creditor', 'debtor', { viz_alpha_key: key })]))
-      expect(m[0]!.style, `alpha key ${key}`).toBe(withAlpha(LINE, 1))
+      expect(m[0]!.style, `alpha key ${key}`).toBe(DIR)
     }
     const draws = draw(both, [link('creditor', 'debtor', { viz_color_key: 'warm' })], { palette: { warm: { color: '#aa5500' } } })
-    expect(markers(draws)[0]!.style, 'the marker takes the palette colour').toBe(withAlpha('#aa5500', 1))
-    expect(bodies(draws)[0]!.d.strokeStyle, 'as the body of the same line does, at the alpha of the line').toBe(withAlpha('#aa5500', MAPPING.link.alpha.hi!))
+    expect(markers(draws)[0]!.style, 'the marker keeps its own colour').toBe(DIR)
+    expect(bodies(draws)[0]!.d.strokeStyle, 'the body takes the palette colour, at the alpha of the line').toBe(withAlpha('#aa5500', MAPPING.link.alpha.hi!))
+    // The palette is the resolved object: a new direction colour there is the colour of the next pass.
+    const other = { ...MAPPING, node: { palette: { ...MAPPING.node.palette, direction: '#123456' } } }
+    const { ctx, draws: d2 } = recordingCtx()
+    drawBaseGraph(ctx, { w: 800, h: 600, nodes: both, links: [link('creditor', 'debtor')], mapping: other, selectedNodeId: null, activeEdges: new Map(), cameraZoom: 1 })
+    expect(markers(d2)[0]!.style).toBe(withAlpha('#123456', 1))
   })
 
   it('the body of the line is drawn as before: its own open path and stroke, rim to rim; the marker is a separate closed path and fill, after every body', () => {
@@ -121,18 +133,18 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
     for (const zoom of [0.5, 1, 2]) {
       const [m] = markers(draw([creditor, far], [link('creditor', 'far')], { cameraZoom: zoom }))
       const mid = { x: (m!.base[0].x + m!.base[1].x) / 2, y: (m!.base[0].y + m!.base[1].y) / 2 }
-      expect(dist(m!.tip, mid) * zoom, `length at zoom ${zoom}`).toBeCloseTo(5, 6)
-      expect(dist(m!.base[0], m!.base[1]) * zoom, `width at zoom ${zoom}`).toBeCloseTo(4, 6)
+      expect(dist(m!.tip, mid) * zoom, `length at zoom ${zoom}`).toBeCloseTo(ARROW.lengthPx, 6)
+      expect(dist(m!.base[0], m!.base[1]) * zoom, `width at zoom ${zoom}`).toBeCloseTo(ARROW.widthPx, 6)
       expect((dist(m!.tip, at(far)) - 12 / zoom) * zoom, `tip to the rim at zoom ${zoom}`).toBeCloseTo(2, 6)
     }
   })
 
-  it('less than 14 px between the rims: the line is drawn, the marker is not; at 14 px it is', () => {
-    const near = node('near', 137, 300) // 13 px of free line
+  it('less than the minimum room between the rims: the line is drawn, the marker is not; at the minimum it is', () => {
+    const near = node('near', 124 + ROOM - 1, 300) // one px short
     const draws = draw([creditor, near], [link('creditor', 'near'), link('near', 'creditor')])
     expect(bodies(draws), 'the bodies of the pair').toHaveLength(2)
     expect(markers(draws), 'no marker without room').toHaveLength(0)
-    expect(markers(draw([creditor, node('ok', 138, 300)], [link('creditor', 'ok')])), 'a marker at exactly 14 px').toHaveLength(1)
+    expect(markers(draw([creditor, node('ok', 124 + ROOM, 300)], [link('creditor', 'ok')])), 'a marker at exactly the minimum').toHaveLength(1)
   })
 
   it('`focus` LOD (a node is being dragged): markers follow the lines that remain, and only them', () => {
@@ -144,8 +156,8 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
     expect(bodies(draws), 'focus LOD: the two lines of the dragged node').toHaveLength(2)
     const m = markers(draws)
     expect(m).toHaveLength(2)
-    expect(dist(m[0]!.tip, at(third)), 'debtor -> third: at `third`').toBeCloseTo(14, 6)
-    expect(dist(m[1]!.tip, at(creditor)), 'third -> creditor: at `creditor`').toBeCloseTo(14, 6)
+    expect(dist(m[0]!.tip, at(third)), 'debtor -> third: at `third`').toBeCloseTo(TIP_AT, 6)
+    expect(dist(m[1]!.tip, at(creditor)), 'third -> creditor: at `creditor`').toBeCloseTo(TIP_AT, 6)
   })
 
   it('`full` LOD never drops a marker for the number of lines or for the zoom while there is room', () => {
@@ -168,7 +180,7 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
     const draws = draw(both, [l], { activeEdges: new Map([[l.__key, 1]]) })
     const m = markers(draws)
     expect(m, 'the marker of the line and the marker of its highlight').toHaveLength(2)
-    expect(m[0]!.style).toBe(withAlpha(LINE, 1))
+    expect(m[0]!.style).toBe(DIR)
     expect(m[1]!.style, 'the highlight marker is the colour of the highlight stroke').toBe(withAlpha(TX, 1))
     expect(m[1]!.tip, 'at the same place').toEqual(m[0]!.tip)
     expect(m[1]!.base).toEqual(m[0]!.base)
@@ -181,13 +193,13 @@ describe('drawBaseGraph - the direction marker of a trust line', () => {
   it('a fading highlight: its marker fades with it and is gone when the stroke is, the marker of the line itself stays opaque', () => {
     const l = link('creditor', 'debtor')
     const half = markers(draw(both, [l], { activeEdges: new Map([[l.__key, 0.5]]) }))
-    expect(half.map((x) => x.style)).toEqual([withAlpha(LINE, 1), withAlpha(TX, 0.5)])
+    expect(half.map((x) => x.style)).toEqual([DIR, withAlpha(TX, 0.5)])
     const gone = markers(draw(both, [l], { activeEdges: new Map([[l.__key, 0.002]]) }))
-    expect(gone.map((x) => x.style), 'below the threshold of the highlight stroke: no highlight marker').toEqual([withAlpha(LINE, 1)])
+    expect(gone.map((x) => x.style), 'below the threshold of the highlight stroke: no highlight marker').toEqual([DIR])
   })
 
   it('an active line without room for a marker gets none in the highlight either', () => {
-    const near = node('near', 130, 300)
+    const near = node('near', 124 + ROOM - 1, 300)
     const l = link('creditor', 'near')
     const draws = draw([creditor, near], [l], { activeEdges: new Map([[l.__key, 1]]) })
     expect(bodies(draws), 'body and highlight stroke').toHaveLength(2)

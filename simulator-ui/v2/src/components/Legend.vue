@@ -14,11 +14,14 @@
  *
  * THE DIRECTION OF A TRUST LINE (PR 2) is the last entry, after the shapes: an arrow and `Trust → potential debtor`.
  * It is shown when the snapshot has trust lines - the parent hands over `trustLineColor`, the colour the canvas draws
- * the marker with (`linkColorOf`), and nothing when there are none. The arrow points at the words that name the end
- * it stands at on the canvas: the debtor. It is not a participant feature and not part of `LEGEND_VOCABULARY`.
+ * their bodies with (`linkColorOf`), and nothing when there are none. The shaft is that colour; the HEAD is the
+ * colour and the size the canvas draws the marker with (`palette.direction`, `ARROW`; revised 2026-10-16). The arrow
+ * points at the words that name the end it stands at on the canvas: the debtor. It is not a participant feature and
+ * not part of `LEGEND_VOCABULARY`.
  */
 import { computed } from 'vue'
 
+import { ARROW } from '../render/linkArrowhead'
 import type { GraphNode } from '../types'
 import { LEGEND_HELP, LEGEND_TITLE, LEGEND_VOCABULARY, legendEntriesFor, TRUST_DIRECTION_TEXT, type DataPalette, type LegendEntryId } from '../vizMapping'
 
@@ -56,6 +59,17 @@ const entries = computed(() => {
 
 const title = computed(() => (props.equivalent ? `${LEGEND_TITLE} · ${props.equivalent}` : LEGEND_TITLE))
 
+/** The arrow of the direction entry: a 15 px shaft and the canvas marker's own head (length x width), tip at the right. */
+const arrowSvg = (() => {
+  const shaft = 15
+  const h = Math.max(8, Math.ceil(ARROW.widthPx) + 2)
+  const y = h / 2
+  const base = 1 + shaft
+  const tip = base + ARROW.lengthPx
+  const half = ARROW.widthPx / 2
+  return { w: Math.ceil(tip) + 1, h, y, base, points: `${tip},${y} ${base},${y - half} ${base},${y + half}` }
+})()
+
 function swatchStyle(s: Swatch): Record<string, string> {
   if (!s.color) return {}
   // A hub is a ring: the colour is its outline only. Everything else is filled with its colour.
@@ -87,10 +101,10 @@ function swatchStyle(s: Swatch): Record<string, string> {
       </li>
       <li v-if="trustLineColor" class="ds-legend__entry" data-legend-direction>
         <span class="ds-legend__arrow" data-legend-swatch>
-          <!-- The marker of the canvas, on a stretch of its line: head 5 x 4, the tip at the end the words name. -->
-          <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true" focusable="false">
-            <line x1="1" y1="4" x2="16" y2="4" :stroke="trustLineColor" stroke-width="1.25" />
-            <polygon points="21,4 16,2 16,6" :fill="trustLineColor" />
+          <!-- The marker of the canvas on a stretch of its line: its head, the tip at the end the words name. -->
+          <svg :width="arrowSvg.w" :height="arrowSvg.h" :viewBox="`0 0 ${arrowSvg.w} ${arrowSvg.h}`" aria-hidden="true" focusable="false">
+            <line x1="1" :y1="arrowSvg.y" :x2="arrowSvg.base" :y2="arrowSvg.y" :stroke="trustLineColor" stroke-width="1.25" />
+            <polygon :points="arrowSvg.points" :fill="palette.direction" />
           </svg>
         </span>
         <span class="ds-legend__text">{{ TRUST_DIRECTION_TEXT }}</span>

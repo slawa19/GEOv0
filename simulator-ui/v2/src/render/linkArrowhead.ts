@@ -13,19 +13,32 @@
 import type { LayoutNode } from '../types/layout'
 import { getLinkTermination } from './linkGeometry'
 
+/**
+ * THE length of the arrowhead, tip to base, in screen px - the one size the product ships. MEASURED, not chosen: the
+ * smallest whole length at which the marker stands out from a bare stretch of its own line at application zoom 0.6,
+ * on the 100-node scene and on a line with no debt, in both themes (`e2e/qa/p039-repro/marker-size.p039-repro.ts`, the
+ * curve is in `docs/ru/simulator/frontend/docs/visual-language.md` section 3.1). Decision 4 of the slice's design said
+ * 5 x 4; revised 2026-10-16 after the external review found it barely legible. A test may override this one line
+ * (the size frames of the owner do): everything below is derived from it.
+ */
+export const ARROW_LENGTH_PX = 5
+/** Width to length, kept from decision 4 (4 : 5). */
+export const ARROW_ASPECT = 0.8
+/** The tip stops this far before the rim of the target (`getLinkTermination`), as in decision 4. */
+export const ARROW_TIP_GAP_PX = 2
+
 export const ARROW = {
   /** From the tip back to the base, along the line. */
-  lengthPx: 5,
+  lengthPx: ARROW_LENGTH_PX,
   /** The base, across the line. */
-  widthPx: 4,
-  /** The tip stops this far before the rim of the target (`getLinkTermination`). */
-  tipGapPx: 2,
+  widthPx: ARROW_LENGTH_PX * ARROW_ASPECT,
+  tipGapPx: ARROW_TIP_GAP_PX,
   /**
    * With less free line than this between the two rims there is NO marker: it would be drawn inside a node or past
-   * the source. 14 = 2 x (tip gap 2 + length 5): the room the two opposite arrowheads of a mutual pair need without
-   * overlapping, so one bound serves a one-way line and a pair alike.
+   * the source. 2 x (tip gap + length): the room the two opposite arrowheads of a mutual pair need without
+   * overlapping, so one bound serves a one-way line and a pair alike (14 px for decision 4's 5 px).
    */
-  minFreeGapPx: 14,
+  minFreeGapPx: 2 * (ARROW_TIP_GAP_PX + ARROW_LENGTH_PX),
 } as const
 
 /** The three corners, in world coordinates. `left` / `right` are the two ends of the base. */

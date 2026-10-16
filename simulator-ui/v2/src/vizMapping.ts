@@ -111,6 +111,8 @@ export const DATA_TOKEN = {
   neutral: '--ds-data-neutral',
   frozen: '--ds-data-frozen',
   hub: '--ds-data-hub',
+  /** The direction marker of a trust line and the head of the legend's arrow (039 slice B, PR 2). */
+  direction: '--ds-data-direction',
 } as const satisfies Record<string, `--${string}`>
 
 export type DataColorName = keyof typeof DATA_TOKEN
@@ -126,6 +128,7 @@ export const DATA_PALETTE_DEFAULT: DataPalette = Object.freeze({
   neutral: '#dfe5ee',
   frozen: '#8c8c8c',
   hub: '#a3e635',
+  direction: '#b4bfcf',
 })
 
 /** Which token colours the FILL of a look: a freeze wins over the role; unknown is filled like neutral (its sign says `?`). */

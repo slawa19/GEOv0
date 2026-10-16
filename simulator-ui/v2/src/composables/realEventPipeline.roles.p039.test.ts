@@ -29,7 +29,7 @@ import { classifyNode, createVizMapping, DATA_TOKEN, legendEntriesFor, type Data
 import { applyAcceptedRealEvent, type RealEventDraft } from './realEventPipeline'
 
 const TS = '2026-10-12T00:00:00Z'
-const PALETTE = { debtor: '#010101', creditor: '#020202', neutral: '#030303', frozen: '#040404', hub: '#050505' } as const
+const PALETTE = { debtor: '#010101', creditor: '#020202', neutral: '#030303', frozen: '#040404', hub: '#050505', direction: '#060606' } as const
 const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: PALETTE } }
 const tokenOf = (fill: string) => DATA_TOKEN[(Object.keys(PALETTE) as DataColorName[]).find((k) => PALETTE[k] === fill)!]
 

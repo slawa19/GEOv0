@@ -1,6 +1,6 @@
 import type { GraphLink, GraphNode } from '../types'
 import type { LayoutLink } from '../types/layout'
-import { linkColorOf, type VizMapping } from '../vizMapping'
+import { classifyNode, linkColorOf, type VizMapping } from '../vizMapping'
 import { clamp01 } from '../utils/math'
 import { createThrottledWarn } from '../utils/throttledWarn'
 import { withAlpha } from './color'
@@ -43,15 +43,62 @@ const linkColor = linkColorOf
 /**
  * The alpha of a direction marker: OPAQUE (039 slice B, PR 2). The marker must not inherit the alpha of its line - a
  * line with little or no debt is drawn at 0.06 and its marker would be invisible, although the direction of trust is
- * the same whatever is owed. At 1 the line colour `#64748b` has a contrast of 3.93 to the canvas of `saas` and 4.14
- * to that of `hud` (WCAG relative luminance, computed 2026-10-12, not measured on pixels; 3 is the floor for a
- * graphical object); at 0.8 it is 2.94 and 3.03 - at the floor and under it. Opaque also means that markers lying
- * one over another do not add up to another colour.
+ * the same whatever is owed. Its colour is the data token `--ds-data-direction` (`mapping.node.palette.direction`,
+ * the same in every theme; revised 2026-10-16 from the line's own `#64748b`, which the external review found barely
+ * legible): contrast 10.1 to the canvas of `saas` and 10.6 to that of `hud` (WCAG relative luminance, computed, not
+ * measured on pixels). Opaque also means that markers lying one over another do not add up to another colour.
  */
 export const DIRECTION_MARKER_ALPHA = 1
 
-/** One reused object: `trustArrowhead` writes the corners of the current marker into it. */
-const arrowhead: Arrowhead = newArrowhead()
+/** Corners of the markers of one pass, reused between passes: the hot path allocates only when the scene grows. */
+const markerPool: Arrowhead[] = []
+const markerLinks: LayoutLink[] = []
+let markerCount = 0
+
+/**
+ * Does a THIRD node (not the two ends of the line) lie over this triangle? Such a node covers the line, and it
+ * covers the marker too: that marker is drawn before the nodes, the others after them. The node's painted extent is
+ * its size plus its outline (1.5 px) - plus the ring of a hub (3.5 px gap + 1.4 px line). Rectangles are taken as
+ * their box (their rounded corners make that a little generous: a marker near a corner goes under the node).
+ */
+function underAThirdNode(m: Arrowhead, nodes: LayoutNode[], sourceId: string, targetId: string, hiddenNodeId: string | null, invZ: number): boolean {
+  const minX = Math.min(m.tipX, m.leftX, m.rightX)
+  const maxX = Math.max(m.tipX, m.leftX, m.rightX)
+  const minY = Math.min(m.tipY, m.leftY, m.rightY)
+  const maxY = Math.max(m.tipY, m.leftY, m.rightY)
+  for (const n of nodes) {
+    if (n.id === sourceId || n.id === targetId || n.id === hiddenNodeId) continue
+    const g = getNodeBaseGeometry(n, invZ)
+    const pad = (classifyNode(n).hub ? 1.5 + 3.5 + 1.4 : 1.5) * invZ
+    const hw = (g.shape === 'circle' ? g.r : g.w / 2) + pad
+    const hh = (g.shape === 'circle' ? g.r : g.h / 2) + pad
+    // Box against box first: almost every node is far away.
+    if (n.__x + hw < minX || n.__x - hw > maxX || n.__y + hh < minY || n.__y - hh > maxY) continue
+    if (g.shape !== 'circle') return true
+    if (circleTouchesTriangle(n.__x, n.__y, hw, m)) return true
+  }
+  return false
+}
+
+function circleTouchesTriangle(cx: number, cy: number, r: number, m: Arrowhead): boolean {
+  const r2 = r * r
+  const edge = (ax: number, ay: number, bx: number, by: number) => {
+    const dx = bx - ax
+    const dy = by - ay
+    const l2 = dx * dx + dy * dy
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / l2)) : 0
+    const ex = ax + t * dx - cx
+    const ey = ay + t * dy - cy
+    return ex * ex + ey * ey <= r2
+  }
+  if (edge(m.tipX, m.tipY, m.leftX, m.leftY) || edge(m.leftX, m.leftY, m.rightX, m.rightY) || edge(m.rightX, m.rightY, m.tipX, m.tipY)) return true
+  // The centre inside the triangle (a node smaller than the marker): same side of all three edges.
+  const side = (ax: number, ay: number, bx: number, by: number) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+  const s1 = side(m.tipX, m.tipY, m.leftX, m.leftY)
+  const s2 = side(m.leftX, m.leftY, m.rightX, m.rightY)
+  const s3 = side(m.rightX, m.rightY, m.tipX, m.tipY)
+  return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0)
+}
 
 /** A closed path of its own and one `fill`: the body of the line stays an open path with its own stroke. */
 function fillArrowhead(ctx: CanvasRenderingContext2D, a: Arrowhead, style: string) {
@@ -172,10 +219,31 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     ctx.stroke()
   }
 
-  // Links: direction markers. `source -> target` is creditor -> debtor (AGENTS.md section 8): the arrowhead stands
-  // at the TARGET. A pass of its own after every body, so that no body is stroked over a marker, in the resolved
-  // colour of the line and opaque - the same triangle whatever `used` is (it shows trust, not a debt). The lines are
-  // the ones the pass above drew: all of them in `full` LOD, the remaining ones in `focus`. No batching: one fill each.
+  // Direction markers (039 slice B, PR 2). `source -> target` is creditor -> debtor (AGENTS.md section 8): the
+  // arrowhead stands at the TARGET, the same triangle whatever `used` is (it shows trust, not a debt). Collected here
+  // for the lines the pass above drew - all of them in `full` LOD, the remaining ones in `focus` - and DRAWN after
+  // everything that could be painted over them: the highlight strokes and the nodes with their rings (revised
+  // 2026-10-16 after the external review: a hub ring cut the neck of a marker at a hub-debtor, and the highlight
+  // stroke of A -> B crossed the marker of B -> A at A). Exception: a marker under a THIRD node is drawn before the
+  // nodes, so that node covers it as it covers the line. One fill per marker, no batching.
+  const markerHighlight = (link: LayoutLink): number => {
+    if (dragMode) return 0
+    const edgeAlpha = activeEdges.get(link.__key)
+    if (edgeAlpha === undefined) return 0
+    // The same gate as the highlight stroke below: no stroke, no highlight marker.
+    const alpha = clamp01(Math.max(mapping.link.alpha.hi, linkAlpha(link, mapping) * 4.0)) * edgeAlpha
+    return alpha > 0.003 ? edgeAlpha : 0
+  }
+  const markerBase = withAlpha(mapping.node.palette.direction, DIRECTION_MARKER_ALPHA)
+  const fillMarker = (m: Arrowhead, link: LayoutLink) => {
+    fillArrowhead(ctx, m, markerBase)
+    // A highlighted line: its marker again in the highlight colour, at the same TARGET end, fading with the highlight
+    // back to the marker underneath.
+    const h = markerHighlight(link)
+    if (h > 0) fillArrowhead(ctx, m, withAlpha(mapping.fx.tx_spark.trail, DIRECTION_MARKER_ALPHA * h))
+  }
+  markerCount = 0
+  const deferred: number[] = []
   for (const link of links) {
     if (linkLod === 'focus') {
       const isActive = activeEdges.has(link.__key)
@@ -186,8 +254,11 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
     const b = pos.get(link.target)
     // An orphan link was counted and reported by the pass above.
     if (!a || !b) continue
-    if (!trustArrowhead(a, b, invZ, arrowhead)) continue
-    fillArrowhead(ctx, arrowhead, withAlpha(linkColor(link, mapping, palette), DIRECTION_MARKER_ALPHA))
+    const m = (markerPool[markerCount] ??= newArrowhead())
+    if (!trustArrowhead(a, b, invZ, m)) continue
+    markerLinks[markerCount] = link
+    deferred.push(markerCount)
+    markerCount += 1
   }
 
   // Links: overlay pass = UX highlight for focus/active without overwriting base style.
@@ -249,16 +320,19 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(end.x, end.y)
           ctx.stroke()
-          // The highlight stroke runs over the marker of this line: the marker is drawn again in the highlight
-          // colour, at the same TARGET end, and fades with the highlight back to the marker underneath. A focus
-          // overlay (above) keeps the line's own colour, so the marker of the pass before stays as it is.
-          if (trustArrowhead(a, b, invZ, arrowhead)) {
-            fillArrowhead(ctx, arrowhead, withAlpha(mapping.fx.tx_spark.trail, DIRECTION_MARKER_ALPHA * edgeAlpha))
-          }
         }
       }
     }
   }
+
+  // Markers that a third node lies over: drawn now, under the nodes (see the collection above).
+  let after = 0
+  for (const k of deferred) {
+    const link = markerLinks[k]!
+    if (underAThirdNode(markerPool[k]!, nodes, link.source, link.target, hiddenNodeId, invZ)) fillMarker(markerPool[k]!, link)
+    else deferred[after++] = k
+  }
+  deferred.length = after
 
   // Nodes
   for (const n of nodes) {
@@ -295,6 +369,10 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
     if (isDimmed) ctx.globalAlpha = 1
   }
+
+  // The markers, last: nothing of the base canvas is painted over them.
+  for (const k of deferred) fillMarker(markerPool[k]!, markerLinks[k]!)
+  markerLinks.fill(undefined as unknown as LayoutLink, 0, markerCount)
 
   return pos
 }

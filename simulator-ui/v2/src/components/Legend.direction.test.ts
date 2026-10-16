@@ -97,7 +97,7 @@ describe('Legend - the direction of a trust line', () => {
     done()
   })
 
-  it('the arrow is drawn in the colour it was handed, head and shaft, and follows a new colour', async () => {
+  it('the shaft is drawn in the line colour it was handed and follows a new one; the head is the marker colour of the palette', async () => {
     const props = reactive({ ...base, trustLineColor: '#aa5500' })
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -105,16 +105,19 @@ describe('Legend - the direction of a trust line', () => {
     app.mount(host)
     const head = () => host.querySelector<SVGElement>('[data-legend-direction] polygon')!
     const shaft = () => host.querySelector<SVGElement>('[data-legend-direction] line')!
-    expect(rgbOf(head().getAttribute('fill')!)).toBe('170,85,0')
+    expect(rgbOf(head().getAttribute('fill')!)).toBe(rgbOf(DATA_PALETTE_DEFAULT.direction))
     expect(rgbOf(shaft().getAttribute('stroke')!)).toBe('170,85,0')
     props.trustLineColor = '#010203'
     await nextTick()
-    expect(rgbOf(head().getAttribute('fill')!)).toBe('1,2,3')
+    expect(rgbOf(shaft().getAttribute('stroke')!)).toBe('1,2,3')
+    props.palette = { ...DATA_PALETTE_DEFAULT, direction: '#040506' }
+    await nextTick()
+    expect(rgbOf(head().getAttribute('fill')!), 'a new palette object recolours the head').toBe('4,5,6')
     app.unmount()
     host.remove()
   })
 
-  it('canvas and legend agree: the colour `linkColorOf` resolves is the fill of the marker `drawBaseGraph` paints - default and snapshot palette', () => {
+  it('canvas and legend agree: the marker `drawBaseGraph` paints is the head of the legend arrow, the body is its shaft - default and snapshot palette', () => {
     const mapping = createVizMapping()
     const a = { id: 'a', __x: 0, __y: 0, viz_shape_key: 'circle', viz_size: { w: 24, h: 24 } } as LayoutNode
     const b = { id: 'b', __x: 200, __y: 0, viz_shape_key: 'circle', viz_size: { w: 24, h: 24 } } as LayoutNode
@@ -126,10 +129,12 @@ describe('Legend - the direction of a trust line', () => {
       const { ctx, draws } = recordingCtx()
       drawBaseGraph(ctx, { w: 400, h: 200, nodes: [a, b], links: [link], mapping, palette, selectedNodeId: null, activeEdges: new Map(), cameraZoom: 1 })
       const marker = draws.find((d) => d.kind === 'fill')!
+      const body = draws.find((d) => d.kind === 'stroke')!
       const legendColor = linkColorOf(link, mapping, palette)
-      expect(rgbOf(marker.fillStyle), `key ${String(link.viz_color_key)}`).toBe(rgbOf(legendColor))
-      const { host, done } = mount(Legend, { ...base, trustLineColor: legendColor })
-      expect(rgbOf(host.querySelector('[data-legend-direction] polygon')!.getAttribute('fill')!)).toBe(rgbOf(marker.fillStyle))
+      expect(rgbOf(body.strokeStyle), `key ${String(link.viz_color_key)}: the body`).toBe(rgbOf(legendColor))
+      const { host, done } = mount(Legend, { ...base, palette: mapping.node.palette, trustLineColor: legendColor })
+      expect(rgbOf(host.querySelector('[data-legend-direction] polygon')!.getAttribute('fill')!), 'the head of the legend arrow is the marker').toBe(rgbOf(marker.fillStyle))
+      expect(rgbOf(host.querySelector('[data-legend-direction] line')!.getAttribute('stroke')!), 'the shaft is the body').toBe(rgbOf(body.strokeStyle))
       done()
     }
   })

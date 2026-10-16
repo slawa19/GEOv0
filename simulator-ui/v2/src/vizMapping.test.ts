@@ -68,7 +68,7 @@ describe('classifyNode - the one place that says what a participant looks like',
 })
 
 describe('fill - which data colour a look is painted with', () => {
-  const palette = { debtor: '#010101', creditor: '#020202', neutral: '#030303', frozen: '#040404', hub: '#050505' }
+  const palette = { debtor: '#010101', creditor: '#020202', neutral: '#030303', frozen: '#040404', hub: '#050505', direction: '#060606' }
 
   it('by role; unknown like neutral; a freeze over any role; never the hub colour', () => {
     const token = (n: In) => DATA_TOKEN[fillTokenOf(classifyNode(n))]
@@ -151,8 +151,8 @@ describe('the resolved colours - read at the app root, not cached, one object fo
   })
 
   it('the tokens are read at the scope element, by their names', () => {
-    const el = root({ '--ds-data-debtor': '#aa0001', '--ds-data-creditor': '#aa0002', '--ds-data-neutral': '#aa0003', '--ds-data-frozen': '#aa0004', '--ds-data-hub': '#aa0005' })
-    expect(createVizMapping(el).node.palette).toEqual({ debtor: '#aa0001', creditor: '#aa0002', neutral: '#aa0003', frozen: '#aa0004', hub: '#aa0005' })
+    const el = root({ '--ds-data-debtor': '#aa0001', '--ds-data-creditor': '#aa0002', '--ds-data-neutral': '#aa0003', '--ds-data-frozen': '#aa0004', '--ds-data-hub': '#aa0005', '--ds-data-direction': '#aa0006' })
+    expect(createVizMapping(el).node.palette).toEqual({ debtor: '#aa0001', creditor: '#aa0002', neutral: '#aa0003', frozen: '#aa0004', hub: '#aa0005', direction: '#aa0006' })
   })
 
   it('no eternal cache: a second resolution sees the changed value, in the SAME mapping object', () => {
@@ -204,7 +204,7 @@ describe('DOM-independent settings', () => {
 
 /**
  * FORM GUARD of `designSystem.tokens.css` (an architecture guard, AGENTS.md section 11). It reads the TEXT of the
- * stylesheet: that the five data tokens are declared exactly once, inside the first `:root` block, before any
+ * stylesheet: that the data tokens (six since 2026-10-16) are declared exactly once, inside the first `:root` block, before any
  * `[data-theme]` block, as `#rrggbb`, and that the defaults of `vizMapping.ts` are those values.
  * It does NOT see what a browser computes (a later rule elsewhere, a typo in a selector) - that is
  * `e2e/qa/data-colours.qa.ts`, which reads the tokens under every theme in a real page.
@@ -232,7 +232,7 @@ describe('form guard - the data tokens in designSystem.tokens.css', () => {
     })
   }
 
-  it('there are five data tokens and no sixth', () => {
+  it('there are the six data tokens and no seventh', () => {
     expect([...new Set(css.match(/--ds-data-[a-z-]+/g))].sort()).toEqual(Object.values(DATA_TOKEN).sort())
   })
 })

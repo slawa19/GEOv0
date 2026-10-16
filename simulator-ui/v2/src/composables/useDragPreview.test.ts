@@ -11,7 +11,7 @@ import type { GraphNode } from '../types'
 import { classifyNode, createVizMapping, type VizMapping } from '../vizMapping'
 import { useDragPreview } from './useDragPreview'
 
-const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: { debtor: '#a10000', creditor: '#0000b2', neutral: '#c3c3c3', frozen: '#444444', hub: '#00e500' } } }
+const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: { debtor: '#a10000', creditor: '#0000b2', neutral: '#c3c3c3', frozen: '#444444', hub: '#00e500', direction: '#060606' } } }
 
 function preview(node: GraphNode) {
   const el = ref<HTMLDivElement | null>(document.createElement('div'))

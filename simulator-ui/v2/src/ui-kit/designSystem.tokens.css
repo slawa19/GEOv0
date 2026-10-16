@@ -440,12 +440,15 @@
       neutral  - even overall ("0") and balance unknown ("?")
       frozen   - frozen / suspended, over the role; with a dashed outline
       hub      - the thin extra ring of a participant of type "hub"; never a fill
+      direction - the arrowhead of a trust line at its debtor end, and the head of the legend's arrow
   */
   --ds-data-debtor: #f2545b;
   --ds-data-creditor: #4c8dff;
   --ds-data-neutral: #dfe5ee;
   --ds-data-frozen: #8c8c8c;
   --ds-data-hub: #a3e635;
+  /* 039 slice B, PR 2 (2026-10-16): the direction marker of a trust line - a light neutral, the same in every theme. */
+  --ds-data-direction: #b4bfcf;
 }
 
 /* Density */

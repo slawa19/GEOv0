@@ -30,7 +30,7 @@ import { classifyNode, createVizMapping, DATA_TOKEN, type DataColorName, type Vi
 import { fixture100, measured } from './p039'
 
 /** Made-up, all different: a fill is recognised by WHICH token it is, never by a value this test would have to know. */
-const PALETTE = { debtor: '#010101', creditor: '#020202', neutral: '#030303', frozen: '#040404', hub: '#050505' } as const
+const PALETTE = { debtor: '#010101', creditor: '#020202', neutral: '#030303', frozen: '#040404', hub: '#050505', direction: '#060606' } as const
 const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: PALETTE } }
 const tokenOf = (fill: string): string => {
   const name = (Object.keys(PALETTE) as DataColorName[]).find((k) => PALETTE[k] === fill)

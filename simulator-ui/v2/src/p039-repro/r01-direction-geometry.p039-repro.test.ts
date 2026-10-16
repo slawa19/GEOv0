@@ -27,6 +27,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { drawBaseGraph } from '../render/baseGraph'
+import { ARROW } from '../render/linkArrowhead'
 import type { LayoutLink, LayoutNode } from '../types/layout'
 import { createVizMapping } from '../vizMapping'
 import { measured } from './p039'
@@ -40,8 +41,8 @@ vi.mock('../render/glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 
 /** A path point this far from the axis of the line is not the line (the line is drawn on its axis exactly). */
 const OFF_AXIS_PX = 0.75
-/** Decision 4: tip 2 px before the rim, base 5 px farther back - the whole marker is within 7 px of the rim. One more for rounding. */
-const AT_THE_END_PX = 8
+/** The shipped marker (decision 4 as revised 2026-10-16): tip 2 px before the rim, base one length farther - the whole marker within tip gap + length of the rim. One more for rounding. */
+const AT_THE_END_PX = ARROW.tipGapPx + ARROW.lengthPx + 1
 /** The stand-in nodes are 24 px circles. */
 const RIM_PX = 12
 

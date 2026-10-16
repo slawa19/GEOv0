@@ -18,7 +18,7 @@ import { createVizMapping, LEGEND_HELP, type DataPalette, type VizMapping } from
 
 vi.mock('../render/glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 
-const PALETTE: DataPalette = { debtor: '#a10000', creditor: '#0000b2', neutral: '#c3c3c3', frozen: '#444444', hub: '#00e500' }
+const PALETTE: DataPalette = { debtor: '#a10000', creditor: '#0000b2', neutral: '#c3c3c3', frozen: '#444444', hub: '#00e500', direction: '#060606' }
 const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: PALETTE } }
 
 /** `#rrggbb`, `rgb(r, g, b)` and `rgba(r,g,b,a)` to one form: "r,g,b". */
@@ -170,8 +170,9 @@ describe('the canvas, the legend and the node card agree', () => {
     })
   }
 
-  it('counter-check: the made-up palette has five different colours, and the cases cover four of them as fills', () => {
-    expect(new Set(Object.values(PALETTE)).size).toBe(5)
+  // 2026-10-16 (039 slice B, PR 2): a sixth colour, `direction` - the marker of a trust line, not a fill of a node.
+  it('counter-check: the made-up palette has six different colours, and the cases cover four of them as fills', () => {
+    expect(new Set(Object.values(PALETTE)).size).toBe(6)
     expect(new Set(SCENE.map(canvasFill)).size).toBe(4)
   })
 

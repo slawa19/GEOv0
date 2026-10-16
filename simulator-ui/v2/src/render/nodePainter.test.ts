@@ -15,7 +15,7 @@ import { drawNodeShape, NODE_SIGN_SIZE_PX } from './nodePainter'
 
 vi.mock('./glowSprites', () => ({ drawGlowSprite: vi.fn() }))
 
-const PALETTE = { debtor: '#110000', creditor: '#000011', neutral: '#111111', frozen: '#222222', hub: '#00ff00' } as const
+const PALETTE = { debtor: '#110000', creditor: '#000011', neutral: '#111111', frozen: '#222222', hub: '#00ff00', direction: '#060606' } as const
 const MAPPING: VizMapping = { ...createVizMapping(), node: { palette: PALETTE } }
 const rgb = (hex: string) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},`
 
