@@ -147,6 +147,8 @@ type GeoTestGlobals = {
   __GEO_TEST_FOCUS_ON_EDGE?: TestFnMock
   /** 039 slice B: the app's re-resolution of the colour tokens (on mount, after a theme change). */
   __GEO_TEST_RESOLVE_VIZ_COLORS?: TestFnMock
+  /** 043 S1 (review): the equivalent of the scene on screen, as the real app's `sceneEq` (the mock lacked the field). */
+  __GEO_TEST_SCENE_EQ_REF?: Ref<string>
 
   // Camera + highlight, wired to the real composables rather than to spies, so a test can ask
   // what the graph is showing instead of asking which functions ran (spec 007, §4.2 item 4).
@@ -287,6 +289,10 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
 
       const phase = ref(String(getGeoTestGlobal('__GEO_TEST_INTERACT_PHASE') ?? 'idle'))
       setGeoTestGlobal('__GEO_TEST_PHASE_REF', phase)
+      // 043 S1 (review): `sceneEq` is a field of the real `SimulatorAppApi` that this mock never had (it rendered as
+      // undefined); a ref the tests can move, defaulting to the fixtures' UAH.
+      const sceneEqRef = ref('UAH')
+      setGeoTestGlobal('__GEO_TEST_SCENE_EQ_REF', sceneEqRef)
 
        const selectedNode = ref<TestSelectedNode | null>(getGeoTestGlobal('__GEO_TEST_SELECTED_NODE') ?? null)
        const selectedNodeScreenCenter = ref<TestAnchor | null>(getGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER') ?? null)
@@ -589,6 +595,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           flash: 0,
         }),
         eq: ref('UAH'),
+        sceneEq: computed(() => sceneEqRef.value),
         scene: ref('A'),
         layoutMode: ref('admin-force'),
         quality: ref('med'),
@@ -6294,11 +6301,84 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
         expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('ui=interact')
         segment('Sandbox').click()
         expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('mode=fixtures')
+        const before = nav.hrefSet.mock.calls.length
+        segment('Auto-Run').click()
+        expect(nav.hrefSet.mock.calls.length, 'go-auto-run reaches a navigation').toBe(before + 1)
+        const autoRun = new URL(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? ''), 'http://localhost')
+        expect([autoRun.searchParams.get('mode'), autoRun.searchParams.get('ui')], 'Auto-Run: real mode, no ?ui=').toEqual(['real', null])
       } finally {
         nav.restore()
       }
     } finally {
       done()
+    }
+  })
+})
+
+/**
+ * 043 S1, fix-delta review (class 1): a kept-alive edge popup must never print the figures of one equivalent under
+ * the name of another. Path: an edge of a UAH scene, its "Send Payment" (the popup stays as frozen context), then
+ * the scene is replaced by the EUR one (the Equivalent selector of the bottom bar, from the keyboard).
+ */
+describe('SimulatorAppRoot - 043 S1 review: the kept-alive edge popup and a scene replacement', () => {
+  const UAH = {
+    equivalent: 'UAH', generated_at: '2026-10-16T00:00:00Z',
+    nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+    links: [{ source: 'alice', target: 'bob', trust_limit: '500.00', used: '120.00', available: '380.00', status: 'active' }],
+  }
+
+  it('the EUR scene does not keep the frozen UAH figures on screen under EUR', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', UAH)
+    setUrl('/?mode=real&ui=interact')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    const popupText = () => (host.querySelector('[data-testid="edge-detail-popup"]')?.textContent ?? '').replace(/\s+/g, ' ')
+    try {
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = [{
+        from_pid: 'alice', from_name: 'Alice', to_pid: 'bob', to_name: 'Bob', equivalent: 'UAH', limit: '500.00', used: '120.00', available: '380.00', status: 'active',
+      } as TrustlineInfo]
+      await nextTick()
+      await nextTick()
+      expect(popupText(), 'counter-check: the popup shows the UAH line').toContain('500.00')
+      expect(popupText()).toContain('UAH')
+
+      host.querySelector<HTMLButtonElement>('[data-testid="edge-send-payment"]')!.click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]'), 'counter-check: kept alive as frozen context').toHaveLength(1)
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]'), 'the payment panel is open').toHaveLength(1)
+
+      // Capture: the unit of the frozen figures is frozen with them, and the popup prints THAT one (a value the live
+      // scene never has proves it is not the live one that is printed).
+      const setup0 = (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance.subTree.component.setupState
+      expect(setup0.wmEdgeDetail.frozenEquivalent.value, 'the equivalent is captured at freeze time').toBe('UAH')
+      setup0.wmEdgeDetail.frozenEquivalent.value = 'XQ1'
+      await nextTick()
+      expect(popupText(), 'the kept-alive popup prints the captured equivalent, not the live one').toContain('500.00 XQ1')
+      setup0.wmEdgeDetail.frozenEquivalent.value = 'UAH'
+      await nextTick()
+
+      // The EUR scene replaces the UAH one.
+      const wrapper = (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance
+      wrapper.subTree.component.setupState.state.snapshot = { ...UAH, equivalent: 'EUR', links: [{ ...UAH.links[0], trust_limit: '7.00' }] }
+      getRequiredGeoTestGlobal('__GEO_TEST_SCENE_EQ_REF').value = 'EUR'
+      await nextTick()
+      await nextTick()
+
+      const text = popupText()
+      expect(text.includes('500.00') && text.includes('EUR'), `frozen UAH figures labelled EUR: "${text}"`).toBe(false)
+      expect(host.querySelectorAll('[data-testid="edge-detail-popup"]'), 'the frozen edge context of the old scene is released').toHaveLength(0)
+      expect(host.querySelectorAll('[data-testid="manual-payment-panel"]'), 'the payment panel the person is in stays').toHaveLength(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      getRequiredGeoTestGlobal('__GEO_TEST_SCENE_EQ_REF').value = 'UAH'
+      getRequiredGeoTestGlobal('__GEO_TEST_TRUSTLINES_REF').value = []
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL', '__GEO_TEST_INTERACT_STATE', '__GEO_TEST_SNAPSHOT')
+      vi.unstubAllGlobals()
     }
   })
 })

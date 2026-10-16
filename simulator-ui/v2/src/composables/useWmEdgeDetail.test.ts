@@ -210,3 +210,14 @@ describe('useWmEdgeDetail (ARCH-6 state machine)', () => {
   })
 })
 
+
+describe('useWmEdgeDetail - 043 S1 review: the frozen equivalent', () => {
+  it('is frozen with the figures and leaves with them', () => {
+    const ed = useWmEdgeDetail()
+    ed.syncAuto({ fromPid: 'A', toPid: 'B', anchor: null, focus: 'never', source: 'auto' })
+    ed.allowKeepAlive({ frozenLink: null, frozenEquivalent: 'UAH' })
+    expect([ed.state.value, ed.frozenEquivalent.value]).toEqual(['keepAlive', 'UAH'])
+    ed.releaseKeepAlive()
+    expect(ed.frozenEquivalent.value).toBeNull()
+  })
+})

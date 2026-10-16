@@ -539,6 +539,28 @@ function wmInteractPanelPhase(win: WindowInstance): InteractPhase {
   return String(win.data.phase ?? 'idle') as InteractPhase
 }
 
+/**
+ * 043 S1 (review, class 1): the unit the edge popup prints. Kept alive, it shows frozen figures - in the equivalent
+ * captured with them, never in the live scene's.
+ */
+const wmEdgeDetailEffectiveUnit = computed(() =>
+  wmEdgeDetail.state.value === 'keepAlive' ? (wmEdgeDetail.frozenEquivalent.value ?? '') : sceneEq.value,
+)
+
+/**
+ * 043 S1 (review, class 1): a replaced scene context - another equivalent, another scenario, another run - releases
+ * the kept-alive edge popup: its frozen line belongs to the scene that is gone. The payment panel the person is in
+ * stays; it is live (its figures, its unit and the equivalent it submits in follow the scene on screen).
+ */
+watch(
+  () => [sceneEq.value, shownScenarioId.value, real.runId] as const,
+  () => {
+    if (wmEdgeDetail.state.value !== 'keepAlive') return
+    wmEdgeDetail.releaseKeepAlive()
+    wmEdgeDetail.applyToWindowManager(wm, { closeReason: 'programmatic' })
+  },
+)
+
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
   return toLower(interactPhase.value) !== 'idle'
@@ -1053,6 +1075,8 @@ function onEdgeDetailCloseLine() {
    wmEdgeDetail.allowKeepAlive({
      frozenLink: interactSelectedLink.value,
      frozenFiguresSource: interactSelectedLinkFiguresSource.value,
+     // 043 S1 (review, class 1): the unit of the frozen figures is frozen with them.
+     frozenEquivalent: sceneEq.value,
    })
    // Do NOT close edge-detail — it persists as context.
 
@@ -1333,7 +1357,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
           :state="wmEdgeDetailEffectiveState(win)"
-          :unit="sceneEq"
+          :unit="wmEdgeDetailEffectiveUnit"
           :used="emptyToNull(wmEdgeDetailEffectiveLink?.used)"
           :reverse-used="emptyToNull(wmEdgeDetailEffectiveLink?.reverse_used)"
           :limit="emptyToNull(wmEdgeDetailEffectiveLink?.trust_limit)"
