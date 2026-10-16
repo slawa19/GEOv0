@@ -207,8 +207,15 @@ _HERE = Path(__file__).resolve().parent
 #: key (1) and every git child's environment (1), a replacement ref swapping a frozen blob (1), a gitlink expanded x2, malformed
 #: markers x6 and a prompt declaring no verdict values (1), model lookalikes x3 and the exact requested id (1), a key with CR/LF
 #: x2, and a response over the read cap (1).
+#:
+#: 2026-10-16, 041 `T4101` (F-041-1, the backend count replaced by a ban on narrowing flags): portable 510 -> 524 (+14).
+#: `portable/test_p035_c_backend_tier_counts_what_it_collects.py` (25) renamed `portable/test_p041_backend_tier_refuses_narrowing_flags.py`
+#: (39). Gone: the count comparison and the named-skip list it reconciled (2), the old profile decision, the wide-profile
+#: and selector counter-checks (3, rewritten). New: each refused option by name (6 + `--lf`/`--sw`/`--sw-skip` 3), the same
+#: from `PYTEST_ADDOPTS`, the wide profile with a deselect, the unmodified wide profile, four allowed options, the flag
+#: verdict and the whole-tier decision. The A10 cases are unchanged (16).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 510,
+    "portable": 524,
     "powershell": 235,
 }
 

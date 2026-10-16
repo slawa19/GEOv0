@@ -165,7 +165,7 @@ _A10_OUTCOMES = pytest.StashKey[dict]()
 def pytest_runtest_makereport(item, call):
     """A listed A10 member must EXECUTE: a skipped (or xfailed) outcome is turned into a failure (`tests/tier_count.py`).
 
-    Membership and count cannot see a `pytest.mark.skip`, a true `skipif`, an xfail or a `pytest.skip()` in the body or in
+    Membership cannot see a `pytest.mark.skip`, a true `skipif`, an xfail or a `pytest.skip()` in the body or in
     a fixture: the selection stays right and one of the five never passes. Collection-only runs reach no report and are not
     judged here. Every phase's outcome and duration of the five is kept for the one summary line below.
     """
@@ -199,17 +199,17 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
 
 
 def pytest_collection_finish(session) -> None:
-    """The canonical profile selects exactly the recorded number of cases (035 F-035-14, `tests/tier_count.py`).
+    """The whole tier is not narrowed by a flag, and the five A10 cases hold by name (041 F-041-1, `tests/tier_count.py`).
 
     A different hook, a different question from the one above: not "can this test run here" but "is the tier still
-    whole". It judges only the whole tier under `-m "not slow"` (what `scripts/verify_local.ps1 -BackendOnly` runs) and
-    never a path selector or the wide profile; the full statement of the rule and of what it does not see is in
-    `tests/tier_count.py`. Refused with exit 4 at the end of collection, so it holds under `--collect-only` too.
+    whole". The flag ban judges only a session over the whole tier, never a path selector; the full statement of the rule
+    and of what it does not see is in `tests/tier_count.py`. There is no count of the selected cases any more (removed
+    2026-10-16). Refused with exit 4 at the end of collection, so it holds under `--collect-only` too.
     """
 
     config = session.config
     # pytest 7.4 runs this hook even when a module failed to import and aborts only afterwards (exit 2). A broken
-    # module has no cases, so the count would blame a "lost" test for an import error; that is pytest's to report.
+    # module has no cases, and its import error is pytest's to report, not this hook's to reread.
     if session.testsfailed or session.shouldstop or session.shouldfail:
         return
     # The A10 exception is a property of the collection, not of a profile: judged on every run.
@@ -221,14 +221,13 @@ def pytest_collection_finish(session) -> None:
     )
     if a10_problem is not None:
         pytest.exit(f"backend tier refused: {a10_problem}", returncode=pytest.ExitCode.USAGE_ERROR)
-    if not _tier_count.is_canonical_profile(
-        markexpr=getattr(config.option, "markexpr", ""),
+    if not _tier_count.is_whole_tier(
         args=list(config.args),
         invocation_dir=config.invocation_params.dir,
         root=config.rootpath,
     ):
         return
-    problem = _tier_count.count_problem(selected=len(session.items))
+    problem = _tier_count.narrowing_problem(config.option)
     if problem is not None:
         pytest.exit(f"backend tier refused: {problem}", returncode=pytest.ExitCode.USAGE_ERROR)
 
