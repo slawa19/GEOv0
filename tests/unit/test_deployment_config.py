@@ -198,49 +198,13 @@ def test_env_example_has_no_runnable_non_dev_security_placeholders() -> None:
 
 
 def test_active_local_callers_select_dev_configuration_explicitly() -> None:
-    """Source-policy guard; runtime Compose behavior is verified separately."""
-    overlay = "docker compose -f docker-compose.yml -f docker-compose.dev.yml"
-    readme = _read_text("README.md")
-    contributing = _read_text("docs/ru/06-contributing.md")
-    contributing_en = _read_text("docs/en/06-contributing.md")
-    contributing_pl = _read_text("docs/pl/06-contributing.md")
-    real_mode_runbook = _read_text(
-        "docs/ru/simulator/backend/real-mode-runbook.md"
-    )
-    debugging = _read_text("docs/ru/testing/quick-start-and-debugging.md")
-    wsl_runbook = _read_text("docs/ru/runbook-dev-wsl2-docker-no-desktop.md")
-    real_simulator_runner = _read_text("scripts/run_real_simulator.ps1")
-    wsl_production = wsl_runbook.split("### 4.1", 1)[1].split("### 4.2", 1)[0]
-    wsl_development = wsl_runbook.split("### 4.2", 1)[1].split("### 4.3", 1)[0]
-    wsl_quick_summary = wsl_runbook.split("## 8)", 1)[1]
+    """Source-policy guard on the local launcher; runtime Compose behavior is verified separately.
 
-    assert readme.count(f"{overlay} up -d --build") >= 2
-    assert "$env:ENV = 'dev'" in readme
-    assert overlay in contributing
-    assert '$env:ENV = "dev"' in contributing
-    assert overlay in contributing_en
-    assert '$env:ENV = "dev"' in contributing_en
-    assert overlay in contributing_pl
-    assert '$env:ENV = "dev"' in contributing_pl
-    for local_guide in (
-        readme,
-        contributing,
-        contributing_en,
-        contributing_pl,
-    ):
-        assert "docker compose up -d --build" not in local_guide
-        assert "docker compose exec app" not in local_guide
-    assert f"{overlay} up --build" in real_mode_runbook
-    assert "Production-like" in real_mode_runbook
-    assert "заполнения `JWT_SECRET`, `ADMIN_TOKEN`" in real_mode_runbook
-    assert "$env:ENV = 'dev'" in debugging
-    assert "заполните `JWT_SECRET`" in wsl_production
-    assert "docker compose up -d --build" in wsl_production
-    assert "docker compose exec app" in wsl_production
-    assert overlay not in wsl_production
-    assert f"{overlay} up --build" in wsl_development
-    assert f"{overlay} up -d --build" in wsl_quick_summary
-    assert f"{overlay} exec app" in wsl_quick_summary
+    Documentation is outside the checks (owner's decision 2026-10-16, programme 041 `T4102`): this
+    test reads no Markdown.
+    """
+    real_simulator_runner = _read_text("scripts/run_real_simulator.ps1")
+
     assert (
         "$script:DevComposeFiles = @('-f', 'docker-compose.yml', "
         "'-f', 'docker-compose.dev.yml')"
