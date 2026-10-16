@@ -153,13 +153,19 @@ describe('F-034-D7: the eager bootstrap of the demo page', () => {
     expect(app.state.snapshot?.nodes.map((n) => n.id), 'anti-vacuum: the page itself loaded').toEqual(['PREVIEW_NODE'])
   })
 
-  it('CONTRACT: outside the demo page nothing is started for the visitor', async () => {
+  // 043 S2 (decision 2) REVERSES the contract this test held until 2026-10-16 ("outside the demo page nothing is started
+  // for the visitor"): opening the demo is a live run. Outside the demo page the one screen starts ONE run, not paused,
+  // at the default intensity - and not the demo page's paused bootstrap. The walk of the opening is
+  // `useSimulatorApp.autostart.p043.test.ts`.
+  it('CONTRACT (043 S2): outside the demo page the one screen starts one live run for the visitor, not paused', async () => {
     vi.stubEnv('DEV', false)
     window.history.replaceState({}, '', '/?mode=real')
 
     boot()
     await settle()
 
-    expect(createRun).not.toHaveBeenCalled()
+    expect(createRun).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 30 })
+    expect(pauseRun, 'not the paused bootstrap of the demo page').not.toHaveBeenCalled()
   })
 })

@@ -123,15 +123,16 @@ describe('042 S2: the client no longer chooses a run mode (reproducers: red whil
     // only that key: another preference of the same person is untouched
     expect(window.localStorage.getItem('geo.sim.v2.intensityPercent')).toBe('55')
 
-    await app.realActions.startRun()
-    await settle()
-
+    // 043 S2: the opening itself starts the run (decision 2) - at the person's stored intensity, with `real`.
     expect(createRun).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(createRun).mock.calls[0]?.[1]).toMatchObject({ scenario_id: 'sc1', mode: 'real' })
+    expect(vi.mocked(createRun).mock.calls[0]?.[1]).toMatchObject({ scenario_id: 'sc1', mode: 'real', intensity_percent: 55 })
+    expect(app.real.runId).toBe('R2')
   })
 
   it('a stored `fixtures` choice reaches neither the scenario preview source nor its request', async () => {
     window.localStorage.setItem(MODE_KEY, 'fixtures')
+    // 043 S2: the opening starts a run; here its create fails, so the scene on screen stays the preview this test reads.
+    vi.mocked(createRun).mockRejectedValueOnce(new Error('043 S2 test: the autostart create fails'))
 
     const app = boot()
     await settle()
@@ -158,8 +159,13 @@ describe('042 S2: the client no longer chooses a run mode (reproducers: red whil
   })
 
   it('anti-vacuum: the same boot still starts a run, and the preview follows the scenario switch', async () => {
+    // 043 S2: the opening starts a run; its create fails here (one attempt per load), so the preview stays and follows the
+    // switch, and the explicit Start below still creates the run.
+    vi.mocked(createRun).mockRejectedValueOnce(new Error('043 S2 test: the autostart create fails'))
     const app = boot()
     await settle()
+    expect(createRun, 'the opening tried once').toHaveBeenCalledTimes(1)
+    expect(app.real.runId, 'and left no run').toBeNull()
     expect(app.state.snapshot?.nodes.map((n) => n.id)).toEqual(['PREVIEW_sc1'])
 
     app.realActions.setSelectedScenarioId('sc2')
@@ -170,6 +176,7 @@ describe('042 S2: the client no longer chooses a run mode (reproducers: red whil
     await app.realActions.startRun({ intensityPercent: 0, pauseImmediately: true })
     await settle()
     expect(app.real.runId).toBe('R2')
-    expect(vi.mocked(createRun).mock.calls[0]?.[1]).toMatchObject({ scenario_id: 'sc2', mode: 'real', intensity_percent: 0 })
+    expect(createRun, 'the failed opening did not try again behind the explicit Start').toHaveBeenCalledTimes(2)
+    expect(vi.mocked(createRun).mock.calls[1]?.[1]).toMatchObject({ scenario_id: 'sc2', mode: 'real', intensity_percent: 0 })
   })
 })

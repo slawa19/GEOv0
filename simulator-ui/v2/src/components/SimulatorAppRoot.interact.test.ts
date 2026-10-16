@@ -72,6 +72,8 @@ const __GEO_TEST_SIM_STORAGE = {
   // 043 S1: the "Подробнее" toggle. `null` = a first visit (Details off).
   readDetailsOpen: vi.fn<() => boolean | null>(() => null),
   writeDetailsOpen: vi.fn<(isOpen: boolean) => void>(),
+  readOnboardingDismissed: vi.fn<() => boolean | null>(() => null),
+  writeOnboardingDismissed: vi.fn<(dismissed: boolean) => void>(),
 
   readDevtoolsOpenReal: vi.fn<() => boolean | null>(() => null),
   writeDevtoolsOpenReal: vi.fn<(isOpen: boolean) => void>(),
@@ -278,8 +280,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       }
 
       const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'real' ? 'real' : 'fixtures')
-      const isInteractUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'interact')
       const isDemoUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'demo')
+      // 043 S2: the one screen - the shipped rule, not a restatement (`ui=interact` is ignored by the product).
+      const isLiveUi = computed(() => actual.liveScreenPolicy(apiMode.value === 'real', isDemoUi.value))
       const isTestMode = computed(() => {
         // Default to true for most interaction tests, but allow overriding for
         // DevTools/Demo UI wiring tests (DevTools are hidden in test mode).
@@ -473,7 +476,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       setGeoTestGlobal('__GEO_TEST_INTERACT_STATE', interactState)
 
       const isInteractPickingPhase = computed(() => {
-        if (!isInteractUi.value) return false
+        if (!isLiveUi.value) return false
         const p = phase.value
         return (
           p === 'picking-payment-from' ||
@@ -533,7 +536,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         // flags
         isDemoFixtures: computed(() => false),
         isDemoUi,
-        isInteractUi,
+        isLiveUi,
         isTestMode,
         isWebDriver: computed(() => false),
         isE2eScreenshots: computed(() => false),
@@ -1661,10 +1664,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('ui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider', async () => {
+  it('043 S2: one screen - no mode segment; the ActionBar, the payment panel and (under Details) the run controls with the intensity', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    // The old Interact address: `ui=interact` is ignored, the same screen opens.
     setUrl('/?mode=real&ui=interact')
-    // 043 S1: the mode segment and the Advanced menu live behind "Подробнее"; with it on, Interact still has no intensity.
     storedDetails(true)
 
     const host = document.createElement('div')
@@ -1673,20 +1676,18 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     const app = mountSimulatorAppRoot(host)
     await nextTick()
 
-    // HUD presence (unified TopBar)
-    const interactBtn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === 'Interact') as
-      | HTMLButtonElement
-      | undefined
-    expect(interactBtn).toBeTruthy()
-    expect(interactBtn?.getAttribute('data-active')).toBe('1')
+    // No mode segment any more (decision 2), with Details on as well.
+    expect(host.querySelectorAll('button.ds-segment'), 'the Sandbox / Auto-Run / Interact segment is gone').toHaveLength(0)
 
     // ActionBar presence
     expect(host.querySelector('[data-testid="actionbar-payment"]')).toBeTruthy()
     // Phase panel presence
     expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
-    // Interact Mode must hide intensity slider (it exists in TopBar Auto-Run advanced only)
-    expect(host.querySelector('[aria-label="Intensity percent"]')).toBeFalsy()
+    // The Interact contract "intensity forced to 0, no intensity control" is gone (decision 3 replaces it with the pause
+    // on a manual action): the run controls and the intensity are under Details on the one screen.
+    expect(host.querySelector('[aria-label="Intensity percent"]'), 'the intensity control is under Details').toBeTruthy()
+    expect(host.querySelector('select[aria-label="Scenario"]'), 'the scenario selector is under Details').toBeTruthy()
 
     app.unmount()
     host.remove()
@@ -6029,7 +6030,7 @@ describe('SimulatorAppRoot - 043 S1: the first view (Details off by default)', (
  */
 describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces', () => {
   const SERVICE = [
-    ['mode segment', 'button.ds-segment'],
+    ['source select', 'select[aria-label="Источник"]'],
     ['theme switcher', 'select[aria-label="UI theme"]'],
     ['equivalent', 'select[aria-label="Equivalent"]'],
     ['layout', 'select[aria-label="Layout"]'],
@@ -6183,12 +6184,26 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       first.done()
     }
 
+    // 043 S2: remembered - the dismissal is written, and a load that reads it shows no hint.
+    expect(getSimStorage().writeOnboardingDismissed, 'the dismissal is remembered').toHaveBeenLastCalledWith(true)
+    getSimStorage().readOnboardingDismissed.mockImplementation(() => true)
+    const back = mount('/?mode=real')
+    try {
+      await nextTick()
+      expect(back.host.querySelector('[data-testid="onboarding-hint"]'), 'a dismissed hint does not come back on the next load').toBeNull()
+    } finally {
+      back.done()
+      getSimStorage().readOnboardingDismissed.mockImplementation(() => null)
+    }
+
+    // The old Auto-Run address is the same screen: the hint names "Send Payment", which is on it (decision 2).
     const second = mount('/?mode=real')
     try {
       await nextTick()
       const hint = second.host.querySelector('[data-testid="onboarding-hint"]')
-      expect(hint, 'shown in Auto-Run too').not.toBeNull()
-      expect(hint!.textContent, 'no promise of a button that is not on this screen').not.toContain('Send Payment')
+      expect(hint, 'shown on the old Auto-Run address too').not.toBeNull()
+      expect(hint!.textContent, 'the action it names is on this screen').toContain('Send Payment')
+      expect(second.host.querySelector('[data-testid="actionbar-payment"]')).not.toBeNull()
       toggle(second.host).click()
       await nextTick()
       expect(second.host.querySelector('[data-testid="onboarding-hint"]'), 'gone after "Подробнее"').toBeNull()
@@ -6244,6 +6259,11 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       byText('Pause')!.click()
       expect(actions.pause).toHaveBeenCalledTimes(1)
+      // 043 S2: "Поток" in the first row - pause on a living run, resume on a paused one.
+      const flow = () => host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')
+      expect(flow()?.getAttribute('aria-pressed'), 'the flow is on').toBe('true')
+      flow()!.click()
+      expect(actions.pause, 'the flow button on a living run reaches pause').toHaveBeenCalledTimes(2)
       byText('Stop')!.click()
       expect(actions.stop).toHaveBeenCalledTimes(1)
       byText('Apply')!.click()
@@ -6252,10 +6272,14 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       byText('Resume')!.click()
       expect(actions.resume).toHaveBeenCalledTimes(1)
+      expect(flow()?.getAttribute('aria-pressed'), 'the flow is off').toBe('false')
+      flow()!.click()
+      expect(actions.resume, 'the flow button on a paused run reaches resume').toHaveBeenCalledTimes(2)
       real.runId = null
       real.runStatus = null
       real.selectedScenarioId = 'sc1'
       await nextTick()
+      expect(flow(), 'no run: no flow button (Start is under Details)').toBeNull()
       byText('Start')!.click()
       expect(actions.startRun).toHaveBeenCalledTimes(1)
 
@@ -6288,18 +6312,21 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       expect(host.querySelector('.root')!.getAttribute('data-theme'), 'the theme switch reaches the root').toBe('hud')
 
+      // 043 S2: "Источник" (bottom row, Details) is the one switch that navigates - the pipeline is replaced. The same
+      // source navigates nowhere; the other one reloads with `?mode=` and without `?ui=`.
       const nav = stubLocationHrefSetter()
       try {
-        const segment = (t: string) => [...host.querySelectorAll<HTMLButtonElement>('button.ds-segment')].find((b) => (b.textContent ?? '').trim() === t)!
-        segment('Interact').click()
-        expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('ui=interact')
-        segment('Sandbox').click()
-        expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('mode=fixtures')
+        const source = host.querySelector<HTMLSelectElement>('select[aria-label="Источник"]')!
+        expect(source.value, 'the select shows the source on screen').toBe('real')
         const before = nav.hrefSet.mock.calls.length
-        segment('Auto-Run').click()
-        expect(nav.hrefSet.mock.calls.length, 'go-auto-run reaches a navigation').toBe(before + 1)
-        const autoRun = new URL(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? ''), 'http://localhost')
-        expect([autoRun.searchParams.get('mode'), autoRun.searchParams.get('ui')], 'Auto-Run: real mode, no ?ui=').toEqual(['real', null])
+        source.value = 'real'
+        source.dispatchEvent(new Event('change', { bubbles: true }))
+        expect(nav.hrefSet.mock.calls.length, 'the same source: no navigation').toBe(before)
+        source.value = 'fixtures'
+        source.dispatchEvent(new Event('change', { bubbles: true }))
+        expect(nav.hrefSet.mock.calls.length, 'the other source: one navigation').toBe(before + 1)
+        const to = new URL(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? ''), 'http://localhost')
+        expect([to.searchParams.get('mode'), to.searchParams.get('ui')], 'offline snapshot, no ?ui=').toEqual(['fixtures', null])
       } finally {
         nav.restore()
       }

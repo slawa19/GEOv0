@@ -223,6 +223,13 @@ ull, the caller defaults it); remembered in this browser, applied without
    */
   const DETAILS_OPEN_KEY = 'geo.sim.v2.details.open'
 
+  /**
+   * 043 S2: the onboarding hint, once dismissed, does not come back (decision 1: it "disappears after the first
+   * action"; a hint that returned on every load would ask the same person the same thing again). Set by the first action
+   * of a page - its close button, "Подробнее", a participant chosen, a manual flow started. Absent = not yet dismissed.
+   */
+  const ONBOARDING_DISMISSED_KEY = 'geo.sim.v2.onboarding.dismissed'
+
   const DEVTOOLS_OPEN_REAL_KEY = 'geo.sim.v2.devtools.open.real'
   const DEVTOOLS_OPEN_DEMO_KEY = 'geo.sim.v2.devtools.open.demo'
   const DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY = 'geo.sim.v2.devtools.open.realSnapshot'
@@ -274,6 +281,13 @@ ull, the caller defaults it); remembered in this browser, applied without
     storage01.write01(DETAILS_OPEN_KEY, v)
   }
 
+  function readOnboardingDismissed(): boolean | null {
+    return storage01.read01(ONBOARDING_DISMISSED_KEY)
+  }
+  function writeOnboardingDismissed(v: boolean) {
+    storage01.write01(ONBOARDING_DISMISSED_KEY, v)
+  }
+
   function readDevtoolsOpenReal(): boolean | null {
     return storage01.read01(DEVTOOLS_OPEN_REAL_KEY)
   }
@@ -311,6 +325,10 @@ ull, the caller defaults it); remembered in this browser, applied without
     // 043 S1: the "Подробнее" toggle.
     readDetailsOpen,
     writeDetailsOpen,
+
+    // 043 S2: the onboarding hint does not come back once dismissed.
+    readOnboardingDismissed,
+    writeOnboardingDismissed,
 
     // DevTools panel prefs (Demo vs Real) + snapshot for reload-based demo enter/exit.
     readDevtoolsOpenReal,

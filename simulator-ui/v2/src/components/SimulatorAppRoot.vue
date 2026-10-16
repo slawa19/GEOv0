@@ -336,7 +336,7 @@ const {
   // flags
   isDemoFixtures,
   isDemoUi,
-  isInteractUi,
+  isLiveUi,
   isTestMode,
   isWebDriver,
   isE2eScreenshots,
@@ -473,7 +473,7 @@ const useFullTrustlineEditor = ref(false)
 // E2 (P0): consolidate WM bridging watchers in a single controller composable.
 const ctl = useWindowController({
   apiMode,
-  isInteractUi,
+  isLiveUi,
   interactPhase,
   isFullEditor: useFullTrustlineEditor,
   interactState: interact.mode.state,
@@ -559,19 +559,8 @@ watch(
   },
 )
 
-const isInteractActivePhase = computed(() => {
-  if (!isInteractUi.value) return false
-  return toLower(interactPhase.value) !== 'idle'
-})
-
-const activeSegment = computed(() =>
-  apiMode.value !== 'real' ? 'sandbox' : isInteractUi.value ? 'interact' : 'auto'
-)
-
  const topBarCtx: TopBarContext = {
    apiMode,
-   activeSegment,
-   isInteractUi,
    isTestMode,
 
    uiTheme,
@@ -600,9 +589,6 @@ const activeSegment = computed(() =>
  }
 
  provideTopBarContext(topBarCtx)
-
-/** True when running in Auto-Run mode (real API, non-interact, non-demo). */
-const isAutoRunUi = computed(() => apiMode.value === 'real' && !isInteractUi.value && !isDemoUi.value)
 
 /** True when initial data has loaded (or we already have a snapshot from a previous load). */
 const dataReady = computed(() => !state.loading || !!state.snapshot)
@@ -890,7 +876,7 @@ function focusBottleneckTarget(target: BottleneckTarget): void {
 }
 
 function inspectEdgeFromNavigator(link: GraphLink): void {
-  if (apiMode.value !== 'real' || !isInteractUi.value || interact.mode.busy.value) return
+  if (apiMode.value !== 'real' || !isLiveUi.value || interact.mode.busy.value) return
 
   const anchor = navigatorEdgeAnchor(link)
   if (!interact.mode.selectEdge(keyEdge(link.source, link.target), anchor)) return
@@ -966,29 +952,18 @@ function toggleDemoUi() {
   else enterDemoUi()
 }
 
-function goSandbox() {
-  if (isInteractActivePhase.value) interact.mode.cancel()
+/**
+ * 043 S2: the source of the scene - the server (a live run) or the offline snapshot - is the "Источник" select under
+ * "Подробнее" (decision 2). Switching it replaces the whole data pipeline, so it reloads the page with `?mode=`; it is
+ * the one switch of this screen that still navigates (the Sandbox / Auto-Run / Interact segment and its three reloads
+ * are gone). Entering a manual action never navigates (reproducer (d)).
+ */
+function setSource(next: 'real' | 'fixtures') {
+  if (next === apiMode.value) return
+  if (toLower(interactPhase.value) !== 'idle') interact.mode.cancel()
   setQueryAndReload((sp) => {
-    sp.set('mode', 'fixtures')
+    sp.set('mode', next)
     sp.delete('ui')
-    sp.delete('debug')
-  })
-}
-
-function goAutoRun() {
-  if (isInteractActivePhase.value) interact.mode.cancel()
-  setQueryAndReload((sp) => {
-    sp.set('mode', 'real')
-    sp.delete('ui')
-    sp.delete('debug')
-  })
-}
-
-function goInteract() {
-  if (isInteractUi.value) return
-  setQueryAndReload((sp) => {
-    sp.set('mode', 'real')
-    sp.set('ui', 'interact')
     sp.delete('debug')
   })
 }
@@ -1145,15 +1120,17 @@ function onActionStartClearingFlow() {
 
 /**
  * 043 S1: the one onboarding hint (decision 1; a static line until the tour of 034 S9). Shown while a scene is on
- * screen until the first action of this page: its own close button, "Подробнее", a participant selected, or any
- * interact flow started. Not remembered across loads: the spec gives this slice one new stored key, and it is the
- * Details toggle's. Not in the offline screenshot mode (isE2eScreenshots), which has its own minimal controls.
+ * screen until the first action: its own close button, "Подробнее", a participant selected, or any manual flow
+ * started. 043 S2: remembered in this browser (`readOnboardingDismissed`) - once gone, it does not come back on the next
+ * load. Not in the offline screenshot mode (isE2eScreenshots), which has its own minimal controls.
  */
-const onboardingDismissed = ref(false)
+const onboardingDismissed = ref(simulatorStorage.readOnboardingDismissed() ?? false)
 const showOnboardingHint = computed(() => !onboardingDismissed.value && !isE2eScreenshots.value && !!state.snapshot)
-const onboardingCanAct = computed(() => apiMode.value === 'real' && isInteractUi.value)
+const onboardingCanAct = computed(() => isLiveUi.value)
 function dismissOnboarding(): void {
+  if (onboardingDismissed.value) return
   onboardingDismissed.value = true
+  simulatorStorage.writeOnboardingDismissed(true)
 }
 watch(detailsOpen, dismissOnboarding)
 watch(() => state.selectedNodeId, (id) => { if (id) dismissOnboarding() })
@@ -1237,15 +1214,12 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :edge="hoveredEdge"
       :style="edgeTooltipStyle"
       :get-node-name="(id) => getNodeById(id)?.name ?? null"
-      :interact-mode="isInteractUi"
+      :interact-mode="isLiveUi"
     />
 
     <TopBar
       :details-open="detailsOpen"
       @toggle-details="toggleDetails"
-      @go-sandbox="goSandbox"
-      @go-auto-run="goAutoRun"
-      @go-interact="goInteract"
       @set-ui-theme="setUiTheme"
       @refresh-scenarios="realActions.refreshScenarios"
       @start-run="realActions.startRun"
@@ -1260,10 +1234,10 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:intensity-percent="realActions.setIntensityPercent"
     >
-      <!-- 043 S1: the three protocol actions in the first row (Interact only until S2). -->
+      <!-- 043 S2: the three protocol actions in the first row of the one screen (server source). -->
       <template #actions>
         <ActionBar
-          v-if="dataReady && apiMode === 'real' && isInteractUi"
+          v-if="dataReady && isLiveUi"
           :phase="interactPhase"
           :busy="interact.mode.busy.value"
           :cancelling="interact.mode.cancelling?.value ?? false"
@@ -1278,7 +1252,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       <!-- 043 S1: the full metrics, below the rows, while Details is on (the total debt is in the bottom bar).
            No snapshot - no balance (034 S8, review C3): unknown debts are not zero debts. -->
       <SystemBalanceBar
-        v-if="detailsOpen && dataReady && (isInteractUi || isAutoRunUi) && state.snapshot"
+        v-if="detailsOpen && dataReady && isLiveUi && state.snapshot"
         :balance="interact.systemBalance"
         :equivalent="sceneEq"
         variant="metrics"
@@ -1355,13 +1329,13 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :is-pinned="isNodePinned(String(win.data.nodeId))"
           :pin="() => pinNode(String(win.data.nodeId))"
           :unpin="() => unpinNode(String(win.data.nodeId))"
-          :interact-mode="isInteractUi"
-          :interact-trustlines="isInteractUi ? interact.mode.trustlines.value : undefined"
-          :trustlines-loading="isInteractUi ? interact.mode.trustlinesLoading.value : undefined"
-          :interact-busy="isInteractUi ? interact.mode.busy.value : undefined"
-          :on-interact-send-payment="isInteractUi ? onInteractSendPayment : undefined"
-          :on-interact-new-trustline="isInteractUi ? onInteractNewTrustline : undefined"
-          :on-interact-edit-trustline="isInteractUi ? onInteractEditTrustline : undefined"
+          :interact-mode="isLiveUi"
+          :interact-trustlines="isLiveUi ? interact.mode.trustlines.value : undefined"
+          :trustlines-loading="isLiveUi ? interact.mode.trustlinesLoading.value : undefined"
+          :interact-busy="isLiveUi ? interact.mode.busy.value : undefined"
+          :on-interact-send-payment="isLiveUi ? onInteractSendPayment : undefined"
+          :on-interact-new-trustline="isLiveUi ? onInteractNewTrustline : undefined"
+          :on-interact-edit-trustline="isLiveUi ? onInteractEditTrustline : undefined"
           @close="() => {
             wm.close(win.id, 'action')
           }"
@@ -1448,7 +1422,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       v-model:quality="quality"
       v-model:labelsLod="labelsLod"
       :api-mode="apiMode"
-      :active-segment="activeSegment"
+      :set-source="setSource"
       :is-demo-fixtures="isDemoFixtures"
       :equivalent-options="equivalentOptions"
       :show-reset-view="showResetView"
@@ -1475,7 +1449,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       </template>
 
       <!-- 043 S1: the compact total debt, always in the bottom row. -->
-      <template v-if="dataReady && (isInteractUi || isAutoRunUi) && state.snapshot" #summary>
+      <template v-if="dataReady && isLiveUi && state.snapshot" #summary>
         <SystemBalanceBar :balance="interact.systemBalance" :equivalent="sceneEq" variant="debt" />
       </template>
 
@@ -1484,7 +1458,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
         <GraphNavigator
           :nodes="state.snapshot?.nodes ?? []"
           :links="state.snapshot?.links ?? []"
-          :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi || interact.mode.busy.value"
+          :edge-inspect-disabled="apiMode !== 'real' || !isLiveUi || interact.mode.busy.value"
           @inspect-node="inspectNodeFromNavigator"
           @inspect-edge="inspectEdgeFromNavigator"
         />
@@ -1549,20 +1523,20 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 
     <!-- BUG-6: Error toast for Interact Mode (auto-dismiss 4s). -->
     <SuccessToast
-      v-if="isInteractUi"
+      v-if="isLiveUi"
       :message="interact.mode.successMessage"
       @dismiss="interact.mode.successMessage.value = null"
     />
 
     <ErrorToast
-      v-if="isInteractUi"
+      v-if="isLiveUi"
       :message="interact.mode.state.error"
       @dismiss="interact.mode.state.error = null"
     />
 
     <!-- BUG-5: Interact Mode inline history log. -->
     <div
-      v-if="isInteractUi && interact.mode.history.length > 0"
+      v-if="isLiveUi && interact.mode.history.length > 0"
       class="ds-ov-bottom sar-interact-history-overlay"
     >
       <InteractHistoryLog :entries="interact.mode.history" :max-visible="3" />

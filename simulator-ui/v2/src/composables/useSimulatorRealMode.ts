@@ -31,6 +31,7 @@ import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
+import { toLower } from '../utils/stringHelpers'
 import { runStatusErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
@@ -173,6 +174,8 @@ export function useSimulatorRealMode(opts: {
   refreshScenarios: () => Promise<void>
   startRun: (opts?: { intensityPercent?: number; pauseImmediately?: boolean }) => Promise<void>
   pause: () => Promise<void>
+  /** 043 S2 (decision 3): the pause a manual action asks for - see the function. */
+  pauseForManualAction: () => Promise<void>
   resume: () => Promise<void>
   stop: () => Promise<void>
   applyIntensity: () => Promise<void>
@@ -1191,6 +1194,9 @@ export function useSimulatorRealMode(opts: {
       real.lastError = getErrorMessage(e)
     } finally {
       startRunInProgress = false
+      // A start that ended without a live run leaves no pause to wait for (043 S2).
+      const st = toLower(real.runStatus?.state)
+      if (st !== 'running' && st !== 'created') manualPausePending = false
     }
   }
 
@@ -1204,7 +1210,37 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
+  /**
+   * 043 S2 (decision 3): a manual action pauses the automatic payments. A `running` run is paused now; a run that is
+   * still being started (`startRun` in flight, or `created`) is paused the moment it reads `running`, so an action taken
+   * during the opening is not run over by the run that opening starts. Any other state is left alone: a paused run is
+   * already quiet, an ended one has nothing to pause. Only `resume` (the "Поток" button) cancels a pending pause.
+   */
+  let manualPausePending = false
+  async function pauseForManualAction() {
+    const st = toLower(real.runStatus?.state)
+    if (st === 'running') {
+      manualPausePending = false
+      await pause()
+      return
+    }
+    if (startRunInProgress || st === 'created') manualPausePending = true
+  }
+  watch(
+    () => toLower(real.runStatus?.state),
+    (st) => {
+      if (!manualPausePending) return
+      if (st === 'running') {
+        manualPausePending = false
+        void pause()
+      } else if (st && st !== 'created') {
+        manualPausePending = false
+      }
+    },
+  )
+
   async function resume() {
+    manualPausePending = false
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
     try {
@@ -1471,6 +1507,7 @@ export function useSimulatorRealMode(opts: {
     refreshScenarios,
     startRun,
     pause,
+    pauseForManualAction,
     resume,
     stop,
     applyIntensity,

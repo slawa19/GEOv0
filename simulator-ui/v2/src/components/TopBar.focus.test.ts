@@ -8,8 +8,6 @@ import TopBar from './TopBar.vue'
 function createTopBarContext(overrides: Partial<TopBarContext> = {}): TopBarContext {
   return {
     apiMode: ref('real'),
-    activeSegment: ref('auto'),
-    isInteractUi: ref(false),
     isTestMode: ref(false),
     uiTheme: ref('hud'),
     loadingScenarios: ref(false),

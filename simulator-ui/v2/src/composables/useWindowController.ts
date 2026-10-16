@@ -219,7 +219,7 @@ function confirmCancelInteractBusy(): boolean {
 
 export function useWindowController(opts: {
 	apiMode: Ref<string>
-	isInteractUi: Ref<boolean>
+	isLiveUi: Ref<boolean>
 	interactPhase: ComputedRef<InteractPhase>
 	isFullEditor: Ref<boolean>
 	interactState: InteractState
@@ -312,11 +312,11 @@ export function useWindowController(opts: {
 
 	const desiredWindows = computed<DesiredWindowStateExact[]>(() => {
 		const apiMode = String(opts.apiMode.value)
-		const isInteractUi = Boolean(opts.isInteractUi.value)
+		const isLiveUi = Boolean(opts.isLiveUi.value)
 		const phase = String(opts.interactPhase.value) as InteractPhase
 		const isFullEditor = Boolean(opts.isFullEditor.value)
 
-		if (apiMode !== 'real' || !isInteractUi) return []
+		if (apiMode !== 'real' || !isLiveUi) return []
 
 		const m = interactWindowOfPhase(phase, isFullEditor)
 		if (m?.type !== 'interact-panel') return []
@@ -335,7 +335,7 @@ export function useWindowController(opts: {
 
 	const edgeDetailAutoReq = computed(() => {
 		const curApiMode = String(opts.apiMode.value)
-		const curIsInteractUi = Boolean(opts.isInteractUi.value)
+		const curIsLiveUi = Boolean(opts.isLiveUi.value)
 		const phase = String(opts.interactPhase.value)
 		const isFullEditor = Boolean(opts.isFullEditor.value)
 
@@ -343,7 +343,7 @@ export function useWindowController(opts: {
 		const toPid = String(opts.interactState.toPid ?? '')
 		const a = opts.interactState.edgeAnchor
 
-		const eligible = curApiMode === 'real' && curIsInteractUi && phase === 'editing-trustline' && !isFullEditor
+		const eligible = curApiMode === 'real' && curIsLiveUi && phase === 'editing-trustline' && !isFullEditor
 		if (!eligible) return null
 		if (!a || !fromPid || !toPid) return null
 
@@ -363,12 +363,12 @@ export function useWindowController(opts: {
 			() => desiredWindows.value,
 			() => edgeDetailAutoReq.value,
 			() => String(opts.apiMode.value),
-			() => Boolean(opts.isInteractUi.value),
+			() => Boolean(opts.isLiveUi.value),
 			() => wmInteractAnchorKey.value,
 		],
-		([nextDesired, nextEdgeReq, curApiMode, curIsInteractUi]) => {
+		([nextDesired, nextEdgeReq, curApiMode, curIsLiveUi]) => {
 			// Interact panel bridging (desiredWindows diff).
-			if (curApiMode !== 'real' || !curIsInteractUi) {
+			if (curApiMode !== 'real' || !curIsLiveUi) {
 				opts.wm.closeGroup('interact', 'programmatic')
 				// Match legacy: leaving interact UI clears only panel-open anchor.
 				wmPanelOpenAnchor.value = null
@@ -530,7 +530,7 @@ export function useWindowController(opts: {
 	}
 
 	function hardDismissInteractBusyIfNeeded(): boolean {
-		if (!opts.isInteractUi.value) return false
+		if (!opts.isLiveUi.value) return false
 		if (!opts.interactMode.busy.value) return false
 
 		const ok = confirmCancelInteractBusy()
