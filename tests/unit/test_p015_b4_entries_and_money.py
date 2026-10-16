@@ -220,9 +220,8 @@ async def test_c4_an_amount_change_and_a_delete_in_one_flush_are_one_effect(fact
     identity = _identity("zero-then-delete")
     starting_edge = world.debt("10.00")
     async with factory() as setup:
-        # Built before the block: `fixture_block_violations` allows only constructors and session
-        # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
-        # drives a writer. Same object, same single `add`, same flush.
+        # Built before the block: a fixture block holds only model construction and session
+        # calls, and `world.debt(...)` is a helper call. Same object, same single `add`, same flush.
         async with debt_fixture_setup(setup, label="starting-edge"):
             setup.add(starting_edge)
         await setup.commit()
@@ -320,9 +319,8 @@ async def test_c4_a_deleted_edge_that_comes_back_is_an_insert_and_not_an_update(
     identity = _identity("reinsert")
     starting_edge = world.debt("10.00")
     async with factory() as setup:
-        # Built before the block: `fixture_block_violations` allows only constructors and session
-        # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
-        # drives a writer. Same object, same single `add`, same flush.
+        # Built before the block: a fixture block holds only model construction and session
+        # calls, and `world.debt(...)` is a helper call. Same object, same single `add`, same flush.
         async with debt_fixture_setup(setup, label="starting-edge"):
             setup.add(starting_edge)
         await setup.commit()
@@ -681,9 +679,8 @@ async def test_c18_entries_come_from_the_attempt_that_succeeded_and_not_the_stal
     stale_errors: list[StaleDataError] = []
     starting_edge = world.debt("10.00")
     async with factory() as setup:
-        # Built before the block: `fixture_block_violations` allows only constructors and session
-        # calls inside one, and `world.debt(...)` is indistinguishable in the AST from a helper that
-        # drives a writer. Same object, same single `add`, same flush.
+        # Built before the block: a fixture block holds only model construction and session
+        # calls, and `world.debt(...)` is a helper call. Same object, same single `add`, same flush.
         async with debt_fixture_setup(setup, label="starting-edge"):
             setup.add(starting_edge)
         await setup.commit()

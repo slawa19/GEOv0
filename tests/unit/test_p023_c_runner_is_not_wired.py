@@ -9,6 +9,8 @@ What it checks: with default settings `_start_configured_background_tasks` start
 setting's default is False (anti-vacuum: with `CLEARING_PERIODIC_ENABLED` set the loop IS started); a refusal of
 the isolation rule is recorded as a failed job (health `degraded`), not swallowed; an equivalent pass that stopped
 on an error degrades health, while ordinary interruptions keep it `ok`.
+
+Имя историческое, сканер проводки удалён 041 T4104.
 """
 
 from __future__ import annotations
