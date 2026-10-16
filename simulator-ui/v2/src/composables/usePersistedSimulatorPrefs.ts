@@ -25,7 +25,6 @@ type PersistedKey =
   | 'geo.sim.quality'
   | 'geo.sim.labelsLod'
   | 'geo.uiTheme'
-  | 'geo.sim.v2.desiredMode'
   | 'geo.sim.v2.fxDebugRun'
   | 'geo.sim.v2.runId'
 
@@ -238,14 +237,6 @@ export function useSimulatorStorage(storage?: StorageLike) {
     _storage.setItem('geo.uiTheme', theme)
   }
 
-  /**
-   * Force desiredMode = 'real' on next load.
-   * Called before navigating away from Demo UI to avoid a topology-only preview snapshot.
-   */
-  function forceDesiredModeReal() {
-    _storage.setItem('geo.sim.v2.desiredMode', 'real')
-  }
-
   /** Returns true when an active FX Debug run was persisted. */
   function isFxDebugRun(): boolean {
     return _storage.getItem('geo.sim.v2.fxDebugRun') === '1'
@@ -295,7 +286,6 @@ export function useSimulatorStorage(storage?: StorageLike) {
   return {
     readUiTheme,
     writeUiTheme,
-    forceDesiredModeReal,
     isFxDebugRun,
     clearFxDebugRunState,
 

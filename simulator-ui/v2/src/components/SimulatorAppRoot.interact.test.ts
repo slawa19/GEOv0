@@ -60,7 +60,6 @@ type MockUseSimulatorAppOpts = {
 // Shared simulatorStorage stub (used by SimulatorAppRoot for demo enter/exit).
 // ---------------------------------------------------------------------------
 const __GEO_TEST_SIM_STORAGE = {
-  forceDesiredModeReal: vi.fn(),
   isFxDebugRun: vi.fn(() => false),
   clearFxDebugRunState: vi.fn(),
 
@@ -529,7 +528,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           loadingScenarios: false,
           scenarios: [],
           selectedScenarioId: '',
-          desiredMode: 'real',
           intensityPercent: 0,
           runId: null as string | null,
           runStatus: null as Record<string, unknown> | null,
@@ -543,7 +541,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           setApiBase: vi.fn(),
           setAccessToken: vi.fn(),
           setSelectedScenarioId: vi.fn(),
-          setDesiredMode: vi.fn(),
           setIntensityPercent: vi.fn(),
           refreshScenarios: vi.fn(),
           startRun: vi.fn(),

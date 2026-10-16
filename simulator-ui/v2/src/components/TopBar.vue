@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { SimulatorMode } from '../api/simulatorTypes'
 import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 import { isJwtLike } from '../utils/isJwtLike'
@@ -13,7 +12,6 @@ const ctx = useTopBarContext()
 
 const emit = defineEmits<{
   (e: 'update:selected-scenario-id', v: string): void
-  (e: 'update:desired-mode', v: SimulatorMode): void
   (e: 'update:intensity-percent', v: number): void
 
   (e: 'go-sandbox'): void
@@ -109,10 +107,6 @@ const txCompact = computed(() => {
 
 function setSelectedScenarioId(v: string) {
   emit('update:selected-scenario-id', v)
-}
-
-function setDesiredMode(v: string) {
-  emit('update:desired-mode', (v === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode)
 }
 
 function setIntensityPercent(v: string) {
@@ -408,20 +402,6 @@ function onApplyIntensity() {
                 tabindex="-1"
               >
                 <div class="ds-stack tb-adv-stack">
-                  <div class="ds-row tb-adv-row">
-                    <span class="ds-label">Pipeline</span>
-                    <select
-                      class="ds-select"
-                      :value="ctx.desiredMode.value"
-                      :disabled="isRunActive"
-                      aria-label="Run pipeline"
-                      @change="setDesiredMode(($event.target as HTMLSelectElement).value)"
-                    >
-                      <option value="real">real (DB)</option>
-                      <option value="fixtures">sandbox (topology-only)</option>
-                    </select>
-                  </div>
-
                   <div class="ds-row tb-adv-row" aria-label="Intensity">
                     <span class="ds-label">Intensity</span>
                     <input

@@ -357,7 +357,7 @@ export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }
  * recorded blind zone (2026-10-11), not an oversight.
  */
 export const NATIVE_SELECTS = [
-  'top bar: "UI theme"', 'top bar (Auto-Run): "Scenario"', 'top bar, Advanced: "Run pipeline"',
+  'top bar: "UI theme"', 'top bar (Auto-Run): "Scenario"',
   'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Quality"', 'bottom bar: "Labels"', 'bottom bar (offline): "Scene"',
   'graph navigator: "Node"', 'graph navigator: "Edge"',
 ]
