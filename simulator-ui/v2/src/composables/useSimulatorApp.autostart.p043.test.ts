@@ -204,6 +204,42 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     expect(app.real.runId).toBeNull()
   })
 
+  // 043 S2 follow-up: the 409 of the global limit of active runs (a second visitor on a shared server) gets a human text.
+  const conflict = (kind: string) => new ApiError('HTTP 409 Conflict for /simulator/runs', {
+    status: 409,
+    bodyText: JSON.stringify({ error: { code: 'E008', message: 'Global active runs limit reached', details: { conflict_kind: kind, max_active_runs: 1, active_runs: 1 } } }),
+  })
+
+  it('a create refused by the global limit of active runs (409 global_active_limit): the error line is a human text, in the interface language', async () => {
+    vi.mocked(createRun).mockRejectedValue(conflict('global_active_limit'))
+    document.documentElement.lang = 'ru'
+    try {
+      const app = boot()
+      await settle()
+      expect(app.real.runId).toBeNull()
+      expect(app.real.lastError).toBe('Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова — Start в «Подробнее».')
+    } finally {
+      document.documentElement.lang = ''
+    }
+    scope?.stop()
+    const en = boot()
+    await settle()
+    expect(en.real.lastError).toBe('Someone is already watching the demo on this server; try again later. To start again, use Start under "Подробнее".')
+  })
+
+  it('counter-check: a 409 of another kind (owner_active_exists) and a non-409 error keep their old text', async () => {
+    vi.mocked(createRun).mockRejectedValue(conflict('owner_active_exists'))
+    const app = boot()
+    await settle()
+    expect(app.real.lastError, 'another 409: the raw message as before').toBe('HTTP 409 Conflict for /simulator/runs')
+    scope?.stop()
+    window.localStorage.clear()
+    vi.mocked(createRun).mockRejectedValue(new ApiError('HTTP 500 for /simulator/runs', { status: 500, bodyText: JSON.stringify({ error: { details: { conflict_kind: 'global_active_limit' } } }) }))
+    const other = boot()
+    await settle()
+    expect(other.real.lastError, 'a non-409 error, even with that kind in its body: as before').toBe('HTTP 500 for /simulator/runs')
+  })
+
   it('an empty catalogue: no scenario, nothing started', async () => {
     vi.mocked(listScenarios).mockResolvedValue({ api_version: 'simulator-api/1', items: [] } as never)
     boot()

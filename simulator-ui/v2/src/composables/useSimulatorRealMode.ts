@@ -32,7 +32,7 @@ import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
-import { runStatusErrorText } from '../utils/runErrorClassification'
+import { runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -1191,7 +1191,8 @@ export function useSimulatorRealMode(opts: {
       // SSE loop is long-lived; do not await it. `lastError` was reset at the top of this start.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      // The one place a failed start is written to the error line (every start goes through here).
+      real.lastError = startRunErrorText(e, getErrorMessage)
     } finally {
       startRunInProgress = false
       // A start that ended without a live run leaves no pause to wait for (043 S2).

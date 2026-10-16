@@ -32,3 +32,35 @@ export function runErrorText(error: RunError, locale: UiLocale = uiLocale()): st
   if (error.code.toUpperCase() === 'CLEARING_REFUSED') return clearingStepRefusalText(null, locale)
   return `${error.code}: ${error.message}`
 }
+
+/** 043 S2: the machine code the server gives a create refused by the global limit of active runs (`run_lifecycle.py`). */
+export const GLOBAL_ACTIVE_LIMIT_CONFLICT = 'global_active_limit'
+
+/** `error.details.conflict_kind` of an HTTP 409 answer in the server's envelope (`{"error": {"code", "message", "details"}}`), else null. */
+function conflictKindOf409(e: unknown): string | null {
+  const err = (e && typeof e === 'object' ? e : {}) as { status?: unknown; bodyText?: unknown }
+  if (err.status !== 409 || typeof err.bodyText !== 'string') return null
+  try {
+    const body = JSON.parse(err.bodyText) as { error?: { details?: { conflict_kind?: unknown } } }
+    const kind = body?.error?.details?.conflict_kind
+    return typeof kind === 'string' ? kind : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 043 S2 (advisor's follow-up): the error line of a run start that failed. One case gets a human text in the interface
+ * language: the server refused the create because its global limit of active runs is reached (a 409 whose
+ * `conflict_kind` is `global_active_limit` - matched on the machine code, never on the message). On a shared server
+ * that is a second visitor while somebody else's run is live; that run is not this visitor's to watch. Every other
+ * error - another 409 included - keeps the text it had (`fallback`).
+ */
+export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, locale: UiLocale = uiLocale()): string {
+  if (conflictKindOf409(e) === GLOBAL_ACTIVE_LIMIT_CONFLICT) {
+    return locale === 'ru'
+      ? 'Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова — Start в «Подробнее».'
+      : 'Someone is already watching the demo on this server; try again later. To start again, use Start under "Подробнее".'
+  }
+  return fallback(e)
+}
