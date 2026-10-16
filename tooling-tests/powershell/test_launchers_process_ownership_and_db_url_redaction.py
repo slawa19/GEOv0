@@ -1,3 +1,18 @@
+"""Dev launchers: DB URL redaction and process ownership (`scripts/run_full_stack.ps1`, `run_local.ps1`, `run_real_simulator.ps1`).
+
+Two groups of cases, most of them run once per PowerShell host:
+
+* DB URL redaction (~29 cases): the launcher prints the database URL without user, password or query secrets,
+  rejects ambiguous or malformed URLs without leaking them, and never prints environment override values.
+* Launcher process ownership and lifecycle (~131 cases): a launcher never stops a process it has not proven it
+  owns; the repository lifecycle lock rejects interleaving; startup rollback runs in reverse order and touches
+  only exact launched processes; PID reuse and unreadable identity are conflicts, not stops.
+
+Renamed 2026-10-16 (041 `T4103`) from `test_run_full_stack_database_url_redaction.py`, which named only the first
+group. The same task removed the self-referential console-text block: the tests of `_console_text` itself and the
+AST guard that parsed this file.
+"""
+
 from __future__ import annotations
 
 import os

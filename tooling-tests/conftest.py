@@ -132,7 +132,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def _missing_powershell_hosts() -> list[str]:
     """The two hosts the launcher checks are run under, and which of them this machine lacks.
 
-    `powershell/test_run_full_stack_database_url_redaction.py` runs most of its cases once per host
+    `powershell/test_launchers_process_ownership_and_db_url_redaction.py` runs most of its cases once per host
     it finds; a machine with one host would silently run fewer of them. Requiring both keeps every
     case in the run and names the real reason when a host is missing.
     """
