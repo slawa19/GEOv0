@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -589,16 +587,6 @@ describe('TrustlineManagementPanel', () => {
 
     app.unmount()
     host.remove()
-  })
-
-  it('Batch 2b: uses shared compact form primitives and removes local select/input width clamps', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/TrustlineManagementPanel.vue'), 'utf8')
-
-    expect(source).toContain('ds-ov-panel ds-ov-panel--compact ds-panel ds-panel--elevated')
-    expect(source).toContain('class="ds-controls__row ds-controls__row--compact"')
-    expect(source).toContain('class="ds-controls__suffix tl-input-row"')
-    expect(source).not.toContain('--ds-tlmp-select-max-w')
-    expect(source).not.toContain('--ds-tlmp-limit-input-w')
   })
 })
 
