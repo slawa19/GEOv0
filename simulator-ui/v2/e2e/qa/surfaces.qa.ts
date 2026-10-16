@@ -406,7 +406,8 @@ test('counter-check: injected surfaces - a stray child of the window layer, a 0x
 
 test('matrix [hud] node-card opened from the graph navigator: Escape returns the focus to "Inspect node"', async ({ page }) => {
   await page.setViewportSize(VIEWPORT_MAIN)
-  await boot(page, { snapshot: ringSnapshot(), clock: false })
+  // Pinned: since 039 B3 the default theme is saas, and the title promises hud (external review 2026-10-16).
+  await boot(page, { snapshot: ringSnapshot(), clock: false, query: '&theme=hud' })
   await page.locator('.graph-navigator summary').click()
   const opener = page.locator('.graph-navigator button', { hasText: 'Inspect node' })
   await opener.focus()

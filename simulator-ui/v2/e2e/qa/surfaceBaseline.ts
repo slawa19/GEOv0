@@ -16,7 +16,7 @@
  *   The rows of `shadcn` and `library` are REMOVED with the themes, not measured away: `page` and `top-bar-interact`
  *   lose their `shadcn`/`library` columns (2 + 1 `aria-prohibited-attr` each, the same nodes as in the other
  *   themes); `edge-popup` loses `shadcn: 1`; `payment-panel` (3), `trustline-panel` (3), `clearing-panel` (4) and
- *   `node-card` (2), which were `shadcn` only, lose their lines - 15 `color-contrast` nodes of `shadcn` in all, none of
+ *   `node-card` (2), which were `shadcn` only, lose their lines - 13 `color-contrast` nodes of `shadcn` in all (1 + 3 + 3 + 4 + 2; corrected from 15 after the external review), none of
  *   them fixed: they leave with the theme. `library` had no line apart from the two columns above. The `saas` and
  *   `hud` numbers did not move. `KNOWN_FINDINGS` now holds for both themes (it held for `hud` alone).
  */
