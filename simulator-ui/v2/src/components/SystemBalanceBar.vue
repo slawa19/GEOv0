@@ -11,11 +11,21 @@ type Props = {
   balance: SystemBalance | ComputedRef<SystemBalance>
   /** Fallback only: the unit is the balance's own equivalent (028 F-028-47, B6). */
   equivalent?: string
-  /** Compact mode: shows only the most important metrics (for Auto-Run overlay). */
+  /** Legacy alias of `variant: 'debt'`. */
   compact?: boolean
+  /**
+   * 043 S1. `debt`: the total debt alone - the first view's bottom row. `metrics`: everything else (clean badge,
+   * capacity, trust lines, participants, utilization) - the row of "Подробнее", beside the total debt that stays in
+   * the bottom row. `full` (default): all of it.
+   */
+  variant?: 'full' | 'debt' | 'metrics'
 }
 
 const props = defineProps<Props>()
+
+const shown = computed<'full' | 'debt' | 'metrics'>(() => props.variant ?? (props.compact ? 'debt' : 'full'))
+const showDebt = computed(() => shown.value !== 'metrics')
+const showMetrics = computed(() => shown.value !== 'debt')
 
 const b = computed<SystemBalance>(() => unref(props.balance))
 
@@ -31,34 +41,38 @@ const money = (v: string) => formatMoney(v, equivalentPrecision(unit.value))
 </script>
 
 <template>
-  <div class="system-balance-bar" :class="{ 'system-balance-bar--compact': compact }" aria-label="System balance">
+  <div
+    class="system-balance-bar"
+    :class="{ 'system-balance-bar--compact': shown === 'debt' }"
+    :aria-label="shown === 'metrics' ? 'System metrics' : 'System balance'"
+  >
     <HudBar variant="ghost" layout="start" fit class="system-balance-bar__inner">
-      <div v-if="b.isClean && !compact" class="ds-panel ds-ov-metric">
+      <div v-if="b.isClean && showMetrics" class="ds-panel ds-ov-metric">
         <span class="ds-badge ds-badge--ok">Clean</span>
         <span class="ds-label">System is clean — no debts</span>
       </div>
 
-      <div class="ds-panel ds-ov-metric">
+      <div v-if="showDebt" class="ds-panel ds-ov-metric">
         <span class="ds-label">Total Debt</span>
         <span class="ds-value ds-mono">{{ money(b.totalUsed) }} {{ unit }}</span>
       </div>
 
-      <div v-if="!compact" class="ds-panel ds-ov-metric">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric">
         <span class="ds-label">Available Capacity</span>
         <span class="ds-value ds-mono">{{ money(b.totalAvailable) }} {{ unit }}</span>
       </div>
 
-      <div v-if="!compact" class="ds-panel ds-ov-metric">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric">
         <span class="ds-label">Trustlines</span>
         <span class="ds-value ds-mono">{{ b.activeTrustlines }}</span>
       </div>
 
-      <div v-if="!compact" class="ds-panel ds-ov-metric">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric">
         <span class="ds-label">Participants</span>
         <span class="ds-value ds-mono">{{ b.activeParticipants }}</span>
       </div>
 
-      <div class="ds-panel ds-ov-metric sbb-util">
+      <div v-if="showMetrics" class="ds-panel ds-ov-metric sbb-util">
         <span class="ds-label">Utilization</span>
         <span class="ds-value ds-mono">{{ utilPct }}%</span>
         <div class="ds-progress__track sbb-track">

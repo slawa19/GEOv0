@@ -234,3 +234,22 @@ describe('useSimulatorStorage — analytics panel visibility', () => {
     expect(prefs.readAnalyticsPanelOpen()).toBe(false)
   })
 })
+
+describe('useSimulatorStorage — the "Подробнее" toggle (043 S1)', () => {
+  it('reads null before the first choice and round-trips its own key in the 0/1 encoding', () => {
+    const store = makeStorage()
+    const prefs = useSimulatorStorage(store)
+    // Null, not false: the caller's default (off) applies to a first visit.
+    expect(prefs.readDetailsOpen()).toBeNull()
+
+    prefs.writeDetailsOpen(true)
+    expect(store._map.get('geo.sim.v2.details.open')).toBe('1')
+    expect(prefs.readDetailsOpen()).toBe(true)
+
+    prefs.writeDetailsOpen(false)
+    expect(store._map.get('geo.sim.v2.details.open')).toBe('0')
+    expect(prefs.readDetailsOpen()).toBe(false)
+    // Its own key: the analytics flag beside it is untouched.
+    expect(prefs.readAnalyticsPanelOpen()).toBeNull()
+  })
+})

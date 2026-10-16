@@ -69,6 +69,10 @@ const __GEO_TEST_SIM_STORAGE = {
   readAnalyticsPanelOpen: vi.fn<() => boolean | null>(() => null),
   writeAnalyticsPanelOpen: vi.fn<(isOpen: boolean) => void>(),
 
+  // 043 S1: the "Подробнее" toggle. `null` = a first visit (Details off).
+  readDetailsOpen: vi.fn<() => boolean | null>(() => null),
+  writeDetailsOpen: vi.fn<(isOpen: boolean) => void>(),
+
   readDevtoolsOpenReal: vi.fn<() => boolean | null>(() => null),
   writeDevtoolsOpenReal: vi.fn<(isOpen: boolean) => void>(),
   readDevtoolsOpenDemo: vi.fn<() => boolean | null>(() => null),
@@ -181,6 +185,11 @@ function getPhaseRef(): Ref<string> {
 
 function getSimStorage() {
   return getRequiredGeoTestGlobal('__GEO_TEST_SIM_STORAGE')
+}
+
+/** 043 S1: what the browser remembers of the "Подробнее" toggle at mount (`null`: a first visit, Details off). */
+function storedDetails(open: boolean | null): void {
+  getSimStorage().readDetailsOpen.mockImplementation(() => open)
 }
 
 function makeSelectedNode(id = 'bob', name = 'Bob'): TestSelectedNode {
@@ -1617,6 +1626,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   it('ui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
     setUrl('/?mode=real&ui=interact')
+    // 043 S1: the mode segment and the Advanced menu live behind "Подробнее"; with it on, Interact still has no intensity.
+    storedDetails(true)
 
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -1641,6 +1652,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
     app.unmount()
     host.remove()
+    storedDetails(null)
     clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
   })
 
@@ -1889,6 +1901,8 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
   })
 
   it('opens node and edge inspectors from the labelled DOM graph navigator', async () => {
+    // 043 S1: "Inspect graph" is a button of the bottom row, behind "Подробнее".
+    storedDetails(true)
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setGeoTestGlobal('__GEO_TEST_SELECTED_NODE', makeSelectedNode())
     setGeoTestGlobal('__GEO_TEST_NODE_SCREEN_CENTER', { x: 100, y: 160 })
@@ -1950,9 +1964,13 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       expect(getInteractState().selectedEdgeKey).toBe(selectedEdgeBeforeRejectedClick)
       expect(host.querySelectorAll('.ws-shell[data-win-type="edge-detail"]')).toHaveLength(1)
+      // 043 S1: it is a button of the bottom row now, not a panel under the top bar.
+      expect(navigator!.closest('.ds-ov-bottom'), 'the navigator is in the bottom bar').not.toBeNull()
+      expect(navigator!.closest('.ds-ov-top'), 'and not in the top bar').toBeNull()
     } finally {
       app.unmount()
       host.remove()
+      storedDetails(null)
       clearGeoTestGlobals(
         '__GEO_TEST_INTERACT_PHASE',
         '__GEO_TEST_SELECTED_NODE',
@@ -5099,6 +5117,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 })
 
 describe('SimulatorAppRoot - Demo UI DevTools snapshot/restore wiring', () => {
+  // 043 S1: Dev Tools live behind "Подробнее".
+  beforeEach(() => storedDetails(true))
+  afterEach(() => storedDetails(null))
+
   it('enter demo: snapshots real devtools open state; URL reload does not keep devtools param', async () => {
     const simStorage = getSimStorage()
 
@@ -5246,7 +5268,11 @@ function makeAnalyticsBottlenecks(target: AnalyticsTestTarget): BottlenecksRespo
 }
 
 describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => {
+  // 043 S1: the Analytics toggle and its dock live behind "Подробнее" (the off case: its own test below).
+  afterEach(() => storedDetails(null))
+
   beforeEach(() => {
+    storedDetails(true)
     const simStorage = getSimStorage()
     simStorage.readAnalyticsPanelOpen.mockReturnValue(null)
     simStorage.writeAnalyticsPanelOpen.mockClear()
@@ -5798,6 +5824,10 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
  * NOT seen here: pixels, the real resolution of the tokens (`vizMapping.test.ts`, `e2e/qa/data-colours.qa.ts`).
  */
 describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
+  // 043 S1: the equivalent selector and the theme switcher live behind "Подробнее".
+  beforeEach(() => storedDetails(true))
+  afterEach(() => storedDetails(null))
+
   const role = (over: Record<string, unknown>) => ({ ...makeSelectedNode(String(over.id), String(over.id)), viz_shape_key: 'circle', ...over })
   const snapshotOf = (equivalent: string, nodes: Array<Record<string, unknown>>): GraphSnapshot =>
     ({ equivalent, generated_at: '2026-10-12T00:00:00Z', nodes, links: [] }) as unknown as GraphSnapshot
@@ -5811,7 +5841,7 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
     return { host, done: () => { app.unmount(); host.remove(); clearGeoTestGlobals('__GEO_TEST_SNAPSHOT'); vi.unstubAllGlobals() } }
   }
 
-  it('the legend is a row INSIDE the measured bottom bar, above its controls', async () => {
+  it('the legend is a row INSIDE the measured bottom bar, in its main row, which comes after the Details row (043 S1)', async () => {
     setGeoTestGlobal('__GEO_TEST_SNAPSHOT', snapshotOf('UAH', [role({ id: 'a', net_sign: 1 }), role({ id: 'b', net_sign: -1 })]))
     const { host, done } = mount()
     await nextTick()
@@ -5820,8 +5850,12 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
     const legend = host.querySelector('[data-testid="legend"]')!
     expect(legend, 'a legend is rendered').not.toBeNull()
     expect(measured.contains(legend), 'inside the measured bar: its height is published with it').toBe(true)
-    const bar = measured.querySelector('.hud-bar')!
-    expect(legend.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING, 'the controls come after the legend').toBeTruthy()
+    // 043 S1 (mock-up, decision 1): the main row - legend, total debt, Reset view - is the last row, so turning Details
+    // on or off never moves it; the Details row is laid above it. (Until 043 S1 the controls came after the legend.)
+    const detailsRow = measured.querySelector('[data-testid="bottom-details-row"]')!
+    expect(detailsRow, 'counter-check: Details is on, its row is rendered').not.toBeNull()
+    expect(detailsRow.compareDocumentPosition(legend) & Node.DOCUMENT_POSITION_FOLLOWING, 'the legend comes after the Details row').toBeTruthy()
+    expect(legend.closest('.bb-main-row'), 'the legend is in the main row').not.toBeNull()
     expect(host.querySelectorAll('[data-testid="legend"]')).toHaveLength(1)
     done()
   })
@@ -5880,5 +5914,336 @@ describe('SimulatorAppRoot - legend and data colours (039 slice B)', () => {
     expect(themeAtResolve, 'the tokens are read when the new theme is already on the root element').toBe('hud')
     resolve.mockReset()
     done()
+  })
+})
+
+/**
+ * 043 S1, reproducer (a): the first view of the demo has at most seven controls in its two bars (spec 043, decision 1;
+ * Verification plan 1 (a)). Counted in the DOM of the mounted root, never in the source: an element counts when it is
+ * an interactive control (`button`, `select`, `input`, `[role=button]`, and `summary` - a menu of the bars opens from
+ * one), and a person can reach it - enabled, not `hidden`/`inert`, not `display: none`/`visibility: hidden` on itself
+ * or an ancestor, not `tabindex="-1"`, and not inside a closed `<details>` (its own summary excepted).
+ *
+ * LIMITS: happy-dom has no layout, so "visible" is read from attributes and computed style, not from a box; the mocked
+ * app has no admin token, so `Admin ▾` is not among the counted controls (the stand counts it, reproducer (d)).
+ */
+describe('SimulatorAppRoot - 043 S1: the first view (Details off by default)', () => {
+  const CONTROL = 'button, select, input, summary, [role="button"]'
+
+  function reachable(el: HTMLElement): boolean {
+    if ((el as HTMLButtonElement).disabled) return false
+    if (el.getAttribute('tabindex') === '-1') return false
+    if (el.closest('[hidden], [inert]')) return false
+    for (let cur: HTMLElement | null = el; cur; cur = cur.parentElement) {
+      const s = getComputedStyle(cur)
+      if (s.display === 'none' || s.visibility === 'hidden') return false
+      if (cur !== el && cur.tagName === 'DETAILS' && !(cur as HTMLDetailsElement).open) {
+        // Only the summary of a closed <details> is reachable.
+        if (!(el.tagName === 'SUMMARY' && el.parentElement === cur)) return false
+      }
+    }
+    return true
+  }
+
+  function barControls(host: HTMLElement): string[] {
+    const bars = [...host.querySelectorAll<HTMLElement>('.ds-ov-top, .ds-ov-bottom')].filter((b) => !b.classList.contains('sar-interact-history-overlay'))
+    return bars.flatMap((bar) => [...bar.querySelectorAll<HTMLElement>(CONTROL)].filter(reachable))
+      .map((el) => `${el.tagName.toLowerCase()}[${el.getAttribute('aria-label') ?? el.dataset.testid ?? (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24)}]`)
+  }
+
+  function mount(search: string) {
+    getSimStorage().readDetailsOpen.mockImplementation(() => null)
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', {
+      equivalent: 'UAH',
+      generated_at: '2026-10-16T00:00:00Z',
+      nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+      links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '25', available: '75' }],
+    })
+    setUrl(search)
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    return { host, done: () => { app.unmount(); host.remove(); clearGeoTestGlobals('__GEO_TEST_SNAPSHOT'); vi.unstubAllGlobals() } }
+  }
+
+  for (const search of ['/?mode=real&ui=interact&testMode=0', '/?mode=real&testMode=0', '/?testMode=0']) {
+    it(`reproducer (a): ${search} - at most 7 reachable controls in the two bars, the canvas being everything else`, async () => {
+      const { host, done } = mount(search)
+      try {
+        await nextTick()
+        await nextTick()
+        const controls = barControls(host)
+        // Anti-vacuum: the counter does see the bars (the bottom bar always has the toggle or at least one control).
+        expect(host.querySelector('.ds-ov-top'), 'the top bar is mounted').not.toBeNull()
+        expect(controls.length, `the counter found controls at all: ${JSON.stringify(controls)}`).toBeGreaterThan(0)
+        expect(controls.length, `reachable controls in the two bars: ${JSON.stringify(controls)}`).toBeLessThanOrEqual(7)
+      } finally {
+        done()
+      }
+    })
+  }
+})
+
+/**
+ * 043 S1: the "Подробнее" toggle and what it gates, observed in the mounted root (spec 043, decisions 1 and 4).
+ * Hidden means NOT RENDERED: every check below looks for the element in the DOM, not at its style.
+ */
+describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces', () => {
+  const SERVICE = [
+    ['mode segment', 'button.ds-segment'],
+    ['theme switcher', 'select[aria-label="UI theme"]'],
+    ['equivalent', 'select[aria-label="Equivalent"]'],
+    ['layout', 'select[aria-label="Layout"]'],
+    ['quality', 'select[aria-label="Quality"]'],
+    ['labels', 'select[aria-label="Labels"]'],
+    ['analytics toggle', '[data-testid="bottombar-analytics-toggle"]'],
+    ['graph navigator', '[role="region"][aria-label="Graph navigator"]'],
+    ['run state badge', '[aria-label="Run state"]'],
+    ['full metrics', '[aria-label="System metrics"]'],
+  ] as const
+
+  const SNAPSHOT = {
+    equivalent: 'UAH',
+    generated_at: '2026-10-16T00:00:00Z',
+    nodes: [makeSelectedNode('alice', 'Alice'), makeSelectedNode('bob', 'Bob')],
+    links: [{ source: 'alice', target: 'bob', trust_limit: '100', used: '25', available: '75' }],
+  }
+
+  function mount(search = '/?mode=real&ui=interact') {
+    setGeoTestGlobal('__GEO_TEST_SNAPSHOT', SNAPSHOT)
+    setUrl(search)
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const app = mountSimulatorAppRoot(host)
+    return {
+      host,
+      app,
+      done: () => {
+        app.unmount()
+        host.remove()
+        storedDetails(null)
+        clearGeoTestGlobals('__GEO_TEST_SNAPSHOT', '__GEO_TEST_INTERACT_HISTORY', '__GEO_TEST_INTERACT_PHASE')
+        vi.unstubAllGlobals()
+      },
+    }
+  }
+
+  const present = (host: HTMLElement) => SERVICE.filter(([, sel]) => host.querySelector(sel)).map(([name]) => name)
+  const toggle = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('[data-testid="details-toggle"]')!
+
+  /** The bindings of the mounted root (`<script setup>`): the mocked actions it wires its children to. */
+  function rootSetup(app: ReturnType<typeof mountSimulatorAppRoot>): Record<string, any> {
+    const wrapper = (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance
+    return wrapper.subTree.component.setupState
+  }
+
+  it('off by default: no service control is rendered; the first row has the name, the state, the actions and the toggle', async () => {
+    storedDetails(null)
+    const { host, done } = mount()
+    try {
+      await nextTick()
+      expect(present(host), 'service controls rendered with Details off').toEqual([])
+      expect(toggle(host).getAttribute('aria-expanded')).toBe('false')
+      const top = host.querySelector('.ds-ov-top')!
+      for (const id of ['network-name', 'network-state', 'actionbar-payment', 'actionbar-trustline', 'actionbar-clearing', 'details-toggle']) {
+        expect(top.querySelector(`[data-testid="${id}"]`), `${id} is in the top bar`).not.toBeNull()
+      }
+      expect(host.querySelector('[data-testid="network-state"]')?.tagName, 'the state is text, not a control').toBe('SPAN')
+      // The total debt is in the bottom row, compact.
+      const bottom = [...host.querySelectorAll('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
+      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).toContain('Total Debt')
+      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).not.toContain('Utilization')
+    } finally {
+      done()
+    }
+  })
+
+  it('on: every service control appears without a reload, the choice is written, and off removes them again', async () => {
+    storedDetails(null)
+    const writes = getSimStorage().writeDetailsOpen
+    writes.mockClear()
+    const { host, done } = mount()
+    try {
+      await nextTick()
+      toggle(host).click()
+      await nextTick()
+      expect(present(host), 'every service control is rendered').toEqual(SERVICE.map(([name]) => name))
+      expect(toggle(host).getAttribute('aria-expanded')).toBe('true')
+      expect(writes).toHaveBeenLastCalledWith(true)
+      // The navigator is a button of the bottom row now.
+      expect(host.querySelector('.graph-navigator')!.closest('.ds-ov-bottom')).not.toBeNull()
+
+      toggle(host).click()
+      await nextTick()
+      expect(present(host), 'off again: nothing left').toEqual([])
+      expect(writes).toHaveBeenLastCalledWith(false)
+    } finally {
+      done()
+    }
+  })
+
+  it('a remembered "on" is applied on the first paint (a reload)', async () => {
+    storedDetails(true)
+    const { host, done } = mount()
+    try {
+      await nextTick()
+      expect(present(host)).toEqual(SERVICE.map(([name]) => name))
+    } finally {
+      done()
+    }
+  })
+
+  it('a remembered open analytics dock is not shown (nor polled) while Details is off, and comes back with it', async () => {
+    storedDetails(null)
+    getSimStorage().readAnalyticsPanelOpen.mockReturnValue(true)
+    const { host, done } = mount()
+    try {
+      await nextTick()
+      expect(host.querySelector('[data-surface="real-metrics-panel"]'), 'no dock without its toggle on screen').toBeNull()
+      toggle(host).click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelector('[data-surface="real-metrics-panel"]'), 'the remembered dock is back with Details').not.toBeNull()
+    } finally {
+      getSimStorage().readAnalyticsPanelOpen.mockReturnValue(null)
+      done()
+    }
+  })
+
+  it('the history is three lines in the bottom overlay shell (was eight)', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_HISTORY', [1, 2, 3, 4, 5].map((i) => ({ id: `h${i}`, icon: '•', text: `action ${i}`, timeText: `10:0${i}` })))
+    const { host, done } = mount()
+    try {
+      await nextTick()
+      const shell = host.querySelector('.ds-ov-bottom.sar-interact-history-overlay')
+      expect(shell, 'the overlay shell hosts it').not.toBeNull()
+      const items = [...shell!.querySelectorAll('.interact-history__item')].map((li) => (li.textContent ?? '').replace(/\s+/g, ' ').trim())
+      expect(items).toHaveLength(3)
+      expect(items[0]).toContain('action 5')
+    } finally {
+      done()
+    }
+  })
+
+  it('one onboarding hint: shown on the first view, gone after the first action (its close button, or the toggle)', async () => {
+    storedDetails(null)
+    const first = mount()
+    try {
+      await nextTick()
+      const hints = first.host.querySelectorAll('[data-testid="onboarding-hint"]')
+      expect(hints).toHaveLength(1)
+      expect(hints[0]!.textContent).toContain('Send Payment')
+      expect(hints[0]!.closest('.ds-ov-top'), 'it hangs under the top bar').not.toBeNull()
+      hints[0]!.querySelector<HTMLButtonElement>('button')!.click()
+      await nextTick()
+      expect(first.host.querySelector('[data-testid="onboarding-hint"]')).toBeNull()
+    } finally {
+      first.done()
+    }
+
+    const second = mount('/?mode=real')
+    try {
+      await nextTick()
+      const hint = second.host.querySelector('[data-testid="onboarding-hint"]')
+      expect(hint, 'shown in Auto-Run too').not.toBeNull()
+      expect(hint!.textContent, 'no promise of a button that is not on this screen').not.toContain('Send Payment')
+      toggle(second.host).click()
+      await nextTick()
+      expect(second.host.querySelector('[data-testid="onboarding-hint"]'), 'gone after "Подробнее"').toBeNull()
+    } finally {
+      second.done()
+    }
+  })
+
+  it('an interact flow started from the first row dismisses the hint', async () => {
+    storedDetails(null)
+    const { host, done } = mount()
+    try {
+      await nextTick()
+      host.querySelector<HTMLButtonElement>('[data-testid="actionbar-payment"]')!.click()
+      await nextTick()
+      await nextTick()
+      expect(host.querySelector('[data-testid="onboarding-hint"]')).toBeNull()
+    } finally {
+      done()
+    }
+  })
+
+  /**
+   * F-041-9 (`TopBar.wiring.test.ts` read the parent's template as a string and looked for `@start-run="..."` etc.).
+   * Observed instead: a click or a change on the control in the MOUNTED root reaches the mocked action it is wired to.
+   */
+  it('wiring (was a source-text guard): the controls of the top bar reach the actions of the app', async () => {
+    storedDetails(true)
+    const { host, app, done } = mount('/?mode=real')
+    try {
+      await nextTick()
+      const setup = rootSetup(app)
+      const real = setup.real as Record<string, unknown>
+      const actions = setup.realActions as Record<string, Mock>
+      const admin = setup.admin as Record<string, Mock>
+      for (const fn of Object.values(actions)) fn.mockClear?.()
+
+      const scenario = host.querySelector<HTMLSelectElement>('select[aria-label="Scenario"]')!
+      scenario.dispatchEvent(new Event('change', { bubbles: true }))
+      expect(actions.setSelectedScenarioId).toHaveBeenCalledWith('')
+
+      const intensity = host.querySelector<HTMLInputElement>('input[aria-label="Intensity percent"]')!
+      intensity.value = '140'
+      intensity.dispatchEvent(new Event('input', { bubbles: true }))
+      expect(actions.setIntensityPercent, 'clamped to 0..100 on the way').toHaveBeenCalledWith(100)
+
+      host.querySelector<HTMLButtonElement>('button[aria-label="Refresh scenarios"]')!.click()
+      expect(actions.refreshScenarios).toHaveBeenCalledTimes(1)
+
+      const byText = (t: string) => [...host.querySelectorAll<HTMLButtonElement>('.ds-ov-top button')].find((b) => (b.textContent ?? '').trim() === t)
+      real.runId = 'run-1'
+      real.runStatus = { run_id: 'run-1', state: 'running' }
+      await nextTick()
+      byText('Pause')!.click()
+      expect(actions.pause).toHaveBeenCalledTimes(1)
+      byText('Stop')!.click()
+      expect(actions.stop).toHaveBeenCalledTimes(1)
+      byText('Apply')!.click()
+      expect(actions.applyIntensity).toHaveBeenCalledTimes(1)
+      real.runStatus = { run_id: 'run-1', state: 'paused' }
+      await nextTick()
+      byText('Resume')!.click()
+      expect(actions.resume).toHaveBeenCalledTimes(1)
+      real.runId = null
+      real.runStatus = null
+      real.selectedScenarioId = 'sc1'
+      await nextTick()
+      byText('Start')!.click()
+      expect(actions.startRun).toHaveBeenCalledTimes(1)
+
+      real.accessToken = 'admin-token'
+      await nextTick()
+      const adminSummary = host.querySelector<HTMLElement>('summary[aria-label="Admin"]')
+      expect(adminSummary, 'Admin with an admin token').not.toBeNull()
+      host.querySelector<HTMLButtonElement>('button[aria-label="Refresh runs list"]')!.click()
+      expect(admin.getRuns).toHaveBeenCalledTimes(1)
+
+      const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
+      theme.value = 'hud'
+      theme.dispatchEvent(new Event('change', { bubbles: true }))
+      await nextTick()
+      expect(host.querySelector('.root')!.getAttribute('data-theme'), 'the theme switch reaches the root').toBe('hud')
+
+      const nav = stubLocationHrefSetter()
+      try {
+        const segment = (t: string) => [...host.querySelectorAll<HTMLButtonElement>('button.ds-segment')].find((b) => (b.textContent ?? '').trim() === t)!
+        segment('Interact').click()
+        expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('ui=interact')
+        segment('Sandbox').click()
+        expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('mode=fixtures')
+      } finally {
+        nav.restore()
+      }
+    } finally {
+      done()
+    }
   })
 })
