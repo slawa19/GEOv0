@@ -25,7 +25,11 @@ that runs and collects nothing, still exits 0 somewhere. So the session refuses 
 
 * it is started without `--tooling-partition` (the runner always passes it);
 * it is narrowed: by an option (`-m`, `-k`, `--deselect`, `--ignore`, `--ignore-glob`, `--lf`,
-  `--sw`/`--sw-skip`, read from the session's options, so `PYTEST_ADDOPTS` and `addopts` are seen),
+  `--sw`/`--sw-skip`; an `-o`/`--override-ini` of a discovery key - `testpaths`, `norecursedirs`,
+  `python_files`, `python_classes`, `python_functions`, `collect_imported_tests` - added after the
+  041 review of 2026-10-16; a `--rootdir` or `-c`/`--config-file` other than this repository's own;
+  all read from the session's options, so `PYTEST_ADDOPTS` and `addopts` are seen; unrelated `-o`
+  keys such as the runner's own `cache_dir` are allowed),
   by a positional path other than the requested partition directories (or `tooling-tests` for
   `all`), or by anything that reports deselected cases (a plugin's `pytest_deselected` included);
 * an option collects without executing the test bodies (`--collect-only` and the like);
@@ -40,10 +44,12 @@ It also removes the database variables from the environment before any test modu
 a tooling test that reaches for a database gets no URL, so "needs no database" is a property of the
 tier and not only of the tests that are in it today.
 
-WHAT IT DOES NOT SEE. Which tests exist: a tooling test deleted or replaced by a weaker one passes
-(accepted by the owner's decision of 2026-10-16, spec 041). Narrowing that is neither an option nor
-a reported deselection: a `collect_ignore` or `pytest_ignore_collect` in a conftest, or a plugin that
-drops items without reporting them. Whether CI runs the steps: that is asserted by
+WHAT IT DOES NOT SEE (the classes known on 2026-10-16; not a proof that no other way exists). Which
+tests exist: a tooling test deleted or replaced by a weaker one passes (accepted by the owner's
+decision of 2026-10-16, spec 041). Narrowing through COMMITTED collection configuration or conftest
+hooks - the same category as deleting a test, a reviewable change of the tree, and not caught:
+discovery keys set in the `[pytest]` section of `pytest.ini` itself, a `collect_ignore` or
+`pytest_ignore_collect` in a conftest, or a hook that drops items without reporting them. Whether CI runs the steps: that is asserted by
 `tooling_ci_binding_violations` below, from both partitions, so removing either step is noticed by the
 other one. A debug run of one file is possible with `--noconftest`; it is a debug path and checks
 none of the above.
@@ -107,6 +113,12 @@ _NARROWING_OPTIONS = (
     ("stepwise_skip", "--sw-skip"),
 )
 
+#: The `-o`/`--override-ini` keys that decide WHICH modules, classes and functions are collected (pytest 7.4; the last is
+#: pytest 8's, listed so an upgrade does not open a path). Any other key is allowed (the runner passes `cache_dir`).
+_DISCOVERY_INI_KEYS = frozenset(
+    {"testpaths", "norecursedirs", "python_files", "python_classes", "python_functions", "collect_imported_tests"}
+)
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -163,6 +175,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # 041 F-041-13 (2026-10-16): with no count left, a narrowing option or a narrower path is refused
     # by name. A missing attribute (a plugin that is not loaded) counts as not given.
     narrowing = [flag for option, flag in _NARROWING_OPTIONS if getattr(config.option, option, None)]
+    narrowing += _discovery_overrides(config)
     narrowing += _narrowing_paths(config, requested, whole=value == "all")
     if narrowing:
         raise pytest.UsageError(
@@ -189,6 +202,25 @@ def pytest_configure(config: pytest.Config) -> None:
                 f"missing: {', '.join(missing)}. It runs in the Windows `required-ui` job."
             )
     config.stash[_STATE] = {"requested": requested, "deselected": 0}
+
+
+def _discovery_overrides(config: pytest.Config) -> list[str]:
+    """`-o` overrides of a discovery key, and a `--rootdir` or `-c` other than this repository's own (041 review)."""
+
+    found: list[str] = []
+    for entry in getattr(config.option, "override_ini", None) or ():
+        key = str(entry).partition("=")[0].strip()
+        if key in _DISCOVERY_INI_KEYS:
+            found.append(f"-o/--override-ini {key}")
+    here = config.invocation_params.dir
+    repository = _HERE.parent
+    rootdir = getattr(config.option, "rootdir", None)
+    if rootdir and (here / rootdir).resolve() != repository:
+        found.append(f"--rootdir {rootdir!r}")
+    inifile = getattr(config.option, "inifilename", None)
+    if inifile and (here / inifile).resolve() != repository / "pytest.ini":
+        found.append(f"-c/--config-file {inifile!r}")
+    return found
 
 
 def _narrowing_paths(config: pytest.Config, requested: tuple[str, ...], *, whole: bool) -> list[str]:
