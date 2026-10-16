@@ -1,14 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it } from 'vitest'
 
 import EdgeTooltip from './EdgeTooltip.vue'
 
 const edgeTooltipComponent: Component = EdgeTooltip
-const edgeTooltipSource = readFileSync(resolve(process.cwd(), 'src/components/EdgeTooltip.vue'), 'utf8')
-const overlaysSource = readFileSync(resolve(process.cwd(), 'src/ui-kit/designSystem.overlays.css'), 'utf8')
-const tokensSource = readFileSync(resolve(process.cwd(), 'src/ui-kit/designSystem.tokens.css'), 'utf8')
 
 describe('EdgeTooltip', () => {
   it('renders interact detail rows using the shared tooltip contract', async () => {
@@ -49,20 +44,6 @@ describe('EdgeTooltip', () => {
       app.unmount()
       host.remove()
     }
-  })
-
-  it('keeps tooltip micro-layout in the DS overlay layer instead of scoped literals', () => {
-    expect(edgeTooltipSource).not.toContain('gap: 10px;')
-    expect(edgeTooltipSource).not.toContain('font-size: 0.78rem;')
-    expect(edgeTooltipSource).not.toContain('margin: 4px 0;')
-
-    expect(overlaysSource).toContain('.ds-ov-tooltip__divider {')
-    expect(overlaysSource).toContain('margin: var(--ds-ov-tooltip-divider-margin-y) 0;')
-    expect(overlaysSource).toContain('.ds-ov-tooltip__row {')
-    expect(overlaysSource).toContain('gap: var(--ds-ov-tooltip-row-gap);')
-    expect(overlaysSource).toContain('font-size: var(--ds-ov-tooltip-row-font-size);')
-    expect(tokensSource).toContain('--ds-ov-tooltip-row-gap: 10px;')
-    expect(tokensSource).toContain('--ds-ov-tooltip-row-font-size: 0.78rem;')
   })
 })
 

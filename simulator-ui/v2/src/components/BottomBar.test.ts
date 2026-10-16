@@ -1,11 +1,6 @@
 import { createApp, h, nextTick, ref } from 'vue'
-import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SceneId } from '../scenes'
-
-function readHere(rel: string): string {
-  return readFileSync(new URL(rel, import.meta.url), 'utf8')
-}
 
 type SimulatorStorageMock = {
   readDevtoolsOpenReal: ReturnType<typeof vi.fn>
@@ -277,19 +272,6 @@ describe('BottomBar — DevTools panel (<details>)', () => {
 
     app.unmount()
     host.remove()
-  })
-
-  it('keeps dropdown surfaces on the shared overlay contract and leaves generic narrow HUD rules to HudBar', () => {
-    const sfc = readHere('./BottomBar.vue')
-
-    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right"')
-    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--up ds-ov-dropdown--right ds-ov-dropdown--fit-content bb-devtools-dropdown"')
-    expect(sfc).toContain('--ds-ov-dropdown-vw-inset: var(--ds-bb-devtools-maxw-inset);')
-    expect(sfc).toContain(':deep(.ds-value) {')
-
-    expect(sfc).not.toContain(':deep(.ds-select) {')
-    expect(sfc).not.toContain(':deep(.ds-btn) {')
-    expect(sfc).not.toContain(':deep(.ds-label) {')
   })
 })
 

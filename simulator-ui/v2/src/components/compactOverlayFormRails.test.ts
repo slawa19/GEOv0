@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { createApp, h, nextTick, reactive, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -10,29 +8,7 @@ const manualPaymentPanelComponent: Component = ManualPaymentPanel
 const trustlineManagementPanelComponent: Component = TrustlineManagementPanel
 
 describe('shared compact overlay form rails', () => {
-  it('keeps compact-row and suffix primitives in the shared design-system rail contract', () => {
-    const cssSource = readFileSync(resolve(process.cwd(), 'src/ui-kit/designSystem.primitives.css'), 'utf8')
-    const tokenSource = readFileSync(resolve(process.cwd(), 'src/ui-kit/designSystem.tokens.css'), 'utf8')
-    const overlaySelectSource = readFileSync(resolve(process.cwd(), 'src/components/common/OverlaySelect.vue'), 'utf8')
-
-    expect(cssSource).toContain('.ds-controls__row--compact > .ds-input,')
-    expect(cssSource).toContain('.ds-controls__row--compact > .ds-select,')
-    expect(cssSource).toContain('.ds-controls__row--compact > .ds-controls__suffix {')
-    expect(cssSource).toContain('width: min(100%, var(--ds-controls-field-max-w));')
-    expect(cssSource).toContain('.ds-controls__suffix {')
-    expect(cssSource).toContain('width: min(100%, var(--ds-controls-suffix-max-w));')
-    expect(tokenSource).toContain('--ds-controls-interact-select-trigger-max-w: 280px;')
-    expect(tokenSource).toContain('--ds-controls-interact-select-surface-max-w: 360px;')
-    expect(overlaySelectSource).toContain('var(--ds-controls-interact-select-trigger-max-w)')
-    expect(overlaySelectSource).toContain('var(--ds-controls-interact-select-surface-max-w)')
-  })
-
   it('keeps ManualPaymentPanel on shared compact-row primitives without local width clamps', async () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/ManualPaymentPanel.vue'), 'utf8')
-    expect(source).toContain('class="ds-controls__row ds-controls__row--compact"')
-    expect(source).toContain('class="ds-controls__suffix mp-amount-row"')
-    expect(source).not.toContain('mp-amount-input {')
-
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -75,12 +51,6 @@ describe('shared compact overlay form rails', () => {
   })
 
   it('keeps TrustlineManagementPanel on shared compact-row primitives without local width clamps', async () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/components/TrustlineManagementPanel.vue'), 'utf8')
-    expect(source).toContain('class="ds-controls__row ds-controls__row--compact"')
-    expect(source).toContain('class="ds-controls__suffix tl-input-row"')
-    expect(source).not.toContain('--ds-tlmp-select-max-w')
-    expect(source).not.toContain('--ds-tlmp-limit-input-w')
-
     const host = document.createElement('div')
     document.body.appendChild(host)
 

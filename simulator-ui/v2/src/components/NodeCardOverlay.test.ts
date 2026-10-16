@@ -1,13 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { createApp, h, nextTick, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import NodeCardOverlay from './NodeCardOverlay.vue'
 import { DATA_PALETTE_DEFAULT } from '../vizMapping'
 import { resetEquivalentPrecisions, setEquivalentPrecisions } from '../config/equivalentPrecision'
-
-const nodeCardOverlaySource = readFileSync(resolve(process.cwd(), 'src/components/NodeCardOverlay.vue'), 'utf8')
 
 function mountNodeCard(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -276,11 +272,19 @@ describe('NodeCardOverlay (Interact Mode flags)', () => {
     }
   })
 
-  it('keeps the node-card inspector on WM/DS contracts without introducing ds-inspector-row', () => {
-    expect(nodeCardOverlaySource).toContain("position: 'static'")
-    expect(nodeCardOverlaySource).toContain('class="ds-ov-node-card"')
-    expect(nodeCardOverlaySource).not.toContain('ds-inspector-row')
-    expect(nodeCardOverlaySource).not.toContain('role="dialog"')
+  it('leaves geometry and the dialog role to the WM window: a static content block, no nested dialog', async () => {
+    // F-041-9 (041 T4107): was a read of the .vue text; now the rendered card is observed.
+    const { app, host } = mountNodeCard()
+    await nextTick()
+
+    const card = host.querySelector('.ds-ov-node-card') as HTMLElement | null
+    expect(card).toBeTruthy()
+    expect(card!.style.position).toBe('static')
+    expect(host.querySelector('[role="dialog"]')).toBeNull()
+    expect(host.querySelector('.ds-inspector-row')).toBeNull()
+
+    app.unmount()
+    host.remove()
   })
 
 })
