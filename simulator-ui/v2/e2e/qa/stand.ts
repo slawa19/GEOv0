@@ -332,8 +332,6 @@ export type BootOptions = {
   /** `true`: fake clock installed before load and paused after the layout settled. */
   clock: boolean
   query?: string
-  /** The segment of the top bar the app opens in. `auto` (Auto-Run) shows the scenario selector; default `interact`. */
-  ui?: 'interact' | 'auto'
   /**
    * `false`: the CSS animations of labels are left to run by themselves even under `clock: true`.
    * The pause is installed only together with the fake clock (038 S3, BACKLOG 034-6 (k)): a deterministic check
@@ -498,7 +496,8 @@ export async function boot(page: Page, o: BootOptions): Promise<{ unmocked: stri
   }, { scenarioId: SCENARIO_ID, runId: RUN_ID, fresh: o.firstVisit === true })
 
   if (o.beforeLoad) await o.beforeLoad(page)
-  await page.goto(o.firstVisit ? `/?${(o.query ?? '').replace(/^&/, '')}` : `/?mode=real${o.ui === 'auto' ? '' : '&ui=interact'}${o.query ?? ''}`)
+  // 043 S2: one screen - no `?ui=` (the product ignores it; until S2 the stand opened `&ui=interact` by default).
+  await page.goto(o.firstVisit ? `/?${(o.query ?? '').replace(/^&/, '')}` : `/?mode=real${o.query ?? ''}`)
   await assertUserMode(page, o)
   if (o.awaitScene === false) return mock
   await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
@@ -892,8 +891,7 @@ export async function bootTwoScenarios(page: Page, fail: SceneFail) {
   const item = (scenario_id: string, name: string) => ({ api_version: 'simulator-api/1', scenario_id, name, participants_count: 6, trustlines_count: 6, equivalents: [EQ] })
   await boot(page, {
     snapshot: ringSnapshot(),
-    clock: true,
-    ui: 'auto', // the Auto-Run segment: the scenario selector lives there (behind "Подробнее" since 043 S1, opened below)
+    clock: true, // the scenario selector is behind "Подробнее" (043 S1), opened below
     beforeLoad: async (p) => {
       await p.route(/\/simulator\/scenarios$/i, (r) => r.fulfill({
         status: 200, contentType: 'application/json',

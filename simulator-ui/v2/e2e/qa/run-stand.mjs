@@ -96,8 +96,14 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   201 + 8 + 4 + 4 = 217. No test left or changed scope; seven entries (four menus, `top-bar-auto-run`,
  *   `graph-navigator`, `analytics-panel`) now first hold that their surface is NOT rendered on the first view
  *   (`bootEntry`, `details.hiddenByDefault`) and then turn "Подробнее" on.
+ * - 2026-10-16 (043 S2 - one screen, autostart, the pause on a manual action): gate 122 -> 127, full 217 -> 222. One new
+ *   file, `one-screen.qa.ts`, five tests in the gate (advisor's decision 2026-10-16: the new S2 tests go into the stand
+ *   gate): (b) a first visit starts a live run at intensity 30 and its payment is drawn; (c) "Send Payment" pauses until
+ *   "Поток", cancel does not resume; (c) a participant chosen pauses; (c) a run somebody paused is not resumed or
+ *   doubled at opening; (d) zero navigations into the manual flow. 122 + 5 = 127; full 217 + 5 = 222. No test left or
+ *   changed scope; the matrix lost its `ui` field (one screen: every entry opens the same address), not an entry.
  */
-export const EXPECTED = { gate: 122, full: 217 }
+export const EXPECTED = { gate: 127, full: 222 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

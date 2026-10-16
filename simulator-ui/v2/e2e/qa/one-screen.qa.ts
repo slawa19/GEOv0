@@ -9,7 +9,7 @@
  *
  * The backend is the stand's (`mockLiveRun`: a run whose state follows the requests). WHAT THIS DOES NOT SEE: that a
  * real backend emits payments after the create - the required `ui-smoke` job proves that on a seeded server
- * (`e2e/live-autostart.live.ts`); the payment here is a frame the test writes into the product's own SSE pipeline.
+ * (`e2e/live/autostart.live.ts`, config `e2e/playwright.live.config.ts`); the payment here is a frame the test writes into the product's own SSE pipeline.
  */
 import { expect, test, type Page } from '@playwright/test'
 

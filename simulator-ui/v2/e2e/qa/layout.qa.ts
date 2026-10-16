@@ -19,7 +19,7 @@ import { boot, DETAILS_TOGGLE, ringSnapshot } from './stand.js'
 import { THEMES, VIEWPORT_MAIN } from './surfaceMatrix.js'
 
 const SERVICE: Array<[string, string]> = [
-  ['mode segment', 'button.ds-segment'],
+  ['source select', 'select[aria-label="Источник"]'], // 043 S2: the mode segment is gone; the source is a service control
   ['theme switcher', 'select[aria-label="UI theme"]'],
   ['Admin menu', 'summary[aria-label="Admin"]'],
   ['run state badge', '[aria-label="Run state"]'],
@@ -70,7 +70,10 @@ test('043 S1: Tab through the first view reaches the first view\'s controls only
   console.log('[043 S1 tab]', JSON.stringify(distinct))
   for (const id of ACTIONS) expect(distinct, `${id} is reachable by Tab`).toContain(id)
   expect(distinct, 'the toggle is reachable by Tab').toContain('details-toggle')
-  const allowed = new Set([...ACTIONS, 'details-toggle', 'Close hint', 'Reset view', 'body'])
+  // 043 S2: "Поток" is a control of the first view (the stand's run is paused, so it reads ▶).
+  expect(distinct, 'the flow button is reachable by Tab').toContain('flow-toggle')
+  const allowed = new Set([...ACTIONS, 'flow-toggle', 'details-toggle', 'Close hint', 'Reset view', 'body'])
+  expect(distinct.filter((d) => d !== 'body').length, 'at most seven controls on the first view (decision 1)').toBeLessThanOrEqual(7)
   expect(distinct.filter((d) => !allowed.has(d)), 'nothing else is in the tab order of the first view').toEqual([])
 })
 
