@@ -7,7 +7,7 @@
  * controls afterwards is only `real.lastError` - a text with the server's body in it.
  *
  * 042 S1 (2026-10-16): the run is asked for through `ensureRunSerialized` (the demo UI's bootstrap); the buttons that
- * used to ask for it on a click no longer send an action (`tx-once` / `clearing-once` are gone).
+ * used to ask for it on a click are gone with the server actions `tx-once` / `clearing-once`.
  */
 import { effectScope, reactive, ref, type EffectScope } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'

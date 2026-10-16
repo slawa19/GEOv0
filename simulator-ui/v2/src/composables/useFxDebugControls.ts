@@ -1,8 +1,14 @@
 import type { Ref } from 'vue'
-import { onUnmounted, ref, watch } from 'vue'
+import { onUnmounted, watch } from 'vue'
 
 import { toLower } from '../utils/stringHelpers'
 
+/**
+ * REMNANT of the Demo UI (`?ui=demo`): the paused-run bootstrap (`ensureRunSerialized`) and the SSE-open wait, nothing
+ * else. The server debug actions `tx-once` / `clearing-once` and their buttons are gone (042 S1, 2026-10-16): an event
+ * about a payment is born only in the core, never drawn on request. The module itself is removed in programme 043 S3,
+ * after 042 `T4205` (the offline playlist workbench).
+ */
 export function useFxDebugControls(deps: {
   isFxDebugEnabled: Readonly<Ref<boolean>>
   real: {
@@ -27,15 +33,10 @@ export function useFxDebugControls(deps: {
     refreshSnapshot: () => Promise<void>
   }
 }): {
-  busy: Ref<boolean>
   ensureRunSerialized: () => Promise<string>
-  runTxOnce: () => Promise<void>
-  runClearingOnce: () => Promise<void>
   waitForRealSseOpen: (opts?: { timeoutMs?: number }) => Promise<boolean>
   dispose: () => void
 } {
-  const busy = ref(false)
-
   let disposed = false
   const pendingWaitResolves = new Set<(ok: boolean) => void>()
 
@@ -160,18 +161,5 @@ export function useFxDebugControls(deps: {
     })
   }
 
-  // 042 S1 (owner, 2026-10-16): the server actions `tx-once` / `clearing-once` are gone - an event about a payment is
-  // born only in the core, never drawn on request. These two send nothing and start no run. They stay as no-ops only
-  // because their callers (the Dev Tools buttons in `BottomBar.vue`, `__geoSim` in the dev hook) are outside this
-  // slice; the buttons go in 042 stage 2 / `T4205` (the offline playlist workbench). `ensureRunSerialized` stays: the
-  // demo UI's paused-run bootstrap uses it.
-  async function runTxOnce(): Promise<void> {
-    return
-  }
-
-  async function runClearingOnce(): Promise<void> {
-    return
-  }
-
-  return { busy, ensureRunSerialized, runTxOnce, runClearingOnce, waitForRealSseOpen, dispose }
+  return { ensureRunSerialized, waitForRealSseOpen, dispose }
 }

@@ -5,14 +5,14 @@
  * transport), and `startRun` already has no token guard for that reason. The demo controls refused before sending
  * anything - `Missing access token`.
  *
- * 042 S1 (2026-10-16): the server actions `tx-once` / `clearing-once` are gone, and with them the half of this file
- * that checked the buttons SENT them (to which run, with which token). What stays is the run they started -
- * `ensureRunSerialized`, which the demo UI's bootstrap still uses - and a check that the buttons now send nothing.
+ * 042 S1 (2026-10-16): the server actions `tx-once` / `clearing-once` and their buttons are gone, and with them the
+ * half of this file that checked the buttons SENT them (to which run, with which token). What stays is the run they
+ * started - `ensureRunSerialized`, which the demo UI's bootstrap still uses.
  *
  * Not judged here: whether the server accepts the run (ownership, limits).
  */
 import { effectScope, reactive, ref, type EffectScope } from 'vue'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useFxDebugControls } from './useFxDebugControls'
 
@@ -22,7 +22,7 @@ vi.mock('../api/simulatorApi', () => ({
 
 let scope: EffectScope | null = null
 
-function stand(input: { accessToken: string; runId: string | null; fxDebugEnabled?: boolean }) {
+function stand(input: { accessToken: string; runId: string | null }) {
   const real = reactive({
     apiBase: 'http://sim.test/api/v1',
     accessToken: input.accessToken,
@@ -39,7 +39,7 @@ function stand(input: { accessToken: string; runId: string | null; fxDebugEnable
   scope = effectScope()
   const controls = scope.run(() =>
     useFxDebugControls({
-      isFxDebugEnabled: ref(input.fxDebugEnabled ?? true),
+      isFxDebugEnabled: ref(true),
       real,
       effectiveEq: ref('UAH'),
       markDemoActivity: () => undefined,
@@ -56,18 +56,10 @@ function stand(input: { accessToken: string; runId: string | null; fxDebugEnable
   return { real, controls, startRun }
 }
 
-let fetchSpy: ReturnType<typeof vi.fn>
-
-beforeEach(() => {
-  fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }))
-  vi.stubGlobal('fetch', fetchSpy)
-})
-
 afterEach(() => {
   scope?.stop()
   scope = null
   window.localStorage.clear()
-  vi.unstubAllGlobals()
 })
 
 describe('F-034-D7: the demo run without an access token (cookie session)', () => {
@@ -94,21 +86,5 @@ describe('F-034-D7: the demo run without an access token (cookie session)', () =
     })
 
     await expect(s.controls.ensureRunSerialized()).rejects.toThrow('Failed to start run for FX debug: HTTP 503')
-  })
-})
-
-describe('042 S1: Single Tx and Run Clearing have no server action any more', () => {
-  it('they send nothing and start no run, whatever the debug flag says', async () => {
-    for (const fxDebugEnabled of [true, false]) {
-      const s = stand({ accessToken: 'tok', runId: null, fxDebugEnabled })
-
-      await s.controls.runTxOnce()
-      await s.controls.runClearingOnce()
-
-      expect(s.startRun, `fxDebugEnabled=${fxDebugEnabled}`).not.toHaveBeenCalled()
-      expect(s.controls.busy.value).toBe(false)
-      scope?.stop()
-    }
-    expect(fetchSpy, 'a request left the demo buttons').not.toHaveBeenCalled()
   })
 })

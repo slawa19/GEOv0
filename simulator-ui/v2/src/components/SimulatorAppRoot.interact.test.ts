@@ -697,12 +697,6 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         // dev / diagnostics
         showPerfOverlay: computed(() => false),
         perf: reactive<Record<string, unknown>>({}),
-        fxDebug: {
-          enabled: computed(() => false),
-          busy: ref(false),
-          runTxOnce: vi.fn(),
-          runClearingOnce: vi.fn(),
-        },
         e2e: {
           runTxOnce: vi.fn(),
           runClearingOnce: vi.fn(),
