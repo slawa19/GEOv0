@@ -30,7 +30,7 @@ import { provideActivePanelState } from '../composables/useActivePanelState'
 import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } from '../composables/useParticipantDisplay'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
- import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
+ import { useUiTheme } from '../composables/useUiTheme'
  import { toLower } from '../utils/stringHelpers'
  import { canonicalEquivalent } from '../config/equivalents'
  import { extractErrorMessage } from '../utils/errorMessage'
@@ -40,48 +40,8 @@ import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } fr
 const simulatorStorage = useSimulatorStorage()
 const reducedMotion = useReducedMotionPreference()
 
-function readThemeFromUrl(): UiThemeId {
-  try {
-    return normalizeUiThemeId(new URLSearchParams(window.location.search).get('theme'))
-  } catch {
-    return 'hud'
-  }
-}
-
-function readThemeFromStorage(): UiThemeId | null {
-  // TD-1: delegated to composable — no direct localStorage access.
-  return simulatorStorage.readUiTheme()
-}
-
-function pickInitialTheme(): UiThemeId {
-  const url = readThemeFromUrl()
-  if (url !== 'hud') return url
-  const stored = readThemeFromStorage()
-  return stored ?? 'hud'
-}
-
-const uiTheme = ref<UiThemeId>(pickInitialTheme())
-
-function syncThemeFromUrl() {
-  const t = readThemeFromUrl()
-  uiTheme.value = t
-}
-
-function setUiTheme(next: UiThemeId) {
-  const theme = normalizeUiThemeId(next)
-  uiTheme.value = theme
-  // TD-1: delegated to composable — no direct localStorage access.
-  simulatorStorage.writeUiTheme(theme)
-
-  try {
-    const u = new URL(window.location.href)
-    if (theme === 'hud') u.searchParams.delete('theme')
-    else u.searchParams.set('theme', theme)
-    window.history.replaceState({}, '', u.toString())
-  } catch {
-    // ignore
-  }
-}
+// 039 B3: which theme is shown, and what a switch writes back - `useUiTheme` (URL, stored choice, default).
+const { uiTheme, setUiTheme, onPopState: syncThemeFromUrl } = useUiTheme(simulatorStorage)
 
 onMounted(() => {
   // Allow browser back/forward to update theme without reload.

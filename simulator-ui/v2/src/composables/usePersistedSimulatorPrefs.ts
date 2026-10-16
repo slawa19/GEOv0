@@ -220,11 +220,17 @@ export function useSimulatorStorage(storage?: StorageLike) {
   const DEVTOOLS_OPEN_DEMO_KEY = 'geo.sim.v2.devtools.open.demo'
   const DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY = 'geo.sim.v2.devtools.open.realSnapshot'
 
-  /** Read persisted UI theme (null if absent). */
+  /**
+   * Read persisted UI theme (null if absent). A value the app no longer offers (`shadcn`, `library`, anything
+   * unknown; 039 B3) is normalised to `saas` and written back here, so it is rewritten once: the next read finds a
+   * valid value and writes nothing, and a valid value is never touched.
+   */
   function readUiTheme(): UiThemeId | null {
     const v = _storage.getItem('geo.uiTheme')
     if (!v) return null
-    return normalizeUiThemeId(v)
+    const theme = normalizeUiThemeId(v)
+    if (v !== theme) _storage.setItem('geo.uiTheme', theme)
+    return theme
   }
 
   /** Persist UI theme selection. */

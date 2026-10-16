@@ -9,7 +9,7 @@
  *  - R3: the tokens resolve to one value in every theme the switcher OFFERS (switched live, in the same mounted
  *    application), and, apart from the UI, under every theme id the design system has tokens for - the frozen
  *    `shadcn` included (the attribute is set on the root directly: no option of the switcher is needed for it).
- *  - R4: two options, `shadcn` not among them.
+ *  - R4: two options, `shadcn` not among them (since slice B, PR 3: exactly `saas` and `hud`).
  * The names looked for (selectors, role ids, token names) are in `contract.ts` - the one place a slice renames them.
  *
  * SLICE B must turn the three red tests green (legend, data tokens, switcher); plain failing tests, no `test.fail`.
@@ -23,7 +23,8 @@
  *    legend that always lists everything).
  *  - R3: the neutral token is walked with the four.
  * The counted checks of the same things are in the stand's gate: `../data-colours.qa.ts`.
- * R4 (the switcher) is still RED: it belongs to PR 3 of the slice (themes and the stand).
+ * R4 (the switcher) was RED until PR 3 of the slice (themes and the stand, 2026-10-16): it now asks for exactly
+ * `saas` and `hud` (decision 6: `library` left the switcher with `shadcn`); the counted check is `../themes.qa.ts`.
  *
  * LIMITS. (1) "The canvas paints with the same colours as the legend" is NOT judged: the legend's swatch is compared
  * with the token, and whether the renderer consumes that token is the mapping tier's (`src/p039-repro/r03-...`) and the
@@ -154,11 +155,13 @@ test('039 R3 (browser) - the data colour tokens resolve to ONE value: in every t
   }
 })
 
-test('039 R4 (browser) - the switcher of the running app offers two themes, shadcn is not one of them (today: four)', async ({ page }) => {
+test('039 R4 (browser) - the switcher of the running app offers two themes, saas and hud; shadcn and library are not among them (base: four)', async ({ page }) => {
   const options = await offeredThemes(page)
   note('R4 switcher options', options)
   expect.soft(options, 'options of the theme switcher').toHaveLength(2)
+  expect.soft(options).toEqual(['saas', 'hud'])
   expect.soft(options).not.toContain('shadcn')
+  expect.soft(options).not.toContain('library')
 })
 
 test('039 measurement (P-6, P-9) - a live switch through the OFFERED themes: what the canvas does, and where its colour tokens are read from', async ({ page }) => {

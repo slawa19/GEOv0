@@ -15,7 +15,7 @@
  * itself, which would hide exactly the clipping this spec is after.
  *
  * What this does NOT see: a real phone (browser chrome, on-screen keyboard - Playwright cannot raise it); real-backend
- * latency; more than 31 recipients; the HUD theme only (the default of the app).
+ * latency; more than 31 recipients; the default theme only (`saas` since 2026-10-16, 039 B3; `hud` before).
  */
 import { expect, test, type Page } from '@playwright/test'
 

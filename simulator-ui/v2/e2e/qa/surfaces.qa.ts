@@ -1,10 +1,12 @@
 /**
  * 038 S2 - windows and menus by the named matrix (F-038-5; replaces the S0 measurements R6 and R8).
  *
- * In the `hud` theme every entry is opened by its gesture and gets: the tie to the catalogue, its rectangle against
- * the viewport at 1366x768, opened anew at 1920x1080 and resized down to 1024x640, the size of its controls, axe, and
- * the policies its code declares (Escape, a click outside, where the focus returns, Tab). In all four themes: a frame
- * on a settled graph and axe - the gallery a human looks through. Tests tagged `@extended` (the gallery, the other
+ * In each theme the app offers (`saas`, the default, and `hud`; 039 B3, 2026-10-16 - until then `hud` alone here and
+ * four themes in the gallery) every entry is opened by its gesture and gets: the tie to the catalogue, its rectangle
+ * against the viewport at 1366x768, opened anew at 1920x1080 and resized down to 1024x640, the size of its controls,
+ * axe, and the policies its code declares (Escape, a click outside, where the focus returns, Tab). In the same two
+ * themes: a frame on a settled graph and axe - the gallery a human looks through. The frozen `shadcn` and `library`
+ * (owner's decision R1) are not walked. Tests tagged `@extended` (the gallery, the other
  * viewports of surfaces placed by CSS, the measurement of what the HUD covers) are not part of the required gate.
  *
  * What a green run does NOT say: that a surface looks right (the frames are for a human), that its contrast is
@@ -251,17 +253,17 @@ const tourInGate = (e: Entry) => e.catalogue === 'hud-dropdown' || e.catalogue =
 const OTHER_VIEWPORT = /@(1920x1080|1024x640)$/
 
 /** Opened anew on the large viewport, then resized down with the surface on screen. The surface is closed or absent on entry. */
-async function otherViewports(page: Page, e: Entry, info: TestInfo): Promise<{ findings: string[]; large: Box; resized: Box }> {
+async function otherViewports(page: Page, e: Entry, info: TestInfo, theme: Theme): Promise<{ findings: string[]; large: Box; resized: Box }> {
   await page.setViewportSize(VIEWPORT_LARGE)
   await e.open(page)
   let box = await settled(page, e)
   const large = await insideFindings(page, e, box, VIEWPORT_LARGE)
-  await frame(page, info, `${e.id}-hud-${VIEWPORT_LARGE.width}x${VIEWPORT_LARGE.height}`)
+  await frame(page, info, `${e.id}-${theme}-${VIEWPORT_LARGE.width}x${VIEWPORT_LARGE.height}`)
   await page.setViewportSize(VIEWPORT_RESIZED)
   if (e.followsPointer) await e.open(page)
   box = await settled(page, e)
   const resized = await insideFindings(page, e, box, VIEWPORT_RESIZED)
-  await frame(page, info, `${e.id}-hud-resized-${VIEWPORT_RESIZED.width}x${VIEWPORT_RESIZED.height}`)
+  await frame(page, info, `${e.id}-${theme}-resized-${VIEWPORT_RESIZED.width}x${VIEWPORT_RESIZED.height}`)
   return { findings: [...large.findings, ...resized.findings], large: large.box, resized: resized.box }
 }
 
@@ -271,11 +273,11 @@ function expectFindings(e: Entry, findings: string[], scope: (finding: string) =
     .toEqual((KNOWN_FINDINGS[e.id] ?? []).map((k) => k.finding).filter(scope).sort())
 }
 
-for (const e of MATRIX) {
+for (const theme of THEMES) for (const e of MATRIX) {
   const all = tourInGate(e)
-  test(`matrix [hud] ${e.id}: ${e.gesture} - catalogue, viewport${all ? 's' : ''}, targets, frame, axe, declared policies`, async ({ page }, info) => {
+  test(`matrix [${theme}] ${e.id}: ${e.gesture} - catalogue, viewport${all ? 's' : ''}, targets, frame, axe, declared policies`, async ({ page }, info) => {
     const keys = await catalogueKeys()
-    await bootEntry(page, e, 'hud', VIEWPORT_MAIN)
+    await bootEntry(page, e, theme, VIEWPORT_MAIN)
     await e.open(page)
     const box = await settled(page, e)
     await assertClaimed(page, e, keys)
@@ -285,13 +287,13 @@ for (const e of MATRIX) {
     findings.push(...main.findings)
     const { checked: targetsChecked, small } = await smallTargets(page, e)
     findings.push(...new Set(small.map((s) => s.key)))
-    await frame(page, info, `${e.id}-hud-${VIEWPORT_MAIN.width}x${VIEWPORT_MAIN.height}`)
+    await frame(page, info, `${e.id}-${theme}-${VIEWPORT_MAIN.width}x${VIEWPORT_MAIN.height}`)
     const ax = await axe(page, e.root, e.clock === true)
 
     let other: Awaited<ReturnType<typeof otherViewports>> | null = null
     if (all) {
       await closeIt(page, e)
-      other = await otherViewports(page, e, info)
+      other = await otherViewports(page, e, info, theme)
       findings.push(...other.findings)
       // Policies last, back on the main viewport, on the surface as it stands after the resizes.
       await page.setViewportSize(VIEWPORT_MAIN)
@@ -300,26 +302,26 @@ for (const e of MATRIX) {
     const policies = await checkPolicies(page, e)
 
     note(info, {
-      entry: e.id, catalogue: e.catalogue, theme: 'hud', gesture: e.gesture, notAGesture: e.notAGesture ?? null,
+      entry: e.id, catalogue: e.catalogue, theme, gesture: e.gesture, notAGesture: e.notAGesture ?? null,
       box: { main: main.box, large: other?.large ?? null, resized: other?.resized ?? null }, pad: main.pad, findings, targetsChecked, smallTargets: small, policies,
       axe: ax.counts, axeNodes: ax.targets, axeIncomplete: ax.incomplete,
     })
     expectFindings(e, findings, (f) => all || !OTHER_VIEWPORT.test(f))
-    expectAxe(e.id, 'hud', ax)
+    expectAxe(e.id, theme, ax)
   })
 
   if (!all && e.policies.inside !== null) {
-    test(`matrix [hud] ${e.id}: opened at 1920x1080 and resized to 1024x640 @extended`, async ({ page }, info) => {
-      await bootEntry(page, e, 'hud', VIEWPORT_LARGE)
-      const other = await otherViewports(page, e, info)
-      note(info, { entry: e.id, theme: 'hud', box: { large: other.large, resized: other.resized }, findings: other.findings })
+    test(`matrix [${theme}] ${e.id}: opened at 1920x1080 and resized to 1024x640 @extended`, async ({ page }, info) => {
+      await bootEntry(page, e, theme, VIEWPORT_LARGE)
+      const other = await otherViewports(page, e, info, theme)
+      note(info, { entry: e.id, theme, box: { large: other.large, resized: other.resized }, findings: other.findings })
       expectFindings(e, other.findings, (f) => OTHER_VIEWPORT.test(f))
     })
   }
 }
 
-// The gallery for a human: every entry in every theme, on a settled graph. hud is here too - the required test above
-// frames it without waiting for the graph, and judges its axe numbers a second time here against the same constant.
+// The gallery for a human: every entry in both themes, on a settled graph. The required tests above frame them
+// without waiting for the graph; here their axe numbers are judged a second time against the same constant.
 for (const theme of THEMES) {
   for (const e of MATRIX) {
     test(`matrix [${theme}] ${e.id}: frame and axe @extended`, async ({ page }, info) => {
@@ -335,7 +337,7 @@ for (const theme of THEMES) {
 }
 
 for (const theme of THEMES) {
-  test(`matrix [${theme}] page: axe on the whole page with nothing summoned${theme === 'hud' ? '' : ' @extended'}`, async ({ page }, info) => {
+  test(`matrix [${theme}] page: axe on the whole page with nothing summoned`, async ({ page }, info) => {
     await page.setViewportSize(VIEWPORT_MAIN)
     await boot(page, { snapshot: ringSnapshot(), clock: false, query: `&theme=${theme}`, awaitLayout: false })
     await frame(page, info, `page-${theme}-${VIEWPORT_MAIN.width}x${VIEWPORT_MAIN.height}`)
@@ -404,7 +406,8 @@ test('counter-check: injected surfaces - a stray child of the window layer, a 0x
 
 test('matrix [hud] node-card opened from the graph navigator: Escape returns the focus to "Inspect node"', async ({ page }) => {
   await page.setViewportSize(VIEWPORT_MAIN)
-  await boot(page, { snapshot: ringSnapshot(), clock: false })
+  // Pinned: since 039 B3 the default theme is saas, and the title promises hud (external review 2026-10-16).
+  await boot(page, { snapshot: ringSnapshot(), clock: false, query: '&theme=hud' })
   await page.locator('.graph-navigator summary').click()
   const opener = page.locator('.graph-navigator button', { hasText: 'Inspect node' })
   await opener.focus()

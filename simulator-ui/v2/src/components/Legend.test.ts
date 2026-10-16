@@ -206,3 +206,34 @@ describe('the canvas, the legend and the node card agree', () => {
     expect(balanceOf({ net_sign: 0, net_balance_atoms: '0' })).toBe('0.00')
   })
 })
+
+// Carried over 2026-10-16 (039 B3) from the withdrawn branch of slice B, PR 2 (commit 16fff143), the swatch alone.
+describe('Legend - the frozen swatch shows its dashed outline', () => {
+  it('the outline is a circle of separate dashes round the swatch, and the fill is still the freeze colour of the palette', () => {
+    const { host, done } = mount(Legend, { nodes: SCENE, equivalent: 'UAH', palette: PALETTE })
+    const s = swatch(host, 'frozen')
+    expect(rgbOf(s.style.backgroundColor)).toBe(rgbOf(PALETTE.frozen))
+    const circle = s.querySelector('[data-legend-dash] circle')!
+    expect(circle, 'the dashed outline').not.toBeNull()
+    const [dash, gap] = circle.getAttribute('stroke-dasharray')!.split(/\s+/).map(Number) as [number, number]
+    const total = Number(circle.getAttribute('pathLength'))
+    expect(dash).toBeGreaterThan(0)
+    expect(gap, 'there IS a gap between dashes').toBeGreaterThan(0)
+    expect(Number.isInteger(Math.round((total / (dash + gap)) * 1e6) / 1e6), 'a whole number of dashes: no seam where the circle closes').toBe(true)
+    // On screen (r = 7 px): each dash and each gap is long enough to be told apart at legend size.
+    const unitPx = (2 * Math.PI * Number(circle.getAttribute('r'))) / total
+    expect(dash * unitPx, 'dash length in px').toBeGreaterThanOrEqual(2.5)
+    expect(gap * unitPx, 'gap length in px').toBeGreaterThanOrEqual(2)
+    done()
+  })
+
+  it('only the frozen swatch carries it', () => {
+    const { host, done } = mount(Legend, { nodes: SCENE, equivalent: 'UAH', palette: PALETTE })
+    expect(host.querySelectorAll('[data-legend-dash]')).toHaveLength(1)
+    for (const id of ['debtor', 'creditor', 'neutral', 'unknown', 'hub']) {
+      const e = entry(host, id)
+      if (e) expect(e.querySelector('[data-legend-dash]'), `${id} has no dashed outline`).toBeNull()
+    }
+    done()
+  })
+})

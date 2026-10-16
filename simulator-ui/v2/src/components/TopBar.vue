@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { SimulatorMode } from '../api/simulatorTypes'
-import type { UiThemeId } from '../types/uiPrefs'
+import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 import { isJwtLike } from '../utils/isJwtLike'
 
@@ -127,8 +127,7 @@ function short(s: string, n: number) {
 }
 
 function onThemeChange(v: string) {
-  // Normalize at caller if needed.
-  emit('set-ui-theme', (v as UiThemeId) || 'hud')
+  emit('set-ui-theme', normalizeUiThemeId(v))
 }
 
 const stopSummary = computed(() => {
@@ -317,9 +316,8 @@ function onApplyIntensity() {
                 aria-label="UI theme"
                 @change="onThemeChange(($event.target as HTMLSelectElement).value)"
               >
-                <option value="shadcn">shadcn/ui (dark)</option>
+                <!-- 039 B3 (owner's decision R1): two themes; shadcn and library are frozen (tokens kept, not offered). -->
                 <option value="saas">SaaS (subtle)</option>
-                <option value="library">Library (Naive-like)</option>
                 <option value="hud">HUD (sci-fi)</option>
               </select>
             </div>
