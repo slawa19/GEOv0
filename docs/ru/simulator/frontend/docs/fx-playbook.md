@@ -13,7 +13,7 @@ FX — это отдельный overlay canvas поверх базового г
 - Базовый граф: постоянно рисует узлы/рёбра и их LOD.
 - FX overlay: рисует краткоживущие эффекты (частицы/пульсы/вспышки).
 
-См. общий контекст: [archive/GEO-visual-demo-fast-mock.md](archive/GEO-visual-demo-fast-mock.md).
+См. общий контекст: [archive/GEO-visual-demo-fast-mock.md](../../../archive/simulator/frontend/docs/archive/GEO-visual-demo-fast-mock.md).
 
 ## 1) Примитивы FX (что у нас есть)
 

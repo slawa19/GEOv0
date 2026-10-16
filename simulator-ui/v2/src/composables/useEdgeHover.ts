@@ -16,6 +16,8 @@ type UseEdgeHoverDeps = {
 
   getLinkByKey: (key: string) => GraphLink | null | undefined
   formatEdgeAmountText: (link: GraphLink | null | undefined) => string
+  /** 043 S1: the equivalent of the scene the link's figures belong to - captured with them (review finding 1). */
+  getEquivalent?: () => string | null
 
   clientToScreen: (clientX: number, clientY: number) => Point
   screenToWorld: (screenX: number, screenY: number) => Point
@@ -57,6 +59,7 @@ export function useEdgeHover(deps: UseEdgeHoverDeps) {
         deps.hoveredEdge.used = link?.used ?? null
         deps.hoveredEdge.available = link?.available ?? null
         deps.hoveredEdge.edgeStatus = link?.status ?? null
+        deps.hoveredEdge.equivalent = deps.getEquivalent?.() ?? null
       } else {
         deps.clearHoveredEdge()
       }

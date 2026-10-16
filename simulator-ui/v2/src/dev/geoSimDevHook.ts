@@ -23,6 +23,8 @@ type GeoSimTooltipInput = {
   used?: string | number | null
   available?: string | number | null
   edgeStatus?: string | null
+  /** 043 S1: the equivalent of the figures (the tooltip prints no other). */
+  equivalent?: string | null
 }
 
 type GeoSimNodeCardInput = {

@@ -67,6 +67,12 @@ export function useWmEdgeDetail(): {
    */
   frozenFiguresSource: Ref<TrustlineFiguresSource | null>
 
+  /**
+   * 043 S1 (review, class 1): the equivalent the frozen figures are in, captured WITH them. While kept alive the
+   * popup prints this one and never the live scene's: frozen figures and their unit cannot come apart.
+   */
+  frozenEquivalent: Ref<string | null>
+
   /** Feed the current auto (Interact FSM) desire to show EdgeDetail quick-info. */
   syncAuto: (req: EdgeDetailOpenRequest | null) => void
 
@@ -86,6 +92,7 @@ export function useWmEdgeDetail(): {
   allowKeepAlive: (o?: {
     frozenLink?: GraphLink | null
     frozenFiguresSource?: TrustlineFiguresSource | null
+    frozenEquivalent?: string | null
   }) => void
   releaseKeepAlive: () => void
 
@@ -111,6 +118,7 @@ export function useWmEdgeDetail(): {
   const frozenReq = ref<EdgeDetailOpenRequest | null>(null)
   const frozenLink = ref<GraphLink | null>(null)
   const frozenFiguresSource = ref<TrustlineFiguresSource | null>(null)
+  const frozenEquivalent = ref<string | null>(null)
 
   // WM bookkeeping (singleton window id + last applied open signature).
   const winId = ref<number | null>(null)
@@ -196,6 +204,7 @@ export function useWmEdgeDetail(): {
     frozenReq.value = null
     frozenLink.value = null
     frozenFiguresSource.value = null
+    frozenEquivalent.value = null
 
     if (state.value === 'keepAlive') {
       state.value = 'closed'
@@ -208,6 +217,7 @@ export function useWmEdgeDetail(): {
   function allowKeepAlive(o?: {
     frozenLink?: GraphLink | null
     frozenFiguresSource?: TrustlineFiguresSource | null
+    frozenEquivalent?: string | null
   }): void {
     // Only meaningful while the window is live.
     const req = desiredOpenReq()
@@ -219,6 +229,7 @@ export function useWmEdgeDetail(): {
     // Основание замораживается ВМЕСТЕ с числами: иначе заморозка молча повысила бы их
     // происхождение (внешнее ревью 013, находка P3).
     frozenFiguresSource.value = o?.frozenFiguresSource ?? null
+    frozenEquivalent.value = o?.frozenEquivalent ?? null
     state.value = 'keepAlive'
   }
 
@@ -279,6 +290,7 @@ export function useWmEdgeDetail(): {
     state,
     frozenLink,
     frozenFiguresSource,
+    frozenEquivalent,
     syncAuto,
     open,
     close,

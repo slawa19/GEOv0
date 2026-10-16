@@ -14,7 +14,7 @@ tests. Новое устойчивое правило переносится в 
 1. **Reference scan** — на active-копию `manual-operations-ui-improvements-spec-2026-02-26.md`
    ссылались только три архивных review/report документа.
 2. **Единственная historical location** — выбрана
-   [`archive/manual-operations-ui-improvements-spec-2026-02-26.md`](archive/manual-operations-ui-improvements-spec-2026-02-26.md);
+   [`archive/manual-operations-ui-improvements-spec-2026-02-26.md`](../../../../archive/simulator/frontend/docs/specs/archive/manual-operations-ui-improvements-spec-2026-02-26.md);
    active-копия (побайтово идентичная, md5 `33c2611f689e52f1ef63a8f8289bde8d`) вынесена
    в карантин и удалена 2026-08-11 после проверки владельцем.
 3. **Обновление ссылок** — 9 ссылок в `../archive/REVIEW-*-2026-02-26.md`,

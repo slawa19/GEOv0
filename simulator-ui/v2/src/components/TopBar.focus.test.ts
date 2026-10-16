@@ -64,7 +64,8 @@ async function mountTopBar(overrides: Partial<TopBarContext> = {}) {
   const app = createApp({
     setup() {
       provideTopBarContext(createTopBarContext(overrides))
-      return () => h(TopBar, listeners)
+      // 043 S1: the dropdowns and statuses these tests are about live behind "Подробнее".
+      return () => h(TopBar, { ...listeners, detailsOpen: true })
     },
   })
 

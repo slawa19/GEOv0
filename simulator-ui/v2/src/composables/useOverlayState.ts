@@ -19,6 +19,11 @@ export type HoveredEdgeState = {
   used?: string | number | null
   available?: string | number | null
   edgeStatus?: string | null
+  /**
+   * 043 S1 (review finding 1): the equivalent of the scene the figures above were read from, captured WITH them.
+   * The tooltip prints this one and never the live scene's: figures and their unit cannot come apart.
+   */
+  equivalent?: string | null
 }
 
 export type FloatingLabel = {
@@ -88,6 +93,14 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
 
   function clearHoveredEdge() {
     hoveredEdge.key = null
+    // 043 S1 (review finding 1): the figures and their equivalent leave with the key, so no later path can show
+    // a key over figures it did not capture.
+    hoveredEdge.amountText = ''
+    hoveredEdge.trustLimit = null
+    hoveredEdge.used = null
+    hoveredEdge.available = null
+    hoveredEdge.edgeStatus = null
+    hoveredEdge.equivalent = null
   }
 
   const activeEdges = reactive(new Map<string, number>())
@@ -430,6 +443,9 @@ export function useOverlayState<N extends LayoutNodeLike>(deps: UseOverlayStateD
   })
 
   function resetOverlays() {
+    // 043 S1 (review finding 1): a hovered line belongs to the scene being dropped - every scene replacement
+    // (`clearScene`) and every run cleanup passes here. A pointer held still no longer keeps its old figures on screen.
+    clearHoveredEdge()
     cancelPendingLabelRetrigger()
     activeEdges.clear()
     activeEdgeExpiresAtMsByKey.clear()

@@ -10,7 +10,17 @@ import HudBar from './common/HudBar.vue'
 
 const ctx = useTopBarContext()
 
+/**
+ * 043 S1: `detailsOpen` is the one "Подробнее" toggle (owned and remembered by the root). Off: the first row only -
+ * the network's name and state as text, the protocol actions (slot `actions`) and the toggle itself. On: the row of
+ * service controls below it (mode, theme, scenario and run controls, statuses, Admin) and the capacity-stall alert.
+ * Hidden means NOT RENDERED (`v-if`), never hidden by CSS: a hidden control must not stay in the tab order.
+ */
+const props = withDefaults(defineProps<{ detailsOpen?: boolean }>(), { detailsOpen: false })
+
 const emit = defineEmits<{
+  (e: 'toggle-details'): void
+
   (e: 'update:selected-scenario-id', v: string): void
   (e: 'update:intensity-percent', v: number): void
 
@@ -36,6 +46,32 @@ const emit = defineEmits<{
 const STALL_THRESHOLD_TICKS = 3
 
 const showRunControls = computed(() => ctx.activeSegment.value === 'auto')
+
+/** The network on screen, as text: the label of the scenario of the run (or of the selected one), its id otherwise. */
+const networkName = computed(() => {
+  if (ctx.apiMode.value !== 'real') return 'офлайн-демо'
+  const id = String(ctx.runStatus.value?.scenario_id ?? '').trim() || String(ctx.selectedScenarioId.value ?? '').trim()
+  if (!id) return '—'
+  const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
+  return s?.label?.trim() || id
+})
+
+/** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
+const networkState = computed<{ text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
+  if (ctx.apiMode.value !== 'real') return { text: 'снимок без сервера', tone: 'info' }
+  const s = toLower(ctx.runStatus.value?.state)
+  if (s === 'running') return { text: 'живёт', tone: 'ok' }
+  if (s === 'paused') return { text: 'на паузе', tone: 'warn' }
+  if (s === 'created') return { text: 'запускается', tone: 'info' }
+  if (s === 'stopping') return { text: 'останавливается', tone: 'warn' }
+  if (s === 'stopped') return { text: 'остановлена', tone: 'info' }
+  if (s === 'error') return { text: 'ошибка', tone: 'err' }
+  return { text: ctx.runId.value ? '…' : 'нет прогона', tone: 'info' }
+})
+
+function onToggleDetails() {
+  emit('toggle-details')
+}
 
 const showTestModeBadge = computed(() => {
   // Show only for humans; Playwright/WebDriver runs shouldn't change screenshots.
@@ -270,7 +306,37 @@ function onApplyIntensity() {
 <template>
   <div class="ds-ov-top">
     <div class="ds-ov-top-stack">
-      <HudBar variant="ghost" layout="between" aria-label="Top bar">
+      <!-- 043 S1: the first row - always on screen. -->
+      <HudBar variant="ghost" layout="between" class="tb-main-row">
+        <div class="hud-bar__left tb-identity">
+          <span class="ds-panel ds-ov-metric tb-network-name" data-testid="network-name">
+            <span class="ds-label">GEO</span>
+            <span class="ds-value">{{ networkName }}</span>
+          </span>
+          <span class="ds-panel ds-ov-metric tb-network-state" data-testid="network-state">
+            <span :class="['ds-badge', `ds-badge--${networkState.tone}`, 'tb-state-dot']"><span class="ds-dot" aria-hidden="true" /></span>
+            <span class="ds-value">{{ networkState.text }}</span>
+          </span>
+        </div>
+
+        <div class="hud-bar__center tb-actions">
+          <slot name="actions" />
+        </div>
+
+        <div class="hud-bar__right">
+          <button
+            type="button"
+            class="ds-btn ds-btn--secondary ds-btn--sm tb-details-toggle"
+            data-testid="details-toggle"
+            :aria-expanded="props.detailsOpen ? 'true' : 'false'"
+            @click="onToggleDetails"
+          >
+            Подробнее <span aria-hidden="true">{{ props.detailsOpen ? '▴' : '▾' }}</span>
+          </button>
+        </div>
+      </HudBar>
+
+      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" aria-label="Top bar" data-testid="top-details-row">
         <div class="hud-bar__left" aria-label="Mode">
           <div class="ds-row tb-mode-row">
             <div class="ds-segmented" role="group" aria-label="Simulator mode">
@@ -320,7 +386,8 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <div class="hud-bar__center" aria-label="Run controls">
+        <!-- 043 S1: named only when it holds the run controls (Auto-Run); an empty div with a name is an axe violation (aria-prohibited-attr). -->
+        <div class="hud-bar__center" :aria-label="showRunControls ? 'Run controls' : undefined">
           <div v-if="showRunControls" class="ds-row tb-run-controls">
             <span class="ds-label">Scenario</span>
             <select
@@ -581,20 +648,44 @@ function onApplyIntensity() {
         <span class="ds-value ds-mono tb-fade-92" :title="String(ctx.lastError.value)">{{ short(String(ctx.lastError.value), 160) }}</span>
       </div>
 
-      <div v-if="isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">
+      <div v-if="props.detailsOpen && isCapacityStall" class="ds-alert ds-alert--warn" aria-label="Capacity stall">
         <span class="ds-alert__icon">!</span>
         <span class="ds-label">Stall</span>
         <span class="ds-value ds-mono tb-fade-92">All payments rejected — network capacity exhausted. Waiting for clearing to free capacity.</span>
       </div>
 
-      <!-- Slot for HUD elements (SystemBalanceBar, ActionBar) that stack below TopBar rows -->
+      <!-- Slot for HUD elements that stack below the TopBar rows (043 S1: the full metrics, while Details is on). -->
       <slot />
 
     </div>
+    <!-- 043 S1: the one onboarding hint, laid under the stack and out of its measured height. -->
+    <slot name="hint" />
   </div>
 </template>
 
 <style scoped>
+.tb-identity {
+  gap: var(--ds-space-2, 8px);
+}
+
+.tb-network-name,
+.tb-network-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2, 8px);
+  white-space: nowrap;
+}
+
+.tb-state-dot {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.tb-actions {
+  justify-content: center;
+}
+
 .tb-mode-row {
   gap: var(--ds-space-3, 12px);
   flex-wrap: wrap;

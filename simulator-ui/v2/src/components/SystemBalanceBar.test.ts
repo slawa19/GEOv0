@@ -35,18 +35,38 @@ function mountSystemBalanceBar(overrides: Record<string, unknown> = {}) {
 }
 
 describe('SystemBalanceBar', () => {
-  it('renders utilization and hides secondary metrics in compact mode', async () => {
+  it('compact (043 S1: the bottom row of the first view) shows the total debt alone', async () => {
     const { app, host } = mountSystemBalanceBar({ compact: true })
     await nextTick()
 
     expect(host.textContent).toContain('Total Debt')
-    expect(host.textContent).toContain('Utilization')
+    expect(host.textContent).not.toContain('Utilization')
     expect(host.textContent).not.toContain('Available Capacity')
     expect(host.textContent).not.toContain('Trustlines')
     expect(host.textContent).not.toContain('Participants')
+    expect(host.querySelector('[aria-label="System balance"]')).not.toBeNull()
 
     app.unmount()
     host.remove()
+  })
+
+  it('variant "metrics" (043 S1: the Details row) shows everything but the total debt, under its own name; "full" shows all', async () => {
+    const metrics = mountSystemBalanceBar({ variant: 'metrics' })
+    await nextTick()
+    const text = metrics.host.textContent ?? ''
+    for (const label of ['Available Capacity', 'Trustlines', 'Participants', 'Utilization']) expect(text).toContain(label)
+    expect(text).not.toContain('Total Debt')
+    // Its own accessible name: the bottom row's total debt stays the one "System balance" on the page.
+    expect(metrics.host.querySelector('[aria-label="System metrics"]')).not.toBeNull()
+    expect(metrics.host.querySelector('[aria-label="System balance"]')).toBeNull()
+    metrics.app.unmount()
+    metrics.host.remove()
+
+    const full = mountSystemBalanceBar()
+    await nextTick()
+    for (const label of ['Total Debt', 'Available Capacity', 'Trustlines', 'Participants', 'Utilization']) expect(full.host.textContent).toContain(label)
+    full.app.unmount()
+    full.host.remove()
   })
 
   it('keeps the shared HudBar contract and token-driven progress geometry', () => {
