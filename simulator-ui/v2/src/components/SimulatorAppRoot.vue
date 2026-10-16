@@ -1623,12 +1623,15 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
   margin-bottom: 0;
 }
 
-/* 043 S1: the onboarding hint hangs under the top stack (absolute: not part of its measured height). */
+/* 043 S1: the onboarding hint hangs under the top stack (absolute: not part of its measured height), at the right edge,
+   under "Подробнее": the scene is framed into the middle of the screen, and a hint on the left covered its first nodes
+   (seen on the stand: a node of the ring and a payment's beam under it). */
 .sar-onboarding-hint {
   position: absolute;
   top: calc(100% + var(--ds-space-2, 8px));
-  left: 0;
-  max-width: min(600px, 100%);
+  right: 0;
+  max-width: min(360px, 100%);
+  font-size: 0.86rem;
   display: flex;
   align-items: flex-start;
   gap: var(--ds-space-2, 8px);

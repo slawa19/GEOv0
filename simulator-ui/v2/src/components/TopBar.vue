@@ -386,7 +386,8 @@ function onApplyIntensity() {
           </div>
         </div>
 
-        <div class="hud-bar__center" aria-label="Run controls">
+        <!-- 043 S1: named only when it holds the run controls (Auto-Run); an empty div with a name is an axe violation (aria-prohibited-attr). -->
+        <div class="hud-bar__center" :aria-label="showRunControls ? 'Run controls' : undefined">
           <div v-if="showRunControls" class="ds-row tb-run-controls">
             <span class="ds-label">Scenario</span>
             <select
