@@ -19,8 +19,18 @@ collection, before any test body runs, so it also holds under `--collect-only`):
    * a marker expression other than `not slow` (the canonical profile, `scripts/verify_local.ps1 -BackendOnly`) or none
      (`-IncludeExpensive`, the wide profile). Spellings are compared after runs of whitespace are collapsed; an
      equivalent spelled differently, such as `(not slow)`, is REFUSED (before 2026-10-16 it silently turned the count off).
+   * an override of a DISCOVERY key, `-o`/`--override-ini` `testpaths`, `norecursedirs`, `python_files`,
+     `python_classes`, `python_functions` or `collect_imported_tests` (pytest 8; listed so an upgrade does not open it):
+     each changes which modules, classes or functions are collected while the path stays `tests` (041 review,
+     2026-10-16: `PYTEST_ADDOPTS=-o norecursedirs=unit` dropped `tests/unit` from a green canonical run). Other keys
+     (`cache_dir`, which the runner itself passes, `pythonpath`, `xfail_strict`, `timeout`, ...) do not change the
+     selection and are allowed;
+   * `--rootdir` or `-c`/`--config-file` naming anything other than this repository's root and its `pytest.ini`: another
+     configuration brings its own discovery keys. The whole tier is recognised from the location of `tests/conftest.py`,
+     not from the rootdir, so `--rootdir` cannot make `tests` look like a narrower path.
    The options are read from `config.option`, so the same flag given in `PYTEST_ADDOPTS` or in an `addopts` line of a
-   configuration file is seen too. Deliberately ALLOWED on the whole tier: `--ff` / `--nf` (they reorder, every case still
+   configuration file is seen too (an `-o` in a configuration file's `addopts` is refused although pytest 7.4 does not
+   apply it there: measured 2026-10-16, it is parsed into the options but not into the ini values). Deliberately ALLOWED on the whole tier: `--ff` / `--nf` (they reorder, every case still
    runs), `-x` / `--maxfail` (they stop a run that is already red), `--collect-only` (runs nothing and claims nothing; the
    checks of this module are asked with it).
    To run a subset on purpose, give a path narrower than `tests` (`scripts/verify_local.ps1 -BackendSelector <paths>`):
@@ -45,11 +55,14 @@ A COLLECTION ERROR IS NOT THIS MODULE'S TO JUDGE. pytest 7.4 calls `pytest_colle
 import, and aborts only afterwards (exit 2). The hook returns without judging when the session recorded a collection error
 or a stop request; pytest's own failure handling and error text stand.
 
-WHAT THIS DOES NOT SEE (accepted by the owner's decision of 2026-10-16, spec 041):
+WHAT THIS DOES NOT SEE (accepted by the owner's decision of 2026-10-16, spec 041). The list names the classes known on
+2026-10-16; it is not a proof that no other way exists.
 * WHICH tests exist. A test or module deleted from the tree, or replaced by a weaker one, leaves the tier unnarrowed and
   passes: the composition of the tier is not checked (only the five A10 cases are checked by name).
-* Narrowing that is not a flag: a conftest hook that drops items (`pytest_collection_modifyitems`, `pytest_deselected`),
-  `collect_ignore` / `pytest_ignore_collect` in a conftest, a module-level skip (reported as skipped, not hidden).
+* Narrowing through COMMITTED collection configuration or conftest hooks - the same category as deleting a test, a
+  reviewable change of the tree, and not caught: discovery keys set in the `[pytest]` section of `pytest.ini` itself,
+  `collect_ignore` / `pytest_ignore_collect` in a conftest, a hook that drops items (`pytest_collection_modifyitems`,
+  `items[:] = ...`, `pytest_deselected`), a module-level skip (reported as skipped, not hidden).
 * A run that never loads this conftest (`--noconftest`) or never reaches the end of collection (`--cache-show`,
   `--version`, `--help`, `--fixtures`, `--markers`: pytest answers and exits 0 without running a case), including when
   such an option arrives through `PYTEST_ADDOPTS`. The runner is not defended against reconfiguring itself;
@@ -90,6 +103,12 @@ WHOLE_TIER_MARKEXPRS = frozenset({CANONICAL_MARKEXPR, ""})
 #: The directory whose collection is the whole tier (`pytest.ini` `testpaths`).
 TIER_DIRECTORY = "tests"
 
+#: The `-o`/`--override-ini` keys that decide WHICH modules, classes and functions are collected (pytest 7.4; the last is
+#: pytest 8's, listed so an upgrade does not open a path). Any other key is allowed.
+DISCOVERY_INI_KEYS = frozenset(
+    {"testpaths", "norecursedirs", "python_files", "python_classes", "python_functions", "collect_imported_tests"}
+)
+
 #: The narrowing options refused on the whole tier: `config.option` attribute -> the flag as a person types it.
 NARROWING_OPTIONS = (
     ("deselect", "--deselect"),
@@ -120,14 +139,24 @@ def is_whole_tier(*, args: Sequence[str], invocation_dir: Path, root: Path) -> b
     return True
 
 
-def narrowing_problem(option: object) -> str | None:
+def narrowing_problem(option: object, *, invocation_dir: Path, root: Path) -> str | None:
     """None when a whole-tier session carries no narrowing option; otherwise the refusal text naming each one.
 
     `option` is `config.option` (any object with those attributes; a missing attribute - a plugin that is not loaded,
-    such as the cache provider under `-p no:cacheprovider` - counts as not given).
+    such as the cache provider under `-p no:cacheprovider` - counts as not given). `root` is this repository's root.
     """
 
     found = [flag for attribute, flag in NARROWING_OPTIONS if getattr(option, attribute, None)]
+    for entry in getattr(option, "override_ini", None) or ():
+        key = str(entry).partition("=")[0].strip()
+        if key in DISCOVERY_INI_KEYS:
+            found.append(f"-o/--override-ini {key}")
+    rootdir = getattr(option, "rootdir", None)
+    if rootdir and (invocation_dir / rootdir).resolve() != root.resolve():
+        found.append(f"--rootdir {rootdir!r}")
+    inifile = getattr(option, "inifilename", None)
+    if inifile and (invocation_dir / inifile).resolve() != (root / "pytest.ini").resolve():
+        found.append(f"-c/--config-file {inifile!r}")
     markexpr = " ".join(str(getattr(option, "markexpr", "") or "").split())
     if markexpr not in WHOLE_TIER_MARKEXPRS:
         found.append(f"-m {markexpr!r}")
@@ -135,9 +164,11 @@ def narrowing_problem(option: object) -> str | None:
         return None
     return (
         f"the whole backend tier (no path narrower than `{TIER_DIRECTORY}`) was narrowed by {', '.join(found)}. "
-        "Checked: on the whole tier the options --deselect, --ignore, --ignore-glob, -k, --lf, --sw/--sw-skip and any "
-        f"marker expression other than {CANONICAL_MARKEXPR!r} (or none, -IncludeExpensive) are refused, wherever they come "
-        "from (command line, PYTEST_ADDOPTS, addopts). Not checked: which tests exist - a deleted test is not seen. "
+        "Checked: on the whole tier the options --deselect, --ignore, --ignore-glob, -k, --lf, --sw/--sw-skip, any "
+        f"marker expression other than {CANONICAL_MARKEXPR!r} (or none, -IncludeExpensive), an -o override of a discovery "
+        "key (testpaths, norecursedirs, python_files, python_classes, python_functions) and another --rootdir or -c "
+        "are refused, wherever they come from (command line, PYTEST_ADDOPTS, addopts). Not checked: which tests exist - "
+        "a deleted test or a committed change of collection configuration or conftest hooks is not seen. "
         "To run a subset on purpose, give a path selector: scripts/verify_local.ps1 -BackendOnly -BackendSelector <paths> "
         "(any of these flags is allowed there); the required gate is scripts/verify_local.ps1 -BackendOnly without them "
         "(041 F-041-1, tests/tier_count.py)."

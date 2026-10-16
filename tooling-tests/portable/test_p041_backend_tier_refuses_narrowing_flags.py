@@ -3,7 +3,9 @@
 THE RULE THIS FILE HOLDS (`tests/tier_count.py`, called from `tests/conftest.py` at the end of collection). A backend
 session over the whole tier (no positional path narrower than `tests`) ends with a usage error (exit 4) naming the flag
 when its options carry `--deselect`, `--ignore`, `--ignore-glob`, `-k`, `--lf`, `--sw`/`--sw-skip`, or a marker expression
-other than `not slow` (the canonical profile) or none (`-IncludeExpensive`). Until 2026-10-16 the same file held an exact
+other than `not slow` (the canonical profile) or none (`-IncludeExpensive`), an `-o` override of a discovery key
+(`testpaths`, `norecursedirs`, `python_files`, `python_classes`, `python_functions`; added after the 041 review of
+2026-10-16) or another `--rootdir` / `-c`. Until 2026-10-16 the same file held an exact
 count of the selected cases (035 F-035-14); that count and its constant are gone by the owner's decision of 2026-10-16
 (spec 041). Its two reproducers (a `--deselect`, an `--ignore` on the canonical run) stay below, now refused by the flag.
 
@@ -13,11 +15,12 @@ ignored cases are taken from the baseline collection itself, so the file does no
 
 COUNTER-CHECKS (AGENTS.md section 9, anti-vacuum): every refusal has a run it must NOT refuse - the unmodified canonical
 profile, the unmodified wide profile, the allowed reordering/stopping flags on the whole tier, and a path-selector run
-carrying the refused flags. Each refusal case asserts the flag's own name in the message, so a usage error of another
+carrying the refused flags, unrelated `-o` keys and this repository's own `--rootdir` / `-c`. Each refusal case asserts the flag's own name in the message, so a usage error of another
 origin (an unknown option) cannot pass it.
 
-WHAT THIS DOES NOT SEE. Which tests exist: a deleted test is not narrowing by a flag (accepted, spec 041). Narrowing by a
-conftest hook, and options that end pytest before collection: listed in `tests/tier_count.py`.
+WHAT THIS DOES NOT SEE. Which tests exist: a deleted test is not narrowing by a flag (accepted, spec 041). Narrowing
+through committed collection configuration or conftest hooks is the same category as deleting a test and is not caught;
+that and the options that end pytest before collection are named in `tests/tier_count.py`.
 """
 
 from __future__ import annotations
@@ -140,8 +143,19 @@ def test_a_module_ignored_on_the_canonical_run_ends_it(baseline: subprocess.Comp
         (("-m", "slow"), "-m 'slow'"),
         (("-m", "not slow and not a10_real_pool_timeout"), "-m 'not slow and not a10_real_pool_timeout'"),
         (("-m", "not slow", "-k", "payment", "--", "tests"), "-k"),  # `-- tests` is the whole tier too
+        # 041 review 2026-10-16: discovery keys overridden with -o drop modules while the path stays `tests`
+        (("-m", "not slow", "-o", "norecursedirs=unit"), "-o/--override-ini norecursedirs"),
+        (("-m", "not slow", "--override-ini=python_files=test_p012_*.py"), "-o/--override-ini python_files"),
+        (("-m", "not slow", "-o", "testpaths=tests/unit"), "-o/--override-ini testpaths"),
+        (("-m", "not slow", "-o", "python_classes=Nothing"), "-o/--override-ini python_classes"),
+        (("-m", "not slow", "-o", "python_functions=nothing_*"), "-o/--override-ini python_functions"),
+        (("-m", "not slow", "--rootdir", "tests", "--", "tests"), "--rootdir 'tests'"),
     ],
-    ids=["--ignore-glob", "-k", "an equivalent marker spelling", "another marker expression", "a narrower expression", "-- tests with -k"],
+    ids=[
+        "--ignore-glob", "-k", "an equivalent marker spelling", "another marker expression", "a narrower expression",
+        "-- tests with -k", "-o norecursedirs", "--override-ini python_files", "-o testpaths", "-o python_classes",
+        "-o python_functions", "--rootdir",
+    ],
 )
 def test_each_narrowing_option_is_refused_on_the_whole_tier(args: tuple[str, ...], flag: str) -> None:
     _assert_refused(_collect(*args), flag)
@@ -159,6 +173,20 @@ def test_a_narrowing_option_from_pytest_addopts_is_refused(baseline: subprocess.
 
     nodeid, _ = _a_unit_module(baseline)
     _assert_refused(_collect(*_CANONICAL, addopts=f"--deselect {nodeid}"), "--deselect")
+
+
+def test_a_discovery_override_from_pytest_addopts_is_refused() -> None:
+    """Reproducer of the 041 review (green on 2f16bd05 through the canonical runner, tests/unit silently dropped)."""
+
+    _assert_refused(_collect(*_CANONICAL, addopts="-o norecursedirs=unit"), "-o/--override-ini norecursedirs")
+
+
+def test_another_configuration_file_is_refused(tmp_path: Path) -> None:
+    """`-c` brings its own discovery keys; a copy of this repository's own file is enough to show the refusal."""
+
+    other = tmp_path / "other.ini"
+    other.write_text((_ROOT / "pytest.ini").read_text(encoding="utf-8"), encoding="utf-8")
+    _assert_refused(_collect(*_CANONICAL, "-c", str(other), "--", "tests"), "-c/--config-file")
 
 
 def test_the_wide_profile_with_a_deselect_is_refused(baseline: subprocess.CompletedProcess[str]) -> None:
@@ -235,11 +263,29 @@ def test_the_reordering_and_stopping_options_are_allowed_on_the_whole_tier(tmp_p
     assert _selected(result) > 0
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("-o", "pythonpath=."),
+        ("-o", "xfail_strict=true"),
+        ("--rootdir", "."),
+        ("-c", "pytest.ini"),
+    ],
+    ids=["-o pythonpath", "-o xfail_strict", "--rootdir of this repository", "-c of this repository's pytest.ini"],
+)
+def test_unrelated_overrides_and_this_repositorys_own_configuration_are_allowed(tmp_path: Path, args: tuple[str, ...]) -> None:
+    """Counter-check: only discovery keys and another configuration are refused (`-o cache_dir=` is in every case here)."""
+
+    result = _collect(*_CANONICAL, *args, cache_dir=tmp_path / "cache")
+    assert result.returncode == 0, f"{args} was refused (exit {result.returncode}):\n{(result.stdout + result.stderr)[-800:]}"
+    assert _selected(result) > 0
+
+
 def test_a_selector_run_is_not_judged_even_with_the_refused_flags(baseline: subprocess.CompletedProcess[str]) -> None:
     """Counter-check: `-BackendSelector` narrows on purpose, and a flag inside it is the operator's business."""
 
     nodeid, module = _a_unit_module(baseline)
-    for extra in ((), ("--deselect", nodeid), ("-k", "nothing_matches_this"), ("-m", "slow")):
+    for extra in ((), ("--deselect", nodeid), ("-k", "nothing_matches_this"), ("-m", "slow"), ("-o", "python_functions=test_*")):
         result = _collect(*_CANONICAL, *extra, "--", module)
         assert result.returncode in (0, 5), (
             f"a selector run with {extra} was refused (exit {result.returncode}):\n{result.stdout[-800:]}"
@@ -265,10 +311,15 @@ def test_the_flag_verdict_in_both_outcomes() -> None:
         defaults = dict(deselect=[], ignore=None, ignore_glob=None, keyword="", lf=False, stepwise=False, stepwise_skip=False, markexpr="not slow")
         return SimpleNamespace(**{**defaults, **given})
 
-    assert tier.narrowing_problem(option()) is None
-    assert tier.narrowing_problem(option(markexpr="")) is None  # -IncludeExpensive
-    assert tier.narrowing_problem(option(markexpr=" not  slow ")) is None  # whitespace is collapsed
-    assert tier.narrowing_problem(SimpleNamespace(markexpr="not slow")) is None  # an unloaded plugin's option is absent
+    def verdict(namespace):
+        return tier.narrowing_problem(namespace, invocation_dir=_ROOT, root=_ROOT)
+
+    assert verdict(option()) is None
+    assert verdict(option(markexpr="")) is None  # -IncludeExpensive
+    assert verdict(option(markexpr=" not  slow ")) is None  # whitespace is collapsed
+    assert verdict(SimpleNamespace(markexpr="not slow")) is None  # an unloaded plugin's option is absent
+    assert verdict(option(override_ini=["cache_dir=x", "pythonpath=.", "xfail_strict=true", "timeout=10"])) is None
+    assert verdict(option(rootdir=str(_ROOT), inifilename="pytest.ini")) is None  # this repository's own
     for given, flag in (
         (dict(deselect=["tests/unit/test_x.py::t"]), "--deselect"),
         (dict(ignore=["tests/unit"]), "--ignore"),
@@ -279,8 +330,16 @@ def test_the_flag_verdict_in_both_outcomes() -> None:
         (dict(stepwise_skip=True), "--sw-skip"),
         (dict(markexpr="(not slow)"), "-m '(not slow)'"),
         (dict(markexpr="slow"), "-m 'slow'"),
+        (dict(override_ini=["cache_dir=x", "norecursedirs=unit"]), "-o/--override-ini norecursedirs"),
+        (dict(override_ini=["python_files = test_x*.py"]), "-o/--override-ini python_files"),
+        (dict(override_ini=["testpaths=tests/unit"]), "-o/--override-ini testpaths"),
+        (dict(override_ini=["python_classes=X"]), "-o/--override-ini python_classes"),
+        (dict(override_ini=["python_functions=x"]), "-o/--override-ini python_functions"),
+        (dict(override_ini=["collect_imported_tests=false"]), "-o/--override-ini collect_imported_tests"),
+        (dict(rootdir="tests"), "--rootdir 'tests'"),
+        (dict(inifilename="other.ini"), "-c/--config-file 'other.ini'"),
     ):
-        problem = tier.narrowing_problem(option(**given))
+        problem = verdict(option(**given))
         assert problem is not None and flag in problem, (given, problem)
 
 

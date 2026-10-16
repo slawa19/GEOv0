@@ -214,8 +214,13 @@ _HERE = Path(__file__).resolve().parent
 #: and selector counter-checks (3, rewritten). New: each refused option by name (6 + `--lf`/`--sw`/`--sw-skip` 3), the same
 #: from `PYTEST_ADDOPTS`, the wide profile with a deselect, the unmodified wide profile, four allowed options, the flag
 #: verdict and the whole-tier decision. The A10 cases are unchanged (16).
+#:
+#: 2026-10-16, 041 `T4101` fix-delta of the external review of `2f16bd05`: portable 524 -> 536 (+12) in the same module. An
+#: `-o` override of a discovery key refused (6 subprocess: `norecursedirs`, `python_files`, `testpaths`, `python_classes`,
+#: `python_functions`, `--rootdir`; the reproducer through `PYTEST_ADDOPTS`; another `-c`) and four counter-checks (unrelated
+#: `-o` keys and this repository's own `--rootdir` and `-c` are allowed).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 524,
+    "portable": 536,
     "powershell": 235,
 }
 

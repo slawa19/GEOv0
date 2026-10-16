@@ -126,6 +126,9 @@ _openapi_conformance.HARNESS.install()
 
 _A10_COLLECTED = pytest.StashKey[list]()
 
+#: This repository's root, from this file's location (`tests/conftest.py`): the whole tier is judged against it.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(session, config, items) -> None:
@@ -212,24 +215,33 @@ def pytest_collection_finish(session) -> None:
     # module has no cases, and its import error is pytest's to report, not this hook's to reread.
     if session.testsfailed or session.shouldstop or session.shouldfail:
         return
-    # The A10 exception is a property of the collection, not of a profile: judged on every run.
-    a10_problem = _tier_count.a10_exception_problem(
-        config.stash.get(_A10_COLLECTED, []),
-        args=list(config.args),
+    # Both checks are judged and both refusals are named: the flag ban names the narrowing option itself (a changed
+    # --rootdir or -c also renames node ids, which the A10 check then reports too). The whole tier is recognised from
+    # this file's location, not from the rootdir, so `--rootdir` cannot make `tests` look like a narrower path.
+    # A session given no positional path is the whole tier whatever `testpaths` says: `config.args` already holds the
+    # substituted `testpaths`, which an `-o testpaths=tests/unit` would make look like a deliberate selector.
+    given = list(config.args) if config.args_source == pytest.Config.ArgsSource.ARGS else []
+    problems = []
+    if _tier_count.is_whole_tier(
+        args=given,
         invocation_dir=config.invocation_params.dir,
-        root=config.rootpath,
-    )
-    if a10_problem is not None:
-        pytest.exit(f"backend tier refused: {a10_problem}", returncode=pytest.ExitCode.USAGE_ERROR)
-    if not _tier_count.is_whole_tier(
-        args=list(config.args),
-        invocation_dir=config.invocation_params.dir,
-        root=config.rootpath,
+        root=_REPO_ROOT,
     ):
-        return
-    problem = _tier_count.narrowing_problem(config.option)
-    if problem is not None:
-        pytest.exit(f"backend tier refused: {problem}", returncode=pytest.ExitCode.USAGE_ERROR)
+        problems.append(
+            _tier_count.narrowing_problem(config.option, invocation_dir=config.invocation_params.dir, root=_REPO_ROOT)
+        )
+    # The A10 exception is a property of the collection, not of a profile: judged on every run.
+    problems.append(
+        _tier_count.a10_exception_problem(
+            config.stash.get(_A10_COLLECTED, []),
+            args=list(config.args),
+            invocation_dir=config.invocation_params.dir,
+            root=config.rootpath,
+        )
+    )
+    found = [problem for problem in problems if problem is not None]
+    if found:
+        pytest.exit("backend tier refused: " + " AND ".join(found), returncode=pytest.ExitCode.USAGE_ERROR)
 
 
 _use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"
