@@ -37,7 +37,8 @@ function context(): TopBarContext {
 async function themeOptions(): Promise<Array<{ value: string; text: string }>> {
   const host = document.createElement('div')
   document.body.appendChild(host)
-  const app = createApp({ setup() { provideTopBarContext(context()); return () => h(TopBar) } })
+  // 043 S1: the switcher lives behind "Подробнее".
+  const app = createApp({ setup() { provideTopBarContext(context()); return () => h(TopBar, { detailsOpen: true }) } })
   app.mount(host)
   await nextTick()
   const select = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')

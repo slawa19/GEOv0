@@ -92,7 +92,7 @@ git grep -n $contractMarker
 
 Защищённые/read-only по умолчанию:
 
-- `simulator-ui/v1/` — legacy prototype;
+- `simulator-ui/v1/` — legacy prototype, удалён 2026-10-16 (041 `T4106`), тег `legacy/simulator-ui-v1-removed`;
 - любые `archive/`, архивные планы и исторические отчёты;
 - уже применённые Alembic migrations;
 - generated/public fixture copies и visual baselines, если задача не про их осознанную регенерацию;

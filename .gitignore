@@ -160,6 +160,8 @@ simulator-ui/dist/
 simulator-ui/.vite/
 
 # simulator-ui versions
+# simulator-ui/v1 removed 2026-10-16 (041 T4106, tag legacy/simulator-ui-v1-removed); its three lines stay
+# so that a leftover local node_modules/dist/.vite does not dirty `git status` of existing checkouts.
 simulator-ui/v1/node_modules/
 simulator-ui/v1/dist/
 simulator-ui/v1/.vite/

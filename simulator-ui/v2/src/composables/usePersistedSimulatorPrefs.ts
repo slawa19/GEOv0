@@ -215,6 +215,14 @@ export function useSimulatorStorage(storage?: StorageLike) {
    */
   const ANALYTICS_PANEL_OPEN_KEY = 'geo.sim.v2.analytics.open'
 
+  /**
+   * 043 S1: the one "Подробнее" (Details) toggle - every service control of the two bars is shown only while it is
+   * on. Default off (an absent key reads 
+ull, the caller defaults it); remembered in this browser, applied without
+   * a reload. One key, like the analytics flag above: the toggle is the same in every mode.
+   */
+  const DETAILS_OPEN_KEY = 'geo.sim.v2.details.open'
+
   const DEVTOOLS_OPEN_REAL_KEY = 'geo.sim.v2.devtools.open.real'
   const DEVTOOLS_OPEN_DEMO_KEY = 'geo.sim.v2.devtools.open.demo'
   const DEVTOOLS_OPEN_REAL_SNAPSHOT_KEY = 'geo.sim.v2.devtools.open.realSnapshot'
@@ -259,6 +267,13 @@ export function useSimulatorStorage(storage?: StorageLike) {
     storage01.write01(ANALYTICS_PANEL_OPEN_KEY, v)
   }
 
+  function readDetailsOpen(): boolean | null {
+    return storage01.read01(DETAILS_OPEN_KEY)
+  }
+  function writeDetailsOpen(v: boolean) {
+    storage01.write01(DETAILS_OPEN_KEY, v)
+  }
+
   function readDevtoolsOpenReal(): boolean | null {
     return storage01.read01(DEVTOOLS_OPEN_REAL_KEY)
   }
@@ -292,6 +307,10 @@ export function useSimulatorStorage(storage?: StorageLike) {
     // Analytics panel visibility (spec 007, T705).
     readAnalyticsPanelOpen,
     writeAnalyticsPanelOpen,
+
+    // 043 S1: the "Подробнее" toggle.
+    readDetailsOpen,
+    writeDetailsOpen,
 
     // DevTools panel prefs (Demo vs Real) + snapshot for reload-based demo enter/exit.
     readDevtoolsOpenReal,

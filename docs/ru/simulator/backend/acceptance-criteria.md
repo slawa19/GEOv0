@@ -88,7 +88,7 @@
 
 > Последнее обновление: **2026-02-18** (Фаза 12 — финальная документация)
 
-- Историческая спецификация: [`archive/anonymous-visitors-cookie-runs-spec.md`](archive/anonymous-visitors-cookie-runs-spec.md)
+- Историческая спецификация: [`archive/anonymous-visitors-cookie-runs-spec.md`](../../archive/simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md)
 - Статус: ✅ **Полностью реализовано** (11 фаз завершены)
 - Детали: см. §15 спецификации
 
