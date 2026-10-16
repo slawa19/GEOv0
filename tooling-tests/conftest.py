@@ -186,8 +186,14 @@ _HERE = Path(__file__).resolve().parent
 #: 2026-10-12, 039 slice A, fix-delta of the external review of 0d0deae3 (the debug scope was escaped by `--`): portable 454 -> 457.
 #: Three more mutations in the same module: the debug run accepts the option terminator, the runner builds its arguments past
 #: the checked function, the debug run writes where a counted run does. (The selfcheck it runs through node went 25 -> 56 cases.)
+#:
+#: 2026-10-16, 040 slice A (`T4010`, the second reviewer's call script): portable 457 -> 480. Twenty-three cases, new module
+#: `portable/test_p040_argon_review.py`: five refusals before sending (no key, a non-commit SHA, a payload over the limit, a
+#: secret-looking path x4, the key inside the payload), what is sent (dry run, committed objects only, a binary named) (3), a saved
+#: response verified with its cost or `unknown` (2), a missing marker x3 and an incomplete response x3 unverified, the key in no
+#: file and no output x2, and the live path in process with `post` replaced (2).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 457,
+    "portable": 480,
     "powershell": 235,
 }
 
