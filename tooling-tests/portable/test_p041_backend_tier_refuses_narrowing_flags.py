@@ -1,45 +1,26 @@
-"""The backend tier counts what it collects, and refuses a canonical run that lost or gained a case (035 F-035-14).
+"""The whole backend tier refuses the flags that narrow it, and the five A10 cases hold by name (041 F-041-1).
 
-THE GAP THIS CLOSES. The tooling tier refuses a count that differs from `EXPECTED_CASES`, in either
-direction, and refuses any deselection (`tooling-tests/conftest.py`). The backend tier has no such
-count: `tests/conftest.py` only reorders the conformance aggregate, so deleting a module of tests, or a
-`--deselect` / `--ignore` on the run, ends green. Measured 2026-10-08 on `75dafc82`, direct pytest (debug
-path), `--collect-only -q -m "not slow"`: 3150 selected / 15 deselected; with one `--deselect` of one
-case: 3149 selected / 16 deselected, exit 0. Nothing in the session notices.
+THE RULE THIS FILE HOLDS (`tests/tier_count.py`, called from `tests/conftest.py` at the end of collection). A backend
+session over the whole tier (no positional path narrower than `tests`) ends with a usage error (exit 4) naming the flag
+when its options carry `--deselect`, `--ignore`, `--ignore-glob`, `-k`, `--lf`, `--sw`/`--sw-skip`, or a marker expression
+other than `not slow` (the canonical profile) or none (`-IncludeExpensive`), an `-o` override of a discovery key
+(`testpaths`, `norecursedirs`, `python_files`, `python_classes`, `python_functions`; added after the 041 review of
+2026-10-16) or another `--rootdir` / `-c`. Until 2026-10-16 the same file held an exact
+count of the selected cases (035 F-035-14); that count and its constant are gone by the owner's decision of 2026-10-16
+(spec 041). Its two reproducers (a `--deselect`, an `--ignore` on the canonical run) stay below, now refused by the flag.
 
-THE RULE THIS FILE HOLDS (implemented 2026-10-08 in `tests/tier_count.py`, called from `tests/conftest.py`; the two
-cases that were RED on `75dafc82` are the reproducer and stay as the regression test).
-On the CANONICAL PROFILE - the whole tier, no positional selector, marker expression `not slow` (the
-runner's default, `scripts/verify_local.ps1`) - a backend session whose number of selected cases differs
-from a constant recorded in the repository ends with a usage error (exit 4) that names both numbers. The
-rule is a count of the whole tier and applies to nothing else:
+HOW THE CASES ASK. Each runs pytest in a subprocess, `--collect-only` unless said otherwise, against a PostgreSQL URL that
+nothing listens on: collection opens no database, so the tooling tier keeps needing no database. The deselected and
+ignored cases are taken from the baseline collection itself, so the file does not rot when a test module is renamed.
 
-* a run with a positional selector (`-BackendSelector`) is a deliberate narrowing and is NOT counted;
-* a run with no marker expression (`-IncludeExpensive`) is a different, wider profile and is NOT counted
-  by this rule.
+COUNTER-CHECKS (AGENTS.md section 9, anti-vacuum): every refusal has a run it must NOT refuse - the unmodified canonical
+profile, the unmodified wide profile, the allowed reordering/stopping flags on the whole tier, and a path-selector run
+carrying the refused flags, unrelated `-o` keys and this repository's own `--rootdir` / `-c`. Each refusal case asserts the flag's own name in the message, so a usage error of another
+origin (an unknown option) cannot pass it.
 
-HOW THE CASES ASK. Each runs pytest in a subprocess, `--collect-only` only, against a PostgreSQL URL that
-nothing listens on: collection opens no database (the same stand as
-`tooling-tests/powershell/test_the_tier_refuses_a_database_that_is_not_postgres.py`), so the tooling tier
-keeps needing no database. The count check must therefore fire at collection end, not at test run; a
-mechanism that counted only at session finish would not be visible here and would have to be asked in a
-run that executes cases (15 minutes) - that choice is the implementer's, recorded in the 035 changelog.
-The deselected and ignored cases are taken from the baseline collection itself, so the file does not rot
-when a test module is renamed.
-
-COUNTER-CHECKS (AGENTS.md section 9, anti-vacuum): the refusal must not be a refusal of everything. The
-unmodified canonical profile, a selector run (alone and with a `--deselect`) and the wide profile with a
-`--deselect` are collected with exit 0 - green today and required to stay green. The two RED cases
-confirm in their own message that the baseline collected a positive number of cases and that the
-deselection or ignore really removed some, so a typo in the node id cannot make them pass or fail by
-accident.
-
-WHAT THIS DOES NOT SEE. The GROWTH direction (an unrecorded new case) cannot be reached by a subprocess run
-without adding a test file under `tests/`, which this file does not do; it is held by calling the comparison
-(`count_problem`) and the profile test (`is_canonical_profile`) directly, with a number above the constant. Which tests are present: the count says how many, not which - a case
-swapped for a weaker one under the same number passes. A run started with `-o addopts=...` or
-`PYTEST_ADDOPTS` that ends pytest before the count: the runner is not defended against reconfiguring
-itself (see the limits in `tooling-tests/conftest.py`).
+WHAT THIS DOES NOT SEE. Which tests exist: a deleted test is not narrowing by a flag (accepted, spec 041). Narrowing
+through committed collection configuration or conftest hooks is the same category as deleting a test and is not caught;
+that and the options that end pytest before collection are named in `tests/tier_count.py`.
 """
 
 from __future__ import annotations
@@ -50,13 +31,14 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 
 _USAGE_ERROR = 4  # pytest.ExitCode.USAGE_ERROR
-_NO_SERVER_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:1/geov0_test_p035c_count_probe"
+_NO_SERVER_URL = "postgresql+asyncpg://geo:geo@127.0.0.1:1/geov0_test_p041_flag_probe"
 
 # The canonical profile is exactly what `scripts/verify_local.ps1` passes by default: `-m "not slow"` and no
 # positional selector. `-IncludeExpensive` drops the marker expression.
@@ -67,8 +49,14 @@ _SUMMARY = re.compile(r"(?P<selected>\d+)(?:/(?P<total>\d+))? tests? collected(?
 
 
 def _collect(
-    *args: str, extra_pythonpath: Path | None = None, collect_only: bool = True
+    *args: str,
+    extra_pythonpath: Path | None = None,
+    collect_only: bool = True,
+    cache_dir: Path | None = None,
+    addopts: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """`cache_dir` keeps the cache provider (needed by `--lf` and `--sw`) in a private directory; otherwise it is off."""
+
     env = os.environ.copy()
     if extra_pythonpath is not None:
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(extra_pythonpath), env.get("PYTHONPATH")]))
@@ -77,8 +65,11 @@ def _collect(
     env["GEO_TEST_ALLOW_DB_RESET"] = "1"
     env.pop("GEO_TEST_USE_MIGRATED_SCHEMA", None)
     env.pop("PYTEST_ADDOPTS", None)
+    if addopts is not None:
+        env["PYTEST_ADDOPTS"] = addopts
+    cache = ["-o", f"cache_dir={cache_dir}"] if cache_dir is not None else ["-p", "no:cacheprovider"]
     return subprocess.run(
-        [sys.executable, "-m", "pytest", *(["--collect-only"] if collect_only else ["-rs"]), "-q", "-p", "no:cacheprovider", *args],
+        [sys.executable, "-m", "pytest", *(["--collect-only"] if collect_only else ["-rs"]), "-q", *cache, *args],
         cwd=_ROOT,
         env=env,
         capture_output=True,
@@ -119,41 +110,90 @@ def _a_unit_module(baseline: subprocess.CompletedProcess[str]) -> tuple[str, str
     raise AssertionError("the baseline holds no case under tests/unit/")
 
 
+def _assert_refused(result: subprocess.CompletedProcess[str], flag: str) -> None:
+    output = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, (
+        f"the whole backend tier narrowed by {flag} exited {result.returncode}, not {_USAGE_ERROR}:\n{output[-1500:]}"
+    )
+    assert "backend tier refused" in output and "narrowed by" in output and flag in output, (
+        f"exit {_USAGE_ERROR} but not the flag ban naming {flag}:\n{output[-1500:]}"
+    )
+
+
 def test_a_deselected_case_ends_the_canonical_backend_run(baseline: subprocess.CompletedProcess[str]) -> None:
-    """Reproducer (red on 75dafc82): one `--deselect` on the whole tier must refuse the run, not pass it."""
+    """Reproducer of 035 F-035-14 (red on 75dafc82): one `--deselect` on the whole tier refuses the run."""
 
     nodeid, _ = _a_unit_module(baseline)
-    before = _selected(baseline)
-    result = _collect(*_CANONICAL, "--deselect", nodeid)
-
-    after = _selected(result)
-    assert after < before, f"the --deselect of {nodeid!r} removed nothing ({before} -> {after}): a stale id, not a test"
-    assert result.returncode == _USAGE_ERROR, (
-        f"the canonical backend profile lost one case ({before} -> {after} selected) and pytest "
-        f"exited {result.returncode}, not {_USAGE_ERROR}: the tier has no count of what it collects "
-        f"(F-035-14)"
-    )
-    output = result.stdout + result.stderr
-    assert f"selected {after} case(s), expected exactly {before}" in output, (
-        "the refusal must name the actual and the expected number"
-    )
+    _assert_refused(_collect(*_CANONICAL, "--deselect", nodeid), "--deselect")
 
 
-def test_a_module_dropped_from_the_run_ends_the_canonical_backend_run(baseline: subprocess.CompletedProcess[str]) -> None:
-    """Reproducer (red on 75dafc82): the loss of a whole module (`--ignore`, or a deleted file) must refuse the run."""
+def test_a_module_ignored_on_the_canonical_run_ends_it(baseline: subprocess.CompletedProcess[str]) -> None:
+    """Reproducer of 035 F-035-14 (red on 75dafc82): `--ignore` of a module on the whole tier refuses the run."""
 
     _, module = _a_unit_module(baseline)
-    before = _selected(baseline)
-    result = _collect(*_CANONICAL, "--ignore", module)
+    _assert_refused(_collect(*_CANONICAL, "--ignore", module), "--ignore")
 
-    after = _selected(result)
-    assert after < before, f"--ignore of {module!r} removed nothing ({before} -> {after}): a stale path, not a test"
-    assert result.returncode == _USAGE_ERROR, (
-        f"the canonical backend profile lost the module {module} ({before} -> {after} selected) and "
-        f"pytest exited {result.returncode}, not {_USAGE_ERROR}: the tier has no count of what it "
-        f"collects (F-035-14)"
-    )
-    assert f"selected {after} case(s), expected exactly {before}" in result.stdout + result.stderr
+
+@pytest.mark.parametrize(
+    ("args", "flag"),
+    [
+        (("-m", "not slow", "--ignore-glob", "tests/unit/test_p0*.py"), "--ignore-glob"),
+        (("-m", "not slow", "-k", "payment"), "-k"),
+        (("-m", "(not slow)"), "-m '(not slow)'"),
+        (("-m", "slow"), "-m 'slow'"),
+        (("-m", "not slow and not a10_real_pool_timeout"), "-m 'not slow and not a10_real_pool_timeout'"),
+        (("-m", "not slow", "-k", "payment", "--", "tests"), "-k"),  # `-- tests` is the whole tier too
+        # 041 review 2026-10-16: discovery keys overridden with -o drop modules while the path stays `tests`
+        (("-m", "not slow", "-o", "norecursedirs=unit"), "-o/--override-ini norecursedirs"),
+        (("-m", "not slow", "--override-ini=python_files=test_p012_*.py"), "-o/--override-ini python_files"),
+        (("-m", "not slow", "-o", "testpaths=tests/unit"), "-o/--override-ini testpaths"),
+        (("-m", "not slow", "-o", "python_classes=Nothing"), "-o/--override-ini python_classes"),
+        (("-m", "not slow", "-o", "python_functions=nothing_*"), "-o/--override-ini python_functions"),
+        (("-m", "not slow", "--rootdir", "tests", "--", "tests"), "--rootdir 'tests'"),
+    ],
+    ids=[
+        "--ignore-glob", "-k", "an equivalent marker spelling", "another marker expression", "a narrower expression",
+        "-- tests with -k", "-o norecursedirs", "--override-ini python_files", "-o testpaths", "-o python_classes",
+        "-o python_functions", "--rootdir",
+    ],
+)
+def test_each_narrowing_option_is_refused_on_the_whole_tier(args: tuple[str, ...], flag: str) -> None:
+    _assert_refused(_collect(*args), flag)
+
+
+@pytest.mark.parametrize(("option", "flag"), [("--lf", "--lf/--last-failed"), ("--sw", "--sw/--stepwise"), ("--sw-skip", "--sw-skip")])
+def test_the_cache_driven_narrowing_options_are_refused_on_the_whole_tier(tmp_path: Path, option: str, flag: str) -> None:
+    """`--lf` and `--sw` need the cache provider, which the other cases switch off; here it writes into `tmp_path`."""
+
+    _assert_refused(_collect(*_CANONICAL, option, cache_dir=tmp_path / "cache"), flag)
+
+
+def test_a_narrowing_option_from_pytest_addopts_is_refused(baseline: subprocess.CompletedProcess[str]) -> None:
+    """The ban reads the session's options, so the environment is no way around it."""
+
+    nodeid, _ = _a_unit_module(baseline)
+    _assert_refused(_collect(*_CANONICAL, addopts=f"--deselect {nodeid}"), "--deselect")
+
+
+def test_a_discovery_override_from_pytest_addopts_is_refused() -> None:
+    """Reproducer of the 041 review (green on 2f16bd05 through the canonical runner, tests/unit silently dropped)."""
+
+    _assert_refused(_collect(*_CANONICAL, addopts="-o norecursedirs=unit"), "-o/--override-ini norecursedirs")
+
+
+def test_another_configuration_file_is_refused(tmp_path: Path) -> None:
+    """`-c` brings its own discovery keys; a copy of this repository's own file is enough to show the refusal."""
+
+    other = tmp_path / "other.ini"
+    other.write_text((_ROOT / "pytest.ini").read_text(encoding="utf-8"), encoding="utf-8")
+    _assert_refused(_collect(*_CANONICAL, "-c", str(other), "--", "tests"), "-c/--config-file")
+
+
+def test_the_wide_profile_with_a_deselect_is_refused(baseline: subprocess.CompletedProcess[str]) -> None:
+    """`-IncludeExpensive` on the whole tier is the whole tier too; until 2026-10-16 it was not judged at all."""
+
+    nodeid, _ = _a_unit_module(baseline)
+    _assert_refused(_collect(*_WIDE, "--deselect", nodeid), "--deselect")
 
 
 _COLLECTION_ERROR_PLUGIN = """
@@ -171,15 +211,12 @@ def pytest_collect_file(file_path, parent):
 """
 
 
-def test_a_collection_error_stays_pytests_exit_2_and_is_not_reread_as_a_lost_test(
+def test_a_collection_error_stays_pytests_exit_2_and_is_not_reread_as_a_refusal(
     baseline: subprocess.CompletedProcess[str], tmp_path: Path
 ) -> None:
     """Reproducer (red on 7edf4cb8, review P2): pytest 7.4 calls `pytest_collection_finish` in a `finally`, BEFORE it
-    aborts on a collection error, so a module that fails to import reaches the count with its cases missing.
-
-    The module's real cases are dropped with `--deselect` and a plugin makes the same file fail to collect, which is
-    the shape of an import error in an existing module (done by hand once on `75dafc82`: exit 4, "a test was lost").
-    Expected: pytest's own exit 2 and the collection error's text, and no claim that a test was lost.
+    aborts on a collection error. Expected: pytest's own exit 2 and the collection error's text, and no tier refusal
+    (the `--deselect` here would be refused on its own; a collection error takes precedence).
     """
 
     nodeid, module = _a_unit_module(baseline)
@@ -200,7 +237,7 @@ def test_a_collection_error_stays_pytests_exit_2_and_is_not_reread_as_a_lost_tes
         f"a collection error ended the canonical backend run with exit {result.returncode}, not pytest's 2: "
         f"{[line for line in output.splitlines() if 'refused' in line][:1]}"
     )
-    assert "backend tier refused" not in output, "the count judged a collection that pytest was about to abort"
+    assert "backend tier refused" not in output, "the tier judged a collection that pytest was about to abort"
 
 
 def test_the_unmodified_canonical_profile_is_not_refused(baseline: subprocess.CompletedProcess[str]) -> None:
@@ -209,94 +246,119 @@ def test_the_unmodified_canonical_profile_is_not_refused(baseline: subprocess.Co
     assert _selected(baseline) > 0
 
 
-def test_a_selector_run_is_not_counted_even_with_a_deselect(baseline: subprocess.CompletedProcess[str]) -> None:
-    """Counter-check: `-BackendSelector` narrows on purpose, and a deselect inside it is the operator's business."""
+def test_the_unmodified_wide_profile_is_not_refused() -> None:
+    """Counter-check: `-IncludeExpensive` (no marker expression) on the whole tier, with no flag, collects with exit 0."""
+
+    wide = _collect(*_WIDE)
+    assert wide.returncode == 0, f"the wide profile was refused (exit {wide.returncode}):\n{wide.stdout[-800:]}"
+    assert _selected(wide) > 0
+
+
+@pytest.mark.parametrize("args", [("--ff",), ("--nf",), ("-x",), ("--maxfail", "3")], ids=["--ff", "--nf", "-x", "--maxfail"])
+def test_the_reordering_and_stopping_options_are_allowed_on_the_whole_tier(tmp_path: Path, args: tuple[str, ...]) -> None:
+    """Counter-check: the ban is a list, not a refusal of every option - these drop no case from a green run."""
+
+    result = _collect(*_CANONICAL, *args, cache_dir=tmp_path / "cache")
+    assert result.returncode == 0, f"{args} was refused (exit {result.returncode}):\n{(result.stdout + result.stderr)[-800:]}"
+    assert _selected(result) > 0
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("-o", "pythonpath=."),
+        ("-o", "xfail_strict=true"),
+        ("--rootdir", "."),
+        ("-c", "pytest.ini"),
+    ],
+    ids=["-o pythonpath", "-o xfail_strict", "--rootdir of this repository", "-c of this repository's pytest.ini"],
+)
+def test_unrelated_overrides_and_this_repositorys_own_configuration_are_allowed(tmp_path: Path, args: tuple[str, ...]) -> None:
+    """Counter-check: only discovery keys and another configuration are refused (`-o cache_dir=` is in every case here)."""
+
+    result = _collect(*_CANONICAL, *args, cache_dir=tmp_path / "cache")
+    assert result.returncode == 0, f"{args} was refused (exit {result.returncode}):\n{(result.stdout + result.stderr)[-800:]}"
+    assert _selected(result) > 0
+
+
+def test_a_selector_run_is_not_judged_even_with_the_refused_flags(baseline: subprocess.CompletedProcess[str]) -> None:
+    """Counter-check: `-BackendSelector` narrows on purpose, and a flag inside it is the operator's business."""
 
     nodeid, module = _a_unit_module(baseline)
-    plain = _collect(*_CANONICAL, "--", module)
-    assert plain.returncode == 0, f"a selector run was refused (exit {plain.returncode}):\n{plain.stdout[-800:]}"
-    with_deselect = _collect(*_CANONICAL, "--deselect", nodeid, "--", module)
-    assert with_deselect.returncode == 0, (
-        f"a selector run with a deselect was refused (exit {with_deselect.returncode}):\n"
-        f"{with_deselect.stdout[-800:]}"
-    )
-
-
-def test_the_wide_profile_is_not_counted_by_this_rule(baseline: subprocess.CompletedProcess[str]) -> None:
-    """Counter-check: `-IncludeExpensive` (no marker expression) is a different profile; a deselect in it is not refused."""
-
-    nodeid, _ = _a_unit_module(baseline)
-    wide = _collect(*_WIDE, "--deselect", nodeid)
-    assert wide.returncode == 0, (
-        f"the wide profile with a deselect was refused (exit {wide.returncode}); this rule counts the "
-        f"canonical profile only:\n{wide.stdout[-800:]}"
-    )
+    for extra in ((), ("--deselect", nodeid), ("-k", "nothing_matches_this"), ("-m", "slow"), ("-o", "python_functions=test_*")):
+        result = _collect(*_CANONICAL, *extra, "--", module)
+        assert result.returncode in (0, 5), (
+            f"a selector run with {extra} was refused (exit {result.returncode}):\n{result.stdout[-800:]}"
+        )
+        assert "backend tier refused" not in result.stdout + result.stderr
 
 
 def _tier_count_module():
     path = _ROOT / "tests" / "tier_count.py"
-    spec = importlib.util.spec_from_file_location("p035_c_tier_count_under_test", path)
+    spec = importlib.util.spec_from_file_location("p041_tier_count_under_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_the_comparison_refuses_growth_and_loss_alike_and_accepts_the_recorded_number() -> None:
-    """Unit check of the comparison, both directions (the subprocess cases above can reach only the loss)."""
+def test_the_flag_verdict_in_both_outcomes() -> None:
+    """Unit check of `narrowing_problem`: each listed option alone is refused by name; the profiles alone are not."""
 
     tier = _tier_count_module()
-    expected = tier.EXPECTED_SELECTED_ITEMS
-    assert expected > 0
-    assert tier.count_problem(selected=expected) is None
-    for selected, word in ((expected + 1, "MORE"), (expected - 1, "FEWER")):
-        problem = tier.count_problem(selected=selected)
-        assert problem is not None, f"{selected} selected against {expected} was accepted"
-        assert f"selected {selected} case(s), expected exactly {expected}" in problem
-        assert word in problem
+
+    def option(**given):
+        defaults = dict(deselect=[], ignore=None, ignore_glob=None, keyword="", lf=False, stepwise=False, stepwise_skip=False, markexpr="not slow")
+        return SimpleNamespace(**{**defaults, **given})
+
+    def verdict(namespace):
+        return tier.narrowing_problem(namespace, invocation_dir=_ROOT, root=_ROOT)
+
+    assert verdict(option()) is None
+    assert verdict(option(markexpr="")) is None  # -IncludeExpensive
+    assert verdict(option(markexpr=" not  slow ")) is None  # whitespace is collapsed
+    assert verdict(SimpleNamespace(markexpr="not slow")) is None  # an unloaded plugin's option is absent
+    assert verdict(option(override_ini=["cache_dir=x", "pythonpath=.", "xfail_strict=true", "timeout=10"])) is None
+    assert verdict(option(rootdir=str(_ROOT), inifilename="pytest.ini")) is None  # this repository's own
+    for given, flag in (
+        (dict(deselect=["tests/unit/test_x.py::t"]), "--deselect"),
+        (dict(ignore=["tests/unit"]), "--ignore"),
+        (dict(ignore_glob=["*x*"]), "--ignore-glob"),
+        (dict(keyword="x"), "-k"),
+        (dict(lf=True), "--lf"),
+        (dict(stepwise=True), "--sw"),
+        (dict(stepwise_skip=True), "--sw-skip"),
+        (dict(markexpr="(not slow)"), "-m '(not slow)'"),
+        (dict(markexpr="slow"), "-m 'slow'"),
+        (dict(override_ini=["cache_dir=x", "norecursedirs=unit"]), "-o/--override-ini norecursedirs"),
+        (dict(override_ini=["python_files = test_x*.py"]), "-o/--override-ini python_files"),
+        (dict(override_ini=["testpaths=tests/unit"]), "-o/--override-ini testpaths"),
+        (dict(override_ini=["python_classes=X"]), "-o/--override-ini python_classes"),
+        (dict(override_ini=["python_functions=x"]), "-o/--override-ini python_functions"),
+        (dict(override_ini=["collect_imported_tests=false"]), "-o/--override-ini collect_imported_tests"),
+        (dict(rootdir="tests"), "--rootdir 'tests'"),
+        (dict(inifilename="other.ini"), "-c/--config-file 'other.ini'"),
+    ):
+        problem = verdict(option(**given))
+        assert problem is not None and flag in problem, (given, problem)
 
 
-def test_only_the_whole_tier_under_the_canonical_marker_expression_is_counted() -> None:
-    """The profile decision in both outcomes: a rule that counted nothing, or everything, fails one row."""
+def test_only_a_run_over_the_whole_tier_is_judged() -> None:
+    """The scope decision in both outcomes: a rule that judged nothing, or every selector, fails one row."""
 
     tier = _tier_count_module()
-    root = _ROOT
-    here = root
 
-    def counted(markexpr, *args):
-        return tier.is_canonical_profile(markexpr=markexpr, args=list(args), invocation_dir=here, root=root)
+    def whole(*args):
+        return tier.is_whole_tier(args=list(args), invocation_dir=_ROOT, root=_ROOT)
 
-    assert counted("not slow")  # no argument: `testpaths = tests`
-    assert counted("not slow", "tests")
-    assert counted(" not  slow ", "tests", "tests/")  # whitespace is collapsed
-    assert not counted("(not slow)", "tests")  # a differently spelled equivalent is NOT recognised (documented limit)
-    assert not counted("", "tests")  # -IncludeExpensive
-    assert not counted(None)
-    assert not counted("not slow and not x", "tests")
-    assert not counted("not slow", "tests/unit")  # -BackendSelector
-    assert not counted("not slow", "tests/unit/test_admin_audit_log_list.py")
-    assert not counted("not slow", "tests/unit/test_admin_audit_log_list.py::test_x")
-    assert not counted("not slow", "tests", "tests/unit")
-    assert not counted("not slow", "docs")
-
-
-def test_every_named_skip_is_still_declared_where_the_count_module_says_it_is() -> None:
-    """The skipped cases of the canonical run are named in `tests/tier_count.py`; each name must still be true.
-
-    Form check only: the file holds the decorator and the reason the list quotes. Whether the list is complete is
-    read from `-rs` in the CI log, not from here.
-    """
-
-    named = (
-        ("tests/unit/test_deployment_config.py", 'os.name == "nt" or shutil.which("bash") is None'),
-        ("tests/unit/test_settings_guardrails.py", '@pytest.mark.skipif(os.name == "nt"'),
-        ("tests/unit/test_p024_scenario_id_is_a_safe_path_segment.py", '@pytest.mark.skipif(os.name != "nt"'),
-    )
-    docstring = (_ROOT / "tests" / "tier_count.py").read_text(encoding="utf-8")
-    for relative, declaration in named:
-        assert relative in docstring, f"{relative} is not named in tests/tier_count.py"
-        source = (_ROOT / relative).read_text(encoding="utf-8")
-        assert declaration in source, f"{relative} no longer declares {declaration!r}; update the named list"
+    assert whole()  # no argument: `testpaths = tests`
+    assert whole("tests")
+    assert whole("tests", "tests/")
+    assert not whole("tests/unit")  # -BackendSelector
+    assert not whole("tests/unit/test_admin_audit_log_list.py")
+    assert not whole("tests/unit/test_admin_audit_log_list.py::test_x")
+    assert not whole("tests", "tests/unit")
+    assert not whole("docs")
 
 
 # ------------------------------------------------------------------------------------------------ the A10 exception
@@ -436,7 +498,7 @@ def test_a_single_a10_node_selector_is_not_judged_as_the_whole_module(selector: 
 
 
 def test_the_whole_tier_with_the_a10_file_ignored_is_refused_by_the_membership_guard_itself() -> None:
-    """`--ignore` of the A10 file on the whole tier: the COUNT also catches it, but the membership guard must name it."""
+    """`--ignore` of the A10 file on the whole tier: the flag ban also refuses it, but the membership guard must name it."""
 
     result = _collect(*_CANONICAL, "--ignore", _A10_FILE)
     output = result.stdout + result.stderr
@@ -499,7 +561,7 @@ def _run_with_planted_skip(
     ],
 )
 def test_a_listed_member_skipped_during_execution_is_refused(tmp_path: Path, collected: str, setup: str) -> None:
-    """The count and the membership stay right when a member is skipped; the run must still not be green."""
+    """The membership stays right when a member is skipped; the run must still not be green."""
 
     target = _A10_NODE + "test_no_connection_for_the_attempt_is_the_timeout_refusal_and_leaves_nothing[the pool timeout-mode_b]"
     assert target in _tier_count_module().A10_REAL_POOL_TIMEOUT_CASES

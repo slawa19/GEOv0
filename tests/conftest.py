@@ -126,6 +126,9 @@ _openapi_conformance.HARNESS.install()
 
 _A10_COLLECTED = pytest.StashKey[list]()
 
+#: This repository's root, from this file's location (`tests/conftest.py`): the whole tier is judged against it.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(session, config, items) -> None:
@@ -165,7 +168,7 @@ _A10_OUTCOMES = pytest.StashKey[dict]()
 def pytest_runtest_makereport(item, call):
     """A listed A10 member must EXECUTE: a skipped (or xfailed) outcome is turned into a failure (`tests/tier_count.py`).
 
-    Membership and count cannot see a `pytest.mark.skip`, a true `skipif`, an xfail or a `pytest.skip()` in the body or in
+    Membership cannot see a `pytest.mark.skip`, a true `skipif`, an xfail or a `pytest.skip()` in the body or in
     a fixture: the selection stays right and one of the five never passes. Collection-only runs reach no report and are not
     judged here. Every phase's outcome and duration of the five is kept for the one summary line below.
     """
@@ -199,38 +202,46 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
 
 
 def pytest_collection_finish(session) -> None:
-    """The canonical profile selects exactly the recorded number of cases (035 F-035-14, `tests/tier_count.py`).
+    """The whole tier is not narrowed by a flag, and the five A10 cases hold by name (041 F-041-1, `tests/tier_count.py`).
 
     A different hook, a different question from the one above: not "can this test run here" but "is the tier still
-    whole". It judges only the whole tier under `-m "not slow"` (what `scripts/verify_local.ps1 -BackendOnly` runs) and
-    never a path selector or the wide profile; the full statement of the rule and of what it does not see is in
-    `tests/tier_count.py`. Refused with exit 4 at the end of collection, so it holds under `--collect-only` too.
+    whole". The flag ban judges only a session over the whole tier, never a path selector; the full statement of the rule
+    and of what it does not see is in `tests/tier_count.py`. There is no count of the selected cases any more (removed
+    2026-10-16). Refused with exit 4 at the end of collection, so it holds under `--collect-only` too.
     """
 
     config = session.config
     # pytest 7.4 runs this hook even when a module failed to import and aborts only afterwards (exit 2). A broken
-    # module has no cases, so the count would blame a "lost" test for an import error; that is pytest's to report.
+    # module has no cases, and its import error is pytest's to report, not this hook's to reread.
     if session.testsfailed or session.shouldstop or session.shouldfail:
         return
-    # The A10 exception is a property of the collection, not of a profile: judged on every run.
-    a10_problem = _tier_count.a10_exception_problem(
-        config.stash.get(_A10_COLLECTED, []),
-        args=list(config.args),
+    # Both checks are judged and both refusals are named: the flag ban names the narrowing option itself (a changed
+    # --rootdir or -c also renames node ids, which the A10 check then reports too). The whole tier is recognised from
+    # this file's location, not from the rootdir, so `--rootdir` cannot make `tests` look like a narrower path.
+    # A session given no positional path is the whole tier whatever `testpaths` says: `config.args` already holds the
+    # substituted `testpaths`, which an `-o testpaths=tests/unit` would make look like a deliberate selector.
+    given = list(config.args) if config.args_source == pytest.Config.ArgsSource.ARGS else []
+    problems = []
+    if _tier_count.is_whole_tier(
+        args=given,
         invocation_dir=config.invocation_params.dir,
-        root=config.rootpath,
-    )
-    if a10_problem is not None:
-        pytest.exit(f"backend tier refused: {a10_problem}", returncode=pytest.ExitCode.USAGE_ERROR)
-    if not _tier_count.is_canonical_profile(
-        markexpr=getattr(config.option, "markexpr", ""),
-        args=list(config.args),
-        invocation_dir=config.invocation_params.dir,
-        root=config.rootpath,
+        root=_REPO_ROOT,
     ):
-        return
-    problem = _tier_count.count_problem(selected=len(session.items))
-    if problem is not None:
-        pytest.exit(f"backend tier refused: {problem}", returncode=pytest.ExitCode.USAGE_ERROR)
+        problems.append(
+            _tier_count.narrowing_problem(config.option, invocation_dir=config.invocation_params.dir, root=_REPO_ROOT)
+        )
+    # The A10 exception is a property of the collection, not of a profile: judged on every run.
+    problems.append(
+        _tier_count.a10_exception_problem(
+            config.stash.get(_A10_COLLECTED, []),
+            args=list(config.args),
+            invocation_dir=config.invocation_params.dir,
+            root=config.rootpath,
+        )
+    )
+    found = [problem for problem in problems if problem is not None]
+    if found:
+        pytest.exit("backend tier refused: " + " AND ".join(found), returncode=pytest.ExitCode.USAGE_ERROR)
 
 
 _use_migrated_schema = os.environ.get("GEO_TEST_USE_MIGRATED_SCHEMA") == "1"
