@@ -1,7 +1,6 @@
 import type { Ref } from 'vue'
 import { onUnmounted, ref, watch } from 'vue'
 
-import { actionClearingOnce, actionTxOnce } from '../api/simulatorApi'
 import { toLower } from '../utils/stringHelpers'
 
 export function useFxDebugControls(deps: {
@@ -161,40 +160,17 @@ export function useFxDebugControls(deps: {
     })
   }
 
+  // 042 S1 (owner, 2026-10-16): the server actions `tx-once` / `clearing-once` are gone - an event about a payment is
+  // born only in the core, never drawn on request. These two send nothing and start no run. They stay as no-ops only
+  // because their callers (the Dev Tools buttons in `BottomBar.vue`, `__geoSim` in the dev hook) are outside this
+  // slice; the buttons go in 042 stage 2 / `T4205` (the offline playlist workbench). `ensureRunSerialized` stays: the
+  // demo UI's paused-run bootstrap uses it.
   async function runTxOnce(): Promise<void> {
-    if (!deps.isFxDebugEnabled.value) return
-
-    deps.markDemoActivity()
-    busy.value = true
-    try {
-      const runId = await ensureRunSerialized()
-      await waitForRealSseOpen({ timeoutMs: 1200 })
-      await actionTxOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken ?? '' }, runId, {
-        equivalent: deps.effectiveEq.value,
-        seed: `ui-fx-debug-tx:${Date.now()}`,
-        client_action_id: `ui-fx-debug-tx:${Date.now()}`,
-      })
-    } finally {
-      busy.value = false
-    }
+    return
   }
 
   async function runClearingOnce(): Promise<void> {
-    if (!deps.isFxDebugEnabled.value) return
-
-    deps.markDemoActivity()
-    busy.value = true
-    try {
-      const runId = await ensureRunSerialized()
-      await waitForRealSseOpen({ timeoutMs: 1200 })
-      await actionClearingOnce({ apiBase: deps.real.apiBase, accessToken: deps.real.accessToken ?? '' }, runId, {
-        equivalent: deps.effectiveEq.value,
-        seed: `ui-fx-debug-clearing:${Date.now()}`,
-        client_action_id: `ui-fx-debug-clearing:${Date.now()}`,
-      })
-    } finally {
-      busy.value = false
-    }
+    return
   }
 
   return { busy, ensureRunSerialized, runTxOnce, runClearingOnce, waitForRealSseOpen, dispose }

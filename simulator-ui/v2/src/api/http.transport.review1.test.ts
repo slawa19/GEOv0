@@ -226,20 +226,6 @@ describe('item 3 (transport half): an unsafe-method timeout says the outcome is 
     expect(getError.outcomeUnknown ?? false).toBe(false)
     expect(getError.message).not.toMatch(/unknown/i)
   })
-
-  it('the demo actions tx-once and clearing-once (not Interact) carry it too', async () => {
-    vi.stubGlobal('fetch', hangingFetch())
-    const tx = track(simulatorApi.actionTxOnce(CFG, 'run-1', {} as never))
-    const clearing = track(simulatorApi.actionClearingOnce(CFG, 'run-1', {} as never))
-
-    await vi.advanceTimersByTimeAsync(LONG_REQUEST_TIMEOUT_MS)
-
-    for (const call of [tx, clearing]) {
-      const error = errorOf(call.outcome()) as ApiError & { outcomeUnknown?: boolean }
-      expect(error.outcomeUnknown).toBe(true)
-      expect(extractErrorMessage(error)).toMatch(/unknown/i)
-    }
-  })
 })
 
 describe('item 7: the long bound is a table over every simulatorApi function', () => {
@@ -247,8 +233,6 @@ describe('item 7: the long bound is a table over every simulatorApi function', (
   const X = {} as never
   /** Calls that run work INSIDE the request (Interact/demo actions and the two reads that seed the scenario). */
   const LONG: Record<string, () => Promise<unknown>> = {
-    actionTxOnce: () => simulatorApi.actionTxOnce(CFG, R, X),
-    actionClearingOnce: () => simulatorApi.actionClearingOnce(CFG, R, X),
     actionTrustlineCreate: () => simulatorApi.actionTrustlineCreate(CFG, R, X),
     actionTrustlineUpdate: () => simulatorApi.actionTrustlineUpdate(CFG, R, X),
     actionTrustlineClose: () => simulatorApi.actionTrustlineClose(CFG, R, X),

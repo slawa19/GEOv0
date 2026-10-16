@@ -5,16 +5,17 @@
  * `startRun` owns the 409 answer: it reads the status of the error and attaches to the active run itself
  * (`useSimulatorRealMode.test.ts`, "attaches to active run when createRun returns HTTP 409"). What reaches the demo
  * controls afterwards is only `real.lastError` - a text with the server's body in it.
+ *
+ * 042 S1 (2026-10-16): the run is asked for through `ensureRunSerialized` (the demo UI's bootstrap); the buttons that
+ * used to ask for it on a click no longer send an action (`tx-once` / `clearing-once` are gone).
  */
 import { effectScope, reactive, ref, type EffectScope } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { actionTxOnce, getActiveRun } from '../api/simulatorApi'
+import { getActiveRun } from '../api/simulatorApi'
 import { useFxDebugControls } from './useFxDebugControls'
 
 vi.mock('../api/simulatorApi', () => ({
-  actionTxOnce: vi.fn(async () => ({ ok: true })),
-  actionClearingOnce: vi.fn(async () => ({ ok: true })),
   getActiveRun: vi.fn(async () => ({ run_id: 'SOMEBODY_ELSES_RUN' })),
 }))
 
@@ -57,7 +58,6 @@ afterEach(() => {
   scope?.stop()
   scope = null
   window.localStorage.clear()
-  vi.mocked(actionTxOnce).mockClear()
   vi.mocked(getActiveRun).mockClear()
 })
 
@@ -68,24 +68,21 @@ describe('F-034-D14: a demo run that did not start', () => {
       lastError: 'HTTP 500 Internal Server Error for /simulator/runs: serialization conflict, retry later',
     })
 
-    await expect(s.controls.runTxOnce()).rejects.toThrow('Failed to start run for FX debug: HTTP 500')
+    await expect(s.controls.ensureRunSerialized()).rejects.toThrow('Failed to start run for FX debug: HTTP 500')
 
     expect(s.real.runId, 'the controls attached to a run on the strength of a word in an error text').toBeNull()
-    expect(actionTxOnce, 'an action was sent to a run this start did not create').not.toHaveBeenCalled()
+    expect(getActiveRun, 'the controls went looking for a run they did not start').not.toHaveBeenCalled()
   })
 
-  it('CONTRACT: when startRun attached to the active run (its own 409 handling), the action goes to that run', async () => {
+  it('CONTRACT: when startRun attached to the active run (its own 409 handling), that run is the demo run', async () => {
     const s = stand({ runId: 'ACTIVE', lastError: '' })
 
-    await s.controls.runTxOnce()
-
-    expect(vi.mocked(actionTxOnce).mock.calls[0]?.[1]).toBe('ACTIVE')
+    await expect(s.controls.ensureRunSerialized()).resolves.toBe('ACTIVE')
   })
 
   it('a 409 that startRun itself could not resolve is reported too - the click can be repeated', async () => {
     const s = stand({ runId: null, lastError: 'HTTP 409 Conflict for /simulator/runs' })
 
-    await expect(s.controls.runTxOnce()).rejects.toThrow('Failed to start run for FX debug: HTTP 409 Conflict')
-    expect(actionTxOnce).not.toHaveBeenCalled()
+    await expect(s.controls.ensureRunSerialized()).rejects.toThrow('Failed to start run for FX debug: HTTP 409 Conflict')
   })
 })
