@@ -57,7 +57,7 @@ def _make_run(run_id: str, owner_id: str = "", state: str = "running") -> RunRec
     return RunRecord(
         run_id=run_id,
         scenario_id="test-scenario",
-        mode="fixtures",
+        mode="real",
         state=state,
         owner_id=owner_id,
         owner_kind="admin" if owner_id == "admin" else "anon",
@@ -235,7 +235,7 @@ def test_run_record_owner_fields() -> None:
     record = RunRecord(
         run_id="run-test-001",
         scenario_id="scenario-xyz",
-        mode="fixtures",
+        mode="real",
         state="running",
         owner_id="anon:abc123",
         owner_kind="anon",
@@ -258,7 +258,7 @@ def test_run_record_default_owner_fields() -> None:
     record = RunRecord(
         run_id="run-default",
         scenario_id="sc-1",
-        mode="fixtures",
+        mode="real",
         state="stopped",
     )
 
@@ -272,7 +272,7 @@ def test_run_record_admin_owner() -> None:
     record = RunRecord(
         run_id="run-admin",
         scenario_id="sc-1",
-        mode="fixtures",
+        mode="real",
         state="running",
         owner_id="admin",
         owner_kind="admin",
@@ -287,7 +287,7 @@ def test_run_record_participant_owner() -> None:
     record = RunRecord(
         run_id="run-part",
         scenario_id="sc-1",
-        mode="fixtures",
+        mode="real",
         state="running",
         owner_id="pid:some-participant-id",
         owner_kind="participant",
@@ -361,7 +361,7 @@ def test_create_run_owner_active_exists_conflict() -> None:
     async def _run() -> None:
         await lc.create_run(
             scenario_id="test-scenario",
-            mode="fixtures",
+            mode="real",
             intensity_percent=100,
             owner_id=owner_id,
         )
@@ -387,7 +387,7 @@ def test_create_run_global_limit_conflict_kind() -> None:
     async def _run() -> None:
         await lc.create_run(
             scenario_id="test-scenario",
-            mode="fixtures",
+            mode="real",
             intensity_percent=100,
             owner_id="anon:new-owner",
         )
@@ -423,7 +423,7 @@ def test_create_run_owner_limit_checked_before_global() -> None:
     async def _run() -> None:
         await lc.create_run(
             scenario_id="test-scenario",
-            mode="fixtures",
+            mode="real",
             intensity_percent=100,
             owner_id=owner_id,
         )
@@ -462,7 +462,7 @@ def test_create_run_clears_missing_stale_owner_mapping() -> None:
     async def _run() -> str:
         return await lc.create_run(
             scenario_id="test-scenario",
-            mode="fixtures",
+            mode="real",
             intensity_percent=100,
             owner_id=owner_id,
         )

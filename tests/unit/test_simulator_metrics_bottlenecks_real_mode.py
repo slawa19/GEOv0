@@ -11,7 +11,8 @@ Covered:
 * an empty bottlenecks table is a normal state and yields an empty result;
 * "not measured" (``null``) is distinguishable from "measured zero" at every
   stage: the tick producer, the writer, the DB row and the API response;
-* explicitly synthetic mode (``run.mode != "real"``) keeps synthesising;
+* there is no synthetic mode any more (042 S1, 2026-10-16: the server run mode
+  ``fixtures`` and its synthetic series and bottlenecks were removed);
 * the metric key set is one set on all four sides — canonical OpenAPI, pydantic
   model, reader and writer (spec 007, T713);
 * answering ``GET bottlenecks`` writes nothing to the database (spec 007, T714).
@@ -171,25 +172,22 @@ def _bottleneck_row(
 
 def _build(
     *,
-    mode: str = "real",
     db_enabled: bool = True,
     logger: Optional[logging.Logger] = None,
 ) -> MetricsBottlenecks:
     run = SimpleNamespace(
         run_id="run-1",
         scenario_id="scn-1",
-        mode=mode,
+        mode="real",
         state="running",
         sim_time_ms=5_000,
         intensity_percent=50,
         _edges_by_equivalent={"UAH": [("alice", "bob"), ("bob", "carol")]},
         _scenario_raw=_SCENARIO_RAW,
     )
-    scenario = SimpleNamespace(scenario_id="scn-1", raw=_SCENARIO_RAW)
     return MetricsBottlenecks(
         lock=threading.RLock(),
         runs={"run-1": run},
-        scenarios={"scn-1": scenario},
         db_enabled=lambda: db_enabled,
         logger=logger or logging.getLogger(LOGGER_NAME),
     )
@@ -399,26 +397,6 @@ async def test_real_mode_failure_traceback_is_rate_limited(
     assert [r.exc_info is not None for r in _warnings(caplog)] == [True]
 
 
-async def test_fixtures_mode_metrics_still_synthesise_numeric_series(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Counter-check: the synthetic generator is alive for explicitly synthetic runs.
-
-    Without this, the real-mode assertions above could pass simply because
-    nothing is ever produced anywhere.
-    """
-
-    _install_session(monkeypatch, lambda: _FakeSession([]))
-
-    resp = await _build(mode="fixtures", db_enabled=False).build_metrics(
-        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=3_000, step_ms=1_000
-    )
-
-    values = _values(resp, "success_rate")
-    assert len(values) == 4
-    assert all(v is not None for v in values)
-
-
 # --- bottlenecks: DB-backed paths -------------------------------------------
 
 
@@ -513,24 +491,6 @@ async def test_real_mode_bottlenecks_empty_table_returns_empty_not_synthetic(
 
     assert resp.items == []
     assert _warnings(caplog) == []
-
-
-async def test_fixtures_mode_bottlenecks_still_synthesise_from_trustlines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Counter-check for the empty-table test: the same scenario does produce
-    synthetic items when the mode is explicitly synthetic."""
-
-    _install_session(monkeypatch, lambda: _FakeSession([]))
-
-    resp = await _build(mode="fixtures", db_enabled=False).build_bottlenecks(
-        run_id="run-1", equivalent="UAH", limit=20, min_score=None
-    )
-
-    assert {(i.target.from_, i.target.to) for i in resp.items} == {
-        ("alice", "bob"),
-        ("bob", "carol"),
-    }
 
 
 # --- bottlenecks: failure paths ---------------------------------------------
@@ -857,13 +817,16 @@ def test_metric_point_value_renders_one_canonical_decimal_string() -> None:
         assert len(rendered.split(".")[1]) == 8, rendered
 
 
-async def test_real_and_synthetic_producers_emit_the_same_form(
+async def test_persisted_points_reach_the_wire_in_the_one_canonical_form(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One endpoint, one field, one shape - whichever branch produced it.
+    """One endpoint, one field, one shape.
 
     Before this was pinned, the DB-backed reader emitted `"0.00000000"` while
     the synthetic generator emitted `"0.0"` and `"45.3"` for the same field.
+    The synthetic generator is gone (042 S1); the persisted form is what stays
+    pinned: a measured point is an 8-place decimal string, an unmeasured one
+    is null, in every series.
     """
 
     _install_session(
@@ -876,20 +839,14 @@ async def test_real_and_synthetic_producers_emit_the_same_form(
         run_id="run-1", equivalent="UAH", from_ms=0, to_ms=0, step_ms=1_000
     )
 
-    _install_session(monkeypatch, lambda: _FakeSession([]))
-    synthetic = await _build(mode="fixtures", db_enabled=False).build_metrics(
-        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=0, step_ms=1_000
-    )
-
-    # The same measured cardinality, produced by the two different branches.
     assert _values(persisted, "active_trustlines") == ["2.00000000"]
-    assert _values(synthetic, "active_trustlines") == ["2.00000000"]
-
-    # And no synthetic series slips out in another shape.
-    for series in synthetic.series:
-        for point in series.points:
-            assert point.v is not None
-            assert len(point.v.split(".")[1]) == 8, (series.key, point.v)
+    measured = [
+        (series.key, point.v)
+        for series in persisted.series
+        for point in series.points
+        if point.v is not None
+    ]
+    assert measured == [("active_trustlines", "2.00000000")], measured
 
 
 async def test_money_series_reach_the_wire_without_losing_precision(
@@ -1029,40 +986,6 @@ async def test_real_mode_serves_persisted_network_cardinalities(
     ]
 
 
-async def test_synthetic_mode_counts_cardinalities_instead_of_inventing_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Counter-check: the synthetic path also produces the two new series.
-
-    Without this the synthetic branch would fall through to the
-    ``bottlenecks_score`` formula and label a percentage as a count.
-    """
-
-    _install_session(monkeypatch, lambda: _FakeSession([]))
-    runtime = _build(mode="fixtures", db_enabled=False)
-    runtime._scenarios["scn-1"] = SimpleNamespace(
-        scenario_id="scn-1",
-        raw={
-            **_SCENARIO_RAW,
-            "participants": [
-                {"id": "alice"},
-                {"id": "bob", "status": "active"},
-                {"id": "carol", "status": "blocked"},
-            ],
-        },
-    )
-    runtime._runs["run-1"]._scenario_raw = runtime._scenarios["scn-1"].raw
-
-    resp = await runtime.build_metrics(
-        run_id="run-1", equivalent="UAH", from_ms=0, to_ms=1_000, step_ms=1_000
-    )
-
-    # alice (status omitted, defaults to active) + bob; carol is blocked.
-    assert _values(resp, "active_participants") == ["2.00000000", "2.00000000"]
-    # Two edges in the run's UAH edge cache.
-    assert _values(resp, "active_trustlines") == ["2.00000000", "2.00000000"]
-
-
 async def test_writer_and_reader_agree_on_the_key_set_end_to_end(
     db_session: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1113,14 +1036,16 @@ async def test_writer_and_reader_agree_on_the_key_set_end_to_end(
 # --- T714: answering a GET must not write to the database --------------------
 
 
-async def test_synthetic_bottlenecks_get_writes_nothing_end_to_end(
+async def test_bottlenecks_get_writes_nothing_end_to_end(
     db_session: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """DB-backed (sqlite): polling the endpoint no longer grows the table.
+    """DB-backed: answering the GET writes nothing to `simulator_run_bottlenecks`.
 
     The synthetic branch used to append one row per item on every request, with
-    no deduplication, no row limit and a silent ``except Exception: pass``. The
-    rows were unreachable: only the real-mode branch reads that table.
+    no deduplication, no row limit and a silent ``except Exception: pass``. That
+    branch is gone with the synthetic mode (042 S1); what stays pinned is that
+    the reader - the only branch left - reads and never writes: the row the
+    runner wrote is served, and polling does not multiply it.
     """
 
     monkeypatch.setattr(settings, "SIMULATOR_DB_ENABLED", True, raising=False)
@@ -1136,22 +1061,7 @@ async def test_synthetic_bottlenecks_get_writes_nothing_end_to_end(
             ).scalar_one()
         )
 
-    synthetic = _build(mode="fixtures", db_enabled=True)
-    for _ in range(3):
-        resp = await synthetic.build_bottlenecks(
-            run_id="run-1", equivalent="UAH", limit=20, min_score=None
-        )
-
-    # The endpoint still answers with synthetic items; only the write is gone.
-    assert {(i.target.from_, i.target.to) for i in resp.items} == {
-        ("alice", "bob"),
-        ("bob", "carol"),
-    }
-    assert await _row_count() == 0
-    assert _warnings(caplog) == []
-
-    # Counter-check: the table is writable through this very session, so the
-    # zero above means "the GET wrote nothing", not "nothing can be written".
+    # The runner's write, through this very session (so the table is writable here).
     await simulator_storage.write_tick_bottlenecks(
         run_id="run-1",
         equivalent="UAH",
@@ -1170,10 +1080,15 @@ async def test_synthetic_bottlenecks_get_writes_nothing_end_to_end(
     )
     assert await _row_count() == 1
 
-    # And the real-mode reader serves exactly what the runner wrote.
-    real = await _build().build_bottlenecks(
-        run_id="run-1", equivalent="UAH", limit=20, min_score=None
-    )
-    assert [(i.target.from_, i.target.to, i.score) for i in real.items] == [
-        ("alice", "bob", 0.5)
-    ]
+    reader = _build()
+    for _ in range(3):
+        real = await reader.build_bottlenecks(
+            run_id="run-1", equivalent="UAH", limit=20, min_score=None
+        )
+        # The reader serves exactly what the runner wrote ...
+        assert [(i.target.from_, i.target.to, i.score) for i in real.items] == [
+            ("alice", "bob", 0.5)
+        ]
+    # ... and three GETs left the table as they found it.
+    assert await _row_count() == 1
+    assert _warnings(caplog) == []

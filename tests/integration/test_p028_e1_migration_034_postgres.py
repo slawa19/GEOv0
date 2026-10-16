@@ -20,7 +20,7 @@ _AFTER = "034_simulator_run_seed_bigint"
 _TYPE = "SELECT data_type FROM information_schema.columns WHERE table_name = 'simulator_runs' AND column_name = 'seed'"
 _SEEDS = "SELECT run_id, seed FROM simulator_runs WHERE run_id LIKE 'p028-m034-%' ORDER BY run_id"
 _ROW = ("INSERT INTO simulator_runs (run_id, scenario_id, mode, state, owner_id, seed) "
-        "VALUES (:id, 's', 'fixtures', 'stopped', 'test', :seed)")
+        "VALUES (:id, 's', 'real', 'stopped', 'test', :seed)")
 
 
 @pytest.mark.asyncio

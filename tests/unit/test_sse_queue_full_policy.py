@@ -14,7 +14,7 @@ async def test_sse_queue_overflow_closes_stream_before_any_higher_id_is_delivere
 ) -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
-    run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
+    run = RunRecord(run_id="run_1", scenario_id="s", mode="real", state="running")
     runs[run.run_id] = run
 
     logger = logging.getLogger("test.sse.queue_full")
@@ -87,7 +87,7 @@ async def test_sse_queue_overflow_closes_stream_before_any_higher_id_is_delivere
 async def test_sse_queue_full_run_status_terminates_instead_of_skipping_lower_event() -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
-    run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
+    run = RunRecord(run_id="run_1", scenario_id="s", mode="real", state="running")
     runs[run.run_id] = run
 
     sse = SseBroadcast(
@@ -137,7 +137,7 @@ async def test_sse_queue_full_run_status_terminates_instead_of_skipping_lower_ev
 async def test_sse_queue_full_amount_flyout_terminates_instead_of_skipping_lower_event() -> None:
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
-    run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
+    run = RunRecord(run_id="run_1", scenario_id="s", mode="real", state="running")
     runs[run.run_id] = run
 
     sse = SseBroadcast(

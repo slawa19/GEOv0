@@ -387,7 +387,7 @@ jobs:
           docker exec "$PHASE1_POSTGRES" \
             psql --set ON_ERROR_STOP=1 --username geo \
             --dbname geov0_test_phase1_from_016 \
-            --command "INSERT INTO simulator_runs (run_id, scenario_id, mode, state) VALUES ('phase1-legacy-run', 'phase1-fixture', 'fixtures', 'stopped')"
+            --command "INSERT INTO simulator_runs (run_id, scenario_id, mode, state) VALUES ('phase1-legacy-run', 'phase1-fixture', 'real', 'stopped')"
 
       - name: Boot empty database, verify health and schema, then stop gracefully
         shell: bash

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
-import random
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -201,7 +200,7 @@ class RunLifecycle:
         owner_kind: str = "",
         created_by: Optional[dict] = None,
     ) -> str:
-        # Validate scenario exists (even for real mode for now).
+        # Validate scenario exists.
         scenario_for_story = self._get_scenario_raw(scenario_id)
         # 036 B2: a scenario whose story cannot be served as written is refused HERE, by the rule and with the answer of the
         # detail read (`build_story`: 409/E008, SCENARIO_INVALID, the path of every bad field). Nothing is created.
@@ -231,19 +230,13 @@ class RunLifecycle:
             intensity_percent=intensity_percent,
         )
 
-        if mode == "real":
-            configured = settings.SIMULATOR_REAL_MAX_IN_FLIGHT
-            run._real_max_in_flight = max(1, self._real_max_in_flight_default if configured is None else configured)
+        configured = settings.SIMULATOR_REAL_MAX_IN_FLIGHT
+        run._real_max_in_flight = max(1, self._real_max_in_flight_default if configured is None else configured)
 
-        # Precompute per-equivalent edges for quick event generation.
-        # (Needed for both fixtures + real runners.)
+        # Precompute per-equivalent edges (the runner's topology cache).
         scenario = self._get_scenario_raw(scenario_id)
         run._scenario_raw = copy.deepcopy(scenario)
         run._edges_by_equivalent = self._edges_by_equivalent(run._scenario_raw)
-        run._rng = random.Random(run_id)
-        run._next_tx_at_ms = 0
-        run._next_clearing_at_ms = 25_000
-        run._clearing_pending_done_at_ms = None
 
         with self._lock:
             # Thread safety: RunRecord is created outside lock (cheap), but all

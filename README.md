@@ -453,10 +453,10 @@ backend selectors so DB, basetemp, and failure artifacts stay task-local:
 $taskSlug = "agent_contract_review"
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/contract/test_openapi_contract.py
 
-# Simulator SSE smoke (fixtures-mode)
-.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_simulator_sse_smoke.py
+# Simulator SSE smoke (real mode)
+.\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_simulator_sse_real_smoke.py
 
-# Expensive milestone: fixtures + deterministic real logic + real-mode HTTP startup
+# Expensive milestone: deterministic real logic + real-mode HTTP startup
 .\scripts\verify_local.ps1 -TaskSlug $taskSlug -BackendOnly -BackendSelector tests/integration/test_simulator_super_smoke.py -IncludeExpensive
 ```
 

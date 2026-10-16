@@ -1154,10 +1154,13 @@ paths:
         - in: query
           name: mode
           required: false
+          description: >-
+            Only `real` (042): the preview enriched from the database. Before 042 the default was `fixtures`, a
+            topology-only picture; an explicit `fixtures` is now refused (422).
           schema:
             type: string
-            enum: [fixtures, real]
-            default: fixtures
+            enum: [real]
+            default: real
       responses:
         '200':
           description: Scenario graph snapshot
@@ -1625,98 +1628,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
-
-  /simulator/runs/{run_id}/actions/tx-once:
-    post:
-      tags: [Simulator]
-      summary: Emit one debug transaction event (Real Mode control plane)
-      parameters:
-        - $ref: '#/components/parameters/RunIdPath'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TxOnceRequestBody'
-      responses:
-        '200':
-          description: Transaction emitted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TxOnceResponseBody'
-        '400':
-          description: Simulator action validation error (flat envelope)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SimulatorActionError'
-        '403':
-          description: Simulator actions disabled or access denied
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          description: Invalid simulator identity transport (for example, X-Simulator-Owner)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
-  /simulator/runs/{run_id}/actions/clearing-once:
-    post:
-      tags: [Simulator]
-      summary: Emit one debug clearing event (Real Mode control plane)
-      parameters:
-        - $ref: '#/components/parameters/RunIdPath'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ClearingOnceRequestBody'
-      responses:
-        '200':
-          description: Clearing emitted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClearingOnceResponseBody'
-        '400':
-          description: Simulator action validation error (flat envelope)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SimulatorActionError'
-        '403':
-          description: Simulator actions disabled or access denied
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          description: Invalid simulator identity transport (for example, X-Simulator-Owner)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
 
   /simulator/runs/{run_id}/graph/snapshot:
     get:
@@ -3967,91 +3878,6 @@ components:
             that refusal and a new payment of the same intent needs a new key; `false` - nothing is stored under the key
             (a repeat is executed), or the payment IS committed and only its answer was lost (a repeat returns it);
             absent - the state could not be read, keep the key. A request without a key never carries it.
-
-    TxOnceRequestBody:
-      type: object
-      required: [equivalent]
-      properties:
-        equivalent:
-          type: string
-        from:
-          type: string
-          nullable: true
-        to:
-          type: string
-          nullable: true
-        amount:
-          type: string
-          nullable: true
-        ttl_ms:
-          type: integer
-          nullable: true
-        intensity_key:
-          type: string
-          nullable: true
-        seed:
-          # Deliberately an EMPTY schema. The field is `Optional[Any]`
-          # (app/api/v1/simulator.py:944) and the runtime only interpolates it into a hash seed
-          # (`f"{run_id}:{eq}:{seed}"`, app/core/simulator/runtime_impl.py:539), so any JSON
-          # value is accepted, null included, and an empty schema states exactly that. What stood
-          # here was a lone `nullable: true`, which in OpenAPI 3.0.3 modifies a sibling `type`
-          # and nothing else - with no `type` to modify it stated nothing at all (`F-011-10`).
-          {}
-        client_action_id:
-          type: string
-          nullable: true
-
-    TxOnceResponseBody:
-      type: object
-      required: [emitted_event_id]
-      properties:
-        ok:
-          type: boolean
-          default: true
-        emitted_event_id:
-          type: string
-        client_action_id:
-          type: string
-          nullable: true
-
-    ClearingOnceRequestBody:
-      type: object
-      required: [equivalent]
-      properties:
-        equivalent:
-          type: string
-        cycle_edges:
-          type: array
-          nullable: true
-          items:
-            type: object
-            additionalProperties:
-              type: string
-        cleared_amount:
-          type: string
-          nullable: true
-        seed:
-          # Empty schema, same reason as TxOnceRequestBody.seed above: `Optional[Any]`
-          # (app/api/v1/simulator.py:960), interpolated into a hash seed and nothing more.
-          {}
-        client_action_id:
-          type: string
-          nullable: true
-
-    ClearingOnceResponseBody:
-      type: object
-      required: [plan_id, done_event_id]
-      properties:
-        ok:
-          type: boolean
-          default: true
-        plan_id:
-          type: string
-        done_event_id:
-          type: string
-        client_action_id:
-          type: string
-          nullable: true
 
     Equivalent:
       type: object
@@ -7394,13 +7220,15 @@ components:
 
     RunCreateRequest:
       type: object
-      required: [scenario_id, mode]
+      required: [scenario_id]
       properties:
         scenario_id:
           type: string
         mode:
+          # 042: one run mode. Absent means `real`; an explicit `fixtures` (the removed server mode) is refused (422).
           type: string
-          enum: [fixtures, real]
+          enum: [real]
+          default: real
         intensity_percent:
           type: integer
           nullable: true
@@ -7439,7 +7267,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [fixtures, real]
+          enum: [real]
         state:
           $ref: '#/components/schemas/RunState'
         started_at:
@@ -7636,10 +7464,10 @@ components:
         scenario_id:
           type: string
         mode:
-          # RunMode = Literal["fixtures", "real"] (app/schemas/simulator.py:376). A plain string
+          # RunMode = Literal["real"] (app/schemas/simulator.py, 042). A plain string
           # on the wire, because the artifact is written with `json.dumps`, not by pydantic.
           type: string
-          enum: [fixtures, real]
+          enum: [real]
         created_at:
           type: string
           format: date-time
@@ -7667,7 +7495,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [fixtures, real]
+          enum: [real]
         state:
           $ref: '#/components/schemas/RunState'
         status:

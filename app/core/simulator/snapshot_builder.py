@@ -71,7 +71,7 @@ class SnapshotBuilder:
         run = self._get_run(run_id)
         scenario = getattr(run, "_scenario_raw", None) or self._get_scenario(run.scenario_id).raw
         snap = scenario_to_snapshot(scenario, equivalent=equivalent, utc_now=self._utc_now)
-        if run.mode != "real" or not self._db_enabled():
+        if not self._db_enabled():
             return snap
         return await self._enrich_snapshot_from_db(snap, equivalent=equivalent, session=session)
 

@@ -8,8 +8,9 @@ proves nothing). Ownership is never inferred from in-memory runs.
 
 * Positive control: on a hub database (no real simulator run) the periodic pass clears its cycle.
 * Exclusion: a real-mode run row -> refused, the cycle untouched; `SIMULATOR_DB_ENABLED = false` -> refused.
-* Counter-check of the filter (anti-vacuum): a `fixtures`-mode run row (which never touches money tables) does
-  not refuse - the rule excludes on the evidence it names and not on "any row".
+* (Removed 2026-10-16, 042 S1: the counter-check that a `fixtures`-mode row does not refuse. That mode is gone and the
+  database refuses such a row - CHECK `chk_simulator_runs_mode`, migration 037 - so every row is real-mode and the
+  rule's filter selects them all; the positive control above is what shows the rule does not refuse on nothing.)
 * `CLEARING_ENABLED = false`: the periodic pass clears nothing.
 
 The periodic loop itself is not started by default in slice (c) (`tests/unit/test_p023_c_runner_is_not_wired.py`).
@@ -86,14 +87,6 @@ async def test_without_simulator_persistence_the_periodic_pass_is_refused(db_ses
         await api.run_periodic_clearing_pass(factory, None)
     assert refused.value.reason == "simulator_persistence_disabled"
     assert await _clearings(factory) == 0
-
-
-@pytest.mark.asyncio
-async def test_counter_check_a_fixtures_mode_run_does_not_refuse(db_session) -> None:
-    api, factory = await _stand(db_session)
-    await _record_run(factory, mode="fixtures")
-    results = await api.run_periodic_clearing_pass(factory, None)
-    assert results[CODE].status == "complete" and await _left(factory) == []
 
 
 @pytest.mark.asyncio

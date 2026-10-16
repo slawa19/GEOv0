@@ -15,7 +15,7 @@ async def test_sse_subscribe_rate_limit_per_run(monkeypatch: pytest.MonkeyPatch)
 
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
-    run = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
+    run = RunRecord(run_id="run_1", scenario_id="s", mode="real", state="running")
     runs[run.run_id] = run
 
     sse = SseBroadcast(
@@ -40,8 +40,8 @@ async def test_sse_subscribe_rate_limit_total(monkeypatch: pytest.MonkeyPatch) -
 
     lock = threading.RLock()
     runs: dict[str, RunRecord] = {}
-    run1 = RunRecord(run_id="run_1", scenario_id="s", mode="fixtures", state="running")
-    run2 = RunRecord(run_id="run_2", scenario_id="s", mode="fixtures", state="running")
+    run1 = RunRecord(run_id="run_1", scenario_id="s", mode="real", state="running")
+    run2 = RunRecord(run_id="run_2", scenario_id="s", mode="real", state="running")
     runs[run1.run_id] = run1
     runs[run2.run_id] = run2
 

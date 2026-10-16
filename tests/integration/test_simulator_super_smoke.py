@@ -33,12 +33,6 @@ def _edge_key(a: str, b: str) -> str:
     return f"{a}→{b}"
 
 
-def _ensure_str(v: Any) -> str:
-    if isinstance(v, str):
-        return v
-    raise _SuperSimFailure(f"Expected str, got {type(v).__name__}: {v!r}")
-
-
 def _ensure_list(v: Any) -> list:
     if isinstance(v, list):
         return v
@@ -56,34 +50,6 @@ async def _best_effort_stop(client: AsyncClient, *, run_id: str, auth_headers: d
         await client.post(f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers)
     except Exception:
         return
-
-
-async def _get_snapshot_with_links(
-    client: AsyncClient, *, run_id: str, eq: str, auth_headers: dict[str, str]
-) -> tuple[dict[str, Any], list[dict[str, Any]], set[str]]:
-    r = await client.get(
-        f"/api/v1/simulator/runs/{run_id}/graph/snapshot",
-        headers=auth_headers,
-        params={"equivalent": eq},
-    )
-    if r.status_code != 200:
-        raise _SuperSimFailure(f"Snapshot failed: {r.status_code} {r.text}")
-
-    snap = _ensure_dict(r.json())
-    links_any = _ensure_list(snap.get("links"))
-    links: list[dict[str, Any]] = [_ensure_dict(x) for x in links_any]
-
-    keys: set[str] = set()
-    for link in links:
-        src = link.get("source")
-        tgt = link.get("target")
-        if isinstance(src, str) and isinstance(tgt, str):
-            keys.add(_edge_key(src, tgt))
-
-    if not keys:
-        raise _SuperSimFailure("Snapshot has no links; cannot validate tx/clearing edges")
-
-    return snap, links, keys
 
 
 async def _read_sse_events(
@@ -406,26 +372,6 @@ def _validate_tx_updated(evt: dict[str, Any], *, snapshot_edge_keys: set[str] | 
         _validate_edge_patch_shape(edge_patch, context="tx.updated.edge_patch")
 
 
-def _validate_clearing_done(evt: dict[str, Any], *, snapshot_edge_keys: set[str]) -> None:
-    plan_id = evt.get("plan_id")
-    if not isinstance(plan_id, str) or not plan_id:
-        raise _SuperSimFailure(f"clearing.done missing plan_id: {evt}")
-
-    cleared_amount = str(evt.get("cleared_amount") or "").strip()
-    if not cleared_amount or cleared_amount in {"0", "0.0", "0.00"}:
-        raise _SuperSimFailure(f"clearing.done has empty/zero cleared_amount: {evt}")
-
-    cycle_edges = evt.get("cycle_edges")
-    if not isinstance(cycle_edges, list) or not cycle_edges:
-        raise _SuperSimFailure(f"clearing.done missing cycle_edges: {evt}")
-
-    _validate_edge_refs_are_in_snapshot(
-        cycle_edges,
-        snapshot_edge_keys=snapshot_edge_keys,
-        context="clearing.done",
-    )
-
-
 def _validate_run_status(evt: dict[str, Any], *, run_id: str, scenario_id: str) -> None:
     if evt.get("type") != "run_status":
         raise _SuperSimFailure(f"Expected run_status, got: {evt}")
@@ -445,170 +391,6 @@ def _validate_run_status(evt: dict[str, Any], *, run_id: str, scenario_id: str) 
 def _print_summary(msg: str) -> None:
     # Intentional stdout summary for CI readability.
     print(msg)
-
-
-@pytest.mark.asyncio
-async def test_super_smoke_part1_fixtures_http_visual_contract(
-    client: AsyncClient,
-    auth_headers,
-    monkeypatch,
-) -> None:
-    """Part 1: fixtures-mode HTTP + SSE + visual contract."""
-
-    monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
-
-    dump = _DumpCollector(test_name="test_super_smoke_part1_fixtures_http_visual_contract")
-    scenario_id = "greenfield-village-100-realistic-v2"
-    eq = "UAH"
-    intensity_percent = 0
-
-    async with asyncio.timeout(30.0):
-        resp = await client.post(
-            "/api/v1/simulator/runs",
-            headers=auth_headers,
-            json={
-                "scenario_id": scenario_id,
-                "mode": "fixtures",
-                "intensity_percent": intensity_percent,
-            },
-        )
-        if resp.status_code != 200:
-            raise _SuperSimFailure(f"create_run failed: {resp.status_code} {resp.text}")
-        run_id = str(resp.json()["run_id"])
-
-        cap = _RunCapture(
-            run_id=run_id,
-            mode="fixtures",
-            eq=eq,
-            scenario_id=scenario_id,
-            intensity_percent=intensity_percent,
-        )
-        dump.add_run(cap)
-
-        try:
-            snap, links, edge_keys = await _get_snapshot_with_links(
-                client,
-                run_id=cap.run_id,
-                eq=eq,
-                auth_headers=auth_headers,
-            )
-            cap.snapshot_edge_keys = edge_keys
-
-            # Pick one deterministic edge for tx-once.
-            l0 = _ensure_dict(links[0])
-            src = _ensure_str(l0.get("source"))
-            tgt = _ensure_str(l0.get("target"))
-            dump.add_extra({"phase": "part1.snapshot", "snapshot": snap})
-
-            tx1 = await client.post(
-                f"/api/v1/simulator/runs/{cap.run_id}/actions/tx-once",
-                headers=auth_headers,
-                json={
-                    "equivalent": eq,
-                    "from": src,
-                    "to": tgt,
-                    "amount": "1.00",
-                    "ttl_ms": 1200,
-                    "seed": {"case": "super-smoke", "n": 1},
-                    "client_action_id": "super-smoke-tx-1",
-                },
-            )
-            cap.actions.append({"type": "tx-once", "status": tx1.status_code, "body": tx1.json()})
-            if tx1.status_code != 200:
-                raise _SuperSimFailure(f"tx-once failed: {tx1.status_code} {tx1.text}")
-
-            tx2 = await client.post(
-                f"/api/v1/simulator/runs/{cap.run_id}/actions/tx-once",
-                headers=auth_headers,
-                json={
-                    "equivalent": eq,
-                    "from": src,
-                    "to": tgt,
-                    "amount": "2.00",
-                    "ttl_ms": 1200,
-                    "seed": {"case": "super-smoke", "n": 2},
-                    "client_action_id": "super-smoke-tx-2",
-                },
-            )
-            cap.actions.append({"type": "tx-once", "status": tx2.status_code, "body": tx2.json()})
-            if tx2.status_code != 200:
-                raise _SuperSimFailure(f"tx-once(2) failed: {tx2.status_code} {tx2.text}")
-
-            clr = await client.post(
-                f"/api/v1/simulator/runs/{cap.run_id}/actions/clearing-once",
-                headers=auth_headers,
-                json={
-                    "equivalent": eq,
-                    "seed": {"case": "super-smoke"},
-                    "client_action_id": "super-smoke-clr",
-                },
-            )
-            cap.actions.append({"type": "clearing-once", "status": clr.status_code, "body": clr.json()})
-            if clr.status_code != 200:
-                raise _SuperSimFailure(f"clearing-once failed: {clr.status_code} {clr.text}")
-
-            def _stop_when(evt: dict[str, Any], seen: set[str]) -> bool:
-                return "clearing.done" in seen
-
-            cap.events = await _read_sse_events(
-                client,
-                run_id=cap.run_id,
-                eq=eq,
-                auth_headers=auth_headers,
-                last_event_id=f"evt_{cap.run_id}_000000",
-                stop_when=_stop_when,
-                timeout_sec=12.0,
-            )
-
-            seen_run_status = 0
-            seen_updated = 0
-            seen_failed = 0
-            seen_done = 0
-
-            for evt in cap.events:
-                _validate_common_event_shape(evt, eq=eq)
-                t = evt.get("type")
-                if t == "run_status":
-                    seen_run_status += 1
-                    _validate_run_status(evt, run_id=cap.run_id, scenario_id=scenario_id)
-                elif t == "tx.updated":
-                    seen_updated += 1
-                    _validate_tx_updated(evt, snapshot_edge_keys=cap.snapshot_edge_keys, require_patches=False)
-                elif t == "tx.failed":
-                    seen_failed += 1
-                    _validate_tx_failed(evt)
-                elif t == "clearing.done":
-                    seen_done += 1
-                    _validate_clearing_done(evt, snapshot_edge_keys=cap.snapshot_edge_keys)
-
-            if seen_run_status < 1:
-                raise _SuperSimFailure(f"Expected run_status in SSE. Types: {[e.get('type') for e in cap.events]}")
-            if seen_done < 1:
-                raise _SuperSimFailure(f"Expected clearing.done. Types: {[e.get('type') for e in cap.events]}")
-            if (seen_updated + seen_failed) < 1:
-                raise _SuperSimFailure(
-                    f"Expected tx.updated or tx.failed, saw updated={seen_updated} failed={seen_failed}."
-                )
-
-            st = await client.get(f"/api/v1/simulator/runs/{cap.run_id}", headers=auth_headers)
-            if st.status_code == 200:
-                cap.run_status = st.json()
-                if str(cap.run_status.get("state") or "") == "error":
-                    raise _SuperSimFailure(f"Run ended in error state: {cap.run_status}")
-
-            _print_summary(
-                f"Part1 OK: run_status={seen_run_status} tx.updated={seen_updated} tx.failed={seen_failed} clearing.done={seen_done}"
-            )
-        except Exception as e:
-            await dump.collect_postmortem(client, auth_headers=auth_headers)
-            p = dump.write_dump(reason="part1 failure", exc=e)
-            raise _SuperSimFailure(f"Part1 failed; postmortem written to: {p.as_posix()}") from e
-        finally:
-            await _best_effort_stop(client, run_id=cap.run_id, auth_headers=auth_headers)
-
-    if str(os.environ.get("GEO_TEST_DUMP_SUPER_SIM", "") or "").strip() in {"1", "true", "TRUE", "yes"}:
-        await dump.collect_postmortem(client, auth_headers=auth_headers)
-        dump.write_dump(reason="part1 success")
 
 
 @pytest.mark.asyncio

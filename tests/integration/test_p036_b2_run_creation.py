@@ -8,7 +8,8 @@
   The Simulator UI (`useSimulatorRealMode.ts`) always sends a number, so the scenario's default is not reached from it yet.
 * `GET /runs/{id}` carries `episode_progress` (optional, typed): see `RunStatus` in `api/openapi.yaml`.
 
-Runs are created in `fixtures` mode and stopped in a `finally`: nothing here depends on the creation mode.
+Runs are created in `real` mode (the only mode since 042) with the real tick replaced by a no-op (`no_real_tick`), and
+stopped in a `finally`: what is checked here is decided when the run is created, before any tick.
 """
 
 from __future__ import annotations
@@ -20,6 +21,9 @@ import pytest
 from app.core.simulator.runtime import runtime
 from app.core.simulator.scenario_registry import scenario_to_record
 from tests.contract.openapi_response_conformance import load_canon, validate_body
+from tests.p042_support import no_real_tick  # noqa: F401 - a fixture, used by every test below
+
+pytestmark = pytest.mark.usefixtures("no_real_tick")
 
 BASE = {
     "schema_version": "scenario/1",
@@ -37,7 +41,7 @@ def _register(monkeypatch, scenario_id: str, **top) -> str:
 
 async def _start(client, auth_headers, scenario_id: str, **body):
     return await client.post(
-        "/api/v1/simulator/runs", headers=auth_headers, json={"scenario_id": scenario_id, "mode": "fixtures", **body}
+        "/api/v1/simulator/runs", headers=auth_headers, json={"scenario_id": scenario_id, "mode": "real", **body}
     )
 
 
@@ -71,36 +75,17 @@ async def test_a_damaged_story_is_refused_at_run_creation_and_no_run_is_made(cli
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["fixtures", "real"])
-async def test_a_damaged_story_is_refused_in_either_mode(client, auth_headers, monkeypatch, mode) -> None:
-    """Fix-delta: the refusal is of the story, not of a mode. `real` is the mode the story is played in; the product answers
-    409 / E008 there too and creates nothing (a guard against `build_story` being called for `fixtures` only)."""
-
-    scenario_id = _register(monkeypatch, f"p036-b2-damaged-{mode}", events=DAMAGED)
-    runs_before = set(runtime._runs)
-
-    response = await _start(client, auth_headers, scenario_id, mode=mode, intensity_percent=10)
-    try:
-        assert response.status_code == 409, f"{mode}: {response.status_code}: {response.text[:300]}"
-        assert response.json()["error"]["details"]["simulator_error"] == "SCENARIO_INVALID"
-        assert set(runtime._runs) == runs_before
-    finally:
-        await _stop(client, auth_headers, response)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["fixtures", "real"])
 async def test_a_pause_after_that_is_not_a_boolean_on_an_event_without_a_caption_is_refused_at_run_creation(
-    client, auth_headers, monkeypatch, mode
+    client, auth_headers, monkeypatch
 ) -> None:
     """TARGET (red on 7c11ee0f: 200, the bad value silently paused nothing)."""
 
-    scenario_id = _register(monkeypatch, f"p036-b2-pause-{mode}", events=[{"time": 0, "type": "note", "pause_after": "yes"}])
+    scenario_id = _register(monkeypatch, "p036-b2-pause", events=[{"time": 0, "type": "note", "pause_after": "yes"}])
     runs_before = set(runtime._runs)
 
-    response = await _start(client, auth_headers, scenario_id, mode=mode, intensity_percent=10)
+    response = await _start(client, auth_headers, scenario_id, intensity_percent=10)
     try:
-        assert response.status_code == 409, f"{mode}: {response.status_code}: {response.text[:300]}"
+        assert response.status_code == 409, f"{response.status_code}: {response.text[:300]}"
         error = response.json()["error"]
         assert error["code"] == "E008" and [e["path"] for e in error["details"]["errors"]] == ["events/0/pause_after"]
         assert set(runtime._runs) == runs_before

@@ -42,7 +42,7 @@ class SimulatorRun(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        CheckConstraint("mode IN ('fixtures','real')", name="chk_simulator_runs_mode"),
+        CheckConstraint("mode = 'real'", name="chk_simulator_runs_mode"),  # 042 S1, migration 037
         CheckConstraint("state IN ('idle','running','paused','stopping','stopped','error')", name="chk_simulator_runs_state"),
         CheckConstraint("sim_time_ms IS NULL OR sim_time_ms >= 0", name="chk_simulator_runs_sim_time_ms"),
         CheckConstraint(

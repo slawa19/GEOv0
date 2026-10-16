@@ -1,44 +1,31 @@
+"""A run's artifacts include `events.ndjson` with its domain events, downloadable with the bundle.
+
+The domain event is a REAL payment (042 S1: the server mode `fixtures`, whose random first event this test used to wait
+for, is gone): `pay_once` commits p2 -> p1 through the Interact route, which publishes `tx.updated`. The run's own tick is
+a no-op, so that payment is the run's only domain event. Mode B: the seeding and the payment commit.
+"""
+
 import asyncio
 import json
 
 import pytest
 from httpx import AsyncClient
 
-from app.core.simulator.runtime import runtime
+from tests.conftest import MODE_B
+from tests.p042_support import no_real_tick, pay_once, start_real_run  # noqa: F401 - `no_real_tick` is a fixture
+
+pytestmark = MODE_B
 
 
 @pytest.mark.asyncio
 async def test_simulator_artifacts_include_events_ndjson(
-    client: AsyncClient, auth_headers
+    client: AsyncClient, auth_headers, monkeypatch, no_real_tick  # noqa: F811
 ):
-    # Start a fixtures-mode run.
-    resp = await client.post(
-        "/api/v1/simulator/runs",
-        headers=auth_headers,
-        json={
-            "scenario_id": "greenfield-village-100-realistic-v2",
-            "mode": "fixtures",
-            "intensity_percent": 90,
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    run_id = resp.json()["run_id"]
+    run_id = await start_real_run(client, auth_headers)
+    payment = await pay_once(client, auth_headers, run_id, monkeypatch)
 
-    # Trigger a real fixtures event, then close the run through the normal
-    # terminal status so HTTPX's buffering ASGI transport receives a finite
-    # production SSE response.
-    observer = await runtime.subscribe(run_id, equivalent="UAH")
-    try:
-        async def _wait_for_domain_event() -> None:
-            while True:
-                event = await observer.queue.get()
-                if event.get("type") != "run_status":
-                    return
-
-        await asyncio.wait_for(_wait_for_domain_event(), timeout=5.0)
-    finally:
-        await runtime.unsubscribe(run_id, observer)
-
+    # Close the run through the normal terminal status so HTTPX's buffering ASGI transport receives a finite production
+    # SSE response.
     stop_resp = await client.post(
         f"/api/v1/simulator/runs/{run_id}/stop", headers=auth_headers
     )
@@ -92,9 +79,10 @@ async def test_simulator_artifacts_include_events_ndjson(
     assert len(lines) >= 1
 
     first = json.loads(lines[0])
-    assert str(first.get("type") or "").strip()
-    assert first.get("type") != "run_status"
+    assert first.get("type") == "tx.updated", first
     assert str(first.get("event_id") or "").startswith("evt_")
+    # It is the payment's event, not just any line.
+    assert (first.get("from"), first.get("to"), first.get("amount")) == ("p2", "p1", payment["amount"]), first
 
     # run_status is intentionally not exported into events.ndjson (too noisy).
     assert all(json.loads(ln).get("type") != "run_status" for ln in lines)

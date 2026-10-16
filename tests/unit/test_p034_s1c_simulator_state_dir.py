@@ -69,7 +69,7 @@ def test_a_test_process_keeps_its_simulator_state_under_the_tasks_artifact_root(
 def test_a_runs_artifacts_are_written_under_the_tasks_artifact_root() -> None:
     """A real write by the runtime's own artifacts manager: the directory it creates for a run."""
 
-    run = RunRecord(run_id="run_p034_s1c_isolation", scenario_id="s", mode="fixtures", state="running")
+    run = RunRecord(run_id="run_p034_s1c_isolation", scenario_id="s", mode="real", state="running")
     runtime._artifacts.init_run_artifacts(run)
     try:
         assert run.artifacts_dir is not None and (run.artifacts_dir / "events.ndjson").is_file()
