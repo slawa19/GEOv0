@@ -46,14 +46,19 @@ basetemp/cache и failure artifacts находятся в
 переключателей полный `verify_local.ps1` берёт оба раздела; `-BackendOnly` и `-UiOnly` — ни одного.
 
 Сессия сама сверяет себя ([`tooling-tests/conftest.py`](../../tooling-tests/conftest.py)):
-число выбранных элементов раздела обязано равняться `EXPECTED_CASES` **в обе стороны**
-(новый элемент без записи в константу краснит так же, как потерянный); отказывают
-запуск без `--tooling-partition`, `--collect-only` и подобные, любой deselect
-(`-m`, `-k`, `--deselect`, `--lf`) и модуль вне `portable/` и `powershell/`; прогон
+отказывают запуск без `--tooling-partition`, `--collect-only` и подобные, любое сужение
+(`-m`, `-k`, `--deselect`, `--ignore`, `--ignore-glob`, `--lf`, `--sw`, `-o` ключей сбора —
+`testpaths`, `norecursedirs`, `python_files`, `python_classes`, `python_functions`, — чужие
+`--rootdir`/`-c`, позиционный путь уже раздела, любой deselect), пустой запрошенный раздел и
+модуль вне `portable/` и `powershell/`. Точного числа элементов с 2026-10-16 нет (041 `T4109`):
+добавление и удаление теста ничего не правит, а состав тира не проверяется — удалённый тест не
+виден, и сужение через закоммиченную конфигурацию сбора или хуки conftest (ключи сбора в самом
+`pytest.ini`, `collect_ignore`, `pytest_ignore_collect`) — та же категория, что удаление теста,
+не ловится; прогон
 краснеет при skip и xfail; раздел `powershell` требует на машине обе PowerShell
 (`pwsh` и Windows PowerShell 5.1). Переменные базы из окружения сессии удаляются.
 Отладочный прогон одного файла возможен с `--noconftest` и ничего из перечисленного не проверяет.
-Границы механизма — в docstring `conftest.py` («WHAT IT DOES NOT SEE»).
+Известные на 2026-10-16 границы механизма — в docstring `conftest.py` («WHAT IT DOES NOT SEE»); список не доказательство полноты.
 
 ## Узкие backend-проверки
 
