@@ -1,7 +1,7 @@
 # Interact Flow — ESC Step-Back Fix (Unified Spec)
 
 - **Дата**: 2026-03-02
-- **Статус**: Archived
+- **Статус**: Implemented & Complete (all TODOs closed except optional ESC-dispatch localization and selector hardening)
 - **Компонент**: Interact FSM / WindowManager ESC policy (Simulator UI v2)
 - **История**: в этот документ слиты implementation-детали и AC из follow-up спеки; отдельный follow-up документ удалён после мерджа, чтобы не было расхождений.
 
@@ -10,6 +10,8 @@
 - FSM: добавлен latched-флаг `initiatedWithPrefilledFrom`.
 - WM onBack: логика ESC step-back переключена с эвристики `fromPid` на `initiatedWithPrefilledFrom`; trustline edit/confirm теперь всегда делает step-back через очистку TO.
 - Тесты: добавлены/обновлены unit/regression тесты на WM ESC и onBack.
+
+**Дополнительно (по результатам код-ревью):** выявлены риски/техдолг и пробелы в тестах; зафиксированы ниже как проверяемые требования и TODO-чеклист.
 
 ---
 
@@ -41,19 +43,19 @@
 
 | Действие | Обработчик | Предзаполнение | Проблема |
 |---|---|---|---|
-| 💸 Send Payment — NodeCard | `onInteractSendPayment(fromPid)` ([SimulatorAppRoot.vue#L1119](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1119)) | FROM = nodeId | ДА |
-| ＋ New Trustline — NodeCard | `onInteractNewTrustline(fromPid)` ([SimulatorAppRoot.vue#L1127](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1127)) | FROM = nodeId | ДА |
-| ✏️ Edit Trustline — NodeCard | `onInteractEditTrustline(fromPid, toPid)` ([SimulatorAppRoot.vue#L1135](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1135)) | FROM + TO | ДА |
-| Send Payment — EdgeDetail | `onEdgeDetailSendPayment()` ([SimulatorAppRoot.vue#L1040](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1040)) | FROM + TO | ДА |
-| Send Payment — ActionBar | `onActionStartPaymentFlow()` ([SimulatorAppRoot.vue#L1144](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1144)) | нет | ДА (закрывает окно вместо step-back) |
-| New Trustline — ActionBar | `onActionStartTrustlineFlow()` ([SimulatorAppRoot.vue#L1152](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1152)) | нет | ДА (закрывает окно вместо step-back) |
-| 🔄 Run Clearing — ActionBar | `onActionStartClearingFlow()` ([SimulatorAppRoot.vue#L1161](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1161)) | нет | НЕТ — нет step-back |
+| 💸 Send Payment — NodeCard | `onInteractSendPayment(fromPid)` ([SimulatorAppRoot.vue#L1119](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1119)) | FROM = nodeId | ДА |
+| ＋ New Trustline — NodeCard | `onInteractNewTrustline(fromPid)` ([SimulatorAppRoot.vue#L1127](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1127)) | FROM = nodeId | ДА |
+| ✏️ Edit Trustline — NodeCard | `onInteractEditTrustline(fromPid, toPid)` ([SimulatorAppRoot.vue#L1135](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1135)) | FROM + TO | ДА |
+| Send Payment — EdgeDetail | `onEdgeDetailSendPayment()` ([SimulatorAppRoot.vue#L1040](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1040)) | FROM + TO | ДА |
+| Send Payment — ActionBar | `onActionStartPaymentFlow()` ([SimulatorAppRoot.vue#L1144](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1144)) | нет | ДА (закрывает окно вместо step-back) |
+| New Trustline — ActionBar | `onActionStartTrustlineFlow()` ([SimulatorAppRoot.vue#L1152](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1152)) | нет | ДА (закрывает окно вместо step-back) |
+| 🔄 Run Clearing — ActionBar | `onActionStartClearingFlow()` ([SimulatorAppRoot.vue#L1161](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L1161)) | нет | НЕТ — нет step-back |
 
 ### Дефект B — FROM фильтрация (условный)
 
 Исторически: в `fromParticipants` computed при фильтрации по availability выбранный отправитель мог выпасть из списка, если у него нет исходящих TL с `available > 0`. Результат: FROM dropdown показывает предзаполненное значение, но участник отсутствует в списке вариантов — UX-рассогласование.
 
-Статус на 2026-03-02: **в текущем коде уже добавлена гарантия** включения `state.fromPid` в список вариантов (см. [ManualPaymentPanel.vue#L230](../../../../../../simulator-ui/v2/src/components/ManualPaymentPanel.vue#L230)). В этом документе это остаётся как AC/регрессия.
+Статус на 2026-03-02: **в текущем коде уже добавлена гарантия** включения `state.fromPid` в список вариантов (см. [ManualPaymentPanel.vue#L230](../../../../../../../simulator-ui/v2/src/components/ManualPaymentPanel.vue#L230)). В этом документе это остаётся как AC/регрессия.
 
 ---
 
@@ -91,7 +93,7 @@ return participantsSorted.value.filter(
 
 Проблема была в том, что если `state.fromPid` уже установлен (например, prefill), но у этого участника нет подходящих TL, он выпадал из отфильтрованного списка.
 
-Статус на 2026-03-02: **уже исправлено** — после фильтрации текущий `state.fromPid` гарантированно добавляется в список (см. [ManualPaymentPanel.vue#L255](../../../../../../simulator-ui/v2/src/components/ManualPaymentPanel.vue#L255)).
+Статус на 2026-03-02: **уже исправлено** — после фильтрации текущий `state.fromPid` гарантированно добавляется в список (см. [ManualPaymentPanel.vue#L255](../../../../../../../simulator-ui/v2/src/components/ManualPaymentPanel.vue#L255)).
 
 ---
 
@@ -298,7 +300,7 @@ fromParticipants computed:
 
 **Файл:** `simulator-ui/v2/src/components/SimulatorAppRoot.vue`
 
-В [`makeInteractPanelWindowData()`](../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L395) заменить текущую эвристику “prefilled == `state.fromPid` truthy” на “prefilled == `state.initiatedWithPrefilledFrom`”.
+В [`makeInteractPanelWindowData()`](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L395) заменить текущую эвристику “prefilled == `state.fromPid` truthy” на “prefilled == `state.initiatedWithPrefilledFrom`”.
 
 Также исправить ветку trustline `editing-trustline`/`confirm-trustline-create`, чтобы ESC делал `setTrustlineToPid(null)` и возвращал `true`, а не закрывал окно из-за `fromPid && toPid`.
 
@@ -306,7 +308,7 @@ fromParticipants computed:
 
 **Файл:** `simulator-ui/v2/src/components/ManualPaymentPanel.vue`
 
-Изменений не требуется: фикс уже реализован в текущем коде (см. [ManualPaymentPanel.vue#L255](../../../../../../simulator-ui/v2/src/components/ManualPaymentPanel.vue#L255)).
+Изменений не требуется: фикс уже реализован в текущем коде (см. [ManualPaymentPanel.vue#L255](../../../../../../../simulator-ui/v2/src/components/ManualPaymentPanel.vue#L255)).
 Рекомендуется оставить/добавить регресс-тест (см. ниже).
 
 ### 7.5 Тесты
@@ -358,3 +360,97 @@ fromParticipants computed:
 - WM onBack: `simulator-ui/v2/src/components/SimulatorAppRoot.vue`
 - Тесты (WM ESC / step-back): `simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts`
 - Тесты (fromParticipants regression): `simulator-ui/v2/src/components/ManualPaymentPanel.test.ts`
+
+---
+
+## 10. Результаты код-ревью: риски и технический долг (дополнено)
+
+### 10.1 Риск качества: дублирование инициализации flow state в FSM
+
+**Наблюдение:** в FSM присутствуют несколько «точек старта», которые выставляют/дублируют части state вручную. Это создаёт риск расхождений при добавлении новых полей состояния: одна из веток старта может забыть выставить/сбросить новое поле.
+
+**Где проявляется:** различается паттерн старта между «общим» сбросом и атомарными стартами:
+
+- общий сброс/инициализация: [`useInteractFSM.startNewFlow()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:115)
+- атомарные старты с FROM: [`useInteractFSM.startPaymentFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:130), [`useInteractFSM.startTrustlineFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:145)
+
+**Требование (фиксируем как контракт для предотвращения регрессий AC):**
+
+- Должен существовать **единый источник истины** для инициализации/сброса всех полей flow-state.
+- Любой новый старт flow (включая атомарные старты) обязан проходить через общий initializer (например, через вызов [`useInteractFSM.startNewFlow()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:115) или выделенную внутреннюю функцию `initFlowState(...)`, которую вызывают все публичные `start*` методы).
+- Добавление нового поля в state должно требовать изменения **в одном месте** и не должно ломать поведение ESC step-back и критерии AC.
+
+### 10.2 Риск корректности: нормализация/валидация `fromPid` в атомарных стартах
+
+**Наблюдение:** в атомарных стартах `fromPid` может приходить «сырым» (не `trim`/не валидирован). Потенциально возможен переход в `picking-...-to` с пустым FROM (например, строка из пробелов), что ломает логику отображения/step-back и может скрыто влиять на эвристики.
+
+**Где проявляется:** [`useInteractFSM.startPaymentFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:130), [`useInteractFSM.startTrustlineFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:145).
+
+**Ожидаемое поведение (guard):**
+
+- Перед использованием `fromPid` должен быть нормализован (`trim`).
+- Если после нормализации `fromPid` пустой или невалидный, атомарный старт **не должен** инициировать prefilled-сценарий.
+- Фиксируемый fallback (для однозначности и тестируемости):
+  - `startPaymentFlowWithFrom(fromPidRaw)` при пустом/невалидном `fromPidRaw` должен вести себя как `startPaymentFlow()` (старт без prefill, `initiatedWithPrefilledFrom = false`).
+  - `startTrustlineFlowWithFrom(fromPidRaw)` при пустом/невалидном `fromPidRaw` должен вести себя как `startTrustlineFlow()` (старт без prefill, `initiatedWithPrefilledFrom = false`).
+
+### 10.3 API/контракт: Option C hard dismiss должен быть описан явно
+
+**Наблюдение:** текущее поведение «закрытия» стало шире, чем подразумевает имя функции: закрывается инспектор + Interact и делается best-effort cancel. Это превращается в «неявное знание», которое легко сломать при рефакторинге.
+
+**Где проявляется:** [`SimulatorAppRoot.uiCloseTopmostInspectorWindow()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:167).
+
+**Требование (контракт закрытия, Option C hard dismiss):**
+
+- Действие close/hard dismiss должно быть задокументировано как **единая атомарная операция UI**: закрыть topmost inspector window, закрыть/свернуть Interact (если открыт) и выполнить best-effort отмену активного flow.
+- Операция должна быть идемпотентной и безопасной к повторному вызову (best-effort).
+- Если имя функции не отражает контракт, контракт должен быть явно записан в спеках, чтобы поведение не зависело от интерпретации названия.
+
+### 10.4 Архитектурный риск: глобальный ESC-dispatch потенциально не локален
+
+**Наблюдение:** ESC диспатчится глобально, поэтому при нескольких окнах/контейнерах обработчик может быть поглощён «не тем» слушателем. Это создаёт хрупкость в UX и тестах.
+
+**Где проявляется:** [`useWindowManager.handleEsc()`](simulator-ui/v2/src/composables/windowManager/useWindowManager.ts:428), [`SimulatorAppRoot.dispatchInteractEsc()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:703).
+
+**Известный риск / возможное улучшение:** локализовать ESC-dispatch по topmost окну/DOM-контейнеру (например, чтобы событие доставлялось только в активный window shell/overlay tree).
+
+### 10.5 Тесты: пробелы и устойчивость (добавлено в DoD/TODO)
+
+**Наблюдение:** часть регрессионных сценариев не зафиксирована тестами или покрыта недостаточно устойчиво (флейки из-за селекторов).
+
+**Необходимые тест-кейсы (добавить/усилить):**
+
+- Payment ActionBar: «второй ESC после step-back» (после возврата с `picking-payment-to` на `picking-payment-from` второй ESC должен закрыть окно корректно) — см. рядом с [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1359).
+- Trustline ActionBar: аналогично «второй ESC после step-back» — см. рядом с [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1515).
+- Clearing confirm: ESC закрывает окно без step-back, `cancel` вызывается ровно 1 раз — см. [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1270).
+- Latched-flag не пересчитывается после ручной смены FROM: зафиксировать сценарий, что `initiatedWithPrefilledFrom` остаётся latched и не вычисляется из `state.fromPid` при построении window-data — логика [`SimulatorAppRoot.makeInteractPanelWindowData()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:395) + сценарий теста рядом с [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:1311).
+
+**Рекомендация по селекторам (уменьшить флейки):**
+
+- В тестах предпочитать стабильные селекторы (`data-testid`, роли/лейблы), избегать хрупких цепочек DOM/текста.
+- Конкретный пример «хрупкого места», которое стоит укрепить: [`SimulatorAppRoot.interact.test.ts`](simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts:721).
+
+---
+
+## 11. Definition of Done (дополнено)
+
+- Все AC из раздела «Acceptance Criteria» продолжают выполняться и защищены тестами.
+- Инициализация/сброс flow-state в FSM имеет **единый источник истины**; атомарные старты не дублируют инициализацию вручную (см. [`useInteractFSM.startNewFlow()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:115)).
+- Атомарные старты с FROM выполняют нормализацию/валидацию `fromPid`; при пустом/невалидном значении применяется fallback на обычный старт без prefill (см. [`useInteractFSM.startPaymentFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:130), [`useInteractFSM.startTrustlineFlowWithFrom()`](simulator-ui/v2/src/composables/interact/useInteractFSM.ts:145)).
+- Контракт Option C hard dismiss (что именно закрывается и какие best-effort отмены происходят) явно задокументирован (см. [`SimulatorAppRoot.uiCloseTopmostInspectorWindow()`](simulator-ui/v2/src/components/SimulatorAppRoot.vue:167)).
+- Добавлены/усилены регрессионные тесты, перечисленные в разделе «Результаты код-ревью: тесты»; в частности: «2-й ESC после step-back» для payment/trustline ActionBar, clearing confirm (cancel ровно 1 раз), и тест на latched-семантику `initiatedWithPrefilledFrom`.
+- Селекторы в тестах укреплены (уменьшен риск флейков) согласно рекомендациям.
+
+---
+
+## 12. TODO
+
+- [x] FSM: унифицировать инициализацию flow-state — реализовано: добавлена внутренняя `_initFlowState()` как единственный источник истины; все `start*` функции теперь роутятся через неё (см. [useInteractFSM.ts](../../../../../../../simulator-ui/v2/src/composables/interact/useInteractFSM.ts)).
+- [x] Атомарные старты: нормализовать и валидировать `fromPid` — реализовано: `startPaymentFlowWithFrom` и `startTrustlineFlowWithFrom` теперь делают `trim()` и при пустом/невалидном значении fallback на обычный old без prefill (см. [useInteractFSM.ts](../../../../../../../simulator-ui/v2/src/composables/interact/useInteractFSM.ts)).
+- [x] Документировать контракт Option C hard dismiss — реализовано: контракт задокументирован в комментарии `uiCloseTopmostInspectorWindow()` как «AC-4 / Option C: outside-click is a hard dismiss» (см. [SimulatorAppRoot.vue](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue#L167)).
+- [ ] (Опционально) Локализовать ESC-dispatch по topmost окну/DOM-контейнеру, чтобы избежать cross-window consumption (см. [`useWindowManager.handleEsc()`](../../../../../../../simulator-ui/v2/src/composables/windowManager/useWindowManager.ts), [`SimulatorAppRoot.dispatchInteractEsc()`](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.vue)).
+- [x] Тест: payment ActionBar — «второй ESC после step-back» — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [x] Тест: trustline ActionBar — «второй ESC после step-back» — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [x] Тест: clearing confirm — ESC закрывает окно без step-back, `cancel` вызывается ровно 1 раз — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [x] Тест: latched-flag `initiatedWithPrefilledFrom` не пересчитывается после ручной смены FROM — добавлен (см. [SimulatorAppRoot.interact.test.ts](../../../../../../../simulator-ui/v2/src/components/SimulatorAppRoot.interact.test.ts)).
+- [ ] Тесты: усилить селекторы (перейти на `data-testid`/role-based, уменьшить флейки) и заменить хрупкие места — остаётся как ongoing tech debt.
