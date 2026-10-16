@@ -1,9 +1,37 @@
-import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { effectScope, nextTick, ref } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { __analyticsPanelVisibilityPolicy } from './useSimulatorApp'
+import { getActiveRun, listScenarios } from '../api/simulatorApi'
+import { __analyticsPanelVisibilityPolicy, useSimulatorApp } from './useSimulatorApp'
+
+// The transport of the booted app, mocked at the module boundary: nothing here is about requests.
+vi.mock('../api/simulatorApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/simulatorApi')>()
+  return {
+    ...actual,
+    listScenarios: vi.fn(),
+    getActiveRun: vi.fn(),
+    getRun: vi.fn(async () => { throw new Error('no run in this test') }),
+    getSnapshot: vi.fn(async () => { throw new Error('no snapshot in this test') }),
+    getScenarioPreview: vi.fn(async () => { throw new Error('no preview in this test') }),
+    ensureSession: vi.fn(async () => ({ actor_kind: 'anonymous', owner_id: 'o1' })),
+  }
+})
+vi.mock('../api/equivalentsApi', () => ({ fetchEquivalentPrecisions: vi.fn(async () => []) }))
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))))
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  vi.mocked(listScenarios).mockResolvedValue({ api_version: 'simulator-api/1', items: [] } as never)
+  vi.mocked(getActiveRun).mockResolvedValue({} as never)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  window.localStorage.clear()
+})
 
 /**
  * The fourth position of the registered `useSimulatorApp` blind spot (spec 008).
@@ -33,36 +61,51 @@ describe('the analytics surface gate (spec 007, T705)', () => {
   })
 
   /**
-   * And the app really computes it that way.
+   * And the app really computes it that way (F-041-9, converted in 043 S1 from a guard that sliced the source of
+   * `useSimulatorApp.ts` and looked for `isRealMode.value` and `isAnalyticsPanelOpen` in the text of the definition).
    *
-   * The policy alone is not enough: a correct rule nobody calls with the right arguments is the
-   * same regression. `vue-tsc` now refuses a call missing an argument, and this refuses a call fed
-   * from somewhere other than real mode and the panel toggle.
+   * Observed instead: the REAL composable is booted (its transport mocked at the module boundary, as in
+   * `useSimulatorApp.runMode.p042.test.ts`) in real mode and over fixtures, with the panel toggle on and off and
+   * flipped while it runs, and what it publishes - `analytics.isVisible` - is read. Deleting the real-mode half of
+   * the condition makes the fixtures rows true; feeding the policy anything but the live toggle breaks the flip rows.
    */
-  it('is fed with real mode and the panel toggle, at the definition and not merely at the seam', () => {
-    const here = dirname(fileURLToPath(import.meta.url))
-    const source = readFileSync(resolve(here, './useSimulatorApp.ts'), 'utf8')
+  it('is fed with real mode and the live panel toggle: the booted app publishes exactly the policy', async () => {
+    const rows: string[] = []
+    for (const mode of ['real', 'fixtures'] as const) {
+      for (const initiallyOpen of [false, true]) {
+        window.history.replaceState({}, '', `/?mode=${mode}`)
+        const open = ref(initiallyOpen)
+        const scope = effectScope()
+        const app = scope.run(() => useSimulatorApp({ isAnalyticsPanelOpen: () => open.value }))!
+        try {
+          await nextTick()
+          rows.push(`${mode} open=${open.value} -> ${app.analytics.isVisible.value}`)
+          open.value = !open.value
+          await nextTick()
+          rows.push(`${mode} open=${open.value} -> ${app.analytics.isVisible.value}`)
+        } finally {
+          scope.stop()
+        }
+      }
+    }
+    window.history.replaceState({}, '', '/')
+    expect(rows).toEqual([
+      'real open=false -> false', 'real open=true -> true',
+      'real open=true -> true', 'real open=false -> false',
+      'fixtures open=false -> false', 'fixtures open=true -> false',
+      'fixtures open=true -> false', 'fixtures open=false -> false',
+    ])
+  })
 
-    const start = source.indexOf('const isAnalyticsPanelVisible = ')
-    expect(start).toBeGreaterThan(-1)
-    const end = source.indexOf('\n  )', start)
-    expect(end).toBeGreaterThan(start)
-
-    // Comments removed: prose describing a dependency is not the dependency. Without this the
-    // guard can be satisfied by the paragraph that explains the rule.
-    const definition = source
-      .slice(start, end)
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .split('\n')
-      .filter((line) => !line.trim().startsWith('//'))
-      .join('\n')
-
-    // Counter-probe: the slice is the definition and nothing else.
-    expect(definition.startsWith('const isAnalyticsPanelVisible = ')).toBe(true)
-    expect(definition).not.toContain('useMetricsPolling')
-
-    expect(definition).toContain('__analyticsPanelVisibilityPolicy(')
-    expect(definition).toMatch(/\bisRealMode\.value\b/)
-    expect(definition).toMatch(/\bisAnalyticsPanelOpen\b/)
+  it('without the getter (no such surface) it is closed in real mode', async () => {
+    window.history.replaceState({}, '', '/?mode=real')
+    const scope = effectScope()
+    const app = scope.run(() => useSimulatorApp())!
+    try {
+      expect(app.analytics.isVisible.value).toBe(false)
+    } finally {
+      scope.stop()
+      window.history.replaceState({}, '', '/')
+    }
   })
 })

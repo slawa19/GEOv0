@@ -152,6 +152,8 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
 
   await page.goto('/?mode=real&e2eReal=1')
   await waitReady(page)
+  // 043 S1: the scenario selector lives behind "Подробнее".
+  await page.locator('[data-testid="details-toggle"]').click()
 
   const scenarioSelect = page.getByRole('combobox', { name: 'Scenario' })
   await expect(scenarioSelect).toBeVisible()

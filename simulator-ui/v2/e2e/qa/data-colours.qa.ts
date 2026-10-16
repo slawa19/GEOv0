@@ -22,7 +22,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { boot, loopCounters, ringSnapshot, screenNodes, waitLoopAsleep, type QaSnapshot } from './stand.js'
+import { boot, loopCounters, openDetails, ringSnapshot, screenNodes, waitLoopAsleep, type QaSnapshot } from './stand.js'
 
 const DATA_TOKENS = ['--ds-data-debtor', '--ds-data-creditor', '--ds-data-neutral', '--ds-data-frozen', '--ds-data-hub'] as const
 /** Every theme id the design system has TOKENS for: `library` and `shadcn` are frozen (out of the app, tokens kept). */
@@ -65,6 +65,7 @@ function rolesSnapshot(): QaSnapshot {
 const switcher = (page: Page) => page.getByRole('combobox', { name: 'UI theme' })
 
 async function switchTheme(page: Page, theme: string): Promise<void> {
+  await openDetails(page) // 043 S1: the theme switcher is behind "Подробнее"
   await switcher(page).selectOption(theme)
   await expect(page.locator('.root')).toHaveAttribute('data-theme', theme)
 }
@@ -123,6 +124,7 @@ test('039 B1: the five data tokens resolve to ONE value under every theme - swit
     const el = document.querySelector('.root')!
     return Object.fromEntries(names.map((n) => [n, getComputedStyle(el).getPropertyValue(n).trim()]))
   }, [...DATA_TOKENS])
+  await openDetails(page) // 043 S1: the theme switcher is behind "Подробнее"
   const offered = await switcher(page).locator('option').evaluateAll((els) => els.map((o) => (o as HTMLOptionElement).value))
   expect(offered.length, 'counter-check: the switcher offers themes to walk').toBeGreaterThan(1)
   expect(offered, 'the two themes that remain are offered, and only they (039 B3)').toEqual(['saas', 'hud'])
@@ -174,17 +176,30 @@ test('039 B1: the legend names what the scene contains, in the fixed order, each
   expect(by.hub!.bg, 'and is not a fill').toBe('rgba(0, 0, 0, 0)')
   expect(new Set([by.debtor!.bg, by.creditor!.bg, by.neutral!.bg, by.frozen!.bg]).size, 'four different fills').toBe(4)
 
-  // The legend is a row of the bottom bar, above its controls, and the published height of the bar includes it.
-  const geo = await page.evaluate(() => {
+  // The legend is in the main row of the bottom bar (043 S1: legend, total debt, Reset view); with "Подробнее" on, the
+  // row of controls lies above it, not over it; the published height of the bar includes the legend in both states.
+  const geometry = () => page.evaluate(() => {
     const bar = [...document.querySelectorAll<HTMLElement>('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
-    const l = document.querySelector<HTMLElement>('[data-testid="legend"]')!.getBoundingClientRect()
-    const controls = bar.querySelector<HTMLElement>('.hud-bar')!.getBoundingClientRect()
+    const legendEl = document.querySelector<HTMLElement>('[data-testid="legend"]')!
+    const l = legendEl.getBoundingClientRect()
+    const main = legendEl.closest<HTMLElement>('.bb-main-row')?.getBoundingClientRect() ?? null
+    const controls = bar.querySelector<HTMLElement>('[data-testid="bottom-details-row"]')?.getBoundingClientRect() ?? null
     const published = getComputedStyle(document.querySelector('.root')!).getPropertyValue('--ds-hud-bottom-stack-height').trim()
-    return { inside: bar.contains(document.querySelector('[data-testid="legend"]')), legendBottom: l.bottom, controlsTop: controls.top, barHeight: Math.round(bar.getBoundingClientRect().height), published }
+    return {
+      inside: bar.contains(legendEl), inMainRow: !!main && l.top >= main.top - 0.5 && l.bottom <= main.bottom + 0.5,
+      legendTop: l.top, controlsBottom: controls?.bottom ?? null, barHeight: Math.round(bar.getBoundingClientRect().height), published,
+    }
   })
+  let geo = await geometry()
   expect(geo.inside).toBe(true)
-  expect(geo.legendBottom, 'the legend is above the controls, not over them').toBeLessThanOrEqual(geo.controlsTop)
-  expect(geo.published, 'the bottom-bar measurer publishes the height WITH the legend row').toBe(`${geo.barHeight}px`)
+  expect(geo.inMainRow, 'the legend lies inside the main row').toBe(true)
+  expect(geo.controlsBottom, 'the first view has no row of controls').toBeNull()
+  await expect.poll(async () => (await geometry()).published, { message: 'the bottom-bar measurer publishes the height WITH the legend row' }).toBe(`${geo.barHeight}px`)
+  await openDetails(page)
+  await expect(page.locator('[data-testid="bottom-details-row"]')).toBeVisible()
+  await expect.poll(async () => { const g = await geometry(); return g.published === `${g.barHeight}px` }, { message: 'published again after "Подробнее"' }).toBe(true)
+  geo = await geometry()
+  expect(geo.controlsBottom!, 'the controls are above the legend, not over it').toBeLessThanOrEqual(geo.legendTop)
 
   // A scene of six even persons: two entries, and nothing the scene does not contain.
   await page.goto('about:blank')

@@ -6,7 +6,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { expectBeamOnRoute, pickRingRoute, probeFrame, rememberBaseline, watchFlight } from './oracle.js'
-import { RING, boot, frames, fxCounts, loopCounters, pushEvent, ringSnapshot, sampleCanvas, txUpdated } from './stand.js'
+import { RING, boot, frames, fxCounts, loopCounters, openDetails, pushEvent, ringSnapshot, sampleCanvas, txUpdated } from './stand.js'
 
 async function sparks(page: Page) {
   return page.evaluate(() =>
@@ -141,6 +141,7 @@ test('R3 - measurement at the cap: a 6-edge route, 200 ms an edge - frames paint
 // must hold there. The quality is chosen as a user chooses it, in the bottom bar.
 for (const quality of ['med', 'high'] as const) {
   test(`R3 - the five properties hold at quality "${quality}" too (a 2-edge payment)`, async ({ page }) => {
+    await openDetails(page) // 043 S1: Quality is behind "Подробнее"
     await page.getByRole('combobox', { name: 'Quality' }).selectOption(quality)
     await frames(page, 10)
     expect(await page.evaluate(() => document.querySelector<HTMLElement>('.root')?.dataset.quality)).toBe(quality)

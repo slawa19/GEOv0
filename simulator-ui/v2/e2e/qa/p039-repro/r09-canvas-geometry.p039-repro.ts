@@ -21,7 +21,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { RUN_ID, EQ, boot, ringSnapshot } from '../stand.js'
+import { RUN_ID, EQ, boot, openDetails, ringSnapshot } from '../stand.js'
 import { MATRIX, VIEWPORT_MAIN, type Viewport } from '../surfaceMatrix.js'
 
 type R = { name: string; x: number; y: number; w: number; h: number }
@@ -91,6 +91,7 @@ for (const vp of [VIEWPORT_MAIN, { width: 1440, height: 900 }] as Viewport[]) {
     await boot(page, { snapshot: ringSnapshot(), clock: false })
     const closed = await unobscured(page, vp)
     const rows = await rects(page, ['.ds-ov-top .ds-ov-top-stack > *', '.ds-ov-bottom:not(.sar-interact-history-overlay)', '.action-bar', '.graph-navigator'])
+    await openDetails(page) // 043 S1: the navigator is behind "Подробнее" ("closed" above is the first view without it)
     await page.locator('.graph-navigator summary').click()
     await expect(page.locator('#graph-navigator-node')).toBeVisible()
     const open = await unobscured(page, vp)

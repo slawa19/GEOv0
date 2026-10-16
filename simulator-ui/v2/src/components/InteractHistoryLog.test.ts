@@ -45,16 +45,14 @@ describe('InteractHistoryLog', () => {
     host.remove()
   })
 
-  it('keeps token-driven bottom-overlay styling and is hosted via the root bottom overlay shell', () => {
+  it('keeps token-driven bottom-overlay styling', () => {
     const sfc = readHere('./InteractHistoryLog.vue')
-    const root = readHere('./SimulatorAppRoot.vue')
 
     expect(sfc).toContain('font-size: var(--ds-typo-section-label-font-size);')
     expect(sfc).toContain('gap: var(--ds-ihl-list-gap);')
     expect(sfc).toContain('transition: opacity var(--ds-dur-slow);')
     expect(sfc).toContain('font-size: var(--ds-ihl-time-font-size);')
-
-    expect(root).toContain('class="ds-ov-bottom sar-interact-history-overlay"')
-    expect(root).toContain('<InteractHistoryLog :entries="interact.mode.history" :max-visible="8" />')
+    // How the root hosts it (the overlay shell, three lines) is observed in the root's DOM since 043 S1:
+    // SimulatorAppRoot.interact.test.ts, "043 S1: the history is three lines in the bottom overlay shell".
   })
 })

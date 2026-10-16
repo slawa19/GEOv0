@@ -28,7 +28,7 @@ import { isAbsolute, join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { boot, fixtureSnapshot100, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
+import { boot, fixtureSnapshot100, openDetails, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
 
 const DIR = process.env.P039_FRAMES_DIR ?? ''
 const PHASE = process.env.P039_FRAMES_PHASE ?? ''
@@ -142,6 +142,7 @@ for (const theme of THEMES) {
   test(`039 B1 frames [${theme}] - name labels (Labels: Neighbors, the hub selected)`, async ({ page }) => {
     const dir = outDir()
     await bootThemed(page, rolesSnapshot(), theme)
+    await openDetails(page) // 043 S1: Labels is behind "Подробнее"
     await page.getByRole('combobox', { name: 'Labels' }).selectOption('neighbors')
     const hub = (await screenNodes(page)).get('hub')!
     await page.mouse.click(hub.x, hub.y)
