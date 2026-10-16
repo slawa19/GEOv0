@@ -23,8 +23,14 @@ loopback discard port - so a test that reached for the network fails with that w
 
 The live path is exercised twice: through the guard with the real `post` (urllib reaches the guard and the run is
 UNVERIFIED with `NETWORK-BLOCKED` - the counter-check that the guard is not vacuous) and in process with `post`
-replaced (a successful answer, a transport failure carrying the key, an HTTP 429 that is not retried). No test
-opens a socket.
+replaced (a successful answer, a transport failure carrying the key, an HTTP 429 that is not retried). The
+socket walls are in-process: they hold for the script's interpreter, not for the git children it starts. The
+fixture's own git runs without system or global config and with an empty hooks directory.
+
+The `test_f*` cases are the counterexamples of the external review of `3dad3761` (Codex, 2026-10-16): a signature
+helper from repository config seeing the key (F1), a replacement ref swapping a frozen blob (F2), a gitlink
+expanded into another commit (F3), malformed markers (F4), model lookalikes (F5), a key with a CR/LF (F6), and an
+unbounded response read.
 
 WHAT THIS DOES NOT PROVE. That OpenRouter really answers in the shape the saved responses have, that the model id
 is served, or what a call costs: that is the first real call (040 `T4030`), recorded in the ledger.
@@ -50,11 +56,14 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "argon_review.py"
 KEY = "sk-or-TESTMARKER-123"
+PROMPT = "Review this. PROMPT-SENTINEL\nEnd with:\nVERDICT-<TAG>: SOUND | WEAK | BROKEN\n"
 MARKED = "Findings: none.\nVERDICT-040-A: SOUND\nCLASS-1-COUNT: 0\nREVIEW-COMPLETE: YES\n"
 
-#: Runs the script's `main` with the network closed. Each of the three socket walls is enough on its own for
-#: urllib; all raise an `OSError` subclass, so the script meets them as it would meet a refused connection.
-#: `API_URL` is moved to the loopback discard port as a fourth, independent wall.
+#: Runs the script's `main` with the network closed IN THAT PYTHON PROCESS. Each of the three socket walls is
+#: enough on its own for urllib; all raise an `OSError` subclass, so the script meets them as it would meet a
+#: refused connection. `API_URL` is moved to the loopback discard port as a fourth, independent wall. This is an
+#: in-process guard, not a process-tree guarantee: the git children the script starts are outside it (they only
+#: read local objects, under the isolated environment `test_f1_every_git_child_...` pins).
 _GUARD = """
 import importlib.util, socket, sys
 class Blocked(ConnectionRefusedError):
@@ -72,11 +81,18 @@ sys.exit(module.main(sys.argv[2:]))
 """
 
 
+def _git_env() -> dict[str, str]:
+    """The fixture's own git runs without system or global config (no hooks, signing or helpers from there)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "OPENROUTER_API_KEY"}
+    return {**env, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+
+
 def _git(repo: Path, *args: str) -> str:
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-           "GIT_COMMITTER_EMAIL": "t@t"}
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-                          env=env).stdout.strip()
+    no_hooks = repo.parent / "no-hooks"
+    no_hooks.mkdir(exist_ok=True)
+    return subprocess.run(["git", "-C", str(repo), "-c", f"core.hooksPath={no_hooks.as_posix()}", *args], check=True,
+                          capture_output=True, text=True, env=_git_env()).stdout.strip()
 
 
 def _commit(repo: Path, files: dict[str, str | bytes], message: str) -> str:
@@ -101,7 +117,7 @@ def repo(tmp_path: Path) -> dict:
     base = _commit(root, {"app/a.py": "print('base')\n"}, "base")
     head = _commit(root, {"app/a.py": "print('COMMITTED-HEAD')\n", "app/b.py": "B = 1\n"}, "head change")
     prompt = tmp_path / "prompt.txt"
-    prompt.write_text("Review this. PROMPT-SENTINEL\n", encoding="utf-8")
+    prompt.write_text(PROMPT, encoding="utf-8")
     return {"root": root, "base": base, "head": head, "prompt": prompt, "tmp": tmp_path}
 
 
@@ -137,11 +153,9 @@ def _meta(out: Path) -> dict:
 # --- refusals before anything is sent ----------------------------------------------------------------------------
 
 def test_live_mode_without_a_key_is_refused_before_a_run_directory_exists(repo: dict) -> None:
-    # The real entry point, not the guard: the refusal comes before any network code.
-    env = {k: v for k, v in os.environ.items() if k != "OPENROUTER_API_KEY"}
+    # Through the guard too: a regression that moved the key check after sending would meet it, not the API.
     out = repo["tmp"] / "out"
-    result = subprocess.run([sys.executable, "-I", str(SCRIPT), *_args(repo, out)], cwd=repo["root"], env=env,
-                            capture_output=True, text=True, timeout=120)
+    result = _run(repo)
     assert result.returncode == 3, result.stderr
     assert "OPENROUTER_API_KEY" in result.stderr
     assert not out.exists()
@@ -223,13 +237,13 @@ def test_dry_run_writes_the_payload_and_makes_no_call_without_a_key(repo: dict) 
     body = json.loads((out / "payload.json").read_text(encoding="utf-8"))
     assert body["model"] == "google/gemini-4-argon" and body["temperature"] == 0 and body["usage"] == {"include": True}
     text = body["messages"][0]["content"]
-    assert text.startswith("Review this. PROMPT-SENTINEL")
+    assert text.startswith(PROMPT.rstrip("\n"))
     assert "+print('COMMITTED-HEAD')" in text and "-print('base')" in text  # the diff
     assert "### app/b.py" in text and "head change" in text  # a full file, the commit list
     meta = _meta(out)
     assert meta["status"] == "DRY-RUN" and meta["payload_chars"] == len(text)
     assert meta["base"] == repo["base"] and meta["head"] == repo["head"]
-    assert (out / "prompt.txt").read_text(encoding="utf-8") == "Review this. PROMPT-SENTINEL\n"
+    assert (out / "prompt.txt").read_text(encoding="utf-8") == PROMPT
 
 
 def test_the_payload_comes_from_commits_not_from_the_working_tree(repo: dict) -> None:
@@ -424,3 +438,159 @@ def test_a_redirect_is_not_followed_and_the_key_goes_nowhere_else(monkeypatch: p
     status, raw = module.post({"model": "m"}, KEY, 5)
     assert (status, raw) == (302, "moved")
     assert seen == [("https://127.0.0.1:9/api/v1/chat/completions", f"Bearer {KEY}")]
+
+
+# --- fix-delta of the external review of 3dad3761 (Codex, 2026-10-16): counterexamples ---------------------------
+
+def _git_in(repo: Path, text: str, *args: str) -> str:
+    """Bytes on stdin: a text-mode pipe would turn LF into CRLF on Windows and corrupt object text."""
+    return subprocess.run(["git", "-C", str(repo), *args], input=text.encode("utf-8"), check=True,
+                          capture_output=True, env=_git_env()).stdout.decode("utf-8").strip()
+
+
+def _hash_blob(repo: Path, text: str) -> str:
+    return _git_in(repo, text, "hash-object", "-w", "--stdin")
+
+
+def test_f1_repository_config_cannot_run_a_signature_helper_that_sees_the_key(repo: dict) -> None:
+    """`log.showSignature` + a signed commit made `git log` run `gpg.program` with the key in its environment."""
+    canary = repo["tmp"] / "helper-ran.txt"
+    helper = repo["tmp"] / "fake-gpg"
+    helper.write_text(f'#!/bin/sh\nprintf "%s" "${{OPENROUTER_API_KEY:-NO-KEY}}" > "{canary.as_posix()}"\nexit 1\n',
+                      encoding="utf-8", newline="\n")
+    helper.chmod(0o755)
+    root = repo["root"]
+    _git(root, "config", "gpg.program", helper.as_posix())
+    _git(root, "config", "log.showSignature", "true")
+    unsigned = _git(root, "cat-file", "commit", repo["head"])
+    header, message = unsigned.split("\n\n", 1)
+    signature = "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEE\n -----END PGP SIGNATURE-----"
+    signed = _git_in(root, f"{header}\n{signature}\n\n{message}\n", "hash-object", "-t", "commit", "-w", "--stdin")
+    result = _run({**repo, "head": signed}, "--dry-run", key=KEY)
+    assert result.returncode == 0, result.stderr
+    assert not canary.exists(), f"a helper ran and saw {canary.read_text(encoding='utf-8')!r}"
+
+
+def test_f1_every_git_child_runs_without_the_key_and_with_the_isolated_environment(
+    repo: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module, envs = _load_module(), []
+    real_run = subprocess.run
+
+    def recording_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        envs.append((args, kwargs.get("env")))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(module.subprocess, "run", recording_run)
+    monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
+    monkeypatch.chdir(repo["root"])
+    assert module.main([*_args(repo, repo["tmp"] / "out"), "--dry-run"]) == 0
+    assert envs and all(args[0] == "git" for args, _ in envs)
+    for args, env in envs:
+        assert env is not None and "OPENROUTER_API_KEY" not in env, args
+        assert (env["GIT_NO_REPLACE_OBJECTS"], env["GIT_CONFIG_NOSYSTEM"]) == ("1", "1"), args
+        assert env["GIT_CONFIG_GLOBAL"] == os.devnull and env["GIT_PAGER"] == "cat", args
+        assert "log" not in args and "show" not in args, args  # plumbing only
+
+
+def test_f2_a_replacement_ref_cannot_swap_the_content_of_a_frozen_blob(repo: dict) -> None:
+    root = repo["root"]
+    original = _git(root, "rev-parse", f"{repo['head']}:app/b.py")
+    _git(root, "replace", original, _hash_blob(root, "REPLACED-SECRET = 1\n"))
+    result = _run(repo, "--dry-run")
+    assert result.returncode == 0, result.stderr
+    payload = (repo["tmp"] / "out" / "payload.json").read_text(encoding="utf-8")
+    assert "REPLACED-SECRET" not in payload
+    assert "B = 1" in payload
+
+
+@pytest.mark.parametrize("paths", [["vendor/lib"], []], ids=["paths-the-gitlink", "whole-range"])
+def test_f3_a_gitlink_is_refused_and_never_expanded(repo: dict, paths: list[str]) -> None:
+    root = repo["root"]
+    blob = _hash_blob(root, "GITLINK-TARGET-SECRET\n")
+    tree = _git_in(root, f"100644 blob {blob}\thidden.txt\n", "mktree")
+    target = _git(root, "commit-tree", tree, "-m", "outside the range")
+    _git(root, "update-index", "--add", "--cacheinfo", f"160000,{target},vendor/lib")
+    _git(root, "commit", "-q", "-m", "gitlink")
+    head = _git(root, "rev-parse", "HEAD")
+    result = _run({**repo, "head": head}, "--dry-run", *(["--paths", *paths] if paths else []))
+    assert result.returncode == 3, (result.returncode, result.stderr)
+    assert "gitlink" in result.stderr and "vendor/lib" in result.stderr
+    assert not (repo["tmp"] / "out").exists()
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["VERDICT-040-A: \nCLASS-1-COUNT: 0\nREVIEW-COMPLETE: YES\n",
+     "VERDICT-040-A: SOUND\nCLASS-1-COUNT: 0unknown\nREVIEW-COMPLETE: YES\n",
+     "VERDICT-040-A: SOUND\nCLASS-1-COUNT: 0\nREVIEW-COMPLETE: YES—but only the first half was reviewed\n",
+     "VERDICT-040-A: GREAT\nCLASS-1-COUNT: 0\nREVIEW-COMPLETE: YES\n",
+     "VERDICT-040-A: SOUND but see below\nCLASS-1-COUNT: 0\nREVIEW-COMPLETE: YES\n",
+     "VERDICT-040-A: SOUND\nVERDICT-040-B: \nCLASS-1-COUNT: 0\nREVIEW-COMPLETE: YES\n"],
+    ids=["empty-verdict", "count-not-a-number", "complete-qualified", "verdict-not-declared", "verdict-with-tail",
+         "second-verdict-empty"],
+)
+def test_f4_a_malformed_marker_is_unverified(repo: dict, content: str) -> None:
+    result = _run(repo, "--verify-response", str(_response(repo["tmp"], content=content)))
+    assert result.returncode == 2, (result.returncode, result.stderr)
+    assert "marker" in _meta(repo["tmp"] / "out")["reason"]
+
+
+def test_f4_a_prompt_that_declares_no_verdict_values_is_refused(repo: dict) -> None:
+    repo["prompt"].write_text("Review this, no markers declared.\n", encoding="utf-8")
+    result = _run(repo, "--dry-run")
+    assert result.returncode == 3, (result.returncode, result.stderr)
+    assert "declares no verdict values" in result.stderr
+
+
+@pytest.mark.parametrize("model", ["google/gemini-4-argon-evil", "google/gemini-4-argon-", "google/gemini-4-argon-20261014"])
+def test_f5_a_model_outside_the_allowlist_is_unverified(repo: dict, model: str) -> None:
+    result = _run(repo, "--verify-response", str(_response(repo["tmp"], model=model)))
+    assert result.returncode == 2, (model, result.returncode, result.stderr)
+    assert "is not the requested" in _meta(repo["tmp"] / "out")["reason"]
+
+
+def test_f5_the_requested_id_itself_is_accepted(repo: dict) -> None:
+    result = _run(repo, "--verify-response", str(_response(repo["tmp"], model="google/gemini-4-argon")))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("tail", ["\n", "\r"], ids=["newline", "carriage-return"])
+def test_f6_a_key_that_is_not_header_safe_is_refused_without_echoing_it(repo: dict, tail: str) -> None:
+    result = _run(repo, key=KEY + tail)
+    assert result.returncode == 3, (result.returncode, result.stderr[-400:].replace(KEY, "<KEY>"))
+    assert KEY not in result.stdout + result.stderr
+    assert "header-safe" in result.stderr
+    assert not (repo["tmp"] / "out").exists()
+
+
+def test_a_response_over_the_read_cap_is_unverified(repo: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+
+    def blocked(*args: object, **kwargs: object) -> None:
+        raise ConnectionRefusedError("NETWORK-BLOCKED by the 040 test guard")
+
+    for name in ("getaddrinfo", "create_connection"):
+        monkeypatch.setattr(socket, name, blocked)
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(module, "MAX_RESPONSE_BYTES", 100)
+    monkeypatch.setattr(module, "API_URL", "https://127.0.0.1:9/api/v1/chat/completions")
+
+    class AnswersBig(urllib.request.BaseHandler):
+        handler_order = 100
+
+        def https_open(self, request: urllib.request.Request) -> urllib.response.addinfourl:
+            body = _response(repo["tmp"]).read_bytes() + b" " * 1000
+            response = urllib.response.addinfourl(io.BytesIO(body), http.client.HTTPMessage(), request.full_url,
+                                                  code=200)
+            response.msg = "OK"
+            return response
+
+    real_build_opener = urllib.request.build_opener
+    monkeypatch.setattr(module.urllib.request, "build_opener",
+                        lambda *handlers: real_build_opener(*handlers, AnswersBig))
+    monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
+    monkeypatch.chdir(repo["root"])
+    out = repo["tmp"] / "out"
+    assert module.main(_args(repo, out)) == 2
+    assert "MAX_RESPONSE_BYTES" in (out / "response.json").read_text(encoding="utf-8")

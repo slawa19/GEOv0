@@ -201,8 +201,14 @@ _HERE = Path(__file__).resolve().parent
 #:
 #: 2026-10-16, 040 slice A, adversarial pass: portable 490 -> 491. One case added to the same module: a 3xx from the API is
 #: not followed, so the `Authorization` header never reaches the redirect target (urllib's default would carry it there).
+#:
+#: 2026-10-16, 040 slice A, fix-delta of the external review of `3dad3761` (Codex): portable 491 -> 510. Nineteen cases added to
+#: the same module, each a counterexample that was red on `3dad3761`: a signature helper named by repository config ran with the
+#: key (1) and every git child's environment (1), a replacement ref swapping a frozen blob (1), a gitlink expanded x2, malformed
+#: markers x6 and a prompt declaring no verdict values (1), model lookalikes x3 and the exact requested id (1), a key with CR/LF
+#: x2, and a response over the read cap (1).
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 491,
+    "portable": 510,
     "powershell": 235,
 }
 
