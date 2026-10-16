@@ -86,8 +86,11 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   `direction.qa.ts`: the shipped marker is distinguishable as an arrowhead at application zoom 0.6 on the 100-node
  *   scene and on a line with no debt, in both themes (the criterion of `directionProbe.ts`, the size derived by the
  *   debug sweep `p039-repro/marker-size.p039-repro.ts`). In the GATE: it holds the revised decision 4. About 25 s.
+ * - 2026-10-16 (the same fix-delta): gate 89 -> 90, full 212 -> 213. One more test of `direction.qa.ts`: a hub as the
+ *   debtor - along the axis the marker's colour runs unbroken through the band of the hub's ring (the ring used to be
+ *   painted over the marker's neck). Real clock, about 5 s.
  */
-export const EXPECTED = { gate: 89, full: 212 }
+export const EXPECTED = { gate: 90, full: 213 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

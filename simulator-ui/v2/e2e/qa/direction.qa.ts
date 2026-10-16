@@ -306,3 +306,48 @@ test('039 B2: the shipped marker is DISTINGUISHABLE as an arrowhead at applicati
   console.log('[039 B2 legible at 0.6]', JSON.stringify({ arrow: SHIPPED_ARROW, rows }))
   test.info().annotations.push({ type: '039-B2-legible', description: JSON.stringify({ arrow: SHIPPED_ARROW, rows }) })
 })
+
+test("039 B2: a HUB as the debtor - its ring does not cut the marker: where the ring crosses the axis, the pixel is the marker's colour, not the ring's", async ({ page }) => {
+  // External review 2026-10-16, finding 1: the ring of a hub is a 1.4 px stroke centred 3.5 px outside the outline;
+  // the marker runs from 2 px outside it to one length farther. The ring used to be painted over the marker's neck.
+  // MEASURED 2026-10-16 on the axis at the centre line of the ring: with the marker painted last the pixel is the
+  // marker's colour (6 colour units off it); with the old order (markers before the nodes - the mutant of this test)
+  // it is the ring's (2 units off the ring, 208 off the marker). Elsewhere along the narrow neck the pixels are blends
+  // either way at DPR 1 (the app keeps its canvas at DPR 1 on quality low), so they are logged, not judged.
+  const s = ringSnapshot()
+  const proto = s.links[0]!
+  const hub = { ...s.nodes.find((n) => n.id === 'b')!, id: 'hub', name: 'Hub', type: 'hub' }
+  const snapshot: QaSnapshot = { ...s, nodes: [s.nodes.find((n) => n.id === 'a')!, hub], links: [{ ...proto, source: 'a', target: 'hub', used: '80.00', viz_alpha_key: 'hi' }] }
+  await boot(page, { snapshot, clock: false })
+  await waitLoopAsleep(page)
+  const marker = (await legendArrow(page)).rgb
+  const ringHex = await page.evaluate(() => getComputedStyle(document.querySelector('.root')!).getPropertyValue('--ds-data-hub').trim())
+  const ring = [1, 3, 5].map((i) => parseInt(ringHex.slice(i, i + 2), 16))
+  const n = await screenNodes(page)
+  const RING_CENTRE_PX = 3.5
+  const along = await page.evaluate(({ at, to, r0, from, until }) => {
+    const c = document.querySelector<HTMLCanvasElement>('canvas.canvas:not(.canvas-fx)')!
+    const k = c.width / Math.max(1, c.clientWidth)
+    const box = c.getBoundingClientRect()
+    const img = c.getContext('2d')!.getImageData(0, 0, c.width, c.height)
+    const l = Math.hypot(to.x - at.x, to.y - at.y)
+    const u = { x: (to.x - at.x) / l, y: (to.y - at.y) / l }
+    const out: Array<{ d: number; rgb: number[] }> = []
+    for (let d = from; d <= until; d += 0.5) {
+      const x = Math.round((at.x + u.x * (r0 + d) - box.x) * k)
+      const y = Math.round((at.y + u.y * (r0 + d) - box.y) * k)
+      const i = (y * c.width + x) * 4
+      out.push({ d, rgb: [img.data[i]!, img.data[i + 1]!, img.data[i + 2]!] })
+    }
+    return out
+  }, { at: n.get('hub')!, to: n.get('a')!, r0: R, from: SHIPPED_ARROW.tipGapPx + 0.5, until: SHIPPED_ARROW.tipGapPx + SHIPPED_ARROW.lengthPx - 1 })
+  const diff = (v: number[], w: number[]) => Math.abs(v[0]! - w[0]!) + Math.abs(v[1]! - w[1]!) + Math.abs(v[2]! - w[2]!)
+  const row = { marker, ring, along: along.map((p) => [p.d, diff(p.rgb, marker), diff(p.rgb, ring)]) }
+  console.log('[039 B2 hub debtor]', JSON.stringify(row))
+  test.info().annotations.push({ type: '039-B2-hub-debtor', description: JSON.stringify(row) })
+  expect(diff(marker, ring), 'counter-check: the marker and the ring are told apart by colour').toBeGreaterThan(100)
+  const atRing = along.find((p) => p.d === RING_CENTRE_PX)
+  expect(atRing, 'counter-check: the centre line of the ring lies inside the marker, and is sampled').toBeTruthy()
+  expect(diff(atRing!.rgb, marker), `at the centre line of the hub's ring, on the axis: the marker's colour (rgb ${atRing!.rgb.join(',')})`).toBeLessThanOrEqual(24)
+  expect(diff(atRing!.rgb, ring), "and not the ring's").toBeGreaterThan(100)
+})

@@ -18,10 +18,11 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 
-import { compareWithModel, lastPass, markerSeen, modelOf, probeEnd, recordMarkers, type Marker } from '../directionProbe.js'
+import { compareWithModel, lastPass, markerSeen, modelOf, probeEnd, recordMarkers, SHIPPED_ARROW, type Marker } from '../directionProbe.js'
 import { boot, camera, frames, pushEvent, ringSnapshot, screenNodes, waitLoopAsleep, type QaSnapshot } from '../stand.js'
 
-const LINE = '#64748b'
+/** The colour of a marker (`--ds-data-direction`, since 2026-10-16; before that the line colour #64748b). */
+const LINE = '#b4bfcf'
 type Line = { source: string; target: string }
 
 /** a -> b, c <-> d, e -> f: every node has one neighbour. */
@@ -134,7 +135,7 @@ test('039 B2 paths - topology events, refresh, selection, clearing highlight, dr
   await settle(page)
   await check(page, s, lines, 'after the drop')
 
-  // Zoom in with the wheel: every marker still at its target, 5 px long and 4 px wide on screen.
+  // Zoom in with the wheel: every marker still at its target, of the shipped size on screen.
   const zoom0 = (await camera(page)).zoom
   await page.mouse.move(640, 400)
   await page.mouse.wheel(0, -400)
@@ -148,7 +149,7 @@ test('039 B2 paths - topology events, refresh, selection, clearing highlight, dr
     return { length: Math.hypot(tip[0]! - mid[0]!, tip[1]! - mid[1]!) * zoom, width: Math.hypot(l[0]! - r[0]!, l[1]! - r[1]!) * zoom }
   })
   note('size on screen at the new zoom', { zoom, length: size.map((x) => Math.round(x.length * 1e4) / 1e4), width: size.map((x) => Math.round(x.width * 1e4) / 1e4) })
-  for (const x of size) { expect(x.length).toBeCloseTo(5, 4); expect(x.width).toBeCloseTo(4, 4) }
+  for (const x of size) { expect(x.length).toBeCloseTo(SHIPPED_ARROW.lengthPx, 4); expect(x.width).toBeCloseTo(SHIPPED_ARROW.widthPx, 4) }
 
   // The scene fetched again in full (an empty topology event asks for a refresh): the mock answers with the ORIGINAL snapshot.
   await pushEvent(page, { type: 'topology.changed', payload: { added_nodes: [], removed_nodes: [], added_edges: [], removed_edges: [] } })
@@ -175,7 +176,7 @@ test.describe('device pixel ratio 2', () => {
     expect(await page.evaluate(() => window.devicePixelRatio)).toBe(2)
     await check(page, s, s.links.map((l) => ({ source: l.source, target: l.target })), 'DPR 2')
     const n = await screenNodes(page)
-    const solid: [number, number, number] = [100, 116, 139]
+    const solid: [number, number, number] = [180, 191, 207]
     const debtor = await probeEnd(page, n.get('b')!, n.get('a')!, 12, null, solid)
     const creditor = await probeEnd(page, n.get('a')!, n.get('b')!, 12, null, solid)
     note('DPR 2 pixels', { debtor, creditor })
