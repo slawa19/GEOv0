@@ -10,11 +10,14 @@ HEAD (`git show <HEAD>:<path>`). The working tree is never read, so uncommitted 
 cannot reach the reviewer. Binary and non-UTF-8 files are named in `meta.json`.
 
 WHAT IT REFUSES (exit 3, nothing sent): no `OPENROUTER_API_KEY` (live mode), a SHA that
-is not a commit, a touched path that looks like a secret (`SECRET_PATTERNS`), a payload
-that contains the key, a payload over `MAX_PAYLOAD_CHARS`. Nothing is ever truncated: a
-reviewer that silently saw half the diff is a false green.
+is not a commit, an empty range (no diff, also after `--paths`), a touched path that looks
+like a secret (`SECRET_PATTERNS`, except the versioned templates `SECRET_EXCEPTIONS`), a
+payload that contains the key, a payload over `MAX_PAYLOAD_CHARS`, an `--out` directory
+that is not empty (a stale `final.md` would read as this run's answer). Nothing is ever
+truncated: a reviewer that silently saw half the diff is a false green.
 
-WHAT COUNTS AS A REVIEW (exit 0): HTTP 200, `finish_reason == "stop"`, non-empty content
+WHAT COUNTS AS A REVIEW (exit 0): HTTP 200, a response model that is the requested id or
+its dated canonical form (`<id>-<suffix>`), `finish_reason == "stop"`, non-empty content
 and every regex of `MARKERS` on a line of its own. Anything else is UNVERIFIED (exit 2),
 never "no findings".
 
@@ -50,9 +53,14 @@ API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MAX_PAYLOAD_CHARS = 1_500_000
 DEFAULT_TIMEOUT_SECONDS = 900
 #: Matched case-insensitively against every component of every touched path, including
-#: deleted ones and both sides of a rename. Tracked `.env.example` files match too:
-#: exclude them with `--paths` when a range touches them.
+#: deleted ones and both sides of a rename. Wider than the spec's `secrets*` on purpose
+#: (`*secret*` also names `client_secret.json`).
 SECRET_PATTERNS = (".env*", "*.pem", "*.key", "*secret*")
+#: The one exception, for the LAST component only: the versioned templates that
+#: `.gitignore` itself lets in (`!.env*.example`) - `.env.example`,
+#: `admin-ui/.env.local.example`, `simulator-ui/v2/.env.example`. A real `.env` or
+#: `.env.local`, and an `.example` under a secret-looking directory, are still refused.
+SECRET_EXCEPTIONS = (".env*.example",)
 MARKERS = (r"^VERDICT-[A-Z0-9-]+: ", r"^CLASS-1-COUNT: \d+", r"^REVIEW-COMPLETE: YES")
 EXIT_OK, EXIT_UNVERIFIED, EXIT_REFUSED = 0, 2, 3
 
@@ -103,16 +111,24 @@ def resolve_commit(sha: str) -> str:
 
 
 def is_secret_path(path: str) -> bool:
-    parts = path.lower().split("/")
-    return any(fnmatch.fnmatchcase(p, pat) for p in parts for pat in SECRET_PATTERNS)
+    *dirs, name = path.lower().split("/")
+
+    def matches(part: str, patterns: tuple[str, ...]) -> bool:
+        return any(fnmatch.fnmatchcase(part, pat) for pat in patterns)
+
+    if any(matches(part, SECRET_PATTERNS) for part in dirs):
+        return True
+    return matches(name, SECRET_PATTERNS) and not matches(name, SECRET_EXCEPTIONS)
 
 
 def build_payload(base: str, head: str, prompt: str, paths: list[str]) -> tuple[str, dict]:
     """The text sent to the reviewer and what the meta records. Committed objects only."""
     spec = ["--", *paths] if paths else []
+    # No external diff driver, no textconv, no colour: the text is git's own, of blobs only.
+    plain = ("--no-ext-diff", "--no-textconv", "--no-color")
 
     def changed(*options: str) -> list[str]:
-        out = git("diff", "-z", "--no-renames", *options, base, head, *spec)
+        out = git("diff", *plain, "-z", "--no-renames", *options, base, head, *spec)
         return [name for name in out.split("\0") if name]
 
     secrets = [p for p in changed("--name-only") if is_secret_path(p)]
@@ -128,7 +144,9 @@ def build_payload(base: str, head: str, prompt: str, paths: list[str]) -> tuple[
         except UnicodeDecodeError:
             skipped.append(path)
     commits = git("log", "--format=%H %s", f"{base}..{head}")
-    diff = git("diff", "--find-renames", f"{base}..{head}", *spec)
+    diff = git("diff", *plain, "--find-renames", f"{base}..{head}", *spec)
+    if not diff.strip():
+        raise Refused(f"the range {base[:8]}..{head[:8]} has no diff (check --base, --head, --paths)")
     parts = [
         prompt.rstrip("\n"),
         f"\n\n## Commits {base}..{head}\n\n{commits}",
@@ -158,7 +176,7 @@ def post(body: dict, key: str, timeout: float) -> tuple[int, str]:
         return error.code, error.read().decode("utf-8", "replace")
 
 
-def verify(status: int, raw: str) -> tuple[dict, str | None, str]:
+def verify(status: int, raw: str, requested: str) -> tuple[dict, str | None, str]:
     """(fields for the meta, the reason it is UNVERIFIED or None, the final text)."""
     try:
         data = json.loads(raw)
@@ -190,6 +208,9 @@ def verify(status: int, raw: str) -> tuple[dict, str | None, str]:
         return fields, f"HTTP {status}", final
     if not data:
         return fields, "response is not a JSON object", final
+    model = fields["response_model"]
+    if not isinstance(model, str) or not (model == requested or model.startswith(f"{requested}-")):
+        return fields, f"response model {model!r} is not the requested {requested!r}", final
     if fields["finish_reason"] != "stop":
         return fields, f"finish_reason is {fields['finish_reason']!r}, not 'stop'", final
     if not final.strip():
@@ -236,14 +257,16 @@ def main(argv: list[str]) -> int:
                 " narrow the range or pass --paths (nothing is truncated)"
             )
         top = Path(git("rev-parse", "--show-toplevel").strip())
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out = args.out or top / ".local-run" / "argon-review" / f"{stamp}-{base[:7]}-{head[:7]}"
+        if out.exists() and (not out.is_dir() or any(out.iterdir())):
+            raise Refused(f"--out {out} exists and is not an empty directory; one run, one directory")
     except (Refused, OSError, UnicodeDecodeError) as error:
         message = str(error).replace(key, "<redacted>") if key else str(error)
         print(f"REFUSED: {message}", file=sys.stderr)
         return EXIT_REFUSED
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    default_out = top / ".local-run" / "argon-review" / f"{stamp}-{base[:7]}-{head[:7]}"
-    run = Run(args.out or default_out, key)
+    run = Run(out, key)
     mode = "live" if live else ("dry-run" if args.dry_run else "verify-response")
     body = {
         "model": args.model,
@@ -282,7 +305,7 @@ def main(argv: list[str]) -> int:
         status, raw = 200, saved
     meta["wall_seconds"] = round(time.monotonic() - started, 1)
     run.write("response.json", raw)
-    fields, reason, final = verify(status, raw)
+    fields, reason, final = verify(status, raw, args.model)
     run.write("final.md", final)
     meta.update(fields, status="UNVERIFIED" if reason else "VERIFIED", reason=reason)
     meta["exit_status"] = EXIT_UNVERIFIED if reason else EXIT_OK

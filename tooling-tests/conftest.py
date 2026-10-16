@@ -192,8 +192,14 @@ _HERE = Path(__file__).resolve().parent
 #: secret-looking path x4, the key inside the payload), what is sent (dry run, committed objects only, a binary named) (3), a saved
 #: response verified with its cost or `unknown` (2), a missing marker x3 and an incomplete response x3 unverified, the key in no
 #: file and no output x2, and the live path in process with `post` replaced (2).
+#:
+#: 2026-10-16, 040 slice A, review of the stopped agent's `bdd99526` before any gate ran: portable 480 -> 490. Ten cases
+#: added to the same module: an empty range x2 (the same SHA; `--paths` matching nothing), an `--out` holding a previous run,
+#: the versioned `.env*.example` templates pass while a real `.env`/`.env.local` is still refused (1), a response from another,
+#: a lookalike or no model x3, a response that is not JSON (1), the network guard met by a real live call (1), an HTTP 429
+#: that is not retried (1). Every subprocess case now runs through a guard that closes the sockets.
 EXPECTED_CASES: dict[str, int] = {
-    "portable": 480,
+    "portable": 490,
     "powershell": 235,
 }
 
