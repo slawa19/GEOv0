@@ -1,6 +1,6 @@
 /**
- * Programme 037, `T3701` - reproducers that need a browser: the PATH (number of user actions), the page reload on
- * entry (a known DEBT, characterised below - not a met budget) and the 390x844 LAYOUT of the manual payment flow.
+ * Programme 037, `T3701` - reproducers that need a browser: the PATH (number of user actions), the entry into the flow
+ * (zero document navigations since 043 S2; until then a known debt, 037-3) and the 390x844 LAYOUT of the manual payment flow.
  *
  * Backend is mocked exactly like `manual-operations-interact.spec.ts` (E-2): `page.route`, no real server. The mock
  * is a trimmed copy of that file's `mockRealInteractApp`, kept in `helpers/p037Mock.ts` (shared with the panel-container
@@ -118,13 +118,11 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     expect(c.steps.length, `current path: ${c.steps.join(' -> ')}`).toBeLessThanOrEqual(5)
   })
 
-  // KNOWN DEBT, not a met budget (BACKLOG 037-3, owner: the simulator mode-entry/bootstrap maintainer; decision 037-B
-  // 2026-10-10: POSTPONE-TO-BACKLOG). `goInteract` still reloads the page; the target is ZERO document navigations.
-  // This test CHARACTERISES the debt: entry happened (positive), the ActionBar is ready, exactly one navigation of the
-  // document, and the window marker is gone. It is not an expected-failure test: a broken entry (segment disabled, the
-  // ActionBar never appears) fails here for ITS OWN reason instead of hiding behind the debt. If the entry stops
-  // reloading, this test goes RED on purpose - replace it by the positive zero-reload assertion (BACKLOG 037-3).
-  test('ENTRY (known debt 037-3, characterisation): switching into Interact from Auto-Run still reloads the page once', async ({ page }, testInfo) => {
+  // BACKLOG 037-3 CLOSED by 043 S2 (2026-10-16): one screen, no mode to switch into. Until S2 this test characterised the
+  // debt - `goInteract` reloaded the page once on the way into the manual flow. The target named there is now the
+  // assertion: from the address of the former Auto-Run screen, the protocol actions are already on the screen, and
+  // "Send Payment" opens the panel with ZERO document navigations in the same document (the window marker survives).
+  test('ENTRY (043 S2, closes 037-3): the manual flow is entered without a document navigation', async ({ page }, testInfo) => {
     await mockApp(page, { paymentRealBodies: [] })
     await page.goto('/?mode=real&e2eReal=1')
     await ready(page, false)
@@ -133,25 +131,18 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     let navigations = 0
     page.on('framenavigated', (f) => { if (f === page.mainFrame()) navigations += 1 })
 
-    // 043 S1: the mode segment is behind "Подробнее" until S2 removes it (one screen, no reload).
-    await page.locator('[data-testid="details-toggle"]').click()
-    const interactSegment = page.getByRole('button', { name: 'Interact', exact: true })
-    await expect(interactSegment).toBeVisible()
-    await expect(interactSegment, 'precondition: the Interact segment is available in real mode').toBeEnabled()
-    await interactSegment.click()
-
-    // The entry itself, stated positively: the address says Interact and the Interact ActionBar is ready.
-    await page.waitForURL(/ui=interact/, { timeout: 15_000 })
-    await expect(page.locator('[data-testid="actionbar-payment"]'), 'the entry did not reach a ready Interact screen').toBeVisible({ timeout: 20_000 })
+    const send = page.locator('[data-testid="actionbar-payment"]')
+    await expect(send, 'the protocol actions are on the screen without entering a mode').toBeVisible({ timeout: 20_000 })
+    await send.click()
+    await expect(page.locator('[data-testid="manual-payment-panel"]'), 'the entry reached the payment panel').toBeVisible()
 
     const markerSurvived = await page.evaluate(() => (window as unknown as { __p037Marker?: number }).__p037Marker === 1)
     const numbers = { navigations, markerSurvived }
     console.log(`P037 ENTRY ${JSON.stringify(numbers)}`)
     testInfo.annotations.push({ type: 'P037-ENTRY', description: JSON.stringify(numbers) })
 
-    const improved = 'the entry no longer reloads the page: replace this characterisation by the positive zero-reload assertion (BACKLOG 037-3)'
-    expect(navigations, improved).toBe(1)
-    expect(markerSurvived, improved).toBe(false)
+    expect(navigations, 'zero document navigations on the way into the manual flow').toBe(0)
+    expect(markerSurvived, 'the same document').toBe(true)
   })
 })
 
