@@ -56,26 +56,57 @@ const markerLinks: LayoutLink[] = []
 let markerCount = 0
 
 /**
+ * The painted extent of every node, once per pass (measured 2026-10-16: asking the node geometry and the classifier
+ * for each marker x node pair - 348 x 100 per frame - took the frame from 54 to 117 ms at CPU x4). Plain arrays,
+ * reused between passes.
+ */
+const extentX: number[] = []
+const extentY: number[] = []
+const extentHW: number[] = []
+const extentHH: number[] = []
+const extentCircle: boolean[] = []
+const extentId: string[] = []
+let extentCount = 0
+
+function measureNodeExtents(nodes: LayoutNode[], hiddenNodeId: string | null, invZ: number) {
+  extentCount = 0
+  for (const n of nodes) {
+    if (n.id === hiddenNodeId) continue
+    const g = getNodeBaseGeometry(n, invZ)
+    // The outline (1.5 px); a hub's ring stands 3.5 px out and is 1.4 px wide.
+    const pad = (classifyNode(n).hub ? 1.5 + 3.5 + 1.4 : 1.5) * invZ
+    const k = extentCount++
+    extentX[k] = n.__x
+    extentY[k] = n.__y
+    extentCircle[k] = g.shape === 'circle'
+    extentHW[k] = (g.shape === 'circle' ? g.r : g.w / 2) + pad
+    extentHH[k] = (g.shape === 'circle' ? g.r : g.h / 2) + pad
+    extentId[k] = n.id
+  }
+}
+
+/**
  * Does a THIRD node (not the two ends of the line) lie over this triangle? Such a node covers the line, and it
  * covers the marker too: that marker is drawn before the nodes, the others after them. The node's painted extent is
- * its size plus its outline (1.5 px) - plus the ring of a hub (3.5 px gap + 1.4 px line). Rectangles are taken as
- * their box (their rounded corners make that a little generous: a marker near a corner goes under the node).
+ * its size plus its outline - plus the ring of a hub (`measureNodeExtents`). Rectangles are taken as their box (their
+ * rounded corners make that a little generous: a marker near a corner goes under the node).
  */
-function underAThirdNode(m: Arrowhead, nodes: LayoutNode[], sourceId: string, targetId: string, hiddenNodeId: string | null, invZ: number): boolean {
+function underAThirdNode(m: Arrowhead, sourceId: string, targetId: string): boolean {
   const minX = Math.min(m.tipX, m.leftX, m.rightX)
   const maxX = Math.max(m.tipX, m.leftX, m.rightX)
   const minY = Math.min(m.tipY, m.leftY, m.rightY)
   const maxY = Math.max(m.tipY, m.leftY, m.rightY)
-  for (const n of nodes) {
-    if (n.id === sourceId || n.id === targetId || n.id === hiddenNodeId) continue
-    const g = getNodeBaseGeometry(n, invZ)
-    const pad = (classifyNode(n).hub ? 1.5 + 3.5 + 1.4 : 1.5) * invZ
-    const hw = (g.shape === 'circle' ? g.r : g.w / 2) + pad
-    const hh = (g.shape === 'circle' ? g.r : g.h / 2) + pad
+  for (let k = 0; k < extentCount; k++) {
+    const x = extentX[k]!
+    const y = extentY[k]!
+    const hw = extentHW[k]!
+    const hh = extentHH[k]!
     // Box against box first: almost every node is far away.
-    if (n.__x + hw < minX || n.__x - hw > maxX || n.__y + hh < minY || n.__y - hh > maxY) continue
-    if (g.shape !== 'circle') return true
-    if (circleTouchesTriangle(n.__x, n.__y, hw, m)) return true
+    if (x + hw < minX || x - hw > maxX || y + hh < minY || y - hh > maxY) continue
+    const id = extentId[k]!
+    if (id === sourceId || id === targetId) continue
+    if (!extentCircle[k]) return true
+    if (circleTouchesTriangle(x, y, hw, m)) return true
   }
   return false
 }
@@ -327,9 +358,10 @@ export function drawBaseGraph(ctx: CanvasRenderingContext2D, opts: {
 
   // Markers that a third node lies over: drawn now, under the nodes (see the collection above).
   let after = 0
+  if (deferred.length > 0) measureNodeExtents(nodes, hiddenNodeId, invZ)
   for (const k of deferred) {
     const link = markerLinks[k]!
-    if (underAThirdNode(markerPool[k]!, nodes, link.source, link.target, hiddenNodeId, invZ)) fillMarker(markerPool[k]!, link)
+    if (underAThirdNode(markerPool[k]!, link.source, link.target)) fillMarker(markerPool[k]!, link)
     else deferred[after++] = k
   }
   deferred.length = after
