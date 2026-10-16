@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { SimulatorMode } from '../api/simulatorTypes'
-import type { UiThemeId } from '../types/uiPrefs'
+import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 import { isJwtLike } from '../utils/isJwtLike'
 
@@ -13,7 +12,6 @@ const ctx = useTopBarContext()
 
 const emit = defineEmits<{
   (e: 'update:selected-scenario-id', v: string): void
-  (e: 'update:desired-mode', v: SimulatorMode): void
   (e: 'update:intensity-percent', v: number): void
 
   (e: 'go-sandbox'): void
@@ -111,10 +109,6 @@ function setSelectedScenarioId(v: string) {
   emit('update:selected-scenario-id', v)
 }
 
-function setDesiredMode(v: string) {
-  emit('update:desired-mode', (v === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode)
-}
-
 function setIntensityPercent(v: string) {
   const n = Number(v)
   if (!Number.isFinite(n)) return
@@ -127,8 +121,7 @@ function short(s: string, n: number) {
 }
 
 function onThemeChange(v: string) {
-  // Normalize at caller if needed.
-  emit('set-ui-theme', (v as UiThemeId) || 'hud')
+  emit('set-ui-theme', normalizeUiThemeId(v))
 }
 
 const stopSummary = computed(() => {
@@ -317,9 +310,8 @@ function onApplyIntensity() {
                 aria-label="UI theme"
                 @change="onThemeChange(($event.target as HTMLSelectElement).value)"
               >
-                <option value="shadcn">shadcn/ui (dark)</option>
+                <!-- 039 B3 (owner's decision R1): two themes; shadcn and library are frozen (tokens kept, not offered). -->
                 <option value="saas">SaaS (subtle)</option>
-                <option value="library">Library (Naive-like)</option>
                 <option value="hud">HUD (sci-fi)</option>
               </select>
             </div>
@@ -410,20 +402,6 @@ function onApplyIntensity() {
                 tabindex="-1"
               >
                 <div class="ds-stack tb-adv-stack">
-                  <div class="ds-row tb-adv-row">
-                    <span class="ds-label">Pipeline</span>
-                    <select
-                      class="ds-select"
-                      :value="ctx.desiredMode.value"
-                      :disabled="isRunActive"
-                      aria-label="Run pipeline"
-                      @change="setDesiredMode(($event.target as HTMLSelectElement).value)"
-                    >
-                      <option value="real">real (DB)</option>
-                      <option value="fixtures">sandbox (topology-only)</option>
-                    </select>
-                  </div>
-
                   <div class="ds-row tb-adv-row" aria-label="Intensity">
                     <span class="ds-label">Intensity</span>
                     <input

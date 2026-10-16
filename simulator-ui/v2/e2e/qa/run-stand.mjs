@@ -2,8 +2,10 @@
  * 038 S2 - the QA stand as a gate: one entry, two counted scopes and one debug scope.
  *
  *   node e2e/qa/run-stand.mjs gate   the required subset: project `qa-stand` without the tests tagged `@extended`
- *                                    (clock, pixels, the window matrix in the `hud` theme, axe). No wall-clock thresholds.
- *   node e2e/qa/run-stand.mjs full   the whole `qa-stand` project: the same plus the frames and axe of the other three themes.
+ *                                    (clock, pixels, the window matrix in the `saas` and `hud` themes, axe, which theme is
+ *                                    shown). No wall-clock thresholds.
+ *   node e2e/qa/run-stand.mjs full   the whole `qa-stand` project: the same plus the gallery (frames and axe on a settled
+ *                                    graph) and the other viewports, in both themes.
  *   node e2e/qa/run-stand.mjs debug [playwright arguments]
  *                                    a SLICE of the `qa-stand` project, for debugging (`npm run test:e2e:qa -- --grep ...`).
  *
@@ -74,8 +76,19 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   legend and node card move together when a token changes. In the GATE, not `@extended`: they hold the three
  *   class-1 risks of the slice's design, and nothing else that a pull request runs sees a pixel of the new colours.
  *   Real clock (nothing in them is about time), about 45 s locally in one worker. No existing test left or changed scope.
+ * - 2026-10-16 (039 slice B, PR 3 - themes and the stand): gate 85 -> 114, full 208 -> 201. The app offers two themes,
+ *   `saas` (the default) and `hud` (owner's decision R1; slice B, decision 6), and the matrix walks exactly those. Exact
+ *   accounting, gate: +25 the required per-entry test of `surfaces.qa.ts` in `saas` (geometry, targets, axe, declared
+ *   policies - until now `hud` alone; the design of slice B asks for geometry and policies in both remaining themes,
+ *   and `saas` is now what a user sees first); +1 `matrix [saas] page` moved from `@extended` into the gate (the
+ *   default theme's page axe, as `hud`'s was); +3 a new file, `themes.qa.ts` (the first visit; a stored `shadcn` and
+ *   `?theme=library` normalised; URL over storage, back/forward and the palette resolved again after such a switch).
+ *   85 + 25 + 1 + 3 = 114. Full: the gate's +29, and under `@extended` -50 the gallery of `shadcn` and `library`
+ *   (2 x 25 entries), -2 their `page` tests, -1 `matrix [saas] page` (now in the gate, counted above), +17 the other
+ *   viewports (1920x1080, resized 1024x640) of the 17 entries placed by CSS, now in `saas` as well as `hud`.
+ *   208 + 29 - 50 - 2 - 1 + 17 = 201. No other test left or changed scope.
  */
-export const EXPECTED = { gate: 85, full: 208 }
+export const EXPECTED = { gate: 114, full: 201 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

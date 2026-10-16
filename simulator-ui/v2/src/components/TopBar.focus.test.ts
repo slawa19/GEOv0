@@ -15,7 +15,6 @@ function createTopBarContext(overrides: Partial<TopBarContext> = {}): TopBarCont
     loadingScenarios: ref(false),
     scenarios: ref([{ scenario_id: 'scenario-1', label: 'Scenario 1' }]),
     selectedScenarioId: ref('scenario-1'),
-    desiredMode: ref('real'),
     intensityPercent: ref(50),
     runId: ref('run-1'),
     runStatus: ref(null),
@@ -59,7 +58,6 @@ async function mountTopBar(overrides: Partial<TopBarContext> = {}) {
     'onStop': vi.fn(),
     'onApply-intensity': vi.fn(),
     'onUpdate:selected-scenario-id': vi.fn(),
-    'onUpdate:desired-mode': vi.fn(),
     'onUpdate:intensity-percent': vi.fn(),
   }
 
@@ -114,6 +112,22 @@ describe('TopBar dropdown focus contract', () => {
     expect(error?.textContent).not.toContain('trust_line_status_frozen')
     // ...and the full text is on the element a pointer rests on
     expect(error?.querySelector('[title]')?.getAttribute('title')).toBe(full)
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('042 S2: the Advanced dropdown has no run-pipeline choice (no Pipeline row, no select, no sandbox option)', async () => {
+    const { app, host } = await mountTopBar()
+
+    const dropdown = host.querySelector('[aria-label="Advanced dropdown"]') as HTMLElement
+    expect(dropdown).toBeTruthy()
+    expect(dropdown.querySelector('select')).toBeNull()
+    expect(dropdown.querySelector('[aria-label="Run pipeline"]')).toBeNull()
+    expect(dropdown.textContent).not.toContain('Pipeline')
+    expect(dropdown.textContent).not.toContain('topology-only')
+    // anti-vacuum: the dropdown is the real one and still carries the intensity control that stays
+    expect(dropdown.querySelector('input[aria-label="Intensity percent"]')).toBeTruthy()
 
     app.unmount()
     host.remove()

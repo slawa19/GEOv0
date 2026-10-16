@@ -1,5 +1,5 @@
 import { inject, provide, type InjectionKey, type Ref } from 'vue'
-import type { RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
+import type { RunStatus, ScenarioSummary } from '../api/simulatorTypes'
 import type { AdminRunSummary } from '../api/simulatorApi'
 import type { UiThemeId } from '../types/uiPrefs'
 
@@ -18,7 +18,6 @@ export type TopBarContext = {
   loadingScenarios: Readonly<Ref<boolean>>
   scenarios: Readonly<Ref<ScenarioSummary[]>>
   selectedScenarioId: Readonly<Ref<string>>
-  desiredMode: Readonly<Ref<SimulatorMode>>
   intensityPercent: Readonly<Ref<number>>
 
   // run status

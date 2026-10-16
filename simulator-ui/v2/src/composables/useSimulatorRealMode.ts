@@ -18,7 +18,6 @@ import type {
   ArtifactIndexItem,
   RunStatus,
   ScenarioSummary,
-  SimulatorMode,
 } from '../api/simulatorTypes'
 import { connectSse, type SseParsedMessage } from '../api/sse'
 import { normalizeSimulatorEvent } from '../api/normalizeSimulatorEvent'
@@ -46,7 +45,6 @@ export type RealModeState = {
   loadingScenarios: boolean
   scenarios: ScenarioSummary[]
   selectedScenarioId: string
-  desiredMode: SimulatorMode
   intensityPercent: number
   runId: string | null
   runStatus: RunStatus | null
@@ -173,7 +171,7 @@ export function useSimulatorRealMode(opts: {
   refreshRunStatus: () => Promise<void>
   refreshSnapshot: () => Promise<void>
   refreshScenarios: () => Promise<void>
-  startRun: (opts?: { mode?: SimulatorMode; intensityPercent?: number; pauseImmediately?: boolean }) => Promise<void>
+  startRun: (opts?: { intensityPercent?: number; pauseImmediately?: boolean }) => Promise<void>
   pause: () => Promise<void>
   resume: () => Promise<void>
   stop: () => Promise<void>
@@ -1114,7 +1112,7 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function startRun(startOpts?: { mode?: SimulatorMode; intensityPercent?: number; pauseImmediately?: boolean }) {
+  async function startRun(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
@@ -1136,7 +1134,8 @@ export function useSimulatorRealMode(opts: {
           { apiBase: real.apiBase, accessToken: real.accessToken },
           {
             scenario_id: real.selectedScenarioId,
-            mode: startOpts?.mode ?? real.desiredMode,
+            // The only run mode there is (042 S2): no stored or UI-chosen mode feeds this request.
+            mode: 'real',
             intensity_percent: startOpts?.intensityPercent ?? real.intensityPercent,
           },
         )
@@ -1437,7 +1436,7 @@ export function useSimulatorRealMode(opts: {
 
   // When user selects a different scenario (and no run is active), reload scene so preview graph appears.
   watch(
-    () => [real.selectedScenarioId, real.desiredMode, effectiveEq.value, real.accessToken, real.runId] as const,
+    () => [real.selectedScenarioId, effectiveEq.value, real.accessToken, real.runId] as const,
     async ([scenarioId]) => {
       if (!isRealMode.value) return
       if (!scenarioId) return

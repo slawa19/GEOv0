@@ -17,7 +17,11 @@ import { expect, type Page, type Route } from '@playwright/test'
 
 import { boot, distToSegment, EQ, frames, layoutNodes, pausedClockTime, pushEvent, ringSnapshot, RUN_ID, screenNodes, syncCssToClock, txUpdated, type Pt } from './stand.js'
 
-export const THEMES = ['hud', 'shadcn', 'saas', 'library'] as const
+/**
+ * The themes the app offers (039 B3, 2026-10-16; owner's decision R1): `saas` (the default) and `hud`. Until that date
+ * four: `shadcn` and `library` were walked too; they are frozen (tokens kept, out of the switcher) and not walked.
+ */
+export const THEMES = ['saas', 'hud'] as const
 export type Theme = (typeof THEMES)[number]
 
 export type Viewport = { width: number; height: number }
@@ -353,7 +357,7 @@ export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }
  * recorded blind zone (2026-10-11), not an oversight.
  */
 export const NATIVE_SELECTS = [
-  'top bar: "UI theme"', 'top bar (Auto-Run): "Scenario"', 'top bar, Advanced: "Run pipeline"',
+  'top bar: "UI theme"', 'top bar (Auto-Run): "Scenario"',
   'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Quality"', 'bottom bar: "Labels"', 'bottom bar (offline): "Scene"',
   'graph navigator: "Node"', 'graph navigator: "Edge"',
 ]

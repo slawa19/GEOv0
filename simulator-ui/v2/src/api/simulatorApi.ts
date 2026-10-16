@@ -43,7 +43,6 @@ import type {
   ScenarioSummary,
   ScenariosListResponse,
   SimulatorGraphSnapshot,
-  SimulatorMode,
   TxOnceRequest,
   TxOnceResponse,
 } from './simulatorTypes'
@@ -80,9 +79,9 @@ export function getScenarioPreview(
   cfg: HttpConfig,
   scenarioId: string,
   equivalent: string,
-  opts?: { mode?: SimulatorMode },
 ): Promise<SimulatorGraphSnapshot> {
-  const q = new URLSearchParams({ equivalent, ...(opts?.mode ? { mode: opts.mode } : {}) }).toString()
+  // `real` is the only run mode a client asks for (042 S2); the server still defaults/accepts `fixtures` until stage 1.
+  const q = new URLSearchParams({ equivalent, mode: 'real' }).toString()
   return simulatorContractJson(
     cfg,
     `/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?${q}`,

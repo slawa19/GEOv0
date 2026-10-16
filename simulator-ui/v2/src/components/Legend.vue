@@ -12,8 +12,8 @@
  * colour itself, the sign is the glyph drawn inside the node. Its `background-color` IS the data colour (the dimming
  * is an inset shadow over it), so a test can compare it with the token.
  *
- * The direction of a trust line is NOT explained here yet: that entry comes with the direction marker (PR 2) and
- * takes the slot after the shapes.
+ * The direction of a trust line is not drawn on the canvas and has no entry here: the owner withdrew the direction
+ * marker on 2026-10-16 (spec 039, Changelog); the edge tooltip and the edge window name it as "A -> B".
  */
 import { computed } from 'vue'
 
@@ -72,7 +72,13 @@ function swatchStyle(s: Swatch): Record<string, string> {
     <span id="ds-legend-help" class="ds-legend__help">{{ LEGEND_HELP }}</span>
     <ul class="ds-legend__list">
       <li v-for="e in entries" :key="e.id" class="ds-legend__entry" :data-legend-role="e.id">
-        <span class="ds-data-swatch" :class="e.swatch.cls" :style="swatchStyle(e.swatch)" data-legend-swatch aria-hidden="true">{{ e.swatch.sign }}</span>
+        <span class="ds-data-swatch" :class="e.swatch.cls" :style="swatchStyle(e.swatch)" data-legend-swatch aria-hidden="true">{{ e.swatch.sign }}<svg
+          v-if="e.id === 'frozen'"
+          class="ds-legend__dash"
+          data-legend-dash
+          viewBox="0 0 16 16"
+          focusable="false"
+        ><circle cx="8" cy="8" r="7" pathLength="8" stroke-dasharray="0.56 0.44" /></svg></span>
         <span class="ds-legend__text">{{ e.text }}</span>
       </li>
     </ul>
@@ -125,5 +131,30 @@ function swatchStyle(s: Swatch): Record<string, string> {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+
+/*
+ * The frozen swatch (carried over 2026-10-16 by 039 B3 from the withdrawn branch of PR 2, commit 16fff143). A dashed
+ * CSS border on a 16 px circle came out as a plain grey disc: the fill lay under the border, so the gaps between the
+ * dashes were the fill itself, and the dashes were a pixel and a half. Here the fill stops inside the outline (the gaps
+ * show the legend's surface) and the outline is drawn as eight even dashes of a circle, light like the dashed outline
+ * of a frozen node on the canvas. The fill is still the freeze colour handed over in the palette; `border-style` stays
+ * dashed for whoever reads the computed style.
+ */
+.ds-legend .ds-data-swatch--frozen {
+  position: relative;
+  border-color: transparent !important;
+  background-clip: padding-box;
+}
+
+.ds-legend__dash {
+  position: absolute;
+  inset: -1.5px;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.92);
+  stroke-width: 1.6;
 }
 </style>

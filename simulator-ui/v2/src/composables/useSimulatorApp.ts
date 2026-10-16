@@ -34,7 +34,7 @@ import { resetGlowSpritesCache } from '../render/glowSprites'
 
 import { getSnapshot, getScenarioPreview } from '../api/simulatorApi'
 import { ApiError, isTimeoutError } from '../api/http'
-import type { ArtifactIndexItem, RunStatus, ScenarioSummary, SimulatorMode } from '../api/simulatorTypes'
+import type { ArtifactIndexItem, RunStatus, ScenarioSummary } from '../api/simulatorTypes'
 import { normalizeApiBase } from '../api/apiBase'
 import type { Point } from '../types/layout'
 
@@ -182,7 +182,6 @@ export type SimulatorAppApi = {
     setApiBase: (v: string) => void
     setAccessToken: (v: string) => void
     setSelectedScenarioId: (v: string) => void
-    setDesiredMode: (v: SimulatorMode) => void
     setIntensityPercent: (v: number) => void
   } & Pick<
     RealModeApi,
@@ -585,6 +584,19 @@ export function useSimulatorApp(opts?: {
     }
   }
 
+  function lsRemove(key: string) {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // ignore
+    }
+  }
+
+  // 042 S2: the run mode is no longer a client setting. A person who once picked "sandbox (topology-only)" in the
+  // removed Advanced > Pipeline menu has `fixtures` stored under this key; it is dropped on load (this key only), so
+  // it can never again reach a run or preview request - there is no reader left, and the request says `real` itself.
+  lsRemove('geo.sim.v2.desiredMode')
+
   const state = reactive<SimulatorAppState>({
     loading: true,
     error: '',
@@ -606,7 +618,6 @@ export function useSimulatorApp(opts?: {
     loadingScenarios: false,
     scenarios: [] as ScenarioSummary[],
     selectedScenarioId: lsGet('geo.sim.v2.selectedScenarioId', ''),
-    desiredMode: (lsGet('geo.sim.v2.desiredMode', 'real') === 'fixtures' ? 'fixtures' : 'real') as SimulatorMode,
     // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
     intensityPercent: (() => {
       const fallback = 30
@@ -720,10 +731,6 @@ export function useSimulatorApp(opts?: {
   watch(
     () => real.selectedScenarioId,
     (v) => lsSet('geo.sim.v2.selectedScenarioId', v),
-  )
-  watch(
-    () => real.desiredMode,
-    (v) => lsSet('geo.sim.v2.desiredMode', v),
   )
   watch(
     () => real.intensityPercent,
@@ -1496,7 +1503,7 @@ export function useSimulatorApp(opts?: {
   }
 
   const previewSourcePath = (scenarioId: string, eq: string) =>
-    `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=${encodeURIComponent(real.desiredMode)}`
+    `GET ${real.apiBase}/simulator/scenarios/${encodeURIComponent(scenarioId)}/graph/preview?equivalent=${encodeURIComponent(eq)}&mode=real`
   // The source the LATEST scene load asked for, as the `sourcePath` its snapshot would carry. Written when the load
   // is requested (before its first await); the scene owner reads it only for the latest load, when that load failed.
   let requestedSceneSource: string | null = null
@@ -1541,13 +1548,10 @@ export function useSimulatorApp(opts?: {
     }
 
     // Real mode: no run, but have scenario selected - show preview
-    // Use desiredMode so UI can toggle between sandbox(topology-only) and real(DB-enriched) previews.
     // A preview that fails is THROWN (034 S8, F-034-D2): an empty network with no debts is data, and a failed
     // read is not. The scene owner keeps what is shown and puts the error into `state.error`.
     if (scenarioId) {
-      const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq, {
-        mode: real.desiredMode,
-      })
+      const snapshot = await getScenarioPreview({ apiBase: real.apiBase, accessToken: real.accessToken }, scenarioId, eq)
       if (!snapshot.limits) snapshot.limits = { max_particles: 220 }
       return {
         snapshot,
@@ -1864,9 +1868,6 @@ export function useSimulatorApp(opts?: {
       },
       setSelectedScenarioId: (v: string) => {
         real.selectedScenarioId = v
-      },
-      setDesiredMode: (v: SimulatorMode) => {
-        real.desiredMode = v
       },
       setIntensityPercent: (v: number) => {
         real.intensityPercent = Math.max(0, Math.min(100, Math.round(v)))

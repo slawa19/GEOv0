@@ -30,7 +30,7 @@ import { provideActivePanelState } from '../composables/useActivePanelState'
 import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } from '../composables/useParticipantDisplay'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
- import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
+ import { useUiTheme } from '../composables/useUiTheme'
  import { toLower } from '../utils/stringHelpers'
  import { canonicalEquivalent } from '../config/equivalents'
  import { extractErrorMessage } from '../utils/errorMessage'
@@ -40,48 +40,8 @@ import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } fr
 const simulatorStorage = useSimulatorStorage()
 const reducedMotion = useReducedMotionPreference()
 
-function readThemeFromUrl(): UiThemeId {
-  try {
-    return normalizeUiThemeId(new URLSearchParams(window.location.search).get('theme'))
-  } catch {
-    return 'hud'
-  }
-}
-
-function readThemeFromStorage(): UiThemeId | null {
-  // TD-1: delegated to composable — no direct localStorage access.
-  return simulatorStorage.readUiTheme()
-}
-
-function pickInitialTheme(): UiThemeId {
-  const url = readThemeFromUrl()
-  if (url !== 'hud') return url
-  const stored = readThemeFromStorage()
-  return stored ?? 'hud'
-}
-
-const uiTheme = ref<UiThemeId>(pickInitialTheme())
-
-function syncThemeFromUrl() {
-  const t = readThemeFromUrl()
-  uiTheme.value = t
-}
-
-function setUiTheme(next: UiThemeId) {
-  const theme = normalizeUiThemeId(next)
-  uiTheme.value = theme
-  // TD-1: delegated to composable — no direct localStorage access.
-  simulatorStorage.writeUiTheme(theme)
-
-  try {
-    const u = new URL(window.location.href)
-    if (theme === 'hud') u.searchParams.delete('theme')
-    else u.searchParams.set('theme', theme)
-    window.history.replaceState({}, '', u.toString())
-  } catch {
-    // ignore
-  }
-}
+// 039 B3: which theme is shown, and what a switch writes back - `useUiTheme` (URL, stored choice, default).
+const { uiTheme, setUiTheme, onPopState: syncThemeFromUrl } = useUiTheme(simulatorStorage)
 
 onMounted(() => {
   // Allow browser back/forward to update theme without reload.
@@ -579,7 +539,6 @@ const activeSegment = computed(() =>
    loadingScenarios: computed(() => real.loadingScenarios),
    scenarios: computed(() => real.scenarios),
    selectedScenarioId: computed(() => real.selectedScenarioId),
-   desiredMode: computed(() => real.desiredMode),
    intensityPercent: computed(() => real.intensityPercent),
 
    runId: computed(() => real.runId),
@@ -696,14 +655,6 @@ function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
   window.location.href = nextHref
 }
 
-function forceDbEnrichedPreviewOnNextLoad() {
-  // Avoid a transient topology-only preview snapshot right after a full reload.
-  // The real-mode boot flow shows a scenario preview until an active run is discovered.
-  // If persisted desiredMode is "fixtures", the preview looks "non-enriched" for a few seconds.
-  // TD-1: delegated to composable — no direct localStorage access.
-  simulatorStorage.forceDesiredModeReal()
-}
-
 function clearFxDebugRunOnNextLoad() {
   // FX Debug may autostart a fixtures run and persist its runId.
   // After exiting Demo UI we want to return to the normal real UI preview (DB-enriched),
@@ -713,8 +664,6 @@ function clearFxDebugRunOnNextLoad() {
 }
 
 function enterDemoUi() {
-  forceDbEnrichedPreviewOnNextLoad()
-
   // Demo enter: snapshot real-state so it can be restored after a reload-based exit.
   // Persisted snapshot must survive reload.
   simulatorStorage.writeDevtoolsOpenRealSnapshot(simulatorStorage.readDevtoolsOpenReal() ?? false)
@@ -959,7 +908,6 @@ function cancelInteractWindowFromUi(): void {
 
 async function exitDemoUi() {
   isExiting.value = true
-  forceDbEnrichedPreviewOnNextLoad()
 
   // Best-effort cleanup: if Demo UI auto-started an FX debug run, stop it server-side
   // before doing a full reload, otherwise it may keep running in the background.
@@ -1272,7 +1220,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @admin-attach-run="admin.attachRun"
       @admin-stop-run="admin.stopRun"
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
-      @update:desired-mode="realActions.setDesiredMode"
       @update:intensity-percent="realActions.setIntensityPercent"
     >
       <!-- HUD elements stacked below TopBar rows (inside ds-ov-top-stack via slot) -->

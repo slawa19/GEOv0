@@ -91,7 +91,7 @@ describe('F-034-D7: the demo buttons without an access token (cookie session)', 
 
     await s.controls.runTxOnce()
 
-    expect(s.startRun).toHaveBeenCalledWith({ mode: 'real', pauseImmediately: true })
+    expect(s.startRun).toHaveBeenCalledWith({ pauseImmediately: true })
     expect(vi.mocked(actionTxOnce).mock.calls[0]?.[1]).toBe('R_NEW')
   })
 })
