@@ -2,7 +2,7 @@
 
 This folder is the *current* home for the demo-fast-mock v2 implementation.
 
-Legacy / previous prototype was archived to `simulator-ui/v1/` and should be treated as outdated reference.
+The previous prototype `simulator-ui/v1/` was removed 2026-10-16 (041 `T4106`); it is kept in git under the tag `legacy/simulator-ui-v1-removed`.
 
 ## Run (Windows)
 

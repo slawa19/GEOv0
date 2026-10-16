@@ -82,6 +82,8 @@ async function mountBottomBar(opts: { isDemoUi: boolean; propOverrides?: Record<
     fxBusy: false,
     runTxOnce: vi.fn(),
     runClearingOnce: vi.fn(),
+    // 043 S1: the controls these tests are about live behind "Подробнее".
+    detailsOpen: true,
     ...opts.propOverrides,
   }
 

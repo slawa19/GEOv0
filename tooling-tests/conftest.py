@@ -12,15 +12,28 @@ a YAML file could not run anywhere a database was not. Two partitions, one per r
 Both run through `scripts/verify_local.ps1 -ToolingOnly -ToolingPartition <portable|powershell|all>`,
 locally and on CI alike. Backend discovery is not touched: `pytest.ini` still collects `tests` only.
 
+THERE IS NO COUNT TO MAINTAIN. Until 2026-10-16 this file held `EXPECTED_CASES`, an exact two-sided
+count of the selected cases per partition, and a dated journal of every edit of it. The owner's
+decision of 2026-10-16 (programme 041, `specs/041-verification-diet/spec.md`, F-041-13, the same
+mode as F-041-1 for the backend tier) replaced it with the refusals below; the constant and its
+journal are in git history (`git log -S EXPECTED_CASES -- tooling-tests/conftest.py`). Do not add a
+number, a lower bound or a journal back: adding or deleting a tooling test needs no edit here.
+
 WHAT THIS FILE ENFORCES, IN THE SAME PYTEST SESSION THAT RUNS THE TESTS (anti-vacuum, AGENTS.md §9).
 A tier that moved out of the gate is exactly the shape of a false green - a step nobody runs, or one
 that runs and collects nothing, still exits 0 somewhere. So the session refuses (exit 4) when:
 
 * it is started without `--tooling-partition` (the runner always passes it);
-* the number of selected cases of a requested partition differs from `EXPECTED_CASES` - in EITHER
-  direction: a lost case and an unrecorded new case fail alike, as AGENTS.md §6 asks of a ratchet;
-* a case is collected outside the requested partitions, or a partition collects nothing;
-* anything was deselected (`-m`, `-k`, `--deselect`, `--lf`): the count is of the whole partition;
+* it is narrowed: by an option (`-m`, `-k`, `--deselect`, `--ignore`, `--ignore-glob`, `--lf`,
+  `--sw`/`--sw-skip`; an `-o`/`--override-ini` of a discovery key - `testpaths`, `norecursedirs`,
+  `python_files`, `python_classes`, `python_functions`, `collect_imported_tests` - added after the
+  041 review of 2026-10-16; a `--rootdir` or `-c`/`--config-file` other than this repository's own;
+  all read from the session's options, so `PYTEST_ADDOPTS` and `addopts` are seen; unrelated `-o`
+  keys such as the runner's own `cache_dir` are allowed),
+  by a positional path other than the requested partition directories (or `tooling-tests` for
+  `all`), or by anything that reports deselected cases (a plugin's `pytest_deselected` included);
+* an option collects without executing the test bodies (`--collect-only` and the like);
+* a case is collected outside the requested partitions, or a requested partition collects nothing;
 * the `powershell` partition is requested on a host without both PowerShells the launcher checks
   run under (see `_missing_powershell_hosts`);
 
@@ -31,14 +44,18 @@ It also removes the database variables from the environment before any test modu
 a tooling test that reaches for a database gets no URL, so "needs no database" is a property of the
 tier and not only of the tests that are in it today.
 
-WHAT IT DOES NOT SEE. Whether the right tests are here: the count says how many, not which; a case
-replaced by a weaker one under the same number passes. Whether CI runs the steps: that is asserted by
+WHAT IT DOES NOT SEE (the classes known on 2026-10-16; not a proof that no other way exists). Which
+tests exist: a tooling test deleted or replaced by a weaker one passes (accepted by the owner's
+decision of 2026-10-16, spec 041). Narrowing through COMMITTED collection configuration or conftest
+hooks - the same category as deleting a test, a reviewable change of the tree, and not caught:
+discovery keys set in the `[pytest]` section of `pytest.ini` itself, a `collect_ignore` or
+`pytest_ignore_collect` in a conftest, or a hook that drops items without reporting them. Whether CI runs the steps: that is asserted by
 `tooling_ci_binding_violations` below, from both partitions, so removing either step is noticed by the
 other one. A debug run of one file is possible with `--noconftest`; it is a debug path and checks
 none of the above.
 
 WHAT THIS DOES NOT DEFEND AGAINST (narrowed 2026-10-03 after the §15 fix-delta round, AGENTS.md §19.4).
-The guarantee is the FORM of the CI steps and the count/outcome inside a session that really runs.
+The guarantee is the FORM of the CI steps and the selection/outcome inside a session that really runs.
 It does not defend against deliberate reconfiguration of the mechanism that runs it:
 
 * `pytest.ini` `addopts` (for example `--help` or `--version`: pytest exits before any check here,
@@ -53,9 +70,6 @@ trigger: it is caught by review, not by this file, and chasing it here is the lo
 findings in a row about the binding mechanism). The cheapest general fix, if ever authorised - a
 completion marker the enforcing session writes at `sessionfinish` and the runner requires - is in
 `specs/BACKLOG.md` ("Пределы тира инструментов").
-
-CHANGING THE NUMBERS. Move, add or delete a case - then change `EXPECTED_CASES` in the same commit,
-with a dated line below saying why. That is the only way to make the session green again.
 """
 
 from __future__ import annotations
@@ -70,161 +84,8 @@ import pytest
 
 _HERE = Path(__file__).resolve().parent
 
-#: THE EXPECTED NUMBER OF SELECTED CASES PER PARTITION (parametrised cases count one each).
-#:
-#: 2026-10-03, T2502.2: first values. 417 cases moved out of `tests/` unchanged (portable 195,
-#: powershell 222), plus the CI-binding check in each partition and its counter-check (portable +2,
-#: powershell +1) and the bootstrap guard's new scanned directory `tooling-tests` (portable +1).
-#: The `powershell` value assumes both PowerShell hosts (`_missing_powershell_hosts`): the launcher
-#: module runs most of its cases once per host it finds.
-#:
-#: 2026-10-05, 029 S4 F-029-20: portable 198 -> 199. One case added,
-#: `portable/test_p029_s4_demo_fixtures_of_every_equivalent_are_current.py`: the committed Simulator
-#: demo snapshots of every equivalent carry no signed `net_balance_atoms` and no `frozen` trust line.
-#:
-#: 2026-10-07, 032 S4 (022 `T2207`): portable 199 -> 196. The three cases of
-#: `portable/test_p017_s1_demo_fixture_generator_needs_no_database.py` are deleted with the generator
-#: they checked (`admin-fixtures/tools/generate_simulator_demo_snapshots.py`): the Simulator demo
-#: snapshots are static versioned assets now, and no build step runs a generator.
-#:
-#: 2026-10-07, 032 S4: portable 196 -> 192. `admin-fixtures/` is deleted, and with it the two bridge
-#: tests of `portable/test_p017_t1712_community_descriptions.py` that compared the community
-#: descriptions with the v2 generators and the extraction script living there (two functions, each
-#: run for two communities). They said they would die with the generators.
-#:
-#: 2026-10-07, 033 A item 6: powershell 223 -> 235. Twelve cases added,
-#: `powershell/test_p033_launchers_write_vite_api_mode_only_for_the_simulator.py`: `Update-EnvLocal` of
-#: `run_full_stack.ps1` and `run_local.ps1` leaves no `VITE_API_MODE` in the Admin UI's `.env.local` (two launchers x
-#: two initial states x two hosts = 8) and keeps it in the Simulator UI's (two states x two hosts = 4).
-#:
-#: 2026-10-08, 035 slice C (F-035-14 reproducer): portable 192 -> 197. Five cases added,
-#: `portable/test_p035_c_backend_tier_counts_what_it_collects.py`: the backend tier refuses a canonical
-#: run (whole tier, `-m "not slow"`, no selector) whose selected count differs from a recorded constant
-#: - two RED cases until the count is implemented (a deselect; a dropped module) - and three
-#: counter-checks that the unmodified tier, a selector run and the wide profile are not refused.
-#:
-#: 2026-10-08, 035 slice C1 (F-035-14): portable 197 -> 200. Three cases added to the same module, now that the count
-#: exists (`tests/tier_count.py`): the comparison refuses growth and loss alike, the profile decision in both
-#: outcomes, and each named skip is still declared where the count module says. The two reproducer cases went green.
-#:
-#: 2026-10-08, 035 slice C1 review fix-delta: portable 200 -> 201. One case added to the same module: a collection error on the
-#: canonical profile stays pytest's exit 2 (reproducer red on 7edf4cb8, exit 4 "a test was lost").
-#:
-#: 2026-10-09, 036 slice A (F-036-1, F-036-5): portable 201 -> 233. Thirty-two cases added,
-#: `portable/test_p036_a_scenario_schema_and_the_live_fixtures.py`: the live set (1), each live fixture validates
-#: against the scenario schema (5), the validator refuses a broken live fixture (1), the archive's only schema failure is its
-#: string time (1), the story scenario validates (1), twenty-two one-mutation refusals of the new episode fields, the removed `params` block (F-036-3), the string
-#: time and `settings.playback`, and the compatibility case (older string description, no captions) (1).
-#:
-#: 2026-10-09, 036 slice A fix-delta (review of `1afe0b09`): portable 233 -> 252. Nineteen cases added to the same module: the
-#: tx.updated / tx.failed anchor requirements (6 refusals), the money grammar of `amount` (7 refusals: 19 fraction digits, 51
-#: digits, a terminal newline, an exponent, an Arabic-Indic digit, on the payment and on the anchor), their boundary controls (5), a complete
-#: tx.failed anchor (1).
-#:
-#: 2026-10-09, 036 slice C (`T3630`): portable 252 -> 254. The new live fixture `community-story-10` is one more parametrised case of
-#: `test_every_live_fixture_validates_against_the_schema` (+1), and `test_the_validator_refuses_a_broken_community_story` shows the guard is
-#: not blind to it (+1); the live-set test only changed its list.
-#:
-#: 2026-10-10, 035 test-database cleanup command (`QD-TEST-DATABASES: BUILD-NARROW`): portable 254 -> 290. Thirty-six cases added,
-#: `portable/test_p035_cleanup_test_databases_selection.py`: names that only look like a test database (11 + 1), the selection rules (6),
-#: the apply order (1), nine kinds of changed evidence that stop an apply (9), a refused drop (1), import and `--help` without a
-#: connection (1), the command line's refusals (3 + 3).
-#:
-#: 2026-10-10, the same command, fix-delta of the review of `ddcb97b6` (F1, F2, F4): portable 290 -> 370. The module was rewritten
-#: and is 116 cases: 26 misleading names of which 15 carry a character outside the grammar (`?`, a quote, a newline...), 4 accepted
-#: names, the layers on their own (2), 20 escaped identifiers, the selection rules (5) and 6 refused protected slugs, the dry run (1),
-#: the apply order (1), a statement that cannot name another database (1), 9 kinds of changed evidence, the last row before the first
-#: drop (1), a protected busy family (1), the reviewed count (1), manifest freshness (5), 14 malformed manifests, a refused and an
-#: unanswered drop (2), import and `--help` (1), the command line (7 + 5), unusable manifest files (3), an unreachable server (1), the
-#: result file (1). The recorder now PARSES the one statement it accepts instead of splitting it on a quote.
-#:
-#: 2026-10-10, the same command, second fix-delta (review of `e8ab6b96`, F5-F7): portable 370 -> 396. +27 and -1 in the same
-#: module: eleven kinds of "no answer" - the driver's own classes among them - each with and without the drop having happened (22),
-#: three answers of the server that are refusals (3), the run's own artifact directory (1), an unreadable server (1); the one test
-#: that used Python's `ConnectionResetError` for a lost connection is replaced by those (-1).
-#: 2026-10-10, merge of main (the cleanup command, portable 396) with the A10 exception guard cases recorded below (+16): portable 412.
-#:
-#: 2026-10-10, 035 slice Q-C (the A10 exception): portable 254 -> 258. Four cases added to `portable/test_p035_c_backend_tier_counts_what_it_collects.py`: the verdict on planted collections (1), the real collection selects the listed five by marker and under `not slow` (1), and the real collection ends with exit 4 when a listed case is turned `slow` or a sixth case is marked (2).
-#:
-#: 2026-10-10, 035 slice Q-C review (5e9ba5fd): portable 258 -> 266. Eight cases added to the same module: a single A10 node selector is not judged as the whole module (3), `--ignore` of the A10 file on the whole tier is named by the membership guard (1), a listed member skipped by marker, skipif or at runtime ends the run red (3), and a skipped non-member stays an ordinary skip (1).
-#:
-#: 2026-10-10, 035 slice Q-C review fix: portable 266 -> 267. One case added: the summary line is printed only for five executed and passed members (the verdict-with-scope case was rewritten, the same count).
-#:
-#: 2026-10-10, 035 slice Q-C fix-delta (xfail members): portable 267 -> 270. Two member cases added to the skipped-member test (`pytest.xfail()` at runtime; an xfail marker on a member that fails), and one control (an xfailed non-member stays an expected failure).
-#:
-#: 2026-10-10, D1 (scenario participant ids are `<scenario_id>:<community pid>`): portable 412 -> 413. One case added to
-#: `portable/test_p017_t1712_community_descriptions.py`: the scenario generator refuses an id longer than `participants.pid` holds;
-#: the roster test of the same module now spells the namespace out and compares both ends of every line (the same count).
-#:
-#: 2026-10-11, 038 slice S2 (the Simulator UI QA stand joins the required gate): portable 413 -> 427. Fourteen cases, new module
-#: `portable/test_p038_qa_stand_gate.py`: the wiring of the stand's scripts, config, gate entry and the two workflow jobs (1),
-#: twelve mutations of that wiring, each of which the finder must notice (12), and the two prohibitions of spec 038 - no
-#: `waitForTimeout` in the stand, no product branch on the stand (1).
-#:
-#: 2026-10-11, 038 slice S2, adversarial pass (D4): portable 427 -> 433. Six cases added to `portable/test_p038_qa_stand_gate.py`:
-#: five more mutations of the wiring (a flaky test tolerated, an expected failure let into the gate, the verdict ignored by the
-#: entry, retries allowed in the config and in the entry) and the verdict of the gate entry run on made-up runs through node (1).
-#:
-#: 2026-10-11, 038 S2 + S3 merged (I3): portable 433 -> 436. Three more mutations in the same module: the perf job put on every pull
-#: request, the required step made to run the perf project, the perf job without its production build.
-#:
-#: 2026-10-12, 039 slice A (hardening of the QA stand step): portable 436 -> 440. Four more mutations in the same module: the
-#: report of the gate step uploaded only on failure, the gate step without a `timeout-minutes` of its own, that number not under
-#: the job's, and a wall-clock window (`perf-measure.ts`) imported by a file of the counted project.
-#:
-#: 2026-10-12, 039 slice A (`test:e2e:qa` goes through the runner as a debug scope): portable 440 -> 444. In the same module one
-#: mutation is replaced (the plain script ran the snapshot config -> the plain script runs Playwright past the runner again) and
-#: four are added: another script runs the counted project past the runner, a script runs the stand config with no project
-#: named, the debug run prints the line of a counted verdict, every scope is judged as a debug run.
-#:
-#: 2026-10-12, 039 slice A (the owner's videos are recorded by the scheduled job `simulator-qa-stand` and leave it with the
-#: gallery in one artifact): portable 444 -> 454. Ten more mutations in the same module: the video step removed, allowed to
-#: fail, or writing over the stand's report; a second artifact; the one artifact without the videos, without the gallery, not
-#: uploaded on every run, or uploaded before the videos are recorded; a pull-request job recording videos; a video config
-#: that records only on failure.
-#:
-#: 2026-10-12, 039 slice A, fix-delta of the external review of 0d0deae3 (the debug scope was escaped by `--`): portable 454 -> 457.
-#: Three more mutations in the same module: the debug run accepts the option terminator, the runner builds its arguments past
-#: the checked function, the debug run writes where a counted run does. (The selfcheck it runs through node went 25 -> 56 cases.)
-#:
-#: 2026-10-16, 040 slice A (`T4010`, the second reviewer's call script): portable 457 -> 480. Twenty-three cases, new module
-#: `portable/test_p040_argon_review.py`: five refusals before sending (no key, a non-commit SHA, a payload over the limit, a
-#: secret-looking path x4, the key inside the payload), what is sent (dry run, committed objects only, a binary named) (3), a saved
-#: response verified with its cost or `unknown` (2), a missing marker x3 and an incomplete response x3 unverified, the key in no
-#: file and no output x2, and the live path in process with `post` replaced (2).
-#:
-#: 2026-10-16, 040 slice A, review of the stopped agent's `bdd99526` before any gate ran: portable 480 -> 490. Ten cases
-#: added to the same module: an empty range x2 (the same SHA; `--paths` matching nothing), an `--out` holding a previous run,
-#: the versioned `.env*.example` templates pass while a real `.env`/`.env.local` is still refused (1), a response from another,
-#: a lookalike or no model x3, a response that is not JSON (1), the network guard met by a real live call (1), an HTTP 429
-#: that is not retried (1). Every subprocess case now runs through a guard that closes the sockets.
-#:
-#: 2026-10-16, 040 slice A, adversarial pass: portable 490 -> 491. One case added to the same module: a 3xx from the API is
-#: not followed, so the `Authorization` header never reaches the redirect target (urllib's default would carry it there).
-#:
-#: 2026-10-16, 040 slice A, fix-delta of the external review of `3dad3761` (Codex): portable 491 -> 510. Nineteen cases added to
-#: the same module, each a counterexample that was red on `3dad3761`: a signature helper named by repository config ran with the
-#: key (1) and every git child's environment (1), a replacement ref swapping a frozen blob (1), a gitlink expanded x2, malformed
-#: markers x6 and a prompt declaring no verdict values (1), model lookalikes x3 and the exact requested id (1), a key with CR/LF
-#: x2, and a response over the read cap (1).
-#:
-#: 2026-10-16, 041 `T4101` (F-041-1, the backend count replaced by a ban on narrowing flags): portable 510 -> 524 (+14).
-#: `portable/test_p035_c_backend_tier_counts_what_it_collects.py` (25) renamed `portable/test_p041_backend_tier_refuses_narrowing_flags.py`
-#: (39). Gone: the count comparison and the named-skip list it reconciled (2), the old profile decision, the wide-profile
-#: and selector counter-checks (3, rewritten). New: each refused option by name (6 + `--lf`/`--sw`/`--sw-skip` 3), the same
-#: from `PYTEST_ADDOPTS`, the wide profile with a deselect, the unmodified wide profile, four allowed options, the flag
-#: verdict and the whole-tier decision. The A10 cases are unchanged (16).
-#:
-#: 2026-10-16, 041 `T4101` fix-delta of the external review of `2f16bd05`: portable 524 -> 536 (+12) in the same module. An
-#: `-o` override of a discovery key refused (6 subprocess: `norecursedirs`, `python_files`, `testpaths`, `python_classes`,
-#: `python_functions`, `--rootdir`; the reproducer through `PYTEST_ADDOPTS`; another `-c`) and four counter-checks (unrelated
-#: `-o` keys and this repository's own `--rootdir` and `-c` are allowed).
-EXPECTED_CASES: dict[str, int] = {
-    "portable": 536,
-    "powershell": 235,
-}
-
-_PARTITIONS = tuple(EXPECTED_CASES)
+#: The partitions, each a directory under `tooling-tests/` and a blocking CI step (`tooling_ci_binding_violations`).
+_PARTITIONS = ("portable", "powershell")
 
 _DATABASE_VARIABLES = ("DATABASE_URL", "TEST_DATABASE_URL", "GEO_TEST_ALLOW_DB_RESET")
 
@@ -240,13 +101,31 @@ _NO_RUN_OPTIONS = (
     ("markers", "--markers"),
 )
 
+#: pytest options that narrow the selection: `config.option` attribute -> the flag as a person types it.
+_NARROWING_OPTIONS = (
+    ("markexpr", "-m"),
+    ("keyword", "-k"),
+    ("deselect", "--deselect"),
+    ("ignore", "--ignore"),
+    ("ignore_glob", "--ignore-glob"),
+    ("lf", "--lf/--last-failed"),
+    ("stepwise", "--sw/--stepwise"),
+    ("stepwise_skip", "--sw-skip"),
+)
+
+#: The `-o`/`--override-ini` keys that decide WHICH modules, classes and functions are collected (pytest 7.4; the last is
+#: pytest 8's, listed so an upgrade does not open a path). Any other key is allowed (the runner passes `cache_dir`).
+_DISCOVERY_INI_KEYS = frozenset(
+    {"testpaths", "norecursedirs", "python_files", "python_classes", "python_functions", "collect_imported_tests"}
+)
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--tooling-partition",
         choices=(*_PARTITIONS, "all"),
         default=None,
-        help="Tooling tier partition to run and count (scripts/verify_local.ps1 -ToolingOnly).",
+        help="Tooling tier partition to run (scripts/verify_local.ps1 -ToolingOnly).",
     )
 
 
@@ -254,8 +133,8 @@ def _missing_powershell_hosts() -> list[str]:
     """The two hosts the launcher checks are run under, and which of them this machine lacks.
 
     `powershell/test_run_full_stack_database_url_redaction.py` runs most of its cases once per host
-    it finds; a machine with one host would select fewer cases and look like a lost test. Requiring
-    both makes the count exact and names the real reason instead.
+    it finds; a machine with one host would silently run fewer of them. Requiring both keeps every
+    case in the run and names the real reason when a host is missing.
     """
 
     missing: list[str] = []
@@ -281,8 +160,8 @@ def pytest_configure(config: pytest.Config) -> None:
     if value is None:
         raise pytest.UsageError(
             "The tooling tier runs only with --tooling-partition portable|powershell|all, which "
-            "`scripts/verify_local.ps1 -ToolingOnly` passes; the partition is what the selected "
-            "count is checked against. A one-file debug run is `--noconftest` and checks nothing."
+            "`scripts/verify_local.ps1 -ToolingOnly` passes; the partition is what the selection "
+            "is checked against. A one-file debug run is `--noconftest` and checks nothing."
         )
     requested = _PARTITIONS if value == "all" else (value,)
     # §15 2026-10-03 (P1): `--collect-only` matched the count and ran nothing, and the runner said
@@ -290,8 +169,20 @@ def pytest_configure(config: pytest.Config) -> None:
     no_run = [flag for option, flag in _NO_RUN_OPTIONS if getattr(config.option, option, False)]
     if no_run:
         raise pytest.UsageError(
-            f"the tooling tier executes every case; {', '.join(no_run)} would count cases and run "
+            f"the tooling tier executes every case; {', '.join(no_run)} would collect cases and run "
             "none of them (check PYTEST_ADDOPTS)"
+        )
+    # 041 F-041-13 (2026-10-16): with no count left, a narrowing option or a narrower path is refused
+    # by name. A missing attribute (a plugin that is not loaded) counts as not given.
+    narrowing = [flag for option, flag in _NARROWING_OPTIONS if getattr(config.option, option, None)]
+    narrowing += _discovery_overrides(config)
+    narrowing += _narrowing_paths(config, requested, whole=value == "all")
+    if narrowing:
+        raise pytest.UsageError(
+            f"the tooling tier runs whole partitions; it was narrowed by {', '.join(narrowing)} "
+            "(check PYTEST_ADDOPTS). Not checked: which tests exist. Run the tier with "
+            "`scripts/verify_local.ps1 -ToolingOnly -ToolingPartition <portable|powershell|all>`; "
+            "a debug run of a subset is `--noconftest` and checks nothing."
         )
     outside = sorted(
         str(path.relative_to(_HERE))
@@ -311,6 +202,41 @@ def pytest_configure(config: pytest.Config) -> None:
                 f"missing: {', '.join(missing)}. It runs in the Windows `required-ui` job."
             )
     config.stash[_STATE] = {"requested": requested, "deselected": 0}
+
+
+def _discovery_overrides(config: pytest.Config) -> list[str]:
+    """`-o` overrides of a discovery key, and a `--rootdir` or `-c` other than this repository's own (041 review)."""
+
+    found: list[str] = []
+    for entry in getattr(config.option, "override_ini", None) or ():
+        key = str(entry).partition("=")[0].strip()
+        if key in _DISCOVERY_INI_KEYS:
+            found.append(f"-o/--override-ini {key}")
+    here = config.invocation_params.dir
+    repository = _HERE.parent
+    rootdir = getattr(config.option, "rootdir", None)
+    if rootdir and (here / rootdir).resolve() != repository:
+        found.append(f"--rootdir {rootdir!r}")
+    inifile = getattr(config.option, "inifilename", None)
+    if inifile and (here / inifile).resolve() != repository / "pytest.ini":
+        found.append(f"-c/--config-file {inifile!r}")
+    return found
+
+
+def _narrowing_paths(config: pytest.Config, requested: tuple[str, ...], *, whole: bool) -> list[str]:
+    """Positional arguments other than the requested partition directories (or `tooling-tests` for `all`).
+
+    A partition the arguments do not reach is caught after collection as "collects nothing".
+    """
+
+    allowed = {(_HERE / partition).resolve() for partition in requested}
+    if whole:
+        allowed.add(_HERE)
+    narrower: list[str] = []
+    for argument in config.args:
+        if "::" in argument or (config.invocation_params.dir / argument).resolve() not in allowed:
+            narrower.append(f"the path {argument!r}")
+    return narrower
 
 
 def pytest_deselected(items: list[pytest.Item]) -> None:
@@ -344,20 +270,16 @@ def pytest_collection_finish(session: pytest.Session) -> None:
     problems: list[str] = []
     if state["deselected"]:
         problems.append(
-            f"{state['deselected']} case(s) were deselected; the tooling tier is counted whole, "
-            "so no -m, -k, --deselect or --lf"
+            f"{state['deselected']} case(s) were deselected; the tooling tier runs whole partitions, "
+            "so no -m, -k, --deselect, --lf or deselecting plugin"
         )
     if strays:
         problems.append(f"cases outside the requested partitions: {strays[:5]}")
     for partition in _PARTITIONS:
-        expected = EXPECTED_CASES[partition] if partition in requested else 0
-        if counts[partition] != expected:
-            problems.append(
-                f"partition {partition!r} selected {counts[partition]} case(s), expected exactly "
-                f"{expected} (EXPECTED_CASES in tooling-tests/conftest.py)"
-            )
-    if any(EXPECTED_CASES[partition] == 0 for partition in requested):
-        problems.append("a requested partition expects zero cases, which is a gate over nothing")
+        if partition in requested and counts[partition] == 0:
+            problems.append(f"partition {partition!r} collected nothing, which is a gate over nothing")
+        if partition not in requested and counts[partition]:
+            problems.append(f"partition {partition!r} was not requested and selected {counts[partition]} case(s)")
     if problems:
         pytest.exit(
             "tooling tier refused: " + "; ".join(problems),
@@ -402,14 +324,14 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list[str]:
-    """Whether CI runs each partition as a blocking step, and the runner as a counted session.
+    """Whether CI runs each partition as a blocking step, and the runner as a checked session.
 
     Each partition must be exactly one `verify_local.ps1 -ToolingOnly -ToolingPartition <name>` step
     of its job, and neither the job nor the step may carry `if:` or `continue-on-error`: the Black
     step's `continue-on-error` in the same job is a step attribute and must stay off this one. The
     runner's tooling session must run under `$runTooling` as an `Invoke-RequiredStep` (a diagnostic
     step turns a failure into a warning and exit 0) and pass `--tooling-partition`, and must not
-    pass `--noconftest`, which would run the tests without the count.
+    pass `--noconftest`, which would run the tests without any check of this file.
 
     Form only: whether the steps really ran is in the job log (`gh run view <id> --log`).
 
@@ -462,9 +384,9 @@ def tooling_ci_binding_violations(workflow: dict[str, Any], runner: str) -> list
         or "Invoke-RequiredStep" not in block.group(1)
         or "Invoke-DiagnosticStep" in block.group(1)
     ):
-        violations.append("verify_local.ps1 does not run the counted session (--tooling-partition)")
+        violations.append("verify_local.ps1 does not run the checked session (--tooling-partition)")
     if "--noconftest" in runner:
-        violations.append("scripts/verify_local.ps1 passes --noconftest, which drops the count")
+        violations.append("scripts/verify_local.ps1 passes --noconftest, which drops every check of the session")
     return violations
 
 

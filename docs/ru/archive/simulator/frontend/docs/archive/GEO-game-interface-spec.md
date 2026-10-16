@@ -821,7 +821,7 @@ onMounted(async () => {
 
 ## 10. Контракт API для состояния, транзакций и клиринга
 
-**Источник правды:** см. [docs/ru/simulator/frontend/docs/api.md](../api.md).
+**Источник правды:** см. [docs/ru/simulator/frontend/docs/api.md](../../../../../simulator/frontend/docs/api.md).
 
 Коротко:
 - Snapshot возвращает узлы/рёбра и готовые `viz_*` ключи (цвет/размер/альфа/ширина).

@@ -133,6 +133,8 @@ test.describe('037 A2 - manual payment path (current panel, mocked backend)', ()
     let navigations = 0
     page.on('framenavigated', (f) => { if (f === page.mainFrame()) navigations += 1 })
 
+    // 043 S1: the mode segment is behind "Подробнее" until S2 removes it (one screen, no reload).
+    await page.locator('[data-testid="details-toggle"]').click()
     const interactSegment = page.getByRole('button', { name: 'Interact', exact: true })
     await expect(interactSegment).toBeVisible()
     await expect(interactSegment, 'precondition: the Interact segment is available in real mode').toBeEnabled()

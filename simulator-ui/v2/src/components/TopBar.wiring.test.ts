@@ -1,91 +1,150 @@
-import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+/**
+ * TopBar wiring, observed (F-041-9, converted in 043 S1). Until then this file read `TopBar.vue` and
+ * `SimulatorAppRoot.vue` as strings and looked for `emit('start-run'`, `@start-run="realActions.startRun"`, CSS
+ * literals and the like: it held the spelling of the source, not what a click does, and a layout change that kept
+ * every behaviour (043 S1 moved the controls behind "Подробнее") turned it red.
+ *
+ * Now: TopBar is mounted with its context, each control is used the way a person uses it, and the event it emits -
+ * name and payload - is what the test reads. The parent's half (each event reaches the app's action) is observed in
+ * the mounted root: `SimulatorAppRoot.interact.test.ts`, "wiring (was a source-text guard)". The dropdown keyboard
+ * contract (focus in, Tab trapped, Escape restores) is `TopBar.focus.test.ts`; the CSS literals of the old file are
+ * not behaviour and are not re-checked.
+ */
+import { createApp, h, nextTick, ref } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
 
-function readHere(rel: string): string {
-  return readFileSync(new URL(rel, import.meta.url), 'utf8')
+import type { RunStatus } from '../api/simulatorTypes'
+import { provideTopBarContext, type TopBarContext } from '../composables/useTopBarContext'
+import TopBar from './TopBar.vue'
+
+const EVENTS = [
+  'toggle-details', 'update:selected-scenario-id', 'update:intensity-percent', 'go-sandbox', 'go-auto-run', 'go-interact',
+  'set-ui-theme', 'refresh-scenarios', 'start-run', 'pause', 'resume', 'stop', 'apply-intensity',
+  'admin-get-runs', 'admin-stop-runs', 'admin-attach-run', 'admin-stop-run',
+] as const
+
+function context(over: Partial<TopBarContext> = {}): TopBarContext {
+  return {
+    apiMode: ref('real'), activeSegment: ref('auto'), isInteractUi: ref(false), isTestMode: ref(false), uiTheme: ref('saas'),
+    loadingScenarios: ref(false), scenarios: ref([{ scenario_id: 'sc-1', label: 'Riverside town' }, { scenario_id: 'sc-2', label: 'Two' }]),
+    selectedScenarioId: ref('sc-1'), intensityPercent: ref(30), runId: ref('run-1'), runStatus: ref(null), sseState: ref('open'),
+    lastError: ref(null),
+    runStats: ref({ startedAtMs: 0, attempts: 0, committed: 0, rejected: 0, errors: 0, timeouts: 0, rejectedByCode: {}, errorsByCode: {} }),
+    accessToken: ref('admin-token'), adminRuns: ref([{ run_id: 'run-9', state: 'running', scenario_id: 'sc-1', owner_id: 'o' }]),
+    adminRunsLoading: ref(false), adminLastError: ref(undefined),
+    adminCanGetRuns: ref(true), adminCanStopRuns: ref(true), adminCanAttachRun: ref(true), adminCanStopRun: ref(true),
+    ...over,
+  } as TopBarContext
 }
 
-describe('TopBar wiring smoke', () => {
-  it('emits kebab-case update events (HTML-safe)', () => {
-    const sfc = readHere('./TopBar.vue')
+function mountTopBar(ctx: TopBarContext, detailsOpen: boolean) {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const spies = Object.fromEntries(EVENTS.map((e) => [e, vi.fn()])) as Record<(typeof EVENTS)[number], ReturnType<typeof vi.fn>>
+  // Listener props by the kebab-case name of each event, exactly as the root's template binds them.
+  const listeners = Object.fromEntries(EVENTS.map((e) => [`on${e[0]!.toUpperCase()}${e.slice(1)}`, spies[e]]))
+  const app = createApp({ setup() { provideTopBarContext(ctx); return () => h(TopBar, { ...listeners, detailsOpen }) } })
+  app.mount(host)
+  return { host, spies, done: () => { app.unmount(); host.remove() } }
+}
 
-    // Emits (child)
-    expect(sfc).toContain("emit('update:selected-scenario-id'")
-    expect(sfc).toContain("emit('update:intensity-percent'")
+const button = (host: HTMLElement, text: string) =>
+  [...host.querySelectorAll<HTMLButtonElement>('button')].find((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim() === text)
 
-    // Optional: ensure we did not regress to camelCase
-    expect(sfc).not.toContain("emit('update:selectedScenarioId'")
-    expect(sfc).not.toContain("emit('update:intensityPercent'")
+describe('TopBar wiring - what each control emits', () => {
+  it('the toggle emits toggle-details and states whether it is open', async () => {
+    const off = mountTopBar(context(), false)
+    await nextTick()
+    const t = off.host.querySelector<HTMLButtonElement>('[data-testid="details-toggle"]')!
+    expect(t.getAttribute('aria-expanded')).toBe('false')
+    t.click()
+    expect(off.spies['toggle-details']).toHaveBeenCalledTimes(1)
+    off.done()
+
+    const on = mountTopBar(context(), true)
+    await nextTick()
+    expect(on.host.querySelector('[data-testid="details-toggle"]')!.getAttribute('aria-expanded')).toBe('true')
+    on.done()
   })
 
-  it('uses events (not callback-props) for TopBar actions', () => {
-    const sfc = readHere('./TopBar.vue')
+  it('selects and inputs emit update events with the value (the intensity clamped to 0..100)', async () => {
+    const { host, spies, done } = mountTopBar(context(), true)
+    await nextTick()
+    const scenario = host.querySelector<HTMLSelectElement>('select[aria-label="Scenario"]')!
+    scenario.value = 'sc-2'
+    scenario.dispatchEvent(new Event('change'))
+    expect(spies['update:selected-scenario-id']).toHaveBeenCalledWith('sc-2')
 
-    // These should be events now (defineEmits), not function props.
-    expect(sfc).toContain("emit('go-sandbox'")
-    expect(sfc).toContain("emit('go-auto-run'")
-    expect(sfc).toContain("emit('go-interact'")
-    expect(sfc).toContain("emit('set-ui-theme'")
+    const intensity = host.querySelector<HTMLInputElement>('input[aria-label="Intensity percent"]')!
+    intensity.value = '-5'
+    intensity.dispatchEvent(new Event('input'))
+    intensity.value = '42.4'
+    intensity.dispatchEvent(new Event('input'))
+    expect(spies['update:intensity-percent'].mock.calls).toEqual([[0], [42]])
 
-    expect(sfc).toContain("emit('refresh-scenarios'")
-    expect(sfc).toContain("emit('start-run'")
-    expect(sfc).toContain("emit('pause'")
-    expect(sfc).toContain("emit('resume'")
-    expect(sfc).toContain("emit('stop'")
-    expect(sfc).toContain("emit('apply-intensity'")
-
-    expect(sfc).toContain("emit('admin-get-runs'")
-    expect(sfc).toContain("emit('admin-stop-runs'")
-    expect(sfc).toContain("emit('admin-attach-run'")
-    expect(sfc).toContain("emit('admin-stop-run'")
+    const theme = host.querySelector<HTMLSelectElement>('select[aria-label="UI theme"]')!
+    theme.value = 'hud'
+    theme.dispatchEvent(new Event('change'))
+    expect(spies['set-ui-theme']).toHaveBeenCalledWith('hud')
+    done()
   })
 
-  it('listens to the same kebab-case update events in parent template', () => {
-    const parent = readHere('./SimulatorAppRoot.vue')
+  it('buttons emit their events: mode segment, scenarios, run lifecycle, intensity', async () => {
+    const runStatus = ref<RunStatus | null>({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus)
+    const { host, spies, done } = mountTopBar(context({ runStatus }), true)
+    await nextTick()
+    button(host, 'Sandbox')!.click()
+    button(host, 'Auto-Run')!.click()
+    button(host, 'Interact')!.click()
+    expect([spies['go-sandbox'], spies['go-auto-run'], spies['go-interact']].map((s) => s.mock.calls.length)).toEqual([1, 1, 1])
 
-    expect(parent).toContain('@update:selected-scenario-id="realActions.setSelectedScenarioId"')
-    expect(parent).toContain('@update:intensity-percent="realActions.setIntensityPercent"')
+    host.querySelector<HTMLButtonElement>('button[aria-label="Refresh scenarios"]')!.click()
+    expect(spies['refresh-scenarios']).toHaveBeenCalledTimes(1)
+    button(host, 'Pause')!.click()
+    expect(spies.pause).toHaveBeenCalledTimes(1)
+    button(host, 'Apply')!.click()
+    expect(spies['apply-intensity']).toHaveBeenCalledTimes(1)
+    const stops = [...host.querySelectorAll<HTMLButtonElement>('.tb-run-controls button')].filter((b) => (b.textContent ?? '').trim() === 'Stop')
+    stops[0]!.click()
+    expect(spies.stop).toHaveBeenCalledTimes(1)
+
+    runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'paused' } as RunStatus
+    await nextTick()
+    button(host, 'Resume')!.click()
+    expect(spies.resume).toHaveBeenCalledTimes(1)
+    done()
   })
 
-  it('listens to TopBar events in parent template (instead of callback-props)', () => {
-    const parent = readHere('./SimulatorAppRoot.vue')
-
-    expect(parent).toContain('@go-sandbox="goSandbox"')
-    expect(parent).toContain('@go-auto-run="goAutoRun"')
-    expect(parent).toContain('@go-interact="goInteract"')
-
-    expect(parent).toContain('@set-ui-theme="setUiTheme"')
-
-    expect(parent).toContain('@refresh-scenarios="realActions.refreshScenarios"')
-    expect(parent).toContain('@start-run="realActions.startRun"')
-    expect(parent).toContain('@pause="realActions.pause"')
-    expect(parent).toContain('@resume="realActions.resume"')
-    expect(parent).toContain('@stop="realActions.stop"')
-    expect(parent).toContain('@apply-intensity="realActions.applyIntensity"')
-
-    expect(parent).toContain('@admin-get-runs="admin.getRuns"')
-    expect(parent).toContain('@admin-stop-runs="admin.stopRuns"')
-    expect(parent).toContain('@admin-attach-run="admin.attachRun"')
-    expect(parent).toContain('@admin-stop-run="admin.stopRun"')
+  it('Start emits start-run when no run is active', async () => {
+    const { host, spies, done } = mountTopBar(context({ runId: ref(null) }), true)
+    await nextTick()
+    button(host, 'Start')!.click()
+    expect(spies['start-run']).toHaveBeenCalledTimes(1)
+    done()
   })
 
-  it('keeps dropdown surfaces on the shared overlay contract and leaves generic narrow HUD rules to HudBar', () => {
-    const sfc = readHere('./TopBar.vue')
+  it('the Admin menu emits the admin events, with the run id for the per-run ones', async () => {
+    const { host, spies, done } = mountTopBar(context(), true)
+    await nextTick()
+    host.querySelector<HTMLButtonElement>('button[aria-label="Refresh runs list"]')!.click()
+    expect(spies['admin-get-runs']).toHaveBeenCalledTimes(1)
+    host.querySelector<HTMLButtonElement>('button[aria-label="Stop all runs"]')!.click()
+    expect(spies['admin-stop-runs']).toHaveBeenCalledTimes(1)
+    host.querySelector<HTMLButtonElement>('button[aria-label="Attach to selected run"]')!.click()
+    expect(spies['admin-attach-run']).toHaveBeenCalledWith('run-9')
+    host.querySelector<HTMLButtonElement>('button[aria-label="Stop selected run"]')!.click()
+    expect(spies['admin-stop-run']).toHaveBeenCalledWith('run-9')
+    done()
+  })
 
-    expect(sfc).toContain("import { useHudDropdownFocus } from '../composables/useHudDropdownFocus'")
-    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown"')
-    expect(sfc).toContain('class="ds-panel ds-ov-surface ds-ov-dropdown ds-ov-dropdown--right tb-admin-dropdown"')
-    expect(sfc).toContain('@keydown.capture="onAdvancedDetailsKeydown"')
-    expect(sfc).toContain('@keydown.capture="onAdminDetailsKeydown"')
-    expect(sfc).toContain('--ds-ov-dropdown-minw: var(--ds-tb-admin-dropdown-minw);')
-    expect(sfc).toContain('--ds-ov-dropdown-maxw: var(--ds-tb-admin-dropdown-maxw);')
-    expect(sfc).toContain('width: var(--ds-tb-intensity-input-w);')
-    expect(sfc).toContain('grid-template-columns: var(--ds-tb-run-id-col-w) var(--ds-tb-run-state-col-w) 1fr auto auto;')
-    expect(sfc).toContain(':deep(.ds-segmented) {')
-    expect(sfc).toContain(':deep(.ds-segment) {')
-
-    expect(sfc).not.toContain(':deep(.ds-select) {')
-    expect(sfc).not.toContain(':deep(.ds-btn) {')
-    expect(sfc).not.toContain(':deep(.ds-label) {')
+  it('with Details off none of those controls is rendered, so none can emit (043 S1)', async () => {
+    const { host, spies, done } = mountTopBar(context({ runStatus: ref({ run_id: 'run-1', state: 'running' } as RunStatus) }), false)
+    await nextTick()
+    expect(host.querySelectorAll('select, input').length, 'no select or input in the first row').toBe(0)
+    const texts = [...host.querySelectorAll('button')].map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim())
+    expect(texts, 'the first row has the toggle alone (the actions come from the root, slot "actions")').toEqual(['Подробнее ▾'])
+    expect(host.querySelector('summary'), 'no menu').toBeNull()
+    for (const s of Object.values(spies)) expect(s).not.toHaveBeenCalled()
+    done()
   })
 })

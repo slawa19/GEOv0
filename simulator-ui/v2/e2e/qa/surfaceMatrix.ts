@@ -15,7 +15,7 @@
  */
 import { expect, type Page, type Route } from '@playwright/test'
 
-import { boot, distToSegment, EQ, frames, layoutNodes, pausedClockTime, pushEvent, ringSnapshot, RUN_ID, screenNodes, syncCssToClock, txUpdated, type Pt } from './stand.js'
+import { boot, distToSegment, EQ, frames, layoutNodes, openDetails, pausedClockTime, pushEvent, ringSnapshot, RUN_ID, screenNodes, syncCssToClock, txUpdated, type Pt } from './stand.js'
 
 /**
  * The themes the app offers (039 B3, 2026-10-16; owner's decision R1): `saas` (the default) and `hud`. Until that date
@@ -72,6 +72,12 @@ export type Entry = {
   open: (page: Page) => Promise<void>
   /** The surface exists only under the pointer: after a resize the line has moved from under it, and the gesture is repeated. */
   followsPointer?: true
+  /**
+   * 043 S1: the surface (or its opener) is a service control, behind "Подробнее". `bootEntry` first holds that
+   * `hiddenByDefault` is NOT RENDERED on the first view (the anti-vacuum of the recipe: a surface reachable by default
+   * fails here), then turns "Подробнее" on and holds that it is on screen.
+   */
+  details?: { hiddenByDefault: string }
   policies: Policies
 }
 
@@ -188,8 +194,8 @@ async function openList(page: Page, panelButton: string, id: string): Promise<vo
   if (!(await page.locator(`#${id}__surface`).isVisible())) await page.locator(`#${id}__trigger`).click()
 }
 
-/** A summoned HUD menu: `<details>` driven by `useHudDropdownFocus`. */
-const openDetails = (summary: string) => async (page: Page) => {
+/** A summoned HUD menu: `<details>` driven by `useHudDropdownFocus`. (Named `openDetails` until 043 S1 - the element, not the toggle.) */
+const openMenu = (summary: string) => async (page: Page) => {
   const s = page.locator(summary)
   if ((await s.evaluate((el) => (el.parentElement as HTMLDetailsElement).open)) === false) await s.click()
 }
@@ -262,35 +268,45 @@ export const MATRIX: Entry[] = [
     root: '#tl-from__surface', open: (page) => openList(page, '[data-testid="actionbar-trustline"]', 'tl-from'),
     policies: SELECT_LIST('#tl-from__trigger') },
 
-  // hud-dropdown: four menus of the two bars
-  { id: 'menu-advanced', catalogue: 'hud-dropdown', ui: 'auto', gesture: 'click "Advanced" in the top bar (Auto-Run)',
-    root: 'details[aria-label="Advanced"] > .ds-ov-dropdown', open: openDetails('summary[aria-label="Advanced settings"]'),
+  // hud-dropdown: four menus of the two bars (all four behind "Подробнее" since 043 S1)
+  { id: 'menu-advanced', catalogue: 'hud-dropdown', ui: 'auto', gesture: 'click "Advanced" in the top bar (Auto-Run, "Подробнее" on)',
+    details: { hiddenByDefault: 'summary[aria-label="Advanced settings"]' },
+    root: 'details[aria-label="Advanced"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Advanced settings"]'),
     policies: hudDropdown('summary[aria-label="Advanced settings"]') },
-  { id: 'menu-admin', catalogue: 'hud-dropdown', ui: 'interact', gesture: 'click "Admin" in the top bar (admin token)',
-    beforeLoad: routeToolbars,
-    root: 'details[aria-label="Admin controls"] > .ds-ov-dropdown', open: openDetails('summary[aria-label="Admin"]'),
+  { id: 'menu-admin', catalogue: 'hud-dropdown', ui: 'interact', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
+    beforeLoad: routeToolbars, details: { hiddenByDefault: 'summary[aria-label="Admin"]' },
+    root: 'details[aria-label="Admin controls"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Admin"]'),
     policies: hudDropdown('summary[aria-label="Admin"]') },
-  { id: 'menu-artifacts', catalogue: 'hud-dropdown', ui: 'auto', gesture: 'click "Artifacts" in the bottom bar (Auto-Run)',
-    beforeLoad: routeToolbars,
-    root: 'details[aria-label="Artifacts"] > .ds-ov-dropdown', open: openDetails('details[aria-label="Artifacts"] > summary'),
+  { id: 'menu-artifacts', catalogue: 'hud-dropdown', ui: 'auto', gesture: 'click "Artifacts" in the bottom bar (Auto-Run, "Подробнее" on)',
+    beforeLoad: routeToolbars, details: { hiddenByDefault: 'details[aria-label="Artifacts"] > summary' },
+    root: 'details[aria-label="Artifacts"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Artifacts"] > summary'),
     policies: hudDropdown('details[aria-label="Artifacts"] > summary') },
-  { id: 'menu-dev-tools', catalogue: 'hud-dropdown', ui: 'interact', gesture: 'click "Dev Tools" in the bottom bar (dev build only)',
-    root: 'details[aria-label="Dev tools"] > .ds-ov-dropdown', open: openDetails('details[aria-label="Dev tools"] > summary'),
+  { id: 'menu-dev-tools', catalogue: 'hud-dropdown', ui: 'interact', gesture: 'click "Dev Tools" in the bottom bar (dev build only, "Подробнее" on)',
+    details: { hiddenByDefault: 'details[aria-label="Dev tools"] > summary' },
+    root: 'details[aria-label="Dev tools"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Dev tools"] > summary'),
     policies: hudDropdown('details[aria-label="Dev tools"] > summary') },
 
   // the two bars and what expands inside them
-  { id: 'top-bar-interact', catalogue: 'top-hud-stack', ui: 'interact', gesture: 'always on screen (Interact)',
+  { id: 'top-bar-interact', catalogue: 'top-hud-stack', ui: 'interact', gesture: 'always on screen (Interact, the first view)',
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', ui: 'auto', gesture: 'always on screen (Auto-Run: scenario and run controls)',
+  { id: 'top-bar-interact-details', catalogue: 'top-hud-stack', ui: 'interact', gesture: 'click "Подробнее" (Interact: the row of service controls and the metrics)',
+    details: { hiddenByDefault: '[data-testid="top-details-row"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'graph-navigator', catalogue: 'top-hud-stack', ui: 'interact', gesture: 'click "Inspect graph" under the top bar',
+  { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', ui: 'auto', gesture: 'click "Подробнее" (Auto-Run: scenario and run controls)',
+    details: { hiddenByDefault: 'select[aria-label="Scenario"]' },
+    root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
+  { id: 'graph-navigator', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'click "Inspect graph" in the bottom bar ("Подробнее" on)',
+    details: { hiddenByDefault: '.graph-navigator' },
     root: '.graph-navigator',
     open: async (page) => {
       const d = page.locator('.graph-navigator > details')
       if (!(await d.evaluate((el) => (el as HTMLDetailsElement).open))) await d.locator('summary').click()
     },
     policies: { inside: 'viewport' } },
-  { id: 'bottom-bar', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'always on screen',
+  { id: 'bottom-bar', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'always on screen (the first view)',
+    root: '.ds-ov-bottom:not(.sar-interact-history-overlay)', open: async () => {}, policies: { inside: 'viewport' } },
+  { id: 'bottom-bar-details', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'click "Подробнее" (the row of view settings and tools)',
+    details: { hiddenByDefault: '[data-testid="bottom-details-row"]' },
     root: '.ds-ov-bottom:not(.sar-interact-history-overlay)', open: async () => {}, policies: { inside: 'viewport' } },
 
   // toasts, history, tooltip, analytics: no Escape, no focus, no outside click declared
@@ -314,8 +330,8 @@ export const MATRIX: Entry[] = [
       await page.mouse.move(e.at.x, e.at.y, { steps: 4 })
     },
     policies: { inside: 'viewport' } },
-  { id: 'analytics-panel', catalogue: 'real-metrics-panel', ui: 'interact', gesture: 'click "Analytics" in the bottom bar',
-    beforeLoad: routeAnalytics, root: '[data-surface="real-metrics-panel"]',
+  { id: 'analytics-panel', catalogue: 'real-metrics-panel', ui: 'interact', gesture: 'click "Analytics" in the bottom bar ("Подробнее" on)',
+    beforeLoad: routeAnalytics, root: '[data-surface="real-metrics-panel"]', details: { hiddenByDefault: '[data-testid="bottombar-analytics-toggle"]' },
     open: async (page) => {
       if (!(await page.locator('[data-surface="real-metrics-panel"]').isVisible())) await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
     },
@@ -474,6 +490,12 @@ export async function bootEntry(page: Page, e: Entry, theme: Theme, viewport: Vi
     beforeLoad: e.beforeLoad, ...(e.awaitScene === false ? { awaitScene: false as const } : {}), ...(e.clock || o.stillLayout ? {} : { awaitLayout: false as const }),
   })
   if (e.awaitScene !== false) await expect(page.locator('.root'), 'the theme of the test is the theme on screen').toHaveAttribute('data-theme', theme)
+  if (e.details) {
+    // 043 S1, anti-vacuum of the recipe: on the first view the service control is not rendered at all.
+    await expect(page.locator(e.details.hiddenByDefault), `${e.id}: "${e.details.hiddenByDefault}" is not on the first view (043 S1)`).toHaveCount(0)
+    await openDetails(page)
+    await expect(page.locator(e.details.hiddenByDefault).first(), `${e.id}: "${e.details.hiddenByDefault}" is on screen after "Подробнее"`).toBeVisible()
+  }
 }
 
 export type Box = { x: number; y: number; width: number; height: number }

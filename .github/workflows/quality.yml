@@ -125,7 +125,7 @@ jobs:
       # THE POWERSHELL PARTITION OF THE TOOLING TIER (025 T2502.2, 2026-10-03). The launcher checks
       # run once per PowerShell host they find, and this runner has both pwsh and Windows PowerShell;
       # they need no database, so they left the backend tier for the job that has the hosts. The
-      # session counts its cases against tooling-tests/conftest.py. Blocking: no if, no
+      # session refuses narrowing and skips (tooling-tests/conftest.py). Blocking: no if, no
       # continue-on-error (tooling-tests/conftest.py, tooling_ci_binding_violations).
       - name: Run the tooling tier, PowerShell partition
         shell: pwsh

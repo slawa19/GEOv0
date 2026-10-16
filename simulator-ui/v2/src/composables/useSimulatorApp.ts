@@ -1792,6 +1792,7 @@ export function useSimulatorApp(opts?: {
       hoveredEdge.used = edge.used ?? null
       hoveredEdge.available = edge.available ?? null
       hoveredEdge.edgeStatus = edge.edgeStatus ?? null
+      hoveredEdge.equivalent = edge.equivalent ?? null
       wakeUp()
     },
     hideEdgeTooltip: () => {

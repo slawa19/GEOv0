@@ -184,13 +184,33 @@ function toggleAnalyticsPanel(): void {
   analyticsPanelOpen.value = !analyticsPanelOpen.value
 }
 
+/**
+ * 043 S1: the one "Подробнее" toggle. Off by default (a first visit, or a browser that never chose); remembered in
+ * this browser through the same `read01`/`write01` pair as the analytics flag above, and applied without a reload.
+ * Every service control of the two bars is rendered only while it is on - and so is the analytics dock, whose toggle
+ * lives behind it: a remembered open dock does not reappear (nor poll) on a screen that has no control to close it.
+ */
+const detailsOpen = ref(simulatorStorage.readDetailsOpen() ?? false)
+
+watch(
+  detailsOpen,
+  (open) => {
+    simulatorStorage.writeDetailsOpen(open)
+  },
+  { flush: 'sync' },
+)
+
+function toggleDetails(): void {
+  detailsOpen.value = !detailsOpen.value
+}
+
 const app = useSimulatorApp({
   uiCloseTopmostInspectorWindow,
   uiOpenOrUpdateEdgeDetail,
   uiOpenOrUpdateNodeCard,
   uiIsNodeCardOpen: () => wm.windows.value.some((w) => w.type === 'node-card'),
   optionalFxEnabled: () => !reducedMotion.value,
-  isAnalyticsPanelOpen: () => analyticsPanelOpen.value,
+  isAnalyticsPanelOpen: () => detailsOpen.value && analyticsPanelOpen.value,
 })
 
 // MVP safety: ensure viewport isn't 0×0 even before `.root` ref is available.
@@ -519,6 +539,28 @@ function wmInteractPanelPhase(win: WindowInstance): InteractPhase {
   return String(win.data.phase ?? 'idle') as InteractPhase
 }
 
+/**
+ * 043 S1 (review, class 1): the unit the edge popup prints. Kept alive, it shows frozen figures - in the equivalent
+ * captured with them, never in the live scene's.
+ */
+const wmEdgeDetailEffectiveUnit = computed(() =>
+  wmEdgeDetail.state.value === 'keepAlive' ? (wmEdgeDetail.frozenEquivalent.value ?? '') : sceneEq.value,
+)
+
+/**
+ * 043 S1 (review, class 1): a replaced scene context - another equivalent, another scenario, another run - releases
+ * the kept-alive edge popup: its frozen line belongs to the scene that is gone. The payment panel the person is in
+ * stays; it is live (its figures, its unit and the equivalent it submits in follow the scene on screen).
+ */
+watch(
+  () => [sceneEq.value, shownScenarioId.value, real.runId] as const,
+  () => {
+    if (wmEdgeDetail.state.value !== 'keepAlive') return
+    wmEdgeDetail.releaseKeepAlive()
+    wmEdgeDetail.applyToWindowManager(wm, { closeReason: 'programmatic' })
+  },
+)
+
 const isInteractActivePhase = computed(() => {
   if (!isInteractUi.value) return false
   return toLower(interactPhase.value) !== 'idle'
@@ -752,8 +794,12 @@ function getActionBarAnchor(): Point | null {
 
   // Anchor at the left edge under the bar so the panel opens near ActionBar,
   // not docked to the far right.
+  // 043 S1: the ActionBar is in the FIRST row of the top stack; with "Подробнее" on, rows follow it. The panel opens
+  // under the whole stack, never over those rows (until 043 S1 the ActionBar was the stack's last row).
+  const stack = host.querySelector('.ds-ov-top-stack')
+  const stackBottom = stack instanceof HTMLElement ? stack.getBoundingClientRect().bottom - hostRect.top : Number.NEGATIVE_INFINITY
   const x = r.left - hostRect.left
-  const y = r.bottom - hostRect.top
+  const y = Math.max(r.bottom - hostRect.top, Number.isFinite(stackBottom) ? stackBottom : Number.NEGATIVE_INFINITY)
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   return { x, y }
 }
@@ -1029,6 +1075,8 @@ function onEdgeDetailCloseLine() {
    wmEdgeDetail.allowKeepAlive({
      frozenLink: interactSelectedLink.value,
      frozenFiguresSource: interactSelectedLinkFiguresSource.value,
+     // 043 S1 (review, class 1): the unit of the frozen figures is frozen with them.
+     frozenEquivalent: sceneEq.value,
    })
    // Do NOT close edge-detail — it persists as context.
 
@@ -1123,6 +1171,22 @@ function onActionStartClearingFlow() {
   })
 }
 
+/**
+ * 043 S1: the one onboarding hint (decision 1; a static line until the tour of 034 S9). Shown while a scene is on
+ * screen until the first action of this page: its own close button, "Подробнее", a participant selected, or any
+ * interact flow started. Not remembered across loads: the spec gives this slice one new stored key, and it is the
+ * Details toggle's. Not in the offline screenshot mode (isE2eScreenshots), which has its own minimal controls.
+ */
+const onboardingDismissed = ref(false)
+const showOnboardingHint = computed(() => !onboardingDismissed.value && !isE2eScreenshots.value && !!state.snapshot)
+const onboardingCanAct = computed(() => apiMode.value === 'real' && isInteractUi.value)
+function dismissOnboarding(): void {
+  onboardingDismissed.value = true
+}
+watch(detailsOpen, dismissOnboarding)
+watch(() => state.selectedNodeId, (id) => { if (id) dismissOnboarding() })
+watch(interactPhase, (p) => { if (toLower(p) !== 'idle') dismissOnboarding() })
+
 // When phase changes, reset local UI flags.
 // Reset useFullTrustlineEditor when leaving trustline phases (idle, payment, clearing)
 // so the NEXT edge click shows EdgeDetailPopup (not full editor).
@@ -1205,6 +1269,8 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
     />
 
     <TopBar
+      :details-open="detailsOpen"
+      @toggle-details="toggleDetails"
       @go-sandbox="goSandbox"
       @go-auto-run="goAutoRun"
       @go-interact="goInteract"
@@ -1222,18 +1288,10 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       @update:selected-scenario-id="realActions.setSelectedScenarioId"
       @update:intensity-percent="realActions.setIntensityPercent"
     >
-      <!-- HUD elements stacked below TopBar rows (inside ds-ov-top-stack via slot) -->
-      <template v-if="dataReady && (isInteractUi || isAutoRunUi)">
-        <!-- No snapshot - no balance (034 S8, review C3): unknown debts are not zero debts. -->
-        <SystemBalanceBar
-          v-if="state.snapshot"
-          :balance="interact.systemBalance"
-          :equivalent="sceneEq"
-          :compact="isAutoRunUi"
-        />
-
+      <!-- 043 S1: the three protocol actions in the first row (Interact only until S2). -->
+      <template #actions>
         <ActionBar
-          v-if="apiMode === 'real' && isInteractUi"
+          v-if="dataReady && apiMode === 'real' && isInteractUi"
           :phase="interactPhase"
           :busy="interact.mode.busy.value"
           :cancelling="interact.mode.cancelling?.value ?? false"
@@ -1243,17 +1301,27 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :start-trustline-flow="onActionStartTrustlineFlow"
           :start-clearing-flow="onActionStartClearingFlow"
         />
-
       </template>
 
-      <GraphNavigator
-        v-if="dataReady && !isE2eScreenshots"
-        :nodes="state.snapshot?.nodes ?? []"
-        :links="state.snapshot?.links ?? []"
-        :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi || interact.mode.busy.value"
-        @inspect-node="inspectNodeFromNavigator"
-        @inspect-edge="inspectEdgeFromNavigator"
+      <!-- 043 S1: the full metrics, below the rows, while Details is on (the total debt is in the bottom bar).
+           No snapshot - no balance (034 S8, review C3): unknown debts are not zero debts. -->
+      <SystemBalanceBar
+        v-if="detailsOpen && dataReady && (isInteractUi || isAutoRunUi) && state.snapshot"
+        :balance="interact.systemBalance"
+        :equivalent="sceneEq"
+        variant="metrics"
       />
+
+      <template #hint>
+        <div v-if="showOnboardingHint" class="ds-panel sar-onboarding-hint" data-testid="onboarding-hint">
+          <span class="sar-onboarding-hint__icon" aria-hidden="true">💡</span>
+          <span class="sar-onboarding-hint__text">
+            Линии — доверие между участниками. Выберите участника и наведите на его линию: кто кому доверяет и кто кому должен.
+            <template v-if="onboardingCanAct"> Нажмите <b>Send Payment</b>, чтобы попробовать самому.</template>
+          </span>
+          <button type="button" class="ds-btn ds-btn--ghost ds-btn--sm sar-onboarding-hint__close" aria-label="Close hint" @click="dismissOnboarding">✕</button>
+        </div>
+      </template>
     </TopBar>
 
     <!-- Step 2: WindowLayer (renders migrated windows from WM state). -->
@@ -1289,7 +1357,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           v-if="win.type === 'edge-detail'"
           :phase="wmEdgeDetailEffectivePhase"
           :state="wmEdgeDetailEffectiveState(win)"
-          :unit="sceneEq"
+          :unit="wmEdgeDetailEffectiveUnit"
           :used="emptyToNull(wmEdgeDetailEffectiveLink?.used)"
           :reverse-used="emptyToNull(wmEdgeDetailEffectiveLink?.reverse_used)"
           :limit="emptyToNull(wmEdgeDetailEffectiveLink?.trust_limit)"
@@ -1427,6 +1495,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :toggle-demo-ui="toggleDemoUi"
       :analytics-panel-open="analyticsPanelOpen"
       :toggle-analytics-panel="toggleAnalyticsPanel"
+      :details-open="detailsOpen"
       :fx-debug-enabled="apiMode === 'real' && fxDebug.enabled.value"
       :fx-busy="fxDebug.busy.value"
       :run-tx-once="isDemoUi ? demoRunTxOnce : fxDebug.runTxOnce"
@@ -1435,6 +1504,22 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       <!-- 039 slice B: a row INSIDE the bottom bar, above its controls; the bar's measured height includes it. -->
       <template #legend>
         <Legend :nodes="state.snapshot?.nodes" :equivalent="shownSnapshotEquivalent" :palette="dataPalette" />
+      </template>
+
+      <!-- 043 S1: the compact total debt, always in the bottom row. -->
+      <template v-if="dataReady && (isInteractUi || isAutoRunUi) && state.snapshot" #summary>
+        <SystemBalanceBar :balance="interact.systemBalance" :equivalent="sceneEq" variant="debt" />
+      </template>
+
+      <!-- 043 S1: "Inspect graph" (the keyboard path to nodes and lines) is a button of the bottom row, behind Details. -->
+      <template v-if="dataReady && !isE2eScreenshots" #navigator>
+        <GraphNavigator
+          :nodes="state.snapshot?.nodes ?? []"
+          :links="state.snapshot?.links ?? []"
+          :edge-inspect-disabled="apiMode !== 'real' || !isInteractUi || interact.mode.busy.value"
+          @inspect-node="inspectNodeFromNavigator"
+          @inspect-edge="inspectEdgeFromNavigator"
+        />
       </template>
     </BottomBar>
 
@@ -1512,7 +1597,7 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       v-if="isInteractUi && interact.mode.history.length > 0"
       class="ds-ov-bottom sar-interact-history-overlay"
     >
-      <InteractHistoryLog :entries="interact.mode.history" :max-visible="8" />
+      <InteractHistoryLog :entries="interact.mode.history" :max-visible="3" />
     </div>
   </div>
 </template>
@@ -1559,6 +1644,31 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
 .sar-e2e-legend {
   flex: 1 0 100%;
   margin-bottom: 0;
+}
+
+/* 043 S1: the onboarding hint hangs under the top stack (absolute: not part of its measured height), at the right edge,
+   under "Подробнее": the scene is framed into the middle of the screen, and a hint on the left covered its first nodes
+   (seen on the stand: a node of the ring and a payment's beam under it). */
+.sar-onboarding-hint {
+  position: absolute;
+  top: calc(100% + var(--ds-space-2, 8px));
+  right: 0;
+  max-width: min(360px, 100%);
+  font-size: 0.86rem;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2, 8px);
+  padding: var(--ds-space-2, 8px) var(--ds-space-3, 12px);
+  pointer-events: auto;
+  line-height: 1.4;
+}
+
+.sar-onboarding-hint__text {
+  flex: 1 1 auto;
+}
+
+.sar-onboarding-hint__close {
+  flex: 0 0 auto;
 }
 
 .sar-interact-history-overlay {

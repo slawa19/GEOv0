@@ -268,7 +268,7 @@ Dashboard), `GET /admin/participants/{pid}/metrics` — до `balance_rows`. Э�
 
 Клиринг (policy):
 - Фиксированный cadence (`SIMULATOR_CLEARING_EVERY_N_TICKS`) — единственная политика клиринга real mode: клиринг на тиках, где `tick_index % N == 0`; `N <= 0` выключает его.
-- **Решение 2026-09-28 (программа 021, стадия 3, `T2104`): адаптивная политика клиринга удалена.** Прежняя запись здесь описывала `SIMULATOR_CLEARING_POLICY=static|adaptive` и 12 ручек `SIMULATOR_CLEARING_ADAPTIVE_*`; режим включался только сырой переменной окружения, нигде не был включён и не был виден в API, SSE и UI. Удаление — решение владельца 2026-09-21 по П3 (`specs/README.md`, «П3 (021)»; `specs/021-simulator-as-domain-client/spec.md`, «Решения», п. 1). Переменные `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` больше не читаются; гард — `tests/unit/test_p021_adaptive_clearing_is_gone.py`. Историческая спецификация режима — `docs/ru/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`.
+- **Решение 2026-09-28 (программа 021, стадия 3, `T2104`): адаптивная политика клиринга удалена.** Прежняя запись здесь описывала `SIMULATOR_CLEARING_POLICY=static|adaptive` и 12 ручек `SIMULATOR_CLEARING_ADAPTIVE_*`; режим включался только сырой переменной окружения, нигде не был включён и не был виден в API, SSE и UI. Удаление — решение владельца 2026-09-21 по П3 (`specs/README.md`, «П3 (021)»; `specs/021-simulator-as-domain-client/spec.md`, «Решения», п. 1). Переменные `SIMULATOR_CLEARING_POLICY` и `SIMULATOR_CLEARING_ADAPTIVE_*` больше не читаются; гард — `tests/unit/test_p021_adaptive_clearing_is_gone.py`. Историческая спецификация режима — `docs/ru/archive/simulator/backend/archive/adaptive-clearing-policy-spec--archived-2026-02-13.md`.
 
 Расширение real mode (behavior model):
 - Спецификация: [simulator/backend/behavior-model-spec.md](simulator/backend/behavior-model-spec.md)
@@ -464,7 +464,7 @@ Candidate amount не является источником accounting; aggregat
 - Для CLI/автотестов вводим admin-only owner override через `X-Simulator-Owner`.
 - Для cookie-mode: обязателен `SIMULATOR_SESSION_SECRET` (guardrail вне dev/test) и CSRF защита минимум через `Origin` allowlist.
 
-Историческая спецификация решения: [simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md](simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md)
+Историческая спецификация решения: [simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md](archive/simulator/backend/archive/anonymous-visitors-cookie-runs-spec.md)
 
 ### 1.14. Аутентификация WebSocket без токена в URL
 

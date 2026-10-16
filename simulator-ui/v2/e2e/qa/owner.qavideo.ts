@@ -7,7 +7,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { pickRingRoute } from './oracle.js'
-import { RING, RUN_ID, SCENARIO_ID, EQ, boot, fxCounts, pushEvent, ringSnapshot, screenNodes, txUpdated } from './stand.js'
+import { RING, RUN_ID, SCENARIO_ID, EQ, boot, fxCounts, openDetails, pushEvent, ringSnapshot, screenNodes, txUpdated } from './stand.js'
 
 /** Let the page render `n` frames in real time. */
 async function realFrames(page: Page, n: number): Promise<void> {
@@ -24,6 +24,7 @@ async function sceneQuiet(page: Page): Promise<void> {
 }
 
 async function setQuality(page: Page, value: 'low' | 'med' | 'high'): Promise<void> {
+  await openDetails(page) // 043 S1: Quality is behind "Подробнее"
   await page.getByRole('combobox', { name: 'Quality' }).selectOption(value)
   await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>('.root')?.dataset.quality)).toBe(value)
 }
@@ -110,6 +111,7 @@ test('frames - the empty screen with the error after a scene that cannot be load
 
   await pushEvent(page, { type: 'run_status', run_id: RUN_ID, scenario_id: SCENARIO_ID, state: 'stopped', sim_time_ms: 0, intensity_percent: 0, ops_sec: 0, queue_depth: 0 })
   await realFrames(page, 20)
+  await openDetails(page) // 043 S1: the scenario selector is behind "Подробнее"
   await page.getByRole('combobox', { name: 'Scenario' }).selectOption(OTHER)
   await expect(page.locator('.ds-ov-inset[role="alert"]')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (window as unknown as { __geoSim: { hasSnapshot: boolean } }).__geoSim.hasSnapshot)).toBe(false)

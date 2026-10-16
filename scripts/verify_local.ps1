@@ -43,8 +43,8 @@ if ($UiOnly) {
 # launchers - need no database and live under `tooling-tests/`, outside the backend tier's
 # discovery (`pytest.ini` collects `tests` only). `-ToolingPartition` picks `portable` (plain
 # Python; CI's `static-diagnostics` job), `powershell` (the launchers; CI's Windows `required-ui`
-# job) or `all`. The session counts what it selected against `tooling-tests/conftest.py` and
-# refuses a drift either way. A run with no switch takes every partition after the backend tier;
+# job) or `all`. The session refuses narrowing, an empty partition, skips and a missing PowerShell
+# host (`tooling-tests/conftest.py`; no exact count since 2026-10-16, 041). A run with no switch takes every partition after the backend tier;
 # `-BackendOnly` and `-UiOnly` take none, because CI runs the partitions as their own steps.
 if ($ToolingOnly) {
     $ignoredToolingArguments = @()
@@ -230,7 +230,7 @@ try {
         }
         if ($runTooling) {
             Invoke-RequiredStep -Name "Tooling tests (pytest, partition $ToolingPartition)" -Command {
-                # The session itself refuses a count that differs from `tooling-tests/conftest.py`,
+                # The session itself (`tooling-tests/conftest.py`) refuses narrowing, an empty partition,
                 # any deselection, skip or missing PowerShell host; nothing here filters it.
                 # pytest creates `--basetemp` but not its parent: on a fresh slug the session died with
                 # FileNotFoundError in every tmp_path test (measured 2026-10-03, first run per slug).

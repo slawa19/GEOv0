@@ -43,13 +43,20 @@ type Props = {
   analyticsPanelOpen: boolean
   toggleAnalyticsPanel: () => void
 
+  /**
+   * 043 S1: the one "Подробнее" toggle (owned by the root). Off: the bottom row is the legend, the total debt (slot
+   * `summary`) and "Reset view". On: the row of service controls above it - EQ, Layout, Scene, Quality, Labels,
+   * Refresh, Analytics, Artifacts, Dev Tools and "Inspect graph" (slot `navigator`). Hidden means not rendered.
+   */
+  detailsOpen?: boolean
+
   fxDebugEnabled: boolean
   fxBusy: boolean
   runTxOnce: () => void | Promise<void>
   runClearingOnce: () => void | Promise<void>
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), { detailsOpen: false })
 
 const eq = defineModel<string>('eq', { required: true })
 const layoutMode = defineModel<string>('layoutMode', { required: true })
@@ -132,9 +139,8 @@ async function onRunClearingOnce() {
 
 <template>
   <div class="ds-ov-bottom">
-    <!-- 039 slice B: the legend is a row of this bar, above the controls - its height is part of the measured bar. -->
-    <div v-if="$slots.legend" class="ds-ov-bottom__legend"><slot name="legend" /></div>
-    <HudBar variant="ghost" layout="between" aria-label="Bottom bar">
+    <!-- 043 S1: the service row, while Details is on; above the main row, which therefore never moves. -->
+    <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" aria-label="Bottom bar" data-testid="bottom-details-row">
       <div class="hud-bar__left" aria-label="View settings">
         <div class="ds-row bb-row" aria-label="Equivalent">
         <span class="ds-label">EQ</span>
@@ -194,15 +200,6 @@ async function onRunClearingOnce() {
           @click="refreshSnapshot"
         >
           Refresh
-        </button>
-
-        <button
-          v-if="showResetView"
-          class="ds-btn ds-btn--ghost ds-btn--sm"
-          type="button"
-          @click="resetView"
-        >
-          Reset view
         </button>
 
         <button
@@ -313,24 +310,66 @@ async function onRunClearingOnce() {
         </details>
       </div>
 
-      <div v-else class="ds-ov-btn-group" aria-label="Offline tools">
+      <div v-if="$slots.navigator" class="bb-navigator"><slot name="navigator" /></div>
+    </div>
+    </HudBar>
+
+    <!-- 043 S1: the main row - always on screen. 039 slice B: the legend is part of this measured bar. -->
+    <HudBar variant="ghost" layout="between" class="bb-main-row">
+      <div v-if="$slots.legend" class="ds-ov-bottom__legend bb-main-legend"><slot name="legend" /></div>
+      <div class="hud-bar__right bb-main-right">
+        <slot name="summary" />
         <button
           v-if="showResetView"
-          class="ds-btn ds-btn--ghost ds-btn--sm"
+          class="ds-btn ds-btn--secondary ds-btn--sm"
           type="button"
           @click="resetView"
         >
           Reset view
         </button>
       </div>
-    </div>
     </HudBar>
   </div>
 </template>
 
 <style scoped>
+/* 043 S1: the rows of this bar are as tight as the top stack's (`--ds-hud-bar-py: 2px` there); nested HudBars inherit
+   it. Measured at 1366x768 (layout.qa.ts, R9): the main row with 10 px paddings made the first view 81 % canvas. */
+.ds-ov-bottom {
+  --ds-hud-bar-py: 2px;
+}
+
 .bb-row {
   gap: var(--ds-space-2, 8px);
+}
+
+.bb-main-legend {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.bb-main-right {
+  margin-left: auto;
+}
+
+/* "Inspect graph" is a button of the row; its panel opens upwards over the scene and does not grow the measured bar. */
+.bb-navigator {
+  position: relative;
+  min-width: 8.5rem;
+  align-self: stretch;
+}
+
+.bb-navigator :deep(.graph-navigator) {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 2 * var(--ds-ov-inset, 12px)));
+}
+
+/* Open: the panel floats above the row, so it never covers the row's other controls. */
+.bb-navigator :deep(.graph-navigator:has(> details[open])) {
+  bottom: calc(100% + var(--ds-space-2, 8px));
 }
 
 .bb-details {

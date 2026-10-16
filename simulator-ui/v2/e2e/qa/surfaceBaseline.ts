@@ -19,6 +19,11 @@
  *   `node-card` (2), which were `shadcn` only, lose their lines - 13 `color-contrast` nodes of `shadcn` in all (1 + 3 + 3 + 4 + 2; corrected from 15 after the external review), none of
  *   them fixed: they leave with the theme. `library` had no line apart from the two columns above. The `saas` and
  *   `hud` numbers did not move. `KNOWN_FINDINGS` now holds for both themes (it held for `hud` alone).
+ * - 2026-10-16 (043 S1, the first view and "Подробнее"): one node FIXED, none added. The `aria-prohibited-attr` of
+ *   `.hud-bar__center` (TopBar.vue, now inside the owner surface of 043) was an empty div named "Run controls" in
+ *   Interact; it is named only while it holds the run controls. `page` 2 -> 1 in both themes (`.wm-layer` stays);
+ *   `top-bar-interact` 1 -> 0 in both themes (line removed). The two new entries, `top-bar-interact-details` and
+ *   `bottom-bar-details`, measured 0 in both themes (no line). No other number moved.
  */
 import type { Theme } from './surfaceMatrix.js'
 
@@ -36,10 +41,8 @@ export const KNOWN_FINDINGS: Record<string, Array<{ finding: string; why: string
  * decide and reports them as `incomplete` - a blind zone of the stand, not a zero (see `qa-stand.md`).
  */
 export const AXE_BASELINE: Record<string, Partial<Record<Theme, Record<string, number>>>> = {
-  // `.hud-bar__center` and `.wm-layer`: the S0 start value (R8), unchanged.
-  page: { hud: { 'aria-prohibited-attr': 2 }, saas: { 'aria-prohibited-attr': 2 } },
-  // `.hud-bar__center` again, seen from inside the top bar; in Auto-Run the same node holds controls and axe does not flag it.
-  'top-bar-interact': { hud: { 'aria-prohibited-attr': 1 }, saas: { 'aria-prohibited-attr': 1 } },
+  // `.wm-layer`: what is left of the S0 start value (R8); `.hud-bar__center` was fixed by 043 S1 (2026-10-16).
+  page: { hud: { 'aria-prohibited-attr': 1 }, saas: { 'aria-prohibited-attr': 1 } },
   // hud: "Send payment", "Change limit", the ghost close button.
   'edge-popup': { hud: { 'color-contrast': 3 } },
   // The "Copy" button of a dev-only overlay (`?perf=1`).
@@ -48,8 +51,9 @@ export const AXE_BASELINE: Record<string, Partial<Record<Theme, Record<string, n
 
 /** Why each baselined axe rule stands. A rule that appears in `AXE_BASELINE` must be named here. */
 export const AXE_WHY: Record<string, string> = {
-  'aria-prohibited-attr': 'An `aria-label` on a `div` without a role: `.hud-bar__center` (TopBar.vue) and `.wm-layer` (SimulatorAppRoot.vue). '
-    + 'Both files are outside the owner surface of 038, and the cure - a role, or no label - is a decision of the maintainer of the HUD. Recorded 2026-10-11 (S0, R8).',
+  'aria-prohibited-attr': 'An `aria-label` on a `div` without a role: `.wm-layer` (SimulatorAppRoot.vue). '
+    + 'Outside the owner surface of 038, and the cure - a role, or no label - is a decision of the maintainer of the HUD. Recorded 2026-10-11 (S0, R8); '
+    + 'the second node of that date, `.hud-bar__center` (TopBar.vue), was fixed by 043 S1 on 2026-10-16.',
   'color-contrast': 'The cure is a colour, and the stand does not change colours (owner\'s decision 2026-10-10: he does the visual acceptance himself). '
     + 'The nodes are in the report of the run, for him. Recorded 2026-10-11.',
 }
