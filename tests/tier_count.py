@@ -124,7 +124,9 @@ NARROWING_OPTIONS = (
 def is_whole_tier(*, args: Sequence[str], invocation_dir: Path, root: Path) -> bool:
     """True when the session collects the whole tier: no positional argument, or only the tier directory itself.
 
-    `args` are the session's positional arguments after pytest has substituted `testpaths` for an empty list.
+    `args` are the positional paths the caller actually gave (`config.args_source == ArgsSource.ARGS`), or an empty
+    list when pytest substituted `testpaths` or the invocation directory - so a `-o testpaths=...` cannot pass for a
+    selector (041 fix-delta, 2026-10-16).
     A `path::node` argument is a selector; so is every path other than the tier directory itself.
     """
 
