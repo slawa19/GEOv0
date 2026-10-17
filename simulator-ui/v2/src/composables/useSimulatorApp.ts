@@ -516,15 +516,12 @@ export function useSimulatorApp(opts?: {
       const p = toLower(new URLSearchParams(window.location.search).get('mode'))
       if (p === 'real') return 'real'
       if (p === 'fixtures') return 'fixtures'
-      // Backward-compat: legacy param value.
-      if (p === 'demo') return 'fixtures'
     } catch {
       // ignore
     }
     const env = toLowerTrim(import.meta.env.VITE_API_MODE)
     if (env === 'real') return 'real'
     if (env === 'fixtures') return 'fixtures'
-    if (env === 'demo') return 'fixtures'
     // 043 S2 (decision 2): opening the demo is a live run on the server. The offline snapshot is a choice - the
     // "Источник" select under "Подробнее" (`?mode=fixtures`) or `VITE_API_MODE=fixtures` - not the default.
     return 'real'
