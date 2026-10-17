@@ -621,8 +621,19 @@ export function useSimulatorApp(opts?: {
     selectedScenarioId: lsGet('geo.sim.v2.selectedScenarioId', ''),
     // Default lower than demo to keep real-mode readable (avoid dozens of overlapping sparks).
     intensityPercent: (() => {
-      const fallback = 30
+      const fallback = AUTOSTART_DEFAULT_INTENSITY_PERCENT
       const raw = lsGet('geo.sim.v2.intensityPercent', '')
+      // 043 S3 (decision 5): a stored 0 is what the removed Interact mode forced and kept; it is dropped here, once per
+      // stored value (the key is removed), instead of a reset after the pipeline is wired. A 0 a person stores by hand is
+      // dropped the same way at the next load - nothing tells the two apart - as the removed reset did on every load.
+      if (raw.trim() === '0') {
+        try {
+          localStorage.removeItem('geo.sim.v2.intensityPercent')
+        } catch {
+          // ignore
+        }
+        return fallback
+      }
       if (!raw) return fallback
       const n = Number(raw)
       if (!Number.isFinite(n)) return fallback
@@ -1689,13 +1700,6 @@ export function useSimulatorApp(opts?: {
   })
   handleRealSceneContextChange = realMode.handleSceneContextChange
   resetStaleRunOwner = realMode.resetStaleRun
-
-  // Real mode: if intensity ends up 0 (common after legacy Interact UI persistence, which forced and stored 0),
-  // reset to a sensible default so a newly started run actually produces events. (043 S3 removes this with a one-off
-  // clean-up of the stored 0; decision 5.)
-  if (isRealMode.value && real.intensityPercent === 0) {
-    real.intensityPercent = AUTOSTART_DEFAULT_INTENSITY_PERCENT
-  }
 
   // 043 S2: the Interact contract "intensity forced to 0, local-only" (`33563ba2`) is gone with the mode. What keeps the
   // automatic payments out of a person's way now is the pause on a manual action (decision 3, below).

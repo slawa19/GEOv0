@@ -185,6 +185,8 @@ describe('043 S2 (decision 2): opening the demo is a live run', () => {
     boot()
     await settle()
     expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 30 })
+    // 043 S3: the stale 0 is cleaned from storage at load (it no longer waits for a reset after the wiring).
+    expect(window.localStorage.getItem('geo.sim.v2.intensityPercent'), 'the stale 0 is gone from storage').toBeNull()
   })
 
   it('409 (the backend already runs one for this visitor): the active run is attached', async () => {
