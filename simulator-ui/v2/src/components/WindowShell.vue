@@ -130,7 +130,11 @@ function focusInitialTarget() {
   const active = document.activeElement
   if (active instanceof HTMLElement && shell.contains(active)) return
 
-  const target = getFocusableElements(shell)[0] ?? shell
+  // 045 S2 (advisor 2026-10-17): a window may NAME its first focus with `data-initial-focus` on a focusable control - opt-in,
+  // and only where focus is contained (interact panels). Without a usable marker the rule is the old one: the first focusable.
+  const focusables = getFocusableElements(shell)
+  const named = focusables.find((el) => el.hasAttribute('data-initial-focus'))
+  const target = named ?? focusables[0] ?? shell
   target.focus()
 }
 
