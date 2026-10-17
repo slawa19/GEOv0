@@ -1764,7 +1764,6 @@ export function useSimulatorApp(opts?: {
     isManualActionActive,
     real,
     realMode: {
-      refreshScenarios: realMode.refreshScenarios,
       startRun: (o) => realMode.startRun(o),
     },
   })

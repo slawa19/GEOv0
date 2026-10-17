@@ -32,7 +32,7 @@ import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
 import { toLower } from '../utils/stringHelpers'
-import { runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
+import { noScenarioText, runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -1212,9 +1212,11 @@ export function useSimulatorRealMode(opts: {
       real.lastError = startRunErrorText(e, getErrorMessage)
     } finally {
       startRunInProgress = false
-      // A start that ended without a live run leaves no pause to wait for (043 S2).
+      // A start that ended without a run, or with a run that has ended, leaves no pause to wait for (043 S2). A run
+      // whose status is not known yet (a transient failure of the first read; review C5) keeps the pending pause: it
+      // is applied the moment a later read or the stream says `running`.
       const st = toLower(real.runStatus?.state)
-      if (st !== 'running' && st !== 'created') manualPausePending = false
+      if (!real.runId || st === 'stopped' || st === 'error' || st === 'paused') manualPausePending = false
     }
   }
 
@@ -1439,7 +1441,11 @@ export function useSimulatorRealMode(opts: {
             await refreshRunStatus()
             if (real.runId) {
               await refreshSnapshot()
-              if (real.runId) {
+              // 043 S2 (review C6): an ENDED run (`stopped`, `error`) gets no event stream - there is nothing live to
+              // follow, and on the one screen the opening replaces it (`useInteractAutoBootstrapRun.ts`). A live run, and
+              // a run whose status could not be read (the stream is how it shows up again), still get it.
+              const ended = !!real.runStatus && !isLiveRunState(real.runStatus.state)
+              if (real.runId && !ended) {
                 // SSE loop is long-lived; do not await it during boot.
                 // The error of the status/snapshot reads above is not stale: keep it on screen.
                 void runSseLoop({ preserveLastError: true })
@@ -1452,6 +1458,13 @@ export function useSimulatorRealMode(opts: {
           // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
           if (real.selectedScenarioId && !real.runId) {
             await refreshSnapshot()
+          }
+          // 043 S2 (review B5/C4): no run and no scenario to show (the catalogue is empty, or its read failed) - nothing
+          // will load a scene, so the opening ends here: the loading is over and the error line says why (a failed read
+          // already holds its error).
+          if (!real.runId && !real.selectedScenarioId) {
+            state.loading = false
+            if (!real.lastError) real.lastError = noScenarioText()
           }
           // 043 S2 (external review 2026-10-17): the dev-only `?autostart=1` start that stood here is gone - the opening
           // of the one screen (`useInteractAutoBootstrapRun.ts`) is the single owner of a start nobody pressed.

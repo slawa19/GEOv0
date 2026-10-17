@@ -12,10 +12,12 @@ import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
+import { connectSse } from '../api/sse'
 import {
   createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios, pauseRun, resumeRun, stopRun,
 } from '../api/simulatorApi'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
+import { keyEdge } from '../utils/edgeKey'
 import { autostartDecision } from './useInteractAutoBootstrapRun'
 import { useSimulatorApp } from './useSimulatorApp'
 
@@ -52,7 +54,8 @@ function snap(nodeId: string): SimulatorGraphSnapshot {
     equivalent: 'UAH',
     generated_at: '2026-10-16T00:00:00Z',
     nodes: [{ id: nodeId, name: nodeId, type: 'person', status: 'active' }, { id: 'B', name: 'B', type: 'person', status: 'active' }],
-    links: [],
+    // One line between the two nodes (the node of the run is named after it): "Inspect edge" and a line click need it.
+    links: [{ source: nodeId, target: 'B', trust_limit: '100', used: '0', available: '100', status: 'active' }],
   } as unknown as SimulatorGraphSnapshot
 }
 
@@ -90,6 +93,7 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   runs.clear()
   for (const m of [listScenarios, getActiveRun, getRun, getSnapshot, getScenarioPreview, createRun, pauseRun, resumeRun, stopRun]) vi.mocked(m).mockReset()
+  vi.mocked(connectSse).mockClear()
   vi.mocked(listScenarios).mockResolvedValue({ api_version: 'simulator-api/1', items: [{ scenario_id: 'sc1', label: 'Scenario 1' }] } as never)
   vi.mocked(getActiveRun).mockResolvedValue({ run_id: null } as never)
   vi.mocked(getRun).mockImplementation((async (_c: unknown, id: string) => status(id)) as never)
@@ -412,6 +416,78 @@ describe('043 S2 fix round (external review 2026-10-17): one create per start, a
     expect(createRun).toHaveBeenCalledTimes(1)
   })
 
+  for (const ended of ['stopped', 'error']) {
+    it(`C6: a stored run that has ended (${ended}) gets no live event stream before the opening decides`, async () => {
+      storedRun('R_OLD', ended)
+      heldCreate() // the opening's create stays in flight: what was opened before it is what the test reads
+      boot()
+      await settle()
+      expect(createRun, 'precondition: the opening is starting a new run').toHaveBeenCalledTimes(1)
+      const urls = vi.mocked(connectSse).mock.calls.map((c) => String((c[0] as { url?: string }).url ?? ''))
+      expect(urls.filter((u) => u.includes('R_OLD')), 'no stream of the ended run').toEqual([])
+    })
+  }
+
+  // The race above is won by the opening in this harness (its start resets the ended run before the boot's stream
+  // connects), so the stream of an ended run is shown where nothing else starts: a page without the one screen.
+  it('C6: the boot opens no event stream for an ended stored run (shown where no opening starts: Demo UI)', async () => {
+    window.history.replaceState({}, '', '/?ui=demo')
+    storedRun('R_OLD', 'stopped')
+    const app = boot()
+    await settle()
+    expect(app.isLiveUi.value, 'precondition: no opening on this page').toBe(false)
+    const urls = vi.mocked(connectSse).mock.calls.map((c) => String((c[0] as { url?: string }).url ?? ''))
+    expect(urls.filter((u) => u.includes('R_OLD')), 'no stream of the ended run').toEqual([])
+    expect(app.real.runStatus?.state, 'its status is still read and shown').toBe('stopped')
+  })
+
+  it('C6 counter-check: a stored LIVE run (paused) is attached with its stream', async () => {
+    storedRun('R1', 'paused')
+    boot()
+    await settle()
+    const urls = vi.mocked(connectSse).mock.calls.map((c) => String((c[0] as { url?: string }).url ?? ''))
+    expect(urls.some((u) => u.includes('R1')), 'the stream of the live run is open').toBe(true)
+  })
+
+  it('B5: an EMPTY catalogue ends the loading, says so on the error line, starts nothing', async () => {
+    vi.mocked(listScenarios).mockResolvedValue({ api_version: 'simulator-api/1', items: [] } as never)
+    document.documentElement.lang = 'ru'
+    try {
+      const app = boot()
+      await settle()
+      expect(app.state.loading, 'the opening is over').toBe(false)
+      expect(app.real.lastError).toBe('На сервере нет сценариев: показать нечего.')
+      expect(createRun).not.toHaveBeenCalled()
+    } finally {
+      document.documentElement.lang = ''
+    }
+  })
+
+  it('B5: a FAILED catalogue read ends the loading and keeps its error on the error line, starts nothing', async () => {
+    vi.mocked(listScenarios).mockRejectedValue(new ApiError('HTTP 503 Service Unavailable for /simulator/scenarios', { status: 503 }))
+    const app = boot()
+    await settle()
+    expect(app.state.loading, 'the opening is over').toBe(false)
+    expect(app.real.lastError).toContain('HTTP 503')
+    expect(createRun).not.toHaveBeenCalled()
+  })
+
+  it('C5: an action during the create of the opening, then a failed first status read (502): the pause still comes when the run reads running', async () => {
+    const held = heldCreate()
+    const app = boot()
+    await settle()
+    app.interact.mode.startPaymentFlow() // the person acts while the create is in flight
+    await settle()
+    vi.mocked(getRun).mockRejectedValueOnce(new ApiError('HTTP 502 Bad Gateway for /simulator/runs/R_NEW', { status: 502 }))
+    held.release()
+    await settle()
+    expect(app.real.runId, 'the run exists').toBe('R_NEW')
+    expect(pauseRun, 'nothing to pause yet: its status is unknown').not.toHaveBeenCalled()
+    await app.admin.attachRun('R_NEW') // a later read of the status (the stream's run_status does the same)
+    await settle()
+    expect(pauseRun, 'paused the moment it reads running').toHaveBeenCalledTimes(1)
+  })
+
   /** A running run, a flow already open and the flow brought back by "Поток": the state every entry below starts from. */
   async function openFlowResumed(open: (app: ReturnType<typeof useSimulatorApp>) => void) {
     storedRun('R1', 'running')
@@ -441,6 +517,8 @@ describe('043 S2 fix round (external review 2026-10-17): one create per start, a
     ['ActionBar: Run Clearing pressed again', (a) => a.interact.mode.startClearingFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startClearingFlow() }],
     ['node card: Send Payment from a participant, over an open payment', (a) => a.interact.mode.startPaymentFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startPaymentFlowWithFrom('B') }],
     ['node card: New trust line from a participant, over an open trust line flow', (a) => a.interact.mode.startTrustlineFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startTrustlineFlowWithFrom('B') }],
+    ['"Inspect edge" / a line clicked, over an open flow', (a) => a.interact.mode.startPaymentFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.selectEdge(keyEdge('R1_NODE', 'B'), { x: 10, y: 10 }) }],
+    ['node card ✏️: a line of the participant chosen to edit', (a) => a.interact.mode.startPaymentFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.selectTrustline('R1_NODE', 'B') }],
     ['canvas: a participant picked in the flow', (a) => a.interact.mode.startPaymentFlow(), (a) => a.interact.mode.selectNode('B')],
   ]
   for (const [name, open, act] of ENTRIES) {

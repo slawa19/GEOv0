@@ -64,3 +64,8 @@ export function startRunErrorText(e: unknown, fallback: (e: unknown) => string, 
   }
   return fallback(e)
 }
+
+/** 043 S2 (review B5): the error line when the server offers no scenario at all - the opening has nothing to show. */
+export function noScenarioText(locale: UiLocale = uiLocale()): string {
+  return locale === 'ru' ? 'На сервере нет сценариев: показать нечего.' : 'The server offers no scenario: there is nothing to show.'
+}

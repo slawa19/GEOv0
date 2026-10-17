@@ -102,3 +102,27 @@ test('(d) entering the manual flow is zero navigations of the document', async (
   expect(navigations, 'no document navigation on the way into the flow').toBe(0)
   expect(await page.evaluate(() => (window as unknown as { __s2Marker?: number }).__s2Marker), 'the same document').toBe(1)
 })
+
+// 043 S2 review round (Gemini B3/B4, 2026-10-17): the page's own language and a start the server refuses.
+test('(b) a start refused by the global limit of runs: a Russian line from the real page language, and no action without a run', async ({ page }) => {
+  let creates = 0
+  await boot(page, {
+    snapshot: ringSnapshot(), clock: false, firstVisit: true, awaitScene: false,
+    beforeLoad: async (p) => {
+      await p.route(/\/simulator\/runs$/i, (r) => {
+        if (r.request().method() !== 'POST') return r.fallback()
+        creates += 1
+        return r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+          error: { code: 'E008', message: 'Global active runs limit reached', details: { conflict_kind: 'global_active_limit', max_active_runs: 1, active_runs: 1 } },
+        }) })
+      })
+    },
+  })
+  await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
+  expect(await page.evaluate(() => document.documentElement.lang), 'the language the page declares (index.html)').toBe('ru')
+  await expect(page.locator('[role="alert"][aria-label="Error"]'), 'the refusal in the interface language')
+    .toContainText('Демо уже кто-то смотрит на этом сервере', { timeout: 15_000 })
+  expect(creates, 'one attempt').toBe(1)
+  // No run: the three actions are there and disabled (B4), so no raw "No active run_id" can be reached.
+  for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) await expect(page.getByTestId(id), `${id} without a run`).toBeDisabled()
+})

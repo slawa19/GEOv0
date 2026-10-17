@@ -102,8 +102,11 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   "Поток", cancel does not resume; (c) a participant chosen pauses; (c) a run somebody paused is not resumed or
  *   doubled at opening; (d) zero navigations into the manual flow. 122 + 5 = 127; full 217 + 5 = 222. No test left or
  *   changed scope; the matrix lost its `ui` field (one screen: every entry opens the same address), not an entry.
+ * - 2026-10-17 (043 S2, review round): gate 127 -> 128, full 222 -> 223. One test of `one-screen.qa.ts`: a start the server
+ *   refuses by its global limit of runs shows the Russian line chosen by the page's own `lang` (`index.html`), and the
+ *   three actions are disabled without a run (external review, Gemini B3/B4).
  */
-export const EXPECTED = { gate: 127, full: 222 }
+export const EXPECTED = { gate: 128, full: 223 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

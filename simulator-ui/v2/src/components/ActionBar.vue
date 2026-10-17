@@ -42,7 +42,7 @@ function titleFor(_key: ActivePanelKey, idleTitle: string): string {
   if (props.busy) return 'Operation in progress… please wait.'
   if (isFlowActive.value) return 'Cancel current action first (press ESC).'
   if (props.actionsDisabled) return 'Actions are disabled by backend feature flags.'
-  if (props.runTerminal) return 'Run is stopped or in error state. Start a run first.'
+  if (props.runTerminal) return 'No run, or the run is stopped or in error state. Start a run first.'
   return idleTitle
 }
 

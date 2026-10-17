@@ -101,7 +101,7 @@ test('039 R7 - after a clearing the system balance states the total debt BEFORE 
     const el = document.querySelector(sel)!
     const seen: string[] = []
     ;(window as unknown as { __p039Bar: string[] }).__p039Bar = seen
-    const read = () => { const t = /Total Debt\s*([\d.]+)/.exec((el.textContent ?? '').replace(/\s+/g, ' '))?.[1]; if (t && seen[seen.length - 1] !== t) seen.push(t) }
+    const read = () => { const t = /Общий долг\s*([\d.]+)/.exec((el.textContent ?? '').replace(/\s+/g, ' '))?.[1]; if (t && seen[seen.length - 1] !== t) seen.push(t) }
     read()
     new MutationObserver(read).observe(el, { childList: true, subtree: true, characterData: true })
     const sse = (window as unknown as { __qaSse: { push: (t: string) => Promise<number> } }).__qaSse

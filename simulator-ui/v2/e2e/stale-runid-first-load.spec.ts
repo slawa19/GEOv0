@@ -134,5 +134,5 @@ test('real mode: stale persisted runId does not block first preview load', async
   // was applied rather than merely observing the fallback state.
   // 028 F-028-48 (T2882): the totals are exact money text shown at the equivalent's precision (UAH: 2), no longer
   // rounded to whole units - the sentinel used 7 and now reads 7.00.
-  expect(await readMetricValue(page, 'Total Debt')).toBe('7.00 UAH')
+  expect(await readMetricValue(page, 'Общий долг')).toBe('7.00 UAH')
 })

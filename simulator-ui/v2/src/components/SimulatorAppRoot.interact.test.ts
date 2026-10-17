@@ -547,7 +547,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           scenarios: [],
           selectedScenarioId: '',
           intensityPercent: 0,
-          runId: null as string | null,
+          // 043 S2 (review B4): the one screen has a run to act on; without one the actions are disabled. Tests of the
+          // "no run" state set it to null themselves.
+          runId: 'run-mock' as string | null,
           runStatus: null as Record<string, unknown> | null,
           sseState: 'idle',
           lastError: '',
@@ -2358,6 +2360,102 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       app.unmount()
       host.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // 043 S2 review round (Gemini C1/C2, 2026-10-17): the root's own entries of a manual action - the ones that are not a
+  // flow transition of the composable - ask for the pause themselves.
+  const rootActions = (app: ReturnType<typeof mountSimulatorAppRoot>) =>
+    (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance.subTree.component.setupState
+
+  it('043 S2 (C2): opening a node card (double click, the dev hook, the navigator) pauses, also for the node already selected', async () => {
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const actions = rootActions(app).realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+      const open = getRequiredGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD')
+      open?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      open?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      expect(actions.pauseForManualAction, 'each opening of a card is an act').toHaveBeenCalledTimes(2)
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('043 S2 (C1): "Inspect graph" -> a node selects it (the same selection path as a click) and pauses', async () => {
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const setup = rootActions(app)
+      const actions = setup.realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+      setup.inspectNodeFromNavigator('bob')
+      expect((setup.state as { selectedNodeId: string | null }).selectedNodeId, 'the node is selected').toBe('bob')
+      expect(actions.pauseForManualAction).toHaveBeenCalled()
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('043 S2 (B4): without a run the three actions are disabled, with their reason; with a run they are enabled', async () => {
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const real = rootActions(app).real as { runId: string | null }
+      const buttons = () => ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing'].map((id) => host.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!)
+      expect(buttons().map((b) => b.disabled), 'a run: enabled').toEqual([false, false, false])
+      real.runId = null
+      await nextTick()
+      expect(buttons().map((b) => b.disabled), 'no run: disabled').toEqual([true, true, true])
+      expect(buttons()[0]!.title).toContain('No run')
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('043 S2 (C2): "Close line" of a line\'s popup pauses', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      answerWithTrustlineForSelectedPair()
+      await nextTick()
+      await nextTick()
+      const actions = rootActions(app).realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+      const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      closeLine?.click()
+      await nextTick()
+      closeLine?.click()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')).toHaveBeenCalledOnce()
+      expect(actions.pauseForManualAction, 'Close line pauses').toHaveBeenCalledTimes(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
       vi.unstubAllGlobals()
     }
   })
@@ -6100,7 +6198,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(host.querySelector('[data-testid="network-state"]')?.tagName, 'the state is text, not a control').toBe('SPAN')
       // The total debt is in the bottom row, compact.
       const bottom = [...host.querySelectorAll('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
-      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).toContain('Total Debt')
+      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).toContain('Общий долг')
       expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).not.toContain('Utilization')
     } finally {
       done()

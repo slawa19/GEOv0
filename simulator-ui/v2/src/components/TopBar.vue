@@ -59,13 +59,21 @@ function onFlowToggle() {
   else if (flowState.value === 'paused') emit('resume')
 }
 
+/**
+ * 043 S2 (review B1): the name of a scenario as the API gives it - `name` (the decoder, `simulatorContracts.ts`); `label`
+ * is a UI-only compatibility field the REST decoder never fills. Empty when neither is set: the caller shows the id.
+ */
+function scenarioTitle(s: { name?: string | null; label?: string } | undefined): string {
+  return s?.name?.trim() || s?.label?.trim() || ''
+}
+
 /** The network on screen, as text: the label of the scenario of the run (or of the selected one), its id otherwise. */
 const networkName = computed(() => {
   if (ctx.apiMode.value !== 'real') return 'офлайн-демо'
   const id = String(ctx.runStatus.value?.scenario_id ?? '').trim() || String(ctx.selectedScenarioId.value ?? '').trim()
   if (!id) return '—'
   const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
-  return s?.label?.trim() || id
+  return scenarioTitle(s) || id
 })
 
 /** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
@@ -366,7 +374,7 @@ function onApplyIntensity() {
             >
               <option value="">— select —</option>
               <option v-for="s in ctx.scenarios.value" :key="s.scenario_id" :value="s.scenario_id">
-                {{ s.label ? `${s.label} (${s.scenario_id})` : s.scenario_id }}
+                {{ scenarioTitle(s) ? `${scenarioTitle(s)} (${s.scenario_id})` : s.scenario_id }}
               </option>
             </select>
             <button

@@ -154,6 +154,9 @@ function uiOpenOrUpdateEdgeDetail(o: { fromPid: string; toPid: string; anchor: P
 }
 
 function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
+  // 043 S2 (decision 3; review C2): opening a participant's card is a manual act - the double click, "Inspect graph",
+  // the dev hook all come here - and it pauses even when the participant is already the selected one.
+  void realActions.pauseForManualAction()
   if (windowController) {
     windowController.uiOpenOrUpdateNodeCard(o)
     return
@@ -623,7 +626,13 @@ onUnmounted(() => {
   resetOverlayGeometryPublishers()
 })
 
+/**
+ * The actions have no run to act on: none is attached (a refused or failed start, a stopped run reset, the opening's
+ * start still in flight) or the run has ended. 043 S2 (review B4): until then "no run" left the three actions enabled
+ * and the person got the raw "No active run_id" of the action instead of a disabled button with its reason.
+ */
 const interactRunTerminal = computed(() => {
+  if (!real.runId) return true
   const st = toLower(real.runStatus?.state)
   return st === 'stopped' || st === 'error'
 })
@@ -798,6 +807,8 @@ function captureInteractFlowOpener(
 }
 
 function inspectNodeFromNavigator(nodeId: string): void {
+  // 043 S2 (review C1): the same selection as a double click on the canvas (`openNodeCardFromCanvasDblClick`), then the card.
+  state.selectedNodeId = nodeId
   uiOpenOrUpdateNodeCard({ nodeId, anchor: getNodeScreenCenter(nodeId) })
 }
 
@@ -997,6 +1008,8 @@ function onEdgeDetailCloseLine() {
   // `F-013-7`: отключённая кнопка — это видимость гарда, а не гард: этот обработчик
   // вызывается по событию от попапа, и решение о мутации принимается здесь же, где известно основание.
   if (!canActOnTrustlineFigures(wmEdgeDetailFiguresSource.value)) return
+  // 043 S2 (review C2): closing a line from its popup is a manual act of its own.
+  void realActions.pauseForManualAction()
   captureInteractFlowOpener('[data-testid="actionbar-trustline"]', {
     focusOwnerType: 'edge-detail',
     preferFallback: true,

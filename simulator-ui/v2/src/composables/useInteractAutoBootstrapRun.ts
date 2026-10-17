@@ -51,7 +51,6 @@ export function useInteractAutoBootstrapRun(deps: {
     scenarios?: ScenarioSummary[] | null
   }
   realMode: {
-    refreshScenarios: () => Promise<void>
     startRun: (opts: { intensityPercent: number; pauseImmediately: boolean }) => Promise<void>
   }
 }): {
@@ -67,10 +66,9 @@ export function useInteractAutoBootstrapRun(deps: {
     const decision = autostartDecision(deps.real.runId, deps.real.runStatus)
     if (decision !== 'start') return decision
 
+    // The catalogue was read by the opening itself (043 S2, review B5: no second read here - an empty or failed
+    // catalogue has already ended the opening and put its reason on the error line).
     if (!String(deps.real.selectedScenarioId ?? '').trim()) {
-      if (!deps.real.loadingScenarios && (deps.real.scenarios?.length ?? 0) === 0) {
-        await deps.realMode.refreshScenarios()
-      }
       const scenarios = deps.real.scenarios ?? []
       const preferred = scenarios.find((s) => readScenarioId(s) === INTERACT_AUTOSTART_SCENARIO_ID)
       if (preferred) deps.real.selectedScenarioId = INTERACT_AUTOSTART_SCENARIO_ID

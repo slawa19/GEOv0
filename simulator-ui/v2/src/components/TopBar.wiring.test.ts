@@ -176,4 +176,18 @@ describe('TopBar wiring - what each control emits', () => {
     expect(flow(), 'the offline snapshot has no run').toBeNull()
     done()
   })
+
+  it('043 S2 (review B1): the network is named by the scenario NAME the API gives (`name`; `label` is a UI-only field)', async () => {
+    const scenarios = ref([{ scenario_id: 'riverside-town-50', name: 'Riverside town' }, { scenario_id: 'other', name: '  ' }])
+    const selectedScenarioId = ref('riverside-town-50')
+    const { host, done } = mountTopBar(context({ scenarios, selectedScenarioId, runStatus: ref(null) } as Partial<TopBarContext>), true)
+    await nextTick()
+    expect(host.querySelector('[data-testid="network-name"]')!.textContent, 'the name, not the slug').toContain('Riverside town')
+    const options = [...host.querySelectorAll<HTMLOptionElement>('select[aria-label="Scenario"] option')].map((o) => o.textContent!.trim())
+    expect(options, 'the selector names the scenario too; a blank name falls back to the id').toEqual(['— select —', 'Riverside town (riverside-town-50)', 'other'])
+    selectedScenarioId.value = 'other'
+    await nextTick()
+    expect(host.querySelector('[data-testid="network-name"]')!.textContent, 'a blank name: the id').toContain('other')
+    done()
+  })
 })
