@@ -789,22 +789,6 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           <div data-testid="mp-line-direction-note">{{ interactText('lineDirectionNote') }}</div>
         </details>
 
-        <!--
-          045 S2: the one information line of the confirm step - the figures, separated by " · ", their source in grey. The direct
-          capacity is the line's (marked with where it came from, 037 F-037-1); the two captions of the chosen recipient come from the
-          server's `payment-targets` answer, NOT from the line figures. The explanations are the `title` of their figure.
-        -->
-        <div class="ds-help mp-info" data-testid="mp-info">
-          <span data-testid="mp-direct-capacity-help" :title="interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ interactText('directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
-          <span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
-          <template v-if="estimate">
-            <span class="ds-muted" aria-hidden="true">·</span>
-            <span data-testid="mp-estimate">{{ interactText('estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><span v-if="estimate.state === 'received' && estimate.maxAvailable != null" class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>)</span></span>
-            <span class="ds-muted" aria-hidden="true">·</span>
-            <span data-testid="mp-shortest" :title="`${interactText('shortestTitle')}. ${interactText('routeNote')}`"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
-          </template>
-        </div>
-
         <div class="ds-controls__row ds-controls__row--compact">
           <label class="ds-label" for="mp-amount">Amount</label>
           <div class="ds-controls__suffix mp-amount-row">
@@ -826,6 +810,23 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
             />
             <span class="ds-label ds-muted">{{ unit }}</span>
           </div>
+        </div>
+
+        <!--
+          045 S2: the one information line of the confirm step, under the amount (decision 3: From, To, Amount, the line, the
+          reason, the buttons) - the figures, separated by " · ", their source in grey. The direct
+          capacity is the line's (marked with where it came from, 037 F-037-1); the two captions of the chosen recipient come from the
+          server's `payment-targets` answer, NOT from the line figures. The explanations are the `title` of their figure.
+        -->
+        <div class="ds-help mp-info" data-testid="mp-info">
+          <span data-testid="mp-direct-capacity-help" :title="interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ interactText('directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
+          <span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
+          <template v-if="estimate">
+            <span class="ds-muted" aria-hidden="true">·</span>
+            <span data-testid="mp-estimate">{{ interactText('estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><span v-if="estimate.state === 'received' && estimate.maxAvailable != null" class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>)</span></span>
+            <span class="ds-muted" aria-hidden="true">·</span>
+            <span data-testid="mp-shortest" :title="`${interactText('shortestTitle')}. ${interactText('routeNote')}`"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
+          </template>
         </div>
       </template>
 
