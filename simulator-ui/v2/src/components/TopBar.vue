@@ -640,6 +640,22 @@ function onApplyIntensity() {
 </template>
 
 <style scoped>
+/*
+  043 S2 (owner's decision on review item B2, 2026-10-17): the three actions sit in the centre of the row whatever the
+  width of the sides - the state text and the flow button change width ("живёт" / "на паузе", ⏸ / ▶) the moment an
+  action pauses the run, and with a flex row the centred group moved under the person's pointer. Two equal side tracks
+  keep the centre track fixed.
+*/
+.tb-main-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.tb-main-row > .hud-bar__right {
+  justify-self: end;
+}
+
 .tb-identity {
   gap: var(--ds-space-2, 8px);
 }

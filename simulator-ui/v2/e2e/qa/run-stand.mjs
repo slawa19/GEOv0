@@ -105,8 +105,11 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  * - 2026-10-17 (043 S2, review round): gate 127 -> 128, full 222 -> 223. One test of `one-screen.qa.ts`: a start the server
  *   refuses by its global limit of runs shows the Russian line chosen by the page's own `lang` (`index.html`), and the
  *   three actions are disabled without a run (external review, Gemini B3/B4).
+ * - 2026-10-17 (043 S2, the owner's decision on review item B2): gate 128 -> 129, full 223 -> 224. One test of
+ *   `one-screen.qa.ts`: Send Payment opens its window in the right rail under the top bar, the three actions do not
+ *   move when the flow locks them, focus goes into the window.
  */
-export const EXPECTED = { gate: 128, full: 223 }
+export const EXPECTED = { gate: 129, full: 224 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

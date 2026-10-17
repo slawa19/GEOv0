@@ -130,28 +130,27 @@ function guardedStart(fn: () => void) {
   opacity: var(--ds-ab-muted-opacity);
 }
 
+.action-bar {
+  position: relative;
+}
+
+/*
+  043 S2 (owner's decision on review item B2, 2026-10-17): the busy and locked lines are OUT of the row's layout -
+  under it, centred - so the three actions never move when a flow locks them (the line used to join the flex row and
+  push the centred group sideways). It does not take pointer input: the buttons' own titles carry the same reason.
+*/
 .action-bar__hint {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
   opacity: var(--ds-ab-hint-opacity);
   font-size: var(--ds-ab-hint-font-size);
-  /*
-    Responsive safety:
-    - never force a single line (can overflow on <500px)
-    - allow wrapping/breaking long chunks
-    - keep buttons stable; hint can take remaining space or drop to a new row
-  */
-  order: 10;
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
   line-height: var(--ds-ab-hint-line-height);
 }
 
-@media (max-width: 500px) {
-  .action-bar__hint {
-    flex-basis: 100%;
-  }
-}
 </style>
 
 

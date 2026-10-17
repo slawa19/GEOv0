@@ -1006,7 +1006,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('regression-guard: ActionBar-initiated interact-panel must anchor near ActionBar (not at host width)', async () => {
+  it('043 S2 (B2): an ActionBar-initiated window is anchored in the right rail (host width), under the top stack', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setUrl('/?mode=real&ui=interact')
 
@@ -1056,9 +1056,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(interactAnchor?.space).toBe('host')
       expect(interactAnchor?.source).toBe('panel')
 
-      // Key regression guard: anchor must be near ActionBar's left, not at host width (=1400).
-      expect(Number(interactAnchor?.x)).toBeGreaterThanOrEqual(0)
-      expect(Number(interactAnchor?.x)).toBeLessThan(200)
+      // 043 S2 (owner's decision on B2, mockup-s3): the right rail - the anchor is the host's right edge (=1400), and the
+      // window manager clamps the window inside it. Until then the guard held the opposite (near the ActionBar's left).
+      expect(Number(interactAnchor?.x)).toBe(1400)
     } finally {
       app.unmount()
       host.remove()
@@ -1093,7 +1093,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const calls = getGeoTestGlobal('__GEO_TEST_WM_OPEN')!.mock.calls.map((c) => c[0] as { type?: string; anchor?: { x: number; y: number } })
       const anchor = [...calls].reverse().find((c) => c?.type === 'interact-panel')?.anchor
       expect(anchor, 'the panel was opened with an anchor').toBeTruthy()
-      expect(anchor!.x, 'still at the ActionBar').toBe(400)
+      expect(anchor!.x, '043 S2 (B2): the right rail (the host width)').toBe(1400)
       expect(anchor!.y, 'under the stack (146), not under the first row (54)').toBe(146)
     } finally {
       app.unmount()

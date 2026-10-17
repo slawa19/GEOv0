@@ -126,3 +126,30 @@ test('(b) a start refused by the global limit of runs: a Russian line from the r
   // No run: the three actions are there and disabled (B4), so no raw "No active run_id" can be reached.
   for (const id of ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']) await expect(page.getByTestId(id), `${id} without a run`).toBeDisabled()
 })
+
+// 043 S2, the owner's decision on review item B2 (2026-10-17): the payment window opens in the right rail under the top
+// bar (mockup-s3), not over the centre of the graph; the action row does not move when a flow locks it.
+test('B2: Send Payment opens its window in the right rail under the top bar; the action row does not shift; focus goes into the window', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await firstVisit(page)
+  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  const xs = () => page.evaluate(() => ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing']
+    .map((id) => Math.round(document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().left)))
+  const before = await xs()
+  await page.locator(SEND).click()
+  const panel = page.locator('[data-testid="manual-payment-panel"]')
+  await expect(panel).toBeVisible()
+  await expect.poll(() => panel.evaluate((el) => (el.closest('.ws-shell') ?? el).contains(document.activeElement)), { message: 'focus is inside the window' }).toBe(true)
+  const geo = await panel.evaluate((el) => {
+    const shell = (el.closest('.ws-shell') ?? el).getBoundingClientRect()
+    const top = document.querySelector('.ds-ov-top .ds-ov-top-stack')!.getBoundingClientRect()
+    return { left: shell.left, right: shell.right, top: shell.top, vw: window.innerWidth, stackBottom: top.bottom }
+  })
+  console.log('[043 S2 B2]', JSON.stringify({ before, geo }))
+  expect(geo.right, 'docked to the right edge').toBeGreaterThan(geo.vw - 40)
+  expect(geo.left, 'not over the centre of the graph').toBeGreaterThan(geo.vw / 2)
+  expect(geo.top, 'under the top bar').toBeGreaterThanOrEqual(geo.stackBottom - 1)
+  const after = await xs()
+  console.log('[043 S2 B2 after]', JSON.stringify(after))
+  expect(after, 'the three actions did not move').toEqual(before)
+})

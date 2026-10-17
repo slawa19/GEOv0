@@ -154,10 +154,8 @@ describe('ActionBar', () => {
     const sfc = readHere('./ActionBar.vue')
 
     expect(sfc).toContain('<HudBar variant="ghost" layout="start" fit>')
-    expect(sfc).toContain('.action-bar__hint {')
-    expect(sfc).toContain('order: 10;')
-    expect(sfc).toContain('flex: 1 1 auto;')
-    expect(sfc).toContain('@media (max-width: 500px) {')
+    // 043 S2 (B2, 2026-10-17): the hint left the row's flex layout (`order`, `flex`, the narrow-screen rule are gone);
+    // that the row does not move when it appears is measured in the browser, `e2e/qa/one-screen.qa.ts` "B2: ...".
     expect(sfc).not.toContain(':deep(.ds-select) {')
     expect(sfc).not.toContain(':deep(.ds-btn) {')
   })

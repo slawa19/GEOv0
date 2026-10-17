@@ -743,9 +743,8 @@ function getActionBarAnchor(): Point | null {
   const host = hostEl.value
   if (!host) return null
 
-  // IMPORTANT: WM anchors must be in host-relative coordinates.
-  // Prefer measuring the actual ActionBar element so interact panels open near the toolbar,
-  // not at the far right edge of the viewport.
+  // IMPORTANT: WM anchors must be in host-relative coordinates. The ActionBar and the top stack are measured for the
+  // TOP of the window (under every row of the stack); its side is the right rail (043 S2, below).
   const hostRect = host.getBoundingClientRect()
   const actionBarContainer = host.querySelector('[aria-label="Interact actions"]') as HTMLElement | null
   if (!actionBarContainer) {
@@ -759,13 +758,14 @@ function getActionBarAnchor(): Point | null {
   const barEl = (actionBarContainer.querySelector('.hud-bar') as HTMLElement | null) ?? actionBarContainer
   const r = barEl.getBoundingClientRect()
 
-  // Anchor at the left edge under the bar so the panel opens near ActionBar,
-  // not docked to the far right.
   // 043 S1: the ActionBar is in the FIRST row of the top stack; with "Подробнее" on, rows follow it. The panel opens
   // under the whole stack, never over those rows (until 043 S1 the ActionBar was the stack's last row).
   const stack = host.querySelector('.ds-ov-top-stack')
   const stackBottom = stack instanceof HTMLElement ? stack.getBoundingClientRect().bottom - hostRect.top : Number.NEGATIVE_INFINITY
-  const x = r.left - hostRect.left
+  // 043 S2 (owner's decision on review item B2, 2026-10-17; mockup-s3): the window of an action opens in the RIGHT
+  // RAIL under the top bar ("Подробнее" is above it), not over the centre of the graph. The anchor is the right edge
+  // of the host; the window manager clamps the window inside the viewport, so it lands flush right.
+  const x = hostRect.width
   const y = Math.max(r.bottom - hostRect.top, Number.isFinite(stackBottom) ? stackBottom : Number.NEGATIVE_INFINITY)
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   return { x, y }
