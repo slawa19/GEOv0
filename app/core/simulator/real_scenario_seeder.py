@@ -12,6 +12,7 @@ from app.core.equivalents import create_equivalent
 from app.core.participants.service import ParticipantService
 from app.db.models.participant import Participant
 from app.schemas.trustline import TrustLineCloseRequest, TrustLineCreateRequest
+from app.core.simulator.run_perimeter import is_run_identity
 from app.core.simulator.scenario_equivalent import (
     effective_equivalent,
     scenario_default_equivalent,
@@ -37,6 +38,8 @@ from app.utils.validation import (
 # status, lines and debts (D1, 2026-10-10). Nothing here tells the two apart; shipped scenarios are
 # kept apart by their ids (`<scenario_id>:<community pid>`, `scripts/generate_simulator_seed_scenarios.py`).
 # Any other key belongs to a real participant, and the run is refused instead of acting in its name.
+# 044 `T4405` (2026-10-17): a RUN's scenario names only identities of that run (`bind_run_identities`), so a row
+# another run left is never adopted: the seeder is told the run and refuses any other pid (`RunIdentityUnbound`).
 SIMULATOR_PID_TAKEN = "SIMULATOR_PID_TAKEN"
 
 
@@ -103,6 +106,24 @@ class ScenarioTrustLineRefused(ConflictException):
         self.permanent = named and reason not in self.CLEARS_BY_ITSELF
 
 
+class RunIdentityUnbound(RuntimeError):
+    """044 `T4405`: a run's scenario names a participant that is not an identity of the run. The run's copy is bound at
+    creation (`bind_run_identities`), so this is an integrity failure, not a scenario error: seeding stops instead of
+    adopting a row another run (or an older, unbound run) owns."""
+
+    def __init__(self, run_id: str, pid: str) -> None:
+        super().__init__(f"participant {pid!r} of run {run_id!r} is not an identity bound by the run")
+        self.run_id, self.pid = run_id, pid
+
+
+def _require_bound(run_id: str | None, pids: list[str]) -> None:
+    if run_id is None:
+        return
+    for pid in sorted(pids):
+        if not is_run_identity(run_id, pid):
+            raise RunIdentityUnbound(run_id, pid)
+
+
 def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
     """Refuse (fail closed) when an existing participant is not one the simulator created."""
 
@@ -112,12 +133,15 @@ def require_simulated_participant(*, pid: str, public_key: str | None) -> None:
 
 class RealScenarioSeeder:
     async def load_real_participants(
-        self, *, session: Any, scenario: dict[str, Any]
+        self, *, session: Any, scenario: dict[str, Any], run_id: str | None = None
     ) -> list[tuple[uuid.UUID, str]]:
+        """The scenario's participants as stored. With `run_id` (every run's caller), only identities of that run."""
+
         pids = [
             str(p.get("id") or "").strip() for p in (scenario.get("participants") or [])
         ]
         pids = [p for p in pids if p]
+        _require_bound(run_id, pids)
         if not pids:
             return []
 
@@ -139,12 +163,20 @@ class RealScenarioSeeder:
             out.append((rec.id, rec.pid))
         return out
 
-    async def seed_scenario_into_db(self, *, session: Any, scenario: dict[str, Any]) -> None:
+    async def seed_scenario_into_db(
+        self, *, session: Any, scenario: dict[str, Any], run_id: str | None = None
+    ) -> None:
+        """Seed the scenario. `run_id` is passed by every run's caller (the tick, Interact's lazy seeding): then every
+        participant must be an identity of that run (044 `T4405`) - a matching pseudo key is necessary for adopting an
+        existing row, and no longer sufficient. Without `run_id` (tools and tests seeding a scenario directly) the
+        rule is the 024 one alone."""
+
         # Perimeter first (F-024-4b): refuse before anything of this scenario is staged, so a
         # refusal leaves no equivalent, participant or trustline behind on any caller's session.
         scenario_pids = sorted(
             {str(p.get("id") or "").strip() for p in (scenario.get("participants") or [])} - {""}
         )
+        _require_bound(run_id, scenario_pids)
         if scenario_pids:
             taken = (
                 await session.execute(

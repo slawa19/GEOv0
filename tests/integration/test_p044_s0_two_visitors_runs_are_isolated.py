@@ -13,12 +13,18 @@ decision 1). Two things are asked of two such runs side by side:
    the table with the simulator's pseudo key is ADOPTED with its lines and debts (`real_scenario_seeder.py`, the
    comment above `SIMULATOR_PID_TAKEN`). Nothing in the perimeter names the run or its owner.
 
-So two runs are apart exactly when their scenarios name disjoint pids. The demo starts every visitor on the SAME
+So two runs were apart exactly when their scenarios named disjoint pids. The demo starts every visitor on the SAME
 scenario (`INTERACT_AUTOSTART_SCENARIO_ID = 'clearing-demo-10'`, `simulator-ui/v2/src/composables/
 useInteractAutoBootstrapRun.ts`), and two shipped scenarios share pids (`clearing-demo-10` and
 `trust-drift-decay-minimal` both name `alice` and `bob`). `test_two_visitors_runs_have_disjoint_perimeters` states
 the precondition 044 sets for a public demo and is RED on the code it was written against (c99306c5): CLASS 1 for
 stage 2, not fixed here (stage 0 changes no product code).
+
+044 `T4405` (2026-10-17) closes it: a run owns fresh participants under identities bound at its creation
+(`bind_run_identities`, `app/core/simulator/run_perimeter.py`). By the advisor's decision of 2026-10-17 the literal
+pid expectations of this file (`p1`, `alice`, ...) are replaced by the identities the run returns, looked up by the
+participant's NAME (`Visitor.ids`); every isolation, debt and access assertion is untouched. The scenarios the tests
+start are admitted explicitly (`SIMULATOR_SCENARIO_ALLOWLIST`), as admission is enforced for visitors since T4405.
 
 Real HTTP through the app; real payments through `payment-real` on the tier's PostgreSQL (mode B: seeding and
 payments commit to a clone dropped after the test); the background tick is a recorder (`no_real_tick`); no sleep.
@@ -45,11 +51,12 @@ pytestmark = MODE_B
 ORIGIN = {"Origin": "http://p044.test"}
 API = "/api/v1/simulator"
 
-#: scenario -> (debtor, creditor) of its first trust line, the payment a test makes on it (the creditor is `from`).
+#: scenario -> (debtor, creditor) of its first trust line, by participant NAME, the payment a test makes on it (the
+#: creditor is `from`). The names are the scenarios' own (`minimal`: p1 Ivan, p2 Coffee Shop; `clearing-demo-10`: alice Алиса, shop Магазин).
 FIRST_LINE = {
-    "minimal": ("p2", "p1"),
-    "trust-drift-decay-minimal": ("bob", "alice"),
-    "clearing-demo-10": ("alice", "shop"),
+    "minimal": ("Coffee Shop", "Ivan"),
+    "trust-drift-decay-minimal": ("Bob", "Alice"),
+    "clearing-demo-10": ("Алиса", "Магазин"),
 }
 
 
@@ -60,6 +67,8 @@ def two_visitors(monkeypatch, no_real_tick):  # noqa: F811
     monkeypatch.setattr(runtime, "_max_active_runs", 2)
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
     monkeypatch.setattr("app.config.settings.SIMULATOR_CSRF_ORIGIN_ALLOWLIST", ORIGIN["Origin"])
+    # Admission (044 T4405): the scenarios these visitors start, admitted explicitly.
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SCENARIO_ALLOWLIST", ",".join(FIRST_LINE))
     return no_real_tick
 
 
@@ -97,8 +106,17 @@ class Visitor:
         self.started.append(str(r.json()["run_id"]))
         return self.started[-1]
 
+    async def ids(self, run_id: str) -> dict[str, str]:
+        """The run's participant identities by name (044 T4405: the run returns them; a test never spells one)."""
+        r = await self.get(f"/runs/{run_id}/actions/participants-list")
+        assert r.status_code == 200, r.text
+        by_name = {item["name"]: item["pid"] for item in r.json()["items"]}
+        assert len(by_name) == len(r.json()["items"]), r.text  # names identify participants in these scenarios
+        return by_name
+
     async def pay(self, run_id: str, scenario_id: str, amount: str = "1") -> None:
-        debtor, creditor = FIRST_LINE[scenario_id]
+        ids = await self.ids(run_id)
+        debtor, creditor = (ids[name] for name in FIRST_LINE[scenario_id])
         r = await self.post(
             f"/runs/{run_id}/actions/payment-real",
             json={"from_pid": debtor, "to_pid": creditor, "equivalent": "UAH", "amount": amount},
@@ -144,6 +162,8 @@ async def test_one_visitor_cannot_reach_the_other_visitors_run(client: AsyncClie
     run_a = await a.start("minimal")
     run_b = await b.start("trust-drift-decay-minimal")
     await a.pay(run_a, "minimal")  # A's run has a domain event, artifacts and a seeded perimeter to be reached
+    ids_a = await a.ids(run_a)
+    p1, p2 = ids_a["Ivan"], ids_a["Coffee Shop"]  # A's own participants: what B would have to name
 
     before = runtime.get_run_status(run_a).model_dump(mode="json")
 
@@ -157,7 +177,7 @@ async def test_one_visitor_cannot_reach_the_other_visitors_run(client: AsyncClie
         f"/runs/{run_a}/events?equivalent=UAH",
         f"/runs/{run_a}/actions/participants-list",
         f"/runs/{run_a}/actions/trustlines-list?equivalent=UAH",
-        f"/runs/{run_a}/payment-targets?from_pid=p2&equivalent=UAH",
+        f"/runs/{run_a}/payment-targets?from_pid={p2}&equivalent=UAH",
     ]
     writes = [
         (f"/runs/{run_a}/pause", None),
@@ -165,11 +185,11 @@ async def test_one_visitor_cannot_reach_the_other_visitors_run(client: AsyncClie
         (f"/runs/{run_a}/intensity", {"intensity_percent": 50}),
         (f"/runs/{run_a}/restart", None),
         (f"/runs/{run_a}/stop", None),
-        (f"/runs/{run_a}/actions/payment-real", {"from_pid": "p2", "to_pid": "p1", "equivalent": "UAH", "amount": "1"}),
+        (f"/runs/{run_a}/actions/payment-real", {"from_pid": p2, "to_pid": p1, "equivalent": "UAH", "amount": "1"}),
         (f"/runs/{run_a}/actions/clearing-real", {"equivalent": "UAH"}),
-        (f"/runs/{run_a}/actions/trustline-create", {"from_pid": "p2", "to_pid": "p1", "equivalent": "UAH", "limit": "5"}),
-        (f"/runs/{run_a}/actions/trustline-update", {"from_pid": "p1", "to_pid": "p2", "equivalent": "UAH", "new_limit": "5"}),
-        (f"/runs/{run_a}/actions/trustline-close", {"from_pid": "p1", "to_pid": "p2", "equivalent": "UAH"}),
+        (f"/runs/{run_a}/actions/trustline-create", {"from_pid": p2, "to_pid": p1, "equivalent": "UAH", "limit": "5"}),
+        (f"/runs/{run_a}/actions/trustline-update", {"from_pid": p1, "to_pid": p2, "equivalent": "UAH", "new_limit": "5"}),
+        (f"/runs/{run_a}/actions/trustline-close", {"from_pid": p1, "to_pid": p2, "equivalent": "UAH"}),
     ]
     answered: dict[str, int] = {}
     for path in reads:
@@ -180,7 +200,7 @@ async def test_one_visitor_cannot_reach_the_other_visitors_run(client: AsyncClie
     assert {k: v for k, v in answered.items() if v != 403} == {}, answered
     # Nothing of A's run moved under B's refused requests.
     assert runtime.get_run_status(run_a).model_dump(mode="json") == before
-    assert (await a.used_by_line(run_a))[("p1", "p2")] == Decimal("1")
+    assert (await a.used_by_line(run_a))[(p1, p2)] == Decimal("1")
 
     # The active-run routes serve each visitor their own run, never the other's.
     for visitor, own in ((a, run_a), (b, run_b)):
@@ -188,7 +208,8 @@ async def test_one_visitor_cannot_reach_the_other_visitors_run(client: AsyncClie
         assert r.status_code == 200 and r.json()["run_id"] == own, r.text
     snap_b = await b.get("/graph/snapshot", params={"equivalent": "UAH"})
     assert snap_b.status_code == 200, snap_b.text
-    assert {n["id"] for n in snap_b.json()["nodes"]} == {"alice", "bob"}
+    assert {n["id"] for n in snap_b.json()["nodes"]} == set((await b.ids(run_b)).values())
+    assert {n["name"] for n in snap_b.json()["nodes"]} == {"Alice", "Bob"}
 
     # Counter-check: the 403s are about ownership, not a broken route - the owner reaches the same run.
     assert (await a.get(f"/runs/{run_a}")).status_code == 200
@@ -208,22 +229,25 @@ async def test_two_runs_of_disjoint_scenarios_stay_in_their_own_perimeters(
     await b.pay(run_b, "trust-drift-decay-minimal", amount="2")
 
     perimeter_a, perimeter_b = await a.perimeter(run_a), await b.perimeter(run_b)
-    assert perimeter_a == {"p1", "p2"} and perimeter_b == {"alice", "bob"}
+    ids_a, ids_b = await a.ids(run_a), await b.ids(run_b)
+    assert perimeter_a == set(ids_a.values()) and set(ids_a) == {"Ivan", "Coffee Shop"}
+    assert perimeter_b == set(ids_b.values()) and set(ids_b) == {"Alice", "Bob"}
+    p1, p2, alice, bob = ids_a["Ivan"], ids_a["Coffee Shop"], ids_b["Alice"], ids_b["Bob"]
 
     # B's clearing runs on B's perimeter; A's debt is untouched by it.
     r = await b.post(f"/runs/{run_b}/actions/clearing-real", json={"equivalent": "UAH"})
     assert r.status_code == 200, r.text
-    assert await _debts_among(db_session, perimeter_a) == {("p2", "p1"): Decimal("3")}
-    assert await _debts_among(db_session, perimeter_b) == {("bob", "alice"): Decimal("2")}
-    assert await a.used_by_line(run_a) == {("p1", "p2"): Decimal("3")}
-    assert await b.used_by_line(run_b) == {("alice", "bob"): Decimal("2")}
+    assert await _debts_among(db_session, perimeter_a) == {(p2, p1): Decimal("3")}
+    assert await _debts_among(db_session, perimeter_b) == {(bob, alice): Decimal("2")}
+    assert await a.used_by_line(run_a) == {(p1, p2): Decimal("3")}
+    assert await b.used_by_line(run_b) == {(alice, bob): Decimal("2")}
     # A payment of B's run cannot name A's participant: it is outside B's perimeter.
     r = await b.post(
         f"/runs/{run_b}/actions/payment-real",
-        json={"from_pid": "p2", "to_pid": "p1", "equivalent": "UAH", "amount": "1"},
+        json={"from_pid": p2, "to_pid": p1, "equivalent": "UAH", "amount": "1"},
     )
     assert r.status_code == 404, r.text
-    assert await _debts_among(db_session, perimeter_a) == {("p2", "p1"): Decimal("3")}
+    assert await _debts_among(db_session, perimeter_a) == {(p2, p1): Decimal("3")}
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,8 @@ from app.core.simulator.scenario_registry import ScenarioRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ORIGIN = {"Origin": "http://localhost:5176"}
+#: 044 `T4405`: only the administrator uploads a scenario (an anonymous upload is 403).
+UPLOAD_HEADERS = {**ORIGIN, "X-Admin-Token": settings.ADMIN_TOKEN}
 PREFIX = "p036-a2-"
 CAPTION = {"ru": "р", "en": "e"}
 
@@ -48,6 +50,7 @@ def registry(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(runtime, "_scenario_registry", reg)
     monkeypatch.setattr(settings, "SIMULATOR_CSRF_ORIGIN_ALLOWLIST", ORIGIN["Origin"])
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "all")  # 044 `T4405`: visitors read only admitted scenarios
     try:
         yield reg
     finally:
@@ -75,7 +78,7 @@ async def _upload(client, scenario: dict):
     client.cookies.clear()
     ensured = await client.post("/api/v1/simulator/session/ensure")
     assert ensured.status_code == 200, ensured.text
-    return await client.post("/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": scenario})
+    return await client.post("/api/v1/simulator/scenarios", headers=UPLOAD_HEADERS, json={"scenario": scenario})
 
 
 def _paths(response) -> list[str]:

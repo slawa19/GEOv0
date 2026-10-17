@@ -12,6 +12,12 @@ THE RULE (arbiter decision 2026-10-10): distinct shipped scenarios use distinct 
 (`<scenario_id>:<community pid>`, derived by `scripts/generate_simulator_seed_scenarios.py`); repeated runs of ONE
 scenario keep theirs, with the state they accumulated.
 
+044 `T4405` (2026-10-17) took the rule one step further: every RUN owns fresh participants under identities bound at
+its creation (`<run_id>:p<n>`, `bind_run_identities`), so two runs - of two scenarios or of one - never share a row.
+The last clause above no longer holds: a repeated run of one scenario starts from its declaration, and the earlier
+run's state is left as it was (`test_a_second_run_of_the_same_scenario_starts_fresh_and_leaves_the_first_alone`).
+What a run is checked against is therefore its OWN bound copy of the scenario (`_bound`), not the template.
+
 Stand: the product path - `POST /simulator/runs` (real mode, the runtime's own heartbeat), Interact seeding through
 `GET .../actions/trustlines-list`, `POST .../actions/payment-real` - in mode B. The DATABASE is asserted directly:
 the graph a run shows is built from its scenario, so its labels and counts cannot show contamination.
@@ -74,6 +80,11 @@ def _admin() -> dict[str, str]:
 
 def _declared(scenario_id: str) -> dict:
     return runtime.get_scenario(scenario_id).raw
+
+
+def _bound(run_id: str) -> dict:
+    """The run's own copy of its scenario: the declaration under the run's identities (044 `T4405`)."""
+    return runtime.get_run(run_id)._scenario_raw
 
 
 def _declared_roster(scenario: dict) -> dict[str, tuple[str, str, str]]:
@@ -171,8 +182,8 @@ async def _pay_one_line(client, run_id: str, scenario: dict) -> tuple[str, str]:
 
 async def _a_scenario_ran_and_left_debt(client, db_session, stopped_runs, scenario_id: str) -> dict:
     """The first scenario is seeded, one payment is committed in it, its run is stopped; returns what it left."""
-    scenario = _declared(scenario_id)
     run_id = await _start(client, stopped_runs, scenario_id)
+    scenario = _bound(run_id)
     await _interact_seeds(client, run_id)
     debtor, creditor = await _pay_one_line(client, run_id, scenario)
     await runtime.stop(run_id)
@@ -196,9 +207,9 @@ async def test_the_second_scenario_runs_on_its_own_participants_and_leaves_the_f
     client, db_session, stopped_runs, first: str, second: str
 ) -> None:
     left_by_first = await _a_scenario_ran_and_left_debt(client, db_session, stopped_runs, first)
-    declared = _declared(second)
 
     run_id = await _start(client, stopped_runs, second)
+    declared = _bound(run_id)
     await _interact_seeds(client, run_id)
 
     # Before anything moves in the second run (intensity 0): it is exactly its declaration, and owes nothing.
@@ -233,15 +244,22 @@ async def test_the_second_scenario_runs_on_its_own_participants_and_leaves_the_f
 
 
 @pytest.mark.asyncio
-async def test_a_second_run_of_the_same_scenario_keeps_what_the_first_left_and_thaws_nobody(
+async def test_a_second_run_of_the_same_scenario_starts_fresh_and_leaves_the_first_alone(
     client, db_session, stopped_runs
 ) -> None:
-    """Counter-check: isolation between scenarios must not become a reset between runs of one scenario."""
+    """Was "keeps what the first left and thaws nobody" (D1, 2026-10-10: runs of one scenario shared rows). 044 `T4405`
+    (2026-10-17): the second run is its declaration again, owing nothing, and the first run's rows - its debt and its
+    frozen participants - are exactly as it left them (nothing thawed, nothing reset)."""
     left = await _a_scenario_ran_and_left_debt(client, db_session, stopped_runs, RIVERSIDE)
 
     run_id = await _start(client, stopped_runs, RIVERSIDE)
+    declared = _bound(run_id)
     await _interact_seeds(client, run_id)
 
+    seeded = await _state(db_session, _declared_roster(declared))
+    _assert_is_its_declaration(seeded, declared, whose="the second run")
+    assert seeded["debts"] == {}, "the second run inherited debts"
+    assert set(_declared_roster(declared)).isdisjoint(left["roster"])
     assert await _state(db_session, left["roster"]) == left
 
 
@@ -270,8 +288,8 @@ async def test_a_database_seeded_before_the_namespaces_does_not_contaminate_eith
     assert len(old_rows["roster"]) == 50 and "suspended" in {s for _n, _t, s in old_rows["roster"].values()}
 
     for scenario_id in (GREENFIELD, RIVERSIDE):
-        declared = _declared(scenario_id)
         run_id = await _start(client, stopped_runs, scenario_id)
+        declared = _bound(run_id)
         await _interact_seeds(client, run_id)
         await runtime.stop(run_id)
         seeded = await _state(db_session, _declared_roster(declared))

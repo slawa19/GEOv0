@@ -28,6 +28,8 @@ from tests.contract.openapi_response_conformance import load_canon, validate_bod
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ORIGIN = {"Origin": "http://localhost:5176"}
+#: 044 `T4405`: only the administrator uploads a scenario (an anonymous upload is 403).
+UPLOAD_HEADERS = {**ORIGIN, "X-Admin-Token": settings.ADMIN_TOKEN}
 STORY_ID = "p036-a-story"
 
 
@@ -117,7 +119,7 @@ def _conforms(schema: str, body) -> list:
 @pytest.mark.asyncio
 async def test_the_detail_serves_description_episodes_and_playback(client, story_registry) -> None:
     await _anonymous(client)
-    uploaded = await client.post("/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": _story()})
+    uploaded = await client.post("/api/v1/simulator/scenarios", headers=UPLOAD_HEADERS, json={"scenario": _story()})
     assert uploaded.status_code == 200, uploaded.text  # control: the story scenario is a valid upload
 
     response = await client.get(f"/api/v1/simulator/scenarios/{STORY_ID}")
@@ -134,7 +136,7 @@ async def test_the_detail_serves_description_episodes_and_playback(client, story
 @pytest.mark.asyncio
 async def test_the_list_carries_the_description_and_no_story(client, story_registry) -> None:
     await _anonymous(client)
-    await client.post("/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": _story()})
+    await client.post("/api/v1/simulator/scenarios", headers=UPLOAD_HEADERS, json={"scenario": _story()})
 
     response = await client.get("/api/v1/simulator/scenarios")
 
@@ -150,7 +152,7 @@ async def test_the_list_carries_the_description_and_no_story(client, story_regis
 async def test_the_upload_response_is_the_summary_with_the_description(client, story_registry) -> None:
     await _anonymous(client)
 
-    response = await client.post("/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": _story()})
+    response = await client.post("/api/v1/simulator/scenarios", headers=UPLOAD_HEADERS, json={"scenario": _story()})
 
     body = response.json()
     assert body["description"] == {"ru": "Описание", "en": "Description"}
@@ -176,7 +178,8 @@ async def test_a_plain_string_description_is_served_as_both_languages(client) ->
 
 
 @pytest.mark.asyncio
-async def test_a_scenario_without_a_description_serves_null(client) -> None:
+async def test_a_scenario_without_a_description_serves_null(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "minimal")  # 044 `T4405`: admitted for visitors
     await _anonymous(client)
 
     response = await client.get("/api/v1/simulator/scenarios/minimal")

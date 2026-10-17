@@ -564,7 +564,8 @@ async def test_action_trustlines_list_is_run_scoped_and_filters_by_participant_p
 
     async def _fake_build_graph_snapshot(*, run_id: str, equivalent: str, session=None):
         assert run_id == "test-run"
-        assert str(equivalent).upper() == "UAH"
+        # "" is the perimeter read of `participant_pid` (044 `T4405`: resolved within the run, like every other route).
+        assert str(equivalent).upper() in {"UAH", ""}
         return SimulatorGraphSnapshot(
             equivalent=str(equivalent),
             generated_at=datetime.now(timezone.utc),

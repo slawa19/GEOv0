@@ -673,7 +673,8 @@ async def _ensure_run_seeded(run_id: str, session) -> Optional[JSONResponse]:
 
         try:
             try:
-                await _real_scenario_seeder.seed_scenario_into_db(session=session, scenario=scenario)
+                await _real_scenario_seeder.seed_scenario_into_db(
+                    session=session, scenario=scenario, run_id=getattr(run, "_identity_run_id", None))
                 await session.commit()
             except SimulatorPidTakenError:
                 # The 024 perimeter refuses before the seeder stages anything (`seed_scenario_into_db`
@@ -2236,7 +2237,13 @@ async def action_trustlines_list(
     assert eq is not None
 
     if participant_pid is not None:
-        p, p_err = await _resolve_participant_or_error(session=db, pid=participant_pid, field="participant_pid")
+        # 044 `T4405`: within the run's perimeter, like every other Interact resolution - a pid of another run answers
+        # as an unknown one (404), never as "exists, no lines here".
+        scoped_pids, perimeter_available = await _run_perimeter(run_id=run_id, session=db)
+        if not perimeter_available:
+            return _perimeter_unavailable_error(run_id)
+        p, p_err = await _resolve_participant_or_error(
+            session=db, pid=participant_pid, field="participant_pid", scoped_pids=scoped_pids)
         if p_err is not None:
             return p_err
         assert p is not None
@@ -2773,6 +2780,11 @@ async def upload_scenario(
     body: ScenarioUploadRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    # 044 `T4405` (admission (v)): only the administrator uploads. An uploaded scenario is a template every run of it
+    # instantiates; the registry stores no uploader, so an anonymous upload would be a template nobody owns. Refused
+    # before the registry or the filesystem is touched.
+    if not actor.is_admin:
+        raise ForbiddenException("Uploading a scenario requires the administrator")
     # Storage reads no row of the database (036 slice A, review N2): the step of a scripted payment against its equivalent's
     # precision is checked where the payment is executed (slice B), not here.
     rec = runtime.save_uploaded_scenario(body.scenario)
@@ -2794,7 +2806,7 @@ async def get_scenario_summary(
     scenario_id: str,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
-    return runtime.get_scenario(scenario_id).detail()
+    return runtime.get_admitted_scenario(scenario_id, is_admin=actor.is_admin).detail()
 
 
 @router.get("/scenarios/{scenario_id}/graph/preview", response_model=SimulatorGraphSnapshot)
@@ -2813,7 +2825,8 @@ async def scenario_graph_preview(
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
     db=Depends(deps.get_db),
 ):
-    """Preview the scenario graph topology without starting a run."""
+    """Preview the scenario graph topology without starting a run (the template's picture; 044: no database read)."""
+    runtime.get_admitted_scenario(scenario_id, is_admin=actor.is_admin)
     return await runtime.build_scenario_preview(scenario_id=scenario_id, equivalent=equivalent, mode=mode, session=db)
 
 
@@ -2822,6 +2835,7 @@ async def start_run(
     body: RunCreateRequest,
     actor: deps.SimulatorActor = Depends(deps.require_simulator_actor),
 ):
+    runtime.get_admitted_scenario(body.scenario_id, is_admin=actor.is_admin)  # 044 admission, before any effect
     run_id = await runtime.create_run(
         scenario_id=body.scenario_id,
         mode=body.mode,

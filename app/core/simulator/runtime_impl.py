@@ -332,6 +332,18 @@ class _SimulatorRuntimeBase:
             raise NotFoundException(f"Scenario {scenario_id} not found")
         return rec
 
+    def get_admitted_scenario(self, scenario_id: str, *, is_admin: bool) -> ScenarioRecord:
+        """The scenario, if this actor may read or start it (044 `T4405`, admission (v)).
+
+        A non-administrator reaches only the scenarios the list shows them (`SIMULATOR_SCENARIO_ALLOWLIST`, the same
+        rule as `list_scenarios`); any other id answers exactly as an unknown one (404), so the refusal discloses
+        nothing. The administrator reaches every registered scenario (it uploads them). Checked before any effect."""
+
+        allow = _scenario_allowlist()
+        if not is_admin and allow is not None and scenario_id not in allow:
+            raise NotFoundException(f"Scenario {scenario_id} not found")
+        return self.get_scenario(scenario_id)
+
     def save_uploaded_scenario(self, scenario: dict[str, Any]) -> ScenarioRecord:
         return self._scenario_registry.save_uploaded_scenario(scenario)
 
@@ -343,16 +355,16 @@ class _SimulatorRuntimeBase:
         mode: RunMode,
         session=None,
     ) -> SimulatorGraphSnapshot:
-        """Build a graph preview without starting a run, with best-effort DB enrichment (balances/debts -> viz_*).
+        """The scenario's graph as its TEMPLATE draws it, without starting a run.
 
-        `mode` is always `real` (042: the topology-only `fixtures` preview is gone; the API refuses it with 422).
+        `mode` is always `real` (042: the `fixtures` mode is gone; the API refuses it with 422). 044 `T4405`: no
+        database enrichment. A run's participants are fresh rows under identities of that run, so the template's pids
+        name no run's state; enriching by them read whatever rows happened to carry those pids (another visitor's, an
+        older unbound run's). `session` is kept for the route's signature and not read.
         """
 
         rec = self.get_scenario(scenario_id)
-        snap = scenario_to_snapshot(rec.raw, equivalent=equivalent, utc_now=_utc_now)
-        return await self._snapshot_builder.enrich_snapshot_from_db_if_enabled(
-            snap, equivalent=equivalent, session=session
-        )
+        return scenario_to_snapshot(rec.raw, equivalent=equivalent, utc_now=_utc_now)
 
     # -----------------------------
     # Runs
