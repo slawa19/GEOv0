@@ -11,6 +11,8 @@ From repo root:
 - PowerShell: `./scripts/run_simulator_ui.ps1`
 - cmd.exe: `scripts\\run_simulator_ui.cmd`
 
+`scripts/run_simulator_ui.ps1` opens the **offline snapshot** by default (`-Mode fixtures`: it sets `VITE_API_MODE=fixtures` and prints `?mode=fixtures`); `-Mode real` opens the server source and needs a reachable backend. A bare `npm run dev` opens the server source (see "The demo screen").
+
 Tip (real mode / proxy changes): if the UI is already running and you need it to pick up new env/proxy settings, use:
 
 - PowerShell: `./scripts/run_simulator_ui.ps1 -RestartIfRunning`
@@ -25,57 +27,35 @@ npm run dev
 
 Open: http://localhost:5176/
 
-## HUD (TopBar + BottomBar)
+## The demo screen (TopBar + BottomBar)
 
-The v2 UI uses a unified HUD:
+Since 043 (S1-S3, 2026-10-16/17) the UI is **one screen**: there is no Sandbox / Auto-Run / Interact switch and no `?ui=` mode. `?ui=interact` and `?ui=demo` in an old link are ignored - the same screen opens (`useSimulatorApp.ts`, `isLiveUi`).
 
-- **TopBar** (top overlay): app mode switch + run controls + status.
-- **BottomBar** (bottom overlay): view settings (left) + tools (right).
+**Opening.** The source is the **server** by default (`apiMode` falls back to `real` when neither `?mode=` nor `VITE_API_MODE` says otherwise, `useSimulatorApp.ts` `apiMode`). When the opening is over the screen makes **one** attempt per page load to start a live run with the existing `startRun` (the stored intensity, 30 % when none; not paused). A live run found on the server - paused included - is left as it is; a run the person stops afterwards is not restarted (`useInteractAutoBootstrapRun.ts`, `autostartDecision`). If the server refuses because its limit of active runs is reached (409 `conflict_kind: global_active_limit`), the error line is a readable text, not an HTTP string: "Демо уже кто-то смотрит на этом сервере; попробуйте позже. Запустить снова - Start в «Подробнее»." (`utils/runErrorClassification.ts`, `startRunErrorText`). The page language is Russian (`index.html` `<html lang="ru">`); the texts that follow the interface language (`uiLocale()`) are Russian accordingly, the English strings of `i18n/interactStrings.ts` are unchanged.
 
-### Mode switch (Sandbox / Auto-Run / Interact)
+**First view** (the "Подробнее" toggle off, the default): the first row of the TopBar - network name and state, the "Поток" button, the three actions (Send Payment, Manage Trustline, Run Clearing) and "Подробнее"; the BottomBar - the legend, the total debt and "Reset view"; one onboarding hint (once dismissed it does not come back, `geo.sim.v2.onboarding.dismissed`). Everything else is **not rendered** until "Подробнее" is on.
 
-The segmented switch in the TopBar maps to URL params and triggers a **full reload** (by design, to fully re-init pipelines):
+**"Подробнее"** (one flag, remembered in the browser, `geo.sim.v2.details.open`) opens the service rows:
 
-- **Sandbox** → `?mode=fixtures` (client-side offline demo on static snapshots, no server; the backend run mode `fixtures` was removed on 2026-10-16, programme 042 - a run is always `real`)
-- **Auto-Run** → `?mode=real`
-- **Interact** → `?mode=real&ui=interact`
+- TopBar: Theme, scenario and run controls (Start / Pause / Resume / Stop, Intensity + Apply; server source only), the SSE / Run / TX badges, Admin, the full system metrics;
+- BottomBar: EQ, Layout, **"Источник"**, Scene (offline snapshot only), Quality, Labels, Refresh, Analytics and Artifacts (server source only) and "Inspect graph".
+
+**Pause on a manual act.** Any explicit manual act pauses the run (`POST .../pause`): starting an action (Send Payment, Manage Trustline, Run Clearing, a node card, a line's popup), choosing a participant or a line, choosing a sender, recipient, creditor or debtor (`useSimulatorApp.ts`, the entries wrapped around `interactMode`, `noteManualAction`). Confirm, cancel, Escape and a closed panel do **not** resume. The flow comes back only by an explicit act: the "Поток" button (⏸ pauses a living run, ▶ resumes a paused one) or Resume under "Подробнее". A selection made by loading (a `?focus=` deep link) is not an act.
+
+**"Источник"** (under "Подробнее") switches between "Сервер" (a live run) and "Снимок без сервера" (the offline snapshot on static fixtures; no run, no server requests). It replaces the whole data pipeline, so it reloads the page with `?mode=` - the one switch of this screen that still navigates (`SimulatorAppRoot.vue`, `setSource`). Entering a manual action never navigates. The offline snapshot is also reached with `?mode=fixtures` or `VITE_API_MODE=fixtures`.
 
 Notes:
-- **Run controls** (scenario, Start/Pause/Resume/Stop) are shown in **Auto-Run**.
-- **Interact** may be disabled until an active run is discovered/started.
+- The backend run mode `fixtures` was removed on 2026-10-16 (programme 042): a run is always `real`; "offline" is a client-only choice.
+- The Dev Tools shell, Demo UI (`?ui=demo`), FX Debug buttons, the `VITE_ALLOW_DEMO_UI` gate, the `geo.sim.v2.devtools.open.*` and `fxDebugRun` keys and the `?mode=demo` alias were removed in 043 S3 (2026-10-17). `?debug=1` is accepted in a URL but nothing reads it any more; the source switch drops `?ui=` and `?debug=`. The "Single Tx" / "Run Clearing" debug buttons, `window.__geoSim.runTxOnce` / `runClearingOnce` and the backend actions `tx-once` / `clearing-once` were removed on 2026-10-16 (programme 042): a payment or clearing event is born in the core only.
 
-### BottomBar: View settings + Tools
+### Test and automation switches (glossary)
 
-- **View settings** (left): EQ, Layout, Scene (fixtures/offline only), Quality, Labels LOD.
-- **Tools** (right): Reset view, Refresh snapshot, Artifacts (Auto-Run only).
+These are not end-user settings - they keep automation stable.
 
-### Dev tools (Demo UI + FX Debug)
-
-Demo/FX Debug controls live under **BottomBar → Tools → Dev**.
-
-Visibility matches code in `src/components/BottomBar.vue`:
-
-- Shown when **either**:
-	- `import.meta.env.DEV` **and** not running under WebDriver/Playwright, and not in test-mode (`VITE_TEST_MODE=1`), and not in the E2E screenshot harness, **or**
-	- `VITE_ALLOW_DEMO_UI='true'` (build-time env; forces the Dev tools group visible even when `import.meta.env.DEV=false`).
-
-Deep-links / query flags:
-
-- FX Debug is considered enabled when `ui=demo` **or** `debug=1` is present in the URL (see `useSimulatorApp.ts`).
-- Note: if the Dev tools group is hidden (no `DEV` and no `VITE_ALLOW_DEMO_UI`), the underlying flags may still take effect, but the UI buttons (Enter/Exit Demo UI) are not shown. The "Single Tx" / "Run Clearing" debug buttons, `window.__geoSim.runTxOnce` / `runClearingOnce` and the backend actions `tx-once` / `clearing-once` were removed on 2026-10-16 (programme 042): a payment or clearing event is born in the core only.
-
-#### Glossary (plain English)
-
-These are not end-user settings — they exist to keep automation stable and to avoid exposing dev-only controls unintentionally.
-
-- **DEV** (`import.meta.env.DEV`): running via Vite dev server (`npm run dev`). Dev-only buttons and helpers may be visible.
-- **WebDriver** (`navigator.webdriver=true`): the browser is controlled by automation (Playwright/Selenium). UI hides some controls to avoid flaky or non-deterministic behavior.
-- **Test mode** (`VITE_TEST_MODE=1`): enables deterministic behavior for visual/screenshot tests (e.g., FX spawning is suppressed). Some interactive controls are hidden.
-- **E2E screenshots**: effectively “test mode + WebDriver”. In this case the app forces the fixtures/offline pipeline for deterministic snapshots.
-
-Build-time override:
-
-- **`VITE_ALLOW_DEMO_UI='true'`**: forces the **Dev tools** group to be visible even when `import.meta.env.DEV=false` (useful on shared demo/staging builds). This only affects visibility of the UI controls — backend still enforces its own guardrails.
+- **DEV** (`import.meta.env.DEV`): running via Vite dev server (`npm run dev`); dev-only warnings and the `window.__geoSim` hook.
+- **WebDriver** (`navigator.webdriver=true`): the browser is controlled by automation (Playwright/Selenium).
+- **Test mode** (`VITE_TEST_MODE=1`): enables deterministic behavior for visual/screenshot tests (e.g., FX spawning is suppressed) and shows the `TEST MODE` badge under "Подробнее".
+- **E2E screenshots**: effectively "test mode + WebDriver". In this case the app forces the fixtures/offline pipeline for deterministic snapshots.
 
 Dev hook:
 
@@ -167,18 +147,17 @@ Notes:
 ### Quick manual smoke
 1) Set `mode=real` (env above does it) and open http://localhost:5176/
 
-2) Click scenarios refresh (↻), select a scenario
-3) Click `Start run`
-4) Confirm:
+2) The screen starts a live run by itself once the opening is over (one attempt per page load). To pick another scenario or to start again, open "Подробнее", refresh scenarios (↻), select one and click `Start`
+3) Confirm:
 	- `run_status` heartbeat updates (state/sim_time/ops/queue)
 	- graph snapshot renders
 	- `tx.updated` / clearing events animate when present
 
 ---
 
-## Interact Mode (Real Mode UI)
+## Manual actions (server source)
 
-Interact Mode is a **Real Mode** UI variant that enables a small set of *manual actions* against a running simulator run.
+The manual actions (payment, trustline, clearing) are part of the one demo screen on the **server source**; there is no separate Interact mode or `?ui=interact` URL since 043 S2. They act on the running simulator run and pause its automatic payments (see "The demo screen").
 
 ### 1) Enable backend action endpoints
 
@@ -188,11 +167,11 @@ Backend action endpoints are feature-flagged.
 - It gates the Interact actions (`payment-real`, `clearing-real`, `trustline-*`, lists); the debug actions `tx-once` / `clearing-once` no longer exist (042).
 - When the flag is off, calling any `/api/v1/simulator/runs/{run_id}/actions/*` endpoint returns HTTP **403** with JSON error code `ACTIONS_DISABLED`.
 
-### 2) Run UI and open Interact Mode
+### 2) Run UI and open the demo
 
 Start the UI in real mode (see section above) and open:
 
-- `http://localhost:5176/?mode=real&ui=interact`
+- `http://localhost:5176/` (or `?mode=real`) - the three actions are in the first row.
 
 ### 3) Example scenario fixture
 

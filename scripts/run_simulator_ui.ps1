@@ -11,8 +11,10 @@ param(
   # Useful when you changed env/proxy defaults but the old Vite server is still running.
   [switch]$RestartIfRunning,
 
-  # UI API mode:
-  # - fixtures: demo/fixtures mode (default)
+  # UI API mode (the data source the page opens with):
+  # - fixtures: the OFFLINE snapshot (default) - no backend needed. Since 043 S2 the client's own default is the
+  #   server, so this mode states the choice explicitly: `?mode=fixtures` in the printed URL and VITE_API_MODE=fixtures
+  #   for the dev server (useSimulatorApp.ts `apiMode`).
   # - real: real backend integration (fetch-stream SSE + REST)
   [ValidateSet('fixtures', 'real')]
   [string]$Mode = 'fixtures',
@@ -205,7 +207,7 @@ if (Test-TcpOpen $HostName $selectedPort) {
         Write-Host 'GEO Simulator UI already running.'
         Write-Host "Open in browser: $url"
         Write-Host ''
-        Write-Host "Demo link: ${url}?mode=fixtures" -ForegroundColor Cyan
+        Write-Host "Offline snapshot link: ${url}?mode=fixtures" -ForegroundColor Cyan
         Write-Host ''
         exit 0
       }
@@ -269,7 +271,7 @@ Write-Host 'Starting GEO Simulator UI (Vite dev server)...'
 if ($Mode -eq 'real') {
   Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/?mode=real"
 } else {
-  Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/"
+  Write-Host "Open in browser (preferred): http://${HostName}:$selectedPort/?mode=fixtures"
 }
 Write-Host "If the port is unavailable, Vite will pick another and print the actual URL." -ForegroundColor DarkGray
 Write-Host ''
@@ -282,7 +284,8 @@ if (-not (Test-Path $viteCli)) {
 if ($Mode -eq 'real') {
   $env:VITE_API_MODE = 'real'
 } else {
-  Remove-Item Env:VITE_API_MODE -ErrorAction SilentlyContinue
+  # 043-16: since 043 S2 an unset VITE_API_MODE selects the SERVER source, so the offline snapshot must be asked for.
+  $env:VITE_API_MODE = 'fixtures'
 }
 
 if ($Mode -eq 'real' -and [string]::IsNullOrWhiteSpace($BackendOrigin)) {
