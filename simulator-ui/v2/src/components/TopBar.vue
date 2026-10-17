@@ -332,7 +332,7 @@ function onApplyIntensity() {
         </div>
       </HudBar>
 
-      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" aria-label="Top bar" data-testid="top-details-row">
+      <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="tb-details-row" aria-label="Top bar" data-testid="top-details-row">
         <div class="hud-bar__left" aria-label="Mode">
           <div class="ds-row tb-mode-row">
             <div class="ds-row tb-theme-row" aria-label="Theme">
@@ -623,6 +623,26 @@ function onApplyIntensity() {
 
 .tb-identity {
   gap: var(--ds-space-2, 8px);
+}
+
+/*
+  043 S3: the service row keeps its status cluster (SSE, Run, TX, Admin) on the right of its first line. The run
+  controls in the middle (scenario, Start/Stop, the tempo that left the "Advanced" menu) take the rest of the line and
+  wrap inside themselves, instead of pushing the cluster onto a line of its own: there the Admin summary landed on the
+  left, and its right-anchored menu, opened while the summary was still on the right, ended past the left edge (stand,
+  `menu-admin` in `saas` at 1366x768: x 8.5 against a pad of 14).
+*/
+.tb-details-row > .hud-bar__center {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* ...and the tempo wraps as a whole, never between its label, its field and Apply (narrow screens wrap: below). */
+@media (min-width: 501px) {
+  .tb-details-row .tb-adv-row {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
 }
 
 .tb-network-name,
