@@ -268,7 +268,7 @@ class RunLifecycle:
                     # enforcing the per-owner limit.
                     if mapped_run_id:
                         existing_mapped = self._runs.get(mapped_run_id)
-                        _terminal_states = ("stopped", "error", "finished")
+                        _terminal_states = ("stopped", "error")
                         _is_stale = (
                             existing_mapped is None
                             or str(getattr(existing_mapped, "state", "") or "") in _terminal_states
