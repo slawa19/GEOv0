@@ -312,7 +312,7 @@ function onApplyIntensity() {
         <div class="hud-bar__left tb-identity">
           <span class="ds-panel ds-ov-metric tb-network-name" data-testid="network-name">
             <span class="ds-label">GEO</span>
-            <span class="ds-value">{{ networkName }}</span>
+            <span class="ds-value tb-network-name__value" :title="networkName || undefined">{{ networkName }}</span>
           </span>
           <span class="ds-panel ds-ov-metric tb-network-state" data-testid="network-state">
             <span :class="['ds-badge', `ds-badge--${networkState.tone}`, 'tb-state-dot']"><span class="ds-dot" aria-hidden="true" /></span>
@@ -681,6 +681,33 @@ function onApplyIntensity() {
   align-items: center;
   gap: var(--ds-space-2, 8px);
   white-space: nowrap;
+}
+
+/*
+  045 S2 (advisor 2026-10-17): the first row keeps the name, the state and the flow button on one line - a long scenario
+  name wrapped the cluster into two (1280x720, both themes: the state went under the name). Like the Scenario select: the
+  name gives way, cut by an ellipsis, and the whole name is its `title`. Desktop only; narrow screens wrap as before.
+*/
+@media (min-width: 501px) {
+  .tb-identity {
+    flex-wrap: nowrap;
+  }
+
+  .tb-network-name {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .tb-network-name__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tb-network-state,
+  .tb-flow-toggle {
+    flex-shrink: 0;
+  }
 }
 
 .tb-state-dot {
