@@ -246,6 +246,10 @@ function notActiveNote(pid: string | null | undefined, role: 'sender' | 'recipie
   return ` Selected ${role} is not active (status: ${status}); a participant that is not active takes no part in payments.`
 }
 
+const isPickFrom = computed(() => props.phase === 'picking-payment-from')
+const isPickTo = computed(() => props.phase === 'picking-payment-to')
+const isConfirm = computed(() => props.phase === 'confirm-payment')
+
 const confirmDisabledReason = computed<string | null>(() => {
   // Spec: do not show reason while busy.
   if (props.busy) return null
@@ -274,17 +278,31 @@ const confirmDisabledReason = computed<string | null>(() => {
 
 const canConfirm = computed(() => {
   if (props.busy) return false
+  // 045 S2: Confirm is on screen from the first step, disabled until the confirm step (an amount left from an earlier pass never
+  // makes it live on a choice step).
+  if (!isConfirm.value) return false
   // An unresolved payment has to be checked or discarded first: no other payment is sent from here.
   if (unknownOutcome.value) return false
   return confirmDisabledReason.value == null
 })
 
-const isPickFrom = computed(() => props.phase === 'picking-payment-from')
-const isPickTo = computed(() => props.phase === 'picking-payment-to')
-const isConfirm = computed(() => props.phase === 'confirm-payment')
 const open = computed(() => {
   return isPickFrom.value || isPickTo.value || isConfirm.value
 })
+
+/** 045 S2: why Confirm is disabled, as its `title` (no dead button). The visible reason line stays the confirm step's own. */
+const confirmTitle = computed<string | undefined>(() => {
+  if (props.busy || canConfirm.value) return undefined
+  if (isPickFrom.value) return interactText('confirmNeedsParties')
+  if (isPickTo.value) return interactText(props.state.fromPid ? 'confirmNeedsRecipient' : 'confirmNeedsParties')
+  return confirmDisabledReason.value ?? undefined
+})
+
+/**
+ * 045 S2: the reason line is shown once the user has typed an amount; before that the empty field and its placeholder say what
+ * to do, and the disabled Confirm says it in its `title`. A warning (never blocking) is shown whenever there is one.
+ */
+const showConfirmReason = computed(() => !!confirmDisabledReason.value && amount.value.trim() !== '')
 
 // F-037-4: a panel that OPENS already at the confirm step with both parties set was started from a line (the line popup sets the
 // debtor as the sender and the creditor as the recipient). Reaching the confirm step by choosing in the panel is not that. Decided
@@ -409,11 +427,8 @@ function titleText() {
   return 'Manual payment'
 }
 
-// Summary of the confirm step: who pays whom, then the sum, from the fields as they are now.
-const summaryParties = computed(() => interactText('summaryPays', { from: nameOf(props.state.fromPid), to: nameOf(props.state.toPid) }))
-const summaryAmount = computed(() =>
-  amountPositive.value && amountNormalized.value != null ? moneyText(amountNormalized.value, props.unit) : interactText('summaryNoAmount'),
-)
+// 045 S2: who pays whom is the title (names, from the fields as they are now) and the sum is the amount field: the confirm step
+// no longer repeats them in a summary row.
 
 const { participantsSorted, toParticipants } = useParticipantsList<ParticipantInfo>({
   participants: () => props.participants,
@@ -545,7 +560,7 @@ function toOptionLabel(p: ParticipantInfo): string {
   // 026 `T2602`: a negative `available` is trust excess, not an amount this payment can carry; no amount is shown
   // and the recipient stays selectable (another route may exist).
   if (String(cap).trim().startsWith('-')) return label
-  // 037 F-037-1: a snapshot figure is not offered as a capacity; the Direct capacity row says what it is.
+  // 037 F-037-1: a snapshot figure is not offered as a capacity; the "Direct" figure of the information line says what it is.
   if (!figuresConfirmed.value) return label
   return `${label} — ${cap} ${props.unit}`
 }
@@ -650,12 +665,16 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 </script>
 
 <template>
-  <div v-if="open" :class="rootClass" :style="rootStyle" data-testid="manual-payment-panel" aria-label="Manual payment panel">
+  <div
+    v-if="open"
+    :class="rootClass"
+    :style="rootStyle"
+    data-testid="manual-payment-panel"
+    aria-label="Manual payment panel"
+    aria-keyshortcuts="Escape"
+  >
     <div class="ds-panel__header">
-      <div class="ds-h2">
-        {{ titleText() }}
-        <span class="ds-muted ds-mono"> (ESC to close)</span>
-      </div>
+      <div class="ds-h2" :title="interactText('escHint')">{{ titleText() }}</div>
     </div>
 
     <div class="ds-panel__body ds-stack">
@@ -715,6 +734,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           :disabled="busy"
           labelledBy="mp-from-label"
           triggerLabel="From participant"
+          :placeholder="interactText('pickPlaceholder')"
           @update:model-value="onFromChange($event ?? '')"
           @selected="onFromSelected"
         />
@@ -735,6 +755,7 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           triggerLabel="To participant"
           describedBy="mp-to-help"
           surfaceLabel="To participant options"
+          :placeholder="interactText('pickPlaceholder')"
           @update:model-value="onToChange($event ?? '')"
           @selected="onToSelected"
           @update:open="onToOpenChange"
@@ -761,11 +782,6 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
       <!-- Announces the list the form opened for the user (a screen reader reads a live region, not a focus move alone). -->
       <div class="mp-sr" role="status" aria-live="polite" data-testid="mp-next-choice">{{ nextChoice }}</div>
 
-      <div v-if="isPickFrom" class="ds-help mp-pick-help">
-        Pick From node (canvas) or choose from dropdown.
-      </div>
-      <div v-if="isPickTo" class="ds-help mp-pick-help">Pick To node (canvas) or choose from dropdown.</div>
-
       <template v-if="isConfirm">
         <!-- Closed by default: the full sentence is long and the confirm step is already the tallest one on a phone. Always in the DOM. -->
         <details v-if="startedFromLine" class="ds-help ds-muted mp-line-direction" data-testid="mp-line-direction">
@@ -773,41 +789,20 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
           <div data-testid="mp-line-direction-note">{{ interactText('lineDirectionNote') }}</div>
         </details>
 
-        <div class="ds-row ds-row--space mp-summary" data-testid="mp-summary">
-          <div class="ds-label">{{ interactText('summaryTitle') }}</div>
-          <div class="ds-value">
-            <span data-testid="mp-summary-parties">{{ summaryParties }}</span>
-            <span class="ds-muted">·</span>
-            <span class="ds-mono" data-testid="mp-summary-amount">{{ summaryAmount }}</span>
-          </div>
-        </div>
-
-        <div class="ds-row ds-row--space">
-          <div class="ds-label">Direct capacity</div>
-          <div class="ds-value ds-mono">
-            {{ availableCapacity ?? '—' }} {{ unit }}
-            <span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">· {{ figuresSourceText }}</span>
-          </div>
-        </div>
-
-        <!-- The two captions of the chosen recipient, from the server's `payment-targets` answer - NOT from the line figures above. -->
-        <template v-if="estimate">
-          <div class="ds-row ds-row--space" data-testid="mp-shortest">
-            <div class="ds-label">{{ interactText('shortestTitle') }}</div>
-            <div class="ds-value ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</div>
-          </div>
-          <div class="ds-row ds-row--space" data-testid="mp-estimate">
-            <div class="ds-label">{{ interactText('estimateTitle') }}</div>
-            <div class="ds-value ds-mono">
-              <span data-testid="mp-estimate-max">{{ estimateText }}</span>
-              <span v-if="estimate.state === 'received' && estimate.maxAvailable != null" class="ds-muted mp-source" data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>
-            </div>
-          </div>
-          <div class="ds-help ds-muted" data-testid="mp-route-note">{{ interactText('routeNote') }}</div>
-        </template>
-
-        <div class="ds-help ds-muted" data-testid="mp-direct-capacity-help">
-          {{ interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel }) }}
+        <!--
+          045 S2: the one information line of the confirm step - the figures, separated by " · ", their source in grey. The direct
+          capacity is the line's (marked with where it came from, 037 F-037-1); the two captions of the chosen recipient come from the
+          server's `payment-targets` answer, NOT from the line figures. The explanations are the `title` of their figure.
+        -->
+        <div class="ds-help mp-info" data-testid="mp-info">
+          <span data-testid="mp-direct-capacity-help" :title="interactText('directCapacityHelp', { hops: paymentTargetsMaxHopsLabel })">{{ interactText('directTitle') }} <span class="ds-mono">{{ availableCapacity ?? '—' }} {{ unit }}</span></span>
+          <span class="ds-muted" :data-figures-source="figuresSource" data-testid="mp-figures-source">({{ figuresSourceText }})</span>
+          <template v-if="estimate">
+            <span class="ds-muted" aria-hidden="true">·</span>
+            <span data-testid="mp-estimate">{{ interactText('estimateShort') }} <span class="ds-mono" data-testid="mp-estimate-max">{{ estimateText }}</span><span v-if="estimate.state === 'received' && estimate.maxAvailable != null" class="ds-muted mp-source">(<span data-testid="mp-estimate-source">{{ interactText('estimateSource') }}</span>)</span></span>
+            <span class="ds-muted" aria-hidden="true">·</span>
+            <span data-testid="mp-shortest" :title="`${interactText('shortestTitle')}. ${interactText('routeNote')}`"><span class="ds-mono" data-testid="mp-shortest-value">{{ shortestText }}</span></span>
+          </template>
         </div>
 
         <div class="ds-controls__row ds-controls__row--compact">
@@ -836,10 +831,10 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 
       <!-- Keep stable aria-describedby target (UX-9), but show content only when disabled. -->
       <div v-if="isConfirm" id="mp-amount-help" class="mp-confirm-help">
-        <div v-if="confirmDisabledReason" class="ds-help" data-testid="mp-confirm-reason">
+        <div v-if="showConfirmReason" class="ds-help" data-testid="mp-confirm-reason">
           {{ confirmDisabledReason }}
         </div>
-        <div v-else-if="confirmInlineWarning" class="ds-help" data-testid="mp-confirm-warning">
+        <div v-else-if="!confirmDisabledReason && confirmInlineWarning" class="ds-help" data-testid="mp-confirm-warning">
           {{ confirmInlineWarning }}
         </div>
       </div>
@@ -900,20 +895,22 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
         </template>
       </div>
 
+      <!-- 045 S2: [Cancel][Confirm] in one row; Confirm is there from the first step, disabled until the payment can be sent. -->
       <div class="ds-row ds-row--actions mp-actions">
         <button
-          v-if="isConfirm && !unknownOutcome"
+          v-if="!unknownOutcome"
           class="ds-btn ds-btn--primary"
           type="button"
           data-testid="manual-payment-confirm"
           :disabled="!canConfirm"
+          :title="confirmTitle"
           @keydown="onConfirmKeydown"
           @click="onConfirm"
         >
           {{ busy ? 'Sending…' : 'Confirm' }}
         </button>
         <button
-          class="ds-btn ds-btn--ghost"
+          class="ds-btn ds-btn--ghost mp-cancel"
           type="button"
           data-testid="manual-payment-cancel"
           :disabled="busy"
@@ -928,10 +925,6 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 </template>
 
 <style scoped>
-.mp-pick-help {
-  margin: 6px 0 2px;
-}
-
 .mp-to-help {
   margin: 4px 0 0;
 }
@@ -940,12 +933,29 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
   justify-content: flex-end;
 }
 
+/*
+  045 S2: [Cancel][Primary] on screen, the primary still FIRST in the DOM - the Tab order and the first focus of a window
+  (WindowShell focuses the first focusable control) stay what they were: Enter on a freshly opened clearing window still
+  confirms, Tab from the amount still reaches Confirm before Cancel. Only the visual order moves, by `order`.
+*/
+.mp-cancel {
+  order: -1;
+}
+
 .mp-line-direction > summary {
   cursor: pointer;
 }
 
+/* 045 S2: the one information line - its figures are flex items, so the space between them is a gap, not template whitespace. */
+.mp-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--ds-space-1, 4px);
+}
+
 .mp-source {
-  margin-left: 6px;
+  margin-left: 4px;
 }
 
 /* Visually hidden, still read by a screen reader: the live region that announces the list the form opened. */
@@ -961,8 +971,9 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
   border: 0;
 }
 
+/* The stable `aria-describedby` target of the amount (UX-9) is not a row of its own: an empty one adds no gap to the stack. */
 .mp-confirm-help {
-  margin: 2px 0 0;
+  display: contents;
 }
 </style>
 

@@ -100,21 +100,20 @@ const closeDisabled = computed(() => waiting.value)
     :style="rootStyle"
     data-testid="clearing-panel"
     aria-label="Clearing panel"
+    aria-keyshortcuts="Escape"
     :aria-busy="waiting || busyUi ? 'true' : 'false'"
   >
+    <!-- 045 S2: the title is the action and its equivalent - "Run clearing · UAH"; the equivalent is no longer a row of its own. -->
     <div class="ds-panel__header">
-      <div class="ds-h2">
+      <div class="ds-h2" :title="interactText('escHint')">
         <span v-if="isConfirm">Run clearing</span>
         <span v-else>{{ interactText('clearingResultTitle') }}</span>
-        <span class="ds-muted ds-mono"> (ESC to close)</span>
+        <span class="ds-muted" aria-hidden="true"> · </span>
+        <span class="ds-mono" data-testid="clearing-equivalent">{{ shownEquivalent }}</span>
       </div>
     </div>
 
     <div class="ds-panel__body ds-stack">
-      <div class="ds-label cp-equivalent-row">
-        <span>Equivalent:</span>
-        <span class="ds-mono" data-testid="clearing-equivalent">{{ shownEquivalent }}</span>
-      </div>
 
       <div v-if="errorText" class="ds-alert ds-alert--err ds-mono" data-testid="clearing-error">{{ errorText }}</div>
 
@@ -132,11 +131,12 @@ const closeDisabled = computed(() => waiting.value)
           <template v-else>This will run a clearing cycle in backend.</template>
         </div>
 
+        <!-- 045 S2: [Cancel][Confirm] on screen; Confirm stays first in the DOM (see `.cp-cancel`). -->
         <div class="ds-row ds-row--actions cp-actions">
           <button class="ds-btn ds-btn--primary" type="button" data-testid="clearing-confirm" :disabled="busyUi" @click="onConfirm">
             {{ busyUi ? 'Running…' : 'Confirm' }}
           </button>
-          <button class="ds-btn ds-btn--ghost" type="button" data-testid="clearing-cancel" :disabled="busyUi" @click="cancel">Cancel</button>
+          <button class="ds-btn ds-btn--ghost cp-cancel" type="button" data-testid="clearing-cancel" :disabled="busyUi" @click="cancel">Cancel</button>
         </div>
       </template>
 
@@ -157,13 +157,14 @@ const closeDisabled = computed(() => waiting.value)
         </div>
 
         <div v-else-if="last" class="ds-stack cp-preview-stack" data-testid="clearing-result" role="status" aria-live="polite" aria-atomic="true">
-          <div class="ds-label">
-            {{ interactText('clearingCycles') }}: <span class="ds-mono" data-testid="clearing-cycles">{{ cyclesCount }}</span>
+          <!-- 045 S2: the result as one line; what the total adds up is the `title` of the total. -->
+          <div class="ds-label cp-result-line">
+            <span>{{ interactText('clearingCycles') }}: <span class="ds-mono" data-testid="clearing-cycles">{{ cyclesCount }}</span></span>
+            <span class="ds-muted" aria-hidden="true">·</span>
+            <span data-testid="clearing-total" :title="interactText('clearingTotalNote')">
+              {{ interactText('clearingTotal') }}: <span class="ds-mono">{{ last.total_cleared_amount }} {{ resultUnit }}</span>
+            </span>
           </div>
-          <div class="ds-label" data-testid="clearing-total">
-            {{ interactText('clearingTotal') }}: <span class="ds-mono">{{ last.total_cleared_amount }} {{ resultUnit }}</span>
-          </div>
-          <div class="ds-help ds-muted" data-testid="clearing-total-note">{{ interactText('clearingTotalNote') }}</div>
 
           <div v-for="(c, i) in cycles" :key="i" class="ds-stack cp-cycle" data-testid="clearing-cycle">
             <div class="ds-label" data-testid="clearing-cycle-title">
@@ -184,12 +185,24 @@ const closeDisabled = computed(() => waiting.value)
 </template>
 
 <style scoped>
-.cp-equivalent-row {
-  margin-bottom: 2px;
-}
-
 .cp-actions {
   justify-content: flex-end;
+}
+
+/*
+  045 S2: [Cancel][Primary] on screen, the primary still FIRST in the DOM - the Tab order and the first focus of a window
+  (WindowShell focuses the first focusable control) stay what they were: Enter on a freshly opened clearing window still
+  confirms, Tab from the amount still reaches Confirm before Cancel. Only the visual order moves, by `order`.
+*/
+.cp-result-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--ds-space-1, 4px);
+}
+
+.cp-cancel {
+  order: -1;
 }
 
 .cp-preview-stack {
