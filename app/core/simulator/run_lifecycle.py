@@ -294,10 +294,7 @@ class RunLifecycle:
                             # Recompute count without the now-cleared stale mapping.
                             count, most_recent_run_id = self._count_active_runs_for_owner_locked(owner_id)
                         else:
-                            # Mapping is valid: ensure count reflects it (handles edge cases
-                            # where the run exists in _runs but wasn't counted above).
-                            if mapped_run_id not in self._runs:
-                                count = max(count, 1)
+                            # Mapping is valid (the run is in _runs, so the scan above saw it).
                             if most_recent_run_id is None:
                                 most_recent_run_id = mapped_run_id
 
