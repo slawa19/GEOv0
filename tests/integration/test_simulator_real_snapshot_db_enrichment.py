@@ -1,8 +1,6 @@
 import asyncio
-import json
 import time
 from decimal import Decimal, ROUND_DOWN
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -113,12 +111,18 @@ async def test_real_mode_graph_snapshot_enriches_used_and_net_sign(
     # taken in `trust_lines.id` order, so the choice is deterministic; the snapshot is requested after the rollback
     # below, which expires what this session loaded. (The S6a conftest change that made a request re-read committed
     # rows was rolled back in the S6 fix-delta; this test does not depend on it.)
-    scenario = json.loads(
-        (Path(__file__).resolve().parents[2] / "fixtures/simulator/greenfield-village-100-realistic-v2/scenario.json")
-        .read_text(encoding="utf-8")
-    )
+    # 044 `T4405`: the run's OWN copy of the scenario, whose participants are the run's identities (`<run_id>:p<n>`); the
+    # template file names pids no row of this run carries, and excluding by them excluded nobody (CI on `59c20013`: the
+    # debtor picked was `run_...:p77`, frozen in the scenario, `viz_color_key` 'suspended').
+    from app.core.simulator.runtime import runtime
+
+    scenario = runtime.get_run(run_id)._scenario_raw
     never_active = {p["id"] for p in scenario["participants"] if str(p.get("status") or "active") != "active"}
     assert never_active, "the scenario freezes nobody: this selection would be vacuous"
+    # Anti-vacuum for the exclusion itself: it must name rows the database holds. Since 044 `T4405` a run's
+    # participants are rows under identities of the run, so template pids name nothing here.
+    stored = set((await db_session.execute(select(Participant.pid).where(Participant.pid.in_(never_active)))).scalars())
+    assert stored == never_active, f"the exclusion names {len(never_active)} participants, the database holds {len(stored)} of them"
     from_end, to_end = aliased(Participant), aliased(Participant)
     tl = (
         await db_session.execute(

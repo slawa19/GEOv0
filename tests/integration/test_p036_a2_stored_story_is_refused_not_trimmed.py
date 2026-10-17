@@ -40,6 +40,7 @@ def _damaged() -> dict:
 def stored(monkeypatch):
     record = scenario_to_record(_damaged(), source_path=None, created_at=None)
     monkeypatch.setitem(runtime._scenarios, ID, record)
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SCENARIO_ALLOWLIST", ID)  # 044 `T4405`: admitted for visitors
     return record
 
 

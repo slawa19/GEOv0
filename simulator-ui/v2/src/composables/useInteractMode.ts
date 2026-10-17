@@ -835,10 +835,11 @@ export function useInteractMode(opts: {
       await opts.actions.createTrustline(from, to, limit, eq, { signal })
       if (!isCurrent()) return
 
-      setSuccessToastMessage(`Trustline created: ${showPid(from)} → ${showPid(to)}`)
+      // 044 `T4405`: the participants' names, not their ids (identities of the run).
+      setSuccessToastMessage(`Trustline created: ${participantName(from)} → ${participantName(to)}`)
 
       // BUG-5: log to history
-      pushHistory('🔗', `Trustline created: ${showPid(from)} → ${showPid(to)} (${limit})`)
+      pushHistory('🔗', `Trustline created: ${participantName(from)} → ${participantName(to)} (${limit})`)
       invalidateTrustlinesCache(eq)
       void refreshTrustlines({ force: true })
       resetToIdle()
@@ -859,7 +860,7 @@ export function useInteractMode(opts: {
       setSuccessToastMessage(`Limit updated: ${newLimit} ${eq}`)
 
       // BUG-5: log to history
-      pushHistory('✏️', `Trustline updated: ${showPid(from)} → ${showPid(to)} → limit ${newLimit}`)
+      pushHistory('✏️', `Trustline updated: ${participantName(from)} → ${participantName(to)} → limit ${newLimit}`)
       const patchTrustlineLimitLocal = dataCache.patchTrustlineLimitLocal
       // Optimistic UI: patch cache immediately (fetch may be slow or fail silently).
       patchTrustlineLimitLocal(from, to, newLimit, eq)
@@ -882,8 +883,8 @@ export function useInteractMode(opts: {
 
       // 026: "closed" only when the backend says so; otherwise the close is a request (limit 0 until repaid).
       const msg = res.status === 'closed'
-        ? `Trustline closed: ${showPid(from)} → ${showPid(to)}`
-        : `Close requested: ${showPid(from)} → ${showPid(to)} (closes when the debt is repaid)`
+        ? `Trustline closed: ${participantName(from)} → ${participantName(to)}`
+        : `Close requested: ${participantName(from)} → ${participantName(to)} (closes when the debt is repaid)`
       setSuccessToastMessage(msg)
 
       // BUG-5: log to history

@@ -3,6 +3,10 @@
 `POST /api/v1/simulator/scenarios` needs only `require_simulator_actor`, which an anonymous visitor
 satisfies with the cookie from `POST /session/ensure`. The unit twin
 (`tests/unit/test_p024_scenario_id_is_a_safe_path_segment.py`) covers the registry alone.
+
+044 `T4405` (2026-10-17): only the administrator uploads now (an anonymous upload is 403 before the registry or the
+disk is touched - `test_p044_t4405_run_isolation.py`), so the unsafe-id refusal is measured on the administrator's
+upload, the one path that still reaches the registry.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from app.core.simulator.scenario_registry import ScenarioRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ORIGIN = {"Origin": "http://localhost:5176"}
+UPLOAD = {**ORIGIN, "X-Admin-Token": settings.ADMIN_TOKEN}  # 044 `T4405`: only the administrator uploads
 
 
 def _scenario(scenario_id: str) -> dict:
@@ -58,13 +63,13 @@ async def _anonymous(client) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario_id", ["../escape", "..\\escape", "C:\\abs"])
-async def test_anonymous_upload_with_a_traversal_id_is_400_and_writes_nothing(
+async def test_an_upload_with_a_traversal_id_is_400_and_writes_nothing(
     client, isolated_registry: ScenarioRegistry, tmp_path: Path, scenario_id: str
 ) -> None:
     await _anonymous(client)
 
     response = await client.post(
-        "/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": _scenario(scenario_id)}
+        "/api/v1/simulator/scenarios", headers=UPLOAD, json={"scenario": _scenario(scenario_id)}
     )
 
     assert response.status_code == 400, response.text
@@ -73,14 +78,14 @@ async def test_anonymous_upload_with_a_traversal_id_is_400_and_writes_nothing(
 
 
 @pytest.mark.asyncio
-async def test_anonymous_upload_with_an_ordinary_id_still_succeeds(
+async def test_an_upload_with_an_ordinary_id_still_succeeds(
     client, isolated_registry: ScenarioRegistry, tmp_path: Path
 ) -> None:
-    # Counter-check: the same anonymous path keeps working for a well-formed id.
+    # Counter-check: the same upload path keeps working for a well-formed id.
     await _anonymous(client)
 
     response = await client.post(
-        "/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": _scenario("my-upload_1")}
+        "/api/v1/simulator/scenarios", headers=UPLOAD, json={"scenario": _scenario("my-upload_1")}
     )
 
     assert response.status_code == 200, response.text

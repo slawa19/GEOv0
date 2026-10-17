@@ -30,7 +30,8 @@ async def test_create_run_deep_copies_scenario_raw_per_run() -> None:
     active_calls: list[tuple[str, str]] = []
 
     scenario_template = {
-        "participants": [{"id": "A", "name": "A"}],
+        # B is declared: since 044 `T4405` a line to an undeclared participant refuses the run.
+        "participants": [{"id": "A", "name": "A"}, {"id": "B", "name": "B"}],
         "trustlines": [{"from": "A", "to": "B", "equivalent": "EUR", "status": "active"}],
         "equivalents": ["EUR"],
     }
@@ -83,4 +84,4 @@ async def test_create_run_deep_copies_scenario_raw_per_run() -> None:
 
     # Deep copy: nested lists must not be shared.
     r1._scenario_raw["participants"].append({"id": "X"})
-    assert len(r2._scenario_raw["participants"]) == 1
+    assert len(r2._scenario_raw["participants"]) == 2

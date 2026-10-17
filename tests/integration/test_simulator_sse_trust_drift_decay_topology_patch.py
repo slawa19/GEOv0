@@ -21,7 +21,10 @@ pytestmark = MODE_B
 async def test_simulator_sse_trust_drift_decay_emits_edge_patch_not_empty_topology_changed(
     client: AsyncClient,
     auth_headers,
+    monkeypatch,
 ):
+    # 044 `T4405`: a non-administrator starts only an admitted scenario.
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SCENARIO_ALLOWLIST", "trust-drift-decay-minimal")
     resp = await client.post(
         "/api/v1/simulator/runs",
         headers=auth_headers,

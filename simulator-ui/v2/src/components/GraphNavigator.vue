@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import type { GraphLink, GraphNode } from '../types'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
 import { keyEdge } from '../utils/edgeKey'
+import { participantLabelsOf } from '../utils/participants'
 
 type Props = {
   nodes: GraphNode[]
@@ -34,13 +35,20 @@ const selectedNodeId = ref('')
 const selectedEdgeKey = ref('')
 const announcement = ref('')
 
+// 044 `T4405`: the participant's name, not its id (an identity of the run); the shown id only when there is no name;
+// two participants that would read the same are numbered, as in the payment pickers (`participantLabelsOf`).
+const labelById = computed(() => participantLabelsOf(props.nodes.map((n) => ({ pid: n.id, name: n.name })), showPid))
+
+function participantText(id: string): string {
+  return labelById.value.get(id) || showPid(id)
+}
+
 function nodeLabel(node: GraphNode): string {
-  const name = node.name?.trim()
-  return name && name !== node.id ? `${name} (${showPid(node.id)})` : showPid(node.id)
+  return participantText(node.id)
 }
 
 function edgeLabel(link: GraphLink): string {
-  return `${showPid(link.source)} → ${showPid(link.target)}`
+  return `${participantText(link.source)} → ${participantText(link.target)}`
 }
 
 watch(
