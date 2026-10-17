@@ -25,6 +25,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.payments.service import PaymentService
 from app.core.simulator.real_scenario_seeder import RealScenarioSeeder, RunIdentityUnbound
 from app.core.simulator.runtime import runtime
 from app.core.simulator.scenario_registry import ScenarioRegistry
@@ -172,12 +173,23 @@ async def test_two_runs_of_one_scenario_cannot_name_each_other_s_participants(cl
 @pytest.mark.asyncio
 async def test_a_new_run_does_not_adopt_the_rows_an_unbound_seeding_left(client: AsyncClient, db_session, started):
     """Before T4405 every run of `minimal` adopted the rows `p1`/`p2` (pseudo key = "the simulator made it") with
-    their debts. Seed them as an older run did, with a debt, and start a run: it starts from nothing."""
+    their debts. Seed them as an older run did, with a debt made by the real payment writer, and start a run: it
+    starts from nothing, and the legacy debt is still there, untouched, after the new run paid on its own rows.
+
+    Fixed 2026-10-17 (§15 review of 044, P3): the earlier revision seeded no debt, so its last assertion (`{}`) could
+    not tell "the legacy debt survived" from "it was erased"."""
 
     template = runtime.get_scenario("minimal").raw
     async with sessionmaker_of(db_session)() as s:
         await RealScenarioSeeder().seed_scenario_into_db(session=s, scenario=template)
         await s.commit()
+    async with sessionmaker_of(db_session)() as s:
+        p2 = (await s.execute(select(Participant).where(Participant.pid == "p2"))).scalar_one()
+        paid = await PaymentService(s).create_payment_internal(p2.id, to_pid="p1", equivalent="UAH", amount="2")
+        assert str(paid.status).upper().endswith("COMMITTED"), paid
+        await s.commit()
+    legacy_debt = {("p2", "p1"): Decimal("2")}
+    assert await _debts(db_session, {"p1", "p2"}) == legacy_debt  # premise: there IS an old debt to adopt or erase
     headers = await _anon(client)
     run_id = (await _start(client, headers, started)).json()["run_id"]
     ids = await _ids(client, headers, run_id)
@@ -187,7 +199,8 @@ async def test_a_new_run_does_not_adopt_the_rows_an_unbound_seeding_left(client:
     assert set(ids.values()).isdisjoint({"p1", "p2"}), ids
     assert set((await _used(client, headers, run_id)).values()) == {Decimal("0")}
     await _pay(client, headers, run_id, "1")
-    assert await _debts(db_session, {"p1", "p2"}) == {}  # the legacy rows are not this run's
+    assert await _debts(db_session, {"p1", "p2"}) == legacy_debt  # the legacy rows are not this run's: kept as they were
+    assert await _debts(db_session, ids.values()) == {(ids["Coffee Shop"], ids["Ivan"]): Decimal("1")}  # the run's own
 
 
 @pytest.mark.asyncio
