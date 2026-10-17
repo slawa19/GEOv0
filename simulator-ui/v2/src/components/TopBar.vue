@@ -67,6 +67,22 @@ function scenarioTitle(s: { name?: string | null; label?: string } | undefined):
   return s?.name?.trim() || s?.label?.trim() || ''
 }
 
+/** The text of a scenario's option: "<name> (<id>)", or the id when the API gives no name. */
+function scenarioOptionText(s: { scenario_id: string; name?: string | null; label?: string }): string {
+  const title = scenarioTitle(s)
+  return title ? `${title} (${s.scenario_id})` : s.scenario_id
+}
+
+/**
+ * 043 S3 (Codex §15, P2): the Scenario select is narrower than its longest option at desktop sizes; the full text of
+ * the chosen option is its `title`, so nothing of the name is lost to a pointer or to assistive tech.
+ */
+const selectedScenarioText = computed(() => {
+  const id = String(ctx.selectedScenarioId.value ?? '')
+  const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
+  return s ? scenarioOptionText(s) : ''
+})
+
 /** The network on screen, as text: the label of the scenario of the run (or of the selected one), its id otherwise. */
 const networkName = computed(() => {
   if (ctx.apiMode.value !== 'real') return 'офлайн-демо'
@@ -358,14 +374,15 @@ function onApplyIntensity() {
           <div v-if="showRunControls" class="ds-row tb-run-controls">
             <span class="ds-label">Scenario</span>
             <select
-              class="ds-select"
+              class="ds-select tb-scenario-select"
               :value="ctx.selectedScenarioId.value"
+              :title="selectedScenarioText || undefined"
               aria-label="Scenario"
               @change="setSelectedScenarioId(($event.target as HTMLSelectElement).value)"
             >
               <option value="">— select —</option>
               <option v-for="s in ctx.scenarios.value" :key="s.scenario_id" :value="s.scenario_id">
-                {{ scenarioTitle(s) ? `${scenarioTitle(s)} (${s.scenario_id})` : s.scenario_id }}
+                {{ scenarioOptionText(s) }}
               </option>
             </select>
             <button
@@ -634,7 +651,20 @@ function onApplyIntensity() {
 */
 .tb-details-row > .hud-bar__center {
   flex: 1 1 0;
+  /*
+    Codex §15 (P2 on the rule above, 2026-10-17): a zero basis alone hid the middle's content from the row's own wrapping,
+    and its widest unbreakable item (the Scenario select, as wide as its longest option) then spilled over the theme and
+    the status cluster. The middle counts its min-content: the row wraps the cluster before anything overlaps, and the
+    min-content is kept small by the cap on the select below.
+  */
+  min-width: min-content;
+}
+
+/* The Scenario select at desktop sizes: capped, its text cut by the control; the whole option is its `title`. */
+.tb-scenario-select {
+  max-width: 18rem;
   min-width: 0;
+  text-overflow: ellipsis;
 }
 
 /* ...and the tempo wraps as a whole, never between its label, its field and Apply (narrow screens wrap: below). */

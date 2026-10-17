@@ -121,8 +121,13 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   matrix entry `menu-dev-tools` is gone with its menu: -2 its required test in both themes, -1 "matrix [hud]
  *   menu-dev-tools left open, then a node card opened from the canvas" (the same test stays for `menu-admin`), and
  *   under `@extended` -2 its gallery test. `layout.qa.ts` lost the Dev Tools line of its service list (no count change).
+ * - 2026-10-17 (043 S3, external review Codex §15, P2 on `46094c4d`): gate 129 -> 133, full 220 -> 224. One new file,
+ *   `top-bar-long.qa.ts`, four tests in the gate (1280x720 and 1366x768, both themes): with the longest scenario name
+ *   and a 64-character stop summary no control of the service row overlaps another or leaves the viewport, and the
+ *   Scenario select carries the full option text as its title. Red before the fix in all four (the select overlapped
+ *   the theme and the status cluster; in `hud` at 1280x720 it left the screen at x -25). About 0.5 s each.
  */
-export const EXPECTED = { gate: 129, full: 220 }
+export const EXPECTED = { gate: 133, full: 224 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason
