@@ -3,6 +3,8 @@
 Дата: **2026-02-05**
 
 > **Исторический документ (2026-10-16, программа 042).** Часть решений ниже снята: серверный режим прогона `fixtures`, отладочные actions `tx-once` / `clearing-once` и кнопки «Single TX» / «Run Clearing» удалены (`RunMode` — только `real`; явный `mode=fixtures` — `422`); событие о платеже или клиринге рождается только в ядре. Клиентское демо без сервера на статических снимках осталось. Актуальный контракт — `api/openapi.yaml`; решение — [`../../09-decisions-and-defaults.md`](../../09-decisions-and-defaults.md) §1.11 и [`specs/042`](../../../../specs/042-fixtures-run-mode-removal/spec.md). Раздел Clearing Viz v2 (§7) этим не затронут.
+>
+> **Дополнение 2026-10-17 (программа [043](../../../../specs/043-demo-screen-minimal/spec.md), S3–S4).** Переключатель **Demo UI**, параметры `ui=demo` и `debug=1`, панель FX Debug / Dev Tools (§4.1–4.2) и алиас `?mode=demo` (§6.2) удалены из клиента: Demo UI, `useFxDebugControls`, `demoToolsAllowed` и алиас в `useSimulatorApp.ts` больше не существуют; `?ui=demo` в ссылке игнорируется, `?debug=1` принимается, но не читается. Офлайн‑снимок без сервера выбирается только `?mode=fixtures` или `VITE_API_MODE=fixtures` (поле «Источник» под «Подробнее»). Текст §4.1–4.2 и §6.2 ниже — исторический, как и описание режимов UI в нём.
 
 ## 0. Контекст
 

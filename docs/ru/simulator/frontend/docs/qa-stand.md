@@ -64,7 +64,7 @@
 | `node-card` | `wm-inspector-window` | двойной клик по узлу | внутри viewport с отступом; Escape закрывает; клик по пустой канве закрывает; фокус — на открывший элемент (с канвы — на `body`, из навигатора — на «Inspect node») |
 | `edge-popup` | `wm-inspector-window` | клик по линии доверия | то же |
 | `payment-from-list`, `trustline-from-list` | `interact-select-dropdown` | клик по списку «From» | внутри viewport; Escape закрывает **список, а не панель**, фокус — на триггер; Tab не покидает список |
-| `menu-advanced`, `menu-artifacts` (Auto-Run), `menu-admin`, `menu-dev-tools` | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
+| `menu-artifacts`, `menu-admin` (оба — после «Подробнее») | `hud-dropdown` | клик по заголовку меню | внутри viewport; Escape закрывает, фокус — на заголовок; Tab не покидает меню. Клик вне меню политикой не объявлен и не проверяется |
 | `top-bar-interact`, `top-bar-auto-run`, `graph-navigator` | `top-hud-stack` | на экране всегда; навигатор — клик «Inspect graph» | внутри viewport |
 | `bottom-bar` | `bottom-hud-stack` | на экране всегда | внутри viewport |
 | `toast-success`, `toast-error` | `success-toast`, `error-toast` | клиринг с циклом; клиринг с отказом бэкенда | внутри viewport; Escape, фокус и клик вне не применяются |
