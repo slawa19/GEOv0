@@ -321,7 +321,7 @@ def _make_lifecycle(
         lock=threading.RLock(),
         runs=runs,
         set_active_run_id=set_active_run_id or (lambda run_id, owner_id: None),
-        clear_active_run_id=clear_active_run_id,
+        clear_active_run_id=clear_active_run_id or (lambda **_: None),
         utc_now=lambda: datetime.now(tz=timezone.utc),
         new_run_id=lambda: str(uuid.uuid4()),
         get_scenario_raw=lambda sid: {"equivalents": [], "edges": [], "scenario_id": sid},
@@ -336,7 +336,8 @@ def _make_lifecycle(
         get_max_active_runs=lambda: max_active,
         get_max_run_records=lambda: 100,
         logger=MagicMock(),
-        get_active_run_id_for_owner=get_active_run_id_for_owner,
+        get_active_run_id_for_owner=get_active_run_id_for_owner or (lambda _: None),
+        get_max_active_runs_per_owner=lambda: 1,
     )
 
 

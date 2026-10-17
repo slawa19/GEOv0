@@ -44,6 +44,7 @@ async def _restart(run: RunRecord) -> None:
         heartbeat_loop=_no_heartbeat, publish_run_status=lambda _: None, run_to_status=lambda _: None,
         get_run_status_payload_json=lambda _: {}, real_max_in_flight_default=1, get_max_active_runs=lambda: 0,
         get_max_run_records=lambda: 0, logger=None, artifacts=artifacts, **unused,
+        clear_active_run_id=lambda **_: None, get_active_run_id_for_owner=lambda _: None, get_max_active_runs_per_owner=lambda: 1,
     ).restart(run.run_id)
 
 
