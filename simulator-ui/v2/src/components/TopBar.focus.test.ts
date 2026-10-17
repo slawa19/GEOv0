@@ -116,59 +116,18 @@ describe('TopBar dropdown focus contract', () => {
     host.remove()
   })
 
-  it('042 S2: the Advanced dropdown has no run-pipeline choice (no Pipeline row, no select, no sandbox option)', async () => {
+  it('042 S2: the top bar has no run-pipeline choice (no Pipeline row, no sandbox option); 043 S3: no Advanced menu', async () => {
     const { app, host } = await mountTopBar()
 
-    const dropdown = host.querySelector('[aria-label="Advanced dropdown"]') as HTMLElement
-    expect(dropdown).toBeTruthy()
-    expect(dropdown.querySelector('select')).toBeNull()
-    expect(dropdown.querySelector('[aria-label="Run pipeline"]')).toBeNull()
-    expect(dropdown.textContent).not.toContain('Pipeline')
-    expect(dropdown.textContent).not.toContain('topology-only')
-    // anti-vacuum: the dropdown is the real one and still carries the intensity control that stays
-    expect(dropdown.querySelector('input[aria-label="Intensity percent"]')).toBeTruthy()
-
-    app.unmount()
-    host.remove()
-  })
-
-  it('moves keyboard-opened focus inside Advanced and traps Tab until Escape closes it', async () => {
-    const { app, host } = await mountTopBar()
-
-    const details = host.querySelector('details[aria-label="Advanced"]') as HTMLDetailsElement
-    const summary = host.querySelector('[aria-label="Advanced settings"]') as HTMLElement
-    const dropdown = host.querySelector('[aria-label="Advanced dropdown"]') as HTMLElement
-    const intensityInput = host.querySelector('input[aria-label="Intensity percent"]') as HTMLInputElement
-    const applyButton = Array.from(dropdown.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent?.trim() === 'Apply',
-    ) as HTMLButtonElement | undefined
-
-    expect(details).toBeTruthy()
-    expect(summary).toBeTruthy()
-    expect(dropdown).toBeTruthy()
-    expect(intensityInput).toBeTruthy()
-    expect(applyButton).toBeTruthy()
-
-    summary.focus()
-    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    details.open = true
-    details.dispatchEvent(new Event('toggle'))
-    await nextTick()
-
-    expect(document.activeElement).toBe(intensityInput)
-
-    applyButton?.focus()
-    applyButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
-    expect(document.activeElement).toBe(intensityInput)
-
-    intensityInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
-    expect(document.activeElement).toBe(applyButton)
-
-    applyButton?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    await nextTick()
-
-    expect(details.open).toBe(false)
-    expect(document.activeElement).toBe(summary)
+    expect(host.querySelector('[aria-label="Run pipeline"]')).toBeNull()
+    expect(host.textContent).not.toContain('Pipeline')
+    expect(host.textContent).not.toContain('topology-only')
+    // 043 S3 (decision 5): the "Advanced ⚙" menu, which held only the tempo, is gone; the tempo is in the row itself.
+    expect(host.querySelector('details[aria-label="Advanced"]')).toBeNull()
+    // anti-vacuum: the bar is the real one, with its service row, and still carries the intensity control that stays
+    const intensity = host.querySelector('[aria-label="Intensity"] input[aria-label="Intensity percent"]')
+    expect(intensity).toBeTruthy()
+    expect(intensity!.closest('details'), 'the tempo is not inside a menu').toBeNull()
 
     app.unmount()
     host.remove()

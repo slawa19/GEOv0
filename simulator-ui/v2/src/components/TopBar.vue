@@ -213,16 +213,7 @@ const adminStopAllBtnClass = computed(() => {
 })
 
 /** Toggle state for the admin panel (details element). */
-const advancedPanelOpen = ref(false)
 const adminPanelOpen = ref(false)
-
-const {
-  detailsRef: advancedDetailsRef,
-  summaryRef: advancedSummaryRef,
-  surfaceRef: advancedSurfaceRef,
-  onToggle: onAdvancedToggle,
-  onDetailsKeydown: onAdvancedDetailsKeydown,
-} = useHudDropdownFocus(advancedPanelOpen)
 
 const {
   detailsRef: adminDetailsRef,
@@ -421,54 +412,28 @@ function onApplyIntensity() {
               Stop
             </button>
 
-            <details
-              ref="advancedDetailsRef"
-              class="ds-ov-details"
-              aria-label="Advanced"
-              :open="advancedPanelOpen"
-              @keydown.capture="onAdvancedDetailsKeydown"
-              @toggle="onAdvancedToggle"
-            >
-              <summary
-                ref="advancedSummaryRef"
-                class="ds-panel ds-ov-metric ds-row tb-adv-summary"
-                aria-label="Advanced settings"
+            <!-- 043 S3 (decision 5): the tempo sits in the row itself; the "Advanced ⚙" menu that held only it is gone. -->
+            <div class="ds-row tb-adv-row" aria-label="Intensity">
+              <span class="ds-label">Intensity</span>
+              <input
+                class="ds-input tb-intensity-input"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                :value="ctx.intensityPercent.value"
+                aria-label="Intensity percent"
+                @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
+              />
+              <button
+                class="ds-btn ds-btn--secondary ds-btn--sm"
+                type="button"
+                :disabled="!isRunActive"
+                @click="onApplyIntensity"
               >
-                <span class="ds-badge ds-badge--info">⚙</span>
-                <span class="ds-label">Advanced</span>
-              </summary>
-
-              <div
-                ref="advancedSurfaceRef"
-                class="ds-panel ds-ov-surface ds-ov-dropdown"
-                aria-label="Advanced dropdown"
-                tabindex="-1"
-              >
-                <div class="ds-stack tb-adv-stack">
-                  <div class="ds-row tb-adv-row" aria-label="Intensity">
-                    <span class="ds-label">Intensity</span>
-                    <input
-                      class="ds-input tb-intensity-input"
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
-                      :value="ctx.intensityPercent.value"
-                      aria-label="Intensity percent"
-                      @input="setIntensityPercent(($event.target as HTMLInputElement).value)"
-                    />
-                    <button
-                      class="ds-btn ds-btn--secondary ds-btn--sm"
-                      type="button"
-                      :disabled="!isRunActive"
-                      @click="onApplyIntensity"
-                    >
-                      Apply
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </details>
+                Apply
+              </button>
+            </div>
 
             <div v-if="!ctx.loadingScenarios.value && ctx.scenarios.value.length === 0" class="ds-panel ds-ov-bar tb-fade-92" aria-label="No scenarios">
               <span class="ds-badge ds-badge--warn">No scenarios</span>
@@ -701,14 +666,6 @@ function onApplyIntensity() {
 .tb-icon-28 {
   height: var(--ds-tb-icon-size);
   width: var(--ds-tb-icon-size);
-}
-
-.tb-adv-summary {
-  gap: var(--ds-space-2, 8px);
-}
-
-.tb-adv-stack {
-  gap: var(--ds-space-2, 8px);
 }
 
 .tb-adv-row {

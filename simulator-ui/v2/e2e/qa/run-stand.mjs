@@ -113,8 +113,12 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   the opening start paused (two tests); a right-rail window stays under the top stack when "Подробнее" opens after it.
  * - 2026-10-17 (043 S2, the internal adversarial pass, 1-A): gate 133 -> 134, full 228 -> 229. One test of
  *   `one-screen.qa.ts`: dragging a participant in the living flow pauses it.
+ * - 2026-10-17 (043 S3, the "Advanced ⚙" menu removed - decision 5; the tempo now sits in the top service row):
+ *   gate 134 -> 132, full 229 -> 225. The matrix entry `menu-advanced` is gone with its menu: -2 its required test in
+ *   `saas` and `hud` (a `hud-dropdown` tours every viewport in the gate, so it has no separate viewport test), and under
+ *   `@extended` -2 its gallery test in both themes. The tempo row stays covered by `top-bar-interact-details`.
  */
-export const EXPECTED = { gate: 134, full: 229 }
+export const EXPECTED = { gate: 132, full: 225 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

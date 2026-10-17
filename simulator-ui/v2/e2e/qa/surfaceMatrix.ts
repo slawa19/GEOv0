@@ -267,11 +267,7 @@ export const MATRIX: Entry[] = [
     root: '#tl-from__surface', open: (page) => openList(page, '[data-testid="actionbar-trustline"]', 'tl-from'),
     policies: SELECT_LIST('#tl-from__trigger') },
 
-  // hud-dropdown: four menus of the two bars (all four behind "Подробнее" since 043 S1)
-  { id: 'menu-advanced', catalogue: 'hud-dropdown', gesture: 'click "Advanced" in the top bar ("Подробнее" on)',
-    details: { hiddenByDefault: 'summary[aria-label="Advanced settings"]' },
-    root: 'details[aria-label="Advanced"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Advanced settings"]'),
-    policies: hudDropdown('summary[aria-label="Advanced settings"]') },
+  // hud-dropdown: the menus of the two bars (all behind "Подробнее" since 043 S1; "Advanced" removed by 043 S3)
   { id: 'menu-admin', catalogue: 'hud-dropdown', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
     beforeLoad: routeToolbars, details: { hiddenByDefault: 'summary[aria-label="Admin"]' },
     root: 'details[aria-label="Admin controls"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Admin"]'),
