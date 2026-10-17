@@ -59,7 +59,6 @@ function mountPopup(overrides: Record<string, unknown> = {}) {
     available: '100',
     status: 'active',
     busy: false,
-    forceHidden: false,
     close: () => undefined,
   }
 

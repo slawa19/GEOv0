@@ -148,7 +148,6 @@ describe('edge detail popup: title and Pay button', () => {
       available: '10.00',
       status: 'active',
       busy: false,
-      forceHidden: false,
       close: () => undefined,
     }
   }

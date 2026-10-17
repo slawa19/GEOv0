@@ -1344,7 +1344,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
           :close-requested-at="wmEdgeDetailEffectiveLink?.close_requested_at ?? null"
           :busy="wmEdgeDetailEffectiveBusy"
           :figures-source="wmEdgeDetailFiguresSource"
-          :force-hidden="false"
           :close="() => uiCloseEdgeDetailWindow('action')"
           @change-limit="onEdgeDetailChangeLimit"
           @close-line="onEdgeDetailCloseLine"

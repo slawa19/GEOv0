@@ -123,7 +123,6 @@ describe('Legacy windows reference — markup snapshots', () => {
       available: '88',
       status: 'active',
       busy: false,
-      forceHidden: false,
       close: () => {},
       onChangeLimit: () => {},
       onCloseLine: () => {},

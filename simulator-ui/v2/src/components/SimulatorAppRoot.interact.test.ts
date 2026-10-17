@@ -3766,7 +3766,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
 
   it('EdgeDetailPopup: hidden when TrustlineManagementPanel is visible (no duplicate windows)', async () => {
     // Enter via ActionBar so useFullTrustlineEditor=true → TrustlineManagementPanel shown,
-    // EdgeDetailPopup hidden via forceHidden prop.
+    // and no edge-detail window is opened (the root never mounts EdgeDetailPopup outside one).
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setUrl('/?mode=real&ui=interact')
 
@@ -3787,7 +3787,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     phaseRef.value = 'editing-trustline'
     await nextTick()
 
-    // EdgeDetailPopup should NOT render (forceHidden=true because useFullTrustlineEditor=true).
+    // EdgeDetailPopup should NOT render (no edge-detail window while the full editor is open).
     const btn = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
     expect(btn).toBeFalsy()
 
