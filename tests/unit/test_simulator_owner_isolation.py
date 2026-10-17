@@ -123,21 +123,21 @@ def test_clear_active_run_id_mismatched_run() -> None:
     )
 
 
-def test_get_active_run_id_empty_owner() -> None:
-    """Backward compat: get('') возвращает первый активный run (любой owner)."""
+def test_get_active_run_id_empty_owner_sees_no_other_owners_run() -> None:
+    """044 S1d: get('') больше не отдаёт чужой run «любого владельца» — пустой owner → None."""
     rt = _MinimalRuntime()
 
     rt.set_active_run_id("run42", owner_id="someOwner")
-    # Пустой owner_id — backward compat: вернуть любой активный
-    result = rt.get_active_run_id("")
+    rt.set_active_run_id("run0", owner_id="")
 
-    assert result == "run42", (
-        "get с пустым owner_id должен вернуть первый активный run (backward compat)"
+    assert rt.get_active_run_id("") is None, (
+        "пустой owner_id не должен получать ни чужой, ни «ничей» активный run"
     )
+    assert rt.get_active_run_id("someOwner") == "run42"
 
 
 def test_get_active_run_id_empty_owner_no_runs() -> None:
-    """Backward compat: get('') при отсутствии runs → None."""
+    """get('') при отсутствии runs → None."""
     rt = _MinimalRuntime()
 
     result = rt.get_active_run_id("")
