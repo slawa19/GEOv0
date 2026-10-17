@@ -192,6 +192,7 @@ export type SimulatorAppApi = {
     | 'refreshScenarios'
     | 'startRun'
     | 'pause'
+    | 'pauseForManualAction'
     | 'resume'
     | 'stop'
     | 'applyIntensity'
@@ -925,6 +926,32 @@ export function useSimulatorApp(opts?: {
       })
     },
   })
+  /**
+   * 043 S2 (decision 3; external review 2026-10-17): every EXPLICIT entry or choice of a manual action pauses the run -
+   * starting a flow (the action bar, a node card, a line's popup: all call these), picking a participant on the canvas,
+   * choosing a sender, recipient, creditor, debtor or line in a panel. Wrapped here, at the one object every caller
+   * reaches (the root's panels, the canvas, the window controller), so an entry does not depend on what changed in
+   * the state: until this round a watched "some flow is open" boolean missed a second entry made in the same tick, a
+   * choice inside an open panel and the full editor of a line. A cleared field (`null`: Escape-back, the window
+   * controller) is not an entry. Internal transitions of the flow call the FSM directly and are not wrapped.
+   */
+  {
+    const entries = [
+      'startPaymentFlow', 'startPaymentFlowWithFrom', 'startTrustlineFlow', 'startTrustlineFlowWithFrom', 'startClearingFlow',
+      'selectNode', 'selectEdge', 'setPaymentFromPid', 'setPaymentToPid', 'setTrustlineFromPid', 'setTrustlineToPid',
+      'selectTrustline',
+    ] as const
+    const target = interactMode as unknown as Record<string, (...a: unknown[]) => unknown>
+    for (const name of entries) {
+      const inner = target[name]!
+      target[name] = (...a: unknown[]) => {
+        const out = inner(...a)
+        const cleared = a.length === 1 && a[0] === null
+        if (!cleared && out !== false) noteManualAction()
+        return out
+      }
+    }
+  }
   const systemBalance = useSystemBalance(snapshotRef).balance
 
   // `fxAndRender` is initialized later (it needs layout + camera), but layout/resize
@@ -1667,21 +1694,21 @@ export function useSimulatorApp(opts?: {
   // automatic payments out of a person's way now is the pause on a manual action (decision 3, below).
 
   /**
-   * 043 S2 (decision 3): "ручной режим должен останавливать все платежи". A manual action - a protocol panel opened
-   * (payment, trust line, clearing, from any entry: the action bar, a node card, a line), or a participant chosen in the
-   * flow - pauses the run (`/pause`). The way back is the "Поток" button ONLY: neither confirm nor cancel resumes, so the
-   * result of one's own action is not run over by automatic payments. Triggered on the CHANGE into an action, not
-   * while it lasts: a person who presses "Поток" with a panel open has asked for the flow and gets it.
+   * 043 S2 (decision 3): "ручной режим должен останавливать все платежи". An explicit manual action pauses the run
+   * (`/pause`): the entries wrapped where `interactMode` is created, a participant chosen (below), and the full line
+   * editor of the root (`realActions.pauseForManualAction`). Resumed only by an explicit act of the person - "Поток" or
+   * Resume under "Подробнее"; confirm, cancel, Escape and a closed panel never resume. Triggered by the ACT, not while
+   * an action lasts: a person who brings the flow back with a panel open gets it, until their next act.
    */
+  function noteManualAction(): void {
+    if (!isLiveUi.value) return
+    void realMode.pauseForManualAction()
+  }
   const isManualActionActive = () => toLower(interactMode.phase.value) !== 'idle' || !!state.selectedNodeId
   watch(
-    () => [toLower(interactMode.phase.value) !== 'idle', state.selectedNodeId] as const,
-    ([inFlow, nodeId], prev) => {
-      if (!isLiveUi.value) return
-      const [wasInFlow, prevNodeId] = prev ?? [false, null]
-      const enteredFlow = inFlow && !wasInFlow
-      const choseParticipant = !!nodeId && nodeId !== prevNodeId
-      if (enteredFlow || choseParticipant) void realMode.pauseForManualAction()
+    () => state.selectedNodeId,
+    (nodeId, prevNodeId) => {
+      if (nodeId && nodeId !== prevNodeId) noteManualAction()
     },
   )
 
@@ -1864,6 +1891,8 @@ export function useSimulatorApp(opts?: {
       refreshScenarios: realMode.refreshScenarios,
       startRun: realMode.startRun,
       pause: realMode.pause,
+      // 043 S2: the entry the root makes without a flow transition (the full line editor of a line's popup).
+      pauseForManualAction: async () => noteManualAction(),
       resume: realMode.resume,
       stop: realMode.stop,
       applyIntensity: realMode.applyIntensity,

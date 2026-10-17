@@ -1115,7 +1115,24 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function startRun(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }) {
+  /**
+   * 043 S2 (external review 2026-10-17): admission is serialised. A start asked for while another is in flight JOINS it
+   * (returns the same promise) and never issues a second create: the callers - the opening's autostart, Start under
+   * "Подробнее", the Demo UI's paused bootstrap (`useFxDebugControls`) - could otherwise put two runs side by side
+   * (with a global limit >= 2) or a redundant create and a 409 recovery (with the default 1). The joining call's own
+   * options are not applied: the run in flight is the one being started.
+   */
+  let startRunInFlight: Promise<void> | null = null
+  function startRun(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }): Promise<void> {
+    if (startRunInFlight) return startRunInFlight
+    const p = startRunOnce(startOpts).finally(() => {
+      if (startRunInFlight === p) startRunInFlight = null
+    })
+    startRunInFlight = p
+    return p
+  }
+
+  async function startRunOnce(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
@@ -1218,12 +1235,18 @@ export function useSimulatorRealMode(opts: {
    * already quiet, an ended one has nothing to pause. Only `resume` (the "Поток" button) cancels a pending pause.
    */
   let manualPausePending = false
+  /** One pause request at a time: two acts in one tick (a flow started with both ends chosen) ask once. */
+  let manualPauseInFlight: Promise<void> | null = null
   async function pauseForManualAction() {
     const st = toLower(real.runStatus?.state)
     if (st === 'running') {
       manualPausePending = false
-      await pause()
-      return
+      if (manualPauseInFlight) return manualPauseInFlight
+      const p = pause().finally(() => {
+        if (manualPauseInFlight === p) manualPauseInFlight = null
+      })
+      manualPauseInFlight = p
+      return p
     }
     if (startRunInProgress || st === 'created') manualPausePending = true
   }
@@ -1430,14 +1453,8 @@ export function useSimulatorRealMode(opts: {
           if (real.selectedScenarioId && !real.runId) {
             await refreshSnapshot()
           }
-
-          const shouldAutoStart =
-            import.meta.env.DEV &&
-            isLocalhost &&
-            real.selectedScenarioId &&
-            !real.runId &&
-            new URLSearchParams(window.location.search).get('autostart') === '1'
-          if (shouldAutoStart) await startRun()
+          // 043 S2 (external review 2026-10-17): the dev-only `?autostart=1` start that stood here is gone - the opening
+          // of the one screen (`useInteractAutoBootstrapRun.ts`) is the single owner of a start nobody pressed.
         } finally {
           initialBootInProgress = false
         }

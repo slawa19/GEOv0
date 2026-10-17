@@ -4,11 +4,14 @@
  * The backend is not started here: the caller gives its origin in `GEO_SIM_LIVE_BACKEND_ORIGIN` (the required CI job
  * `ui-smoke` passes the backend it already runs for the Admin smoke: the `postgres:16` service, the seed
  * `riverside-town-50`, uvicorn). Without the variable this config REFUSES to load - a missing backend is a failed
- * step, not a skipped test. Playwright builds the app and starts `vite preview`, whose `/api/v1` proxy points at that origin.
+ * step, not a skipped test. Playwright starts the Vite dev server (its dev hook is what reads the beam), whose `/api/v1`
+ * proxy points at that origin.
  *
- * The product runs as a public visitor's: a PRODUCTION build (`vite build` + `vite preview`, whose proxy is the dev
- * server's), so no dev access token is filled in and the visitor is an anonymous cookie session (a dev build on
- * localhost sends a dev admin token, which a backend with its own ADMIN_TOKEN refuses with 403); no test mode;
+ * The product runs as a public visitor's: an anonymous cookie session. A dev build on localhost fills in a dev admin
+ * token, which a backend with its own ADMIN_TOKEN refuses with 403; `VITE_GEO_DEV_ACCESS_TOKEN=''` empties that token
+ * (a build variable; no product code changed), so the dev server - which has the dev hook the beam is read through -
+ * is an anonymous visitor as a production build is (2026-10-17; until then the test ran a production build and could
+ * only read "some FX pixel", external review P2). No test mode;
  * `navigator.webdriver` false (the product reads it as "screenshot stand"); and NO `VITE_API_MODE` - what is proven is
  * the default a person gets when opening the address.
  */
@@ -45,7 +48,7 @@ export default defineConfig({
     launchOptions: { args: ['--disable-blink-features=AutomationControlled'] },
   },
   webServer: {
-    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
     url: `${baseURL}/`,
     timeout: 240_000,
     reuseExistingServer: false,
@@ -53,6 +56,7 @@ export default defineConfig({
     stderr: 'pipe',
     env: {
       VITE_GEO_BACKEND_ORIGIN: origin,
+      VITE_GEO_DEV_ACCESS_TOKEN: '',
       VITE_TEST_MODE: '0',
     },
   },

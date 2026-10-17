@@ -563,6 +563,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           refreshScenarios: vi.fn(),
           startRun: vi.fn(),
           pause: vi.fn(),
+          pauseForManualAction: vi.fn(),
           resume: vi.fn(),
           stop: vi.fn(),
           applyIntensity: vi.fn(),
@@ -2328,11 +2329,18 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
         | undefined
       expect(btn).toBeTruthy()
 
+      // 043 S2 (external review 2026-10-17): the full editor is a manual action without a flow transition - the root asks
+      // for the pause itself.
+      const actions = (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance
+        .subTree.component.setupState.realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+
       btn?.focus()
       expect(document.activeElement).toBe(btn)
       btn?.click()
       await nextTick()
       await nextTick()
+      expect(actions.pauseForManualAction, 'Change Limit pauses the run').toHaveBeenCalledTimes(1)
 
       // Edge detail must be closed; trustline panel must be visible.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)

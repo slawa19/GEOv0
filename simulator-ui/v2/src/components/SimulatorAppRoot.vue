@@ -981,6 +981,8 @@ function setSource(next: 'real' | 'fixtures') {
 
   // Switch from EdgeDetailPopup (quick info) to TrustlineManagementPanel (full editor).
   useFullTrustlineEditor.value = true
+  // 043 S2: opening the full editor is a manual action of its own (no flow transition happens): it pauses the run.
+  void realActions.pauseForManualAction()
   // Focus the limit editor in TrustlineManagementPanel via template ref.
   // Defensive: template refs rendered through TransitionGroup / repeated windows may resolve
   // either to a single instance or to an array of instances.

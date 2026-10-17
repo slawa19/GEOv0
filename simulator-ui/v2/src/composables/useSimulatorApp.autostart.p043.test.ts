@@ -374,3 +374,94 @@ describe('043 S2 (decision 3): a manual action pauses the automatic payments; on
     expect(pauseRun).not.toHaveBeenCalled()
   })
 })
+
+describe('043 S2 fix round (external review 2026-10-17): one create per start, a pause on every explicit entry', () => {
+  /** A create held open until the test lets it go: the window in which a second start could slip in. */
+  function heldCreate(): { release: () => void } {
+    const h = { release: () => {} }
+    vi.mocked(createRun).mockImplementation((() => new Promise((ok) => {
+      h.release = () => { runs.set('R_NEW', 'running'); ok({ run_id: 'R_NEW' }) }
+    })) as never)
+    return h
+  }
+
+  it('P2-1: two concurrent starts (Start pressed while the opening\'s start is in flight) issue exactly ONE create', async () => {
+    storedRun('R1', 'stopped')
+    window.localStorage.setItem('geo.sim.v2.runId', '')
+    runs.clear()
+    const held = heldCreate()
+    const app = boot()
+    await settle()
+    expect(createRun, 'precondition: the opening\'s create is in flight').toHaveBeenCalledTimes(1)
+    const second = app.realActions.startRun()
+    await settle()
+    held.release()
+    await second
+    await settle()
+    expect(createRun, 'the second start joined the first').toHaveBeenCalledTimes(1)
+    expect(app.real.runId).toBe('R_NEW')
+  })
+
+  it('P2-1: `?autostart=1` (the old dev-only autostart) no longer starts a second run next to the opening\'s', async () => {
+    window.history.replaceState({}, '', '/?autostart=1')
+    const held = heldCreate()
+    boot()
+    await settle()
+    held.release()
+    await settle()
+    expect(createRun).toHaveBeenCalledTimes(1)
+  })
+
+  /** A running run, a flow already open and the flow brought back by "Поток": the state every entry below starts from. */
+  async function openFlowResumed(open: (app: ReturnType<typeof useSimulatorApp>) => void) {
+    storedRun('R1', 'running')
+    const app = boot()
+    await settle()
+    open(app)
+    await settle()
+    expect(pauseRun, 'precondition: opening the flow paused').toHaveBeenCalledTimes(1)
+    await app.realActions.resume()
+    await settle()
+    expect(app.real.runStatus?.state, 'precondition: the flow is back').toBe('running')
+    return app
+  }
+
+  const ENTRIES: Array<[string, (app: ReturnType<typeof useSimulatorApp>) => void, (app: ReturnType<typeof useSimulatorApp>) => void]> = [
+    ['(a) edge popup -> Send Payment: one tick cancels the line flow and starts a payment with both ends',
+      (a) => a.interact.mode.startTrustlineFlow(),
+      (a) => { a.interact.mode.cancel(); a.interact.mode.startPaymentFlowWithFrom('B'); a.interact.mode.setPaymentToPid('R1_NODE') }],
+    ['(b) payment panel: another sender chosen in the dropdown', (a) => a.interact.mode.startPaymentFlow(), (a) => a.interact.mode.setPaymentFromPid('B')],
+    ['(b) payment panel: a recipient chosen in the dropdown', (a) => a.interact.mode.startPaymentFlowWithFrom('B'), (a) => a.interact.mode.setPaymentToPid('R1_NODE')],
+    ['(b) trust line panel: a creditor chosen in the dropdown', (a) => a.interact.mode.startTrustlineFlow(), (a) => a.interact.mode.setTrustlineFromPid('B')],
+    ['(b) trust line panel: a debtor chosen in the dropdown', (a) => a.interact.mode.startTrustlineFlowWithFrom('B'), (a) => a.interact.mode.setTrustlineToPid('R1_NODE')],
+    ['(b) trust line panel: a line chosen in the list', (a) => a.interact.mode.startTrustlineFlow(), (a) => a.interact.mode.selectTrustline('B', 'R1_NODE')],
+    ['(c) edge popup -> Change Limit (the full editor; the phase does not change)', (a) => a.interact.mode.startTrustlineFlow(), (a) => a.realActions.pauseForManualAction()],
+    ['ActionBar: Send Payment pressed again while a payment is being picked', (a) => a.interact.mode.startPaymentFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startPaymentFlow() }],
+    ['ActionBar: Manage Trustline pressed again', (a) => a.interact.mode.startTrustlineFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startTrustlineFlow() }],
+    ['ActionBar: Run Clearing pressed again', (a) => a.interact.mode.startClearingFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startClearingFlow() }],
+    ['node card: Send Payment from a participant, over an open payment', (a) => a.interact.mode.startPaymentFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startPaymentFlowWithFrom('B') }],
+    ['node card: New trust line from a participant, over an open trust line flow', (a) => a.interact.mode.startTrustlineFlow(), (a) => { a.interact.mode.cancel(); a.interact.mode.startTrustlineFlowWithFrom('B') }],
+    ['canvas: a participant picked in the flow', (a) => a.interact.mode.startPaymentFlow(), (a) => a.interact.mode.selectNode('B')],
+  ]
+  for (const [name, open, act] of ENTRIES) {
+    it(`P2-2: ${name} - pauses the flow brought back by "Поток"`, async () => {
+      const app = await openFlowResumed(open)
+      act(app)
+      await settle()
+      expect(pauseRun, 'the entry paused again').toHaveBeenCalledTimes(2)
+      expect(app.real.runStatus?.state).toBe('paused')
+    })
+  }
+
+  it('P2-2 counter-check: a cleared field (null: Escape-back, the window controller) and cancel are not entries and resume nothing', async () => {
+    const app = await openFlowResumed((a) => a.interact.mode.startPaymentFlowWithFrom('B'))
+    app.interact.mode.setPaymentToPid(null)
+    app.interact.mode.setPaymentFromPid(null)
+    app.interact.mode.cancel()
+    await settle()
+    expect(pauseRun, 'no pause for a cleared field or a cancel').toHaveBeenCalledTimes(1)
+    expect(resumeRun, 'resumed only by the explicit resume').toHaveBeenCalledTimes(1)
+    expect(app.real.runStatus?.state).toBe('running')
+  })
+})
+
