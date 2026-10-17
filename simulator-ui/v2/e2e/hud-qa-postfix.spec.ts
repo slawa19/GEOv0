@@ -1,6 +1,6 @@
 /**
  * HUD QA §4 — Post-fix verification (after HudBar shrink fix)
- * Checks: overflow, dropdown clip, CSS vars, !important guards
+ * Checks: overflow, CSS vars, !important guards. (QA-2 "Advanced dropdown not clipped" at 480 px removed by 043 S3: it never opened a menu.)
  */
 /// <reference types="node" />
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
@@ -175,53 +175,6 @@ test.describe('HUD QA §4 post-fix', () => {
         `HudBar "${bar.label}" has overflow at 360px: scrollWidth=${bar.scrollWidth} > clientWidth=${bar.clientWidth}`
       ).toBe(false)
     }
-  })
-
-  test('QA-2 480px: Advanced dropdown not clipped', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 480, height: 900 })
-    await page.goto(getHomeUrl(testInfo))
-    await waitReady(page)
-
-    let dropdownClipped = false
-
-    // Try Advanced button first
-    const advancedBtn = page.locator('button').filter({ hasText: /advanced/i })
-    if (await advancedBtn.count() > 0) {
-      await advancedBtn.first().click()
-      await page.waitForTimeout(400)
-
-      const dropdown = page.locator('[role="menu"], [role="listbox"], .ds-dropdown, .dropdown-content').first()
-      if (await dropdown.count() > 0) {
-        const bbox = await dropdown.boundingBox()
-        if (bbox) {
-          dropdownClipped = bbox.x < 0 || bbox.y < 0 || (bbox.x + bbox.width) > 490
-        }
-      }
-    } else {
-      // Try Admin dropdown
-      const adminBtn = page.locator('button').filter({ hasText: /admin/i })
-      if (await adminBtn.count() > 0) {
-        const isDisabled = await adminBtn.first().evaluate((el: HTMLButtonElement) => el.disabled)
-        if (!isDisabled) {
-          await adminBtn.first().click()
-          await page.waitForTimeout(400)
-          const dropdown = page.locator('[role="menu"], [role="listbox"], .ds-dropdown, .dropdown-content').first()
-          if (await dropdown.count() > 0) {
-            const bbox = await dropdown.boundingBox()
-            if (bbox) {
-              dropdownClipped = bbox.x < 0 || bbox.y < 0 || (bbox.x + bbox.width) > 490
-            }
-          }
-        }
-      }
-    }
-
-    await page.screenshot({
-      path: join(ARTIFACTS_DIR, 'hud_qa_480_postfix_advanced-open.png'),
-      fullPage: false
-    })
-
-    expect(dropdownClipped).toBe(false)
   })
 
   test('QA-3: CSS vars --ds-hud-bar-py/--ds-hud-bar-px contract', async ({ page }, testInfo) => {
