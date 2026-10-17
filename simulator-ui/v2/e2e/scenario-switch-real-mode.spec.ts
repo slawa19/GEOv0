@@ -163,14 +163,14 @@ test('real mode: switching scenario changes loaded snapshot', async ({ page }) =
   await expect.poll(() => lastPreviewScenario).toBe('S1')
   await waitReady(page)
 
-  const debt1 = await readMetricValue(page, 'Total Debt')
+  const debt1 = await readMetricValue(page, 'Общий долг')
 
   // Select S2 and metric must change (same nodes, different link topology).
   await scenarioSelect.selectOption('S2')
   await expect.poll(() => lastPreviewScenario).toBe('S2')
   await waitReady(page)
 
-  const debt2 = await readMetricValue(page, 'Total Debt')
+  const debt2 = await readMetricValue(page, 'Общий долг')
 
   expect(debt2).not.toBe(debt1)
 })

@@ -72,6 +72,8 @@ const __GEO_TEST_SIM_STORAGE = {
   // 043 S1: the "Подробнее" toggle. `null` = a first visit (Details off).
   readDetailsOpen: vi.fn<() => boolean | null>(() => null),
   writeDetailsOpen: vi.fn<(isOpen: boolean) => void>(),
+  readOnboardingDismissed: vi.fn<() => boolean | null>(() => null),
+  writeOnboardingDismissed: vi.fn<(dismissed: boolean) => void>(),
 
   readDevtoolsOpenReal: vi.fn<() => boolean | null>(() => null),
   writeDevtoolsOpenReal: vi.fn<(isOpen: boolean) => void>(),
@@ -278,8 +280,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       }
 
       const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'real' ? 'real' : 'fixtures')
-      const isInteractUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'interact')
       const isDemoUi = computed(() => (qs().get('ui') || '').toLowerCase() === 'demo')
+      // 043 S2: the one screen - the shipped rule, not a restatement (`ui=interact` is ignored by the product).
+      const isLiveUi = computed(() => actual.liveScreenPolicy(apiMode.value === 'real', isDemoUi.value))
       const isTestMode = computed(() => {
         // Default to true for most interaction tests, but allow overriding for
         // DevTools/Demo UI wiring tests (DevTools are hidden in test mode).
@@ -473,7 +476,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
       setGeoTestGlobal('__GEO_TEST_INTERACT_STATE', interactState)
 
       const isInteractPickingPhase = computed(() => {
-        if (!isInteractUi.value) return false
+        if (!isLiveUi.value) return false
         const p = phase.value
         return (
           p === 'picking-payment-from' ||
@@ -533,7 +536,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         // flags
         isDemoFixtures: computed(() => false),
         isDemoUi,
-        isInteractUi,
+        isLiveUi,
         isTestMode,
         isWebDriver: computed(() => false),
         isE2eScreenshots: computed(() => false),
@@ -544,7 +547,9 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           scenarios: [],
           selectedScenarioId: '',
           intensityPercent: 0,
-          runId: null as string | null,
+          // 043 S2 (review B4): the one screen has a run to act on; without one the actions are disabled. Tests of the
+          // "no run" state set it to null themselves.
+          runId: 'run-mock' as string | null,
           runStatus: null as Record<string, unknown> | null,
           sseState: 'idle',
           lastError: '',
@@ -560,6 +565,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
           refreshScenarios: vi.fn(),
           startRun: vi.fn(),
           pause: vi.fn(),
+          pauseForManualAction: vi.fn(),
           resume: vi.fn(),
           stop: vi.fn(),
           applyIntensity: vi.fn(),
@@ -1000,7 +1006,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('regression-guard: ActionBar-initiated interact-panel must anchor near ActionBar (not at host width)', async () => {
+  it('043 S2 (B2): an ActionBar-initiated window is anchored in the right rail (host width), under the top stack', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'idle')
     setUrl('/?mode=real&ui=interact')
 
@@ -1050,9 +1056,9 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       expect(interactAnchor?.space).toBe('host')
       expect(interactAnchor?.source).toBe('panel')
 
-      // Key regression guard: anchor must be near ActionBar's left, not at host width (=1400).
-      expect(Number(interactAnchor?.x)).toBeGreaterThanOrEqual(0)
-      expect(Number(interactAnchor?.x)).toBeLessThan(200)
+      // 043 S2 (owner's decision on B2, mockup-s3): the right rail - the anchor is the host's right edge (=1400), and the
+      // window manager clamps the window inside it. Until then the guard held the opposite (near the ActionBar's left).
+      expect(Number(interactAnchor?.x)).toBe(1400)
     } finally {
       app.unmount()
       host.remove()
@@ -1087,7 +1093,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       const calls = getGeoTestGlobal('__GEO_TEST_WM_OPEN')!.mock.calls.map((c) => c[0] as { type?: string; anchor?: { x: number; y: number } })
       const anchor = [...calls].reverse().find((c) => c?.type === 'interact-panel')?.anchor
       expect(anchor, 'the panel was opened with an anchor').toBeTruthy()
-      expect(anchor!.x, 'still at the ActionBar').toBe(400)
+      expect(anchor!.x, '043 S2 (B2): the right rail (the host width)').toBe(1400)
       expect(anchor!.y, 'under the stack (146), not under the first row (54)').toBe(146)
     } finally {
       app.unmount()
@@ -1661,10 +1667,10 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     }
   })
 
-  it('ui=interact renders interact HUD + ActionBar + ManualPaymentPanel and does not render intensity slider', async () => {
+  it('043 S2: one screen - no mode segment; the ActionBar, the payment panel and (under Details) the run controls with the intensity', async () => {
     setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'confirm-payment')
+    // The old Interact address: `ui=interact` is ignored, the same screen opens.
     setUrl('/?mode=real&ui=interact')
-    // 043 S1: the mode segment and the Advanced menu live behind "Подробнее"; with it on, Interact still has no intensity.
     storedDetails(true)
 
     const host = document.createElement('div')
@@ -1673,20 +1679,18 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
     const app = mountSimulatorAppRoot(host)
     await nextTick()
 
-    // HUD presence (unified TopBar)
-    const interactBtn = Array.from(host.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === 'Interact') as
-      | HTMLButtonElement
-      | undefined
-    expect(interactBtn).toBeTruthy()
-    expect(interactBtn?.getAttribute('data-active')).toBe('1')
+    // No mode segment any more (decision 2), with Details on as well.
+    expect(host.querySelectorAll('button.ds-segment'), 'the Sandbox / Auto-Run / Interact segment is gone').toHaveLength(0)
 
     // ActionBar presence
     expect(host.querySelector('[data-testid="actionbar-payment"]')).toBeTruthy()
     // Phase panel presence
     expect(host.querySelector('[data-testid="manual-payment-panel"]')).toBeTruthy()
 
-    // Interact Mode must hide intensity slider (it exists in TopBar Auto-Run advanced only)
-    expect(host.querySelector('[aria-label="Intensity percent"]')).toBeFalsy()
+    // The Interact contract "intensity forced to 0, no intensity control" is gone (decision 3 replaces it with the pause
+    // on a manual action): the run controls and the intensity are under Details on the one screen.
+    expect(host.querySelector('[aria-label="Intensity percent"]'), 'the intensity control is under Details').toBeTruthy()
+    expect(host.querySelector('select[aria-label="Scenario"]'), 'the scenario selector is under Details').toBeTruthy()
 
     app.unmount()
     host.remove()
@@ -2327,11 +2331,18 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
         | undefined
       expect(btn).toBeTruthy()
 
+      // 043 S2 (external review 2026-10-17): the full editor is a manual action without a flow transition - the root asks
+      // for the pause itself.
+      const actions = (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance
+        .subTree.component.setupState.realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+
       btn?.focus()
       expect(document.activeElement).toBe(btn)
       btn?.click()
       await nextTick()
       await nextTick()
+      expect(actions.pauseForManualAction, 'Change Limit pauses the run').toHaveBeenCalledTimes(1)
 
       // Edge detail must be closed; trustline panel must be visible.
       expect(host.querySelectorAll('[data-testid="edge-detail-popup"]').length).toBe(0)
@@ -2349,6 +2360,102 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       app.unmount()
       host.remove()
       clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE', '__GEO_TEST_INTERACT_CANCEL')
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // 043 S2 review round (Gemini C1/C2, 2026-10-17): the root's own entries of a manual action - the ones that are not a
+  // flow transition of the composable - ask for the pause themselves.
+  const rootActions = (app: ReturnType<typeof mountSimulatorAppRoot>) =>
+    (app as unknown as { _instance: { subTree: { component: { setupState: Record<string, any> } } } })._instance.subTree.component.setupState
+
+  it('043 S2 (C2): opening a node card (double click, the dev hook, the navigator) pauses, also for the node already selected', async () => {
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const actions = rootActions(app).realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+      const open = getRequiredGeoTestGlobal('__GEO_TEST_UI_OPEN_OR_UPDATE_NODE_CARD')
+      open?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      open?.({ nodeId: 'bob', anchor: { x: 111, y: 222 } })
+      expect(actions.pauseForManualAction, 'each opening of a card is an act').toHaveBeenCalledTimes(2)
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('043 S2 (C1): "Inspect graph" -> a node selects it (the same selection path as a click) and pauses', async () => {
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const setup = rootActions(app)
+      const actions = setup.realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+      setup.inspectNodeFromNavigator('bob')
+      expect((setup.state as { selectedNodeId: string | null }).selectedNodeId, 'the node is selected').toBe('bob')
+      expect(actions.pauseForManualAction).toHaveBeenCalled()
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('043 S2 (B4): without a run the three actions are disabled, with their reason; with a run they are enabled', async () => {
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      await nextTick()
+      const real = rootActions(app).real as { runId: string | null }
+      const buttons = () => ['actionbar-payment', 'actionbar-trustline', 'actionbar-clearing'].map((id) => host.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!)
+      expect(buttons().map((b) => b.disabled), 'a run: enabled').toEqual([false, false, false])
+      real.runId = null
+      await nextTick()
+      expect(buttons().map((b) => b.disabled), 'no run: disabled').toEqual([true, true, true])
+      expect(buttons()[0]!.title).toContain('No run')
+    } finally {
+      app.unmount()
+      host.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('043 S2 (C2): "Close line" of a line\'s popup pauses', async () => {
+    setGeoTestGlobal('__GEO_TEST_INTERACT_PHASE', 'editing-trustline')
+    setUrl('/?mode=real')
+    stubMissingResizeObserver()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const app = mountSimulatorAppRoot(host)
+    try {
+      answerWithTrustlineForSelectedPair()
+      await nextTick()
+      await nextTick()
+      const actions = rootActions(app).realActions as Record<string, Mock>
+      actions.pauseForManualAction.mockClear()
+      const closeLine = host.querySelector('[data-testid="edge-close-line-btn"]') as HTMLButtonElement | null
+      closeLine?.click()
+      await nextTick()
+      closeLine?.click()
+      expect(getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_CONFIRM_TRUSTLINE_CLOSE')).toHaveBeenCalledOnce()
+      expect(actions.pauseForManualAction, 'Close line pauses').toHaveBeenCalledTimes(1)
+    } finally {
+      app.unmount()
+      host.remove()
+      clearGeoTestGlobals('__GEO_TEST_INTERACT_PHASE')
       vi.unstubAllGlobals()
     }
   })
@@ -6029,7 +6136,7 @@ describe('SimulatorAppRoot - 043 S1: the first view (Details off by default)', (
  */
 describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces', () => {
   const SERVICE = [
-    ['mode segment', 'button.ds-segment'],
+    ['source select', 'select[aria-label="Источник"]'],
     ['theme switcher', 'select[aria-label="UI theme"]'],
     ['equivalent', 'select[aria-label="Equivalent"]'],
     ['layout', 'select[aria-label="Layout"]'],
@@ -6091,7 +6198,7 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       expect(host.querySelector('[data-testid="network-state"]')?.tagName, 'the state is text, not a control').toBe('SPAN')
       // The total debt is in the bottom row, compact.
       const bottom = [...host.querySelectorAll('.ds-ov-bottom')].find((el) => !el.classList.contains('sar-interact-history-overlay'))!
-      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).toContain('Total Debt')
+      expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).toContain('Общий долг')
       expect(bottom.querySelector('[aria-label="System balance"]')?.textContent).not.toContain('Utilization')
     } finally {
       done()
@@ -6183,12 +6290,26 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       first.done()
     }
 
+    // 043 S2: remembered - the dismissal is written, and a load that reads it shows no hint.
+    expect(getSimStorage().writeOnboardingDismissed, 'the dismissal is remembered').toHaveBeenLastCalledWith(true)
+    getSimStorage().readOnboardingDismissed.mockImplementation(() => true)
+    const back = mount('/?mode=real')
+    try {
+      await nextTick()
+      expect(back.host.querySelector('[data-testid="onboarding-hint"]'), 'a dismissed hint does not come back on the next load').toBeNull()
+    } finally {
+      back.done()
+      getSimStorage().readOnboardingDismissed.mockImplementation(() => null)
+    }
+
+    // The old Auto-Run address is the same screen: the hint names "Send Payment", which is on it (decision 2).
     const second = mount('/?mode=real')
     try {
       await nextTick()
       const hint = second.host.querySelector('[data-testid="onboarding-hint"]')
-      expect(hint, 'shown in Auto-Run too').not.toBeNull()
-      expect(hint!.textContent, 'no promise of a button that is not on this screen').not.toContain('Send Payment')
+      expect(hint, 'shown on the old Auto-Run address too').not.toBeNull()
+      expect(hint!.textContent, 'the action it names is on this screen').toContain('Send Payment')
+      expect(second.host.querySelector('[data-testid="actionbar-payment"]')).not.toBeNull()
       toggle(second.host).click()
       await nextTick()
       expect(second.host.querySelector('[data-testid="onboarding-hint"]'), 'gone after "Подробнее"').toBeNull()
@@ -6244,6 +6365,11 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       byText('Pause')!.click()
       expect(actions.pause).toHaveBeenCalledTimes(1)
+      // 043 S2: "Поток" in the first row - pause on a living run, resume on a paused one.
+      const flow = () => host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')
+      expect(flow()?.getAttribute('aria-pressed'), 'the flow is on').toBe('true')
+      flow()!.click()
+      expect(actions.pause, 'the flow button on a living run reaches pause').toHaveBeenCalledTimes(2)
       byText('Stop')!.click()
       expect(actions.stop).toHaveBeenCalledTimes(1)
       byText('Apply')!.click()
@@ -6252,10 +6378,14 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       byText('Resume')!.click()
       expect(actions.resume).toHaveBeenCalledTimes(1)
+      expect(flow()?.getAttribute('aria-pressed'), 'the flow is off').toBe('false')
+      flow()!.click()
+      expect(actions.resume, 'the flow button on a paused run reaches resume').toHaveBeenCalledTimes(2)
       real.runId = null
       real.runStatus = null
       real.selectedScenarioId = 'sc1'
       await nextTick()
+      expect(flow(), 'no run: no flow button (Start is under Details)').toBeNull()
       byText('Start')!.click()
       expect(actions.startRun).toHaveBeenCalledTimes(1)
 
@@ -6288,18 +6418,21 @@ describe('SimulatorAppRoot - 043 S1: the Details toggle and the moved surfaces',
       await nextTick()
       expect(host.querySelector('.root')!.getAttribute('data-theme'), 'the theme switch reaches the root').toBe('hud')
 
+      // 043 S2: "Источник" (bottom row, Details) is the one switch that navigates - the pipeline is replaced. The same
+      // source navigates nowhere; the other one reloads with `?mode=` and without `?ui=`.
       const nav = stubLocationHrefSetter()
       try {
-        const segment = (t: string) => [...host.querySelectorAll<HTMLButtonElement>('button.ds-segment')].find((b) => (b.textContent ?? '').trim() === t)!
-        segment('Interact').click()
-        expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('ui=interact')
-        segment('Sandbox').click()
-        expect(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? '')).toContain('mode=fixtures')
+        const source = host.querySelector<HTMLSelectElement>('select[aria-label="Источник"]')!
+        expect(source.value, 'the select shows the source on screen').toBe('real')
         const before = nav.hrefSet.mock.calls.length
-        segment('Auto-Run').click()
-        expect(nav.hrefSet.mock.calls.length, 'go-auto-run reaches a navigation').toBe(before + 1)
-        const autoRun = new URL(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? ''), 'http://localhost')
-        expect([autoRun.searchParams.get('mode'), autoRun.searchParams.get('ui')], 'Auto-Run: real mode, no ?ui=').toEqual(['real', null])
+        source.value = 'real'
+        source.dispatchEvent(new Event('change', { bubbles: true }))
+        expect(nav.hrefSet.mock.calls.length, 'the same source: no navigation').toBe(before)
+        source.value = 'fixtures'
+        source.dispatchEvent(new Event('change', { bubbles: true }))
+        expect(nav.hrefSet.mock.calls.length, 'the other source: one navigation').toBe(before + 1)
+        const to = new URL(String(nav.hrefSet.mock.calls.at(-1)?.[0] ?? ''), 'http://localhost')
+        expect([to.searchParams.get('mode'), to.searchParams.get('ui')], 'offline snapshot, no ?ui=').toEqual(['fixtures', null])
       } finally {
         nav.restore()
       }

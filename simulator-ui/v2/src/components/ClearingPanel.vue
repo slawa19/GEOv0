@@ -34,7 +34,7 @@ const rootStyle = computed(() => {
 })
 
 const rootClass = computed(() => {
-  return 'ds-ov-panel ds-panel ds-panel--elevated'
+  return 'ds-ov-panel ds-ov-panel--compact ds-panel ds-panel--elevated'
 })
 
 const last = computed(() => props.state.lastClearing)
@@ -184,11 +184,6 @@ const closeDisabled = computed(() => waiting.value)
 </template>
 
 <style scoped>
-/* UX-1: min-height prevents 1-frame layout jump during loading stub → content growth */
-.ds-ov-panel {
-  min-height: var(--ds-cp-min-h);
-}
-
 .cp-equivalent-row {
   margin-bottom: 2px;
 }

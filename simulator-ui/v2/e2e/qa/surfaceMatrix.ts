@@ -57,7 +57,6 @@ export type Entry = {
   catalogue: string
   /** The element that is measured, framed and given to axe. */
   root: string
-  ui: 'interact' | 'auto'
   query?: string
   /** The gesture, in words, for the report and the document. */
   gesture: string
@@ -240,62 +239,62 @@ const SELECT_LIST = (trigger: string): Policies => ({
 
 export const MATRIX: Entry[] = [
   // wm-interact-window: three panels
-  { id: 'payment-panel', catalogue: 'wm-interact-window', ui: 'interact', gesture: 'click "Send Payment" in the action bar',
+  { id: 'payment-panel', catalogue: 'wm-interact-window', gesture: 'click "Send Payment" in the action bar',
     root: '.ws-shell:has([data-testid="manual-payment-panel"])', open: click('[data-testid="actionbar-payment"]'),
     policies: INTERACT_PANEL('[data-testid="actionbar-payment"]') },
-  { id: 'trustline-panel', catalogue: 'wm-interact-window', ui: 'interact', gesture: 'click "Manage Trustline" in the action bar',
+  { id: 'trustline-panel', catalogue: 'wm-interact-window', gesture: 'click "Manage Trustline" in the action bar',
     root: '.ws-shell:has([data-testid="trustline-panel"])', open: click('[data-testid="actionbar-trustline"]'),
     policies: INTERACT_PANEL('[data-testid="actionbar-trustline"]') },
-  { id: 'clearing-panel', catalogue: 'wm-interact-window', ui: 'interact', gesture: 'click "Run Clearing" in the action bar',
+  { id: 'clearing-panel', catalogue: 'wm-interact-window', gesture: 'click "Run Clearing" in the action bar',
     root: '.ws-shell:has([data-testid="clearing-panel"])', open: click('[data-testid="actionbar-clearing"]'),
     policies: INTERACT_PANEL('[data-testid="actionbar-clearing"]') },
 
   // wm-inspector-window: two inspectors
-  { id: 'node-card', catalogue: 'wm-inspector-window', ui: 'interact', gesture: 'double click a node on the canvas',
+  { id: 'node-card', catalogue: 'wm-inspector-window', gesture: 'double click a node on the canvas',
     root: '.ws-shell[data-win-type="node-card"]',
     open: async (page) => { const n = await freeNode(page); await page.mouse.dblclick(n.at.x, n.at.y) },
     policies: INSPECTOR },
-  { id: 'edge-popup', catalogue: 'wm-inspector-window', ui: 'interact', gesture: 'click a trust line on the canvas',
+  { id: 'edge-popup', catalogue: 'wm-inspector-window', gesture: 'click a trust line on the canvas',
     root: '.ws-shell[data-win-type="edge-detail"]',
     open: async (page) => { const e = await freeEdge(page); await page.mouse.click(e.at.x, e.at.y) },
     policies: INSPECTOR },
 
   // interact-select-dropdown: the list of OverlaySelect, in two panels
-  { id: 'payment-from-list', catalogue: 'interact-select-dropdown', ui: 'interact', gesture: 'click the "From" list of the payment panel',
+  { id: 'payment-from-list', catalogue: 'interact-select-dropdown', gesture: 'click the "From" list of the payment panel',
     root: '#mp-from__surface', open: (page) => openList(page, '[data-testid="actionbar-payment"]', 'mp-from'),
     policies: SELECT_LIST('#mp-from__trigger') },
-  { id: 'trustline-from-list', catalogue: 'interact-select-dropdown', ui: 'interact', gesture: 'click the "From" list of the trust line panel',
+  { id: 'trustline-from-list', catalogue: 'interact-select-dropdown', gesture: 'click the "From" list of the trust line panel',
     root: '#tl-from__surface', open: (page) => openList(page, '[data-testid="actionbar-trustline"]', 'tl-from'),
     policies: SELECT_LIST('#tl-from__trigger') },
 
   // hud-dropdown: four menus of the two bars (all four behind "Подробнее" since 043 S1)
-  { id: 'menu-advanced', catalogue: 'hud-dropdown', ui: 'auto', gesture: 'click "Advanced" in the top bar (Auto-Run, "Подробнее" on)',
+  { id: 'menu-advanced', catalogue: 'hud-dropdown', gesture: 'click "Advanced" in the top bar ("Подробнее" on)',
     details: { hiddenByDefault: 'summary[aria-label="Advanced settings"]' },
     root: 'details[aria-label="Advanced"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Advanced settings"]'),
     policies: hudDropdown('summary[aria-label="Advanced settings"]') },
-  { id: 'menu-admin', catalogue: 'hud-dropdown', ui: 'interact', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
+  { id: 'menu-admin', catalogue: 'hud-dropdown', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
     beforeLoad: routeToolbars, details: { hiddenByDefault: 'summary[aria-label="Admin"]' },
     root: 'details[aria-label="Admin controls"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Admin"]'),
     policies: hudDropdown('summary[aria-label="Admin"]') },
-  { id: 'menu-artifacts', catalogue: 'hud-dropdown', ui: 'auto', gesture: 'click "Artifacts" in the bottom bar (Auto-Run, "Подробнее" on)',
+  { id: 'menu-artifacts', catalogue: 'hud-dropdown', gesture: 'click "Artifacts" in the bottom bar ("Подробнее" on)',
     beforeLoad: routeToolbars, details: { hiddenByDefault: 'details[aria-label="Artifacts"] > summary' },
     root: 'details[aria-label="Artifacts"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Artifacts"] > summary'),
     policies: hudDropdown('details[aria-label="Artifacts"] > summary') },
-  { id: 'menu-dev-tools', catalogue: 'hud-dropdown', ui: 'interact', gesture: 'click "Dev Tools" in the bottom bar (dev build only, "Подробнее" on)',
+  { id: 'menu-dev-tools', catalogue: 'hud-dropdown', gesture: 'click "Dev Tools" in the bottom bar (dev build only, "Подробнее" on)',
     details: { hiddenByDefault: 'details[aria-label="Dev tools"] > summary' },
     root: 'details[aria-label="Dev tools"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Dev tools"] > summary'),
     policies: hudDropdown('details[aria-label="Dev tools"] > summary') },
 
   // the two bars and what expands inside them
-  { id: 'top-bar-interact', catalogue: 'top-hud-stack', ui: 'interact', gesture: 'always on screen (Interact, the first view)',
+  { id: 'top-bar-interact', catalogue: 'top-hud-stack', gesture: 'always on screen (the first view)',
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'top-bar-interact-details', catalogue: 'top-hud-stack', ui: 'interact', gesture: 'click "Подробнее" (Interact: the row of service controls and the metrics)',
+  { id: 'top-bar-interact-details', catalogue: 'top-hud-stack', gesture: 'click "Подробнее" (the row of service controls and the metrics)',
     details: { hiddenByDefault: '[data-testid="top-details-row"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', ui: 'auto', gesture: 'click "Подробнее" (Auto-Run: scenario and run controls)',
+  { id: 'top-bar-auto-run', catalogue: 'top-hud-stack', gesture: 'click "Подробнее" (scenario and run controls; since 043 S2 the same screen as the entry above, kept for its own anti-vacuum: the scenario selector is not rendered on the first view)',
     details: { hiddenByDefault: 'select[aria-label="Scenario"]' },
     root: '.ds-ov-top .ds-ov-top-stack', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'graph-navigator', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'click "Inspect graph" in the bottom bar ("Подробнее" on)',
+  { id: 'graph-navigator', catalogue: 'bottom-hud-stack', gesture: 'click "Inspect graph" in the bottom bar ("Подробнее" on)',
     details: { hiddenByDefault: '.graph-navigator' },
     root: '.graph-navigator',
     open: async (page) => {
@@ -303,23 +302,23 @@ export const MATRIX: Entry[] = [
       if (!(await d.evaluate((el) => (el as HTMLDetailsElement).open))) await d.locator('summary').click()
     },
     policies: { inside: 'viewport' } },
-  { id: 'bottom-bar', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'always on screen (the first view)',
+  { id: 'bottom-bar', catalogue: 'bottom-hud-stack', gesture: 'always on screen (the first view)',
     root: '.ds-ov-bottom:not(.sar-interact-history-overlay)', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'bottom-bar-details', catalogue: 'bottom-hud-stack', ui: 'interact', gesture: 'click "Подробнее" (the row of view settings and tools)',
+  { id: 'bottom-bar-details', catalogue: 'bottom-hud-stack', gesture: 'click "Подробнее" (the row of view settings and tools)',
     details: { hiddenByDefault: '[data-testid="bottom-details-row"]' },
     root: '.ds-ov-bottom:not(.sar-interact-history-overlay)', open: async () => {}, policies: { inside: 'viewport' } },
 
   // toasts, history, tooltip, analytics: no Escape, no focus, no outside click declared
-  { id: 'toast-success', catalogue: 'success-toast', ui: 'interact', clock: true,
+  { id: 'toast-success', catalogue: 'success-toast', clock: true,
     gesture: 'run a clearing that clears a cycle ("Run Clearing", "Confirm")', beforeLoad: (p) => routeClearing(p, 'cycles'),
     root: '.ds-ov-toast--success', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
-  { id: 'toast-error', catalogue: 'error-toast', ui: 'interact', clock: true,
+  { id: 'toast-error', catalogue: 'error-toast', clock: true,
     gesture: 'run a clearing the backend refuses', beforeLoad: (p) => routeClearing(p, 'refused'),
     root: '.ds-ov-toast--error', open: (page) => runClearing(page, '.ds-ov-toast--error'), policies: { inside: 'viewport' } },
-  { id: 'interact-history', catalogue: 'interact-history-overlay', ui: 'interact', clock: true,
+  { id: 'interact-history', catalogue: 'interact-history-overlay', clock: true,
     gesture: 'appears after the first completed action (here: a clearing)', beforeLoad: (p) => routeClearing(p, 'cycles'),
     root: '.sar-interact-history-overlay', open: (page) => runClearing(page, '.ds-ov-toast--success'), policies: { inside: 'viewport' } },
-  { id: 'edge-tooltip', catalogue: 'edge-tooltip', ui: 'interact', followsPointer: true,
+  { id: 'edge-tooltip', catalogue: 'edge-tooltip', followsPointer: true,
     gesture: 'click a node, then move the mouse over one of its trust lines', root: '.ds-ov-tooltip',
     open: async (page) => {
       // `useEdgeHover.ts`: a line answers the pointer only while one of its two nodes is selected.
@@ -330,7 +329,7 @@ export const MATRIX: Entry[] = [
       await page.mouse.move(e.at.x, e.at.y, { steps: 4 })
     },
     policies: { inside: 'viewport' } },
-  { id: 'analytics-panel', catalogue: 'real-metrics-panel', ui: 'interact', gesture: 'click "Analytics" in the bottom bar ("Подробнее" on)',
+  { id: 'analytics-panel', catalogue: 'real-metrics-panel', gesture: 'click "Analytics" in the bottom bar ("Подробнее" on)',
     beforeLoad: routeAnalytics, root: '[data-surface="real-metrics-panel"]', details: { hiddenByDefault: '[data-testid="bottombar-analytics-toggle"]' },
     open: async (page) => {
       if (!(await page.locator('[data-surface="real-metrics-panel"]').isVisible())) await page.locator('[data-testid="bottombar-analytics-toggle"]').click()
@@ -338,10 +337,10 @@ export const MATRIX: Entry[] = [
     policies: { inside: 'viewport' } },
 
   // layers and messages: a frame, and where it applies - inside the viewport; no window policies
-  { id: 'node-labels', catalogue: 'canvas-labels-overlay', ui: 'interact', gesture: 'click a node on the canvas (Labels: Selection)',
+  { id: 'node-labels', catalogue: 'canvas-labels-overlay', gesture: 'click a node on the canvas (Labels: Selection)',
     root: '.labels-layer', open: async (page) => { const n = await freeNode(page); await page.mouse.click(n.at.x, n.at.y) },
     policies: { inside: null } },
-  { id: 'event-labels', catalogue: 'canvas-floating-labels-overlay', ui: 'interact', clock: true,
+  { id: 'event-labels', catalogue: 'canvas-floating-labels-overlay', clock: true,
     gesture: 'a payment event of the run', notAGesture: 'the label is drawn for an event of the backend; the stand writes one SSE frame',
     root: '.floating-layer',
     open: async (page) => {
@@ -351,13 +350,13 @@ export const MATRIX: Entry[] = [
       await syncCssToClock(page)
     },
     policies: { inside: null } },
-  { id: 'loading-message', catalogue: 'loading-message-overlay', ui: 'interact', awaitScene: false,
+  { id: 'loading-message', catalogue: 'loading-message-overlay', awaitScene: false,
     gesture: 'open the page while the scene has not answered', beforeLoad: (p) => routeScene(p, 'hold'),
     root: '.ds-ov-inset[role="status"]', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'error-message', catalogue: 'error-message-overlay', ui: 'interact', awaitScene: false,
+  { id: 'error-message', catalogue: 'error-message-overlay', awaitScene: false,
     gesture: 'open the page when the scene cannot be loaded', beforeLoad: (p) => routeScene(p, 'fail'),
     root: '.ds-ov-inset[role="alert"]', open: async () => {}, policies: { inside: 'viewport' } },
-  { id: 'dev-perf-overlay', catalogue: 'dev-perf-overlay', ui: 'interact', query: '&perf=1',
+  { id: 'dev-perf-overlay', catalogue: 'dev-perf-overlay', query: '&perf=1',
     gesture: 'open the page with ?perf=1', root: '.ds-ov-dev-perf', open: async () => {}, policies: { inside: 'viewport' } },
 ]
 
@@ -373,8 +372,8 @@ export const EXCLUDED_FROM_MATRIX: Record<string, { why: string; since: string }
  * recorded blind zone (2026-10-11), not an oversight.
  */
 export const NATIVE_SELECTS = [
-  'top bar: "UI theme"', 'top bar (Auto-Run): "Scenario"',
-  'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Quality"', 'bottom bar: "Labels"', 'bottom bar (offline): "Scene"',
+  'top bar: "UI theme"', 'top bar: "Scenario"',
+  'bottom bar: "Equivalent"', 'bottom bar: "Layout"', 'bottom bar: "Quality"', 'bottom bar: "Labels"', 'bottom bar: "Источник"', 'bottom bar (offline): "Scene"',
   'graph navigator: "Node"', 'graph navigator: "Edge"',
 ]
 
@@ -486,7 +485,7 @@ export async function catalogueKeys(): Promise<string[]> {
 export async function bootEntry(page: Page, e: Entry, theme: Theme, viewport: Viewport, o: { stillLayout?: boolean } = {}): Promise<void> {
   await page.setViewportSize(viewport)
   await boot(page, {
-    snapshot: ringSnapshot(), clock: e.clock === true, ui: e.ui, query: `&theme=${theme}${e.query ?? ''}`,
+    snapshot: ringSnapshot(), clock: e.clock === true, query: `&theme=${theme}${e.query ?? ''}`,
     beforeLoad: e.beforeLoad, ...(e.awaitScene === false ? { awaitScene: false as const } : {}), ...(e.clock || o.stillLayout ? {} : { awaitLayout: false as const }),
   })
   if (e.awaitScene !== false) await expect(page.locator('.root'), 'the theme of the test is the theme on screen').toHaveAttribute('data-theme', theme)

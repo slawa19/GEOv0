@@ -18,14 +18,14 @@ import { provideTopBarContext, type TopBarContext } from '../composables/useTopB
 import TopBar from './TopBar.vue'
 
 const EVENTS = [
-  'toggle-details', 'update:selected-scenario-id', 'update:intensity-percent', 'go-sandbox', 'go-auto-run', 'go-interact',
+  'toggle-details', 'update:selected-scenario-id', 'update:intensity-percent',
   'set-ui-theme', 'refresh-scenarios', 'start-run', 'pause', 'resume', 'stop', 'apply-intensity',
   'admin-get-runs', 'admin-stop-runs', 'admin-attach-run', 'admin-stop-run',
 ] as const
 
 function context(over: Partial<TopBarContext> = {}): TopBarContext {
   return {
-    apiMode: ref('real'), activeSegment: ref('auto'), isInteractUi: ref(false), isTestMode: ref(false), uiTheme: ref('saas'),
+    apiMode: ref('real'), isTestMode: ref(false), uiTheme: ref('saas'),
     loadingScenarios: ref(false), scenarios: ref([{ scenario_id: 'sc-1', label: 'Riverside town' }, { scenario_id: 'sc-2', label: 'Two' }]),
     selectedScenarioId: ref('sc-1'), intensityPercent: ref(30), runId: ref('run-1'), runStatus: ref(null), sseState: ref('open'),
     lastError: ref(null),
@@ -89,14 +89,11 @@ describe('TopBar wiring - what each control emits', () => {
     done()
   })
 
-  it('buttons emit their events: mode segment, scenarios, run lifecycle, intensity', async () => {
+  it('buttons emit their events: scenarios, run lifecycle, intensity (043 S2: no mode segment)', async () => {
     const runStatus = ref<RunStatus | null>({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus)
     const { host, spies, done } = mountTopBar(context({ runStatus }), true)
     await nextTick()
-    button(host, 'Sandbox')!.click()
-    button(host, 'Auto-Run')!.click()
-    button(host, 'Interact')!.click()
-    expect([spies['go-sandbox'], spies['go-auto-run'], spies['go-interact']].map((s) => s.mock.calls.length)).toEqual([1, 1, 1])
+    for (const gone of ['Sandbox', 'Auto-Run', 'Interact']) expect(button(host, gone), `${gone}: the mode segment is gone`).toBeUndefined()
 
     host.querySelector<HTMLButtonElement>('button[aria-label="Refresh scenarios"]')!.click()
     expect(spies['refresh-scenarios']).toHaveBeenCalledTimes(1)
@@ -142,9 +139,55 @@ describe('TopBar wiring - what each control emits', () => {
     await nextTick()
     expect(host.querySelectorAll('select, input').length, 'no select or input in the first row').toBe(0)
     const texts = [...host.querySelectorAll('button')].map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim())
-    expect(texts, 'the first row has the toggle alone (the actions come from the root, slot "actions")').toEqual(['Подробнее ▾'])
+    // 043 S2: the flow button of a living run, and the toggle (the actions come from the root, slot "actions").
+    expect(texts, 'the first row: the flow button and the toggle').toEqual(['⏸ Поток', 'Подробнее ▾'])
     expect(host.querySelector('summary'), 'no menu').toBeNull()
     for (const s of Object.values(spies)) expect(s).not.toHaveBeenCalled()
+    done()
+  })
+
+  it('043 S2: the flow button - pause on a living run, resume on a paused one, absent otherwise', async () => {
+    const runStatus = ref<RunStatus | null>({ run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus)
+    const apiMode = ref<'real' | 'fixtures'>('real')
+    const { host, spies, done } = mountTopBar(context({ runStatus, apiMode }), false)
+    const flow = () => host.querySelector<HTMLButtonElement>('[data-testid="flow-toggle"]')
+    await nextTick()
+    expect(flow()!.getAttribute('aria-pressed')).toBe('true')
+    flow()!.click()
+    expect([spies.pause.mock.calls.length, spies.resume.mock.calls.length]).toEqual([1, 0])
+
+    runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'paused' } as RunStatus
+    await nextTick()
+    expect(flow()!.getAttribute('aria-pressed')).toBe('false')
+    flow()!.click()
+    expect([spies.pause.mock.calls.length, spies.resume.mock.calls.length]).toEqual([1, 1])
+
+    for (const state of ['created', 'stopping', 'stopped', 'error']) {
+      runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state } as RunStatus
+      await nextTick()
+      expect(flow(), `${state}: nothing to pause or resume`).toBeNull()
+    }
+    runStatus.value = null
+    await nextTick()
+    expect(flow(), 'no run').toBeNull()
+    runStatus.value = { run_id: 'run-1', scenario_id: 'sc-1', state: 'running' } as RunStatus
+    apiMode.value = 'fixtures'
+    await nextTick()
+    expect(flow(), 'the offline snapshot has no run').toBeNull()
+    done()
+  })
+
+  it('043 S2 (review B1): the network is named by the scenario NAME the API gives (`name`; `label` is a UI-only field)', async () => {
+    const scenarios = ref([{ scenario_id: 'riverside-town-50', name: 'Riverside town' }, { scenario_id: 'other', name: '  ' }])
+    const selectedScenarioId = ref('riverside-town-50')
+    const { host, done } = mountTopBar(context({ scenarios, selectedScenarioId, runStatus: ref(null) } as Partial<TopBarContext>), true)
+    await nextTick()
+    expect(host.querySelector('[data-testid="network-name"]')!.textContent, 'the name, not the slug').toContain('Riverside town')
+    const options = [...host.querySelectorAll<HTMLOptionElement>('select[aria-label="Scenario"] option')].map((o) => o.textContent!.trim())
+    expect(options, 'the selector names the scenario too; a blank name falls back to the id').toEqual(['— select —', 'Riverside town (riverside-town-50)', 'other'])
+    selectedScenarioId.value = 'other'
+    await nextTick()
+    expect(host.querySelector('[data-testid="network-name"]')!.textContent, 'a blank name: the id').toContain('other')
     done()
   })
 })

@@ -31,7 +31,8 @@ import type { SimulatorAppState } from '../types/simulatorApp'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage as getErrorMessage } from '../utils/errorMessage'
 import { isLiveRunState } from '../utils/status'
-import { runStatusErrorText } from '../utils/runErrorClassification'
+import { toLower } from '../utils/stringHelpers'
+import { noScenarioText, runStatusErrorText, startRunErrorText } from '../utils/runErrorClassification'
 import {
   applyAcceptedRealEvent,
   createRealEventReplayOwner,
@@ -173,6 +174,8 @@ export function useSimulatorRealMode(opts: {
   refreshScenarios: () => Promise<void>
   startRun: (opts?: { intensityPercent?: number; pauseImmediately?: boolean }) => Promise<void>
   pause: () => Promise<void>
+  /** 043 S2 (decision 3): the pause a manual action asks for - see the function. */
+  pauseForManualAction: () => Promise<void>
   resume: () => Promise<void>
   stop: () => Promise<void>
   applyIntensity: () => Promise<void>
@@ -1112,7 +1115,24 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
-  async function startRun(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }) {
+  /**
+   * 043 S2 (external review 2026-10-17): admission is serialised. A start asked for while another is in flight JOINS it
+   * (returns the same promise) and never issues a second create: the callers - the opening's autostart, Start under
+   * "Подробнее", the Demo UI's paused bootstrap (`useFxDebugControls`) - could otherwise put two runs side by side
+   * (with a global limit >= 2) or a redundant create and a 409 recovery (with the default 1). The joining call's own
+   * options are not applied: the run in flight is the one being started.
+   */
+  let startRunInFlight: Promise<void> | null = null
+  function startRun(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }): Promise<void> {
+    if (startRunInFlight) return startRunInFlight
+    const p = startRunOnce(startOpts).finally(() => {
+      if (startRunInFlight === p) startRunInFlight = null
+    })
+    startRunInFlight = p
+    return p
+  }
+
+  async function startRunOnce(startOpts?: { intensityPercent?: number; pauseImmediately?: boolean }) {
     if (!real.selectedScenarioId) return
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
 
@@ -1188,9 +1208,15 @@ export function useSimulatorRealMode(opts: {
       // SSE loop is long-lived; do not await it. `lastError` was reset at the top of this start.
       void runSseLoop({ preserveLastError: true })
     } catch (e: unknown) {
-      real.lastError = getErrorMessage(e)
+      // The one place a failed start is written to the error line (every start goes through here).
+      real.lastError = startRunErrorText(e, getErrorMessage)
     } finally {
       startRunInProgress = false
+      // A start that ended without a run, or with a run that has ended, leaves no pause to wait for (043 S2). A run
+      // whose status is not known yet (a transient failure of the first read; review C5) keeps the pending pause: it
+      // is applied the moment a later read or the stream says `running`.
+      const st = toLower(real.runStatus?.state)
+      if (!real.runId || st === 'stopped' || st === 'error' || st === 'paused') manualPausePending = false
     }
   }
 
@@ -1204,7 +1230,43 @@ export function useSimulatorRealMode(opts: {
     }
   }
 
+  /**
+   * 043 S2 (decision 3): a manual action pauses the automatic payments. A `running` run is paused now; a run that is
+   * still being started (`startRun` in flight, or `created`) is paused the moment it reads `running`, so an action taken
+   * during the opening is not run over by the run that opening starts. Any other state is left alone: a paused run is
+   * already quiet, an ended one has nothing to pause. Only `resume` (the "Поток" button) cancels a pending pause.
+   */
+  let manualPausePending = false
+  /** One pause request at a time: two acts in one tick (a flow started with both ends chosen) ask once. */
+  let manualPauseInFlight: Promise<void> | null = null
+  async function pauseForManualAction() {
+    const st = toLower(real.runStatus?.state)
+    if (st === 'running') {
+      manualPausePending = false
+      if (manualPauseInFlight) return manualPauseInFlight
+      const p = pause().finally(() => {
+        if (manualPauseInFlight === p) manualPauseInFlight = null
+      })
+      manualPauseInFlight = p
+      return p
+    }
+    if (startRunInProgress || st === 'created') manualPausePending = true
+  }
+  watch(
+    () => toLower(real.runStatus?.state),
+    (st) => {
+      if (!manualPausePending) return
+      if (st === 'running') {
+        manualPausePending = false
+        void pause()
+      } else if (st && st !== 'created') {
+        manualPausePending = false
+      }
+    },
+  )
+
   async function resume() {
+    manualPausePending = false
     // No accessToken guard: anonymous visitors use cookie-auth (geo_sim_sid).
     if (!real.runId) return
     try {
@@ -1379,7 +1441,11 @@ export function useSimulatorRealMode(opts: {
             await refreshRunStatus()
             if (real.runId) {
               await refreshSnapshot()
-              if (real.runId) {
+              // 043 S2 (review C6): an ENDED run (`stopped`, `error`) gets no event stream - there is nothing live to
+              // follow, and on the one screen the opening replaces it (`useInteractAutoBootstrapRun.ts`). A live run, and
+              // a run whose status could not be read (the stream is how it shows up again), still get it.
+              const ended = !!real.runStatus && !isLiveRunState(real.runStatus.state)
+              if (real.runId && !ended) {
                 // SSE loop is long-lived; do not await it during boot.
                 // The error of the status/snapshot reads above is not stale: keep it on screen.
                 void runSseLoop({ preserveLastError: true })
@@ -1393,14 +1459,15 @@ export function useSimulatorRealMode(opts: {
           if (real.selectedScenarioId && !real.runId) {
             await refreshSnapshot()
           }
-
-          const shouldAutoStart =
-            import.meta.env.DEV &&
-            isLocalhost &&
-            real.selectedScenarioId &&
-            !real.runId &&
-            new URLSearchParams(window.location.search).get('autostart') === '1'
-          if (shouldAutoStart) await startRun()
+          // 043 S2 (review B5/C4): no run and no scenario to show (the catalogue is empty, or its read failed) - nothing
+          // will load a scene, so the opening ends here: the loading is over and the error line says why (a failed read
+          // already holds its error).
+          if (!real.runId && !real.selectedScenarioId) {
+            state.loading = false
+            if (!real.lastError) real.lastError = noScenarioText()
+          }
+          // 043 S2 (external review 2026-10-17): the dev-only `?autostart=1` start that stood here is gone - the opening
+          // of the one screen (`useInteractAutoBootstrapRun.ts`) is the single owner of a start nobody pressed.
         } finally {
           initialBootInProgress = false
         }
@@ -1471,6 +1538,7 @@ export function useSimulatorRealMode(opts: {
     refreshScenarios,
     startRun,
     pause,
+    pauseForManualAction,
     resume,
     stop,
     applyIntensity,

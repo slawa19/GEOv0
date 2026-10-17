@@ -24,10 +24,6 @@ const emit = defineEmits<{
   (e: 'update:selected-scenario-id', v: string): void
   (e: 'update:intensity-percent', v: number): void
 
-  (e: 'go-sandbox'): void
-  (e: 'go-auto-run'): void
-  (e: 'go-interact'): void
-
   (e: 'set-ui-theme', v: UiThemeId): void
 
   (e: 'refresh-scenarios'): void
@@ -45,7 +41,31 @@ const emit = defineEmits<{
 
 const STALL_THRESHOLD_TICKS = 3
 
-const showRunControls = computed(() => ctx.activeSegment.value === 'auto')
+/** 043 S2: one screen - the scenario and run controls (behind "Подробнее") exist wherever the source is the server. */
+const showRunControls = computed(() => ctx.apiMode.value === 'real')
+
+/**
+ * 043 S2 (decisions 1 and 3): "Поток" in the first row - pause (⏸) a living run, resume (▶) a paused one. Rendered only
+ * for a run in one of those two states: there is nothing to pause or resume otherwise (no run, a run being started or
+ * stopped, an ended one - Start lives under "Подробнее"). `aria-pressed` says whether the flow is on.
+ */
+const flowState = computed<'running' | 'paused' | null>(() => {
+  if (ctx.apiMode.value !== 'real') return null
+  const s = toLower(ctx.runStatus.value?.state)
+  return s === 'running' || s === 'paused' ? s : null
+})
+function onFlowToggle() {
+  if (flowState.value === 'running') emit('pause')
+  else if (flowState.value === 'paused') emit('resume')
+}
+
+/**
+ * 043 S2 (review B1): the name of a scenario as the API gives it - `name` (the decoder, `simulatorContracts.ts`); `label`
+ * is a UI-only compatibility field the REST decoder never fills. Empty when neither is set: the caller shows the id.
+ */
+function scenarioTitle(s: { name?: string | null; label?: string } | undefined): string {
+  return s?.name?.trim() || s?.label?.trim() || ''
+}
 
 /** The network on screen, as text: the label of the scenario of the run (or of the selected one), its id otherwise. */
 const networkName = computed(() => {
@@ -53,7 +73,7 @@ const networkName = computed(() => {
   const id = String(ctx.runStatus.value?.scenario_id ?? '').trim() || String(ctx.selectedScenarioId.value ?? '').trim()
   if (!id) return '—'
   const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
-  return s?.label?.trim() || id
+  return scenarioTitle(s) || id
 })
 
 /** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
@@ -112,20 +132,6 @@ const isRunActive = computed(() => {
   if (!ctx.runStatus.value) return true
   const s = toLower(ctx.runStatus.value?.state)
   return s === 'running' || s === 'paused' || s === 'created' || s === 'stopping'
-})
-
-const canEnterInteract = computed(() => {
-  if (ctx.isInteractUi.value) return true  // уже в interact — не блокировать
-  // Interact UI can auto-bootstrap a paused demo run on entry.
-  // Still require real mode because actions rely on backend state.
-  return ctx.apiMode.value === 'real'
-})
-
-const interactDisabledTitle = computed(() => {
-  if (canEnterInteract.value) return ''
-  if (ctx.apiMode.value !== 'real') return 'Real mode only'
-  if (!isRunActive.value) return 'Start a run first'
-  return ''
 })
 
 const successRatePct = computed(() => {
@@ -266,18 +272,6 @@ async function onAdminStopRun(runId: string) {
   emit('admin-stop-run', runId)
 }
 
-function onGoSandbox() {
-  emit('go-sandbox')
-}
-
-function onGoAutoRun() {
-  emit('go-auto-run')
-}
-
-function onGoInteract() {
-  emit('go-interact')
-}
-
 function onRefreshScenarios() {
   emit('refresh-scenarios')
 }
@@ -317,6 +311,17 @@ function onApplyIntensity() {
             <span :class="['ds-badge', `ds-badge--${networkState.tone}`, 'tb-state-dot']"><span class="ds-dot" aria-hidden="true" /></span>
             <span class="ds-value">{{ networkState.text }}</span>
           </span>
+          <button
+            v-if="flowState"
+            type="button"
+            class="ds-btn ds-btn--secondary ds-btn--sm tb-flow-toggle"
+            data-testid="flow-toggle"
+            :aria-pressed="flowState === 'running' ? 'true' : 'false'"
+            :title="flowState === 'running' ? 'Поставить автоматические платежи на паузу' : 'Возобновить автоматические платежи'"
+            @click="onFlowToggle"
+          >
+            <span aria-hidden="true">{{ flowState === 'running' ? '⏸' : '▶' }}</span> Поток
+          </button>
         </div>
 
         <div class="hud-bar__center tb-actions">
@@ -339,35 +344,6 @@ function onApplyIntensity() {
       <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" aria-label="Top bar" data-testid="top-details-row">
         <div class="hud-bar__left" aria-label="Mode">
           <div class="ds-row tb-mode-row">
-            <div class="ds-segmented" role="group" aria-label="Simulator mode">
-            <button
-              type="button"
-              class="ds-segment"
-              :data-active="ctx.activeSegment.value === 'sandbox' ? '1' : '0'"
-              @click="onGoSandbox"
-            >
-              Sandbox
-            </button>
-            <button
-              type="button"
-              class="ds-segment"
-              :data-active="ctx.activeSegment.value === 'auto' ? '1' : '0'"
-              @click="onGoAutoRun"
-            >
-              Auto-Run
-            </button>
-            <button
-              type="button"
-              class="ds-segment"
-              :data-active="ctx.activeSegment.value === 'interact' ? '1' : '0'"
-              :disabled="!canEnterInteract"
-              :title="!canEnterInteract ? interactDisabledTitle : ''"
-              @click="onGoInteract"
-            >
-              Interact
-            </button>
-            </div>
-
             <div class="ds-row tb-theme-row" aria-label="Theme">
               <span class="ds-label">Theme</span>
               <select
@@ -398,7 +374,7 @@ function onApplyIntensity() {
             >
               <option value="">— select —</option>
               <option v-for="s in ctx.scenarios.value" :key="s.scenario_id" :value="s.scenario_id">
-                {{ s.label ? `${s.label} (${s.scenario_id})` : s.scenario_id }}
+                {{ scenarioTitle(s) ? `${scenarioTitle(s)} (${s.scenario_id})` : s.scenario_id }}
               </option>
             </select>
             <button
@@ -664,6 +640,22 @@ function onApplyIntensity() {
 </template>
 
 <style scoped>
+/*
+  043 S2 (owner's decision on review item B2, 2026-10-17): the three actions sit in the centre of the row whatever the
+  width of the sides - the state text and the flow button change width ("живёт" / "на паузе", ⏸ / ▶) the moment an
+  action pauses the run, and with a flex row the centred group moved under the person's pointer. Two equal side tracks
+  keep the centre track fixed.
+*/
+.tb-main-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.tb-main-row > .hud-bar__right {
+  justify-self: end;
+}
+
 .tb-identity {
   gap: var(--ds-space-2, 8px);
 }

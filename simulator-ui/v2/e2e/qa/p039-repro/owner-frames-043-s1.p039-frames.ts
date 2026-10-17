@@ -40,7 +40,8 @@ function outDir(): string {
 
 async function bootFrame(page: Page, snapshot: QaSnapshot, ui: 'auto' | 'interact', theme: string): Promise<void> {
   await page.setViewportSize({ width: 1366, height: 768 })
-  await boot(page, { snapshot, clock: false, ui, query: `&theme=${theme}` })
+  // 043 S2: `boot` has no `ui` option any more (one screen); the old address is named in the query, as the base reads it.
+  await boot(page, { snapshot, clock: false, query: `${ui === 'interact' ? '&ui=interact' : ''}&theme=${theme}` })
   await waitLoopAsleep(page)
   await expect(page.locator('.root'), 'the theme of the frame is the theme on screen').toHaveAttribute('data-theme', theme)
 }

@@ -768,6 +768,19 @@ jobs:
           PW_E2E_PORT: "41732"
         run: npm --prefix simulator-ui/v2 run test:e2e:smoke
 
+      # 043 S2 (2026-10-16): reproducer (b) of spec 043 on a REAL backend - the one this job already runs for the Admin
+      # smoke above (the `postgres:16` service, the seed `riverside-town-50`, uvicorn on ADMIN_E2E_BACKEND_ORIGIN); no
+      # second bring-up. A first visit to `/` (nothing stored, no `?mode`) must start a live run by itself and draw a
+      # payment of it within 15 s (`simulator-ui/v2/e2e/live/autostart.live.ts`). The config refuses to load without the
+      # origin, Playwright fails on no test found, and a failed test fails this step and the job.
+      - name: Run the Simulator UI first-visit autostart against the seeded backend
+        timeout-minutes: 5
+        env:
+          PW_E2E_PORT: "41738"
+          GEO_SIM_LIVE_BACKEND_ORIGIN: ${{ env.ADMIN_E2E_BACKEND_ORIGIN }}
+          GEO_SIMULATOR_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/simulator-live
+        run: npm --prefix simulator-ui/v2 run test:e2e:live
+
       # 038 S2 (2026-10-11): the deterministic part of the Simulator UI QA stand - the product as a user
       # runs it (no test mode, `navigator.webdriver` false), Chromium without a GPU by the stand's own
       # flags, fake clock, pixels of the FX canvas, the window matrix in the `hud` theme, axe. No

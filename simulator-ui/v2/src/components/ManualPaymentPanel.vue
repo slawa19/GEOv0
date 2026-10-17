@@ -931,11 +931,6 @@ const toOptions = computed(() => toParticipants.value.map((participant) => ({
 </template>
 
 <style scoped>
-/* UX-1: min-height prevents 1-frame layout jump during loading stub → content growth */
-.ds-ov-panel {
-  min-height: var(--ds-mpp-min-h);
-}
-
 .mp-pick-help {
   margin: 6px 0 2px;
 }

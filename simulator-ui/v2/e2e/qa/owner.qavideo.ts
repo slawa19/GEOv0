@@ -93,7 +93,7 @@ test('frames - the empty screen with the error after a scene that cannot be load
   const OTHER = 'p038-qa-unloadable'
   const item = (scenario_id: string, name: string) => ({ api_version: 'simulator-api/1', scenario_id, name, participants_count: 6, trustlines_count: 6, equivalents: [EQ] })
   await boot(page, {
-    snapshot: ringSnapshot(), clock: false, cssClock: false, ui: 'auto',
+    snapshot: ringSnapshot(), clock: false, cssClock: false,
     beforeLoad: async (p) => {
       await p.route(/\/simulator\/scenarios$/i, (r) => r.fulfill({
         status: 200, contentType: 'application/json',

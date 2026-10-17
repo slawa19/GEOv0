@@ -16,7 +16,7 @@ import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../api/http'
-import { getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios } from '../api/simulatorApi'
+import { createRun, getActiveRun, getRun, getScenarioPreview, getSnapshot, listScenarios } from '../api/simulatorApi'
 import { connectSse } from '../api/sse'
 import type { SimulatorGraphSnapshot } from '../api/simulatorTypes'
 import { useSimulatorApp } from './useSimulatorApp'
@@ -102,7 +102,7 @@ function withoutRun() {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  for (const mock of [listScenarios, getActiveRun, getRun, getSnapshot, getScenarioPreview]) vi.mocked(mock).mockReset()
+  for (const mock of [listScenarios, getActiveRun, getRun, getSnapshot, getScenarioPreview, createRun]) vi.mocked(mock).mockReset()
   vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))))
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   window.history.replaceState({}, '', '/?mode=real')
@@ -335,29 +335,43 @@ describe('F-034-D2, review C1: a failed load for ANOTHER source does not keep th
  * own `last_error`) comes back.
  */
 describe('F-034-D2, review C2: the HUD copy of a scene error', () => {
-  it('without a run: the preview fails, then loads - the HUD error is gone too', async () => {
+  // 043 S2: "without a run" at opening now means the opening's own start was refused (decision 2: opening starts one);
+  // that refusal is what the HUD shows before the scene error, and what it must show again after the scene recovers.
+  it('without a run: the preview fails, then loads - the scene error is gone from the HUD, what it displaced is back', async () => {
     withoutRun()
+    vi.mocked(createRun).mockRejectedValue(HTTP(503, '/simulator/runs'))
     const app = boot()
     await settle()
+    expect(app.real.runId, 'precondition: no run').toBeNull()
+    const before = app.real.lastError
+    expect(before, 'precondition: the HUD shows the refused start').toContain('/simulator/runs')
     vi.mocked(getScenarioPreview).mockRejectedValueOnce(HTTP(503, '/simulator/scenarios/sc1/graph/preview'))
     await app.realActions.refreshSnapshot()
     await settle()
-    expect(app.real.lastError, 'precondition: the HUD shows the scene error').toContain('HTTP 503')
+    expect(app.real.lastError, 'precondition: the HUD shows the scene error').toContain('/graph/preview')
 
     await app.realActions.refreshSnapshot()
     await settle()
 
     expect(app.state.error).toBe('')
-    expect(app.real.lastError, 'the scene recovered, the HUD still shows its error').toBe('')
+    expect(app.real.lastError, 'the scene recovered, the HUD still shows its error').toBe(before)
   })
 
+  // 043 S2: a run found ENDED at opening is replaced by a live one (decision 2), so the run here stops with an error
+  // AFTER the opening - the opening attaches to it while it runs, and a later read of its status (Admin -> Attach to the
+  // same run) finds it stopped with an error.
   it('a run stopped with an error: its own error is back in the HUD after the scene error is gone', async () => {
-    vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => ({
+    let stopped = false
+    vi.mocked(getRun).mockImplementation((async (_cfg: unknown, runId: string) => (stopped ? {
       ...RUN_STATUS(runId),
       state: 'error',
       last_error: { code: 'REAL_MODE_TICK_FAILED', message: 'tick failed', at: '2026-10-11T00:00:00Z' },
-    })) as never)
+    } : RUN_STATUS(runId))) as never)
     const app = boot()
+    await settle()
+    expect(createRun, 'precondition: the opening attached to the live run and started none').not.toHaveBeenCalled()
+    stopped = true
+    await app.admin.attachRun('R')
     await settle()
     expect(app.real.lastError, 'precondition: the HUD shows why the run stopped').toBe('REAL_MODE_TICK_FAILED: tick failed')
 
