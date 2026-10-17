@@ -5345,7 +5345,7 @@ describe('SimulatorAppRoot - analytics overlay surface (spec 007, T705)', () => 
 
       expect(analyticsDock(host)).toBeTruthy()
       expect(analyticsToggle(host).getAttribute('aria-pressed')).toBe('true')
-      // Same mechanism as the DevTools dropdown next to it: written through useSimulatorStorage.
+      // Same mechanism as the «Подробнее» flag: written through useSimulatorStorage.
       expect(simStorage.writeAnalyticsPanelOpen).toHaveBeenLastCalledWith(true)
 
       analyticsToggle(host).click()

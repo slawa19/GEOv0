@@ -155,10 +155,9 @@ function uiOpenOrUpdateNodeCard(o: { nodeId: string; anchor: Point | null }) {
 /**
  * Analytics overlay surface visibility (spec 007, T705).
  *
- * Kept here, next to the theme and the DevTools snapshot, and persisted through the very same
- * `useSimulatorStorage` `read01`/`write01` pair the DevTools dropdown in `BottomBar` uses — no new
- * store and no new preference layer. `flush: 'sync'` for the same reason as that neighbour: the
- * flag must reach storage before a reload can race it.
+ * Kept here, next to the theme, and persisted through the `useSimulatorStorage` `read01`/`write01`
+ * pair (the same as the «Подробнее» flag) — no new store and no new preference layer. `flush: 'sync'`:
+ * the flag must reach storage before a reload can race it.
  */
 const analyticsPanelOpen = ref(simulatorStorage.readAnalyticsPanelOpen() ?? false)
 

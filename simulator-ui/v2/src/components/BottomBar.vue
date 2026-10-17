@@ -282,10 +282,6 @@ const {
   opacity: var(--ds-bb-fade-85-opacity);
 }
 
-.bb-fade-90 {
-  opacity: var(--ds-bb-fade-90-opacity);
-}
-
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
 @media (max-width: 500px) {
   /* Allow rows inside sections to wrap too */
