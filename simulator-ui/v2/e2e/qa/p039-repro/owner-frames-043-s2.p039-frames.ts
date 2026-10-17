@@ -83,6 +83,9 @@ for (const theme of THEMES) {
     await expect(send, 'the action bar is on screen').toBeVisible({ timeout: 20_000 })
     await send.click()
     await expect(page.locator('[data-testid="manual-payment-panel"]')).toBeVisible()
+    // The window's opening transition is over: a frame of a half-transparent window says nothing about its place.
+    await expect.poll(() => page.locator('[data-testid="manual-payment-panel"]').evaluate((el) => getComputedStyle(el.closest('.ws-shell') ?? el).opacity)).toBe('1')
+    await expect.poll(() => page.locator('[data-testid="manual-payment-panel"]').evaluate((el) => (el.closest('.ws-shell') ?? el).getAnimations().length)).toBe(0)
     await expect(page.locator('[data-testid="network-state"]'), 'the state the frame is named for').toContainText(/на паузе|живёт/)
     await page.screenshot({ path: join(dir, `${theme}-3-manual-action.png`) })
 
