@@ -161,7 +161,8 @@ export function useSimulatorRealMode(opts: {
   // Optional: wake up render loop after snapshot/patch/FX updates.
   wakeUp?: () => void
 
-  // Optional: notify on any SSE event (used to keep Demo UI render loop awake).
+  // Optional: notify on any accepted SSE event. No production caller since 043 S3 (its one caller kept the Demo UI
+  // render loop awake); the tests of this module observe accepted events through it.
   onAnySseEvent?: () => void
   // Optional visual-effects policy seam (e.g. reduced-motion integration).
   optionalFxEnabled?: () => boolean
@@ -1117,8 +1118,8 @@ export function useSimulatorRealMode(opts: {
 
   /**
    * 043 S2 (external review 2026-10-17): admission is serialised. A start asked for while another is in flight JOINS it
-   * (returns the same promise) and never issues a second create: the callers - the opening's autostart, Start under
-   * "Подробнее", the Demo UI's paused bootstrap (`useFxDebugControls`) - could otherwise put two runs side by side
+   * (returns the same promise) and never issues a second create: the callers - the opening's autostart and Start under
+   * "Подробнее" (the Demo UI's paused bootstrap went with Demo UI, 043 S3) - could otherwise put two runs side by side
    * (with a global limit >= 2) or a redundant create and a 409 recovery (with the default 1). The joining call's own
    * options are not applied: the run in flight is the one being started.
    */

@@ -267,7 +267,7 @@ export const MATRIX: Entry[] = [
     root: '#tl-from__surface', open: (page) => openList(page, '[data-testid="actionbar-trustline"]', 'tl-from'),
     policies: SELECT_LIST('#tl-from__trigger') },
 
-  // hud-dropdown: the menus of the two bars (all behind "Подробнее" since 043 S1; "Advanced" removed by 043 S3)
+  // hud-dropdown: the menus of the two bars (all behind "Подробнее" since 043 S1; "Advanced" and "Dev Tools" removed by 043 S3)
   { id: 'menu-admin', catalogue: 'hud-dropdown', gesture: 'click "Admin" in the top bar (admin token, "Подробнее" on)',
     beforeLoad: routeToolbars, details: { hiddenByDefault: 'summary[aria-label="Admin"]' },
     root: 'details[aria-label="Admin controls"] > .ds-ov-dropdown', open: openMenu('summary[aria-label="Admin"]'),
@@ -276,10 +276,6 @@ export const MATRIX: Entry[] = [
     beforeLoad: routeToolbars, details: { hiddenByDefault: 'details[aria-label="Artifacts"] > summary' },
     root: 'details[aria-label="Artifacts"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Artifacts"] > summary'),
     policies: hudDropdown('details[aria-label="Artifacts"] > summary') },
-  { id: 'menu-dev-tools', catalogue: 'hud-dropdown', gesture: 'click "Dev Tools" in the bottom bar (dev build only, "Подробнее" on)',
-    details: { hiddenByDefault: 'details[aria-label="Dev tools"] > summary' },
-    root: 'details[aria-label="Dev tools"] > .ds-ov-dropdown', open: openMenu('details[aria-label="Dev tools"] > summary'),
-    policies: hudDropdown('details[aria-label="Dev tools"] > summary') },
 
   // the two bars and what expands inside them
   { id: 'top-bar-interact', catalogue: 'top-hud-stack', gesture: 'always on screen (the first view)',

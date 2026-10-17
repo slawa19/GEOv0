@@ -433,13 +433,15 @@ describe('043 S2 fix round (external review 2026-10-17): one create per start, a
   }
 
   // The race above is won by the opening in this harness (its start resets the ended run before the boot's stream
-  // connects), so the stream of an ended run is shown where nothing else starts: a page without the one screen.
-  it('C6: the boot opens no event stream for an ended stored run (shown where no opening starts: Demo UI)', async () => {
-    window.history.replaceState({}, '', '/?ui=demo')
+  // connects), so the stream of an ended run is shown where the opening starts nothing: an empty scenario catalogue
+  // (B5). Until 043 S3 this used the Demo UI page, which had no opening; that page is gone.
+  it('C6: the boot opens no event stream for an ended stored run (shown where the opening starts nothing: empty catalogue)', async () => {
+    vi.mocked(listScenarios).mockResolvedValue({ api_version: 'simulator-api/1', items: [] } as never)
     storedRun('R_OLD', 'stopped')
     const app = boot()
     await settle()
-    expect(app.isLiveUi.value, 'precondition: no opening on this page').toBe(false)
+    expect(createRun, 'precondition: the opening starts nothing on this page').not.toHaveBeenCalled()
+    expect(vi.mocked(getRun).mock.calls.some((c) => c[1] === 'R_OLD'), 'precondition: the stored run was read').toBe(true)
     const urls = vi.mocked(connectSse).mock.calls.map((c) => String((c[0] as { url?: string }).url ?? ''))
     expect(urls.filter((u) => u.includes('R_OLD')), 'no stream of the ended run').toEqual([])
     expect(app.real.runStatus?.state, 'its status is still read and shown').toBe('stopped')

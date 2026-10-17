@@ -117,8 +117,12 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  *   gate 134 -> 132, full 229 -> 225. The matrix entry `menu-advanced` is gone with its menu: -2 its required test in
  *   `saas` and `hud` (a `hud-dropdown` tours every viewport in the gate, so it has no separate viewport test), and under
  *   `@extended` -2 its gallery test in both themes. The tempo row stays covered by `top-bar-interact-details`.
+ * - 2026-10-17 (043 S3, Demo UI and the "Dev Tools" menu removed - decision 5): gate 132 -> 129, full 225 -> 220. The
+ *   matrix entry `menu-dev-tools` is gone with its menu: -2 its required test in both themes, -1 "matrix [hud]
+ *   menu-dev-tools left open, then a node card opened from the canvas" (the same test stays for `menu-admin`), and
+ *   under `@extended` -2 its gallery test. `layout.qa.ts` lost the Dev Tools line of its service list (no count change).
  */
-export const EXPECTED = { gate: 132, full: 225 }
+export const EXPECTED = { gate: 129, full: 220 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

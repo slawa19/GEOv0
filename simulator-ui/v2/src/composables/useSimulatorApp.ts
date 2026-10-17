@@ -24,7 +24,6 @@ import { fnv1a } from '../utils/hash'
 import { resolveTxDirection } from '../utils/txDirection'
 import { incCounter } from '../utils/counters'
 import { extractErrorMessage } from '../utils/errorMessage'
-import { demoToolsAllowed } from '../utils/demoToolsAllowed'
 import { isLiveRunState } from '../utils/status'
 import { toLower, toLowerTrim } from '../utils/stringHelpers'
 import { isUserFacingRunErrorCode } from '../utils/runErrorClassification'
@@ -62,12 +61,10 @@ import { intensityScale } from '../config/fxConfig'
 import { EQUIVALENT_CODE_RE, canonicalEquivalent, equivalentOptions as listEquivalentOptions, sameEquivalent } from '../config/equivalents'
 import { catalogueEquivalentCodes } from '../config/equivalentPrecision'
 import { createSimulatorIsAnimating } from './simulatorIsAnimating'
-import { createDemoActivityHold } from './demoActivityHold'
 
 import { useQualityAutoguards } from './useQualityAutoguards'
 import { useCookieSessionBootstrap } from './useCookieSessionBootstrap'
 import { useAdminRunsPanel } from './useAdminRunsPanel'
-import { useFxDebugControls } from './useFxDebugControls'
 import { AUTOSTART_DEFAULT_INTENSITY_PERCENT, useInteractAutoBootstrapRun } from './useInteractAutoBootstrapRun'
 
 import { useInteractActions } from './useInteractActions'
@@ -171,10 +168,9 @@ export type SimulatorAppApi = {
   apiMode: ComputedRef<'fixtures' | 'real'>
 
   isDemoFixtures: ComputedRef<boolean>
-  isDemoUi: ComputedRef<boolean>
   /**
    * 043 S2: the ONE screen - the network lives and the protocol actions are at hand on the same page. True for the
-   * server source outside Demo UI (`liveScreenPolicy`); there is no `?ui=interact` / Auto-Run split any more.
+   * server source; there is no `?ui=interact` / Auto-Run split any more, and no Demo UI (`?ui=demo`, removed by S3).
    */
   isLiveUi: ComputedRef<boolean>
   isTestMode: ComputedRef<boolean>
@@ -338,16 +334,6 @@ export type SimulatorAppApi = {
  */
 export function __analyticsPanelVisibilityPolicy(realMode: boolean, panelOpen: boolean): boolean {
   return realMode && panelOpen
-}
-
-/**
- * 043 S2 (decision 2): the one screen - a live network with the protocol actions at hand - exists for the server
- * source outside Demo UI. Until S2 this was two URL modes, Interact (`?ui=interact`) and Auto-Run (no `ui`), split by a
- * page reload. Exported for the same reason as the analytics policy above: the root's mock calls it instead of
- * re-stating it.
- */
-export function liveScreenPolicy(realMode: boolean, demoUi: boolean): boolean {
-  return realMode && !demoUi
 }
 
 /**
@@ -538,33 +524,10 @@ export function useSimulatorApp(opts?: {
     }
   })()
 
-  const isFxDebugEnabled = computed(() => {
-    try {
-      const sp = new URLSearchParams(window.location.search)
-
-      // Demo UI implies FX Debug should be available (backend-driven, canonical SSE pipeline).
-      const ui = toLower(sp.get('ui'))
-      if (ui === 'demo') return true
-
-      const p = sp.get('debug')
-      return p === '1' || toLower(p) === 'true'
-    } catch {
-      return false
-    }
-  })
-
-  const isDemoUi = computed(() => {
-    try {
-      const ui = toLower(new URLSearchParams(window.location.search).get('ui'))
-      return ui === 'demo'
-    } catch {
-      return false
-    }
-  })
-
-  // 043 S2: one reactive mode instead of `?ui=interact` (Interact) and its absence (Auto-Run). `?ui=interact` in an old
-  // link is ignored: the same screen opens.
-  const isLiveUi = computed(() => liveScreenPolicy(isRealMode.value, isDemoUi.value))
+  // 043 S2 (decision 2): one screen instead of `?ui=interact` (Interact) and its absence (Auto-Run) - a live network with
+  // the protocol actions at hand, on the server source. `?ui=interact` and (043 S3) `?ui=demo` in an old link are
+  // ignored: the same screen opens.
+  const isLiveUi = computed(() => isRealMode.value)
 
   const DEFAULT_REAL_SCENARIO_ID = 'greenfield-village-100-realistic-v2'
 
@@ -761,9 +724,6 @@ export function useSimulatorApp(opts?: {
   const fxCanvasEl = ref<HTMLCanvasElement | null>(null)
   const hostEl = ref<HTMLDivElement | null>(null)
   const dragPreviewEl = ref<HTMLDivElement | null>(null)
-
-  // Demo UI: keep render loop awake around sporadic SSE/debug actions.
-  const demoHold = createDemoActivityHold({ holdMs: 1200 })
 
   async function e2eTxOnce(): Promise<void> {
     if (!isE2eScreenshots.value) return
@@ -969,13 +929,6 @@ export function useSimulatorApp(opts?: {
   let wakeUpImpl: () => void = () => undefined
   const wakeUp = () => wakeUpImpl()
 
-  function markDemoActivity() {
-    if (!isDemoUi.value) return
-    // Demo UI: a short-lived hold window keeps the render loop alive *after* wakeUp.
-    // IMPORTANT: hold alone does not restart deep-idle; we must explicitly wake the loop.
-    demoHold.markDemoEvent()
-    wakeUp()
-  }
 
   const layoutWiring = useAppLayoutWiring({
     canvasEl,
@@ -1157,7 +1110,6 @@ export function useSimulatorApp(opts?: {
     },
     isAnimating: createSimulatorIsAnimating({
       isPhysicsRunning: () => isPhysicsRunningSafe(),
-      isDemoHoldActive: () => isDemoUi.value && demoHold.isWithinHoldWindow(),
     }),
     // BUG-3 (P3): dim unavailable nodes during picking phases.
     getDimmedNodeIds: () => {
@@ -1695,7 +1647,6 @@ export function useSimulatorApp(opts?: {
     runRealClearingDoneFx,
     scheduleTimeout,
     wakeUp,
-    onAnySseEvent: markDemoActivity,
     optionalFxEnabled: opts?.optionalFxEnabled,
   })
   handleRealSceneContextChange = realMode.handleSceneContextChange
@@ -1725,49 +1676,6 @@ export function useSimulatorApp(opts?: {
   }
   /** For the opening's start (`useInteractAutoBootstrapRun.ts`): has the person already acted on this page? */
   const isManualActionActive = () => manualEntryHappened
-
-  const fxDebugControls = useFxDebugControls({
-    isFxDebugEnabled,
-    real,
-    effectiveEq,
-    markDemoActivity,
-    realMode,
-  })
-
-  // ── Demo UI: eager auto-bootstrap ────────────────────────────────────
-  // When Demo UI opens (?mode=real&ui=demo), automatically create a paused run
-  // in the background right after the initial scene finishes loading.
-  // This keeps the first interaction from paying for a heavy startRun() cascade
-  // (a visual "page reload").
-  //
-  // Serialization: `_ensureRunPromise` prevents concurrent bootstrap + user-click
-  // from racing and creating duplicate runs.
-  const ensureRunForFxDebugSerialized = fxDebugControls.ensureRunSerialized
-
-  // Gated by the same rule as the demo buttons: a page that has no demo tools starts no run for its visitor.
-  const demoToolsExist = demoToolsAllowed({
-    isWebDriver,
-    isTestMode: isTestMode.value,
-    isE2eScreenshots: isE2eScreenshots.value,
-  })
-  if (isDemoUi.value && isRealMode.value && demoToolsExist) {
-    const stopAutoBootstrap = watch(
-      // No access-token condition (034 S8, F-034-D7): a cookie-session visitor has none and never would get the run.
-      () => !state.loading && !!real.selectedScenarioId && !real.runId,
-      async (ready) => {
-        if (!ready) return
-        stopAutoBootstrap()
-        try {
-          await ensureRunForFxDebugSerialized()
-        } catch (err) {
-          // Best-effort: user can still trigger manually via button click.
-          console.warn('[auto-bootstrap] best-effort failed:', err)
-          __autoBootstrapMaybeFillUiError({ real, state, err })
-        }
-      },
-      { flush: 'post' },
-    )
-  }
 
   // ── 043 S2 (decision 2): opening the demo is a live run ─────────────
   // One attempt, when the opening is over (the scene is on screen, so the boot has read the stored or the active run
@@ -1880,7 +1788,6 @@ export function useSimulatorApp(opts?: {
 
     // flags
     isDemoFixtures,
-    isDemoUi,
     isLiveUi,
     isTestMode,
     isWebDriver,

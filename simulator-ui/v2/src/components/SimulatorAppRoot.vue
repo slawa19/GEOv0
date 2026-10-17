@@ -355,7 +355,6 @@ const {
 
   // flags
   isDemoFixtures,
-  isDemoUi,
   isLiveUi,
   isTestMode,
   isWebDriver,
@@ -671,38 +670,6 @@ const interactSelectedLink = selectedLine.selectedLink
 const interactSelectedLinkFiguresSource = selectedLine.figuresSource
 const wmEdgeDetailFiguresSource = selectedLine.edgeDetailFiguresSource
 
-function setQueryAndReload(mut: (sp: URLSearchParams) => void) {
-  const u = new URL(window.location.href)
-  mut(u.searchParams)
-  // Always strip legacy `devtools` param — it must never propagate across reloads.
-  u.searchParams.delete('devtools')
-  const nextHref = u.toString()
-  // Setting href ensures full re-init (important when switching between pipelines).
-  window.location.href = nextHref
-}
-
-function clearFxDebugRunOnNextLoad() {
-  // FX Debug may autostart a fixtures run and persist its runId.
-  // After exiting Demo UI we want to return to the normal real UI preview (DB-enriched),
-  // not a topology-only fixtures run snapshot.
-  // TD-1: delegated to composable — no direct localStorage access.
-  simulatorStorage.clearFxDebugRunState()
-}
-
-function enterDemoUi() {
-  // Demo enter: snapshot real-state so it can be restored after a reload-based exit.
-  // Persisted snapshot must survive reload.
-  simulatorStorage.writeDevtoolsOpenRealSnapshot(simulatorStorage.readDevtoolsOpenReal() ?? false)
-
-  setQueryAndReload((sp) => {
-    sp.set('mode', 'real')
-    sp.set('ui', 'demo')
-    sp.set('debug', '1')
-  })
-}
-
-const isExiting = ref(false)
-
 type TrustlinePanelRef = InstanceType<typeof TrustlineManagementPanel>
 
 const tlPanel = ref<TrustlinePanelRef | TrustlinePanelRef[] | null>(null)
@@ -938,48 +905,6 @@ function cancelInteractWindowFromUi(): void {
   interact.mode.cancel()
 }
 
-async function exitDemoUi() {
-  isExiting.value = true
-
-  // Best-effort cleanup: if Demo UI auto-started an FX debug run, stop it server-side
-  // before doing a full reload, otherwise it may keep running in the background.
-  // TD-1: delegated to composable — no direct localStorage access.
-  try {
-    if (simulatorStorage.isFxDebugRun()) {
-      const stopPromise = realActions.stop().catch(() => {
-        // ignore
-      })
-      await Promise.race([stopPromise, new Promise<void>((resolve) => setTimeout(resolve, 1500))])
-    }
-  } catch {
-    // ignore
-  } finally {
-    isExiting.value = false
-  }
-
-  clearFxDebugRunOnNextLoad()
-
-  // Demo exit: restore real-state from snapshot and clear snapshot.
-  try {
-    const snap = simulatorStorage.readDevtoolsOpenRealSnapshot()
-    if (snap != null) simulatorStorage.writeDevtoolsOpenReal(snap)
-  } finally {
-    simulatorStorage.clearDevtoolsOpenRealSnapshot()
-  }
-
-  setQueryAndReload((sp) => {
-    // Always exit into real full UI.
-    sp.set('mode', 'real')
-    sp.delete('ui')
-    sp.delete('debug')
-  })
-}
-
-function toggleDemoUi() {
-  if (isDemoUi.value) void exitDemoUi()
-  else enterDemoUi()
-}
-
 /**
  * 043 S2: the source of the scene - the server (a live run) or the offline snapshot - is the "Источник" select under
  * "Подробнее" (decision 2). Switching it replaces the whole data pipeline, so it reloads the page with `?mode=`; it is
@@ -989,11 +914,15 @@ function toggleDemoUi() {
 function setSource(next: 'real' | 'fixtures') {
   if (next === apiMode.value) return
   if (toLower(interactPhase.value) !== 'idle') interact.mode.cancel()
-  setQueryAndReload((sp) => {
-    sp.set('mode', next)
-    sp.delete('ui')
-    sp.delete('debug')
-  })
+  const u = new URL(window.location.href)
+  u.searchParams.set('mode', next)
+  // An old `?ui=` (`interact`, `demo` - both ignored since 043 S2/S3) and `?debug=` are not carried across the switch.
+  u.searchParams.delete('ui')
+  u.searchParams.delete('debug')
+  // Always strip legacy `devtools` param — it must never propagate across reloads.
+  u.searchParams.delete('devtools')
+  // Setting href ensures a full re-init: the data pipeline is replaced (043 S3: the one navigation left on this screen).
+  window.location.href = u.toString()
 }
 
 // Interact Mode state is provided by useSimulatorApp() (core-only; panels/picking wiring is a later task).
@@ -1464,12 +1393,6 @@ watch([interactPhase, interact.mode.busy], ([phase, busy]) => {
       :artifacts-loading="real.artifactsLoading"
       :refresh-artifacts="realActions.refreshArtifacts"
       :download-artifact="realActions.downloadArtifact"
-      :is-web-driver="isWebDriver"
-      :is-test-mode="isTestMode"
-      :is-e2e-screenshots="isE2eScreenshots"
-      :is-demo-ui="isDemoUi"
-      :is-exiting="isExiting"
-      :toggle-demo-ui="toggleDemoUi"
       :analytics-panel-open="analyticsPanelOpen"
       :toggle-analytics-panel="toggleAnalyticsPanel"
       :details-open="detailsOpen"

@@ -1,10 +1,9 @@
 /**
- * 034 S8, F-034-D7 (reproducer of T3404): the eager bootstrap of `?mode=real&ui=demo` does not wait for a token.
+ * 034 S8, F-034-D7: a visitor with no access token (an anonymous cookie session) is not left without a run.
  *
- * The page prepares a paused run in the background so the first click on a demo button answers at once. The
- * watcher waited for `real.accessToken`, which an anonymous cookie-session visitor never has.
- *
- * The token-less state is the production build's: `DEV` is stubbed off, because a dev build fills in the dev token.
+ * Until 043 S3 this file held the eager paused bootstrap of the Demo UI page (`?mode=real&ui=demo`) - three tests,
+ * removed with that page (043 decision 5). What stays is the same question asked of the one screen: the token-less
+ * state of a production build (`DEV` stubbed off, because a dev build fills in the dev token) still gets its live run.
  */
 import { effectScope, nextTick, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -110,62 +109,20 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-describe('F-034-D7: the eager bootstrap of the demo page', () => {
-  it('a cookie-session visitor (no token) gets the paused demo run prepared - where the demo tools are allowed', async () => {
+describe('F-034-D7: a token-less visitor and the opening run', () => {
+  // 043 S2 (decision 2) REVERSES the contract this test held until 2026-10-16 ("outside the demo page nothing is started
+  // for the visitor"): opening the demo is a live run. The one screen starts ONE run, not paused, at the default
+  // intensity, for a visitor with no token too. The walk of the opening is `useSimulatorApp.autostart.p043.test.ts`.
+  it('CONTRACT (043 S2): the one screen starts one live run for a token-less visitor, not paused', async () => {
     vi.stubEnv('DEV', false)
-    vi.stubEnv('VITE_ALLOW_DEMO_UI', 'true')
-    window.history.replaceState({}, '', '/?mode=real&ui=demo')
+    window.history.replaceState({}, '', '/?mode=real')
 
     const app = boot()
     await settle()
 
     expect(app.real.accessToken, 'precondition: the visitor has no token').toBe('')
-    expect(createRun, 'no demo run was prepared').toHaveBeenCalledTimes(1)
-    expect(app.real.runId).toBe('R_DEMO')
-  })
-
-  it('CONTRACT: a dev build in an ordinary browser (the dev token is filled in) gets the paused demo run prepared', async () => {
-    // happy-dom reports `navigator.webdriver === true`; a person's browser does not.
-    vi.spyOn(navigator, 'webdriver', 'get').mockReturnValue(false)
-    window.history.replaceState({}, '', '/?mode=real&ui=demo')
-
-    const app = boot()
-    await settle()
-
-    expect(app.real.accessToken, 'precondition: a dev build has the dev token').not.toBe('')
-    expect(createRun).toHaveBeenCalledTimes(1)
-    expect(app.real.runId).toBe('R_DEMO')
-  })
-
-  // Adversarial F3: `ui=demo` is dev-only (owner's decision 2026-10-08). The buttons are shown only in a dev build or
-  // with VITE_ALLOW_DEMO_UI; the bootstrap behind them obeys the same gate - a URL parameter alone creates no run.
-  it('a build without DEV and without VITE_ALLOW_DEMO_UI: `?ui=demo` creates no run and pauses nothing', async () => {
-    vi.stubEnv('DEV', false)
-    vi.stubEnv('VITE_ALLOW_DEMO_UI', 'false')
-    window.history.replaceState({}, '', '/?mode=real&ui=demo')
-
-    const app = boot()
-    await settle()
-
-    expect(createRun, 'a run was created for a visitor who has no demo tools').not.toHaveBeenCalled()
-    expect(pauseRun).not.toHaveBeenCalled()
-    expect(app.real.runId).toBeNull()
-    expect(app.state.snapshot?.nodes.map((n) => n.id), 'anti-vacuum: the page itself loaded').toEqual(['PREVIEW_NODE'])
-  })
-
-  // 043 S2 (decision 2) REVERSES the contract this test held until 2026-10-16 ("outside the demo page nothing is started
-  // for the visitor"): opening the demo is a live run. Outside the demo page the one screen starts ONE run, not paused,
-  // at the default intensity - and not the demo page's paused bootstrap. The walk of the opening is
-  // `useSimulatorApp.autostart.p043.test.ts`.
-  it('CONTRACT (043 S2): outside the demo page the one screen starts one live run for the visitor, not paused', async () => {
-    vi.stubEnv('DEV', false)
-    window.history.replaceState({}, '', '/?mode=real')
-
-    boot()
-    await settle()
-
     expect(createRun).toHaveBeenCalledTimes(1)
     expect(vi.mocked(createRun).mock.calls[0]![1]).toMatchObject({ intensity_percent: 30 })
-    expect(pauseRun, 'not the paused bootstrap of the demo page').not.toHaveBeenCalled()
+    expect(pauseRun, 'not paused').not.toHaveBeenCalled()
   })
 })
