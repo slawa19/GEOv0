@@ -262,13 +262,30 @@ function readPublishedStackHeightPx(el: HTMLElement | null): number | null {
   return Math.round(height)
 }
 
+/** 043 S2 (fix-delta 3): the open interact window was placed by the action bar (see `followTopStackWithRightRailAnchor`). */
+let rightRailAnchorActive = false
+
 function applyPublishedTopStackHeightPx(nextPx: number): void {
   const host = getHostEl()
   if (!host) return
 
   host.style.setProperty('--ds-hud-stack-height', `${nextPx}px`)
   wm.setGeometry({ dockedRightTopPx: nextPx })
+  followTopStackWithRightRailAnchor()
   wm.reclampAll()
+}
+
+/**
+ * 043 S2 (fix-delta 3): a window of the action bar sits in the right rail UNDER the top stack - and the stack grows when
+ * "Подробнее" opens after the window did. The anchor is taken again from the live stack whenever this publisher sees
+ * the stack change; the window controller passes a changed anchor to the window manager, which moves the window and
+ * clamps it inside the viewport. Only the action bar's anchor follows: a node card's or a line's stays where it was put.
+ */
+function followTopStackWithRightRailAnchor(): void {
+  if (!rightRailAnchorActive || !wmPanelOpenAnchor.value) return
+  const next = getActionBarAnchor()
+  const cur = wmPanelOpenAnchor.value
+  if (next && (next.x !== cur.x || next.y !== cur.y)) wmPanelOpenAnchor.value = next
 }
 
 function applyPublishedBottomStackHeightPx(nextPx: number): void {
@@ -1058,6 +1075,7 @@ function startFlowFromNodeCard(opts: {
   wmEdgePopupAnchor.value = null
   // Snapshot NodeCard node screen center BEFORE phase changes.
   const snapshot = snapshotNodeCenter()
+  rightRailAnchorActive = false
 
   if (opts.openEditor) useFullTrustlineEditor.value = true
   // H-1 coexistence: NodeCard is an inspector window and must coexist with interact.
@@ -1072,6 +1090,7 @@ function startFlowFromActionBar(opts: { openEditor?: boolean; start: () => void 
   wmEdgePopupAnchor.value = null
   // Snapshot ActionBar anchor BEFORE opts.start() changes the phase.
   const snapshot = getActionBarAnchor()
+  rightRailAnchorActive = true
   if (opts.openEditor) useFullTrustlineEditor.value = true
 
   // WM: set anchor BEFORE phase change so the first `wm.open()` uses it.

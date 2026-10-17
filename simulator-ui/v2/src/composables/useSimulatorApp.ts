@@ -1431,7 +1431,12 @@ export function useSimulatorApp(opts?: {
       },
       // 037 C: an empty click cancels what is being filled in, not a held result (see `cancelFromCanvas`).
       cancelInteract: () => interactMode.cancelFromCanvas(),
-      selectNode,
+      // 043 S2 (fix-delta 1): a click on a participant is an explicit act - it pauses every time, the same participant
+      // clicked again after "Поток" too (the selection does not change then, so no watch of it can see the act).
+      selectNode: (nodeId) => {
+        selectNode(nodeId)
+        if (nodeId) noteManualAction()
+      },
     })
   }
 
@@ -1700,17 +1705,20 @@ export function useSimulatorApp(opts?: {
    * Resume under "Подробнее"; confirm, cancel, Escape and a closed panel never resume. Triggered by the ACT, not while
    * an action lasts: a person who brings the flow back with a panel open gets it, until their next act.
    */
+  /**
+   * 043 S2 (fix-delta 2): the evidence of a manual act comes ONLY from the explicit entries that call this - never from
+   * state. A selection made by loading (the `?focus=` deep link, a snapshot load) is not an act: it neither pauses a
+   * running run nor makes the opening start its run paused. Until this round a watch of `selectedNodeId` and the
+   * predicate below read the selection, and a deep link paused a run nobody touched.
+   */
+  let manualEntryHappened = false
   function noteManualAction(): void {
+    manualEntryHappened = true
     if (!isLiveUi.value) return
     void realMode.pauseForManualAction()
   }
-  const isManualActionActive = () => toLower(interactMode.phase.value) !== 'idle' || !!state.selectedNodeId
-  watch(
-    () => state.selectedNodeId,
-    (nodeId, prevNodeId) => {
-      if (nodeId && nodeId !== prevNodeId) noteManualAction()
-    },
-  )
+  /** For the opening's start (`useInteractAutoBootstrapRun.ts`): has the person already acted on this page? */
+  const isManualActionActive = () => manualEntryHappened
 
   const fxDebugControls = useFxDebugControls({
     isFxDebugEnabled,

@@ -153,3 +153,56 @@ test('B2: Send Payment opens its window in the right rail under the top bar; the
   console.log('[043 S2 B2 after]', JSON.stringify(after))
   expect(after, 'the three actions did not move').toEqual(before)
 })
+
+// --- 043 S2 fix-delta (Codex, 2026-10-17): the last three residuals of the pause and of the right rail. ---
+
+test('fix-delta 1: the SAME participant clicked again after "Поток" pauses again', async ({ page }) => {
+  const log = await firstVisit(page)
+  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  const at = (await screenNodes(page)).get(RING[0]!)!
+  await page.mouse.click(at.x, at.y)
+  await expect.poll(() => log.calls.filter((c) => c === 'POST /pause').length, { timeout: 5_000 }).toBe(1)
+  await page.locator(FLOW).click()
+  await expect(page.locator(STATE)).toContainText('живёт')
+  await page.mouse.click(at.x, at.y)
+  await expect.poll(() => log.calls.filter((c) => c === 'POST /pause').length, { timeout: 5_000, message: 'the second click on the same participant paused' }).toBe(2)
+})
+
+test('fix-delta 2a: a deep link `?focus=` on a running stored run selects the participant and pauses nothing', async ({ page }) => {
+  let log: LiveRunLog | null = null
+  await boot(page, { snapshot: ringSnapshot(), clock: false, query: `&focus=${RING[1]!}`, beforeLoad: async (p) => { log = await mockLiveRun(p, { initial: 'running' }) } })
+  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await expect.poll(() => page.evaluate(() => document.querySelectorAll('.node-label-inner').length), { message: 'precondition: the deep link selected a participant (its labels are shown)' }).toBeGreaterThan(0)
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __qaSse: { state: { controllers: unknown[] } } }).__qaSse.state.controllers.length), { timeout: 15_000 })
+    .toBeGreaterThan(0)
+  expect(log!.calls, 'no pause without an act of the person').not.toContain('POST /pause')
+})
+
+test('fix-delta 2b: a deep link `?focus=` with no run - the opening starts its run unpaused', async ({ page }) => {
+  let log: LiveRunLog | null = null
+  await boot(page, { snapshot: ringSnapshot(), clock: false, firstVisit: true, awaitScene: false, query: `&focus=${RING[1]!}`,
+    beforeLoad: async (p) => { log = await mockLiveRun(p) } })
+  await expect(page.locator('[data-ready="1"]')).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => log!.calls, { timeout: 15_000 }).toContain('POST /runs')
+  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  expect(log!.calls, 'not started paused').not.toContain('POST /pause')
+})
+
+test('fix-delta 3: a right-rail window stays under the top stack when "Подробнее" opens after it', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await firstVisit(page)
+  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  await page.locator(SEND).click()
+  const panel = page.locator('[data-testid="manual-payment-panel"]')
+  await expect(panel).toBeVisible()
+  await page.locator('[data-testid="details-toggle"]').click()
+  await expect(page.locator('[data-testid="top-details-row"]')).toBeVisible()
+  const geo = () => panel.evaluate((el) => {
+    const shell = (el.closest('.ws-shell') ?? el).getBoundingClientRect()
+    const stack = document.querySelector('.ds-ov-top .ds-ov-top-stack')!.getBoundingClientRect()
+    return { top: Math.round(shell.top), bottom: Math.round(shell.bottom), stackBottom: Math.round(stack.bottom), vh: window.innerHeight }
+  })
+  await expect.poll(async () => { const g = await geo(); return g.top >= g.stackBottom && g.bottom <= g.vh }, { timeout: 5_000, message: 'the window is under the expanded stack and inside the viewport' }).toBe(true)
+  console.log('[043 S2 fix-delta 3]', JSON.stringify(await geo()))
+})

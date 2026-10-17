@@ -108,8 +108,11 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  * - 2026-10-17 (043 S2, the owner's decision on review item B2): gate 128 -> 129, full 223 -> 224. One test of
  *   `one-screen.qa.ts`: Send Payment opens its window in the right rail under the top bar, the three actions do not
  *   move when the flow locks them, focus goes into the window.
+ * - 2026-10-17 (043 S2, Codex fix-delta): gate 129 -> 133, full 224 -> 228. Four tests of `one-screen.qa.ts`: the same
+ *   participant clicked again after "Поток" pauses again; a `?focus=` deep link pauses no running run and does not make
+ *   the opening start paused (two tests); a right-rail window stays under the top stack when "Подробнее" opens after it.
  */
-export const EXPECTED = { gate: 129, full: 224 }
+export const EXPECTED = { gate: 133, full: 228 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

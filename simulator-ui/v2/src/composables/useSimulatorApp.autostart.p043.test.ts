@@ -316,17 +316,19 @@ describe('043 S2 (decision 3): a manual action pauses the automatic payments; on
     expect(app.real.runStatus?.state).toBe('running')
   })
 
-  it('choosing a participant pauses; choosing another one with the flow back on pauses again', async () => {
+  // 043 S2 fix-delta 2 (2026-10-17) REVERSES what this test held: a selection set in STATE (as loading sets it - the
+  // `?focus=` deep link) is not a manual act. The explicit canvas click is held in the browser,
+  // `e2e/qa/one-screen.qa.ts` "fix-delta 1" (the same participant clicked again) and "(c) choosing a participant".
+  it('a selection set in state (as loading sets it) pauses nothing; an explicit entry does', async () => {
     storedRun('R1', 'running')
     const app = boot()
     await settle()
     app.state.selectedNodeId = 'R1_NODE'
     await settle()
-    expect(pauseRun).toHaveBeenCalledTimes(1)
-    await app.realActions.resume()
-    app.state.selectedNodeId = 'B'
+    expect(pauseRun, 'a selection by state is not an act').not.toHaveBeenCalled()
+    app.interact.mode.selectNode('B')
     await settle()
-    expect(pauseRun).toHaveBeenCalledTimes(2)
+    expect(pauseRun, 'an explicit pick is').toHaveBeenCalledTimes(1)
   })
 
   it('a paused run is not paused twice (no request on a run that is already quiet)', async () => {
@@ -542,4 +544,3 @@ describe('043 S2 fix round (external review 2026-10-17): one create per start, a
     expect(app.real.runStatus?.state).toBe('running')
   })
 })
-
