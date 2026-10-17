@@ -9,14 +9,15 @@
  * LIMITS. The producer of the text is judged, not the component that renders it (`InteractHistoryLog.vue` prints the
  * text it is given). Three producers are walked: create, change of limit, close. A producer added later is not seen.
  *
- * SLICE D (names) must turn the three `red` tests green: then replace `red` by `it`.
+ * SLICE D (names) must turn the three `red` tests green: then replace `red` by `it`. Done by 044 `T4405` (2026-10-17),
+ * which made trust-line toasts and history print `participantName` (a run's ids are identities of the run).
  */
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { useInteractMode } from '../composables/useInteractMode'
 import type { GraphSnapshot } from '../types'
-import { measured, red } from './p039'
+import { measured } from './p039'
 
 type Actions = Parameters<typeof useInteractMode>[0]['actions']
 
@@ -63,7 +64,7 @@ describe('039 R8 - the Interact history names participants', () => {
     expect(texts(im)).toEqual(['Payment 1.00 UAH: Alice Baker → Bob Carter'])
   })
 
-  red('a trust line CREATED: one history line with both names and no id (today: "pid-0002 → pid-0003")', 'CREATED: the history line names', async () => {
+  it('a trust line CREATED: one history line with both names and no id (today: "pid-0002 → pid-0003")', async () => {
     const im = mode()
     im.startTrustlineFlow()
     im.selectNode('pid-0002')
@@ -77,7 +78,7 @@ describe('039 R8 - the Interact history names participants', () => {
     expect(texts(im)[0]).not.toMatch(/pid-000\d/)
   })
 
-  red('a trust line limit CHANGED: one history line with both names and no id (today: ids)', 'CHANGED: the history line names', async () => {
+  it('a trust line limit CHANGED: one history line with both names and no id (today: ids)', async () => {
     const im = mode()
     expect(im.selectEdge('pid-0001→pid-0003'), 'counter-check: the existing line is selected').toBe(true)
     await im.confirmTrustlineUpdate('20.00')
@@ -88,7 +89,7 @@ describe('039 R8 - the Interact history names participants', () => {
     expect(texts(im)[0]).not.toMatch(/pid-000\d/)
   })
 
-  red('a trust line CLOSED: the history line and the toast carry both names and no id (today: ids)', 'CLOSED: the text names', async () => {
+  it('a trust line CLOSED: the history line and the toast carry both names and no id (today: ids)', async () => {
     const im = mode()
     expect(im.selectEdge('pid-0001→pid-0003')).toBe(true)
     await im.confirmTrustlineClose()

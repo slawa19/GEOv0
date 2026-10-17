@@ -65,7 +65,8 @@ describe('GraphNavigator', () => {
     const status = host.querySelector('[data-testid="graph-navigator-status"]')
     expect(status?.getAttribute('role')).toBe('status')
     expect(status?.getAttribute('aria-live')).toBe('polite')
-    expect(status?.textContent).toContain('Trustline details opened: alice → bob')
+    // 044 `T4405`: the participants' names, not their ids.
+    expect(status?.textContent).toContain('Trustline details opened: Alice → Bob')
 
     app.unmount()
     host.remove()

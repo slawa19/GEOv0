@@ -14,7 +14,7 @@ import { interactText } from '../i18n/interactStrings'
 import { compareMoney, formatMoney } from '../utils/money'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { useParticipantDisplayId } from '../composables/useParticipantDisplay'
-import { participantLabel } from '../utils/participants'
+import { participantLabel, participantLabelsOf } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import OverlaySelect from './common/OverlaySelect.vue'
 
@@ -537,10 +537,13 @@ const capacityByToPid = computed<Map<string, string>>(() => {
   return out
 })
 
+// 044 `T4405`: names, told apart where two read the same (`participantLabelsOf`).
+const labelByPid = computed(() => participantLabelsOf(props.participants ?? [], showPid))
+
 function toOptionLabel(p: ParticipantInfo): string {
   const pid = (p?.pid ?? '').trim()
   const cap = pid ? capacityByToPid.value.get(pid) : undefined
-  const label = participantLabel(p, showPid)
+  const label = labelByPid.value.get(pid) ?? participantLabel(p, showPid)
   if (cap == null) return `${label} — …`
   // 026 `T2602`: a negative `available` is trust excess, not an amount this payment can carry; no amount is shown
   // and the recipient stays selectable (another route may exist).
@@ -633,7 +636,7 @@ function onToChange(v: string) {
 
 const fromOptions = computed(() => fromParticipants.value.map((participant) => ({
   value: participant.pid,
-  label: participantLabel(participant, showPid),
+  label: labelByPid.value.get((participant.pid ?? '').trim()) ?? participantLabel(participant, showPid),
 })))
 
 // BACKLOG 037-5 (c): until the server has answered for this sender AT ALL, the list is the unfiltered fallback - it names who MAY

@@ -8,7 +8,7 @@ import { useParticipantsList } from '../composables/useParticipantsList'
 import type { ParticipantInfo, TrustlineInfo } from '../api/simulatorTypes'
 import { amountStepHint } from '../config/equivalentPrecision'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
-import { participantLabel } from '../utils/participants'
+import { participantLabel, participantLabelsOf } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 import {
@@ -286,14 +286,19 @@ function onTrustlinePick(key: string) {
   props.selectTrustline?.(from, to)
 }
 
+// 044 `T4405`: names, told apart where two read the same (`participantLabelsOf`).
+const labelByPid = computed(() => participantLabelsOf(props.participants ?? [], showPid))
+const labelOf = (participant: { pid?: string | null; name?: string | null }) =>
+  labelByPid.value.get((participant.pid ?? '').trim()) ?? participantLabel(participant, showPid)
+
 const fromOptions = computed(() => participantsSorted.value.map((participant) => ({
   value: participant.pid,
-  label: participantLabel(participant, showPid),
+  label: labelOf(participant),
 })))
 
 const toOptions = computed(() => toParticipants.value.map((participant) => ({
   value: participant.pid,
-  label: participantLabel(participant, showPid) + (isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim()) ? ' (exists)' : ''),
+  label: labelOf(participant) + (isCreate.value && existingActiveToPidsForFrom.value.has((participant.pid ?? '').trim()) ? ' (exists)' : ''),
 })))
 
 const trustlineOptions = computed(() => trustlinesForFrom.value.map((trustline) => ({

@@ -2,6 +2,10 @@
  * A seed scenario namespaces its participant ids (`<scenario id>:<community pid>`). Where the UI PRINTS an id to a person it
  * shows the id without the namespace of the scene on screen; values, keys and API arguments keep the full id.
  *
+ * 044 `T4405` (decision (iv), 2026-10-17): a run's participant id is an identity of the run (`<run id>:p<n>`), so a picker
+ * shows the participant's NAME and no id; the namespace rule is for an id printed WITHOUT a name. Under the name provider
+ * (`provideParticipantNameOf`, given by `SimulatorAppRoot` from the snapshot) every printed id is the participant's name.
+ *
  * Owner of the rule: `utils/participantDisplayId.ts`. These tests judge the places that print: they mount the real component
  * under a provider that says which scenario is on screen, and read what a person reads (option text, popup title, button).
  */
@@ -10,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import EdgeDetailPopup from './EdgeDetailPopup.vue'
 import ManualPaymentPanel from './ManualPaymentPanel.vue'
-import { provideShownScenarioId } from '../composables/useParticipantDisplay'
+import { provideParticipantNameOf, provideShownScenarioId } from '../composables/useParticipantDisplay'
 
 const SCENARIO = 'greenfield-village-100-realistic-v2'
 const OTHER = 'riverside-town-50-realistic-v2'
@@ -21,13 +25,19 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function mountUnder(scenarioId: string, child: Component, props: Record<string, unknown>) {
+function mountUnder(
+  scenarioId: string,
+  child: Component,
+  props: Record<string, unknown>,
+  names?: Record<string, string>,
+) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const scenario = ref(scenarioId)
   const Wrapper = defineComponent({
     setup() {
       provideShownScenarioId(scenario)
+      if (names) provideParticipantNameOf((pid) => names[pid])
       return () => h(child, props)
     },
   })
@@ -86,30 +96,39 @@ describe('manual payment panel: From / To option labels', () => {
     { pid: BOB, name: 'Dana Lee' },
   ]
 
-  it('prints the id without the scenario namespace, keeps the full id as the option value', async () => {
+  it('prints the name and no id, keeps the full id as the option value (044: the id is not printed next to the name)', async () => {
     const { app, host } = mountUnder(SCENARIO, ManualPaymentPanel, paymentPanelProps({ fromPid: ALICE, participants }))
     await nextTick()
     await nextTick()
 
     const from = optionsOf(host, '#mp-from')
     expect(from.map((o) => o.value).sort()).toEqual([ALICE, BOB].sort())
-    expect(from.find((o) => o.value === ALICE)?.text).toBe('Alex Turner (General Builder) (PID_U0046_6df7ddce)')
+    expect(from.find((o) => o.value === ALICE)?.text).toBe('Alex Turner (General Builder)')
 
     const to = optionsOf(host, '#mp-to')
     expect(to.map((o) => o.value)).toEqual([BOB])
-    expect(to[0]!.text.startsWith('Dana Lee (PID_U0047_aa11bb22)')).toBe(true)
+    expect(to[0]!.text.startsWith('Dana Lee')).toBe(true)
+    for (const o of [...from, ...to]) expect(o.text).not.toContain('PID_')
 
     for (const o of [...from, ...to]) expect(o.text).not.toContain(SCENARIO)
     app.unmount()
   })
 
-  it("leaves ids of ANOTHER scenario's namespace as they are (rule is exact, not 'text after a colon')", async () => {
-    const { app, host } = mountUnder(OTHER, ManualPaymentPanel, paymentPanelProps({ fromPid: ALICE, participants }))
+  it("an id printed without a name: the namespace of the scene goes, ANOTHER scenario's stays (rule is exact)", async () => {
+    const nameless = participants.map((p) => ({ ...p, name: '' }))
+    const own = mountUnder(SCENARIO, ManualPaymentPanel, paymentPanelProps({ fromPid: ALICE, participants: nameless }))
+    await nextTick()
+    await nextTick()
+    expect(optionsOf(own.host, '#mp-from').find((o) => o.value === ALICE)?.text).toBe('PID_U0046_6df7ddce')
+    own.app.unmount()
+    document.body.innerHTML = ''
+
+    const { app, host } = mountUnder(OTHER, ManualPaymentPanel, paymentPanelProps({ fromPid: ALICE, participants: nameless }))
     await nextTick()
     await nextTick()
 
     const from = optionsOf(host, '#mp-from')
-    expect(from.find((o) => o.value === ALICE)?.text).toBe(`Alex Turner (General Builder) (${ALICE})`)
+    expect(from.find((o) => o.value === ALICE)?.text).toBe(ALICE)
     app.unmount()
   })
 
@@ -123,6 +142,7 @@ describe('manual payment panel: From / To option labels', () => {
     await nextTick()
     const texts = optionsOf(host, '#mp-from').map((o) => o.text)
     expect(new Set(texts).size).toBe(2)
+    expect(texts.sort()).toEqual(['Same Name (1)', 'Same Name (2)']) // 044: told apart without printing the id
     app.unmount()
   })
 })
@@ -159,6 +179,21 @@ describe('edge detail popup: title and Pay button', () => {
     expect(host.querySelector('.popup__subtitle')?.textContent?.trim()).toBe('PID_U0046_6df7ddce → PID_U0047_aa11bb22')
     const pay = host.querySelector('[data-testid="edge-send-payment"]') ?? Array.from(host.querySelectorAll('button')).find((b) => /Pay/.test(b.textContent ?? ''))
     expect(pay?.textContent?.trim()).toBe('💸 Pay PID_U0046_6df7ddce')
+    app.unmount()
+  })
+
+  it("044: under the name provider (a run on screen) prints the participants' names, never their ids", async () => {
+    const RUN_A = 'run_20261017_101010_ab12cd34:p1'
+    const RUN_B = 'run_20261017_101010_ab12cd34:p2'
+    const props = popupProps()
+    props.state.fromPid = RUN_A
+    props.state.toPid = RUN_B
+    const { app, host } = mountUnder(SCENARIO, EdgeDetailPopup, props, { [RUN_A]: 'Алиса', [RUN_B]: 'Магазин' })
+    await nextTick()
+    expect(host.querySelector('.popup__subtitle')?.textContent?.trim()).toBe('Алиса → Магазин')
+    const pay = host.querySelector('[data-testid="edge-send-payment"]') ?? Array.from(host.querySelectorAll('button')).find((b) => /Pay/.test(b.textContent ?? ''))
+    expect(pay?.textContent?.trim()).toBe('💸 Pay Алиса')
+    expect(host.textContent).not.toContain('run_')
     app.unmount()
   })
 

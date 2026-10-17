@@ -34,13 +34,19 @@ const selectedNodeId = ref('')
 const selectedEdgeKey = ref('')
 const announcement = ref('')
 
+// 044 `T4405`: the participant's name, not its id (an identity of the run); the shown id only when there is no name.
+const nameById = computed(() => new Map(props.nodes.map((n) => [n.id, n.name?.trim() ?? ''])))
+
+function participantText(id: string): string {
+  return nameById.value.get(id) || showPid(id)
+}
+
 function nodeLabel(node: GraphNode): string {
-  const name = node.name?.trim()
-  return name && name !== node.id ? `${name} (${showPid(node.id)})` : showPid(node.id)
+  return participantText(node.id)
 }
 
 function edgeLabel(link: GraphLink): string {
-  return `${showPid(link.source)} → ${showPid(link.target)}`
+  return `${participantText(link.source)} → ${participantText(link.target)}`
 }
 
 watch(

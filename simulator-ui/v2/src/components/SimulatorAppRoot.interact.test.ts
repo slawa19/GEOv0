@@ -1990,7 +1990,7 @@ describe('SimulatorAppRoot - Interact Mode rendering', () => {
       await nextTick()
       expect(host.querySelector('.ws-shell[data-win-type="edge-detail"]')).toBeTruthy()
       expect(host.querySelector('[data-testid="graph-navigator-status"]')?.textContent).toContain(
-        'Trustline details opened: alice → bob',
+        'Trustline details opened: Alice → Bob', // 044 `T4405`: names, not ids
       )
 
       const busy = getRequiredGeoTestGlobal('__GEO_TEST_INTERACT_BUSY_REF')

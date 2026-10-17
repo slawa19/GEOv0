@@ -27,7 +27,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { canActOnTrustlineFigures } from '../composables/interact/trustlinesSourceState'
 import { useSelectedTrustlineLine } from '../composables/useSelectedTrustlineLine'
 import { provideActivePanelState } from '../composables/useActivePanelState'
-import { participantDisplayIdFor, provideShownScenarioId, shownScenarioIdOf } from '../composables/useParticipantDisplay'
+import {
+  participantDisplayIdFor,
+  provideParticipantNameOf,
+  provideShownScenarioId,
+  shownScenarioIdOf,
+} from '../composables/useParticipantDisplay'
  import type { Point } from '../types/layout'
  import { useSimulatorStorage } from '../composables/usePersistedSimulatorPrefs'
  import { useUiTheme } from '../composables/useUiTheme'
@@ -459,7 +464,10 @@ provideActivePanelState(interactPhase)
 // Components that PRINT a participant id remove the namespace of this scenario from it (`utils/participantDisplayId.ts`).
 const shownScenarioId = computed(() => shownScenarioIdOf(real.runStatus, real.selectedScenarioId))
 provideShownScenarioId(shownScenarioId)
-const showPid = participantDisplayIdFor(() => shownScenarioId.value)
+// 044 `T4405`: and show a run's participant by its name (its id is an identity of the run).
+const participantNameOf = (pid: string) => getNodeById(pid)?.name ?? null
+provideParticipantNameOf(participantNameOf)
+const showPid = participantDisplayIdFor(() => shownScenarioId.value, participantNameOf)
 
 /**
  * Controls which UI to show in `editing-trustline` phase:
