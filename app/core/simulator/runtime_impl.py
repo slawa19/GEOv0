@@ -249,14 +249,14 @@ class _SimulatorRuntimeBase:
     # ------------------------------------------
 
     def get_active_run_id(self, owner_id: str = "") -> Optional[str]:
-        """Get active run for a specific owner.
+        """Get active run for a specific owner; an empty owner_id has none (044 S1d).
 
-        If owner_id is empty, return any active run (backward compat).
+        Every SimulatorActor carries a non-empty owner_id ("admin", "cli:", "pid:", "anon:"), so an
+        empty one is never a lookup for "any owner's run".
         """
+        if not owner_id:
+            return None
         with self._lock:
-            if not owner_id:
-                # backward compat: return first active or None
-                return next(iter(self._active_run_id_by_owner.values()), None)
             return self._active_run_id_by_owner.get(owner_id)
 
     def set_active_run_id(self, run_id: str, owner_id: str = "") -> None:
@@ -771,10 +771,6 @@ class SimulatorRuntime(_SimulatorRuntimeBase):
     Public entrypoints should import `SimulatorRuntime`/`runtime` from
     `app.core.simulator.runtime` to keep imports stable.
     """
-
-    def _db_enabled(self) -> bool:
-        """Whether simulator DB persistence is enabled in the current process."""
-        return simulator_storage.db_enabled()
 
 
 runtime = SimulatorRuntime()

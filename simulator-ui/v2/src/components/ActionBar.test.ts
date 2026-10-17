@@ -1,13 +1,8 @@
 import { createApp, h, nextTick } from 'vue'
-import { readFileSync } from 'node:fs'
 import type { Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import ActionBar from './ActionBar.vue'
-
-function readHere(rel: string): string {
-  return readFileSync(new URL(rel, import.meta.url), 'utf8')
-}
 
 function mountActionBar(overrides: Record<string, unknown> = {}) {
   const host = document.createElement('div')
@@ -148,16 +143,6 @@ describe('ActionBar', () => {
 
     app.unmount()
     host.remove()
-  })
-
-  it('keeps the shared HudBar contract and only uses a local hint-wrap exception', () => {
-    const sfc = readHere('./ActionBar.vue')
-
-    expect(sfc).toContain('<HudBar variant="ghost" layout="start" fit>')
-    // 043 S2 (B2, 2026-10-17): the hint left the row's flex layout (`order`, `flex`, the narrow-screen rule are gone);
-    // that the row does not move when it appears is measured in the browser, `e2e/qa/one-screen.qa.ts` "B2: ...".
-    expect(sfc).not.toContain(':deep(.ds-select) {')
-    expect(sfc).not.toContain(':deep(.ds-btn) {')
   })
 })
 

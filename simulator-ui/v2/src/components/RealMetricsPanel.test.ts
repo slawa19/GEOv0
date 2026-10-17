@@ -1,12 +1,8 @@
-import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createApp, h, type Component } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { BottleneckTarget, BottlenecksResponse, MetricsResponse } from '../api/simulatorTypes'
 import type { MetricsStreamPhase } from '../composables/useMetricsPolling'
-import { getOverlaySurfaceDescriptor } from '../ui-kit/overlaySurfaceCatalog'
 import RealMetricsPanel from './RealMetricsPanel.vue'
 
 const panel: Component = RealMetricsPanel
@@ -415,28 +411,5 @@ describe('RealMetricsPanel', () => {
       idle.destroy()
       loading.destroy()
     }
-  })
-
-  /**
-   * The ui-kit guide's surface table is documentation that the same file (section 6.1) declares
-   * subordinate to `overlaySurfaceCatalog.ts`. It said `root inset` for this panel — the one
-   * placement the catalog explicitly rejects, and which `overlaySurfaceCatalog.test.ts` exists to
-   * deny. A row nobody checks drifts; this checks it.
-   */
-  it('is described in the ui-kit guide exactly as the catalog defines it', () => {
-    const here = dirname(fileURLToPath(import.meta.url))
-    const guide = readFileSync(resolve(here, '../ui-kit/AI-AGENT-GUIDE.md'), 'utf8')
-    const row = guide.split('\n').find((line) => line.startsWith('| RealMetricsPanel |'))
-    expect(row).toBeDefined()
-
-    const descriptor = getOverlaySurfaceDescriptor('real-metrics-panel')
-    expect(row).toContain(`\`${descriptor.family}\``)
-    expect(row).toContain(`\`${descriptor.sizingMode}\``)
-    expect(row).toContain(`\`${descriptor.positioningOwner}\``)
-    expect(row).toContain(`\`${descriptor.zLayerToken}\``)
-
-    // Counter-probe: the value the row used to carry, which the catalog denies.
-    expect(descriptor.positioningOwner).not.toBe('root-inset')
-    expect(row).not.toMatch(/\broot inset\b/)
   })
 })

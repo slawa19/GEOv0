@@ -123,21 +123,21 @@ def test_clear_active_run_id_mismatched_run() -> None:
     )
 
 
-def test_get_active_run_id_empty_owner() -> None:
-    """Backward compat: get('') возвращает первый активный run (любой owner)."""
+def test_get_active_run_id_empty_owner_sees_no_other_owners_run() -> None:
+    """044 S1d: get('') больше не отдаёт чужой run «любого владельца» — пустой owner → None."""
     rt = _MinimalRuntime()
 
     rt.set_active_run_id("run42", owner_id="someOwner")
-    # Пустой owner_id — backward compat: вернуть любой активный
-    result = rt.get_active_run_id("")
+    rt.set_active_run_id("run0", owner_id="")
 
-    assert result == "run42", (
-        "get с пустым owner_id должен вернуть первый активный run (backward compat)"
+    assert rt.get_active_run_id("") is None, (
+        "пустой owner_id не должен получать ни чужой, ни «ничей» активный run"
     )
+    assert rt.get_active_run_id("someOwner") == "run42"
 
 
 def test_get_active_run_id_empty_owner_no_runs() -> None:
-    """Backward compat: get('') при отсутствии runs → None."""
+    """get('') при отсутствии runs → None."""
     rt = _MinimalRuntime()
 
     result = rt.get_active_run_id("")
@@ -321,7 +321,7 @@ def _make_lifecycle(
         lock=threading.RLock(),
         runs=runs,
         set_active_run_id=set_active_run_id or (lambda run_id, owner_id: None),
-        clear_active_run_id=clear_active_run_id,
+        clear_active_run_id=clear_active_run_id or (lambda **_: None),
         utc_now=lambda: datetime.now(tz=timezone.utc),
         new_run_id=lambda: str(uuid.uuid4()),
         get_scenario_raw=lambda sid: {"equivalents": [], "edges": [], "scenario_id": sid},
@@ -336,7 +336,8 @@ def _make_lifecycle(
         get_max_active_runs=lambda: max_active,
         get_max_run_records=lambda: 100,
         logger=MagicMock(),
-        get_active_run_id_for_owner=get_active_run_id_for_owner,
+        get_active_run_id_for_owner=get_active_run_id_for_owner or (lambda _: None),
+        get_max_active_runs_per_owner=lambda: 1,
     )
 
 

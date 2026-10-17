@@ -6,7 +6,7 @@ the line was inert and misleading. The Simulator UI still reads it (`simulator-u
 so the counter-cases below must keep it there: a launcher that dropped the variable everywhere would pass the Admin
 cases and break the simulator.
 
-The function is lifted from each launcher by AST (as `test_run_full_stack_database_url_redaction.py` does) and run on a
+The function is lifted from each launcher by AST (as `test_launchers_process_ownership_and_db_url_redaction.py` does) and run on a
 file in a temporary directory. What this does not see: the whole launcher run - only `Update-EnvLocal` is executed,
 and the call sites (`run_full_stack.ps1` passes `-IsSimulator $true` for the simulator's file only; `run_local.ps1`
 configures the Admin UI alone) are read, not driven.

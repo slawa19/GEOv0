@@ -273,7 +273,7 @@ def test_no_test_module_builds_a_sqlite_url_outside_the_scratch_tree() -> None:
             "test_p014_t1406_no_mutable_database_in_the_working_tree.py",
             "test_settings_guardrails.py",
             "test_test_database_guard.py",
-            "test_run_full_stack_database_url_redaction.py",
+            "test_launchers_process_ownership_and_db_url_redaction.py",
             "test_p017_t1711_seed_recipe_refuses.py",
         }:
             continue

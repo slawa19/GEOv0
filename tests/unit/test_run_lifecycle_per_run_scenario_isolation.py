@@ -62,6 +62,9 @@ async def test_create_run_deep_copies_scenario_raw_per_run() -> None:
         get_max_active_runs=lambda: 0,
         get_max_run_records=lambda: 0,
         logger=logging.getLogger(__name__),
+        clear_active_run_id=lambda **_: None,
+        get_active_run_id_for_owner=lambda _: None,
+        get_max_active_runs_per_owner=lambda: 1,
     )
 
     run_id1 = await lifecycle.create_run(scenario_id="s1", mode="real", intensity_percent=50)

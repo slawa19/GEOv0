@@ -69,7 +69,6 @@
 - `tests/unit/test_simulator_sse_replay.py`
 - `tests/unit/test_simulator_tx_failed_event_schema.py`
 - `tests/unit/test_simulator_rejection_codes.py`
-- `tests/unit/test_simulator_fixtures_clearing_plan_done_pair.py`
 - `tests/unit/test_tick_static_clearing.py` — static clearing of the tick (`tick.py`): payment effects after the commit, cleared volume stays Decimal on every return
 
 ### 3.2 Contract (контракты схем/типов)
@@ -93,11 +92,9 @@
 - частично SB-09/SB-10 (если поднимаем тестовую среду PaymentEngine)
 
 Расположение (фактически в репозитории сейчас):
-- `tests/integration/test_simulator_sse_smoke.py`
 - `tests/integration/test_simulator_sse_real_smoke.py`
 - `tests/integration/test_simulator_sse_replay_410.py`
 - `tests/integration/test_simulator_sse_tx_failed_timeout.py`
-- `tests/integration/test_simulator_sse_fixtures_clearing_animation_pair.py`
 - `tests/integration/test_simulator_artifacts_events_ndjson.py`
 - `tests/integration/test_simulator_real_snapshot_db_enrichment.py`
 - `tests/integration/test_simulator_static_clearing_cadence.py` — static clearing cadence on a real tick (clearing only on `tick_index % N == 0`)
@@ -257,9 +254,8 @@ Phase-5 smoke. Наличие этих тестов не превращает в
   поддерживаемым флагом.
 
 Рекомендация по быстрым прогонам:
-- Для «быстрых проверок» UI (smoke/e2e без зависимости от БД и данных) используйте **sandbox/topology-only**:
-  - API: `mode=fixtures` (в UI может отображаться как `sandbox`)
-  - ожидания: топология/рендер/стрим/контроль run; без «семантической» раскраски по долгам/балансам.
+- Для «быстрых проверок» UI без зависимости от БД и данных используйте клиентское демо на статических снимках (Sandbox, `?mode=fixtures` в URL клиента; сервер не нужен) и e2e на этих снимках.
+- Серверный режим `mode=fixtures` («sandbox/topology-only») удалён 2026-10-16 (042): API принимает только `mode=real`, явный `fixtures` — `422`.
 - Для проверки DB enrichment и бизнес-семантики визуализации используйте `mode=real`.
 
 ### 7.3 Real Mode env knobs (важно для воспроизводимости)
