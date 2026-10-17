@@ -111,8 +111,10 @@ import { debugArgProblems, destinations, exclusionProblems, playwrightArgs, verd
  * - 2026-10-17 (043 S2, Codex fix-delta): gate 129 -> 133, full 224 -> 228. Four tests of `one-screen.qa.ts`: the same
  *   participant clicked again after "Поток" pauses again; a `?focus=` deep link pauses no running run and does not make
  *   the opening start paused (two tests); a right-rail window stays under the top stack when "Подробнее" opens after it.
+ * - 2026-10-17 (043 S2, the internal adversarial pass, 1-A): gate 133 -> 134, full 228 -> 229. One test of
+ *   `one-screen.qa.ts`: dragging a participant in the living flow pauses it.
  */
-export const EXPECTED = { gate: 133, full: 228 }
+export const EXPECTED = { gate: 134, full: 229 }
 
 /**
  * Tests kept OUT of the required subset by name, although they carry no `@extended` tag: each with its title, reason

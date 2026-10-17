@@ -1458,7 +1458,12 @@ export function useSimulatorApp(opts?: {
 
     pickNodeAt,
     getLayoutNodeById: (id) => layoutIndex.value.nodeById.get(id) ?? null,
-    setSelectedNodeId: selectNode,
+    // 043 S2 (adversarial 1-A): pressing on a participant to drag it is an explicit act - it pauses like a click (the
+    // click the browser fires after a drag is suppressed, so the canvas click entry never runs for a drag).
+    setSelectedNodeId: (id) => {
+      selectNode(id)
+      if (id) noteManualAction()
+    },
     clearHoveredEdge,
 
     clientToScreen,

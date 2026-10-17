@@ -206,3 +206,17 @@ test('fix-delta 3: a right-rail window stays under the top stack when "Подр�
   await expect.poll(async () => { const g = await geo(); return g.top >= g.stackBottom && g.bottom <= g.vh }, { timeout: 5_000, message: 'the window is under the expanded stack and inside the viewport' }).toBe(true)
   console.log('[043 S2 fix-delta 3]', JSON.stringify(await geo()))
 })
+
+// 043 S2, adversarial pass 1-A (2026-10-17): a drag of a participant is an explicit act and pauses (the click the browser
+// fires after a drag is suppressed, so the canvas click entry never runs for it).
+test('adversarial 1-A: dragging a participant in the living flow pauses it', async ({ page }) => {
+  const log = await firstVisit(page)
+  await expect(page.locator(STATE)).toContainText('живёт', { timeout: 15_000 })
+  const at = (await screenNodes(page)).get(RING[2]!)!
+  await page.mouse.move(at.x, at.y)
+  await page.mouse.down()
+  for (let i = 1; i <= 8; i += 1) await page.mouse.move(at.x + i * 6, at.y + i * 4)
+  await page.mouse.up()
+  await expect.poll(() => log.calls, { timeout: 5_000, message: 'the drag asked for a pause' }).toContain('POST /pause')
+  await expect(page.locator(STATE)).toContainText('на паузе')
+})
