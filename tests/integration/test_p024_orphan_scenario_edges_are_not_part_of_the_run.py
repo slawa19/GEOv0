@@ -125,7 +125,10 @@ async def test_trustlines_list_does_not_read_an_orphan_edge(client, db_session, 
     assert listed.status_code == 200, listed.text
     items = {(i["from_pid"], i["to_pid"]): i for i in listed.json()["items"]}
     # The real pair's debt first, so a regression reports the leaked amount itself.
-    assert "321" not in listed.text, listed.text
+    # Judged on the amount fields, not on the body text: the generated pids and equivalent code are random hex and
+    # can contain "321" themselves (CI run 39062967942: `p024_s1_02D321E2`).
+    leaked = [i for i in items.values() if Decimal("321") in {Decimal(i["used"]), Decimal(i["reverse_used"])}]
+    assert leaked == [], listed.text
     assert (r1.pid, r2.pid) not in items, items
     # Counter-check (anti-vacuum): the run's own edge is listed with its reverse debt.
     assert Decimal(items[(s1.pid, s2.pid)]["reverse_used"]) == Decimal("7"), items

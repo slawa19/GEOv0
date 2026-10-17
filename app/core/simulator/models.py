@@ -188,6 +188,10 @@ class RunRecord:
     # Per-run scenario raw dict (deep-copied from ScenarioRecord.raw on run creation).
     # Used to avoid cross-run conflicts when the runner mutates scenario topology in-memory.
     _scenario_raw: dict[str, Any] | None = None
+    # 044 `T4405`: the run whose identities `_scenario_raw` carries (`bind_run_identities`), set once by
+    # `RunLifecycle.create_run` - the one way a run comes to exist. The seeding paths pass it to the seeder, which then
+    # adopts no row but an identity of this run. None only on a record built by hand outside `create_run` (tests).
+    _identity_run_id: str | None = None
 
     _edges_by_equivalent: dict[str, list[tuple[str, str]]] | None = None
     # 026 `T2603.2`: (equivalent, creditor PID, debtor PID) -> a counter bumped by Interact create/update and by

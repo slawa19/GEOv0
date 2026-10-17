@@ -130,17 +130,22 @@ def _assert_views(snap: dict, real: tuple, simulated: tuple) -> None:
 
 
 @pytest.mark.asyncio
-async def test_anonymous_real_preview_does_not_read_real_participants(client, db_session, world) -> None:
+async def test_anonymous_real_preview_does_not_read_real_participants(client, db_session, world, monkeypatch) -> None:
+    """044 `T4405` (2026-10-17): the preview is the TEMPLATE's picture and reads no database at all - neither a real
+    participant's row (024 B1) nor a simulator-made one (another run's, an older unbound run's). The upload is the
+    administrator's (044: only the administrator uploads); the read is the anonymous visitor's, the scenario admitted."""
+
     eq, r1, r2, s1, s2 = await _seed(db_session)
-    client.cookies.clear()
-    ensured = await client.post("/api/v1/simulator/session/ensure")
-    assert ensured.json()["actor_kind"] == "anon"
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "all")
     scenario_id = f"p024-leak-{uuid.uuid4().hex[:8]}"
     up = await client.post(
-        "/api/v1/simulator/scenarios", headers=ORIGIN,
+        "/api/v1/simulator/scenarios", headers={**ORIGIN, "X-Admin-Token": settings.ADMIN_TOKEN},
         json={"scenario": _scenario(scenario_id, eq, [(r1, r2), (s1, s2)])},
     )
     assert up.status_code == 200, up.text
+    client.cookies.clear()
+    ensured = await client.post("/api/v1/simulator/session/ensure")
+    assert ensured.json()["actor_kind"] == "anon"
 
     preview = await client.get(
         f"/api/v1/simulator/scenarios/{scenario_id}/graph/preview",
@@ -148,7 +153,15 @@ async def test_anonymous_real_preview_does_not_read_real_participants(client, db
     )
 
     assert preview.status_code == 200, preview.text
-    _assert_views(preview.json(), (r1, r2), (s1, s2))
+    nodes = {n["id"]: n for n in preview.json()["nodes"]}
+    links = {(ln["source"], ln["target"]): ln for ln in preview.json()["links"]}
+    assert set(nodes) == {r1.pid, r2.pid, s1.pid, s2.pid}  # the template's participants, all of them
+    for pid, node in nodes.items():
+        assert node.get("net_balance") is None and node.get("net_balance_atoms") is None, node
+    for pair in ((r1.pid, r2.pid), (s1.pid, s2.pid)):
+        # Only what the SCENARIO says (limit "1", nothing used): the database's 500 / 123 / 45 must not appear.
+        assert Decimal(str(links[pair].get("used") or 0)) == 0, links[pair]
+        assert Decimal(str(links[pair].get("trust_limit"))) == Decimal("1"), links[pair]
 
 
 @pytest.mark.asyncio

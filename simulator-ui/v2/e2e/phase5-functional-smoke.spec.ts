@@ -609,7 +609,7 @@ test.describe('Phase 5 frozen non-visual functional matrix', () => {
     await chooseOverlayOption(page, 'To', 'carol', /Carol/, true)
     await page.getByLabel('Limit').fill('15.00')
     await activateButton(page, 'Create')
-    await expect(page.getByLabel('Success notification')).toContainText('Trustline created: alice → carol')
+    await expect(page.getByLabel('Success notification')).toContainText('Trustline created: Alice → Carol') // 044 `T4405`: names
     await expect(page.locator('[data-testid="actionbar-trustline"]')).toBeFocused()
     expect(mock.trustlineCreateRequests).toHaveLength(1)
 

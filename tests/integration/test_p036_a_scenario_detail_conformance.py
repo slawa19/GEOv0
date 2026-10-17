@@ -25,6 +25,8 @@ from tests.contract.openapi_response_conformance import load_canon, validate_bod
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFORMANCE = json.loads((REPO_ROOT / "api" / "scenario-detail-conformance.json").read_text(encoding="utf-8"))
 ORIGIN = {"Origin": "http://localhost:5176"}
+#: 044 `T4405`: only the administrator uploads a scenario (an anonymous upload is 403).
+UPLOAD_HEADERS = {**ORIGIN, "X-Admin-Token": settings.ADMIN_TOKEN}
 
 
 @pytest.fixture
@@ -40,6 +42,7 @@ def registry(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(runtime, "_scenario_registry", reg)
     monkeypatch.setattr(settings, "SIMULATOR_CSRF_ORIGIN_ALLOWLIST", ORIGIN["Origin"])
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", "all")  # 044 `T4405`: visitors read only admitted scenarios
     try:
         yield reg
     finally:
@@ -56,7 +59,7 @@ async def test_the_route_answers_every_case_of_the_shared_set(client, registry) 
 
     for case in cases:
         scenario_id = case["scenario"]["scenario_id"]
-        uploaded = await client.post("/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": case["scenario"]})
+        uploaded = await client.post("/api/v1/simulator/scenarios", headers=UPLOAD_HEADERS, json={"scenario": case["scenario"]})
         assert uploaded.status_code == 200, f"{case['name']}: upload answered {uploaded.status_code}: {uploaded.text[:300]}"
 
         response = await client.get(f"/api/v1/simulator/scenarios/{scenario_id}")

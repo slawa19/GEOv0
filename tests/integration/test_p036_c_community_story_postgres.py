@@ -69,23 +69,53 @@ REFUSED = 10
 CLEARING = 8
 
 
-async def _debts(factory) -> dict[tuple[str, str], Decimal]:  # noqa: F811
-    """{(debtor pid, creditor pid): amount} of the story's participants, in the story's equivalent, zero rows left out."""
+def _identities(run) -> dict[str, str]:
+    """{scenario pid: the run's identity} (044 `T4405`: a run owns fresh participants under identities of its own, bound at
+    creation in its private copy of the scenario; declared order = the copy's order, injects' newcomers included)."""
 
+    def declared(raw) -> list[str]:
+        out = [p["id"] for p in raw["participants"]]
+        for event in raw.get("events") or []:
+            for effect in event.get("effects") or []:
+                if effect.get("op") == "add_participant":
+                    out.append(effect["participant"]["id"])
+        return out
+
+    return dict(zip(declared(STORY), declared(run._scenario_raw)))
+
+
+def _unbind(value, back: dict[str, str]):
+    """`value` with every run identity written back as the scenario's pid: the story's claims are in the scenario's pids."""
+
+    if isinstance(value, str):
+        return back.get(value, value)
+    if isinstance(value, list):
+        return [_unbind(v, back) for v in value]
+    if isinstance(value, dict):
+        return {k: _unbind(v, back) for k, v in value.items()}
+    return value
+
+
+async def _debts(factory, ids: dict[str, str]) -> dict[tuple[str, str], Decimal]:  # noqa: F811
+    """{(debtor pid, creditor pid): amount} of the story's participants OF THIS RUN (`ids`), in the story's equivalent,
+    zero rows left out, keyed by the scenario's pids without `cs_`."""
+
+    back = {bound: src for src, bound in ids.items()}
     debtor, creditor = aliased(Participant), aliased(Participant)
     async with factory() as s:
         rows = (await s.execute(
             select(debtor.pid, creditor.pid, Debt.amount)
             .join(debtor, Debt.debtor_id == debtor.id).join(creditor, Debt.creditor_id == creditor.id)
             .join(Equivalent, Debt.equivalent_id == Equivalent.id).where(Equivalent.code == "UAH")
-            .where(debtor.pid.like("cs\\_%", escape="\\"))
+            .where(debtor.pid.in_(list(back)))
         )).all()
-    return {(d.removeprefix("cs_"), c.removeprefix("cs_")): Decimal(str(a)) for d, c, a in rows if Decimal(str(a)) != 0}
+    return {(back[d].removeprefix("cs_"), back[c].removeprefix("cs_")): Decimal(str(a))
+            for d, c, a in rows if Decimal(str(a)) != 0}
 
 
-async def _status_of(factory, pid: str) -> str | None:  # noqa: F811
+async def _status_of(factory, ids: dict[str, str], pid: str) -> str | None:  # noqa: F811
     async with factory() as s:
-        return (await s.execute(select(Participant.status).where(Participant.pid == pid))).scalar_one_or_none()
+        return (await s.execute(select(Participant.status).where(Participant.pid == ids[pid]))).scalar_one_or_none()
 
 
 def _cycle_edges(pids: list[str]) -> set[tuple[str, str]]:
@@ -120,6 +150,8 @@ class _Story:
         self.taras_status: str | None = None
         self.dmytro_status: str | None = None
         self.listed = False
+        self.ids: dict[str, str] = {}  # scenario pid -> the run's identity (044 `T4405`)
+        self.back: dict[str, str] = {}  # the run's identity -> scenario pid
 
 
 async def _run_story(factory, monkeypatch, *, inject: bool = True, period: int = 25) -> _Story:  # noqa: F811
@@ -163,6 +195,7 @@ async def _run_story(factory, monkeypatch, *, inject: bool = True, period: int =
 
         run_id = await runtime.create_run(scenario_id=SCENARIO_ID, mode="real", intensity_percent=None)
         run = runtime.get_run(run_id)
+        story.ids = ids = _identities(run)
         story.intensity = run.intensity_percent
         try:
             previous: set[int] = set()
@@ -172,8 +205,8 @@ async def _run_story(factory, monkeypatch, *, inject: bool = True, period: int =
                     if run.state == "paused":
                         now = set(run._real_fired_scenario_event_indexes)
                         story.pauses.append({
-                            "spent": sorted(now - previous), "tick": run.tick_index, "debts": await _debts(factory),
-                            "taras": await _status_of(factory, "cs_taras"),
+                            "spent": sorted(now - previous), "tick": run.tick_index, "debts": await _debts(factory, ids),
+                            "taras": await _status_of(factory, ids, "cs_taras"),
                         })
                         previous = now
                         await runtime.resume(run_id)
@@ -187,11 +220,15 @@ async def _run_story(factory, monkeypatch, *, inject: bool = True, period: int =
                             break
                     await real_sleep(0.02)
             story.progress = {p.index: p for p in (run_to_status(run).episode_progress or [])}
-            story.final_debts = await _debts(factory)
+            story.final_debts = await _debts(factory, ids)
             story.final_state = run.state
             story.last_tick = run.tick_index
-            story.taras_status = await _status_of(factory, "cs_taras")
-            story.dmytro_status = await _status_of(factory, "cs_dmytro")
+            story.taras_status = await _status_of(factory, ids, "cs_taras")
+            story.dmytro_status = await _status_of(factory, ids, "cs_dmytro")
+            # The events and the report carry the run's identities; the story's claims are written in the scenario's pids.
+            back = {bound: src for src, bound in ids.items()}
+            story.events = _unbind(story.events, back)
+            story.back = back
         finally:
             await runtime.stop(run_id)
     return story
@@ -237,7 +274,7 @@ async def test_every_scripted_payment_is_done_the_clearing_cleared_exactly_its_c
             continue
         got, e = s.progress.get(i), EVENTS[i]
         assert got is not None and got.status == "done" and got.kind == "payment" and got.reason is None, (i, got)
-        assert (got.payment.from_, got.payment.to, got.payment.amount, got.payment.equivalent) == (e["from"], e["to"], e["amount"], e["equivalent"]), (i, got.payment)
+        assert (s.back[got.payment.from_], s.back[got.payment.to], got.payment.amount, got.payment.equivalent) == (e["from"], e["to"], e["amount"], e["equivalent"]), (i, got.payment)
 
     c = s.progress.get(CLEARING)
     expected_edges = _cycle_edges([p.removeprefix("cs_") for p in EVENTS[CLEARING]["expected_cycle"]])
@@ -245,7 +282,7 @@ async def test_every_scripted_payment_is_done_the_clearing_cleared_exactly_its_c
     assert c.reason is None, c.reason  # the cycle the episode announces is the one that was cleared
     assert c.cleared_cycles == 1 and len(c.cycles) == 1, c
     assert c.cycles[0].cleared_amount == "40.00", c.cycles[0].cleared_amount  # the smallest debt on the circle
-    assert {(e.from_.removeprefix("cs_"), e.to.removeprefix("cs_")) for e in c.cycles[0].edges} == expected_edges, c.cycles[0].edges
+    assert {(s.back[e.from_].removeprefix("cs_"), s.back[e.to].removeprefix("cs_")) for e in c.cycles[0].edges} == expected_edges, c.cycles[0].edges
 
     r = s.progress.get(REFUSED)
     failed = [e for e in s.events if e.get("type") == "tx.failed"]
@@ -332,22 +369,23 @@ async def test_with_the_process_flag_for_injects_off_the_story_says_so_and_still
 
 
 @pytest.mark.asyncio
-async def test_a_second_run_on_the_same_database_inherits_the_first_one(factory, monkeypatch) -> None:  # noqa: F811
-    """The story is single-use per database: the debts, the frozen Taras and the newcomer stay in the ledger, the second run's
-    perimeter does not include the newcomer, the injects are skipped without a word (an inject that was applied is not
-    "progress", and neither is one that found nothing to do) and the debts grow."""
+async def test_a_second_run_on_the_same_database_starts_from_nothing_and_leaves_the_first_alone(factory, monkeypatch) -> None:  # noqa: F811
+    """044 `T4405` (2026-10-17) reversed what this pinned. Before, the story was single-use per database: a second run adopted
+    the first one's rows by pid - its debts, the frozen Taras, the newcomer outside its perimeter - and its report was refusals.
+    Now a run owns fresh participants: the second run tells the story again from nothing, to the same end, and the first run's
+    participants, debts and statuses are not touched by it."""
 
     first = await _run_story(factory, monkeypatch)
     second = await _run_story(factory, monkeypatch)
 
     assert first.final_debts == FINAL  # control: the first run was the good one
-    report = {i: (p.status, p.reason) for i, p in sorted(second.progress.items())}
-    assert report[2][0] == "refused", report  # Taras is suspended: the payment through him is refused
-    assert report[6][0] == "refused" and report[7][0] == "refused", report  # Dmytro exists in the base but is outside this run's perimeter
-    assert (report[6], report[8]) == (("refused", "ROUTING_NO_ROUTE"), ("done", "expected_cycle_not_cleared")), report
-    assert 5 not in report and 9 not in report  # the skipped injects leave no trace in the report
-    assert second.final_debts != FINAL and second.final_debts[("olena", "bakery")] == D("80"), second.final_debts  # the first purchase is paid again
+    assert set(first.ids.values()).isdisjoint(second.ids.values()), (first.ids, second.ids)
+    assert second.final_debts == FINAL, second.final_debts  # the same story, told again, ends the same
+    assert not [p for p in second.progress.values() if p.status == "incomplete"], second.progress
     assert (second.taras_status, second.dmytro_status) == ("suspended", "active")
+    # The first run's state after the second: unchanged.
+    assert await _debts(factory, first.ids) == FINAL
+    assert (await _status_of(factory, first.ids, "cs_taras"), await _status_of(factory, first.ids, "cs_dmytro")) == ("suspended", "active")
 
 
 @pytest.mark.asyncio

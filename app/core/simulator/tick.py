@@ -512,7 +512,8 @@ class RealTick:
                 async with seeding_lock:
                     if not run._real_seeded:
                         try:
-                            await rr._seed_scenario_into_db(setup_session, scenario)
+                            await rr._seed_scenario_into_db(
+                                setup_session, scenario, run_id=getattr(run, "_identity_run_id", None))
                             await setup_session.commit()
                         except Exception:
                             # Programme 021 (T2100 P2-4): the owner of the seeding transaction rolls it back before
@@ -522,7 +523,8 @@ class RealTick:
                         run._real_seeded = True
 
             if run._real_participants is None or run._real_equivalents is None:
-                run._real_participants = await rr._load_real_participants(setup_session, scenario)
+                run._real_participants = await rr._load_real_participants(
+                    setup_session, scenario, run_id=getattr(run, "_identity_run_id", None))
                 eq_set: set[str] = set(str(x).strip().upper() for x in (scenario.get("equivalents") or []))
                 eq_set.discard("")
 

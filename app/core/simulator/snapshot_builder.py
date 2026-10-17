@@ -342,22 +342,6 @@ class SnapshotBuilder:
 
         return snap
 
-    async def enrich_snapshot_from_db_if_enabled(
-        self,
-        snap: SimulatorGraphSnapshot,
-        *,
-        equivalent: str,
-        session=None,
-    ) -> SimulatorGraphSnapshot:
-        """Best-effort DB enrichment for snapshots.
-
-        If DB is disabled, returns the snapshot unchanged.
-        """
-
-        if not self._db_enabled():
-            return snap
-        return await self._enrich_snapshot_from_db(snap, equivalent=equivalent, session=session)
-
 
 _logger = logging.getLogger(__name__)
 

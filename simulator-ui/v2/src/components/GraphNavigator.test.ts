@@ -11,7 +11,7 @@ const nodes: GraphNode[] = [
 ]
 const links: GraphLink[] = [{ source: 'alice', target: 'bob', trust_limit: '100' }]
 
-function mountNavigator(edgeInspectDisabled = false, linkItems: GraphLink[] = links) {
+function mountNavigator(edgeInspectDisabled = false, linkItems: GraphLink[] = links, nodeItems: GraphNode[] = nodes) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const inspectNode = vi.fn()
@@ -19,7 +19,7 @@ function mountNavigator(edgeInspectDisabled = false, linkItems: GraphLink[] = li
   const app = createApp({
     render: () =>
       h(GraphNavigator as Component, {
-        nodes,
+        nodes: nodeItems,
         links: linkItems,
         edgeInspectDisabled,
         onInspectNode: inspectNode,
@@ -65,7 +65,33 @@ describe('GraphNavigator', () => {
     const status = host.querySelector('[data-testid="graph-navigator-status"]')
     expect(status?.getAttribute('role')).toBe('status')
     expect(status?.getAttribute('aria-live')).toBe('polite')
-    expect(status?.textContent).toContain('Trustline details opened: alice → bob')
+    // 044 `T4405`: the participants' names, not their ids.
+    expect(status?.textContent).toContain('Trustline details opened: Alice → Bob')
+
+    app.unmount()
+    host.remove()
+  })
+
+  it('044: two participants with one name read apart (numbered, as in the pickers); values stay full ids', async () => {
+    const A = 'run_20261017_101010_ab12cd34:p1'
+    const B = 'run_20261017_101010_ab12cd34:p2'
+    const C = 'run_20261017_101010_ab12cd34:p3'
+    const twins: GraphNode[] = [{ id: A, name: 'Same' }, { id: B, name: 'Same' }, { id: C, name: 'Other' }]
+    const twinLinks: GraphLink[] = [{ source: C, target: A, trust_limit: '1' }, { source: C, target: B, trust_limit: '1' }]
+    const { app, host } = mountNavigator(false, twinLinks, twins)
+    await nextTick()
+
+    const options = (selector: string) =>
+      Array.from((host.querySelector(selector) as HTMLSelectElement).querySelectorAll('option'))
+        .map((o) => ({ value: (o as HTMLOptionElement).value, text: (o.textContent ?? '').trim() }))
+        .filter((o) => o.value !== '')
+    const nodeOptions = options('#graph-navigator-node')
+    expect(new Set(nodeOptions.map((o) => o.text)).size).toBe(3)
+    expect(nodeOptions.map((o) => o.text).sort()).toEqual(['Other', 'Same (1)', 'Same (2)'])
+    expect(nodeOptions.map((o) => o.value).sort()).toEqual([A, B, C].sort())
+    const edgeOptions = options('#graph-navigator-edge')
+    expect(new Set(edgeOptions.map((o) => o.text)).size).toBe(2)
+    expect(edgeOptions.map((o) => o.value).sort()).toEqual([keyEdge(C, A), keyEdge(C, B)].sort())
 
     app.unmount()
     host.remove()

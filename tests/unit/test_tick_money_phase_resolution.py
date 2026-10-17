@@ -636,7 +636,7 @@ def _unseeded_runner(monkeypatch, *, run_id: str, seeding_raises: BaseException)
     runner._real_max_consec_tick_failures_limit = 3
     runner.seeding_calls = 0
 
-    async def _seed_scenario_into_db(_session, _scenario) -> None:
+    async def _seed_scenario_into_db(_session, _scenario, *, run_id: str) -> None:
         runner.seeding_calls += 1
         raise seeding_raises
 

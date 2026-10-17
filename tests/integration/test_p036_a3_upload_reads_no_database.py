@@ -23,7 +23,7 @@ import pytest
 from sqlalchemy import select
 
 from tests.integration.test_p036_a2_story_is_validated_at_upload import (  # noqa: F401 - `registry` is a fixture
-    ORIGIN,
+    UPLOAD_HEADERS,  # 044 `T4405`: only the administrator uploads
     PREFIX,
     _payment,
     _scenario,
@@ -42,7 +42,7 @@ async def _upload_with_a_trap(client, db_session, monkeypatch, scenario: dict):
         return await real_execute(statement, *args, **kwargs)
 
     monkeypatch.setattr(db_session, "execute", recording_execute)
-    response = await client.post("/api/v1/simulator/scenarios", headers=ORIGIN, json={"scenario": scenario})
+    response = await client.post("/api/v1/simulator/scenarios", headers=UPLOAD_HEADERS, json={"scenario": scenario})
     return response, statements, recording_execute
 
 

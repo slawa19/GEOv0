@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
 from datetime import datetime
 from typing import Any, Callable, Optional
@@ -10,6 +9,7 @@ import app.core.simulator.storage as simulator_storage
 from app.config import settings
 from app.core.simulator.artifacts import ArtifactsManager
 from app.core.simulator.models import RunRecord
+from app.core.simulator.run_perimeter import bind_run_identities
 from app.core.simulator.scenario_story import build_story
 from app.core.simulator.sse_broadcast import SseBroadcast
 from app.schemas.simulator import RunMode, RunStatus
@@ -214,6 +214,10 @@ class RunLifecycle:
             intensity_percent = int(from_scenario) if isinstance(from_scenario, int) and not isinstance(from_scenario, bool) else DEFAULT_RUN_INTENSITY_PERCENT
 
         run_id = self._new_run_id()
+        # 044 `T4405`: the run's private copy of the scenario, its participants under identities of THIS run - bound
+        # once, here, before the run exists (a reference to an undeclared participant or an identity that does not fit
+        # refuses the run: 409 SCENARIO_INVALID, nothing created). `restart` keeps the copy, so the same participants.
+        bound_scenario = bind_run_identities(self._get_scenario_raw(scenario_id), run_id=run_id)
         seed_material = hashlib.sha256(run_id.encode("utf-8")).digest()
         seed = int.from_bytes(seed_material[:4], "big")
         run = RunRecord(
@@ -234,8 +238,8 @@ class RunLifecycle:
         run._real_max_in_flight = max(1, self._real_max_in_flight_default if configured is None else configured)
 
         # Precompute per-equivalent edges (the runner's topology cache).
-        scenario = self._get_scenario_raw(scenario_id)
-        run._scenario_raw = copy.deepcopy(scenario)
+        run._scenario_raw = bound_scenario
+        run._identity_run_id = run_id
         run._edges_by_equivalent = self._edges_by_equivalent(run._scenario_raw)
 
         with self._lock:
@@ -309,6 +313,11 @@ class RunLifecycle:
                         )
 
             self._enforce_active_run_limit_locked()
+            # 044 `T4405`: the run's participant identities carry its id, so an id already held would hand this run
+            # the other's participants. Never expected (`new_run_id` is a second-resolution stamp and 32 random bits);
+            # refused rather than assumed.
+            if run_id in self._runs:
+                raise ConflictException("Run id already in use", details={"conflict_kind": "run_id_collision"})
 
             # Minimal local artifacts (best-effort). Do it before exposing the run.
             self._artifacts.init_run_artifacts(run)
