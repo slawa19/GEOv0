@@ -46,18 +46,6 @@ onMounted(() => {
   // Allow browser back/forward to update theme without reload.
   window.addEventListener('popstate', syncThemeFromUrl)
 
-  // URL cleanup (legacy): remove dead param `devtools=1` (do not reload).
-  // This param is not a source of truth; state is persisted in localStorage.
-  try {
-    const u = new URL(window.location.href)
-    if (u.searchParams.has('devtools')) {
-      u.searchParams.delete('devtools')
-      window.history.replaceState({}, '', u.toString())
-    }
-  } catch {
-    // ignore
-  }
-
   // E1 (P0): WM geometry is driven by DS tokens on the host element.
   // Safe in tests: readOverlayGeometryPx() falls back to defaults.
   {
@@ -919,8 +907,6 @@ function setSource(next: 'real' | 'fixtures') {
   // An old `?ui=` (`interact`, `demo` - both ignored since 043 S2/S3) and `?debug=` are not carried across the switch.
   u.searchParams.delete('ui')
   u.searchParams.delete('debug')
-  // Always strip legacy `devtools` param — it must never propagate across reloads.
-  u.searchParams.delete('devtools')
   // Setting href ensures a full re-init: the data pipeline is replaced (043 S3: the one navigation left on this screen).
   window.location.href = u.toString()
 }
