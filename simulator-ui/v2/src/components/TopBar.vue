@@ -348,6 +348,19 @@ function onApplyIntensity() {
         </div>
       </HudBar>
 
+      <!--
+        045 S2 (Codex §15 P2): the first row cuts a long network name (its `title` is for a pointer only). Behind "Подробнее" the
+        name of the network on screen - the scenario of the RUN, the selected one only while there is no run (`networkName`;
+        not `selectedScenarioText`, which is the selection and may differ) - is shown in full, as text: a keyboard user reaches it
+        with the toggle, and the first view gains no focus stop.
+      -->
+      <HudBar v-if="props.detailsOpen && networkName" variant="ghost" layout="start" class="tb-network-full-row">
+        <span class="ds-panel ds-ov-metric tb-network-full" data-testid="details-network-name">
+          <span class="ds-label">Network</span>
+          <span class="ds-value">{{ networkName }}</span>
+        </span>
+      </HudBar>
+
       <HudBar v-if="props.detailsOpen" variant="ghost" layout="between" class="tb-details-row" aria-label="Top bar" data-testid="top-details-row">
         <div class="hud-bar__left" aria-label="Mode">
           <div class="ds-row tb-mode-row">
@@ -681,6 +694,16 @@ function onApplyIntensity() {
   align-items: center;
   gap: var(--ds-space-2, 8px);
   white-space: nowrap;
+}
+
+/* 045 S2: the full network name behind "Подробнее" wraps rather than being cut. */
+.tb-network-full {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ds-space-2, 8px);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /*
