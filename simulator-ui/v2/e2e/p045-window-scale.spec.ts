@@ -88,7 +88,9 @@ for (const theme of THEMES) {
     test('(б) the hint is set at the size of the label', async ({ page }, info) => {
       await open(page, theme)
       await openPayment(page)
-      const sizes = { help: await fontPx(page, '[data-testid="manual-payment-panel"] .mp-pick-help'), label: await fontPx(page, '#mp-from-label') }
+      // 045 S2 moved the choice-step hint into the placeholders (decision 2); the panel's own `.ds-help` that stays is the
+      // recipient help `#mp-to-help` (computed font size is read even while it is not displayed).
+      const sizes = { help: await fontPx(page, '[data-testid="manual-payment-panel"] #mp-to-help'), label: await fontPx(page, '#mp-from-label') }
       console.log(`P045 (б) ${theme} ${JSON.stringify(sizes)}`)
       info.annotations.push({ type: 'P045-b', description: JSON.stringify(sizes) })
       expect(sizes.help, '.ds-help is the label size (F-045-5)').toBe(sizes.label)

@@ -210,6 +210,7 @@ describe('037 C fix-delta: honest states that do not depend on a toast', () => {
     await settle()
     expect(text(host, 'clearing-total')).toContain('Total over cycles')
     expect(text(host, 'clearing-total')).not.toContain('Total cleared')
-    expect(text(host, 'clearing-total-note')).toBe('Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.')
+    // 045 S2: the result is one line; what the total adds up is the `title` of the total (it was a row of its own).
+    expect(q(host, 'clearing-total')!.getAttribute('title')).toBe('Each debt in a cycle was reduced by the amount of that cycle; this total adds the cycle amounts, not the debts.')
   })
 })

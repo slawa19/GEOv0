@@ -237,28 +237,23 @@ describe('To -> Amount: choosing the recipient focuses the amount and never send
   })
 })
 
-describe('the summary of the confirm step', () => {
-  it('names who pays whom, in the order of the payment, with the amount once it is entered', async () => {
+// 045 S2 (decision 2, F-045-8): the summary row ("Alice pays Bob · 1.00 UAH") repeated the title and the amount field and was
+// removed; who pays whom is the title, by name and in the order of the payment.
+const titleOf = (host: HTMLElement) => (host.querySelector('[data-testid="manual-payment-panel"] .ds-panel__header')?.textContent ?? '').replace(/\s+/g, ' ').trim()
+
+describe('who pays whom on the confirm step', () => {
+  it('the title names who pays whom, in the order of the payment', async () => {
     const { host } = mountFlow({ phase: 'confirm-payment', fromPid: 'alice', toPid: 'bob' })
     await settle()
-    expect(text(host, 'mp-summary-parties')).toBe('Alice pays Bob')
-    expect(text(host, 'mp-summary-amount')).toBe('amount not entered')
-
-    const input = host.querySelector('#mp-amount') as HTMLInputElement
-    input.value = '1'
-    input.dispatchEvent(new Event('input'))
-    await settle()
-    expect(text(host, 'mp-summary-amount')).toBe('1.00 UAH')
+    expect(titleOf(host)).toBe('Manual payment: Alice → Bob')
   })
 
   it('is right for the reversed order too (a payment started from an edge runs the other way) and never shows an id', async () => {
     const { host } = mountFlow({ phase: 'confirm-payment', fromPid: 'bob', toPid: 'alice' })
     await settle()
 
-    expect(text(host, 'mp-summary-parties')).toBe('Bob pays Alice')
-    expect(text(host, 'mp-summary-parties')).not.toMatch(/\b(alice|bob)\b/)
-    expect(host.textContent).toContain('Manual payment: Bob → Alice')
-    expect(host.textContent).not.toContain('Manual payment: bob → alice')
+    expect(titleOf(host)).toBe('Manual payment: Bob → Alice')
+    expect(titleOf(host)).not.toMatch(/\b(alice|bob)\b/)
   })
 })
 
@@ -270,13 +265,15 @@ describe('the two visible captions of the chosen recipient', () => {
     return f.host
   }
 
-  it('shows "Shortest path: N steps" and "Estimated maximum: X" as two rows, plainly visible (no tooltip needed)', async () => {
+  // 045 S2: the two captions are two figures of the one information line ("Max 87.50 UAH (server estimate) · 3 steps"), still
+  // plainly visible; the route note is the `title` of the shortest path (it was a row of its own).
+  it('shows the shortest path and the estimated maximum as two visible figures (no tooltip needed for either)', async () => {
     const host = await confirmWith(received('87.5', 3))
     expect(text(host, 'mp-shortest-value')).toBe('3 steps')
-    expect(text(host, 'mp-estimate')).toContain('Estimated maximum')
+    expect(text(host, 'mp-estimate')).toContain('Max')
     expect(text(host, 'mp-estimate-max')).toBe('87.50 UAH')
     expect(text(host, 'mp-estimate-source')).toBe('server estimate')
-    expect(text(host, 'mp-route-note')).toBe('The route is chosen when the payment is executed.')
+    expect(q(host, 'mp-shortest')!.getAttribute('title')).toContain('The route is chosen when the payment is executed.')
   })
 
   it('says "1 step" for one step', async () => {

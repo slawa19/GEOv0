@@ -10,6 +10,7 @@ import { amountStepHint } from '../config/equivalentPrecision'
 import { parseAmountNumber, parseAmountStringOrNull } from '../utils/numberFormat'
 import { participantLabel } from '../utils/participants'
 import { isActiveStatus } from '../utils/status'
+import { interactText } from '../i18n/interactStrings'
 import { renderAvailable, renderOrDash } from '../utils/valueFormat'
 import {
   canActOnTrustlineFigures,
@@ -182,7 +183,8 @@ const updateValid = computed(() => {
 
 async function onCreate() {
   if (props.busy) return
-  if (!createValid.value) return
+  // 045 S2: Create is on screen from the first step; it creates only on the create step.
+  if (!isCreate.value || !createValid.value) return
   // Submit normalized (backend-compatible) amount string.
   await props.confirmTrustlineCreate(createLimitNormalized.value!)
 }
@@ -331,6 +333,35 @@ const rootClass = computed(() => {
 
 const newLimitInput = ref<HTMLInputElement | null>(null)
 
+/** 045 S2: the one line of the edit step - "Used 12 / Limit 100 UAH · avail 88 UAH" (an excess over the limit reads as such). */
+const availableText = computed(() => {
+  const s = renderAvailable(effectiveAvailable.value)
+  return s.startsWith('over ') ? `${s} ${props.unit}` : `avail ${s} ${props.unit}`
+})
+
+const invalidAmountText = "Invalid amount format. Use digits and '.' for decimals."
+
+// 045 S2: a disabled primary button says why in its `title` (no dead button). Nothing while busy: the label says it.
+const createTitle = computed<string | undefined>(() => {
+  if (props.busy || (isCreate.value && createValid.value)) return undefined
+  if (!(props.state.fromPid ?? '').trim() || !(props.state.toPid ?? '').trim()) return interactText('trustlineNeedsParties')
+  if (!limit.value.trim()) return interactText('trustlineNeedsLimit')
+  return invalidAmountText
+})
+const lineGroundText = computed(() => sourceUnavailableText.value ?? noTrustlineText.value ?? undefined)
+const updateTitle = computed<string | undefined>(() => {
+  if (props.busy || updateValid.value) return undefined
+  if (noExistingLineFigures.value) return lineGroundText.value
+  if (!newLimit.value.trim()) return interactText('trustlineNeedsNewLimit')
+  return invalidAmountText
+})
+const closeTitle = computed<string | undefined>(() => {
+  if (props.busy) return undefined
+  if (closeRequested.value) return interactText('trustlineCloseRequested')
+  if (noExistingLineFigures.value) return lineGroundText.value
+  return undefined
+})
+
 defineExpose({
   focusNewLimit: () => {
     newLimitInput.value?.focus()
@@ -340,12 +371,16 @@ defineExpose({
 </script>
 
 <template>
-  <div v-if="open" :class="rootClass" :style="rootStyle" data-testid="trustline-panel" aria-label="Trustline management panel">
+  <div
+    v-if="open"
+    :class="rootClass"
+    :style="rootStyle"
+    data-testid="trustline-panel"
+    aria-label="Trustline management panel"
+    aria-keyshortcuts="Escape"
+  >
     <div class="ds-panel__header">
-      <div class="ds-h2">
-        {{ title }}
-        <span class="ds-muted ds-mono"> (ESC to close)</span>
-      </div>
+      <div class="ds-h2" :title="interactText('escHint')">{{ title }}</div>
     </div>
 
     <div class="ds-panel__body ds-stack">
@@ -358,6 +393,7 @@ defineExpose({
           :disabled="busy"
               labelledBy="tl-from-label"
               triggerLabel="Trustline from participant"
+              :placeholder="interactText('pickPlaceholder')"
             @update:model-value="onFromSelect"
           />
       </div>
@@ -373,6 +409,7 @@ defineExpose({
               :title="!state.fromPid && !busy ? 'Select \'From\' participant first' : undefined"
               triggerLabel="Trustline to participant"
               surfaceLabel="Trustline to participant options"
+              :placeholder="interactText('pickPlaceholder')"
             @update:model-value="onToSelect"
           />
       </div>
@@ -393,22 +430,12 @@ defineExpose({
           />
       </div>
 
-      <div v-if="isPickFrom" class="ds-help tl-pick-help">Pick From node (canvas) or choose from dropdown.</div>
-      <div v-if="isPickTo" class="ds-help tl-pick-help">Pick To node (canvas) or choose from dropdown.</div>
-
-      <div v-if="isEdit" class="tl-stats" aria-label="Trustline stats">
-        <div class="tl-stats__item">
-          <div class="ds-label">Used</div>
-          <div class="ds-value ds-mono">{{ renderOrDash(effectiveUsed) }} {{ unit }}</div>
-        </div>
-        <div class="tl-stats__item">
-          <div class="ds-label">Limit</div>
-          <div class="ds-value ds-mono">{{ renderOrDash(effectiveLimit) }} {{ unit }}</div>
-        </div>
-        <div class="tl-stats__item">
-          <div class="ds-label">Available</div>
-          <div class="ds-value ds-mono">{{ renderAvailable(effectiveAvailable) }} {{ unit }}</div>
-        </div>
+      <!-- 045 S2: the figures of the line as one line; values through " · ". -->
+      <div v-if="isEdit" class="ds-help tl-stats" aria-label="Trustline stats" data-testid="tl-stats">
+        Used <span class="ds-mono" data-testid="tl-stats-used">{{ renderOrDash(effectiveUsed) }}</span>
+        / Limit <span class="ds-mono" data-testid="tl-stats-limit">{{ renderOrDash(effectiveLimit) }}</span> {{ unit }}
+        <span class="ds-muted" aria-hidden="true">·</span>
+        <span class="ds-mono" data-testid="tl-stats-available">{{ availableText }}</span>
       </div>
 
       <div v-if="isCreate" class="ds-controls__row ds-controls__row--compact">
@@ -470,8 +497,13 @@ defineExpose({
         {{ sourceUnavailableText }}
       </div>
 
+      <!--
+        045 S2: "the backend answered: no line for this pair - nothing to update or close" belongs to EDITING a line. On the
+        choice steps there is no pair yet (the window opened with this warning over an empty form), and on the create step
+        creating the line is what the window already does.
+      -->
       <div
-        v-if="noTrustlineText"
+        v-if="isEdit && noTrustlineText"
         class="ds-alert ds-alert--warn ds-mono"
         data-testid="tl-no-trustline"
         role="status"
@@ -488,18 +520,28 @@ defineExpose({
         Closing with debt (used: {{ renderOrDash(effectiveUsed) }} {{ unit }}) is a request: limit becomes 0, the line closes when the debt is repaid.
       </div>
 
+      <!--
+        045 S2: [Cancel][Primary] in one row. Create is there from the first step, disabled until the pair and the limit are
+        given; editing a line is [Cancel][Close TL][Update]. A disabled button says why in its `title`.
+      -->
       <div class="ds-row ds-row--actions tl-actions">
-        <button v-if="isCreate" class="ds-btn ds-btn--primary" type="button" :disabled="busy || !createValid" @click="onCreate">
-          {{ busy ? 'Creating…' : 'Create' }}
-        </button>
-
-        <template v-else>
-          <button class="ds-btn ds-btn--primary" type="button" :disabled="busy || !updateValid" @click="onUpdate">{{ busy ? 'Updating…' : 'Update' }}</button>
+        <template v-if="isEdit">
+          <button
+            class="ds-btn ds-btn--primary tl-primary"
+            type="button"
+            :disabled="busy || !updateValid"
+            :title="updateTitle"
+            data-testid="trustline-update"
+            @click="onUpdate"
+          >
+            {{ busy ? 'Updating…' : 'Update' }}
+          </button>
 
           <button
             class="ds-btn"
             type="button"
             :disabled="busy || closeRequested || noExistingLineFigures"
+            :title="closeTitle"
             data-testid="trustline-close-btn"
             @click="onClose"
           >
@@ -518,7 +560,19 @@ defineExpose({
           </button>
         </template>
 
-        <button class="ds-btn ds-btn--ghost" type="button" :disabled="busy" @click="cancel">Cancel</button>
+        <button
+          v-else
+          class="ds-btn ds-btn--primary tl-primary"
+          type="button"
+          :disabled="busy || !isCreate || !createValid"
+          :title="createTitle"
+          data-testid="trustline-create"
+          @click="onCreate"
+        >
+          {{ busy ? 'Creating…' : 'Create' }}
+        </button>
+
+        <button class="ds-btn ds-btn--ghost tl-cancel" type="button" :disabled="busy" data-testid="trustline-cancel" @click="cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -533,16 +587,27 @@ defineExpose({
   justify-content: flex-end;
 }
 
+/*
+  045 S2: [Cancel][Primary] on screen, the primary still FIRST in the DOM - the Tab order and the first focus of a window
+  (WindowShell focuses the first focusable control) stay what they were: Enter on a freshly opened clearing window still
+  confirms, Tab from the amount still reaches Confirm before Cancel. Only the visual order moves, by `order`.
+  Editing a line: [Cancel][Close TL (Cancel close)][Update].
+*/
 .tl-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--ds-space-2);
-  margin-top: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--ds-space-1, 4px);
 }
 
-.tl-stats__item {
-  min-width: 0;
+.tl-cancel {
+  order: -1;
 }
+
+.tl-primary {
+  order: 1;
+}
+
 
 @media (max-width: 520px) {
   .tl-stats {
