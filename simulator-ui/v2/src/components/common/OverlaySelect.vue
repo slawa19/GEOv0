@@ -147,13 +147,18 @@ function updateSurfacePosition(): void {
   let left = Math.round(triggerRect.left - bounds.left)
   left = Math.min(Math.max(left, inset), maxLeft)
 
-  let top = Math.round(triggerRect.bottom - bounds.top + gap)
-  const upTop = Math.round(triggerRect.top - bounds.top - surfaceRect.height - gap)
-  const hasMoreRoomAbove = triggerRect.top - bounds.top > bounds.bottom - triggerRect.bottom
-  const wouldOverflowBelow = top + surfaceRect.height > bounds.height - inset
-  if (wouldOverflowBelow && (upTop >= inset || hasMoreRoomAbove)) {
-    top = Math.max(inset, upTop)
+  // Above or below is decided by the room in the VIEWPORT, not in the element the list is teleported into: a window
+  // shell does not clip the list, and a shell shorter than the list (045 S1: 195 px) used to send it "above" - clamped
+  // to the top of the shell, i.e. over its own trigger. The result is then expressed in the container's coordinates.
+  const viewportHeight = window.innerHeight
+  let topInViewport = Math.round(triggerRect.bottom + gap)
+  const upTopInViewport = Math.round(triggerRect.top - surfaceRect.height - gap)
+  const hasMoreRoomAbove = triggerRect.top > viewportHeight - triggerRect.bottom
+  const wouldOverflowBelow = topInViewport + surfaceRect.height > viewportHeight - inset
+  if (wouldOverflowBelow && (upTopInViewport >= inset || hasMoreRoomAbove)) {
+    topInViewport = Math.max(inset, upTopInViewport)
   }
+  const top = Math.round(topInViewport - bounds.top)
 
   surfaceStyle.value = {
     ...baseStyle,

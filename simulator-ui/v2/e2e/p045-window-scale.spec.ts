@@ -60,6 +60,19 @@ async function openNodeCard(page: Page): Promise<void> {
   await expect(page.locator('.ws-shell[data-win-type="node-card"] .ds-ov-node-card')).toBeVisible()
 }
 
+type Span = { top: number; bottom: number; left: number; right: number }
+
+/** The open recipient list, both triggers and the window, as they are on screen. */
+async function listGeometry(page: Page): Promise<{ list: Span; from: Span; to: Span; shell: Span; vh: number }> {
+  return await page.evaluate(() => {
+    const span = (el: Element): Span => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) } }
+    const to = document.getElementById('mp-to__trigger')!
+    return { list: span(document.getElementById('mp-to__surface')!), from: span(document.getElementById('mp-from__trigger')!), to: span(to), shell: span(to.closest('.ws-shell')!), vh: window.innerHeight }
+  })
+}
+
+const overlaps = (a: Span, b: Span) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+
 for (const theme of THEMES) {
   test.describe(`045 S1 [${theme}] window scale at 1366x768`, () => {
     test('(а) payment window, choice step: the panel takes the whole shell, the shell is at most 200 px tall', async ({ page }, info) => {
@@ -88,6 +101,51 @@ for (const theme of THEMES) {
       console.log(`P045 (в) ${theme} ${JSON.stringify(f)}`)
       info.annotations.push({ type: 'P045-c', description: JSON.stringify(f) })
       expect(f.deadStrip, 'no dead strip between the card and its shell (F-045-9)').toBeLessThanOrEqual(0.5)
+    })
+
+    // S1 regression (2026-10-17): the window got shorter than the recipient list, and the list decided "above or below"
+    // by the window instead of the viewport - it opened over its own trigger and over "From".
+    test('(а2) desktop: the recipient list that opens by itself after the sender covers neither "From" nor "To"', async ({ page }, info) => {
+      await mockApp(page, { paymentRealBodies: [], extraTargets: 30 })
+      await page.setViewportSize({ width: 1366, height: 768 })
+      await page.goto(`/?mode=real&ui=interact&e2eReal=1&theme=${theme}`)
+      await ready(page, true)
+      await openPayment(page)
+      await page.locator('#mp-from__trigger').click()
+      await page.locator('#mp-from__surface [role="option"][data-option-value="alice"]').click()
+      await expect(page.locator('#mp-to__surface')).toBeVisible()
+      await expect(page.locator('#mp-to__surface [role="option"]')).toHaveCount(32)
+      const g = await listGeometry(page)
+      console.log(`P045 (а2) ${theme} ${JSON.stringify(g)}`)
+      info.annotations.push({ type: 'P045-a2', description: JSON.stringify(g) })
+      expect(g.list.bottom - g.list.top, 'counter-check: the list is taller than the window it belongs to').toBeGreaterThan(g.shell.bottom - g.shell.top)
+      expect(overlaps(g.list, g.from), 'the list does not cover "From"').toBe(false)
+      expect(overlaps(g.list, g.to), 'the list does not cover "To"').toBe(false)
+      expect(g.list.top, 'there is room below, so the list opens below "To"').toBeGreaterThanOrEqual(g.to.bottom)
+    })
+
+    test('(а2) counter-check: with no room below the trigger the list still opens upward, above "To"', async ({ page }, info) => {
+      await mockApp(page, { paymentRealBodies: [], extraTargets: 30 })
+      await page.setViewportSize({ width: 1366, height: 768 })
+      await page.goto(`/?mode=real&ui=interact&e2eReal=1&theme=${theme}`)
+      await ready(page, true)
+      await openPayment(page)
+      await page.locator('#mp-from__trigger').click()
+      await page.locator('#mp-from__surface [role="option"][data-option-value="alice"]').click()
+      await expect(page.locator('#mp-to__surface')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(page.locator('#mp-to__surface')).toBeHidden()
+      // The viewport ends just under the window: the trigger is now near the bottom edge of the screen.
+      const shellBottom = await page.locator('#mp-to__trigger').evaluate((el) => el.closest('.ws-shell')!.getBoundingClientRect().bottom)
+      await page.setViewportSize({ width: 1366, height: Math.round(shellBottom) + 20 })
+      await settleShell(page)
+      await page.locator('#mp-to__trigger').click()
+      await expect(page.locator('#mp-to__surface')).toBeVisible()
+      const g = await listGeometry(page)
+      console.log(`P045 (а2 up) ${theme} ${JSON.stringify(g)}`)
+      info.annotations.push({ type: 'P045-a2-up', description: JSON.stringify(g) })
+      expect(g.vh - g.to.bottom, 'precondition: the list cannot fit below the trigger').toBeLessThan(g.list.bottom - g.list.top)
+      expect(g.list.bottom, 'the list opens upward: it ends above "To"').toBeLessThanOrEqual(g.to.top)
     })
 
     test('record: confirm step, trust line, clearing, line window, canvas share (numbers only)', async ({ page }, info) => {
