@@ -16,7 +16,6 @@ async function mountBottomBar(opts: { propOverrides?: Record<string, unknown> } 
 
   const defaultProps = {
     apiMode: 'real' as const,
-    activeSegment: 'auto' as const,
     isDemoFixtures: false,
     equivalentOptions: ['UAH', 'EUR'],
 

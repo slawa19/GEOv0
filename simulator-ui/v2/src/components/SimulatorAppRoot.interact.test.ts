@@ -268,7 +268,7 @@ vi.mock('../composables/windowManager/useWindowManager', async () => {
         }
       }
 
-      const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'real' ? 'real' : 'fixtures')
+      const apiMode = computed<'fixtures' | 'real'>(() => (qs().get('mode') || '').toLowerCase() === 'fixtures' ? 'fixtures' : 'real')
       // 043 S2/S3: the one screen is the server source (`useSimulatorApp.ts` isLiveUi = isRealMode); `ui=interact` and
       // `ui=demo` are ignored by the product.
       const isLiveUi = computed(() => apiMode.value === 'real')

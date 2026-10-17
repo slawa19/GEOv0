@@ -71,7 +71,7 @@ describe('GraphNavigator', () => {
     host.remove()
   })
 
-  it('explains and disables edge inspection outside real Interact mode', async () => {
+  it('explains and disables edge inspection outside the live network (043 S3: no Interact mode any more)', async () => {
     const { app, host, inspectEdge } = mountNavigator(true)
     await nextTick()
 
@@ -79,7 +79,7 @@ describe('GraphNavigator', () => {
       | HTMLButtonElement
       | undefined
     expect(button?.disabled).toBe(true)
-    expect(button?.title).toContain('real Interact mode')
+    expect(button?.title).toContain('live network')
     button?.click()
     expect(inspectEdge).not.toHaveBeenCalled()
 

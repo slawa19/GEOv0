@@ -786,18 +786,6 @@ function onApplyIntensity() {
 
 /* ── Responsive: prevent horizontal overflow on narrow viewports ─────────── */
 @media (max-width: 500px) {
-  /* Segmented control: allow wrapping inside */
-  :deep(.ds-segmented) {
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-
-  /* Each segment button: shrink to fit */
-  :deep(.ds-segment) {
-    min-width: 0;
-    flex-shrink: 1;
-  }
-
   /* Theme row: allow wrapping */
   .tb-theme-row {
     flex-wrap: wrap;
