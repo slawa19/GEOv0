@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizeUiThemeId, type UiThemeId } from '../types/uiPrefs'
 import { toLower } from '../utils/stringHelpers'
 import { isJwtLike } from '../utils/isJwtLike'
@@ -91,6 +91,29 @@ const networkName = computed(() => {
   const s = ctx.scenarios.value.find((x) => x.scenario_id === id)
   return scenarioTitle(s) || id
 })
+
+/**
+ * 045 S2 (Codex §15 P2): is the name in the first row cut by its ellipsis? Measured on the element (a resize of the row or a
+ * new name re-measures). Only a cut name gets its full form behind "Подробнее" - a name that fits adds no row there.
+ */
+const networkNameEl = ref<HTMLElement | null>(null)
+const networkNameCut = ref(false)
+function measureNetworkName() {
+  const el = networkNameEl.value
+  networkNameCut.value = !!el && el.scrollWidth > el.clientWidth + 0.5
+}
+let networkNameRo: ResizeObserver | null = null
+onMounted(() => {
+  measureNetworkName()
+  if (typeof ResizeObserver === 'undefined' || !networkNameEl.value) return
+  networkNameRo = new ResizeObserver(() => measureNetworkName())
+  networkNameRo.observe(networkNameEl.value)
+})
+onBeforeUnmount(() => {
+  networkNameRo?.disconnect()
+  networkNameRo = null
+})
+watch(networkName, () => void nextTick(measureNetworkName))
 
 /** The state of the network as words (decision 1: "точка состояния (текст)"); the tone colours the dot only. */
 const networkState = computed<{ text: string; tone: 'ok' | 'warn' | 'err' | 'info' }>(() => {
@@ -312,7 +335,7 @@ function onApplyIntensity() {
         <div class="hud-bar__left tb-identity">
           <span class="ds-panel ds-ov-metric tb-network-name" data-testid="network-name">
             <span class="ds-label">GEO</span>
-            <span class="ds-value tb-network-name__value" :title="networkName || undefined">{{ networkName }}</span>
+            <span ref="networkNameEl" class="ds-value tb-network-name__value" :title="networkName || undefined">{{ networkName }}</span>
           </span>
           <span class="ds-panel ds-ov-metric tb-network-state" data-testid="network-state">
             <span :class="['ds-badge', `ds-badge--${networkState.tone}`, 'tb-state-dot']"><span class="ds-dot" aria-hidden="true" /></span>
@@ -352,9 +375,9 @@ function onApplyIntensity() {
         045 S2 (Codex §15 P2): the first row cuts a long network name (its `title` is for a pointer only). Behind "Подробнее" the
         name of the network on screen - the scenario of the RUN, the selected one only while there is no run (`networkName`;
         not `selectedScenarioText`, which is the selection and may differ) - is shown in full, as text: a keyboard user reaches it
-        with the toggle, and the first view gains no focus stop.
+        with the toggle, and the first view gains no focus stop. Only when the first row cuts it: a name that fits adds no row.
       -->
-      <HudBar v-if="props.detailsOpen && networkName" variant="ghost" layout="start" class="tb-network-full-row">
+      <HudBar v-if="props.detailsOpen && networkNameCut" variant="ghost" layout="start" class="tb-network-full-row">
         <span class="ds-panel ds-ov-metric tb-network-full" data-testid="details-network-name">
           <span class="ds-label">Network</span>
           <span class="ds-value">{{ networkName }}</span>

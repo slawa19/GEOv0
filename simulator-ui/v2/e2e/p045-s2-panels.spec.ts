@@ -300,4 +300,13 @@ for (const theme of THEMES) {
     const cut = await full.locator('.ds-value').evaluate((el) => el.scrollWidth > el.clientWidth + 0.5 || getComputedStyle(el).textOverflow === 'ellipsis')
     expect(cut, 'shown whole, not cut').toBe(false)
   })
+
+  test(`(г5b) [${theme}] counter-check: a name the first row shows whole adds no row behind "Подробнее"`, async ({ page }) => {
+    await open(page, theme, { width: 1366, height: 768 })
+    const value = page.locator('[data-testid="network-name"] .ds-value')
+    expect(await value.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5), 'precondition: the short name fits').toBe(true)
+    await page.locator('[data-testid="details-toggle"]').click()
+    await expect(page.locator('[data-testid="top-details-row"]')).toBeVisible()
+    await expect(page.locator('[data-testid="details-network-name"]')).toHaveCount(0)
+  })
 }
