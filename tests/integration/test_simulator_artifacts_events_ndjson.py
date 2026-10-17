@@ -12,7 +12,7 @@ import pytest
 from httpx import AsyncClient
 
 from tests.conftest import MODE_B
-from tests.p042_support import no_real_tick, pay_once, start_real_run  # noqa: F401 - `no_real_tick` is a fixture
+from tests.p042_support import no_real_tick, pay_once, run_identities, start_real_run  # noqa: F401 - `no_real_tick` is a fixture
 
 pytestmark = MODE_B
 
@@ -81,8 +81,10 @@ async def test_simulator_artifacts_include_events_ndjson(
     first = json.loads(lines[0])
     assert first.get("type") == "tx.updated", first
     assert str(first.get("event_id") or "").startswith("evt_")
-    # It is the payment's event, not just any line.
-    assert (first.get("from"), first.get("to"), first.get("amount")) == ("p2", "p1", payment["amount"]), first
+    # It is the payment's event, not just any line - between the run's own participants (044 `T4405`: identities of
+    # the run, `p2`/`p1` of the scenario).
+    ids = await run_identities(client, auth_headers, run_id)
+    assert (first.get("from"), first.get("to"), first.get("amount")) == (ids["p2"], ids["p1"], payment["amount"]), first
 
     # run_status is intentionally not exported into events.ndjson (too noisy).
     assert all(json.loads(ln).get("type") != "run_status" for ln in lines)

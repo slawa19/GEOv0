@@ -60,7 +60,8 @@ async def test_a_preview_in_fixtures_mode_is_refused(client, auth_headers) -> No
 
 
 @pytest.mark.asyncio
-async def test_a_run_requested_without_a_mode_is_a_real_run(client, auth_headers, no_real_tick) -> None:  # noqa: F811
+async def test_a_run_requested_without_a_mode_is_a_real_run(client, auth_headers, no_real_tick, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SCENARIO_ALLOWLIST", SCENARIO)  # 044: admitted for this visitor
     response = await client.post(
         "/api/v1/simulator/runs", headers=auth_headers, json={"scenario_id": SCENARIO, "intensity_percent": 0}
     )
@@ -75,20 +76,24 @@ async def test_a_run_requested_without_a_mode_is_a_real_run(client, auth_headers
 
 
 @pytest.mark.asyncio
-async def test_a_preview_without_a_mode_is_the_database_enriched_one(client, auth_headers, monkeypatch) -> None:
+async def test_a_preview_without_a_mode_is_accepted_and_reads_no_database(client, auth_headers, monkeypatch) -> None:
+    """044 `T4405` (2026-10-17) changed what this pins: before, a preview without `mode` was the database-enriched one;
+    now every preview is the template's picture and reads no database (a run's participants are rows of that run)."""
+
+    monkeypatch.setattr("app.config.settings.SIMULATOR_SCENARIO_ALLOWLIST", SCENARIO)  # admitted for this visitor
     enriched: list[str] = []
-    original = runtime._snapshot_builder.enrich_snapshot_from_db_if_enabled
+    original = runtime._snapshot_builder._enrich_snapshot_from_db
 
     async def _recording(snap, *, equivalent, session=None):
         enriched.append(equivalent)
         return await original(snap, equivalent=equivalent, session=session)
 
-    monkeypatch.setattr(runtime._snapshot_builder, "enrich_snapshot_from_db_if_enabled", _recording)
+    monkeypatch.setattr(runtime._snapshot_builder, "_enrich_snapshot_from_db", _recording)
     response = await client.get(
         f"/api/v1/simulator/scenarios/{SCENARIO}/graph/preview", headers=auth_headers, params={"equivalent": EQUIVALENT}
     )
     assert response.status_code == 200, response.text
-    assert enriched == [EQUIVALENT], f"the preview without `mode` asked the database enrichment {enriched!r} time(s)"
+    assert enriched == [], f"the preview asked the database enrichment {enriched!r}"
     # Control: the preview is still the scenario's picture.
     assert {node["id"] for node in response.json()["nodes"]} == {"p1", "p2"}
 

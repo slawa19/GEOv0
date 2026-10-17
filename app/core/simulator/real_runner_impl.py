@@ -894,11 +894,12 @@ class RealRunnerImpl:
         return "sim:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
     async def _load_real_participants(
-        self, session, scenario: dict[str, Any]
+        self, session, scenario: dict[str, Any], *, run_id: str | None
     ) -> list[tuple[uuid.UUID, str]]:
         return await self._real_scenario_seeder.load_real_participants(
             session=session,
             scenario=scenario,
+            run_id=run_id,
         )
 
     async def _load_debt_snapshot_by_pid(
@@ -913,8 +914,9 @@ class RealRunnerImpl:
             equivalents=equivalents,
         )
 
-    async def _seed_scenario_into_db(self, session, scenario: dict[str, Any]) -> None:
+    async def _seed_scenario_into_db(self, session, scenario: dict[str, Any], *, run_id: str | None) -> None:
         await self._real_scenario_seeder.seed_scenario_into_db(
             session=session,
             scenario=scenario,
+            run_id=run_id,
         )

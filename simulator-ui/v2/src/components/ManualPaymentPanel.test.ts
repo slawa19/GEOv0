@@ -790,7 +790,7 @@ describe('ManualPaymentPanel', () => {
 
     const opt = host.querySelector('#mp-to option[value="bob"]') as HTMLOptionElement | null
     expect(opt).toBeTruthy()
-    expect((opt?.textContent ?? '').trim()).toContain('Bob (bob)')
+    expect((opt?.textContent ?? '').trim()).toBe('Bob — 500 UAH') // 044 `T4405`: the name, without the id
     expect((opt?.textContent ?? '').trim()).toContain('500 UAH')
 
     app.unmount()
@@ -865,7 +865,7 @@ describe('ManualPaymentPanel', () => {
     const opt = host.querySelector('#mp-to option[value="bob"]') as HTMLOptionElement | null
     expect(opt).toBeTruthy()
     if (shown) expect((opt?.textContent ?? '').trim()).toContain(shown)
-    else expect((opt?.textContent ?? '').trim()).toBe('Bob (bob)')
+    else expect((opt?.textContent ?? '').trim()).toBe('Bob') // 044 `T4405`: the name, without the id
     expect((opt?.textContent ?? '').trim()).not.toContain('…')
 
     app.unmount()

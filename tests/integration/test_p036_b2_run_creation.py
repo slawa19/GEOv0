@@ -18,6 +18,7 @@ from copy import deepcopy
 
 import pytest
 
+from app.config import settings
 from app.core.simulator.runtime import runtime
 from app.core.simulator.scenario_registry import scenario_to_record
 from tests.contract.openapi_response_conformance import load_canon, validate_body
@@ -36,6 +37,9 @@ BASE = {
 def _register(monkeypatch, scenario_id: str, **top) -> str:
     raw = {**deepcopy(BASE), "scenario_id": scenario_id, **top}
     monkeypatch.setitem(runtime._scenarios, scenario_id, scenario_to_record(raw, source_path=None, created_at=None))
+    # 044 `T4405`: a non-administrator starts only an admitted scenario; each registered one is admitted.
+    admitted = settings.SIMULATOR_SCENARIO_ALLOWLIST.strip()
+    monkeypatch.setattr(settings, "SIMULATOR_SCENARIO_ALLOWLIST", f"{admitted},{scenario_id}" if admitted else scenario_id)
     return scenario_id
 
 

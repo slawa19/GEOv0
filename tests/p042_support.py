@@ -46,23 +46,37 @@ def no_real_tick(monkeypatch) -> list[str]:
 
 
 async def start_real_run(client: AsyncClient, auth_headers, *, scenario_id: str = SCENARIO) -> str:
-    response = await client.post(
-        "/api/v1/simulator/runs",
-        headers=auth_headers,
-        json={"scenario_id": scenario_id, "mode": "real", "intensity_percent": 0},
-    )
+    # 044 `T4405`: a non-administrator starts only an admitted scenario; this one is admitted for the start alone.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("app.config.settings.SIMULATOR_SCENARIO_ALLOWLIST", scenario_id)
+        response = await client.post(
+            "/api/v1/simulator/runs",
+            headers=auth_headers,
+            json={"scenario_id": scenario_id, "mode": "real", "intensity_percent": 0},
+        )
     assert response.status_code == 200, response.text
     return str(response.json()["run_id"])
 
 
+async def run_identities(client: AsyncClient, auth_headers, run_id: str) -> dict[str, str]:
+    """The run's participant identities by the scenario's SOURCE pid (044 `T4405`: a run owns fresh participants under
+    identities bound at its creation, `<run_id>:p<n>`). Read from the run's own copy of the scenario, the authority."""
+
+    raw = runtime.get_run(run_id)._scenario_raw or {}
+    template = runtime.get_scenario(runtime.get_run(run_id).scenario_id).raw
+    return {str(src["id"]): str(bound["id"]) for src, bound in zip(template["participants"], raw["participants"])}
+
+
 async def pay_once(client: AsyncClient, auth_headers, run_id: str, monkeypatch, *, amount: str = "1") -> dict[str, Any]:
-    """One committed payment p2 -> p1 on the run; returns the route's answer."""
+    """One committed payment p2 -> p1 (the scenario's source pids, as the run's identities) on the run; returns the
+    route's answer."""
 
     monkeypatch.setattr("app.config.settings.SIMULATOR_ACTIONS_ENABLE", True)
+    ids = await run_identities(client, auth_headers, run_id)
     response = await client.post(
         f"/api/v1/simulator/runs/{run_id}/actions/payment-real",
         headers=auth_headers,
-        json={"from_pid": "p2", "to_pid": "p1", "equivalent": EQUIVALENT, "amount": amount},
+        json={"from_pid": ids["p2"], "to_pid": ids["p1"], "equivalent": EQUIVALENT, "amount": amount},
     )
     assert response.status_code == 200, response.text
     body = response.json()
