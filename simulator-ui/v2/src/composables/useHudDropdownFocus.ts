@@ -40,11 +40,6 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
    * the screen puts a part of the menu outside it: at 1366x768 "Advanced" stuck 49 px out on the right (038 S2). The
    * menu is shifted back by exactly the overflow and no further; a menu that fits is not touched. The gap to the edge
    * is the one its own `max-width` already assumes (`--ds-wm-clamp-pad` a side).
-   *
-   * 043 S3: measured again whenever the open menu changes size (`surfaceResize` below), not only when it opens. A
-   * menu whose content arrives after it opened (the Admin menu: its runs are fetched on open) grew past the edge it
-   * was shifted to - 8.5 px from the left edge against a pad of 14 at 1366x768, once the Admin summary sat on the
-   * left of a wrapped service row.
    */
   function clampSurfaceIntoViewport(): void {
     const surface = surfaceRef.value
@@ -69,7 +64,6 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
    * remembers whether the focus was last seen inside it, and forgets on any focus or press outside it.
    */
   let focusHeld = false
-  let surfaceResize: ResizeObserver | null = null
   const isInside = (target: EventTarget | null) =>
     target instanceof Node && [detailsRef.value, summaryRef.value, surfaceRef.value].some((el) => el?.contains(target))
 
@@ -90,8 +84,6 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
 
   function unbindWhileOpen(): void {
     focusHeld = false
-    surfaceResize?.disconnect()
-    surfaceResize = null
     window.removeEventListener('resize', clampSurfaceIntoViewport)
     document.removeEventListener('keydown', onDocumentKeydown, true)
     document.removeEventListener('focusin', onDocumentFocusIn, true)
@@ -110,11 +102,6 @@ export function useHudDropdownFocus(open: Ref<boolean>) {
     if (details.open) {
       clampSurfaceIntoViewport()
       window.addEventListener('resize', clampSurfaceIntoViewport)
-      // A size change only: the shift itself (`translate`) does not resize the menu, so this cannot loop.
-      if (surfaceRef.value && typeof ResizeObserver !== 'undefined') {
-        surfaceResize = new ResizeObserver(() => clampSurfaceIntoViewport())
-        surfaceResize.observe(surfaceRef.value)
-      }
       focusHeld = isInside(document.activeElement)
       document.addEventListener('keydown', onDocumentKeydown, true)
       document.addEventListener('focusin', onDocumentFocusIn, true)

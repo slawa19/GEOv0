@@ -1,5 +1,5 @@
 import { nextTick, ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { useHudDropdownFocus } from './useHudDropdownFocus'
 
@@ -159,46 +159,6 @@ describe('useHudDropdownFocus', () => {
       expect(document.activeElement).toBe(secondButton)
     } finally {
       cleanupHarness([details, summary, api.surfaceRef.value!])
-    }
-  })
-
-  it('043 S3: an open menu that grows past the left edge is shifted in again; closed, it is no longer watched', async () => {
-    const { details, api, summary, surface } = setupHarness()
-    const observers: Array<{ cb: () => void; observed: Element[]; disconnected: boolean }> = []
-    vi.stubGlobal('ResizeObserver', class {
-      rec: { cb: () => void; observed: Element[]; disconnected: boolean }
-      constructor(cb: () => void) {
-        this.rec = { cb, observed: [], disconnected: false }
-        observers.push(this.rec)
-      }
-      observe(el: Element) { this.rec.observed.push(el) }
-      disconnect() { this.rec.disconnected = true }
-    })
-    surface.style.setProperty('--ds-wm-clamp-pad', '14px')
-    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1366)
-    let left = 100
-    const width = 500
-    vi.spyOn(surface, 'getBoundingClientRect').mockImplementation(() => {
-      const shift = Number.parseFloat(surface.style.translate || '0') || 0
-      return { left: left + shift, right: left + shift + width, top: 0, bottom: 10, width, height: 10, x: left + shift, y: 0, toJSON: () => ({}) } as DOMRect
-    })
-    try {
-      details.open = true
-      api.onToggle(makeToggle(details))
-      expect(surface.style.translate, 'it fits when it opens: not shifted').toBe('')
-      expect(observers.map((o) => o.observed), 'the open menu is watched').toEqual([[surface]])
-
-      left = -20 // the content arrived: the right-anchored menu grew to the left, past the edge
-      observers[0]!.cb()
-      expect(surface.style.translate, 'shifted in by exactly the overflow to the pad').toBe('34px 0')
-
-      details.open = false
-      api.onToggle(makeToggle(details))
-      expect(observers[0]!.disconnected, 'a closed menu is not watched').toBe(true)
-    } finally {
-      vi.unstubAllGlobals()
-      vi.restoreAllMocks()
-      cleanupHarness([details, summary, surface])
     }
   })
 })
